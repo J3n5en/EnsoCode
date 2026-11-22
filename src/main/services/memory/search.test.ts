@@ -348,6 +348,40 @@ describe('searchMemories — hybrid', () => {
     ).toEqual([m.id]);
   });
 
+  it('查询向量超出预算（模型冷启动 / 排队）时不等它，其余通道照常返回并回报跳过', async () => {
+    const emb = keywordEmbedder(['cache']);
+    const m = await add('cache invalidation', 'global', emb);
+    const stuck: Embedder = { ...emb, embed: () => new Promise(() => {}) };
+    let skipped = 0;
+    const started = performance.now();
+    const hits = await searchMemories(db, {
+      q: 'cache',
+      spaceIds: ['global'],
+      embedder: stuck,
+      vectorBudgetMs: 30,
+      onVectorSkipped: () => skipped++,
+    });
+    expect(ids(hits)).toEqual([m.id]);
+    expect(hits[0].relevance).toBeNull();
+    expect(skipped).toBe(1);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it('查询向量在预算内返回时照常走向量通道，不回报跳过', async () => {
+    const emb = keywordEmbedder(['cache']);
+    await add('cache invalidation', 'global', emb);
+    let skipped = 0;
+    const hits = await searchMemories(db, {
+      q: 'cache',
+      spaceIds: ['global'],
+      embedder: emb,
+      vectorBudgetMs: 1000,
+      onVectorSkipped: () => skipped++,
+    });
+    expect(hits[0].relevance).not.toBeNull();
+    expect(skipped).toBe(0);
+  });
+
   it('生产路径（无 embedder）：向量通道为空，纯 FTS 单通道仍出结果', async () => {
     const m = await add('cache invalidation strategy');
     const hits = await searchMemories(db, { q: 'cache', spaceIds: ['global'] });
@@ -629,6 +663,44 @@ describe('searchMemories — 实体通道（三通道并集）', () => {
     expect(ids(await searchMemories(db, { q: 'Kubernetes', spaceIds: ['global'] }))).toEqual([
       m.id,
     ]);
+  });
+
+  // 回归：spaceIds 多于一个（默认 all = project + global）时，旧写法被规划成
+  // 「space 内全部实体 × space 内全部记忆」的嵌套循环，用户库（1.1 万实体 × 2300 记忆）单次 18.8s。
+  it('多 space 检索不随「实体数 × 记忆数」放大', async () => {
+    const proj = projectSpaceId('big');
+    const target = await add('集群编排方案确定', proj);
+    entity(target, 'Kubernetes');
+    const cols = (db.prepare('PRAGMA table_info(memories)').all() as { name: string }[])
+      .map((c) => c.name)
+      .filter((c) => c !== 'id' && c !== 'content_hash');
+    const now = new Date().toISOString();
+    const clone = db.prepare(
+      `INSERT INTO memories (id, content_hash, ${cols.join(', ')})
+       SELECT ?, ?, ${cols.join(', ')} FROM memories WHERE id = ?`
+    );
+    const ent = db.prepare(
+      `INSERT INTO entities (id, name, normalized_name, entity_type, confidence, space_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'CONCEPT', 0.5, ?, ?, ?)`
+    );
+    const mention = db.prepare(
+      'INSERT INTO mentions (memory_id, entity_id, confidence, created_at) VALUES (?, ?, 0.5, ?)'
+    );
+    db.transaction(() => {
+      for (let i = 0; i < 6000; i++) {
+        ent.run(`e${i}`, `thing${i}`, `thing${i}`, proj, now, now);
+      }
+      for (let i = 0; i < 3000; i++) {
+        clone.run(`m${i}`, `h${i}`, target.id);
+        mention.run(`m${i}`, `e${i}`, now);
+        mention.run(`m${i}`, `e${i + 3000}`, now);
+      }
+    })();
+    const started = performance.now();
+    const hits = await searchMemories(db, { q: 'Kubernetes', spaceIds: [proj, 'global'] });
+    const elapsed = performance.now() - started;
+    expect(ids(hits)).toContain(target.id);
+    expect(elapsed).toBeLessThan(500);
   });
 
   it('社区通道召回 1-hop 邻居实体的记忆', async () => {

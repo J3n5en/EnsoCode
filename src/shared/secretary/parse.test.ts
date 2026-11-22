@@ -358,7 +358,13 @@ describe('parseDispatchFile', () => {
           lastResult: { kind: 'goal-complete', turn: 1, at: 20, manual: true },
           closedGoal: { text: '旧目标', status: 'blocked', note: '缺 token' },
         },
-        c2: { ...base, conversationId: 'c2', reopenedAt: 30, manualUndoneAt: 25 },
+        c2: {
+          ...base,
+          conversationId: 'c2',
+          reopenedAt: 30,
+          manualUndoneAt: 25,
+          failurePending: { at: 40, detail: 'boom' },
+        },
         c3: { ...base, conversationId: 'c3', closedGoal: { text: '旧目标', status: 'active' } },
       },
     });
@@ -366,7 +372,11 @@ describe('parseDispatchFile', () => {
       lastResult: { kind: 'goal-complete', turn: 1, at: 20, manual: true },
       closedGoal: { text: '旧目标', status: 'blocked', note: '缺 token' },
     });
-    expect(file.dispatched.c2).toMatchObject({ reopenedAt: 30, manualUndoneAt: 25 });
+    expect(file.dispatched.c2).toMatchObject({
+      reopenedAt: 30,
+      manualUndoneAt: 25,
+      failurePending: { at: 40, detail: 'boom' },
+    });
     // 只收受阻与暂停的目标：别的状态不认
     expect(file.dispatched.c3.closedGoal).toBeUndefined();
   });

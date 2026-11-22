@@ -111,3 +111,17 @@ export function parseSubagentReceipt(
     info: JSON.stringify(json, null, 2),
   };
 }
+
+const ERROR_REASONS: Record<string, string> = {
+  'restart-lost':
+    'This subagent was started before EnsoCode restarted, and its record was lost in the restart',
+  'other-owner': 'This subagent belongs to another conversation and cannot be controlled here',
+  'not-found':
+    'This conversation has no subagent with this id (mistyped, or agentId and runId mixed up)',
+};
+
+/** 子代理报错「码: 说明」→ 工具行标题的可读说明（i18n 键）；未登记的码返回 null，回退原文 */
+export function subagentErrorReason(output: string | null | undefined): string | null {
+  const code = /^([a-z][a-z-]*):\s/u.exec(output?.trim() ?? '')?.[1];
+  return (code && ERROR_REASONS[code]) || null;
+}

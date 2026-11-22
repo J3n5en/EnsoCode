@@ -3998,6 +3998,12 @@ export const zhTranslations: Record<string, string> = {
   'New session': '新会话',
   'Tool failed': '工具失败',
   'Not found': '找不到',
+  'This subagent was started before EnsoCode restarted, and its record was lost in the restart':
+    '这个子代理在 EnsoCode 重启前启动，记录已随重启丢失',
+  'This subagent belongs to another conversation and cannot be controlled here':
+    '这个子代理属于别的会话，不能在这里操作',
+  'This conversation has no subagent with this id (mistyped, or agentId and runId mixed up)':
+    '本会话没有这个 id 的子代理（可能抄错，或把 agentId 和 runId 弄混了）',
   'Dispatch limit reached': '已达到同时派发上限',
   'Project is not visible': '项目不在秘书可见范围内',
   'The message changed (the session was rewound or switched branches). List the session again and read it with the new id.':
