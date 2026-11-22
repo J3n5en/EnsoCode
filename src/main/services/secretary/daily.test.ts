@@ -112,6 +112,24 @@ describe('buildDaily', () => {
     expect(daily.earliest).toBe('2024-05-14');
   });
 
+  it('有别名时日报项目名用别名', async () => {
+    appendDailyRecord(dir, {
+      at: at(15, 10),
+      conversationId: 'c1',
+      kind: 'goal-complete',
+      projectId: 'p1',
+      title: '重构登录流程',
+      text: '登录流程拆成三步',
+    });
+    const daily = await buildDaily(
+      ports({ projectAliases: () => ({ p1: '官网前端' }) }),
+      '2024-05-15'
+    );
+    expect(daily.groups.find((group) => group.key === 'done')?.items[0]).toMatchObject({
+      projectName: '官网前端',
+    });
+  });
+
   it('派发记录按当天状态归列，待办给新增与完成', async () => {
     const file = dispatchFile({
       dispatched: {

@@ -1,4 +1,3 @@
-import { projectNameFromPath } from '@shared/projectName';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import { type ProjectAuthority, TURN_REPORT_MAX_CHARS, type TurnReport } from '@shared/types/agent';
 import {
@@ -16,6 +15,7 @@ import {
   type SecretaryUpdate,
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
+import { secretaryProjectName } from './projectLabel';
 import type { SecretarySessionStatus } from './readers';
 import { todoSessionView, todoStatus } from './todoLifecycle';
 
@@ -461,6 +461,7 @@ export interface BoardInput {
   statuses: Readonly<Record<string, SecretarySessionStatus>>;
   projects: readonly ProjectAuthority[];
   todos: readonly SecretaryTodo[];
+  aliases?: Readonly<Record<string, string>>;
 }
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
@@ -469,7 +470,7 @@ type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): SecretaryBoard {
   const projectName = (projectId: string): string => {
     const project = input.projects.find((candidate) => candidate.projectId === projectId);
-    return project ? projectNameFromPath(project.canonicalPath) : '';
+    return secretaryProjectName(project, input.aliases);
   };
 
   const needsYou: SecretaryCard[] = Object.values(file.proposals)
@@ -574,7 +575,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
         {
           ...todo,
           phase,
-          ...(project ? { projectName: projectNameFromPath(project.canonicalPath) } : {}),
+          ...(project ? { projectName: secretaryProjectName(project, input.aliases) } : {}),
           ...(session?.title ? { sessionTitle: redactSecrets(session.title) } : {}),
           ...(todo.conversationId
             ? { sessionState: session?.present ? session.state : ('gone' as const) }
@@ -604,7 +605,8 @@ function cardAt(card: SecretaryCard): number {
 export function takeoverViews(
   file: SecretaryDispatchFile,
   rows: Readonly<Record<string, Record<string, unknown>>>,
-  projects: readonly ProjectAuthority[]
+  projects: readonly ProjectAuthority[],
+  aliases: Readonly<Record<string, string>> = {}
 ): SecretaryTakeoverView[] {
   const views: SecretaryTakeoverView[] = [];
   for (const record of Object.values(file.dispatched)) {
@@ -615,7 +617,7 @@ export function takeoverViews(
     views.push({
       conversationId: record.conversationId,
       projectId: record.projectId,
-      projectName: project ? projectNameFromPath(project.canonicalPath) : '',
+      projectName: secretaryProjectName(project, aliases),
       title: typeof row.title === 'string' ? row.title : '',
       grantedAt: record.takeover.grantedAt,
       via: record.takeover.via,
@@ -632,7 +634,8 @@ export function takeoverViews(
 export function untrackedViews(
   file: SecretaryDispatchFile,
   rows: Readonly<Record<string, Record<string, unknown>>>,
-  projects: readonly ProjectAuthority[]
+  projects: readonly ProjectAuthority[],
+  aliases: Readonly<Record<string, string>> = {}
 ): SecretaryUntrackedView[] {
   const views: SecretaryUntrackedView[] = [];
   for (const conversationId of file.untracked ?? []) {
@@ -643,7 +646,7 @@ export function untrackedViews(
     views.push({
       conversationId,
       projectId,
-      projectName: project ? projectNameFromPath(project.canonicalPath) : '',
+      projectName: secretaryProjectName(project, aliases),
       title: typeof row.title === 'string' ? row.title : '',
     });
   }

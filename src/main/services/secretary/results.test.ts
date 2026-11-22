@@ -429,6 +429,23 @@ describe('工作台投影', () => {
     ]);
   });
 
+  it('有别名时卡片项目名用别名', () => {
+    const file = emptyFile({
+      dispatched: {
+        running: record({ conversationId: 'running', projectId: 'p1' }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: { running: { id: 'running', title: '在跑', sessionFile: '/tmp/r.jsonl' } },
+      statuses: { running },
+      projects,
+      aliases: { p1: '  官网前端 ' },
+      todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    expect(board.running[0]).toMatchObject({ projectName: '官网前端' });
+    expect(board.todos[0]).toMatchObject({ projectName: '官网前端' });
+  });
+
   it('被应用退出打断的会话不在进行中，落成 interrupted 结果', () => {
     const file = emptyFile({
       dispatched: {

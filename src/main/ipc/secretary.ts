@@ -61,6 +61,7 @@ import {
 import { openSecretaryTarget } from '../services/secretary/links';
 import { reportPeerTodos, setPeerDeliveryListener } from '../services/secretary/peers';
 import { secretaryProfileFor } from '../services/secretary/profile';
+import { projectAliasesFromSettings } from '../services/secretary/projectLabel';
 import { getSecretaryReportStore } from '../services/secretary/reportImages';
 import {
   parseAvatarRequest,
@@ -290,6 +291,7 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     rows: () => readPersistedConversations(),
     conversations: () => getSourceAuthorityRegistry()?.projection().conversations ?? [],
     projects: () => getSourceAuthorityRegistry()?.projection().projects ?? [],
+    projectAliases: () => projectAliasesFromSettings(readSettings()),
     status: (conversationId) => observedSessionStatus(conversationId),
     alive: (conversationId) => isRootSessionAlive(conversationId),
     prompt: (conversationId, text, deliveryId) =>

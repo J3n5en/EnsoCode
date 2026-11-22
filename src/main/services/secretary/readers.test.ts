@@ -286,6 +286,7 @@ describe('项目别名', () => {
         projectId: 'p1',
         name: '官网前端',
         alias: '官网前端',
+        directoryName: 'alpha',
         kind: 'local',
         path: '/repo/alpha',
         lastActivityAt: null,
@@ -294,6 +295,7 @@ describe('项目别名', () => {
     expect(await run(handlers.project_info, { projectId: 'p1' })).toMatchObject({
       name: '官网前端',
       alias: '官网前端',
+      directoryName: 'alpha',
       path: '/repo/alpha',
     });
   });

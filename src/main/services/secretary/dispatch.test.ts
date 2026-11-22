@@ -2365,6 +2365,17 @@ describe('待办', () => {
       error: 'invalid arguments',
     });
   });
+
+  it('todo_list 有别名时项目名用别名', async () => {
+    const h = harness({
+      todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    h.ports.projectAliases = () => ({ p1: '官网前端' });
+    const listed = (await run(h.handlers.todo_list, {})) as {
+      todos: { projectName?: string }[];
+    };
+    expect(listed.todos[0].projectName).toBe('官网前端');
+  });
 });
 
 describe('清理提案', () => {

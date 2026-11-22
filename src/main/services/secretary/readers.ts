@@ -1,4 +1,3 @@
-import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   chunkMessageText,
@@ -22,6 +21,7 @@ import {
 } from '../sessionActivity';
 import { currentBranch, repoIsClean } from '../worktree/service';
 import { leftoverReason, taskIsPersistent } from './leftover';
+import { projectAliasesFromSettings, secretaryProjectNames } from './projectLabel';
 import {
   REPO_STATUS_COMMIT_DEFAULT,
   REPO_STATUS_COMMIT_MAX,
@@ -35,6 +35,8 @@ import {
 import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpHandler, SecretaryOpResult } from './tools';
+
+export { projectAliasesFromSettings };
 
 const DEFAULT_SESSION_LIMIT = 50;
 const MAX_SESSION_LIMIT = 100;
@@ -222,38 +224,6 @@ function projectKind(project: ProjectAuthority): 'local' | 'ssh' {
   return project.kind === 'ssh' ? 'ssh' : 'local';
 }
 
-/** 从 settings.json 的 enso-settings 项目列表取 projectId → 非空别名 */
-export function projectAliasesFromSettings(settings: unknown): Record<string, string> {
-  const aliases: Record<string, string> = {};
-  const state = (settings as { 'enso-settings'?: { state?: { projects?: unknown } } } | null)?.[
-    'enso-settings'
-  ]?.state;
-  if (!Array.isArray(state?.projects)) return aliases;
-  for (const raw of state.projects) {
-    if (!raw || typeof raw !== 'object') continue;
-    const { id, alias } = raw as Record<string, unknown>;
-    if (typeof id === 'string' && id && typeof alias === 'string' && alias.trim())
-      aliases[id] = alias.trim();
-  }
-  return aliases;
-}
-
-/** 展示名按「别名 > 目录名」取，别名只有去空白后非空才算 */
-function projectNames(
-  project: ProjectAuthority,
-  aliases: Readonly<Record<string, string>>
-): { name: string; alias?: string } {
-  const alias = aliases[project.projectId]?.trim();
-  const name = projectDisplayName({
-    name: projectNameFromPath(project.canonicalPath),
-    path: project.canonicalPath,
-    alias,
-  });
-  return alias
-    ? { name: redactSecrets(name), alias: redactSecrets(alias) }
-    : { name: redactSecrets(name) };
-}
-
 function lastActivity(sessions: readonly ListedSession[], projectId: string): number | null {
   let latest: number | null = null;
   for (const session of sessions) {
@@ -316,7 +286,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const aliases = (await ports.projectAliases?.()) ?? {};
       const rows = projects.map((project) => ({
         projectId: project.projectId,
-        ...projectNames(project, aliases),
+        ...secretaryProjectNames(project, aliases),
         kind: projectKind(project),
         path: redactSecrets(project.canonicalPath),
         lastActivityAt: lastActivity(sessions, project.projectId),
@@ -351,7 +321,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ok: true,
         result: {
           projectId,
-          ...projectNames(project, aliases),
+          ...secretaryProjectNames(project, aliases),
           kind: projectKind(project),
           path: redactSecrets(project.canonicalPath),
           lastActivityAt: lastActivity(sessions, projectId),

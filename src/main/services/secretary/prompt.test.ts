@@ -183,5 +183,6 @@ describe('buildSecretarySystemPrompt', () => {
     expect(projects).toBeDefined();
     expect(projects).toMatch(/alias/);
     expect(projects).toMatch(/directory name/);
+    expect(projects).toMatch(/directoryName/);
   });
 });

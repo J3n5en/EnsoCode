@@ -1,7 +1,6 @@
 import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
 import { interruptReason } from '@shared/exitInterrupt';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
-import { projectNameFromPath } from '@shared/projectName';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import {
@@ -48,6 +47,7 @@ import {
   summarizeCommand,
   taskIsPersistent,
 } from './leftover';
+import { secretaryProjectName } from './projectLabel';
 import type { SecretarySessionStatus } from './readers';
 import { closeRelayAsk, dropRelay, openRelayAsk, pendingRelay, sessionLabel } from './relay';
 import {
@@ -469,7 +469,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       ? ports.projects().find((candidate) => candidate.projectId === record.projectId)
       : undefined;
     return sessionLabel(
-      project ? projectNameFromPath(project.canonicalPath) : '',
+      secretaryProjectName(project, ports.projectAliases?.()),
       typeof row?.title === 'string' ? row.title : '',
       conversationId
     );
@@ -590,7 +590,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   ): { update: SecretaryUpdate; title: string; projectName: string } {
     const row = ports.rows()[record.conversationId];
     const project = ports.projects().find((candidate) => candidate.projectId === record.projectId);
-    const projectName = project ? projectNameFromPath(project.canonicalPath) : '';
+    const projectName = secretaryProjectName(project, ports.projectAliases?.());
     const title = typeof row?.title === 'string' ? row.title : '';
     const update: SecretaryUpdate = {
       key: updateKey(record.conversationId, kind, record.turn),
