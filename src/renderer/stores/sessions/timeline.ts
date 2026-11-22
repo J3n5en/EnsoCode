@@ -7,7 +7,9 @@ import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
 import type { RtkToolStats } from '@shared/rtk';
 import { isPureSessionUpdate, isSilentMarker, SILENCE_TURN_TOOL } from '@shared/secretary/silence';
+import { splitSkillBlocks } from '@shared/skillCommands';
 import { nestedToolCallParent } from '@shared/toolCallId';
+import { leadingTaskWrapUp, TASK_WRAP_UP_TAG } from '@shared/turnNotes';
 import type {
   AgentSessionCustomEntry,
   ApprovalRequestInfo,
@@ -45,6 +47,8 @@ export type TimelineItem =
       replyAt?: number;
       /** 本轮各次请求的脱敏报告合计 */
       replyPrivacyMask?: MaskReport;
+      /** 正文前那段收尾清单是宿主在收尾提醒后搭上的，按系统卡片显示 */
+      hostTaskWrapUp?: true;
     }
   | {
       kind: 'text';
@@ -1366,6 +1370,59 @@ export function terminalErrorText(
 const customEntryTime = (entry: AgentSessionCustomEntry): number =>
   entry.kind === 'capability-receipt' ? entry.receipt.occurredAt : entry.at;
 
+const WRAP_UP_OPEN = `<${TASK_WRAP_UP_TAG}>`;
+
+function messageText(message: ProjectedMessage): string {
+  return message.content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('\n')
+    .trim();
+}
+
+function carriesTaskWrapUp(text: string): boolean {
+  if (!text.includes(WRAP_UP_OPEN)) return false;
+  if (leadingTaskWrapUp(text)) return true;
+  const skills = splitSkillBlocks(text);
+  return Boolean(skills && leadingTaskWrapUp(skills.rest));
+}
+
+/**
+ * 消息本身没有来源字段，以宿主落盘的收尾提醒条目为准：每条提醒之后，
+ * 第一条带清单的进模型消息（用户消息或工具结果）才是宿主搭上的。返回绝对下标。
+ */
+function hostTaskWrapUpIndexes(
+  messages: readonly TimelineMessage[],
+  entries: readonly AgentSessionCustomEntry[],
+  historyBaseIndex: number
+): Set<number> {
+  const hosts = new Set<number>();
+  const nudges = entries
+    .filter((entry) => entry.kind === 'task-wrap-up-nudge')
+    .map((entry) => entry.at)
+    .sort((left, right) => left - right);
+  if (nudges.length === 0) return hosts;
+  let next = 0;
+  let armed = false;
+  messages.forEach((message, index) => {
+    if (message.optimistic) return;
+    const at = message.timestamp ?? Number.NEGATIVE_INFINITY;
+    while (next < nudges.length && (nudges[next] ?? 0) <= at) {
+      armed = true;
+      next += 1;
+    }
+    if (!armed || (message.role !== 'user' && message.role !== 'toolResult')) return;
+    const text = messageText(message);
+    if (message.role === 'toolResult') {
+      if (text.includes(WRAP_UP_OPEN)) armed = false;
+      return;
+    }
+    if (!carriesTaskWrapUp(text)) return;
+    hosts.add(historyBaseIndex + index);
+    armed = false;
+  });
+  return hosts;
+}
+
 /** 行 key 的消息下标（`3` 或 `3-1`）；非消息行（custom/chrome）返回 -1 */
 const messageItemIndex = (item: TimelineItem): number => {
   const separator = item.key.indexOf('-');
@@ -1576,7 +1633,7 @@ export function buildTimeline(
     if (entry.kind === 'tool-batch-label') batchLabels.set(entry.callId, entry.label);
     else rowEntries.push(entry);
   }
-  const messageItems = buildMessageTimeline(
+  const builtItems = buildMessageTimeline(
     messages,
     running,
     cwd,
@@ -1588,6 +1645,15 @@ export function buildTimeline(
     options?.secretarySession === true,
     options?.interrupted?.suppressedError
   );
+  const hostWrapUps = hostTaskWrapUpIndexes(messages, rowEntries, historyBaseIndex);
+  const messageItems =
+    hostWrapUps.size === 0
+      ? builtItems
+      : builtItems.map((item) =>
+          item.kind === 'user' && !item.deliveryState && hostWrapUps.has(messageItemIndex(item))
+            ? { ...item, hostTaskWrapUp: true as const }
+            : item
+        );
   const merged =
     rowEntries.length === 0
       ? messageItems

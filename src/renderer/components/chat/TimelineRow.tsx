@@ -20,7 +20,13 @@ import {
 import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
 import { shellFailureHeadline } from '@shared/shellHints';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
-import { splitTurnNotes } from '@shared/turnNotes';
+import {
+  leadingTaskWrapUp,
+  splitTaskWrapUpPrefix,
+  splitTurnNotes,
+  type TaskWrapUpItem,
+  withoutTaskWrapUp,
+} from '@shared/turnNotes';
 import type {
   AgentRunProgress,
   AgentSessionCustomEntry,
@@ -153,6 +159,7 @@ import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { StepDot } from './StepNode';
 import { SubagentResult } from './SubagentResult';
 import { parseSubagentReceipt } from './subagentReceipt';
+import { TaskWrapUpCard } from './TaskWrapUpCard';
 
 // 只有出现 diff / 读文件行时才需要，按需加载以把 @pierre/diffs 移出首屏
 const EditDiff = lazy(() => import('./EditDiff').then((m) => ({ default: m.EditDiff })));
@@ -232,7 +239,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.deliveryState !== b.deliveryState ||
         a.turnDurationMs !== b.turnDurationMs ||
         a.collapsed !== b.collapsed ||
-        a.canCollapse !== b.canCollapse
+        a.canCollapse !== b.canCollapse ||
+        a.hostTaskWrapUp !== b.hostTaskWrapUp
       )
         return false;
       return a.images.every((image, i) => image === b.images[i]);
@@ -352,6 +360,56 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 /** 工作区迁移/回退提醒：前置在用户消息之前，渲染成系统事件行而非原始 XML */
 const WORKSPACE_MIGRATED_PREFIX = /^<workspace-migrated>\n?([\s\S]*?)\n?<\/workspace-migrated>\s*/;
+/** 切分支提醒：随下一条消息前置，正文是给模型的英文说明 */
+const WORKSPACE_BRANCH_PREFIX =
+  /^<workspace-branch-changed>\n?([\s\S]*?)\n?<\/workspace-branch-changed>\s*/;
+
+function WorkspaceBranchBanner({ note }: { note: string }) {
+  const { t } = useI18n();
+  const raw = /on Git branch ("(?:[^"\\]|\\.)*")/.exec(note)?.[1];
+  let branch = '';
+  try {
+    branch = raw ? String(JSON.parse(raw)) : '';
+  } catch {}
+  return (
+    <aside
+      title={note}
+      className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground"
+    >
+      <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 break-all">
+        {branch
+          ? t('Workspace switched to branch {{branch}}', { branch })
+          : t('Workspace switched branch')}
+      </span>
+    </aside>
+  );
+}
+
+/** 宿主搭上的收尾清单：在本机会话里还能跳到任务条 */
+function HostTaskWrapUp({ items }: { items: TaskWrapUpItem[] }) {
+  const host = useChatHost();
+  const conversationId = useSessionsStore((state) =>
+    host ? undefined : displayedConversation(state)?.id
+  );
+  const live = useSessionsStore((state) =>
+    host ? undefined : displayedConversation(state)?.backgroundTasks
+  );
+  return (
+    <TaskWrapUpCard
+      items={items}
+      live={live}
+      onOpen={
+        conversationId
+          ? (taskId) =>
+              useSessionsStore.setState({
+                pendingAgentOpen: { sessionId: conversationId, agentId: taskId },
+              })
+          : undefined
+      }
+    />
+  );
+}
 
 /** 迁移提醒横幅：图标 + 一句话 + 目标路径，完整原文放 hover title。
  * 系统提示条用 aside 并与气泡平铺在 message-user 下：主题以 `> div:not(:last-child)` 选中气泡 */
@@ -755,8 +813,15 @@ function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
 }
 
 /** /skill:name 展开后的 XML 块：气泡里每个块一个高亮 tag，点击看正文 */
-function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof splitSkillBlocks>> }) {
+function SkillInvocation({
+  blocks,
+  hostTaskWrapUp,
+}: {
+  blocks: NonNullable<ReturnType<typeof splitSkillBlocks>>;
+  hostTaskWrapUp?: boolean;
+}) {
   const notes = splitTurnNotes(blocks.rest);
+  const wrapUp = hostTaskWrapUp ? leadingTaskWrapUp(blocks.rest) : undefined;
   const bubble = (
     <ChipBubble
       chip={
@@ -769,11 +834,12 @@ function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof spl
       extra={notes.rest.trim()}
     />
   );
-  if (!notes.plan && !notes.unattended) return bubble;
+  if (!notes.plan && !notes.unattended && !wrapUp) return bubble;
   return (
     <>
       {notes.plan && <PlanNoteBanner note={notes.plan} />}
       {notes.unattended && <UnattendedNoteBanner note={notes.unattended} />}
+      {wrapUp && <HostTaskWrapUp items={wrapUp.items} />}
       {bubble}
     </>
   );
@@ -972,6 +1038,7 @@ function UserText({
   activeNth = -1,
   thumbnails = 0,
   align = 'end',
+  hostTaskWrapUp = false,
 }: {
   text: string;
   searchQuery?: string;
@@ -979,6 +1046,8 @@ function UserText({
   /** 气泡上方已显示的缩略图张数 */
   thumbnails?: number;
   align?: 'start' | 'end';
+  /** 正文前的收尾清单由宿主搭上（时间线按收尾提醒条目判定）；用户自己贴的照常显示 */
+  hostTaskWrapUp?: boolean;
 }) {
   const { t } = useI18n();
   const host = useChatHost();
@@ -989,7 +1058,12 @@ function UserText({
     return (
       <>
         {attached.text && (
-          <UserText text={attached.text} searchQuery={searchQuery} activeNth={activeNth} />
+          <UserText
+            text={attached.text}
+            searchQuery={searchQuery}
+            activeNth={activeNth}
+            hostTaskWrapUp={hostTaskWrapUp}
+          />
         )}
         <InboundImageList entries={attached.entries} thumbnails={thumbnails} align={align} />
       </>
@@ -1003,7 +1077,14 @@ function UserText({
   // Main 投递前追加的笔记更新块不展示
   const withoutNotes = botHost ? stripBotNotesUpdate(text) : text;
   if (withoutNotes !== text)
-    return <UserText text={withoutNotes} searchQuery={searchQuery} activeNth={activeNth} />;
+    return (
+      <UserText
+        text={withoutNotes}
+        searchQuery={searchQuery}
+        activeNth={activeNth}
+        hostTaskWrapUp={hostTaskWrapUp}
+      />
+    );
   // Bot 输入框 @聊天：Main 追加的摘录块折叠成 chip
   const chatRefs = botHost ? splitChatReferences(text) : null;
   if (chatRefs?.refs.length) {
@@ -1033,7 +1114,14 @@ function UserText({
     return (
       <>
         <PlanNoteBanner note={planPrefix.note} />
-        {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
+        {remainder && (
+          <UserText
+            text={remainder}
+            searchQuery={searchQuery}
+            activeNth={activeNth}
+            hostTaskWrapUp={hostTaskWrapUp}
+          />
+        )}
       </>
     );
   }
@@ -1043,6 +1131,33 @@ function UserText({
     return (
       <>
         <UnattendedNoteBanner note={unattended.note} />
+        {remainder && (
+          <UserText
+            text={remainder}
+            searchQuery={searchQuery}
+            activeNth={activeNth}
+            hostTaskWrapUp={hostTaskWrapUp}
+          />
+        )}
+      </>
+    );
+  }
+  const wrapUp = hostTaskWrapUp ? splitTaskWrapUpPrefix(text) : null;
+  if (wrapUp) {
+    const remainder = wrapUp.rest.trim();
+    return (
+      <>
+        <HostTaskWrapUp items={wrapUp.items} />
+        {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
+      </>
+    );
+  }
+  const branchNote = WORKSPACE_BRANCH_PREFIX.exec(text);
+  if (branchNote) {
+    const remainder = text.slice(branchNote[0].length).trim();
+    return (
+      <>
+        <WorkspaceBranchBanner note={branchNote[1] ?? ''} />
         {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
       </>
     );
@@ -1103,7 +1218,7 @@ function UserText({
     );
   }
   const skillBlocks = splitSkillBlocks(text);
-  if (skillBlocks) return <SkillInvocation blocks={skillBlocks} />;
+  if (skillBlocks) return <SkillInvocation blocks={skillBlocks} hostTaskWrapUp={hostTaskWrapUp} />;
   if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
   const migrated = WORKSPACE_MIGRATED_PREFIX.exec(text);
   if (migrated) {
@@ -1111,11 +1226,7 @@ function UserText({
     return (
       <>
         <WorkspaceMigratedBanner note={migrated[1]} />
-        {remainder && (
-          <div className={cn(USER_BUBBLE, 'whitespace-pre-wrap')}>
-            <InlineMentionText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />
-          </div>
-        )}
+        {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
       </>
     );
   }
@@ -1250,6 +1361,7 @@ export const TimelineRow = memo(function TimelineRow({
     case 'user': {
       const fromMain = item.text ? isFromMainAgent(item.text) : false;
       const isCollapsed = item.collapsed === true;
+      const copyText = item.hostTaskWrapUp ? withoutTaskWrapUp(item.text) : item.text;
       return (
         <div
           data-enso="message-user"
@@ -1270,12 +1382,13 @@ export const TimelineRow = memo(function TimelineRow({
               activeNth={activeNth}
               thumbnails={item.images.length}
               align={fromMain ? 'start' : 'end'}
+              hostTaskWrapUp={item.hostTaskWrapUp === true}
             />
           )}
           {isCollapsed ? (
             <CollapsedTurnBar
               turnKey={item.key}
-              text={item.text}
+              text={copyText}
               timestamp={item.timestamp}
               turnDurationMs={item.turnDurationMs}
               onToggle={onToggleTurn}
@@ -1284,7 +1397,7 @@ export const TimelineRow = memo(function TimelineRow({
             <UserMeta
               turnKey={item.key}
               messageIndex={Number(item.key)}
-              text={item.text}
+              text={copyText}
               timestamp={item.timestamp}
               deliveryState={item.deliveryState}
               canCollapse={item.canCollapse}
