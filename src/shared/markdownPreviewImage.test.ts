@@ -124,6 +124,7 @@ describe('previewImageMime', () => {
     expect(previewImageMime('a.png')).toBe('image/png');
     expect(previewImageMime('a.JPG')).toBe('image/jpeg');
     expect(previewImageMime('dir/a.webp')).toBe('image/webp');
+    expect(previewImageMime('a.AVIF')).toBe('image/avif');
   });
 
   it('svg 支持（只通过 <img> 标签渲染，浏览器按图片上下文禁脚本，见 shared/imageSniff.ts）', () => {

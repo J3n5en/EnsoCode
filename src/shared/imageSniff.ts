@@ -72,6 +72,10 @@ export function sniffImageMime(bytes: Uint8Array): string | null {
   if (b.length >= 2 && b[0] === 0x42 && b[1] === 0x4d) return 'image/bmp';
   if (b.length >= 4 && b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0x00)
     return 'image/x-icon';
+  if (b.length >= 12) {
+    const box = String.fromCharCode(...b.subarray(4, 12));
+    if (box === 'ftypavif' || box === 'ftypavis') return 'image/avif';
+  }
   if (looksLikeSvg(b)) return 'image/svg+xml';
   return null;
 }
