@@ -8,10 +8,20 @@ import { useSessionsStore } from '@/stores/sessions';
 import { normalizeGlobalState, type PanelScope, selectSidePanelShown } from './globalTabs';
 import { removeLayoutPanel } from './layoutSanitize';
 import { migrateSidePanelState, SIDE_PANEL_VERSION } from './migrate';
-import { resizeSidePanelWidth, SIDE_PANEL_DEFAULT_WIDTH } from './width';
+import {
+  FILES_TREE_DEFAULT_WIDTH,
+  resizeFilesTreeWidth,
+  resizeSidePanelWidth,
+  SIDE_PANEL_DEFAULT_WIDTH,
+} from './width';
 
 export type { PanelScope } from './globalTabs';
-export { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from './width';
+export {
+  clampFilesTreeWidth,
+  resolveFilesTreeWidth,
+  SIDE_PANEL_DEFAULT_WIDTH,
+  SIDE_PANEL_MIN_WIDTH,
+} from './width';
 
 export type ChangesMode = 'all' | 'git';
 export type PinnableSidePanelTab =
@@ -35,6 +45,8 @@ interface SidePanelState {
    * 最近一次手动调整的宽度，仅作为尚无面板设置的会话的初始值，随会话偏好一起保存。
    */
   lastWidth: number;
+  /** Files 面板文件树宽度，所有会话共用 */
+  filesTreeWidth: number;
   uiByConversation: Record<string, SidePanelUi>;
   /** 可见的原生 guest 矩形（运行态，不持久化）：壁纸按这些矩形挖孔给垫底的 view 透出 */
   browserHoles: Record<string, ScreenRect>;
@@ -62,6 +74,9 @@ interface SidePanelState {
    */
   reconcileForActiveConversation: () => void;
   nudgeWidth: (delta: number, workspaceWidth: number, handleWidth: number) => void;
+  /** paneWidth 为 Files 面板当前宽度，0 表示未量到 */
+  nudgeFilesTreeWidth: (delta: number, paneWidth?: number) => void;
+  resetFilesTreeWidth: () => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
   togglePinnedTab: (tab: PinnableSidePanelTab) => void;
@@ -113,6 +128,7 @@ export const useSidePanelStore = create<SidePanelState>()(
       fullscreen: false,
       fullscreenByConversation: {},
       lastWidth: SIDE_PANEL_DEFAULT_WIDTH,
+      filesTreeWidth: FILES_TREE_DEFAULT_WIDTH,
       uiByConversation: {},
       browserHoles: {},
       layouts: {},
@@ -157,6 +173,13 @@ export const useSidePanelStore = create<SidePanelState>()(
         );
         set({ uiByConversation: patchUi(get(), id, { width }), lastWidth: width });
       },
+
+      nudgeFilesTreeWidth: (delta, paneWidth = 0) => {
+        const filesTreeWidth = resizeFilesTreeWidth(get().filesTreeWidth, delta, paneWidth);
+        if (filesTreeWidth !== get().filesTreeWidth) set({ filesTreeWidth });
+      },
+
+      resetFilesTreeWidth: () => set({ filesTreeWidth: FILES_TREE_DEFAULT_WIDTH }),
 
       toggleFullscreen: () => {
         const id = activeConversationId();
@@ -300,6 +323,7 @@ export const useSidePanelStore = create<SidePanelState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         lastWidth: state.lastWidth,
+        filesTreeWidth: state.filesTreeWidth,
         uiByConversation: state.uiByConversation,
         fullscreenByConversation: state.fullscreenByConversation,
         layouts: state.layouts,

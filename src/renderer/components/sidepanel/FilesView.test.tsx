@@ -3,6 +3,7 @@ import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IS_MAC } from '@/lib/keybindings';
+import { useSidePanelStore } from '@/stores/sidePanel';
 import { FilesView } from './FilesView';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
 
@@ -34,8 +35,8 @@ vi.mock('@/stores/sessions', () => ({
     { getState: () => harness.sessions }
   ),
 }));
-vi.mock('@/stores/sidePanel', () => ({
-  useSidePanelStore: (select: (state: unknown) => unknown) => select(harness.sidePanel),
+vi.mock('@/stores/sidePanel', async (importActual) => ({
+  ...(await importActual<typeof import('@/stores/sidePanel')>()),
   useSidePanelShown: (id: string) =>
     Boolean(
       (harness.sidePanel as { uiByConversation: Record<string, { open?: boolean }> })
@@ -393,5 +394,94 @@ describe('FilesView 宿主桌面操作', () => {
     harness.project = { id: 'project', path: '/workspace', kind: 'ssh' };
     await mountDocks(['a']);
     expect(menuLocal()).toBe('false');
+  });
+});
+
+describe('FilesView 文件树宽度', () => {
+  const handle = () => container.querySelector('[data-dock="a"] .cursor-col-resize');
+  const treeWidth = () =>
+    (handle()?.parentElement?.previousElementSibling as HTMLElement | null)?.style.width;
+  async function drag(dx: number) {
+    const el = handle();
+    expect(el).not.toBeNull();
+    const mouse = (type: string, clientX: number) =>
+      Object.assign(new window.Event(type, { bubbles: true, cancelable: true }), { clientX });
+    await act(async () => {
+      el?.dispatchEvent(mouse('mousedown', 100));
+      document.dispatchEvent(mouse('mousemove', 100 + dx));
+      document.dispatchEvent(mouse('mouseup', 100 + dx));
+    });
+  }
+
+  beforeEach(() => {
+    useSidePanelStore.setState({ filesTreeWidth: 224 });
+  });
+
+  it('默认 224px，向右拖变宽', async () => {
+    await mountDocks(['a']);
+    expect(treeWidth()).toBe('224px');
+    await drag(56);
+    expect(treeWidth()).toBe('280px');
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(280);
+  });
+
+  it('拖过头夹在 160–480', async () => {
+    await mountDocks(['a']);
+    await drag(1000);
+    expect(treeWidth()).toBe('480px');
+    await drag(-1000);
+    expect(treeWidth()).toBe('160px');
+  });
+
+  it('读回上次保存的宽度，脏值回落默认', async () => {
+    useSidePanelStore.setState({ filesTreeWidth: 320 });
+    await mountDocks(['a']);
+    expect(treeWidth()).toBe('320px');
+    await act(async () => useSidePanelStore.setState({ filesTreeWidth: Number.NaN }));
+    expect(treeWidth()).toBe('224px');
+  });
+
+  it('面板窄时文件树不超过「面板宽 - 编辑区最小宽」，拖动从可见宽度起算', async () => {
+    let report: (width: number) => void = () => {};
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: (entries: { contentRect: { width: number } }[]) => void) {
+          report = (width) => callback([{ contentRect: { width } }]);
+        }
+        observe() {
+          report(600);
+        }
+        disconnect() {}
+      }
+    );
+    useSidePanelStore.setState({ filesTreeWidth: 480 });
+    await mountDocks(['a']);
+    expect(treeWidth()).toBe('359px');
+    await drag(-59);
+    expect(treeWidth()).toBe('300px');
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(300);
+    await act(async () => report(1200));
+    expect(treeWidth()).toBe('300px');
+  });
+
+  it('双击手柄复位到默认 224px', async () => {
+    await mountDocks(['a']);
+    await drag(176);
+    expect(treeWidth()).toBe('400px');
+    await act(async () => {
+      handle()?.dispatchEvent(new window.Event('dblclick', { bubbles: true, cancelable: true }));
+    });
+    expect(treeWidth()).toBe('224px');
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(224);
+  });
+
+  it('移动端不渲染手柄，文件树仍铺满', async () => {
+    Object.assign(window, { innerWidth: 375 });
+    await mountDocks(['a']);
+    expect(handle()).toBeNull();
+    const tree = container.querySelector('[data-dock="a"] .w-full') as HTMLElement | null;
+    expect(tree).not.toBeNull();
+    expect(tree?.style.width).toBe('');
   });
 });

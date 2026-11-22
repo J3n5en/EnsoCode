@@ -308,3 +308,38 @@ describe('全局标签与三态开关', () => {
     }
   });
 });
+
+describe('文件树宽度', () => {
+  beforeEach(() => {
+    useSidePanelStore.setState({ filesTreeWidth: 224 });
+  });
+
+  it('拖动按增量调整并夹在 160–480', () => {
+    useSidePanelStore.getState().nudgeFilesTreeWidth(40);
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(264);
+    useSidePanelStore.getState().nudgeFilesTreeWidth(1000);
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(480);
+    useSidePanelStore.getState().nudgeFilesTreeWidth(-1000);
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(160);
+  });
+
+  it('按面板宽度夹住，编辑区不被挤没', () => {
+    useSidePanelStore.getState().nudgeFilesTreeWidth(1000, 600);
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(359);
+  });
+
+  it('宽度随侧栏偏好持久化，读回仍是上次的值', async () => {
+    useSidePanelStore.getState().nudgeFilesTreeWidth(76);
+    const saved = JSON.parse(localStorage.getItem('enso-side-panel') ?? '{}');
+    expect(saved.state.filesTreeWidth).toBe(300);
+
+    useSidePanelStore.setState({ filesTreeWidth: 224 });
+    localStorage.setItem('enso-side-panel', JSON.stringify(saved));
+    try {
+      await useSidePanelStore.persist.rehydrate();
+      expect(useSidePanelStore.getState().filesTreeWidth).toBe(300);
+    } finally {
+      localStorage.removeItem('enso-side-panel');
+    }
+  });
+});
