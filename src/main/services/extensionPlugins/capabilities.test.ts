@@ -33,17 +33,16 @@ class InProcessChild extends EventEmitter {
 }
 
 const temps: string[] = [];
+const services: ExtensionPluginService[] = [];
 const temp = (prefix: string) => {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   temps.push(dir);
   return dir;
 };
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
-  // 停用插件后服务仍可能异步落盘，删目录时撞上新文件会报 ENOTEMPTY
-  for (const dir of temps.splice(0)) {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  }
+  await Promise.all(services.splice(0).map((service) => service.dispose()));
+  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 function writePlugin(files: Record<string, string>) {
@@ -102,6 +101,7 @@ function createService(
       ...(extra.sessions ? { sessions: extra.sessions } : {}),
     },
   });
+  services.push(service);
   return { root, service, bridge };
 }
 
