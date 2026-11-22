@@ -205,11 +205,19 @@ Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会
 `stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。要不要等由 `ipc/sessionIndex.needsQuitCheckpoint`
 决定：有根回合在跑，或回合已结束但 `BackgroundTaskTracker` 里还有在跑的后台命令（重启 / 更新据此把空闲会话按
 await-user 写进清单，命令结束时能被唤醒；普通退出让转后台命令挡住退出、弹等待层），都没有才直接放行；worker 推迟时报告
-有工具在跑就等它结束，上限 `QUIT_TOOL_WAIT_LIMIT_MS`（5 分钟），没有工具在跑时最多等
-`QUIT_NO_TOOL_WAIT_MS`（10s）；超时照常退出（收尾中止命令）并写一行到 worker 退出日志。超时后
+有工具在跑就等它结束，上限 `QUIT_TOOL_WAIT_LIMIT_MS`（5 分钟），没有工具在跑（回复在写）时等这一轮写完、
+最多 `QUIT_REPLY_WAIT_MS`（60s，弹层 reason=`reply`）；超时照常退出（收尾中止命令）并写一行到 worker 退出日志，
+带上每个会话退出时在干什么（回复在写 / 工具在跑）。worker 收尾（`supervisor.shutdown`）时把没有工具在跑、回复
+写到一半的根会话记下这一轮，中止（pi 留下 `stopReason=aborted`，原文多为 undici 的 `This operation was aborted`
+或 pi-ai 重试等待的 `Request aborted`）落盘后断点记成同一 turnId 的 `model-request`；新进程
+`continueAfterRestart` 先用 context_edit 把这条中止的回复移出模型上下文再续跑。工具在跑时被中止的不自动续跑
+（可能只执行了一半），记 await-user，靠退出中断记录提示「被关闭（安装更新），点重试继续」。超时后
 `stopAgentWorkerForQuit` 在 worker 退出后读它收尾时落的断点（本次请求之后写的、没有在跑的工具），照样
 写恢复清单；断点没落盘 / 是旧的 / 还有工具在跑就不写，原因记进 worker 退出日志。同一次退出只发一次请求，
-收尾期间再次退出由 `appQuitDrain` 吞掉。断点落盘后 Main 把恢复清单写到 `dataDir/restart-manifest.json`
+收尾期间再次退出由 `appQuitDrain` 吞掉。清单写好后逐个会话记下处理结果（model-request 冷启动续跑 / await-user
+等用户 / 不进清单）。退出记录 `running-at-exit.json` 在 before-quit 写：收尾后 `app.quit()` 会再触发一次
+before-quit，此时回合已被停掉，`createExitRecorder` 在退出已确定时不让这次空快照抹掉第一次的记录，并停掉心跳。
+断点落盘后 Main 把恢复清单写到 `dataDir/restart-manifest.json`
 （`restartManifest.ts`：会话文件、白名单会话设置、turnId、nextStep、lastCompletedToolCallId、seq；
 写后读回扫密钥样式与内存里真实下发过的凭据，命中即删文件；会话设置跟着之后的 set-* 命令更新，含
 `set-builtin-tools` 的 disabledTools）。冷启动 `coldRestart.ts` 只在清单与配套断点

@@ -263,6 +263,9 @@ export const zhTranslations: Record<string, string> = {
   'Restarting…': '正在重启…',
   'Waiting for running commands to restart…': '等命令跑完再重启…',
   'Waiting for the current command to finish': '正在等当前命令结束',
+  'Waiting for the current reply to finish': '正在等这一轮回复写完',
+  'A session is still writing its reply. EnsoCode waits up to {{seconds}} seconds for it; if it is not done by then, the reply is stopped and continues automatically after the restart.':
+    '有会话的回复还在写，最多等 {{seconds}} 秒；到时还没写完就先停下，重启后自动接着写。',
   'Restarting EnsoCode…': '正在重启 EnsoCode…',
   'Restoring sessions…': '正在恢复会话…',
   'EnsoCode will restart once the current command finishes.': '当前命令结束后再重启 EnsoCode。',

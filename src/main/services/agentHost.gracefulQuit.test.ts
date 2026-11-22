@@ -58,7 +58,7 @@ import {
   DETACH_ACK_TIMEOUT_MS,
   forceAgentWorkerQuit,
   prepareAgentWorkerForQuit,
-  QUIT_NO_TOOL_WAIT_MS,
+  QUIT_REPLY_WAIT_MS,
   QUIT_TOOL_WAIT_LIMIT_MS,
   rememberRestorableSpawn,
   requestGracefulWorkerRestart,
@@ -253,11 +253,11 @@ describe('应用退出走优雅重启', () => {
     void pending.then(() => {
       done = true;
     });
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS - 1);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_MS - 1);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await expect(pending).resolves.toBe('timeout');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${QUIT_NO_TOOL_WAIT_MS}ms`));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${QUIT_REPLY_WAIT_MS}ms`));
     expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain('照常退出');
     expect(graceful(index)).toHaveLength(1);
     // 超时后再触发退出：拿同一个结果，不再发第二次请求
@@ -294,9 +294,9 @@ describe('应用退出走优雅重启', () => {
     ).toBe(pending);
     expect(joined).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS * 3);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_MS * 3);
     expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS - QUIT_NO_TOOL_WAIT_MS * 3 - 1_000);
+    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS - QUIT_REPLY_WAIT_MS * 3 - 1_000);
     expect(done).toBe(false);
     expect(graceful(index)).toHaveLength(1);
 
@@ -324,7 +324,7 @@ describe('应用退出走优雅重启', () => {
       done = true;
     });
     expect(waiting).toHaveBeenCalledExactlyOnceWith('tool');
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS * 3);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_MS * 3);
     expect(done).toBe(false);
   });
 
@@ -336,8 +336,58 @@ describe('应用退出走优雅重启', () => {
     fork.children[index].emit('message', deferred(['call-1']));
     await vi.advanceTimersByTimeAsync(60_000);
     fork.children[index].emit('message', deferred([], 'turn-in-progress'));
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_MS);
     await expect(pending).resolves.toBe('timeout');
+    warn.mockRestore();
+  });
+
+  it('回复在写、没有工具在跑：告诉弹层在等回复，等到回复写完（不到上限不中止），落断点后放行', async () => {
+    vi.useFakeTimers();
+    const index = bootWithSession();
+    const waiting = vi.fn();
+    let done = false;
+    const pending = prepareAgentWorkerForQuit({
+      reason: 'update',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+    });
+    void pending.then(() => {
+      done = true;
+    });
+    fork.children[index].emit('message', deferred([], 'turn-in-progress'));
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('reply');
+    // 以前 10 秒就中止正在写的回复；现在要等它写完
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_MS - 1_000);
+    expect(done).toBe(false);
+    fork.children[index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    await expect(pending).resolves.toBe('checkpointed');
+    const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    expect(log).toContain(
+      'update: 到安全点，恢复清单 1 个会话：session-=model-request（冷启动续跑）'
+    );
+  });
+
+  it('回复写太久超时：日志写明每个会话退出时在干什么，按收尾落的断点写清单并逐个记下处理结果', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'update', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred([], 'turn-in-progress'));
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_MS);
+    await expect(pending).resolves.toBe('timeout');
+    vi.mocked(killAndWaitExit).mockImplementationOnce(async (child) => {
+      child.kill();
+      // worker 收尾中止回复后把这一轮记成 model-request
+      writeCheckpoint({ ...checkpoint, writtenAt: Date.now() });
+    });
+    await stopAgentWorkerForQuit(100);
+    const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    expect(log).toContain(`回复 ${QUIT_REPLY_WAIT_MS}ms 内没写完`);
+    expect(log).toContain('会话状态：session-=回复在写');
+    expect(log).toContain('session-=model-request（冷启动续跑）');
+    expect(loadColdRestartPlan(dataDir())?.resume.map((entry) => entry.sessionId)).toEqual([
+      identity.sessionId,
+    ]);
     warn.mockRestore();
   });
 

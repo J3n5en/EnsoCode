@@ -74,6 +74,9 @@ describe('isExitCausedStreamError', () => {
       'socket hang up',
       'other side closed',
       'Error: aborted (UND_ERR_SOCKET)',
+      // 退出收尾中止模型请求：undici fetch 的 AbortError 与 pi-ai 重试等待被中止
+      'This operation was aborted',
+      'Request aborted',
     ])
       expect(isExitCausedStreamError(text)).toBe(true);
   });
@@ -84,6 +87,7 @@ describe('isExitCausedStreamError', () => {
       '429 rate limit exceeded',
       '500 internal server error',
       'context length exceeded',
+      'Request aborted by user',
       '',
     ])
       expect(isExitCausedStreamError(text)).toBe(false);

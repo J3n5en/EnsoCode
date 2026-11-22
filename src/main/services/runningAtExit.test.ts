@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearRunningAtExit,
+  createExitRecorder,
   readRunningAtExit,
   runningAtExitPath,
   startRunningAtExitHeartbeat,
@@ -79,5 +80,64 @@ describe('runningAtExit', () => {
     });
     expect(existsSync(`${runningAtExitPath(dir)}.tmp`)).toBe(false);
     expect(() => JSON.parse(readFileSync(runningAtExitPath(dir), 'utf8'))).not.toThrow();
+  });
+
+  it('同一次退出 before-quit 来两次：第二次回合已被停掉，不删第一次记下的在跑会话，心跳停掉', () => {
+    let running = [{ conversationId: 'c1', turnId: 't1', startedAt: 5 }];
+    let heartbeatStopped = 0;
+    const recorder = createExitRecorder({
+      dir,
+      pid: 7,
+      snapshot: () => running,
+      committed: () => true,
+      now: () => 900,
+      stopHeartbeat: () => heartbeatStopped++,
+    });
+    recorder.record('update');
+    running = [];
+    recorder.record('update');
+    expect(readRunningAtExit(dir)).toMatchObject({
+      pid: 7,
+      kind: 'update',
+      sessions: [{ conversationId: 'c1', turnId: 't1' }],
+    });
+    expect(heartbeatStopped).toBeGreaterThan(0);
+  });
+
+  it('退出被拦下（确认框取消）：不锁定记录、不停心跳，之后的快照照常覆盖', () => {
+    let running = [{ conversationId: 'c1', startedAt: 5 }];
+    let committed = false;
+    let heartbeatStopped = 0;
+    const recorder = createExitRecorder({
+      dir,
+      pid: 7,
+      snapshot: () => running,
+      committed: () => committed,
+      stopHeartbeat: () => heartbeatStopped++,
+    });
+    recorder.record('quit');
+    expect(heartbeatStopped).toBe(0);
+    running = [];
+    committed = true;
+    recorder.record('quit');
+    expect(existsSync(runningAtExitPath(dir))).toBe(false);
+  });
+
+  it('退出时本来就没有在跑的会话：照旧清掉旧记录', () => {
+    writeRunningAtExit(dir, {
+      pid: 1,
+      kind: 'quit',
+      at: 1,
+      sessions: [{ conversationId: 'old', startedAt: 1 }],
+    });
+    const recorder = createExitRecorder({
+      dir,
+      pid: 7,
+      snapshot: () => [],
+      committed: () => true,
+      now: () => 2,
+    });
+    recorder.record('quit');
+    expect(existsSync(runningAtExitPath(dir))).toBe(false);
   });
 });

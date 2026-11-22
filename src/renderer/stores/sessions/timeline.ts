@@ -1340,10 +1340,12 @@ function buildMessageTimeline(
       }
     });
     if (message.errorMessage) {
-      // 瞬态错误不渲染：后面紧跟另一条 assistant = 已重试过（覆盖 resume 回放）；
+      // 瞬态错误不渲染：后面紧跟另一条 assistant = 已重试过（覆盖 resume 回放；重启续跑前可能插了 system）；
       // 末条且 running = 重试倒计时中（错误文本展示在 RetryBar 上，先渲染再删会抽搐）。
       // 只有真正的终态错误（非 running 的末次尝试）才落红。
-      const retried = messages[messageIndex + 1]?.role === 'assistant';
+      let next = messageIndex + 1;
+      while (messages[next]?.role === 'system') next++;
+      const retried = messages[next]?.role === 'assistant';
       const pendingRetry = running && messageIndex === messages.length - 1;
       const exitCaused = suppressedError !== undefined && message.errorMessage === suppressedError;
       if (!retried && !pendingRetry && !exitCaused) {

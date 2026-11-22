@@ -508,6 +508,8 @@ interface ManagedSession {
   toolDurations: Map<string, number>;
   /** 优雅重启：loop 停在工具批结束、下一次模型请求之前；调用即放行 */
   restartHold?: () => void;
+  /** 优雅重启等不到安全点、收尾时中止了正在写的回复：断点记成同一轮的模型请求，新进程续跑 */
+  restartAbortedTurnId?: string;
   lastCompletedToolCallId?: string;
   /** 上一代 worker 的断点，parent-ready 之后据此续跑 */
   restartResume?: RestartCheckpointEntry;
@@ -5875,17 +5877,30 @@ export class SessionSupervisor {
       }
       const sessionFile = managed.session.sessionFile;
       if (!sessionFile) continue;
+      const abortedReply =
+        gate.nextStep === 'await-user' &&
+        managed.restartAbortedTurnId !== undefined &&
+        endsWithAbortedReply(managed.session.agent.state.messages);
+      const nextStep = abortedReply ? 'model-request' : gate.nextStep;
       entries.push({
         sessionId: managed.identity.sessionId,
         generation: managed.identity.generation,
         sessionFile,
         seq: managed.seq,
-        nextStep: gate.nextStep,
-        turnId: gate.nextStep === 'model-request' ? (managed.currentTurnId ?? null) : null,
+        nextStep,
+        turnId: abortedReply
+          ? (managed.restartAbortedTurnId ?? null)
+          : gate.nextStep === 'model-request'
+            ? (managed.currentTurnId ?? null)
+            : null,
         lastCompletedToolCallId: managed.lastCompletedToolCallId ?? null,
         messageCount: managed.session.messages.length,
         toolsInFlight,
       });
+      if (abortedReply)
+        console.log(
+          `[graceful-restart] ${managed.identity.sessionId.slice(0, 8)} 回复写到一半被重启中止，断点记成 model-request，新进程续跑`
+        );
     }
     if (deferred.length > 0) {
       const key = JSON.stringify(deferred);
@@ -5984,12 +5999,19 @@ export class SessionSupervisor {
     const entry = managed.restartResume;
     managed.restartResume = undefined;
     if (entry?.nextStep !== 'model-request') return;
-    if (managed.session.agent.state.messages.at(-1)?.role !== 'toolResult') {
+    // 上一代收尾时中止了写到一半的回复：先把它移出模型上下文（jsonl 原条目保留），再从它之前续跑
+    const abortedReply =
+      endsWithAbortedReply(managed.session.agent.state.messages) &&
+      editUnfinishedAssistantForResume(managed.session);
+    const tail = managed.session.agent.state.messages.at(-1)?.role;
+    if (tail !== 'toolResult' && !(abortedReply && tail === 'user')) {
       console.warn(
         `[graceful-restart] ${entry.sessionId.slice(0, 8)} 会话文件不在工具结果上，不续跑，等用户下一条`
       );
       return;
     }
+    if (abortedReply)
+      console.log(`[graceful-restart] ${entry.sessionId.slice(0, 8)} 续跑被重启中止的回复`);
     managed.currentTurnId = entry.turnId ?? randomUUID();
     if (entry.lastCompletedToolCallId)
       managed.lastCompletedToolCallId = entry.lastCompletedToolCallId;
@@ -6019,7 +6041,13 @@ export class SessionSupervisor {
     this.bgTasks.stopAll();
     // 还在等安全点（等转后台的命令时被强制退出 / 超时）：给刚停掉的命令一点时间收口，
     // 完成通知进持久化队列、停在边界的会话落下断点，Main 据此补写恢复清单
-    if (this.restart && !this.restart.committed) await this.settleYieldedTasks(1_000);
+    const restartPending = this.restart !== undefined && !this.restart.committed;
+    if (restartPending) await this.settleYieldedTasks(1_000);
+    // 还没到安全点的会话里，正在写回复（没有工具在跑）的根会话记下这一轮：
+    // 中止后断点记成同一轮的模型请求，冷启动续跑，而不是只留一句 This operation was aborted
+    if (restartPending)
+      for (const managed of this.sessions.values()) this.markRestartAbort(managed);
+    const aborts: Promise<unknown>[] = [];
     for (const managed of this.sessions.values()) {
       cancelContinuousMemory(managed.session.sessionManager);
       managed.browser?.cancelAll('Enso worker shutdown');
@@ -6034,9 +6062,34 @@ export class SessionSupervisor {
       // pi 的 bash 是 detached 进程组，只在中断信号上 killProcessTree；SDK 未导出退出清理，
       // 这里同步触发中断（不等 waitForIdle），否则 worker 退出后命令成孤儿进程。
       // 优雅重启已落断点时没有工具在跑，也不能再中断：被挂起的 loop 一放行就会写进会话文件
-      if (!this.restart?.committed) void managed.session.abort().catch(() => {});
+      if (!this.restart?.committed) aborts.push(managed.session.abort().catch(() => {}));
+    }
+    if (restartPending) {
+      // 等中止落进会话文件再落断点（上限内），Main 据此补写恢复清单
+      await Promise.race([
+        Promise.allSettled(aborts),
+        new Promise((resolve) => setTimeout(resolve, RESTART_ABORT_SETTLE_MS).unref()),
+      ]);
+      this.checkRestart();
     }
     return this.mcp.closeAll();
+  }
+
+  private markRestartAbort(managed: ManagedSession): void {
+    const turnActive =
+      managed.status === 'running' ||
+      managed.currentTurnId !== undefined ||
+      managed.session.isStreaming ||
+      managed.session.isRetrying;
+    if (
+      !turnActive ||
+      managed.childIdentity ||
+      managed.parentId ||
+      managed.toolStartAt.size > 0 ||
+      this.bgTasks.runningYielded(managed.identity.sessionId).length > 0
+    )
+      return;
+    managed.restartAbortedTurnId = managed.currentTurnId ?? randomUUID();
   }
 
   private async settleYieldedTasks(limitMs: number): Promise<void> {
@@ -6521,6 +6574,14 @@ export class SessionSupervisor {
 const ZOMBIE_TURN_WAIT_MS = 5_000;
 /** 流式增量下发间隔：约 20 帧/秒，肉眼连贯，长回复的 IPC 与 markdown 重算降一个量级 */
 const STREAM_UPSERT_WINDOW_MS = 50;
+/** 重启收尾中止回复后等它落进会话文件的上限：加上等转后台命令的 1s 仍在 Main 终止 worker 的 3s 内 */
+const RESTART_ABORT_SETTLE_MS = 1_500;
+
+/** 会话停在被中止的回复上（重启收尾中止模型请求后 pi 写下的 stopReason=aborted） */
+function endsWithAbortedReply(messages: readonly unknown[]): boolean {
+  const last = messages.at(-1) as { role?: unknown; stopReason?: unknown } | undefined;
+  return last?.role === 'assistant' && last.stopReason === 'aborted';
+}
 
 /** 限时等 pi 空闲；true = 已空闲，false = 超时仍在跑 */
 export function waitIdleBounded(

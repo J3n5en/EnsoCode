@@ -128,7 +128,7 @@ import { parseWebSearchChain, type WebSearchChainEntry } from '@shared/webSearch
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
-import { QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
+import { QUIT_REPLY_WAIT_MS, QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
 import {
   AGENT_WORKER_SERVICE_NAME,
   appendAgentWorkerExitLog,
@@ -466,8 +466,21 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
           workerReady = false;
           if (gracefulRestart.quitting && quitCheckpoint) {
             const checkpoint = parseRestartCheckpoint(event.checkpoint);
-            if (checkpoint)
-              writeQuitManifest(quitCheckpoint, checkpoint, gracefulRestart.snapshot());
+            if (checkpoint) {
+              const result = writeQuitManifest(
+                quitCheckpoint,
+                checkpoint,
+                gracefulRestart.snapshot()
+              );
+              appendAgentWorkerExitLog(
+                agentDataDir(),
+                `[graceful-restart] ${quitCheckpoint.reason}: 到安全点，${
+                  result === 'written'
+                    ? `恢复清单 ${quitCheckpoint.resumable.size} 个会话：${describeCheckpoint(checkpoint, quitCheckpoint.resumable)}`
+                    : `不写恢复清单（${result}）：${describeCheckpoint(checkpoint, quitCheckpoint.resumable)}`
+                }`
+              );
+            }
             quitCheckpoint.settle('checkpointed');
           } else void killAndWaitExit(child, 5_000);
         }
@@ -688,9 +701,7 @@ function detachBackgroundTasks(child: WorkerProcess, timeoutMs: number): Promise
   });
 }
 
-export { QUIT_TOOL_WAIT_LIMIT_MS };
-/** 没有工具在跑（回复还在流式输出、等收口）时等安全点的上限 */
-export const QUIT_NO_TOOL_WAIT_MS = 10_000;
+export { QUIT_REPLY_WAIT_MS, QUIT_TOOL_WAIT_LIMIT_MS };
 export type QuitCheckpointResult = 'skipped' | 'checkpointed' | 'timeout';
 
 type DeferredSessions = Extract<
@@ -710,8 +721,10 @@ interface QuitCheckpoint {
   late?: RestartSettingsSnapshot;
   /** worker 最近一次推迟时报告有工具在跑 */
   toolsRunning: boolean;
-  /** 在等的命令里有没法脱离应用的转后台命令 */
-  waitReason: RestartWaitReason;
+  /** 已告诉弹层在等什么（工具 / 脱离不了的转后台命令 / 回复）；还没报过推迟时为 null */
+  waitReason: RestartWaitReason | null;
+  /** worker 最近一次报告的推迟：超时时据此记下每个会话在干什么 */
+  lastDeferred: DeferredSessions | null;
   waitingForTools: Array<(reason: RestartWaitReason) => void>;
   observe(sessions: DeferredSessions): void;
   settle(result: QuitCheckpointResult): void;
@@ -726,8 +739,8 @@ let lastRestartDeferred: DeferredSessions | null = null;
 /**
  * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
  * 冷启动据此续跑。没有正在跑的会话、也没有在跑的后台命令时直接放行；同一次退出只发一次请求，再调用拿同一个结果。
- * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时最多等 QUIT_NO_TOOL_WAIT_MS；
- * onWaitingForTools 在 worker 报告有工具在跑时回调（已在跑则立即回调）。
+ * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时等这一轮回复写完、最多 QUIT_REPLY_WAIT_MS
+ * （超时 worker 收尾中止回复并记成续跑点）；onWaitingForTools 在 worker 报告推迟时回调在等什么（已在等则立即回调）。
  */
 export function prepareAgentWorkerForQuit(options: {
   reason: RestartExitReason;
@@ -741,7 +754,7 @@ export function prepareAgentWorkerForQuit(options: {
   if (quitCheckpoint) {
     if (options.onWaitingForTools) {
       quitCheckpoint.waitingForTools.push(options.onWaitingForTools);
-      if (quitCheckpoint.toolsRunning) options.onWaitingForTools(quitCheckpoint.waitReason);
+      if (quitCheckpoint.waitReason) options.onWaitingForTools(quitCheckpoint.waitReason);
     }
     return quitCheckpoint.promise;
   }
@@ -768,16 +781,14 @@ export function prepareAgentWorkerForQuit(options: {
   const arm = () => {
     clearTimeout(timer);
     const limit = requestedAt + QUIT_TOOL_WAIT_LIMIT_MS;
-    const deadline = state.toolsRunning
-      ? limit
-      : Math.min(limit, quietSince + QUIT_NO_TOOL_WAIT_MS);
+    const deadline = state.toolsRunning ? limit : Math.min(limit, quietSince + QUIT_REPLY_WAIT_MS);
     timer = setTimeout(
       () => {
         state.timedOut = true;
         const why = state.toolsRunning
           ? `工具跑了超过上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`
-          : `没有工具在跑，${QUIT_NO_TOOL_WAIT_MS}ms 内没到安全点`;
-        const message = `[graceful-restart] ${options.reason}: worker 等安全点 ${Date.now() - requestedAt}ms 超时（${why}），中止在跑的命令照常退出`;
+          : `没有工具在跑，回复 ${QUIT_REPLY_WAIT_MS}ms 内没写完`;
+        const message = `[graceful-restart] ${options.reason}: worker 等安全点 ${Date.now() - requestedAt}ms 超时（${why}），中止在跑的命令照常退出；会话状态：${describeDeferred(state.lastDeferred)}`;
         console.warn(message);
         appendAgentWorkerExitLog(agentDataDir(), message);
         finish('timeout');
@@ -794,27 +805,27 @@ export function prepareAgentWorkerForQuit(options: {
     manifestWritten: false,
     resumable: new Set(),
     toolsRunning: false,
-    waitReason: 'tool',
+    waitReason: null,
+    lastDeferred: null,
     waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
     observe(sessions) {
-      const running = sessions.some((session) => session.toolsInFlight.length > 0);
-      const waitReason: RestartWaitReason = sessions.some(
-        (session) => (session.undetachableTasks?.length ?? 0) > 0
-      )
-        ? 'background-not-detachable'
-        : 'tool';
       if (settled) return;
-      if (running === state.toolsRunning) {
-        if (running && waitReason !== state.waitReason) {
-          state.waitReason = waitReason;
-          for (const notify of state.waitingForTools) notify(waitReason);
-        }
-        return;
+      state.lastDeferred = sessions;
+      const running = sessions.some((session) => session.toolsInFlight.length > 0);
+      const waitReason: RestartWaitReason | null = running
+        ? sessions.some((session) => (session.undetachableTasks?.length ?? 0) > 0)
+          ? 'background-not-detachable'
+          : 'tool'
+        : sessions.length > 0
+          ? 'reply'
+          : null;
+      if (waitReason && waitReason !== state.waitReason) {
+        state.waitReason = waitReason;
+        for (const notify of state.waitingForTools) notify(waitReason);
       }
+      if (running === state.toolsRunning) return;
       state.toolsRunning = running;
-      state.waitReason = waitReason;
-      if (running) for (const notify of state.waitingForTools) notify(waitReason);
-      else quietSince = Date.now();
+      if (!running) quietSince = Date.now();
       arm();
     },
     settle: finish,
@@ -902,7 +913,7 @@ function writeLateQuitManifest(pending: QuitCheckpoint, settings: RestartSetting
     typeof checkpoint === 'string' ? checkpoint : writeQuitManifest(pending, checkpoint, settings);
   const message =
     result === 'written' && typeof checkpoint !== 'string'
-      ? `按 worker 收尾时落的断点写了恢复清单（${checkpoint.sessions.length} 个会话）`
+      ? `按 worker 收尾时落的断点写了恢复清单（${checkpoint.sessions.length} 个会话）：${describeCheckpoint(checkpoint, pending.resumable)}`
       : `不写恢复清单：${
           result === 'empty'
             ? '断点里的会话都不是可续跑的普通根会话'
@@ -913,6 +924,37 @@ function writeLateQuitManifest(pending: QuitCheckpoint, settings: RestartSetting
   const line = `[graceful-restart] ${pending.reason}: 超时退出，${message}`;
   console.warn(line);
   appendAgentWorkerExitLog(agentDataDir(), line);
+}
+
+/** 退出时每个没到安全点的会话在干什么（worker 最近一次推迟报告） */
+function describeDeferred(sessions: DeferredSessions | null): string {
+  if (!sessions?.length) return 'worker 没报告推迟';
+  return sessions
+    .map(
+      (session) =>
+        `${session.identity.sessionId.slice(0, 8)}=${
+          session.toolsInFlight.length > 0
+            ? `工具在跑(${session.toolsInFlight.join(',')})`
+            : '回复在写'
+        }`
+    )
+    .join(' ');
+}
+
+/** 断点里每个会话的处理结果：清单里的按下一步续跑或等用户，清单外的（Bot、子会话等）不续跑 */
+function describeCheckpoint(checkpoint: RestartCheckpoint, resumable: ReadonlySet<string>): string {
+  return checkpoint.sessions
+    .map(
+      (entry) =>
+        `${entry.sessionId.slice(0, 8)}=${
+          !resumable.has(entry.sessionId)
+            ? '不进清单'
+            : entry.nextStep === 'model-request'
+              ? 'model-request（冷启动续跑）'
+              : 'await-user（等用户）'
+        }`
+    )
+    .join(' ');
 }
 
 /** 普通根会话 spawn 成功后记下原始请求（不含凭据），退出时写进恢复清单 */

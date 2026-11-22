@@ -1,3 +1,4 @@
+import { QUIT_REPLY_WAIT_MS } from '@shared/quitLimits';
 import type { AppExitReason, RestartOverlayState } from '@shared/types/ipc';
 import { Maximize2 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -84,6 +85,7 @@ export function RestartWaitDialog() {
     return off;
   }, []);
   const waiting = shown.phase === 'waiting';
+  const reply = waiting && shown.reason === 'reply';
   return (
     <AlertDialog open={state !== null && !minimized}>
       <AlertDialogPopup className="sm:max-w-sm">
@@ -91,14 +93,23 @@ export function RestartWaitDialog() {
           <AlertDialogTitle className="flex items-center gap-2 text-base">
             <Spinner className="size-4 text-muted-foreground" />
             {waiting
-              ? t('Waiting for the current command to finish')
+              ? t(
+                  reply
+                    ? 'Waiting for the current reply to finish'
+                    : 'Waiting for the current command to finish'
+                )
               : shown.phase === 'resuming'
                 ? t('Restoring sessions…')
                 : t('Restarting EnsoCode…')}
           </AlertDialogTitle>
           {waiting && (
             <AlertDialogDescription>
-              {t(EXIT_NOTES[shown.exit])}
+              {reply
+                ? t(
+                    'A session is still writing its reply. EnsoCode waits up to {{seconds}} seconds for it; if it is not done by then, the reply is stopped and continues automatically after the restart.',
+                    { seconds: QUIT_REPLY_WAIT_MS / 1000 }
+                  )
+                : t(EXIT_NOTES[shown.exit])}
               {shown.reason === 'background-not-detachable' && (
                 <>
                   {' '}

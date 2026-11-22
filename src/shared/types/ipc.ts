@@ -743,8 +743,8 @@ export const IPC_CHANNELS = {
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 
-/** 重启在等哪种命令：在跑的工具，或没法脱离应用、只能等它结束的转后台命令 */
-export type RestartWaitReason = 'tool' | 'background-not-detachable';
+/** 重启在等什么：在跑的工具、没法脱离应用只能等它结束的转后台命令，或正在写的回复 */
+export type RestartWaitReason = 'tool' | 'background-not-detachable' | 'reply';
 
 /** 等待弹层等完命令要做什么：菜单重启、安装更新、退出（Cmd+Q / 关窗 / 菜单退出） */
 export type AppExitReason = 'restart' | 'update' | 'quit';
