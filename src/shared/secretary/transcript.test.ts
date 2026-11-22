@@ -80,6 +80,27 @@ describe('projectReadableMessages', () => {
 
     expect(readable).toEqual([]);
   });
+
+  it('带出 jsonl entryId：优先投影的 messageId，其次复用 user 的 entryId，都没有时不带', () => {
+    const { messages: readable } = projectReadableMessages(
+      [
+        { ...user('问'), entryId: 'u-entry', messageId: 'u-entry' },
+        { ...assistant({ type: 'text', text: '答' }), messageId: 'a-entry' },
+        { ...user('旧读取器'), entryId: 'legacy' },
+        user('未持久化'),
+      ],
+      { limit: 10 }
+    );
+
+    expect(readable.map((message) => message.entryId)).toEqual([
+      'u-entry',
+      'a-entry',
+      'legacy',
+      undefined,
+    ]);
+    expect(readable[3]).not.toHaveProperty('entryId');
+    expect(readable[1]).not.toHaveProperty('messageId');
+  });
 });
 
 describe('wrapUntrusted', () => {

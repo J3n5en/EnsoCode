@@ -1,11 +1,21 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 import type {
   ConversationAuthority,
   ParentHistoryTailResult,
   ProjectAuthority,
   ProjectedMessage,
 } from '@shared/types/agent';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import type { ObservedTask } from '../backgroundTaskTracker';
+import {
+  findHistoryMessage,
+  projectParentHistoryAll,
+  projectParentHistoryPage,
+  projectParentHistoryTail,
+} from '../sessionHistoryTail';
 import {
   createSecretaryReadHandlers,
   type SecretaryReadPorts,
@@ -501,7 +511,8 @@ describe('session_read 的 index 模式', () => {
         projects: () => [project()],
         rows: () => ({ s1: row() }),
         conversations: () => [conversation('s1', 'p1')],
-        message: async () => message,
+        message: async (_sessionFile, target) =>
+          message ? { index: 'index' in target ? target.index : 5, message } : null,
       })
     );
 
@@ -533,23 +544,226 @@ describe('session_read 的 index 模式', () => {
     );
   });
 
-  it('工具结果与不存在的下标都不返回正文', async () => {
+  it('工具结果不返回正文：按 id 点名是 not-readable，按下标撞上视为下标失效', async () => {
     const toolResult = handlers({
       role: 'toolResult',
       content: [{ type: 'text', text: '命令输出' }],
     });
     expect(
       await toolResult.session_read(
+        { conversationId: 's1', entryId: 'tool-entry' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: expect.stringMatching(/^not-readable: /) });
+    expect(
+      await toolResult.session_read(
         { conversationId: 's1', index: 3 },
         { secretaryConversationId: 'sec-1' }
       )
-    ).toEqual({ ok: false, error: 'not-readable' });
+    ).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
+  });
+
+  it('id 或下标已找不到消息时返回 stale-index', async () => {
+    for (const params of [{ entryId: 'gone' }, { index: 99 }])
+      expect(
+        await handlers(null).session_read(
+          { conversationId: 's1', ...params },
+          { secretaryConversationId: 'sec-1' }
+        )
+      ).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
+  });
+
+  it('下标撞上没有正文的工具调用步骤也视为下标失效', async () => {
+    const step = handlers({
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'ls' } }],
+    });
     expect(
-      await handlers(null).session_read(
-        { conversationId: 's1', index: 99 },
+      await step.session_read(
+        { conversationId: 's1', index: 4 },
         { secretaryConversationId: 'sec-1' }
       )
-    ).toEqual({ ok: false, error: 'not-found' });
+    ).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
+  });
+
+  it('按 entryId 读全文，回带当前下标与 id', async () => {
+    const result = await run(
+      handlers({ role: 'assistant', content: [{ type: 'text', text: '全文' }] }).session_read,
+      { conversationId: 's1', entryId: 'entry-a' }
+    );
+    expect(result).toMatchObject({ index: 5, entryId: 'entry-a', role: 'assistant' });
+    expect(result.text).toBe('<untrusted-content source="session:s1">全文</untrusted-content>');
+  });
+
+  it('entryId 与 index 同时给出时按 entryId 取', async () => {
+    const seen: unknown[] = [];
+    const reader = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        message: async (_sessionFile, target) => {
+          seen.push(target);
+          return { index: 2, message: { role: 'user', content: [{ type: 'text', text: '原文' }] } };
+        },
+      })
+    );
+    await run(reader.session_read, { conversationId: 's1', entryId: 'a1', index: 1 });
+    expect(seen).toEqual([{ entryId: 'a1' }]);
+  });
+});
+
+// 真实 pi jsonl：验证下标在哪些操作下会漂移、entryId 是否始终指回原消息
+describe('session_read 在真实 jsonl 上的消息定位', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'enso-secretary-read-'));
+  const sessionDir = path.join(root, 'sessions');
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  const at = { api: 'openai-completions', provider: 'openai', model: 'gpt-4' } as const;
+  const usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const user = (body: string) => ({
+    role: 'user' as const,
+    content: [{ type: 'text' as const, text: body }],
+    timestamp: 1,
+  });
+  const assistant = (body: string) => ({
+    role: 'assistant' as const,
+    content: [{ type: 'text' as const, text: body }],
+    ...at,
+    usage,
+    stopReason: 'stop' as const,
+    timestamp: 1,
+  });
+  const toolStep = (callId: string) => ({
+    role: 'assistant' as const,
+    content: [
+      { type: 'toolCall' as const, id: callId, name: 'bash', arguments: { command: 'ls' } },
+    ],
+    ...at,
+    usage,
+    stopReason: 'toolUse' as const,
+    timestamp: 1,
+  });
+  const toolOutput = (callId: string) => ({
+    role: 'toolResult' as const,
+    toolCallId: callId,
+    toolName: 'bash',
+    content: [{ type: 'text' as const, text: `工具输出 ${SECRET}` }],
+    isError: false,
+    timestamp: 1,
+  });
+
+  /** 与 readPortsFor 同口径：每次调用都从磁盘重开，分页与全文都带 messageIds */
+  function readerOn(file: string) {
+    const branch = () => SessionManager.open(file, sessionDir).getBranch();
+    return createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row({ sessionFile: file }) }),
+        conversations: () => [conversation('s1', 'p1')],
+        history: async (_file, before) => ({
+          ok: true,
+          ...(before === undefined
+            ? projectParentHistoryTail(branch(), { messageIds: true })
+            : projectParentHistoryPage(branch(), before, { messageIds: true })),
+        }),
+        message: async (_file, target) =>
+          findHistoryMessage(projectParentHistoryAll(branch(), { messageIds: true }), target),
+      })
+    );
+  }
+
+  type Listed = { index: number; entryId?: string; role: string; truncated?: boolean };
+  const listed = async (reader: ReturnType<typeof readerOn>) =>
+    (await run(reader.session_read, { conversationId: 's1' })).messages as Listed[];
+
+  it('会话增长、压缩、context_edit 之后，已列出消息的绝对下标与 entryId 都不变', async () => {
+    const manager = SessionManager.create('/repo/alpha', sessionDir);
+    const file = manager.getSessionFile() as string;
+    manager.appendMessage(user('开始'));
+    const longId = manager.appendMessage(assistant('X'.repeat(3000)));
+    const keptId = manager.appendMessage(user('跑一下'));
+    manager.appendMessage(toolStep('c1'));
+    const toolId = manager.appendMessage(toolOutput('c1'));
+    manager.appendMessage(assistant('跑完了'));
+    const reader = readerOn(file);
+    const before = await listed(reader);
+    expect(before.find((message) => message.truncated)).toMatchObject({
+      index: 1,
+      entryId: longId,
+    });
+
+    manager.appendMessage(user('继续'));
+    manager.appendMessage(assistant('好'));
+    manager.appendCompaction('摘要', keptId, 1000);
+    manager.appendContextEdit(toolId, { content: '[cleared]' });
+    manager.appendMessage(user('压缩后'));
+    manager.appendMessage(assistant('收到'));
+
+    for (const message of before) {
+      const byIndex = await run(reader.session_read, {
+        conversationId: 's1',
+        index: message.index,
+      });
+      const byId = await run(reader.session_read, {
+        conversationId: 's1',
+        entryId: message.entryId,
+      });
+      expect(byIndex).toMatchObject({ index: message.index, entryId: message.entryId });
+      expect(byId).toMatchObject({ index: message.index, entryId: message.entryId });
+    }
+    expect(await run(reader.session_read, { conversationId: 's1', entryId: longId })).toMatchObject(
+      { totalChars: 3000 }
+    );
+  });
+
+  it('回退后旧下标会落到新分支的工具输出上：报 stale-index 且不带出工具输出', async () => {
+    const manager = SessionManager.create('/repo/alpha', sessionDir);
+    const file = manager.getSessionFile() as string;
+    const firstId = manager.appendMessage(user('开始'));
+    const anchor = manager.appendMessage(assistant('好'));
+    manager.appendMessage(user('先这样'));
+    manager.appendMessage(user('补一句'));
+    const goneId = manager.appendMessage(assistant('Y'.repeat(3000)));
+    const reader = readerOn(file);
+    const gone = (await listed(reader)).find((message) => message.truncated);
+    expect(gone).toMatchObject({ index: 4, entryId: goneId });
+
+    // 与 supervisor 的回退一致：branch 到回退点，再写不可见锚点让重开停在回退处
+    manager.branch(anchor);
+    manager.appendCustomEntry('enso-rewind-leaf', { at: 1 });
+    manager.appendMessage(user('改成这样'));
+    manager.appendMessage(toolStep('c2'));
+    manager.appendMessage(toolOutput('c2'));
+
+    // 旧实现按下标取到的正是这条工具输出，于是报 not-readable
+    expect(
+      findHistoryMessage(
+        projectParentHistoryAll(SessionManager.open(file, sessionDir).getBranch()),
+        {
+          index: 4,
+        }
+      )?.message.role
+    ).toBe('toolResult');
+    for (const target of [{ index: 4 }, { entryId: goneId }]) {
+      const stale = await reader.session_read(
+        { conversationId: 's1', ...target },
+        { secretaryConversationId: 'sec-1' }
+      );
+      expect(stale).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
+      expect(JSON.stringify(stale)).not.toContain(SECRET);
+    }
+    // 回退点之前的消息下标与 id 都没动
+    expect(
+      await run(reader.session_read, { conversationId: 's1', entryId: firstId })
+    ).toMatchObject({ index: 0, entryId: firstId, role: 'user' });
   });
 });
 

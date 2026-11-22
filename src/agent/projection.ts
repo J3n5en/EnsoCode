@@ -167,6 +167,9 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (value.role === 'user' && typeof value.entryId === 'string' && value.entryId.trim()) {
     projected.entryId = value.entryId;
   }
+  if (typeof value.messageId === 'string' && value.messageId.trim()) {
+    projected.messageId = value.messageId;
+  }
   if (typeof value.toolName === 'string') projected.toolName = value.toolName;
   if (typeof value.toolCallId === 'string') projected.toolCallId = value.toolCallId;
   if (typeof value.isError === 'boolean') projected.isError = value.isError;
