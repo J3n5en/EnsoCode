@@ -64,6 +64,7 @@ export default defineConfig({
         index: path.resolve(__dirname, 'src/server/index.ts'),
         agent: path.resolve(__dirname, 'src/agent/index.ts'),
         'plugin-host': path.resolve(__dirname, 'src/pluginHost/index.ts'),
+        'memory-service': path.resolve(__dirname, 'src/memoryService/index.ts'),
       },
       external: isExternal,
       output: {

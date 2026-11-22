@@ -36,6 +36,7 @@ export declare const images: PlatformImages;
 export declare const notification: PlatformNotification;
 /** agent worker 入口脚本的绝对路径 */
 export declare const agentWorkerPath: string;
+export declare const memoryWorkerPath: string;
 /** 插件宿主进程入口脚本的绝对路径 */
 export declare const pluginHostPath: string;
 /** 打包资源目录（rtk 等随包二进制） */

@@ -126,7 +126,6 @@ import { type BotDesktop, botDesktop } from '../services/desktopHooks';
 import { searchFiles } from '../services/fileSearch';
 import { resolveGlobalInstruction } from '../services/instructionStore';
 import { setBotAvatarResolver } from '../services/localImageProtocol';
-import { listMemories } from '../services/memory/store';
 import { removeMemorySpace } from '../services/memoryCleanup';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import {
@@ -1137,8 +1136,13 @@ function skillEntries(value: unknown): SkillEntry[] {
 
 /** since 之后整理写入某空间的结论（核心笔记重写的输入） */
 async function recentDistilled(spaceId: string, since: number): Promise<string[]> {
-  const { memoryDatabase } = await import('../services/memoryHost');
-  return listMemories(memoryDatabase(), { spaceIds: [spaceId], limit: 50 })
+  const { memoryServiceOp, isMissingDb } = await import('../services/memoryHost');
+  const result = await memoryServiceOp<
+    | { items: { title: string; content: string; createdAt: string; source: string }[] }
+    | { missing: true }
+  >('list-memories', { spaceIds: [spaceId], limit: 50 });
+  if (isMissingDb(result)) return [];
+  return result.items
     .filter((memory) => memory.source === 'distill' && Date.parse(memory.createdAt) >= since)
     .map((memory) => `${memory.title}: ${memory.content}`);
 }

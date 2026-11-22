@@ -49,6 +49,7 @@ import {
 import { appendAgentWorkerExitLog } from './services/agentWorkerExit';
 import { allowAppQuit, setBeforeConfirmedQuit } from './services/appCloseConfirm';
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
+import { setUserDataDir } from './services/appPaths';
 import { attachAppQuitDrain } from './services/appQuitDrain';
 import { configureQuitWatchdog, quitWatchdog } from './services/appQuitWatchdog';
 import { createAppRestart, restartOverlayFor } from './services/appRestart';
@@ -75,11 +76,10 @@ import {
   startExitInterruptRecovery,
   startRunningSessionsHeartbeat,
 } from './services/exitInterruptHost';
-import { releaseLocalChatSlot } from './services/llama/chat';
-import { disposeLlamaRuntime, llamaRuntimeActive } from './services/llama/runtime';
 import {
-  awaitMemoryEmbeddingClose,
   closeMemoryDb,
+  memoryServiceActive,
+  shutdownMemoryService,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
   syncMemoryForgettingFromSettings,
@@ -136,6 +136,8 @@ app.setPath(
     ? path.resolve(developmentUserData)
     : path.join(app.getPath('appData'), app.isPackaged ? 'enso-code' : 'enso-code-dev')
 );
+// 服务侧路径解析（模型目录等）不直接碰 Electron，统一从注入口取
+setUserDataDir(app.getPath('userData'));
 
 // 未启动 crashpad 时子进程 native 崩溃只剩 0xFFFF7003，真实异常码与现场全丢。
 // 只落本地 minidump（userData/Crashpad），不上传。
@@ -439,8 +441,8 @@ if (!gotTheLock) {
     computerHost.closeAll();
     closeMemoryDb();
   });
-  // node-pty TSFN / llama AsyncWorker 在 FreeEnvironment 期间回调会 SIGABRT；
-  // 两步必须共用一次 preventDefault，谁先 app.quit 都会拆掉另一边的环境。
+  // node-pty TSFN / 记忆服务子进程（llama/sqlite 在里面）的收尾都要赶在退出前完成；
+  // 三步共用一次 preventDefault，谁先 app.quit 都会拆掉其他两边的环境。
   attachAppQuitDrain(
     app,
     [
@@ -451,13 +453,11 @@ if (!gotTheLock) {
         wait: waitPtyQuitIdle,
       },
       {
-        name: 'llama',
-        shouldWait: llamaRuntimeActive,
-        wait: async () => {
-          await awaitMemoryEmbeddingClose();
-          await releaseLocalChatSlot();
-          await disposeLlamaRuntime();
-        },
+        // 记忆服务（utilityProcess）：等它关库、卸载模型；超时内部 SIGKILL，
+        // 卡死也不拖住退出（#323 看门狗同款，子进程死了 WAL 可恢复）
+        name: '记忆服务',
+        shouldWait: memoryServiceActive,
+        wait: () => shutdownMemoryService(),
       },
       {
         name: 'agent worker',

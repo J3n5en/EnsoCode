@@ -7,17 +7,18 @@ import {
   isEvolvesReviewState,
   isMemoryEditPatch,
   isMemoryListQuery,
-  isMemoryRetrievalMode,
   isPendingMemoryWriteDecision,
   type MemoryArchiveCandidatesResult,
   type MemoryArchiveConfirmResult,
   type MemoryDecayRunDto,
+  type MemoryDetail,
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
   type MemoryReconcileRunDto,
   type MemorySpaceKind,
   type MemoryStats,
+  type PendingEvolvesReviewDto,
   type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
 import {
@@ -29,9 +30,7 @@ import {
   isTreeQuery,
   type MemoryGraphDto,
 } from '@shared/memory/graphDto';
-import { CRYSTALLIZE_PROMPT, INSIGHT_PROMPT, withMemoryLanguage } from '@shared/memory/prompts';
 import { IPC_CHANNELS } from '@shared/types';
-import type Database from 'better-sqlite3';
 import { BotStore } from '../services/bots/botStore';
 import { BotChatStore } from '../services/bots/chatStore';
 import {
@@ -41,54 +40,18 @@ import {
   setChatModelProgressSink,
   startChatModelDownload,
 } from '../services/chatModels';
-import { appendMemoryAudit, editAuditEntry } from '../services/memory/audit';
-import { createCrystal } from '../services/memory/crystal';
-import { looseParse } from '../services/memory/distill';
-import {
-  archiveCandidatesConfirmed,
-  getForgettingState,
-  listArchiveCandidates,
-} from '../services/memory/forgetting';
-import {
-  buildMemoryGraph,
-  buildMemoryTree,
-  entityMemoryIds,
-  memoriesForEntity,
-  memoriesForPrompt,
-} from '../services/memory/graph';
-import { deleteMemoriesManually, planMemoryDeletion } from '../services/memory/manual';
-import { listPendingWrites, rejectPendingWrite } from '../services/memory/pending';
-import { createSearchAssist } from '../services/memory/searchLlm';
-import { getMemory } from '../services/memory/store';
-import {
-  archiveMemory,
-  clearFinishedMemoryJobs,
-  getMemoryDetail,
-  getMemoryStats,
-  listMemoriesForAdmin,
-  listPendingEvolves,
-  openExistingMemoryDb,
-  restoreMemory,
-  reviewEvolvesEdge,
-  searchMemoriesForAdmin,
-  toMemoryJobsSnapshot,
-  toMemoryListItem,
-} from '../services/memoryAdmin';
+import { editAuditEntry } from '../services/memory/audit';
 import {
   approvePendingMemoryWrite,
   distillSessionNow,
   editMemory,
-  forgettingSettings,
-  getMemoryCompletion,
   getMemoryDistillJobs,
-  getMemoryEmbedder,
   getMemoryEmbeddingError,
   getMemoryKgFailedCount,
-  getMemoryKgJobs,
-  getMemoryReembedProgress,
-  memoryDatabase,
-  memoryLanguage,
+  isMissingDb,
+  memoryServiceOp,
   refreshMemoryEmbedding,
+  releaseMemoryChatSlot,
   retryFailedMemoryKg,
   runMemoryForgettingNow,
   runMemoryReconcileNow,
@@ -124,38 +87,13 @@ function isTrustedWindow(webContentsId: number): boolean {
   return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
 }
 
-function memoryDbPath(): string {
-  return path.join(memoryDir(), 'memory.db');
-}
-
-function memoryDir(): string {
-  return path.join(app.getPath('userData'), 'memory');
-}
-
-function withExistingDb<T>(fallback: T, run: (db: Database.Database) => T): T {
-  const db = openExistingMemoryDb(memoryDbPath());
-  if (!db) return fallback;
+/** 服务侧库不存在（未建库）时按旧 withExistingDb 语义回落 fallback */
+async function existingOp<T>(op: string, fallback: T, args?: unknown): Promise<T> {
   try {
-    return run(db);
+    const result = await memoryServiceOp<T | { missing: true }>(op, args);
+    return isMissingDb(result) ? fallback : result;
   } catch {
     return fallback;
-  } finally {
-    db.close();
-  }
-}
-
-async function withExistingDbAsync<T>(
-  fallback: T,
-  run: (db: Database.Database) => Promise<T>
-): Promise<T> {
-  const db = openExistingMemoryDb(memoryDbPath());
-  if (!db) return fallback;
-  try {
-    return await run(db);
-  } catch {
-    return fallback;
-  } finally {
-    db.close();
   }
 }
 
@@ -186,15 +124,8 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_LIST, async (event, request: unknown) => {
     if (!isTrustedWindow(event.sender.id) || !isMemoryListQuery(request)) return EMPTY_LIST;
-    // 语义模式要拿 embedder，且 searchMemories 是异步的；库不存在时两条路径都返回空
-    const retrieval = isMemoryRetrievalMode(request.mode);
-    const embedder = retrieval ? await getMemoryEmbedder() : null;
-    const assist = request.mode === 'deep' ? createSearchAssist(await getMemoryCompletion()) : null;
-    const result = await withExistingDbAsync(EMPTY_LIST, (db) =>
-      retrieval
-        ? searchMemoriesForAdmin(db, request, embedder, assist)
-        : Promise.resolve(listMemoriesForAdmin(db, request))
-    );
+    // 检索与 embedding 全在记忆服务进程；库不存在时按旧语义返回空
+    const result = await existingOp<MemoryListResult>('list', EMPTY_LIST, request);
     const label = await spaceLabeler();
     return {
       ...result,
@@ -204,7 +135,7 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_DETAIL, async (event, id: unknown) => {
     if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) return null;
-    const detail = withExistingDb(null, (db) => getMemoryDetail(db, id));
+    const detail = await existingOp<MemoryDetail | null>('detail', null, { id });
     if (!detail) return null;
     const label = await spaceLabeler();
     return {
@@ -217,39 +148,40 @@ export function registerMemoryHandlers(): void {
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_ARCHIVE, (event, id: unknown): MemoryMutationResult => {
-    if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) return invalidRequest();
-    return withExistingDb<MemoryMutationResult>(
-      { ok: false, error: 'Memory database is not available.' },
-      (db) => {
-        if (!archiveMemory(db, id)) return { ok: false, error: 'Memory not found.' };
-        const memory = getMemoryDetail(db, id);
-        memoryChanged();
-        return memory ? { ok: true, memory } : { ok: false, error: 'Memory not found.' };
-      }
-    );
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_ARCHIVE,
+    async (event, id: unknown): Promise<MemoryMutationResult> => {
+      if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id)
+        return invalidRequest();
+      return existingOp<MemoryMutationResult>(
+        'archive',
+        { ok: false, error: 'Memory database is not available.' },
+        { id }
+      );
+    }
+  );
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_RESTORE, (event, id: unknown): MemoryMutationResult => {
-    if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) return invalidRequest();
-    return withExistingDb<MemoryMutationResult>(
-      { ok: false, error: 'Memory database is not available.' },
-      (db) => {
-        if (!restoreMemory(db, id)) return { ok: false, error: 'Memory not found.' };
-        const memory = getMemoryDetail(db, id);
-        memoryChanged();
-        return memory ? { ok: true, memory } : { ok: false, error: 'Memory not found.' };
-      }
-    );
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_RESTORE,
+    async (event, id: unknown): Promise<MemoryMutationResult> => {
+      if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id)
+        return invalidRequest();
+      return existingOp<MemoryMutationResult>(
+        'restore',
+        { ok: false, error: 'Memory database is not available.' },
+        { id }
+      );
+    }
+  );
 
   // 立即运行：走 memoryHost 的共享连接（与蒸馏 / 重嵌同一条写通道），跑完广播让列表刷新
-  ipcMain.handle(IPC_CHANNELS.MEMORY_FORGETTING_RUN, (event): MemoryDecayRunDto | null => {
-    if (!isTrustedWindow(event.sender.id)) return null;
-    const summary = runMemoryForgettingNow();
-    memoryChanged();
-    return summary;
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_FORGETTING_RUN,
+    async (event): Promise<MemoryDecayRunDto | null> => {
+      if (!isTrustedWindow(event.sender.id)) return null;
+      return runMemoryForgettingNow();
+    }
+  );
 
   // 立即复核：绕过 memoryReconcileEnabled，排进与蒸馏 / KG 同一条 LLM 串行链；没有可用模型返回 null
   ipcMain.handle(
@@ -269,17 +201,15 @@ export function registerMemoryHandlers(): void {
       // 与 list / delete-preview 同口径：入参不合法就返回空，不猜用户想要哪一页
       if (!isCandidateQuery(request)) return { items: [], total: 0 };
       const query = request ?? { limit: 50, offset: 0 };
-      const result = withExistingDb<ReturnType<typeof listArchiveCandidates>>(
+      const result = await existingOp<{ items: MemoryListResult['items']; total: number }>(
+        'archive-candidates',
         { items: [], total: 0 },
-        (db) => listArchiveCandidates(db, forgettingSettings(), query)
+        { query }
       );
       const label = await spaceLabeler();
       return {
         total: result.total,
-        items: result.items.map((memory) => {
-          const item = toMemoryListItem(memory);
-          return { ...item, spaceLabel: label(item.spaceId) };
-        }),
+        items: result.items.map((item) => ({ ...item, spaceLabel: label(item.spaceId) })),
       };
     }
   );
@@ -287,48 +217,36 @@ export function registerMemoryHandlers(): void {
   // 批量确认归档：只改 lifecycle_state（可还原），不删除；条件在 Main 侧重算，不信任回传的列表
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES_CONFIRM,
-    (event, ids: unknown): MemoryArchiveConfirmResult => {
+    async (event, ids: unknown): Promise<MemoryArchiveConfirmResult> => {
       if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return { archived: 0, skipped: 0 };
-      const result = withExistingDb<MemoryArchiveConfirmResult>(
+      // 审计与通知都在服务侧（审计文件也在 memory 目录）
+      return existingOp<MemoryArchiveConfirmResult>(
+        'archive-confirm',
         { archived: 0, skipped: 0 },
-        (db) => {
-          const outcome = archiveCandidatesConfirmed(db, forgettingSettings(), ids, {
-            audit: (entry) => appendMemoryAudit(memoryDir(), entry),
-          });
-          // 只回传用户要的两个数；命中的 id 列表留在 Main（审计用）
-          return { archived: outcome.archived, skipped: outcome.skipped };
-        }
+        { ids }
       );
-      if (result.archived > 0) memoryChanged();
-      return result;
     }
   );
 
   // 确认框先拿影响说明；真正删除时在事务里按同一规则重算，不信任渲染层回传的计划
-  ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_PREVIEW, (event, ids: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_PREVIEW, async (event, ids: unknown) => {
     if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return null;
-    return withExistingDb(null, (db) => planMemoryDeletion(db, ids));
+    return existingOp('delete-preview', null, { ids });
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE, (event, id: unknown): MemoryMutationResult => {
-    if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) return invalidRequest();
-    return withExistingDb<MemoryMutationResult>(
-      { ok: false, error: 'Memory database is not available.' },
-      (db) => {
-        const impact = deleteMemoriesManually(db, [id]);
-        if (!impact) return { ok: false, error: 'Memory not found.' };
-        appendMemoryAudit(memoryDir(), {
-          ts: new Date().toISOString(),
-          action: 'memory.delete',
-          actor: 'user',
-          requested: [id],
-          impact,
-        });
-        memoryChanged();
-        return { ok: true, impact };
-      }
-    );
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_DELETE,
+    async (event, id: unknown): Promise<MemoryMutationResult> => {
+      if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id)
+        return invalidRequest();
+      // 审计在服务侧写入（memory/audit.jsonl 归记忆服务管）
+      return existingOp<MemoryMutationResult>(
+        'delete',
+        { ok: false, error: 'Memory database is not available.' },
+        { id }
+      );
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_UPDATE,
@@ -340,7 +258,7 @@ export function registerMemoryHandlers(): void {
       try {
         const result = await editMemory(id, patch);
         if (!result) return { ok: false, error: 'Memory not found.' };
-        appendMemoryAudit(memoryDir(), editAuditEntry(result));
+        await memoryServiceOp('audit-append', { entry: editAuditEntry(result) });
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -352,15 +270,12 @@ export function registerMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEMORY_STATS, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return EMPTY_STATS;
     // 遗忘状态并进 stats：同一次开库算完，不再为它多开一条连接
-    const stats = withExistingDb(EMPTY_STATS, (db) => ({
-      ...getMemoryStats(db),
-      forgetting: getForgettingState(db, forgettingSettings()),
-    }));
+    const stats = await existingOp<MemoryStats>('stats', EMPTY_STATS);
     const label = await spaceLabeler();
     const kind = await spaceKinder();
     return {
       ...stats,
-      embeddingError: getMemoryEmbeddingError(),
+      embeddingError: await getMemoryEmbeddingError(),
       spaceLabels: Object.fromEntries(
         Object.keys(stats.bySpace).map((spaceId) => [spaceId, label(spaceId)])
       ),
@@ -370,43 +285,28 @@ export function registerMemoryHandlers(): void {
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_JOBS_CLEAR, (event) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_JOBS_CLEAR, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return 0;
-    return withExistingDb(0, (db) => {
-      const deleted = clearFinishedMemoryJobs(db);
-      if (deleted > 0) memoryChanged();
-      return deleted;
-    });
+    return existingOp<number>('jobs-clear', 0);
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED, (event, raw: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED, async (event, raw: unknown) => {
     if (!isTrustedWindow(event.sender.id) || raw !== undefined) return 0;
-    const reset = retryFailedMemoryKg();
-    if (reset > 0) memoryChanged();
-    return reset;
+    return retryFailedMemoryKg();
   });
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_JOBS, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return EMPTY_JOBS;
-    const snapshot = toMemoryJobsSnapshot(
-      getMemoryDistillJobs(),
-      getMemoryKgJobs(),
-      getMemoryReembedProgress()
-    );
+    const jobs = await memoryServiceOp<{
+      snapshot: MemoryJobsSnapshot;
+      memoryTitles: Record<string, string>;
+    }>('jobs');
+    const snapshot = jobs.snapshot;
     // 任务本身只存 id；界面要显示「哪个会话 / 哪条记忆」才有意义
     const titles = readConversationTitles();
     const label = await spaceLabeler();
     const projects = await projectNames();
-    // 没有 kg 任务就不必为查标题开库（保持「不需要就不碰库」）
-    const memoryTitles =
-      snapshot.kg.length === 0
-        ? new Map<string, string>()
-        : withExistingDb(new Map<string, string>(), (db) =>
-            memoryTitlesFor(
-              db,
-              snapshot.kg.map((job) => job.memoryId)
-            )
-          );
+    const memoryTitles = new Map(Object.entries(jobs.memoryTitles));
     return {
       ...snapshot,
       distill: snapshot.distill.map((job) => ({
@@ -424,13 +324,13 @@ export function registerMemoryHandlers(): void {
       reembed: snapshot.reembed
         ? { ...snapshot.reembed, target: label(snapshot.reembed.target) }
         : null,
-      kgFailed: getMemoryKgFailedCount(),
+      kgFailed: await getMemoryKgFailedCount(),
     };
   });
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_EVOLVES_PENDING, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return [];
-    const items = withExistingDb([], listPendingEvolves);
+    const items = await existingOp<PendingEvolvesReviewDto[]>('evolves-pending', []);
     if (items.length === 0) return [];
     // 空间名要项目注册表，服务层只知道 space id
     const label = await spaceLabeler();
@@ -443,7 +343,7 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_EVOLVES_REVIEW,
-    (event, id: unknown, state: unknown): MemoryMutationResult => {
+    async (event, id: unknown, state: unknown): Promise<MemoryMutationResult> => {
       if (
         !isTrustedWindow(event.sender.id) ||
         typeof id !== 'string' ||
@@ -452,12 +352,10 @@ export function registerMemoryHandlers(): void {
       ) {
         return invalidRequest();
       }
-      return withExistingDb<MemoryMutationResult>(
+      return existingOp<MemoryMutationResult>(
+        'evolves-review',
         { ok: false, error: 'Memory database is not available.' },
-        (db) => {
-          const edge = reviewEvolvesEdge(db, id, state);
-          return edge ? { ok: true, edge } : { ok: false, error: 'Evolves edge not found.' };
-        }
+        { id, state }
       );
     }
   );
@@ -466,7 +364,9 @@ export function registerMemoryHandlers(): void {
     IPC_CHANNELS.MEMORY_PENDING_WRITES,
     async (event): Promise<PendingMemoryWriteDto[]> => {
       if (!isTrustedWindow(event.sender.id)) return [];
-      const rows = withExistingDb([], listPendingWrites);
+      const rows = await existingOp<
+        (PendingMemoryWriteDto & { payload?: Record<string, unknown> })[]
+      >('pending-writes', []);
       if (rows.length === 0) return [];
       const label = await spaceLabeler();
       return rows.map(({ payload: _payload, ...row }) => ({
@@ -489,15 +389,10 @@ export function registerMemoryHandlers(): void {
         return invalidRequest();
       }
       if (decision === 'approve') return approvePendingMemoryWrite(id);
-      return withExistingDb<MemoryMutationResult>(
+      return existingOp<MemoryMutationResult>(
+        'pending-write-reject',
         { ok: false, error: 'Memory database is not available.' },
-        (db) => {
-          if (!rejectPendingWrite(db, id)) {
-            return { ok: false, error: 'Pending memory write not found.' };
-          }
-          memoryChanged();
-          return { ok: true };
-        }
+        { id }
       );
     }
   );
@@ -545,8 +440,10 @@ export function registerMemoryHandlers(): void {
     return cancelChatModelDownload(modelId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_CHAT_MODEL_DELETE, (event, modelId: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_CHAT_MODEL_DELETE, async (event, modelId: unknown) => {
     if (!isTrustedWindow(event.sender.id) || typeof modelId !== 'string' || !modelId) return false;
+    // 服务侧可能正持有该模型（蒸馏补全槽），先 RPC 释放再删文件；Windows 上 mmap 会拦 rm
+    await releaseMemoryChatSlot().catch(() => false);
     return deleteChatModel(modelId);
   });
 
@@ -560,7 +457,7 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_GRAPH, async (event, request: unknown) => {
     if (!isTrustedWindow(event.sender.id) || !isGraphQuery(request)) return EMPTY_GRAPH;
-    const graph = withExistingDb(EMPTY_GRAPH, (db) => buildMemoryGraph(db, request));
+    const graph = await existingOp<MemoryGraphDto>('graph', EMPTY_GRAPH, request);
     const label = await spaceLabeler();
     return {
       ...graph,
@@ -570,12 +467,12 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_GRAPH_ENTITY, (event, entityId: unknown) => {
     if (!isTrustedWindow(event.sender.id) || typeof entityId !== 'string' || !entityId) return [];
-    return withExistingDb([], (db) => memoriesForEntity(db, entityId));
+    return existingOp('graph-entity', [], { entityId });
   });
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_TREE, (event, request: unknown) => {
     if (!isTrustedWindow(event.sender.id) || !isTreeQuery(request)) return [];
-    return withExistingDb([], (db) => buildMemoryTree(db, request));
+    return existingOp('tree', [], request);
   });
 
   // 解读：模型只读不写，失败原样回报（静默失败会让用户以为按钮坏了）
@@ -585,20 +482,8 @@ export function registerMemoryHandlers(): void {
       if (!isTrustedWindow(event.sender.id) || !isInsightRequest(request)) {
         return { ok: false, error: 'Invalid request.' };
       }
-      const complete = await getMemoryCompletion();
-      if (!complete) return { ok: false, error: 'No model available for interpretation.' };
-      const db = memoryDatabase();
-      const ids = request.entityId
-        ? entityMemoryIds(db, request.entityId)
-        : (request.memoryIds ?? []);
-      const { text, count } = memoriesForPrompt(db, ids);
-      if (count === 0) return { ok: false, error: 'Nothing to interpret yet.' };
-      try {
-        const output = await complete(withMemoryLanguage(INSIGHT_PROMPT, memoryLanguage()), text);
-        return { ok: true, text: output.trim(), sourceCount: count };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
+      // 补全与库都在服务侧：解读整条搬到服务，Main 只校验转发
+      return memoryServiceOp<InsightResult>('insight', request);
     }
   );
 
@@ -612,65 +497,7 @@ export function registerMemoryHandlers(): void {
       if (request.memoryIds.length < CRYSTAL_MIN_SOURCES) {
         return { ok: false, error: `Pick at least ${CRYSTAL_MIN_SOURCES} memories.` };
       }
-      const complete = await getMemoryCompletion();
-      if (!complete) return { ok: false, error: 'No model available for synthesis.' };
-      const db = memoryDatabase();
-      const { text, count } = memoriesForPrompt(db, request.memoryIds);
-      if (count < CRYSTAL_MIN_SOURCES) {
-        return { ok: false, error: 'Some of those memories no longer exist.' };
-      }
-      let synthesis: { title: string; content: string; worthwhile: boolean };
-      try {
-        const raw = await complete(withMemoryLanguage(CRYSTALLIZE_PROMPT, memoryLanguage()), text);
-        const parsed = looseParse(raw) as Record<string, unknown> | null;
-        const title = typeof parsed?.title === 'string' ? parsed.title.trim() : '';
-        const content = typeof parsed?.content === 'string' ? parsed.content.trim() : '';
-        if (!content) return { ok: false, error: 'Model did not return a usable synthesis.' };
-        synthesis = { title, content, worthwhile: parsed?.worthwhile !== false };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
-      if (!synthesis.worthwhile) {
-        return {
-          ok: false,
-          error: 'These memories do not add up to something new — nothing was written.',
-        };
-      }
-      const first = getMemory(db, request.memoryIds[0]);
-      if (!first) return { ok: false, error: 'Source memory not found.' };
-      try {
-        const result = await createCrystal(
-          db,
-          {
-            content: synthesis.content,
-            title: request.title?.trim() || synthesis.title || synthesis.content.slice(0, 60),
-            sourceIds: request.memoryIds,
-            spaceId: first.spaceId,
-          },
-          { embedder: await getMemoryEmbedder() }
-        );
-        if (result.status !== 'inserted') {
-          return {
-            ok: false,
-            title: synthesis.title,
-            content: synthesis.content,
-            candidates: result.candidates.map((c) => ({
-              id: c.memory.id,
-              title: c.memory.title,
-              similarity: Number(c.similarity.toFixed(4)),
-            })),
-            error: 'A similar memory already exists.',
-          };
-        }
-        return {
-          ok: true,
-          memoryId: result.memory.id,
-          title: result.memory.title,
-          content: result.memory.content,
-        };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
+      return memoryServiceOp<CrystallizeResult>('crystallize', request);
     }
   );
 
@@ -701,18 +528,6 @@ export function registerMemoryHandlers(): void {
 
 interface DistillableRecord extends DistillableSessionDto {
   sessionFile: string;
-}
-
-/** kg 任务只存 memoryId，列表里要显示标题 */
-function memoryTitlesFor(db: Database.Database, ids: readonly string[]): Map<string, string> {
-  const out = new Map<string, string>();
-  if (ids.length === 0) return out;
-  const unique = [...new Set(ids)];
-  const rows = db
-    .prepare(`SELECT id, title FROM memories WHERE id IN (${unique.map(() => '?').join(',')})`)
-    .all(...unique) as { id: string; title: string }[];
-  for (const row of rows) out.set(row.id, row.title);
-  return out;
 }
 
 async function projectNames(): Promise<Map<string, string>> {
@@ -865,7 +680,7 @@ async function listDistillableSessionRecords(): Promise<DistillableRecord[]> {
   const snapshot = registry.projection();
   const projects = new Map(snapshot.projects.map((p) => [p.projectId, p]));
   const distilled = new Set(
-    getMemoryDistillJobs(200).flatMap((job) =>
+    (await getMemoryDistillJobs(200)).flatMap((job) =>
       job.payload.sessions?.length
         ? job.payload.sessions.map((s) => s.sessionId)
         : [job.payload.sessionId]

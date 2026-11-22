@@ -158,7 +158,8 @@
     "patchedDependencies": {
       "@earendil-works/pi-ai@1.5.1": "patches/@earendil-works__pi-ai@1.5.1.patch",
       "@rahularya01/pi-cursor@1.4.39": "patches/@rahularya01__pi-cursor@1.4.39.patch",
-      "@earendil-works/pi-coding-agent@1.5.1": "patches/@earendil-works__pi-coding-agent@1.5.1.patch"
+      "@earendil-works/pi-coding-agent@1.5.1": "patches/@earendil-works__pi-coding-agent@1.5.1.patch",
+      "electron-vite@5.0.0": "patches/electron-vite@5.0.0.patch"
     }
   },
   "optionalDependencies": {

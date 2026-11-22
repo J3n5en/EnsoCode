@@ -21,6 +21,7 @@ import type {
 export const hostKind = 'server' as const;
 /** 服务器构建把 agent worker 与入口并排输出 */
 export const agentWorkerPath = path.join(import.meta.dirname, 'agent.js');
+export const memoryWorkerPath = path.join(import.meta.dirname, 'memory-service.js');
 export const pluginHostPath = path.join(import.meta.dirname, 'plugin-host.js');
 const appRoot = path.resolve(
   process.env.ENSO_APP_ROOT?.trim() || path.join(import.meta.dirname, '../..')

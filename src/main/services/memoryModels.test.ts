@@ -6,8 +6,16 @@ import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const env = vi.hoisted(() => ({ userData: '' }));
+vi.mock('./appPaths', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./appPaths')>();
+  return {
+    ...actual,
+    userDataPath: () => env.userData,
+    inferUserDataFromMemoryRoot: actual.inferUserDataFromMemoryRoot,
+  };
+});
 vi.mock('electron', () => ({ app: { getPath: () => env.userData } }));
-vi.mock('./llama/chat', () => ({ releaseLocalChatSlot: vi.fn(async () => {}) }));
+vi.mock('./memoryHost', () => ({ releaseMemoryChatSlot: vi.fn(async () => true) }));
 vi.mock('./llama/chatModels', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./llama/chatModels')>();
   return {
