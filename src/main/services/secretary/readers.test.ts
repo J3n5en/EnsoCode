@@ -592,6 +592,17 @@ describe('session_tasks', () => {
     expect((result.tasks as Record<string, unknown>[])[0]?.alive).toBeNull();
   });
 
+  it('子代理起的任务标出所属子会话，会话自己的不标', async () => {
+    const result = await run(
+      handlers([task({ taskId: 'sub', ownerSessionId: 's1::cw-a' }), task({ taskId: 'own' })])
+        .session_tasks,
+      { conversationId: 's1' }
+    );
+    const rows = result.tasks as Record<string, unknown>[];
+    expect(rows[0]).toMatchObject({ taskId: 'sub', startedBySubagent: 's1::cw-a' });
+    expect(rows[1]).not.toHaveProperty('startedBySubagent');
+  });
+
   it('退出码区分正常退出与被杀，超期未结束标 stalled', async () => {
     const result = await run(
       handlers([

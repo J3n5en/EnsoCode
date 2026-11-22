@@ -423,6 +423,8 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           // 常驻服务不会自己结束；遗留只按进程与时长判定，不看会话是否收口
           ...(task.status === 'running' && taskIsPersistent(task, now) ? { persistent: true } : {}),
           ...(leftover ? { leftover } : {}),
+          // 子代理起的任务归子代理：标出所属子会话，不当成会话自己起的
+          ...(task.ownerSessionId ? { startedBySubagent: task.ownerSessionId } : {}),
         };
       });
       return {

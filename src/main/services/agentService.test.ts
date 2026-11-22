@@ -1459,6 +1459,67 @@ describe('AgentService 中断的 task 停放与续跑', () => {
   });
 });
 
+describe('AgentService 子代理起的后台任务', () => {
+  it('结果里列出子代理起的后台任务，并说明归子代理、完成时不会通知父会话', async () => {
+    const notify = vi.fn();
+    const childTasks = vi.fn((sessionId: string) =>
+      sessionId === 'chat-1::agent-aaaaaaaa-aaaa-4aaa-8aaa-000000000001'
+        ? [
+            {
+              taskId: 'task-1-a',
+              command: 'pnpm dev\n--port 5173',
+              status: 'running' as const,
+              startedAt: 5,
+            },
+            {
+              taskId: 'task-2-b',
+              command: 'pnpm test',
+              status: 'done' as const,
+              exitCode: 0,
+              startedAt: 6,
+            },
+            {
+              taskId: 'task-0-old',
+              command: 'old',
+              status: 'done' as const,
+              exitCode: 0,
+              startedAt: 0,
+            },
+          ]
+        : []
+    );
+    const { service, children } = setup({ notify, childTasks });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+    });
+    const text = notify.mock.calls[0][1] as string;
+    expect(text).toContain('task-1-a (running): pnpm dev --port 5173');
+    expect(text).toContain('task-2-b (done, exit 0): pnpm test');
+    expect(text).not.toContain('task-0-old');
+    expect(text).toContain('belong to the subagent');
+    expect(text).toContain('will not notify you');
+  });
+
+  it('子代理没起后台任务时结果不加这一段', async () => {
+    const notify = vi.fn();
+    const { service, children } = setup({ notify, childTasks: () => [] });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+    });
+    expect(notify.mock.calls[0][1]).not.toContain('Background tasks');
+  });
+});
+
 describe('AgentService 用户在子代理 tab 里停止', () => {
   const listStatus = async (service: AgentService) => {
     const listed = await service.list({ context, requestId: 'list', limit: 20 });
