@@ -2,6 +2,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, type ReactNode, useEffect, useMemo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IMAGE_INLINE_MAX_CHARS } from './FileImageViewer';
 import { FilesView } from './FilesView';
 
 const harness = vi.hoisted(() => ({
@@ -9,6 +10,7 @@ const harness = vi.hoisted(() => ({
   pending: null as [string, undefined, 'markdown'] | null,
   editors: [] as { focus: ReturnType<typeof vi.fn> }[],
   read: vi.fn(),
+  readImage: vi.fn(),
   t: (key: string) => key,
   state: {
     workspaceRevisionByConversation: {},
@@ -140,6 +142,7 @@ beforeEach(() => {
     electronAPI: {
       workspaceFiles: {
         read: harness.read,
+        readImage: harness.readImage,
         listDir: vi.fn(async () => ({ ok: true, entries: [] })),
         watchStart: vi.fn(async () => ({ ok: true })),
         watchStop: vi.fn(async () => ({ ok: true })),
@@ -151,6 +154,7 @@ beforeEach(() => {
   harness.pending = null;
   harness.editors = [];
   harness.read.mockReset().mockResolvedValue({ ok: true, content: '# README\ncontent' });
+  harness.readImage.mockReset().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
   container = dom.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
 });
@@ -203,5 +207,84 @@ describe('FilesView 文件链接预览', () => {
       projectId: 'project',
       rel: 'README.md',
     });
+  });
+});
+
+const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgo=';
+
+async function openRel(rel: string) {
+  await act(async () => harness.opener?.(rel));
+}
+function buttonByText(text: string) {
+  return [...container.querySelectorAll('button')].find((node) => node.textContent === text);
+}
+
+describe('FilesView 图片预览', () => {
+  it('图片扩展名（含大写）走图片查看器，不按文本读入编辑器', async () => {
+    await mount();
+    await openRel('assets/logo.PNG');
+    const img = container.querySelector('img');
+    expect(img?.getAttribute('src')).toBe(PNG_DATA_URL);
+    expect(container.querySelector('[data-viewer="source"]')).toBeNull();
+    expect(harness.read).not.toHaveBeenCalled();
+    expect(harness.readImage).toHaveBeenCalledWith({
+      conversationId: 'owner',
+      projectId: 'project',
+      rel: 'assets/logo.PNG',
+    });
+  });
+
+  it('非图片扩展名仍走代码编辑器', async () => {
+    harness.read.mockResolvedValue({ ok: true, content: 'export const a = 1;' });
+    await mount();
+    await openRel('src/main.ts');
+    expect(container.querySelector('[data-viewer="source"]')?.textContent).toBe(
+      'export const a = 1;'
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(harness.readImage).not.toHaveBeenCalled();
+  });
+
+  it('适应窗口与原始尺寸可切换', async () => {
+    await mount();
+    await openRel('a.webp');
+    expect(container.querySelector('img')?.getAttribute('data-fit')).toBe('contain');
+    await toggle('Actual size');
+    expect(container.querySelector('img')?.getAttribute('data-fit')).toBe('actual');
+    await toggle('Fit to window');
+    expect(container.querySelector('img')?.getAttribute('data-fit')).toBe('contain');
+  });
+
+  it.each([
+    [
+      '读图返回失败',
+      () => harness.readImage.mockResolvedValue({ ok: false, error: 'unsupported' }),
+    ],
+    ['读图抛错', () => harness.readImage.mockRejectedValue(new Error('boom'))],
+  ])('%s 时显示兜底文案，可改用代码编辑器打开', async (_name, arrange) => {
+    arrange();
+    harness.read.mockResolvedValue({
+      ok: true,
+      content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    });
+    await mount();
+    await openRel('icons/broken.svg');
+    expect(container.textContent).toContain('Unable to preview this image.');
+    expect(container.querySelector('img')).toBeNull();
+    await act(async () => (buttonByText('Open in code editor') as HTMLButtonElement).click());
+    expect(container.querySelector('[data-viewer="source"]')?.textContent).toContain('<svg');
+    expect(container.textContent).not.toContain('Unable to preview this image.');
+  });
+
+  it('超大图不直接渲染，点击后才加载', async () => {
+    const huge = `data:image/png;base64,${'A'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
+    harness.readImage.mockResolvedValue({ ok: true, dataUrl: huge });
+    await mount();
+    await openRel('big.jpg');
+    expect(container.querySelector('img')).toBeNull();
+    const load = buttonByText('Image is too large. Click to load.');
+    expect(load).toBeDefined();
+    await act(async () => (load as HTMLButtonElement).click());
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
   });
 });
