@@ -79,6 +79,7 @@ import {
 import {
   closeMemoryDb,
   memoryServiceActive,
+  scheduleMemoryServiceWarmup,
   shutdownMemoryService,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
@@ -387,6 +388,7 @@ if (!gotTheLock) {
     syncMemoryKgFromSettings(persistedState);
     syncMemoryReconcileFromSettings(persistedState);
     syncMemoryForgettingFromSettings(persistedState);
+    scheduleMemoryServiceWarmup();
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
     ensureTray();

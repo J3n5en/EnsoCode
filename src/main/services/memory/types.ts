@@ -203,6 +203,12 @@ export interface SearchOptions {
    * 需要严格稳定排序的调用方传 false。无向量时 MMR 恒等，不影响排序。
    */
   mmr?: boolean;
+  /**
+   * 查询向量的等待上限。模型冷加载 / 闲置卸载后重载 / 排在重嵌后面时，不让整次检索陪着等：
+   * 超时即本次不走向量通道（embed 继续在后台跑完，顺带把模型热起来），并调 onVectorSkipped。
+   */
+  vectorBudgetMs?: number;
+  onVectorSkipped?: () => void;
 }
 
 export class MemoryValidationError extends Error {
