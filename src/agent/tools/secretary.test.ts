@@ -155,6 +155,28 @@ describe('secretary tools', () => {
       message: '按图改',
       attachments: ['/tmp/a.png', '/tmp/b.png'],
     });
+    // 空白条目没有语义，schema 校验前丢掉；丢完为空等同没传
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments: ['/tmp/a.png', ' ', '', '/tmp/b.png'],
+      })
+    ).toEqual({
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: ['/tmp/a.png', '/tmp/b.png'],
+    });
+    expect(
+      normalizeSecretaryParams('session_create', { projectId: 'p1', prompt: 'x', images: [''] })
+    ).not.toHaveProperty('attachments');
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: 'hi',
+        attachments: [123, ''],
+      })
+    ).toEqual({ conversationId: 'c1', message: 'hi', attachments: [123] });
     expect(
       normalizeSecretaryParams('session_send', {
         conversation_id: 'c1',
