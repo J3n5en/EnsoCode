@@ -20,7 +20,7 @@ description: >
 pnpm test:formal
 ```
 
-`pnpm test:formal`（`ENSO_FORMAL_FULL=1`）跑完整界限，约 3 万个状态，空载约 20 秒。`pnpm test` 日常跑小界限，约 1200 个状态，1 秒内。只跑本模型：
+`pnpm test:formal`（`ENSO_FORMAL_FULL=1`）跑完整界限，约 3 万个状态，空载约 20 秒。`pnpm test` 日常跑小界限，约 1400 个状态，本机 8 至 15 秒。只跑本模型：
 
 ```bash
 ENSO_FORMAL_FULL=1 npx vitest run src/agent/turnPhase.formal.test.ts
@@ -97,8 +97,8 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 
 ## 已知发现
 
-三条测试断言反例存在。修复后对应测试会变红，届时把触发条件并入 `core` 配置并删掉那条测试。
+三条测试断言对应配置恰好只有这一类反例。修复后或混进新类别时对应测试会变红，修复的话把触发条件并入 `core` 配置并删掉那条测试。
 
 1. 排队进活轮的 prompt 遇上中断，既不送达也没有回执。p1 在跑时到达的 p2 经 `promptFresh` 以 followUp 排进 pi；用户中断后 agent loop 不取排队消息，`abort()` 也不清队列，supervisor 不调 `clearQueue()`。p2 留在 pi 队列里，直到下一次 prompt 才夹在它后面送达。触发需要"随时发送"的来源。
 2. 取消重试后，pi 带着排队 prompt 在同一轮续跑。p2 排进活轮后 p1 遇 503 进入重试倒计时，用户取消重试或新 prompt 经 `interruptRetryIfAny` 打断重试。`auto_retry_end(false)` 让 supervisor `failTurn`，而 `_handlePostAgentRun` 见到排队消息继续 `agent.continue()`。用户看到失败、输入解锁，agent 随后又自己跑起来，该轮最后再收到一个 `turn-completed`。
-3. 中断后 5 秒内再发消息，原轮的终态丢了 `aborted`。中断把投影置 idle 并记 `turnAborted`；工具 5 秒内没停下时，p2 的僵尸等待超时，`failTurn(undelivered)` 清掉了 `turnAborted` 和 `abortedTurnId`。原轮随后经 `agent_settled` 收口成不带 `aborted` 的 `turn-completed`，headless 与其他窗口据此泵队列、续跑 goal。
+3. 中断后 5 秒内再发消息，原轮的终态丢了 `aborted`。中断把投影置 idle 并记 `turnAborted`；工具 5 秒内没停下时，p2 的僵尸等待超时，`failTurn(undelivered)` 清掉了 `turnAborted` 和 `abortedTurnId`。原轮随后经 `agent_settled` 收口成不带 `aborted` 的 `turn-completed`，headless 与其他窗口据此泵队列、续跑 goal。注意这条 `turn-failed(undelivered)` 用的是 `abortedTurnId` 并带 `aborted`，原轮 id 其实先收到了一个终态，之后的 `turn-completed` 用的是随机 id，是多出来的终态。`observeWorker` 不把未送达回执算作终态，所以反例只报了丢 `aborted`；修复时两处都要核对，不要只保住 `turnAborted`。

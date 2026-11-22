@@ -933,6 +933,14 @@ function report(result: Result): string {
   return [...result.counterexamples.values()].join('\n\n');
 }
 
+/** 已知发现只允许恰好这一类反例：修好了会变红，混进新类别也会变红 */
+function expectOnlyKnown(result: Result, kind: string): void {
+  expect(
+    [...result.counterexamples.keys()],
+    `已知发现的反例集合变了。修好了就把触发条件并入 core 并删掉本测试；多出新类别先按 SKILL 判断真 bug 还是模型错。\n${report(result)}`
+  ).toEqual([kind]);
+}
+
 const FULL = process.env.ENSO_FORMAL_FULL === '1';
 const none: Budget = { errors: 0, overflows: 0, memCompactions: 0, beforeSettle: 0 };
 
@@ -1021,7 +1029,7 @@ describe('worker 轮次相位（有界穷举，驱动真实 SessionSupervisor）
       sendWhileRunning: true,
       zombie: false,
     });
-    expect(report(result)).toContain('=> p2 没进 pi，未送达回执 0 次');
+    expectOnlyKnown(result, '# 没进 pi，未送达回执 # 次');
   }, 60_000);
 
   it('已知发现：取消重试后 pi 带着排队 prompt 续跑，已发出的 turn-failed 之后同一轮又开跑', async () => {
@@ -1033,7 +1041,7 @@ describe('worker 轮次相位（有界穷举，驱动真实 SessionSupervisor）
       sendWhileRunning: true,
       zombie: false,
     });
-    expect(report(result)).toContain('=> 终态 turn-failed 之后 pi 仍为第 1 轮发出 agent_start');
+    expectOnlyKnown(result, '终态 turn-failed 之后 pi 仍为第 # 轮发出 agent_start');
   }, 60_000);
 
   it('已知发现：中断后僵尸时限内发的 prompt 失败，清掉了中断标记，原轮收口成不带 aborted 的 turn-completed', async () => {
@@ -1045,6 +1053,6 @@ describe('worker 轮次相位（有界穷举，驱动真实 SessionSupervisor）
       sendWhileRunning: false,
       zombie: true,
     });
-    expect(report(result)).toContain('=> 第 1 轮被中断，终态却是 turn-completed');
+    expectOnlyKnown(result, '第 # 轮被中断，终态却是 turn-completed');
   }, 60_000);
 });
