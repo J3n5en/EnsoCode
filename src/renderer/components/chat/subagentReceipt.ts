@@ -92,8 +92,8 @@ export function parseSubagentReceipt(
   }
   const waited = op === 'wait' ? json : op === undefined ? json.report : null;
   if (!isRecord(waited) || !Array.isArray(waited.runs)) {
-    // 不带 wait 的 spawn 回执：状态是创建那一刻的，不单列，原文收进运行信息
-    return op === undefined &&
+    // 不带 wait 的 spawn / resume 回执：状态是创建那一刻的，不单列，原文收进运行信息
+    return (op === undefined || op === 'resume') &&
       json.report === undefined &&
       typeof json.agentId === 'string' &&
       typeof json.runId === 'string'

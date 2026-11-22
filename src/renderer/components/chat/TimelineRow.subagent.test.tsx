@@ -44,6 +44,12 @@ describe('子代理操作行头', () => {
     expect(row({ subagentOp: 'list' })).toContain('>[List agents]</span>');
   });
 
+  it('resume 显示动作与标题，不把参数 JSON 当行头', () => {
+    const html = row({ summary: '顺序执行 6 步', subagentOp: 'resume' });
+    expect(html).toContain('[Resume agent] · 顺序执行 6 步');
+    expect(html).not.toContain('operation');
+  });
+
   it('出错时照旧显示错误首行', () => {
     const html = row({
       summary: 'reviewer',

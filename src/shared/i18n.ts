@@ -2430,6 +2430,7 @@ export const zhTranslations: Record<string, string> = {
   Wait: '等待',
   'Dismiss agent': '解雇',
   'List agents': '列出全部',
+  'Resume agent': '续跑',
   'awaiting input': '等待输入',
   validating: '校验中',
   interrupted: '已中断',
