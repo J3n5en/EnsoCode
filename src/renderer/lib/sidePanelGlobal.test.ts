@@ -1,0 +1,256 @@
+import type { DockviewApi } from 'dockview-react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const harness = vi.hoisted(() => ({
+  state: {
+    globalTabs: [] as string[],
+    globalScopeOverrides: {} as Record<string, 'global' | 'session'>,
+    uiByConversation: {} as Record<string, { open?: boolean; width: number }>,
+    liveGlobalTabs: [] as string[],
+    dropped: [] as { panelId: string; keep: string[] }[],
+  },
+}));
+
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: {
+    getState: () => ({
+      activeId: 'a',
+      conversations: { a: { projectId: 'p1' }, b: { projectId: 'p2' }, c: { projectId: 'p1' } },
+    }),
+  },
+}));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: { getState: () => ({ disabledBuiltinTools: [], projects: [] }) },
+}));
+vi.mock('@/stores/sidePanel', () => ({
+  useSidePanelStore: {
+    getState: () => ({
+      ...harness.state,
+      setGlobalTabs: (tabs: string[]) => {
+        harness.state.globalTabs = tabs;
+      },
+      setGlobalScopeOverride: (id: string, scope: 'global' | 'session' | undefined) => {
+        const { [id]: _old, ...rest } = harness.state.globalScopeOverrides;
+        harness.state.globalScopeOverrides = scope ? { ...rest, [id]: scope } : rest;
+      },
+      dropPanelFromLayouts: (panelId: string, keep: ReadonlySet<string>) => {
+        harness.state.dropped.push({ panelId, keep: [...keep].sort() });
+      },
+      ensureOpen: vi.fn(),
+      forgetConversation: vi.fn(),
+    }),
+    setState: vi.fn(),
+    subscribe: () => () => {},
+  },
+}));
+vi.mock('@/lib/terminalRegistry', () => ({ releaseTerminal: vi.fn() }));
+
+import { setPluginViews } from '../plugins/viewBridge';
+import {
+  bindSidePanelDock,
+  closeGlobalTab,
+  disposeConversationResources,
+  openGlobalTab,
+  setPluginPanelScope,
+  syncDockGlobalTabs,
+  unbindSidePanelDock,
+  watchGlobalTabs,
+} from './sidePanelDock';
+
+const RADIO = 'plugin:radio:player';
+const NOTES = 'plugin:notes:board';
+
+interface FakePanel {
+  id: string;
+  inactive?: boolean;
+  api: { close: () => void };
+  focus: () => void;
+}
+
+function fakeDock() {
+  const panels: FakePanel[] = [];
+  const listeners = new Set<(panel: { id: string }) => void>();
+  const addListeners = new Set<(panel: { id: string }) => void>();
+  let active: string | undefined;
+  const remove = (id: string) => {
+    const index = panels.findIndex((panel) => panel.id === id);
+    if (index < 0) return;
+    const [panel] = panels.splice(index, 1);
+    for (const listener of [...listeners]) listener(panel);
+  };
+  const make = (id: string, inactive?: boolean): FakePanel => ({
+    id,
+    inactive,
+    api: { close: () => remove(id) },
+    focus: () => {
+      active = id;
+    },
+  });
+  const api = {
+    panels,
+    groups: [{ id: 'g1' }],
+    get activePanel() {
+      return active ? { id: active } : undefined;
+    },
+    getPanel: (id: string) => panels.find((panel) => panel.id === id),
+    addPanel: (opts: { id: string; inactive?: boolean }) => {
+      const panel = make(opts.id, opts.inactive);
+      panels.push(panel);
+      if (!opts.inactive) active = opts.id;
+      for (const listener of [...addListeners]) listener(panel);
+    },
+    onDidRemovePanel: (listener: (panel: { id: string }) => void) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    onDidAddPanel: (listener: (panel: { id: string }) => void) => {
+      addListeners.add(listener);
+      return { dispose: () => addListeners.delete(listener) };
+    },
+  };
+  return {
+    api: api as unknown as DockviewApi,
+    ids: () => panels.map((panel) => panel.id),
+    add: (id: string) => panels.push(make(id)),
+    userAdd: (id: string) => api.addPanel({ id }),
+    userClose: (id: string) => remove(id),
+    panel: (id: string) => panels.find((panel) => panel.id === id),
+    active: () => active,
+  };
+}
+
+function mount(id: string) {
+  const dock = fakeDock();
+  bindSidePanelDock(id, dock.api);
+  watchGlobalTabs(id, dock.api);
+  return dock;
+}
+
+describe('全局标签跨 dock 同步', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', {});
+    for (const id of ['a', 'b', 'c']) disposeConversationResources(id);
+    harness.state.globalTabs = [];
+    harness.state.globalScopeOverrides = {};
+    harness.state.uiByConversation = {};
+    harness.state.dropped = [];
+    setPluginViews([
+      {
+        pluginId: 'radio',
+        pluginName: 'Radio',
+        id: 'player',
+        title: 'Radio',
+        entry: 'p.html',
+        scope: 'global',
+      },
+      { pluginId: 'notes', pluginName: 'Notes', id: 'board', title: 'Notes', entry: 'n.html' },
+    ]);
+  });
+
+  it('在一个会话打开：进 globalTabs，所有已挂载 dock 补上，只有发起的会话选中', () => {
+    const a = mount('a');
+    const b = mount('b');
+    b.add('secretary');
+    openGlobalTab(RADIO, 'a');
+    expect(harness.state.globalTabs).toEqual([RADIO]);
+    expect(a.ids()).toEqual([RADIO]);
+    expect(a.active()).toBe(RADIO);
+    expect(b.ids()).toEqual(['secretary', RADIO]);
+    expect(b.panel(RADIO)?.inactive).toBe(true);
+  });
+
+  it('补进空 dock 时正常激活，免得后加的面板另开分屏', () => {
+    mount('a');
+    const b = mount('b');
+    openGlobalTab(RADIO, 'a');
+    expect(b.panel(RADIO)?.inactive).toBe(false);
+  });
+
+  it('从新建菜单等任意入口在 dock 里加了全局页面，也算打开全局标签', () => {
+    const a = mount('a');
+    const b = mount('b');
+    b.add('files');
+    a.userAdd(RADIO);
+    expect(harness.state.globalTabs).toEqual([RADIO]);
+    expect(b.ids()).toEqual(['files', RADIO]);
+    expect(b.panel(RADIO)?.inactive).toBe(true);
+    a.userAdd(NOTES);
+    expect(harness.state.globalTabs).toEqual([RADIO]);
+    expect(b.ids()).toEqual(['files', RADIO]);
+  });
+
+  it('用户在任一会话关掉：所有 dock 一起关，只触发一次全局关闭，未挂载布局也摘掉', () => {
+    const a = mount('a');
+    const b = mount('b');
+    openGlobalTab(RADIO, 'a');
+    b.userClose(RADIO);
+    expect(harness.state.globalTabs).toEqual([]);
+    expect(a.ids()).toEqual([]);
+    expect(harness.state.dropped).toEqual([{ panelId: RADIO, keep: ['a', 'b'] }]);
+  });
+
+  it('同步中的移除不回头触发全局关闭（来回触发防护）', () => {
+    mount('a');
+    mount('b');
+    openGlobalTab(RADIO, 'a');
+    closeGlobalTab(RADIO);
+    expect(harness.state.dropped).toHaveLength(1);
+  });
+
+  it('会话面板（不在 globalTabs）关掉不影响别的会话', () => {
+    const a = mount('a');
+    const b = mount('b');
+    a.add(NOTES);
+    b.add(NOTES);
+    a.userClose(NOTES);
+    expect(b.ids()).toEqual([NOTES]);
+    expect(harness.state.dropped).toEqual([]);
+  });
+
+  it('挂载时补齐缺的、删掉多余的；侧栏开着的旧布局收进 globalTabs', () => {
+    harness.state.globalTabs = [RADIO];
+    const b = mount('b');
+    syncDockGlobalTabs('b', b.api, true);
+    expect(b.ids()).toEqual([RADIO]);
+
+    harness.state.globalTabs = [];
+    const c = mount('c');
+    c.add(RADIO);
+    syncDockGlobalTabs('c', c.api, true);
+    expect(c.ids()).toEqual([]);
+
+    harness.state.uiByConversation = { a: { open: true, width: 400 } };
+    const a = mount('a');
+    a.add(RADIO);
+    syncDockGlobalTabs('a', a.api, true);
+    expect(a.ids()).toEqual([RADIO]);
+    expect(harness.state.globalTabs).toEqual([RADIO]);
+  });
+
+  it('删除会话、dock 卸载都不动 globalTabs', () => {
+    const a = mount('a');
+    mount('b');
+    openGlobalTab(RADIO, 'a');
+    unbindSidePanelDock('a', a.api);
+    a.userClose(RADIO);
+    disposeConversationResources('b');
+    expect(harness.state.globalTabs).toEqual([RADIO]);
+  });
+
+  it('右键改作用域：会话→全局补进其他 dock；全局→会话只留在当前会话', () => {
+    const a = mount('a');
+    const b = mount('b');
+    a.add(NOTES);
+    setPluginPanelScope(NOTES, 'a', 'global');
+    expect(harness.state.globalScopeOverrides).toEqual({ [NOTES]: 'global' });
+    expect(harness.state.globalTabs).toEqual([NOTES]);
+    expect(b.ids()).toEqual([NOTES]);
+
+    setPluginPanelScope(NOTES, 'a', 'session');
+    expect(harness.state.globalScopeOverrides).toEqual({});
+    expect(harness.state.globalTabs).toEqual([]);
+    expect(a.ids()).toEqual([NOTES]);
+    expect(b.ids()).toEqual([]);
+    expect(harness.state.dropped.at(-1)).toEqual({ panelId: NOTES, keep: ['a', 'b'] });
+  });
+});

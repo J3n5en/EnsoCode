@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SIDE_PANEL_VERSION, splitLegacySnapshots } from './migrate';
+import { migrateSidePanelState, SIDE_PANEL_VERSION, splitLegacySnapshots } from './migrate';
 
 describe('splitLegacySnapshots', () => {
-  it('当前持久化版本为 4', () => {
-    expect(SIDE_PANEL_VERSION).toBe(4);
+  it('当前持久化版本为 5', () => {
+    expect(SIDE_PANEL_VERSION).toBe(5);
   });
 
   it('版本低于 2 时重置旧状态且不迁移快照', () => {
@@ -73,5 +73,38 @@ describe('splitLegacySnapshots', () => {
       snapshots: {},
     });
     expect(splitLegacySnapshots('bad', 4)).toEqual({ state: {}, snapshots: {} });
+  });
+});
+
+describe('migrateSidePanelState v4 → v5', () => {
+  it('只加全局字段，老数据（布局、固定标签、开关、宽度、全屏记忆）原样保留', () => {
+    const v4 = {
+      lastWidth: 520,
+      uiByConversation: { c1: { open: true, width: 520 }, c2: { open: false, width: 400 } },
+      fullscreenByConversation: { c1: true },
+      layouts: { c1: { grid: {}, panels: { files: {} } } },
+      pinnedTabs: ['files', 'plugin:notes:board'],
+      changesModeByConversation: { c1: 'git' },
+    };
+    const { state } = migrateSidePanelState(v4, 4);
+    expect(state).toEqual({ ...v4, globalTabs: [], globalScopeOverrides: {} });
+  });
+
+  it('v5 读回时清洗脏的全局字段', () => {
+    const { state } = migrateSidePanelState(
+      { layouts: {}, globalTabs: ['plugin:a:b', 'files'], globalScopeOverrides: 'x' },
+      5
+    );
+    expect(state.globalTabs).toEqual(['plugin:a:b']);
+    expect(state.globalScopeOverrides).toEqual({});
+  });
+
+  it('更老的版本照旧剥快照，再补全局字段', () => {
+    const { state, snapshots } = migrateSidePanelState(
+      { layouts: { c1: 'x' }, snapshotsByConversation: { c1: { 'a.ts': 'old' } } },
+      3
+    );
+    expect(snapshots).toEqual({ c1: { 'a.ts': 'old' } });
+    expect(state).toMatchObject({ layouts: { c1: 'x' }, globalTabs: [] });
   });
 });

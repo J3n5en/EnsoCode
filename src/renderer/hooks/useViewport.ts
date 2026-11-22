@@ -16,6 +16,12 @@ const coarsePointer = (): boolean =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(pointer: coarse)').matches;
 
+/** 非 React 场景（store 动作）用：当前是不是手机布局 */
+export const isMobileViewport = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof window.innerWidth === 'number' &&
+  isMobileLayout(window.innerWidth, coarsePointer());
+
 const subscribe = (onChange: () => void) => {
   window.addEventListener('resize', onChange);
   return () => window.removeEventListener('resize', onChange);

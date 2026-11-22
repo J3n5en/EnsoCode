@@ -2,11 +2,15 @@ import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import type { SerializedDockview } from 'dockview-react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { isMobileViewport, useIsMobile } from '@/hooks/useViewport';
 import type { ScreenRect } from '@/lib/guestViewOcclusion';
 import { useSessionsStore } from '@/stores/sessions';
-import { SIDE_PANEL_VERSION, splitLegacySnapshots } from './migrate';
+import { normalizeGlobalState, type PanelScope, selectSidePanelShown } from './globalTabs';
+import { removeLayoutPanel } from './layoutSanitize';
+import { migrateSidePanelState, SIDE_PANEL_VERSION } from './migrate';
 import { resizeSidePanelWidth, SIDE_PANEL_DEFAULT_WIDTH } from './width';
 
+export type { PanelScope } from './globalTabs';
 export { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from './width';
 
 export type ChangesMode = 'all' | 'git';
@@ -19,7 +23,8 @@ export type PinnableSidePanelTab =
   | 'workflow'
   | `plugin:${string}:${string}`;
 
-export type SidePanelUi = { open: boolean; width: number };
+/** open 缺省 = 用户没开关过：有全局标签时自动显示（见 selectSidePanelShown） */
+export type SidePanelUi = { open?: boolean; width: number };
 
 interface SidePanelState {
   /** 铺满中间工作区;不 persist,关面板 / 切到关着的会话时清掉 */
@@ -37,6 +42,12 @@ interface SidePanelState {
   layouts: Record<string, SerializedDockview | undefined>;
   /** 新会话打开侧栏时自动创建的面板类型 */
   pinnedTabs: PinnableSidePanelTab[];
+  /** 全局标签（插件面板 id），按打开顺序；所有会话共享开关 */
+  globalTabs: string[];
+  /** 用户在右键菜单里改过的作用域，优先于清单声明 */
+  globalScopeOverrides: Record<string, PanelScope>;
+  /** 运行态：globalTabs 里当前真正启用的全局页面，决定没开关过的会话要不要自动显示 */
+  liveGlobalTabs: string[];
   changesModeByConversation: Record<string, ChangesMode>;
   /**
    * Changes「Session」模式的编辑前全文，按会话惰性从主进程回读（运行态，不 persist）。
@@ -54,6 +65,11 @@ interface SidePanelState {
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
   togglePinnedTab: (tab: PinnableSidePanelTab) => void;
+  setGlobalTabs: (globalTabs: string[]) => void;
+  setGlobalScopeOverride: (panelId: string, scope: PanelScope | undefined) => void;
+  setLiveGlobalTabs: (tabs: string[]) => void;
+  /** 从没挂载会话的已存布局里摘掉一个全局面板；摘空了且侧栏明确开着就收起，同关最后一个 tab */
+  dropPanelFromLayouts: (panelId: string, keepConversationIds: ReadonlySet<string>) => void;
   saveLayout: (conversationId: string, layout: SerializedDockview) => void;
   forgetConversation: (conversationId: string) => void;
   setChangesMode: (conversationId: string, mode: ChangesMode) => void;
@@ -67,7 +83,11 @@ function activeConversationId(): string | undefined {
 }
 
 function uiFor(state: SidePanelState, id: string): SidePanelUi {
-  return state.uiByConversation[id] ?? { open: false, width: state.lastWidth };
+  return state.uiByConversation[id] ?? { width: state.lastWidth };
+}
+
+function shownFor(state: SidePanelState, id: string): boolean {
+  return selectSidePanelShown(state, id, isMobileViewport());
 }
 
 function rememberFullscreen(
@@ -97,13 +117,16 @@ export const useSidePanelStore = create<SidePanelState>()(
       browserHoles: {},
       layouts: {},
       pinnedTabs: [],
+      globalTabs: [],
+      globalScopeOverrides: {},
+      liveGlobalTabs: [],
       changesModeByConversation: {},
       snapshotsByConversation: {},
 
       toggleOpen: () => {
         const id = activeConversationId();
         if (!id) return;
-        const open = !uiFor(get(), id).open;
+        const open = !shownFor(get(), id);
         set({
           uiByConversation: patchUi(get(), id, { open }),
           fullscreen: open ? get().fullscreen : false,
@@ -139,7 +162,7 @@ export const useSidePanelStore = create<SidePanelState>()(
         const id = activeConversationId();
         if (!id) return;
         const { fullscreen } = get();
-        if (!uiFor(get(), id).open) {
+        if (!shownFor(get(), id)) {
           set({
             uiByConversation: patchUi(get(), id, { open: true }),
             fullscreen: true,
@@ -183,6 +206,36 @@ export const useSidePanelStore = create<SidePanelState>()(
         const { [key]: prev, ...rest } = get().browserHoles;
         if (!rect && !prev) return;
         set({ browserHoles: rect ? { ...rest, [key]: rect } : rest });
+      },
+
+      setGlobalTabs: (globalTabs) => set({ globalTabs }),
+
+      setGlobalScopeOverride: (panelId, scope) => {
+        const { [panelId]: _old, ...rest } = get().globalScopeOverrides;
+        set({ globalScopeOverrides: scope ? { ...rest, [panelId]: scope } : rest });
+      },
+
+      setLiveGlobalTabs: (tabs) => {
+        const prev = get().liveGlobalTabs;
+        if (prev.length === tabs.length && prev.every((id, i) => id === tabs[i])) return;
+        set({ liveGlobalTabs: tabs });
+      },
+
+      dropPanelFromLayouts: (panelId, keepConversationIds) => {
+        const { layouts, uiByConversation } = get();
+        const nextLayouts = { ...layouts };
+        const nextUi = { ...uiByConversation };
+        let changed = false;
+        for (const [id, layout] of Object.entries(layouts)) {
+          if (keepConversationIds.has(id)) continue;
+          const next = removeLayoutPanel(layout, panelId);
+          if (next === layout) continue;
+          changed = true;
+          nextLayouts[id] = next;
+          const ui = uiByConversation[id];
+          if (!next && ui?.open === true) nextUi[id] = { ...ui, open: false };
+        }
+        if (changed) set({ layouts: nextLayouts, uiByConversation: nextUi });
       },
 
       saveLayout: (conversationId, layout) => {
@@ -251,10 +304,19 @@ export const useSidePanelStore = create<SidePanelState>()(
         fullscreenByConversation: state.fullscreenByConversation,
         layouts: state.layouts,
         pinnedTabs: state.pinnedTabs,
+        globalTabs: state.globalTabs,
+        globalScopeOverrides: state.globalScopeOverrides,
         changesModeByConversation: state.changesModeByConversation,
       }),
+      merge: (persisted, current) => {
+        const state = (persisted && typeof persisted === 'object' ? persisted : {}) as Record<
+          string,
+          unknown
+        >;
+        return { ...current, ...state, ...normalizeGlobalState(state) };
+      },
       migrate: (persisted, version) => {
-        const { state, snapshots } = splitLegacySnapshots(persisted, version);
+        const { state, snapshots } = migrateSidePanelState(persisted, version);
         // 旧版快照一次性迁到磁盘；失败只是丢 old，Session 模式退回 reconstruct
         const changes = window.electronAPI?.changes;
         if (changes) {
@@ -283,4 +345,10 @@ export function bindSidePanelFullscreen(): () => void {
     unsubHydrate?.();
     unsubSessions();
   };
+}
+
+/** 某会话的侧栏此刻是否显示（三态：明确开/关，或没开关过且有全局标签、非手机） */
+export function useSidePanelShown(conversationId: string | null | undefined): boolean {
+  const isMobile = useIsMobile();
+  return useSidePanelStore((state) => selectSidePanelShown(state, conversationId, isMobile));
 }
