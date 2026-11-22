@@ -207,30 +207,92 @@ function CardDetails({
 }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState(false);
-  return (
-    <div
-      data-enso="tool-card-body"
-      data-framed={framed ? 'true' : undefined}
-      className={
-        framed
-          ? cn(
-              'mt-0.5 mb-1.5 min-w-0 space-y-1 rounded-lg border border-border/60 border-l-2 border-l-muted-foreground/30 bg-muted/25 px-2.5 py-2 text-[12px]',
-              !nested && 'ml-5'
-            )
-          : 'space-y-1 py-0.5 pl-5 text-[12px]'
-      }
+  const rawToggle = (
+    <button
+      type="button"
+      data-enso="tool-card-raw"
+      aria-expanded={raw}
+      onClick={() => setRaw((value) => !value)}
+      className="text-[11px] text-muted-foreground hover:text-foreground"
     >
-      <div className={framed ? 'min-w-0 space-y-2' : 'space-y-1'}>
-        {card.blocks.map((block, index) => (
-          <Block
-            // biome-ignore lint/suspicious/noArrayIndexKey: 块顺序随工具结果整体替换
-            key={`${block.kind}-${index}`}
-            block={block}
-            known={known}
-            onOpen={onOpen}
-          />
-        ))}
+      {t('View raw data')}
+    </button>
+  );
+  const rawBody = raw ? (
+    <div className={cn('mt-1 space-y-1', framed && 'max-h-60 overflow-auto')}>
+      {card.rawArgs && (
+        <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {card.rawArgs}
+        </pre>
+      )}
+      {card.rawOutput && (
+        <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {card.rawOutput}
+        </pre>
+      )}
+    </div>
+  ) : null;
+  const renderBlock = (block: ToolCardBlock, index: number) => (
+    <Block
+      // biome-ignore lint/suspicious/noArrayIndexKey: 块顺序随工具结果整体替换
+      key={`${block.kind}-${index}`}
+      block={block}
+      known={known}
+      onOpen={onOpen}
+    />
+  );
+  if (framed) {
+    const look = DETAIL_LOOKS[detailLook()];
+    // 与普通工具行的展开详情同构：字段一段，指令像命令输出一样另起一段，段间细线分隔
+    const sections: { prompt: boolean; blocks: [ToolCardBlock, number][] }[] = [];
+    card.blocks.forEach((block, index) => {
+      const prompt = block.kind === 'prompt';
+      const last = sections.at(-1);
+      if (!prompt && last && !last.prompt) last.blocks.push([block, index]);
+      else sections.push({ prompt, blocks: [[block, index]] });
+    });
+    // 「查看原始数据」跟在最后一段字段后面；最后是指令段或没有内容时单起一段
+    const tail = sections.at(-1);
+    const footer = !tail || tail.prompt;
+    const rawSection = (
+      <div>
+        {rawToggle}
+        {rawBody}
       </div>
+    );
+    return (
+      <div
+        data-enso="tool-card-body"
+        data-framed="true"
+        className={cn('mt-1 mb-1.5 min-w-0 text-[12px]', look.box, !nested && 'ml-5')}
+      >
+        {sections.map((section, index) => (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段顺序随工具结果整体替换
+            key={index}
+            className={cn(
+              'min-w-0',
+              index > 0 && look.divider,
+              !section.prompt && cn('space-y-1.5', look.pad)
+            )}
+          >
+            {section.blocks.map(([block, at]) =>
+              block.kind === 'prompt' ? (
+                <PromptBlock key={at} label={block.label} text={block.text} look={look} />
+              ) : (
+                renderBlock(block, at)
+              )
+            )}
+            {!footer && section === tail ? rawSection : null}
+          </div>
+        ))}
+        {footer ? <div className={cn(look.pad, tail && look.divider)}>{rawSection}</div> : null}
+      </div>
+    );
+  }
+  return (
+    <div data-enso="tool-card-body" className="space-y-1 py-0.5 pl-5 text-[12px]">
+      <div className="space-y-1">{card.blocks.map(renderBlock)}</div>
       <button
         type="button"
         data-enso="tool-card-raw"
@@ -240,22 +302,60 @@ function CardDetails({
       >
         {t('View raw data')}
       </button>
-      {raw && (
-        <div className={cn('mt-1 space-y-1', framed && 'max-h-60 overflow-auto')}>
-          {card.rawArgs && (
-            <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {card.rawArgs}
-            </pre>
-          )}
-          {card.rawOutput && (
-            <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {card.rawOutput}
-            </pre>
-          )}
-        </div>
-      )}
+      {rawBody}
     </div>
   );
+}
+
+type DetailLook = {
+  /** 详情外框 */
+  box: string;
+  /** 字段段内边距 */
+  pad: string;
+  /** 段间分隔 */
+  divider: string;
+  /** 指令小标题行、正文 */
+  promptHead: string;
+  promptBody: string;
+  /** 折叠时露几行 */
+  previewLines: 1 | 4;
+};
+
+/**
+ * 三版候选，等用户挑定后只留一版：
+ * A 与普通工具行展开详情（bash/read/edit 的 tool-details）同一外框，去掉 shadow-xs；
+ * B 同结构，去描边换极淡底色；C 同结构，不要框，只留左侧细线，指令折成一行。
+ */
+const DETAIL_LOOKS: Record<'A' | 'B' | 'C', DetailLook> = {
+  A: {
+    box: 'overflow-hidden rounded-lg border border-border/70 bg-card',
+    pad: 'px-3 py-2',
+    divider: 'border-t border-border/60',
+    promptHead: 'px-3 pt-1.5',
+    promptBody: 'px-3 pt-1 pb-2',
+    previewLines: 4,
+  },
+  B: {
+    box: 'overflow-hidden rounded-md bg-muted/40',
+    pad: 'px-3 py-2',
+    divider: 'border-t border-background/80',
+    promptHead: 'px-3 pt-1.5',
+    promptBody: 'px-3 pt-1 pb-2',
+    previewLines: 4,
+  },
+  C: {
+    box: 'border-l border-border/70',
+    pad: 'pl-3 py-0.5',
+    divider: 'mt-1.5',
+    promptHead: 'pl-3',
+    promptBody: 'pl-3 pt-0.5',
+    previewLines: 1,
+  },
+};
+
+function detailLook(): 'A' | 'B' | 'C' {
+  const pick = (globalThis as { __ensoDispatchCardLook?: unknown }).__ensoDispatchCardLook;
+  return pick === 'B' || pick === 'C' ? pick : 'A';
 }
 
 /** 框里的 markdown 降一档：标题与正文同号、只靠粗细区分，代码块也缩小 */
@@ -267,33 +367,32 @@ const PROMPT_TYPOGRAPHY = {
   '--chat-code-block-size': '11px',
 } as CSSProperties;
 
-const PROMPT_PREVIEW_LINES = 4;
-
 /** 折叠时只露前几行纯文本：去掉标题井号与代码围栏，不渲染 markdown */
-function promptPreview(text: string): { preview: string; folded: boolean } {
+function promptPreview(text: string, max: number): { preview: string; folded: boolean } {
   const lines = text
     .split('\n')
     .filter((line) => line.trim() && !/^\s*(```|~~~)/.test(line))
     .map((line) => line.replace(/^\s*#{1,6}\s+/, '').trimEnd());
   return {
-    preview: lines.slice(0, PROMPT_PREVIEW_LINES).join('\n'),
-    folded: lines.length > PROMPT_PREVIEW_LINES || text.length > 320,
+    preview: lines.slice(0, max).join(max === 1 ? ' ' : '\n'),
+    folded: lines.length > max || text.length > 320,
   };
 }
 
-function PromptBlock({ label, text }: { label: string; text: string }) {
+function PromptBlock({ label, text, look }: { label: string; text: string; look: DetailLook }) {
   const { t } = useI18n();
-  const { preview, folded } = promptPreview(text);
+  const { preview, folded } = promptPreview(text, look.previewLines);
   const [open, setOpen] = useState(false);
   const expanded = open || !folded;
   return (
-    <section
-      data-enso="tool-card-prompt"
-      data-open={expanded ? 'true' : 'false'}
-      className="min-w-0 overflow-hidden rounded-md border border-border/60 bg-background/70"
-    >
-      <div className="flex min-w-0 items-center gap-2 border-b border-border/50 px-2 py-1 text-[11px] text-muted-foreground">
-        <span className="min-w-0 truncate font-medium">{label}</span>
+    <section data-enso="tool-card-prompt" data-open={expanded ? 'true' : 'false'} className="min-w-0">
+      <div
+        className={cn(
+          'flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground',
+          look.promptHead
+        )}
+      >
+        <span className="min-w-0 truncate">{label}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2.5">
           {folded && (
             <button
@@ -313,7 +412,10 @@ function PromptBlock({ label, text }: { label: string; text: string }) {
         <div
           data-enso="tool-card-prompt-body"
           style={PROMPT_TYPOGRAPHY}
-          className="max-h-80 min-w-0 overflow-y-auto overscroll-contain px-2.5 py-1.5 text-[12px] leading-relaxed [&_:is(h1,h2,h3,h4)]:mt-2.5 [&_:is(h1,h2,h3,h4)]:mb-1"
+          className={cn(
+            'max-h-80 min-w-0 overflow-y-auto overscroll-contain text-xs leading-relaxed [&_:is(h1,h2,h3,h4)]:mt-2.5 [&_:is(h1,h2,h3,h4)]:mb-1 [&_[data-enso=code-block]>:first-child]:border-0',
+            look.promptBody
+          )}
         >
           <Markdown text={text} />
         </div>
@@ -322,7 +424,11 @@ function PromptBlock({ label, text }: { label: string; text: string }) {
           type="button"
           data-enso="tool-card-prompt-preview"
           onClick={() => setOpen(true)}
-          className="line-clamp-4 block w-full min-w-0 px-2.5 py-1.5 text-left text-[12px] leading-relaxed text-muted-foreground break-words whitespace-pre-wrap"
+          className={cn(
+            'block w-full min-w-0 text-left text-xs leading-relaxed text-muted-foreground',
+            look.previewLines === 1 ? 'truncate' : 'line-clamp-4 break-words whitespace-pre-wrap',
+            look.promptBody
+          )}
         >
           {preview}
         </button>
@@ -388,7 +494,8 @@ function Block({
   if (block.kind === 'note') {
     return <p className="whitespace-pre-wrap text-xs">{block.text}</p>;
   }
-  if (block.kind === 'prompt') return <PromptBlock label={block.label} text={block.text} />;
+  if (block.kind === 'prompt')
+    return <PromptBlock label={block.label} text={block.text} look={DETAIL_LOOKS.C} />;
   if (block.kind === 'markdown') {
     const collapsed = block.collapsed && !opened;
     return (
