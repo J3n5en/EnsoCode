@@ -105,9 +105,12 @@ function remarkGithubAlerts() {
   };
 }
 
-/** 仓库内文件路径判定（行内 code 渲染成 chip，聊天里点开 Files 面板，无链接上下文时复制）：需含目录分隔或 file.ext:line 形式 */
+/**
+ * 仓库内路径判定（行内 code 渲染成 chip，无链接上下文时复制）：文件需含目录分隔或 file.ext:line 形式，
+ * 点开 Files 面板；目录只认末尾带 `/`（避免 and/or、TCP/IP 误判），点开系统文件管理器。
+ */
 const FILE_PATH_RE =
-  /^(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,8}(?::\d+(?:-\d+)?)?$|^[\w.-]+\.\w{1,8}:\d+(?:-\d+)?$/;
+  /^(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,8}(?::\d+(?:-\d+)?)?$|^[\w.-]+\.\w{1,8}:\d+(?:-\d+)?$|^(?:[\w.@-]+\/)+$/;
 
 const REMARK_PLUGINS = [remarkGfm, remarkGithubAlerts];
 
@@ -805,7 +808,26 @@ export const markdownComponents: Components = {
           });
           return;
         }
-        openSidePanelFile(linkContext.conversationId, rel, line);
+        if (!value.endsWith('/')) {
+          openSidePanelFile(linkContext.conversationId, rel, line);
+          return;
+        }
+        const fail = (error: string) =>
+          addToast({
+            type: 'error',
+            title: t('Could not open local file link'),
+            description: revealErrorDescription(error, t),
+          });
+        window.electronAPI.workspaceFiles
+          .reveal({
+            conversationId: linkContext.conversationId,
+            projectId: linkContext.projectId,
+            rel,
+          })
+          .then(
+            (result) => !result.ok && fail(result.error),
+            (error: unknown) => fail(error instanceof Error ? error.message : String(error))
+          );
       };
       const chip = (
         <button

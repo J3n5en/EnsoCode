@@ -415,6 +415,60 @@ describe('聊天文件链接的打开方式', () => {
   });
 });
 
+describe('行内 code 路径 chip', () => {
+  it.each([
+    '`src/foo.ts`',
+    '`foo.ts:12`',
+    '`src/foo.ts:12-20`',
+    '`src/`',
+    '`src/renderer/components/`',
+  ])('识别为可点 chip：%s', async (text) => {
+    await render(text);
+    expect(container.querySelector('button')?.textContent).toBe(text.slice(1, -1));
+  });
+
+  it.each(['`and/or`', '`TCP/IP`', '`他/她`'])('普通斜杠文本不是链接：%s', async (text) => {
+    await render(text);
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('code')?.textContent).toBe(text.slice(1, -1));
+  });
+
+  it('末尾带斜杠的目录点击交给系统文件管理器，不打开 Files 面板', async () => {
+    await render('`src/renderer/components/`');
+    await click('button');
+    expect(harness.reveal).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'src/renderer/components',
+    });
+    expect(harness.openSidePanelFile).not.toHaveBeenCalled();
+    harness.reveal.mockResolvedValueOnce({ ok: false, error: 'unavailable' });
+    await click('button');
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: 'The linked file or folder is unavailable.' })
+    );
+  });
+
+  it('文件路径点击仍打开 Files 面板', async () => {
+    await render('`src/foo.ts:12`');
+    await click('button');
+    expect(harness.openSidePanelFile).toHaveBeenCalledWith('child', 'src/foo.ts', 12);
+    expect(harness.reveal).not.toHaveBeenCalled();
+  });
+
+  it('目录 chip 右键按所选应用打开（软链接由 Main 解析真实路径）', async () => {
+    await render('`src/link/`');
+    await click('button', 'contextmenu');
+    await click('[role="menuitem"]:last-child');
+    expect(harness.openContext).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'src/link',
+      itemId: 'vscode',
+    });
+  });
+});
+
 describe('气泡文件卡片的打开方式', () => {
   async function renderChip(path: string) {
     await act(async () =>
