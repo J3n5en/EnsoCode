@@ -2527,7 +2527,9 @@ export const zhTranslations: Record<string, string> = {
   'Compaction already in progress': '正在压缩中，请等待完成',
   'Compaction is queued and runs after this turn': '压缩已排队，本轮结束后自动执行',
   'Session not started yet — nothing to compact': '会话尚未启动，暂无可压缩的上下文',
-  'Workspace operation in progress — compact again when it finishes': '工作区迁移中，完成后再压缩',
+  'Workspace operation in progress — compact again when it finishes':
+    '工作区操作进行中（切换分支、worktree 等），完成后再压缩',
+  'Workspace operation in progress': '工作区操作进行中',
   'Compact the context now (/compact [summary focus])': '立即压缩上下文（/compact [摘要侧重]）',
   'Keep this session and start a parallel one from here': '保留源线，从这里开对话分支',
   'Branched from {{title}}': '分支自 {{title}}',

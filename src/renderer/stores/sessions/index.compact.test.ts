@@ -28,7 +28,7 @@ bindSessionProjection({
   },
 });
 installSessionGlobals();
-const agentCompact = vi.fn(async () => ({ ok: true }));
+const agentCompact = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
 Object.assign(window.electronAPI.agent, { compact: agentCompact });
 
 const setParent = (fields: Record<string, unknown>) =>
@@ -41,6 +41,10 @@ const setParent = (fields: Record<string, unknown>) =>
 
 const toastDescriptions = () =>
   addToast.mock.calls.map((call) => (call as unknown as [{ description: string }])[0].description);
+const sendCompact = (text = '/compact') =>
+  sessionsModule.useSessionsStore
+    .getState()
+    .send(text, { providerId: 'p', modelId: 'm', cwd: '/workspace' }, undefined, 'parent');
 
 describe('手动压缩的反馈', () => {
   beforeAll(async () => {
@@ -49,7 +53,8 @@ describe('手动压缩的反馈', () => {
 
   beforeEach(async () => {
     await resetSessionHarness();
-    agentCompact.mockClear();
+    agentCompact.mockReset();
+    agentCompact.mockResolvedValue({ ok: true });
     addToast.mockClear();
   });
 
@@ -95,5 +100,55 @@ describe('手动压缩的反馈', () => {
         'Workspace operation in progress — compact again when it finishes',
       ])
     );
+  });
+
+  it('/compact 在会话未启动时也提示，而不是静默丢弃', async () => {
+    setParent({ started: false });
+    await expect(sendCompact()).resolves.toBeNull();
+    expect(agentCompact).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(toastDescriptions()).toEqual(['Session not started yet — nothing to compact'])
+    );
+  });
+
+  it('/compact 在工作区操作中也提示，而不是被通用拦截吞掉', async () => {
+    setParent({ started: true, workspaceMigrating: true });
+    await expect(sendCompact('/compact 保留分工')).resolves.toBeNull();
+    expect(agentCompact).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(toastDescriptions()).toEqual([
+        'Workspace operation in progress — compact again when it finishes',
+      ])
+    );
+  });
+
+  it('/compact 正常时带上摘要侧重转给 compact', async () => {
+    setParent({ started: true });
+    await expect(sendCompact('/compact 保留分工')).resolves.toBeNull();
+    expect(agentCompact).toHaveBeenCalledWith('parent', '保留分工');
+  });
+
+  it('Main 拒绝时提示压缩失败', async () => {
+    agentCompact.mockResolvedValue({ ok: false, error: 'Workspace operation in progress.' });
+    setParent({ started: true });
+    sessionsModule.useSessionsStore.getState().compact('parent');
+    await vi.waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith({
+        type: 'error',
+        title: 'Compaction failed',
+        description: 'Workspace operation in progress.',
+      })
+    );
+  });
+
+  it('手机代发（quiet）不在桌面弹提示', async () => {
+    agentCompact.mockResolvedValue({ ok: false, error: 'stale' });
+    setParent({ started: true, compaction: 'running' });
+    sessionsModule.useSessionsStore.getState().compact('parent', undefined, { quiet: true });
+    setParent({ compaction: undefined });
+    sessionsModule.useSessionsStore.getState().compact('parent', undefined, { quiet: true });
+    expect(agentCompact).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(addToast).not.toHaveBeenCalled();
   });
 });

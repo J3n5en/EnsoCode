@@ -327,7 +327,7 @@ export function bindPairCatalogSync(): void {
         store.setGoal(action.sessionId, action.text);
         break;
       case 'compact':
-        store.compact(action.sessionId, action.instructions);
+        store.compact(action.sessionId, action.instructions, { quiet: true });
         break;
       case 'rewind':
         store.rewind(action.sessionId, action.userIndexFromEnd, action.restoreFiles);
