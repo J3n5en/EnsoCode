@@ -30,6 +30,7 @@ import {
   AGENT_WAIT_DEFAULT_MS,
   AGENT_WAIT_MAX_MS,
 } from '@shared/types/agent';
+import type { ObservedTask } from './backgroundTaskTracker';
 
 interface RuntimeResult {
   ok: boolean;
@@ -170,6 +171,8 @@ export interface AgentServiceOptions {
   allowedModes?: (context: AgentControlContext) => ReadonlySet<AgentMode>;
   /** Run 结束而模型还不知情时通知其父会话 */
   notify?: (context: AgentControlContext, text: string, urgent: boolean) => void;
+  /** 子会话起的后台任务（Main 投影）：Run 结果里列给父会话，它们完成时不会通知父会话 */
+  childTasks?: (sessionId: string) => readonly ChildTask[];
   /** 某父会话名下未结束 Run 的进度变化：负载是该 owner 的全量快照（REPLACE 语义） */
   onProgress?: (ownerId: string, runs: AgentRunProgress[]) => void;
 }
@@ -185,6 +188,10 @@ const RESUME_LIMIT_TEXT = `It was already resumed ${AGENT_TASK_MAX_RESUMES} time
 
 const USER_STOPPED_TEXT =
   '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
+
+type ChildTask = Pick<ObservedTask, 'taskId' | 'command' | 'status' | 'startedAt' | 'exitCode'>;
+
+const CHILD_TASK_COMMAND_LIMIT = 120;
 
 function failure<T>(
   code: Extract<AgentServiceResult<T>, { ok: false }>['code'],
@@ -1123,6 +1130,7 @@ export class AgentService implements AgentServiceContract {
           ]
         : []),
       `<usage>subagent_tokens: ${tokens}\ntool_uses: ${run.toolCallIds.size}\nduration_ms: ${durationMs}</usage>`,
+      this.childTasksText(run),
       // 全文已在通知里时不引导 report，否则模型会把整份报告再拉一遍
       [
         truncated ? `Use subagent report with runId ${run.runId} for the full result.` : '',
@@ -1137,6 +1145,34 @@ export class AgentService implements AgentServiceContract {
     ]
       .filter(Boolean)
       .join('\n');
+  }
+
+  /** 这次 Run 里子代理起的、或仍在跑的后台任务：归子代理，完成时只通知子代理，不叫醒父会话 */
+  private childTasksText(run: RunRecord): string {
+    const sessionId = this.agents.get(run.agentId)?.identity.sessionId;
+    const since = run.startedAt ?? run.createdAt;
+    const tasks = sessionId
+      ? (this.options.childTasks?.(sessionId) ?? []).filter(
+          (task) => task.status === 'running' || task.startedAt >= since
+        )
+      : [];
+    if (tasks.length === 0) return '';
+    const lines = tasks.map((task) => {
+      const state =
+        task.status === 'running'
+          ? 'running'
+          : `${task.status}${task.exitCode === undefined ? '' : `, exit ${task.exitCode}`}`;
+      const command = task.command.replace(/\s+/g, ' ').trim();
+      const short =
+        command.length > CHILD_TASK_COMMAND_LIMIT
+          ? `${command.slice(0, CHILD_TASK_COMMAND_LIMIT)}…`
+          : command;
+      return `- ${task.taskId} (${state}): ${short}`;
+    });
+    return [
+      'Background tasks this subagent started (they belong to the subagent, not to you; their completion will not notify you — check one with task_output only if you need its result):',
+      ...lines,
+    ].join('\n');
   }
 
   private snapshot(run: RunRecord): AgentRunSnapshot {

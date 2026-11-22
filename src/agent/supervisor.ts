@@ -435,6 +435,8 @@ interface SessionFactory {
     pluginSource?: ChildPluginSource;
     /** 临时会话：记录只在内存，不落 jsonl */
     ephemeral?: boolean;
+    /** 没有 ChildSessionIdentity 的子会话（工具直雇 coworker）：后台任务按这个会话 id 归属 */
+    sessionId?: string;
   }): Promise<ChildSessionResult>;
 }
 
@@ -527,6 +529,8 @@ interface ManagedSession {
   gate: ApprovalGate;
   asks: AskManager;
   pendingTaskReminders: string[];
+  /** 子会话自己起的后台任务的完成通知：只搭它的下一条工具结果，不为此唤起新回合 */
+  childTaskNotices?: string[];
   /** 通知队列溢出只报一次 */
   reminderEvictionReported?: boolean;
   /** 忙碌时收到的手动压缩请求：本轮收束后自动执行（用户选择「排队」而非打断） */
@@ -1291,6 +1295,16 @@ export class SessionSupervisor {
         },
         // 完成通知走合并投递:多任务同时完成合并成一条,失败在 manager 文本里自带标注
         onCompletionNotify: (sessionId, text, notifyOptions) => {
+          // 子代理起的任务只通知子代理本身：不唤醒它（task 的 Run 可能已收口），更不打扰父会话。
+          // 子代理已不在时丢弃：父会话从子代理结果里得知它起过哪些任务，可用 task_output 查看
+          if (sessionId.includes('::')) {
+            const child = this.sessions.get(sessionId);
+            if (child) {
+              child.childTaskNotices ??= [];
+              enqueueReminder(child.childTaskNotices, text);
+            }
+            return;
+          }
           if (notifyOptions?.durable && !this.sessions.has(sessionId)) {
             this.persistUnopenedNotification(sessionId, text);
             this.requestWake(sessionId);
@@ -2937,10 +2951,9 @@ export class SessionSupervisor {
           }
         ),
         this.bgTasks,
-        sessionId,
+        foregroundSessionId,
         cwd,
-        backgroundTransform,
-        foregroundSessionId
+        backgroundTransform
       );
       // 提权只在本机 bash：远程会话的 sudo 在远端，连不上本机 askpass 服务
       const elevation = remoteOps ? null : prepareElevation();
@@ -2999,7 +3012,10 @@ export class SessionSupervisor {
         extraTools = [],
         pluginSource,
         ephemeral,
+        sessionId: childSessionId,
       }) => {
+        // 子会话起的后台任务归子会话：完成通知、任务条与收尾清单都按它算，不落到父会话
+        const taskOwnerId = childIdentity?.sessionId ?? childSessionId;
         // 插件能力下沉：只读档不挂插件工具（可能有副作用，
         // Plan 模式靠只读子代理保证不写）；事件只拦 tool_call（独立预算），其余只通知
         const childPlugins = pluginSource
@@ -3052,6 +3068,15 @@ export class SessionSupervisor {
           managed.silentTurnKind = kind;
         });
         const childReminders = new SystemReminderRegistry();
+        if (taskOwnerId) {
+          childReminders.register('background-task', () => {
+            const notices = this.sessions.get(taskOwnerId)?.childTaskNotices;
+            if (!notices?.length) return [];
+            return notices
+              .splice(0)
+              .map((text) => `<background-task-update>\n${text}\n</background-task-update>`);
+          });
+        }
         const subLoader = createSessionResourceLoader({
           branchContext,
           silentTurnRecovery,
@@ -3094,12 +3119,7 @@ export class SessionSupervisor {
           resolved?.tools === 'readonly' ||
           agentType?.tools === 'readonly'
             ? readOnlyTools(childGate)
-            : buildBaseTools(
-                childGate,
-                undefined,
-                agentType?.writeScope,
-                childIdentity?.sessionId
-              )),
+            : buildBaseTools(childGate, undefined, agentType?.writeScope, taskOwnerId)),
           ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
           ...childPluginTools,
           ...(extraTools as Def[]),
@@ -4187,6 +4207,7 @@ export class SessionSupervisor {
         thinkingOverride: thinking,
         gate,
         resumeFile,
+        sessionId: coworkerId,
         extraTools: [
           createAskTool(askManager),
           createMessageMainTool(
@@ -5035,7 +5056,7 @@ export class SessionSupervisor {
     this.flushPendingReminders(managed);
   }
 
-  /** 收尾清单：根会话还有在跑、没表态的后台任务时返回（子代理的任务登记在父会话名下） */
+  /** 收尾清单：根会话自己起的、还在跑、没表态的后台任务（子代理起的归子代理，不要求父会话表态） */
   private taskWrapUp(sessionId: string): string | undefined {
     if (sessionId.includes('::')) return undefined;
     return settleChecklist(this.bgTasks.undeclared(sessionId), Date.now());

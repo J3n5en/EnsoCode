@@ -1575,4 +1575,15 @@ describe('疑似闲置与保留', () => {
     manager.stop(b, true);
     manager.stop(c, true);
   });
+
+  it('没表态清单只算会话自己起的任务：子代理起的归子代理，父会话仍能停它', () => {
+    const { manager } = makeManager();
+    const own = manager.start('s1', 'sleep 30', tmpdir());
+    const childTask = manager.start('s1::cw-child', 'sleep 31', tmpdir());
+    expect(manager.undeclared('s1').map((task) => task.taskId)).toEqual([own]);
+    expect(manager.undeclared('s1::cw-child').map((task) => task.taskId)).toEqual([childTask]);
+    expect(manager.owns(childTask, 's1')).toBe(true);
+    manager.stop(own, true);
+    manager.stop(childTask, true);
+  });
 });
