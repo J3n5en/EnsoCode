@@ -428,6 +428,7 @@ export const IPC_CHANNELS = {
   FILES_OPEN: 'files:open',
   FILES_OPEN_CONTEXT: 'files:open-context',
   FILES_SEARCH_WORKSPACE: 'files:search-workspace',
+  FILES_RESOLVE_LINKS: 'files:resolve-links',
 
   GIT_DIFF_HEAD: 'git:diff-head',
   GIT_STATUS: 'git:status',

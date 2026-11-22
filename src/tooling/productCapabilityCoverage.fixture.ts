@@ -861,6 +861,9 @@ export const IPC_PRODUCT_COVERAGE = {
   FILES_SEARCH_WORKSPACE: excluded(
     'Side panel Files name/content search scoped to conversation cwd.'
   ),
+  FILES_RESOLVE_LINKS: excluded(
+    'Chat file link rendering checks which workspace paths exist; not a model capability.'
+  ),
   PAIR_CANCEL: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_CATALOG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_RESUME_SESSION: excluded('Phone second-screen pairing transport; not an Enso capability.'),
