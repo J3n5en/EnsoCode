@@ -37,7 +37,19 @@ export interface MemoryBridgeContext extends MemorySpaceContext {
   onPending?: (id: string) => void;
   /** deep 检索的 instruct LLM；不可用时检索退回本地意图 */
   complete?: (() => Complete | null | Promise<Complete | null>) | null;
+  /** 检索时 embedding 模型还没加载好：本次无向量通道，结果要如实标注 */
+  vectorWarming?: boolean;
+  /** 检索等查询向量的剩余预算；超出即跳过向量通道并同样标注 */
+  vectorBudgetMs?: number;
 }
+
+// 给模型看的说明：结果暂时不全，别把「没搜到」当成「没有」
+const VECTOR_WARMING = {
+  vector: 'warming',
+  note:
+    'Semantic (vector) search is still warming up, so these results come only from full-text and ' +
+    'entity matching. Search again in a moment if semantic matches matter.',
+} as const;
 
 /** Bot 会话写共享空间（项目 / 全局）需用户审批；自己的 bot / chat 空间直接写 */
 function needsReview(ctx: MemoryBridgeContext, spaceId: string): boolean {
@@ -97,6 +109,7 @@ export async function executeMemoryOp(
     const spaceIds = resolveSpaceIds(request.spaceId, ctx);
     const assist =
       request.mode === 'deep' ? createSearchAssist((await ctx.complete?.()) ?? null) : undefined;
+    let vectorSkipped = ctx.vectorWarming === true;
     const hits = await searchMemories(db, {
       q: request.query,
       spaceIds,
@@ -105,6 +118,10 @@ export async function executeMemoryOp(
       now: ctx.now,
       mode: request.mode,
       assist,
+      vectorBudgetMs: ctx.vectorBudgetMs,
+      onVectorSkipped: () => {
+        vectorSkipped = true;
+      },
       // agent 检索启用 MMR 去冗余；显式写出来，默认值变化不会静默关掉它
       mmr: true,
       eventDateFrom: request.eventDateFrom ?? null,
@@ -132,6 +149,7 @@ export async function executeMemoryOp(
         ...(hit.challengedBy ? { challengedBy: hit.challengedBy } : {}),
       })),
       ...searchAssistReport(request.mode, assist),
+      ...(vectorSkipped ? VECTOR_WARMING : {}),
     };
   }
   if (op === 'capture') {

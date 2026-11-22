@@ -247,14 +247,9 @@ export class MemoryServiceClient {
     } catch {}
   }
 
-  /** 一次 op RPC：服务懒起，等待 ready 后再投递 */
+  /** 一次 op RPC：服务懒起，等待 ready 后再投递；超时从调用时起算，起不来也不会无限挂起 */
   async invoke<T = unknown>(op: string, args?: unknown): Promise<T> {
     this.ensureStarted();
-    if (!this.ready) {
-      await new Promise<void>((resolve, reject) => {
-        this.spawnWaiters.push({ resolve, reject });
-      });
-    }
     const requestId = ++this.seq;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -268,13 +263,19 @@ export class MemoryServiceClient {
         reject,
         timer,
       });
-      try {
-        this.child?.postMessage({ type: 'op', requestId, op, args });
-      } catch (error) {
-        this.pendingOps.delete(requestId);
-        clearTimeout(timer);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      }
+      const post = () => {
+        if (!this.pendingOps.has(requestId)) return;
+        try {
+          this.child?.postMessage({ type: 'op', requestId, op, args });
+        } catch (error) {
+          this.pendingOps.delete(requestId);
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      };
+      // 退出前未 ready 的情况由 onExit 统一拒绝 pendingOps
+      if (this.ready) post();
+      else this.spawnWaiters.push({ resolve: post, reject: () => {} });
     });
   }
 
