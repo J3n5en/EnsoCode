@@ -94,8 +94,8 @@ export interface BotRuntimePort {
   prompt(
     conversationId: string,
     text: string,
-    images?: AttachedImage[],
-    deliveryId?: string,
+    images: AttachedImage[] | undefined,
+    deliveryId: string,
     /** 带新消息的断点续跑（见 BotDeliverOptions.resume） */
     resume?: true
   ): ActionResult;
@@ -273,6 +273,8 @@ export class BotSessionHost {
   /** live 会话 spawn 时采用的讨论模式；与当前开关不一致的群成员会话要换说明 */
   private readonly liveDiscuss = new Map<string, boolean>();
   private readonly activeDeliveries = new Map<string, string>();
+  /** 开这一格的 prompt 发给 worker 时带的号：拒收回执按它对上这一格 */
+  private readonly promptIds = new Map<string, string>();
   private readonly turnKeys = new Map<string, string>();
   private disposed = false;
   private readonly budgetChecks = new Set<string>();
@@ -1225,9 +1227,10 @@ export class BotSessionHost {
         if (!delivery) {
           if (
             event.type === 'delivery-rejected' &&
-            this.activeDeliveries.get(id) === event.deliveryId
+            this.slots.has(id) &&
+            this.promptIds.get(id) === event.deliveryId
           )
-            this.rejectPrompt(id, event.deliveryId);
+            this.rejectPrompt(id);
           return;
         }
         const seen = this.pendingSteers.get(delivery);
@@ -1599,6 +1602,7 @@ export class BotSessionHost {
     const independent = this.independentSpecs.get(conversationId)?.bot;
     if (independent) bot = independent;
     this.slots.set(conversationId, { sawRunning: false });
+    this.promptIds.delete(conversationId);
     if (!this.turnKeys.has(conversationId)) this.turnKeys.set(conversationId, randomUUID());
     this.tasks.set(conversationId, delivery.text.length <= 2000 ? delivery.text : '');
     this.lastAssistant.delete(conversationId);
@@ -1697,15 +1701,12 @@ export class BotSessionHost {
     }
     if (!this.dispatchTo(conversationId)) return fail('session-unavailable');
     stage.failure = 'prompt-failed';
+    // worker 只按号回执拒收：投递自己没号时现生成一个，只用于和 worker 对账
+    const deliveryId = delivery.deliveryId ?? randomUUID();
+    this.promptIds.set(conversationId, deliveryId);
     const sent = delivery.resume
-      ? this.deps.runtime.prompt(
-          conversationId,
-          notes.text,
-          delivery.images,
-          delivery.deliveryId,
-          true
-        )
-      : this.deps.runtime.prompt(conversationId, notes.text, delivery.images, delivery.deliveryId);
+      ? this.deps.runtime.prompt(conversationId, notes.text, delivery.images, deliveryId, true)
+      : this.deps.runtime.prompt(conversationId, notes.text, delivery.images, deliveryId);
     if (!sent.ok) return fail(sent.error ?? 'prompt-failed');
     stage.sent = true;
     // 发出后先做必做记账（续跑任务、笔记已读版本、去重登记与 sent 通知——排队投递靠 sent 推进群游标），
@@ -1945,9 +1946,10 @@ export class BotSessionHost {
    * worker 拒收了开这一格的 prompt（上一轮仍卡着不响应中断，或撞上叫停）：本次投递报错收尾并让出会话。
    * 不原地重排：拒收时上一轮还没结束，立刻重投只会再撞上；上一轮迟到的终态也不能记到这次投递头上。
    */
-  private rejectPrompt(conversationId: string, deliveryId: string): void {
+  private rejectPrompt(conversationId: string): void {
+    this.promptIds.delete(conversationId);
     this.running.delete(conversationId);
-    this.finish(conversationId, undefined, false, 'prompt-rejected', '', deliveryId);
+    this.finish(conversationId, undefined, false, 'prompt-rejected');
     this.lastAssistant.delete(conversationId);
     this.release(conversationId);
     this.pump();

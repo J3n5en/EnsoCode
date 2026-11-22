@@ -269,7 +269,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       internals.evictIdleSessions();
       await vi.waitFor(() => expect(current.abort).toHaveBeenCalledTimes(1));
       events.length = 0;
-      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'in-flight' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        deliveryId: 'd-270',
+        identity: parent,
+        text: 'in-flight',
+      });
       supervisor.handleCommand({ type: 'abort', identity: parent });
       expect(events).toContainEqual(expect.objectContaining({ type: 'status', status: 'idle' }));
       release.resolve();
@@ -304,7 +309,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         cwd: '/workspace',
         model,
       });
-      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'first' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        deliveryId: 'd-305',
+        identity: parent,
+        text: 'first',
+      });
       await vi.waitFor(() =>
         expect(events.filter((event) => event.type === 'parent-rejected')).toHaveLength(2)
       );
@@ -356,6 +366,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         });
         supervisor.handleCommand({
           type: 'prompt',
+          deliveryId: 'd-355',
           identity: parent,
           text: 'first',
           instanceId: first,
@@ -425,6 +436,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         await vi.waitFor(() => expect(current.abort).toHaveBeenCalledTimes(1));
         supervisor.handleCommand({
           type: 'prompt',
+          deliveryId: 'd-424',
           identity: parent,
           text: 'in-flight',
           instanceId: first,
@@ -451,7 +463,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
           instanceId: first,
         });
         supervisor.handleCommand({ type: 'retry', identity: parent, instanceId: second });
-        supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'desktop' });
+        supervisor.handleCommand({
+          type: 'prompt',
+          deliveryId: 'd-452',
+          identity: parent,
+          text: 'desktop',
+        });
         await vi.waitFor(() => expect(ends(events)).toHaveLength(3));
         expect(ends(events)).toEqual([
           { type: 'parent-rejected', instanceId: first },
@@ -476,6 +493,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         );
         supervisor.handleCommand({
           type: 'prompt',
+          deliveryId: 'd-475',
           identity: parent,
           text: 'deferred',
           instanceId: first,
@@ -1241,7 +1259,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     });
     await settleUntil(() => mocks.sessions.length > 0);
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'ordinary coding task' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-1153',
+      identity: parent,
+      text: 'ordinary coding task',
+    });
     await settle();
     expect(parentSession.prompt).toHaveBeenCalledWith(
       'ordinary coding task',
@@ -1746,7 +1769,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       parentSession.isStreaming = false;
       return undefined;
     });
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'follow up' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-1658',
+      identity: parent,
+      text: 'follow up',
+    });
     await vi.waitFor(() =>
       expect(parentSession.prompt).toHaveBeenCalledWith(
         'follow up',
@@ -1775,7 +1803,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
       parentSession.isStreaming = true;
       parentSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
-      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'follow up' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        deliveryId: 'd-1687',
+        identity: parent,
+        text: 'follow up',
+      });
       await settle();
       expect(parentSession.steer).not.toHaveBeenCalled();
       await vi.runAllTimersAsync();
@@ -1806,7 +1839,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
             };
           })
       );
-      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        deliveryId: 'd-1718',
+        identity: parent,
+        text: 'queued',
+      });
       await vi.advanceTimersByTimeAsync(4_000);
       piSession.emit({ type: 'turn_start' });
       await vi.advanceTimersByTimeAsync(2_000);
@@ -1833,7 +1871,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       piSession.isStreaming = true;
       piSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
       piSession.emit({ type: 'agent_end', willRetry: false });
-      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        deliveryId: 'd-1745',
+        identity: parent,
+        text: 'queued',
+      });
       await vi.advanceTimersByTimeAsync(5_000);
       await settle();
       expect(events.some((event) => event.type === 'turn-failed')).toBe(true);
@@ -1885,7 +1928,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
   it('轮次收束后压缩进行中收到 prompt：等压完再按新轮 prompt，不报错', async () => {
     const { events, supervisor, piSession } = await spawnParent();
     const finish = holdCompaction(piSession);
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-1797',
+      identity: parent,
+      text: 'queued',
+    });
     await settle();
     expect(piSession.prompt).not.toHaveBeenCalled();
 
@@ -1904,7 +1952,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     try {
       const { events, supervisor, piSession } = await spawnParent();
       const finish = holdCompaction(piSession, true);
-      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        deliveryId: 'd-1816',
+        identity: parent,
+        text: 'queued',
+      });
       await vi.advanceTimersByTimeAsync(30_000);
       expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
       expect(piSession.prompt).not.toHaveBeenCalled();
@@ -1933,7 +1986,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       }, 0);
       return undefined;
     });
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'after abort' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-1845',
+      identity: parent,
+      text: 'after abort',
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(piSession.prompt).not.toHaveBeenCalled();
 
@@ -2213,13 +2271,23 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       agentDir: '/tmp/agent',
       sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hello' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-2125',
+      identity: parent,
+      text: 'hello',
+    });
     await settle();
     const rejected = events.find((event) => event.type === 'parent-rejected');
     expect(rejected).toMatchObject({ identity: parent, seq: 0 });
     expect((rejected as { reason: string }).reason).toContain('parent');
 
-    supervisor.handleCommand({ type: 'prompt', identity: child, text: 'hello' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-2131',
+      identity: child,
+      text: 'hello',
+    });
     await settle();
     expect(events.find((event) => event.type === 'child-rejected')).toMatchObject({
       identity: child,
@@ -2648,7 +2716,12 @@ describe('SessionSupervisor idle eviction', () => {
     const managed = internals.sessions.get(parent.sessionId)!;
     managed.lastActivityAt = Date.now() - 31 * 60_000;
     internals.evictIdleSessions();
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-2560',
+      identity: parent,
+      text: 'queued',
+    });
     // 排除 lastActivityAt 刷新的影响，只验证「队列里有待处理命令」这一条
     managed.lastActivityAt = Date.now() - 31 * 60_000;
     hold.resolve();

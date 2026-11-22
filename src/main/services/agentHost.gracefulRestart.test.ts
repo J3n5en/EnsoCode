@@ -113,7 +113,7 @@ it('菜单重启：没有会话明确返回 no-session；有会话只发一次�
 
   // 换代窗口里的新命令不能投给正在退出的旧进程
   const before = fork.posted.length;
-  sendAgentCommand({ type: 'prompt', identity, text: 'queued' });
+  sendAgentCommand({ type: 'prompt', deliveryId: 'd-116', identity, text: 'queued' });
   expect(fork.posted).toHaveLength(before);
 
   fork.children[0].emit('exit', 0);
@@ -131,7 +131,7 @@ it('菜单重启：没有会话明确返回 no-session；有会话只发一次�
     .filter((command) => command.type === 'spawn-parent' || command.type === 'prompt');
   expect(replayed).toEqual([
     { ...spawn, resumeFile: sessionFile },
-    { type: 'prompt', identity, text: 'queued' },
+    { type: 'prompt', deliveryId: 'd-116', identity, text: 'queued' },
   ]);
 
   // 新一代就绪后可以再次重启
