@@ -11,6 +11,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionWorktree, WorktreeStatus } from '../../../shared/types/worktree';
+import { worktreeTrash } from './trash';
 
 function git(cwd: string, ...args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -242,9 +243,18 @@ export async function currentBranch(repoPath: string): Promise<string | null> {
 /**
  * 删除 worktree（强制，未提交改动由上层拦截确认）。分支保留。
  * 目录已被手动删除时仅清理 git 元数据。
+ * 给了托管根时先改名进 `<根>/.trash` 立即返回，空间后台释放；改名或注销失败才走原路。
  */
-export async function removeSessionWorktree(record: SessionWorktree): Promise<void> {
+export async function removeSessionWorktree(record: SessionWorktree, root?: string): Promise<void> {
   if (existsSync(record.path)) {
+    if (root) {
+      const retired = await worktreeTrash.retire({
+        repoPath: record.repoPath,
+        target: record.path,
+        root,
+      });
+      if (retired.status !== 'failed') return;
+    }
     try {
       await git(record.repoPath, 'worktree', 'remove', '--force', record.path);
     } catch {

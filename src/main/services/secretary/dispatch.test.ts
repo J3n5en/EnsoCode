@@ -359,6 +359,7 @@ function harness(
       projects: () => h.projects,
       rows: () => h.rows,
       dispatchFile: () => structuredClone(h.file),
+      removeWorktree: async () => ({ status: 'failed', reason: 'rename-failed' }),
       archive: (conversationId, at) => {
         h.archived.push({ conversationId, at });
       },

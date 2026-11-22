@@ -42,6 +42,7 @@ import {
   repoIsClean,
   worktreeStatus,
 } from '../services/worktree/service';
+import { worktreeTrash } from '../services/worktree/trash';
 import { getSourceAuthorityRegistry } from './agent';
 import { agentSessionIndex } from './sessionIndex';
 
@@ -172,7 +173,8 @@ export async function removeRegisteredWorktree(
       return;
     const release = lockWorktree(record.path);
     try {
-      if (ensureRegistry().bindings(record).length === 1) await removeSessionWorktree(record);
+      if (ensureRegistry().bindings(record).length === 1)
+        await removeSessionWorktree(record, worktreesRoot());
       ensureRegistry().delete(conversationId);
       return;
     } finally {
@@ -213,7 +215,7 @@ export async function createConversationWorktree(
       ...(base?.branch ? { branch: base.branch } : {}),
     });
     if (activeRoot(conversationId)?.projectId !== projectId) {
-      await removeSessionWorktree(record);
+      await removeSessionWorktree(record, worktreesRoot());
       return { ok: false, error: 'conversation authority changed' };
     }
     ensureRegistry().set(record);
@@ -427,6 +429,15 @@ function branchFailure(error: unknown): WorkspaceBranchFailure {
 
 export function registerWorktreeHandlers(): void {
   setWorkspaceBusyResolver(sessionWorktreeBusy);
+  // 上次没删完的回收目录：启动稍后在后台重试，不拖慢启动
+  setTimeout(() => {
+    void (async () => {
+      const { defaultCleanupWorktreeRoots } = await import('../services/secretary/cleanup');
+      const managed = path.join(app.getPath('userData'), 'worktrees');
+      const roots = new Set([worktreesRoot(), ...defaultCleanupWorktreeRoots(managed)]);
+      for (const root of roots) await worktreeTrash.sweep(root);
+    })().catch((error) => console.warn('[worktree-trash] startup sweep failed', error));
+  }, 30_000).unref?.();
   ipcMain.handle(
     IPC_CHANNELS.WORKTREE_BRANCHES,
     async (event, conversationId: unknown): Promise<WorkspaceBranchesResult> => {
