@@ -117,6 +117,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import {
   canShowConversationFork,
   canShowConversationRewind,
+  forkDepth,
   resolveRewindConfirm,
   userIndexFromEndForTurnKey,
 } from '@/stores/sessions/conversationRewind';
@@ -1878,13 +1879,18 @@ function canRewindDisplayedSession(
 const userActionClass =
   'flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity hover:text-foreground';
 
-/** 分叉入口：与回退并列；idle 的 root 显示，冷会话点击时由 store 先唤醒 */
+/** 分叉入口：与回退并列；idle 且分支层级未到上限时显示，冷会话点击时由 store 先唤醒 */
 function ForkButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
   const host = useChatHost();
-  const canFork = useSessionsStore((state) =>
-    canShowConversationFork(displayedConversation(state), host)
-  );
+  const canFork = useSessionsStore((state) => {
+    const conversation = displayedConversation(state);
+    return canShowConversationFork(
+      conversation,
+      host,
+      conversation ? forkDepth(state.conversations, conversation.id) : 1
+    );
+  });
   if (!canFork) return null;
   return (
     <button

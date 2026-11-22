@@ -4,6 +4,8 @@ import {
   canShowConversationRewind,
   canWakeConversationForRewind,
   extractRewindDraft,
+  forkDepth,
+  MAX_FORK_DEPTH,
   resolveRewindConfirm,
   rewindKeepCount,
   rewindWorkerPhase,
@@ -56,6 +58,13 @@ describe('canShowConversationRewind', () => {
 
   it('已 spawn 的 coworker 仍显示', () => {
     expect(canShowConversationRewind(root({ started: true, parentId: 'parent' }))).toBe(true);
+  });
+
+  it('分支会话（热/冷）显示回退', () => {
+    expect(canShowConversationRewind(root({ forkedFromConversationId: 'origin' }))).toBe(true);
+    expect(
+      canShowConversationRewind(root({ started: true, forkedFromConversationId: 'origin' }))
+    ).toBe(true);
   });
 
   it('远程宿主关闭回退时不显示', () => {
@@ -118,6 +127,41 @@ describe('canShowConversationFork', () => {
     expect(canShowConversationFork(root(), { canRewind: true, canFork: false })).toBe(false);
     expect(canShowConversationFork(root(), { canRewind: false })).toBe(false);
     expect(canShowConversationFork(root(), { canRewind: true })).toBe(true);
+  });
+
+  it('层级未到上限显示，到第 3 层不显示', () => {
+    expect(MAX_FORK_DEPTH).toBe(3);
+    expect(canShowConversationFork(root({ started: true }), null, 1)).toBe(true);
+    expect(canShowConversationFork(root({ started: true }), null, 2)).toBe(true);
+    expect(canShowConversationFork(root({ started: true }), null, 3)).toBe(false);
+    expect(canShowConversationFork(root(), null, 3)).toBe(false);
+  });
+});
+
+describe('forkDepth', () => {
+  it('沿 forkedFrom 链计层：root 为 1', () => {
+    const conversations = {
+      root: {},
+      second: { forkedFromConversationId: 'root' },
+      third: { forkedFromConversationId: 'second' },
+    };
+    expect(forkDepth(conversations, 'root')).toBe(1);
+    expect(forkDepth(conversations, 'second')).toBe(2);
+    expect(forkDepth(conversations, 'third')).toBe(3);
+    expect(forkDepth(conversations, 'unknown')).toBe(1);
+  });
+
+  it('来源会话已删除时仍计入该层', () => {
+    expect(forkDepth({ orphan: { forkedFromConversationId: 'deleted' } }, 'orphan')).toBe(2);
+  });
+
+  it('成环时终止', () => {
+    expect(forkDepth({ self: { forkedFromConversationId: 'self' } }, 'self')).toBe(1);
+    const loop = {
+      a: { forkedFromConversationId: 'b' },
+      b: { forkedFromConversationId: 'a' },
+    };
+    expect(forkDepth(loop, 'a')).toBe(2);
   });
 });
 

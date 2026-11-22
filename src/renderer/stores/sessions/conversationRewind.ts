@@ -29,6 +29,23 @@ export interface ForkHost extends RewindHost {
   canFork?: boolean;
 }
 
+/** 分支层级上限：root 为第 1 层，每层分支都是一份完整上下文副本 */
+export const MAX_FORK_DEPTH = 3;
+
+/** 沿 forkedFrom 链计层；来源已删除仍计入该层，成环时停在重复节点前 */
+export function forkDepth(
+  conversations: Readonly<Record<string, { forkedFromConversationId?: string } | undefined>>,
+  conversationId: string
+): number {
+  const seen = new Set([conversationId]);
+  let parent = conversations[conversationId]?.forkedFromConversationId;
+  while (parent && !seen.has(parent)) {
+    seen.add(parent);
+    parent = conversations[parent]?.forkedFromConversationId;
+  }
+  return seen.size;
+}
+
 export function canWakeConversationForRewind(conversation: ConversationRewindView): boolean {
   return (
     !conversation.started &&
@@ -55,12 +72,14 @@ export function canShowConversationRewind(
   return canWakeConversationForRewind(conversation);
 }
 
-/** 分支入口：热主会话需 idle 且非 spawning；未激活的冷主会话由 store 先唤醒再分叉 */
+/** 分支入口：热主会话需 idle 且非 spawning；未激活的冷主会话由 store 先唤醒再分叉；层级到上限不显示 */
 export function canShowConversationFork(
   conversation: ConversationRewindView | null | undefined,
-  host?: ForkHost | null
+  host?: ForkHost | null,
+  depth = 1
 ): boolean {
   if (host && (!host.canRewind || host.canFork === false)) return false;
+  if (depth >= MAX_FORK_DEPTH) return false;
   if (!conversation || conversation.parentId || conversation.historyOnly) return false;
   if (conversation.status !== 'idle') return false;
   if (conversation.started) return !conversation.spawning;

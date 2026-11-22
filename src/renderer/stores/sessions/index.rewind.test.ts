@@ -953,4 +953,78 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
     expect(agentFork).not.toHaveBeenCalled();
     expect(sessionsModule.useSessionsStore.getState().conversations.forked).toBeUndefined();
   });
+
+  describe('嵌套分支最多 3 层', () => {
+    function seedLineage(
+      lineage: Record<string, string | undefined>,
+      overrides: Record<string, unknown> = {}
+    ) {
+      sessionsModule.useSessionsStore.setState((state) => {
+        const base = {
+          ...state.conversations.parent,
+          started: true,
+          spawning: false,
+          status: 'idle' as const,
+          generation: 'g1',
+        };
+        const conversations = { ...state.conversations };
+        for (const [id, forkedFrom] of Object.entries(lineage)) {
+          conversations[id] = {
+            ...base,
+            id,
+            forkedFromConversationId: forkedFrom,
+            ...overrides,
+          };
+        }
+        return { conversations };
+      });
+    }
+
+    beforeEach(() => {
+      agentFork.mockClear();
+      nextConversationId = 'forked';
+    });
+
+    it('root 与第 2 层可以分支，第 3 层不能', async () => {
+      seedLineage({ parent: undefined, second: 'parent', third: 'second' });
+      const store = sessionsModule.useSessionsStore.getState();
+      await expect(store.forkFromMessage('parent', 0)).resolves.toBe('forked');
+      nextConversationId = 'forked-2';
+      await expect(store.forkFromMessage('second', 0)).resolves.toBe('forked-2');
+      nextConversationId = 'forked-3';
+      await expect(store.forkFromMessage('third', 0)).resolves.toBe(null);
+      await expect(store.forkFromEntry('third', 'entry-one')).resolves.toBe(null);
+      expect(agentFork).toHaveBeenCalledTimes(2);
+      expect(sessionsModule.useSessionsStore.getState().conversations['forked-3']).toBeUndefined();
+    });
+
+    it('forkedFrom 成环时不死循环，按已走过的层数判定', async () => {
+      seedLineage({ a: 'c', b: 'a', c: 'b', x: 'y', y: 'x' });
+      const store = sessionsModule.useSessionsStore.getState();
+      await expect(store.forkFromMessage('a', 0)).resolves.toBe(null);
+      await expect(store.forkFromMessage('x', 0)).resolves.toBe('forked');
+      expect(agentFork).toHaveBeenCalledTimes(1);
+    });
+
+    it('非 idle 或 historyOnly 的分支会话仍不能分支', async () => {
+      seedLineage({ second: 'parent' }, { status: 'running' });
+      await expect(
+        sessionsModule.useSessionsStore.getState().forkFromMessage('second', 0)
+      ).resolves.toBe(null);
+      seedLineage({ second: 'parent' }, { historyOnly: true });
+      await expect(
+        sessionsModule.useSessionsStore.getState().forkFromMessage('second', 0)
+      ).resolves.toBe(null);
+      expect(agentFork).not.toHaveBeenCalled();
+    });
+
+    it('分支会话可以回退，回退后仍保留分支来源', () => {
+      seedLineage({ second: 'parent' }, { messages: rewindMessages() });
+      sessionsModule.useSessionsStore.getState().rewind('second', 0, false);
+      expect(agentRewind).toHaveBeenCalledWith('second', 'entry-two', false);
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations.second.forkedFromConversationId
+      ).toBe('parent');
+    });
+  });
 });
