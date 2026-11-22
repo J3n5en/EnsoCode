@@ -118,6 +118,25 @@ describe('agent control tool protocol', () => {
         response: { ok: true, value: { runId: 'run-1' } },
       })
     ).not.toBeNull();
+    // 找不到 Run / Agent 的细分错误码要能过 worker 边界，否则模型只看到协议错误
+    for (const code of ['restart-lost', 'other-owner', 'not-found']) {
+      expect(
+        parseAgentCommand({
+          type: 'agent-control-result',
+          identity: parent,
+          requestId: 'rpc-1',
+          response: { ok: false, code, error: 'why and what next' },
+        })
+      ).not.toBeNull();
+    }
+    expect(
+      parseAgentCommand({
+        type: 'agent-control-result',
+        identity: parent,
+        requestId: 'rpc-1',
+        response: { ok: false, code: 'made-up', error: 'x' },
+      })
+    ).toBeNull();
     expect(parseAgentWorkerEvent({ ...invoke, identity: { sessionId: 'parent' } })).toBeNull();
     expect(parseAgentWorkerEvent({ ...invoke, requestId: '' })).toBeNull();
     expect(parseAgentCommand({ ...invoke, type: 'agent-control-result' })).toBeNull();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSubagentReceipt } from './subagentReceipt';
+import { parseSubagentReceipt, subagentErrorReason } from './subagentReceipt';
 
 const json = (value: object) => JSON.stringify(value, null, 2);
 const run = (over: Record<string, unknown> = {}) => ({
@@ -179,5 +179,23 @@ describe('parseSubagentReceipt', () => {
     ).toBeNull();
     expect(parseSubagentReceipt('list', json({ agents: [{ mode: 'task' }] }))).toBeNull();
     expect(parseSubagentReceipt('list', json({ agentId: 'agent-a' }))).toBeNull();
+  });
+});
+
+describe('subagentErrorReason', () => {
+  it('找不到 Run / Agent 的报错按码给可读说明，不露裸码', () => {
+    expect(subagentErrorReason('restart-lost: Run r was started before EnsoCode restarted.')).toBe(
+      'This subagent was started before EnsoCode restarted, and its record was lost in the restart'
+    );
+    expect(subagentErrorReason('other-owner: Run r belongs to a different conversation')).toMatch(
+      /another conversation/
+    );
+    expect(subagentErrorReason('not-found: No Run with id r exists')).toMatch(/no subagent/);
+  });
+
+  it('未登记的码与非错误文本返回 null，由调用方显示原文', () => {
+    expect(subagentErrorReason('invalid subagent parameters: wait requires runId')).toBeNull();
+    expect(subagentErrorReason('runtime-unavailable: boom')).toBeNull();
+    expect(subagentErrorReason(undefined)).toBeNull();
   });
 });
