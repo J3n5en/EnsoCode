@@ -41,12 +41,24 @@ vi.mock('./renderers', async (importOriginal) => ({
 vi.mock('../ipc/settings', () => ({ readSettings: () => null }));
 vi.mock('./chatModels', () => ({
   setChatModelProgressSink: vi.fn(),
+  setChatSlotReleaser: vi.fn(),
   listChatModels: vi.fn(() => []),
   startChatModelDownload: vi.fn(async () => false),
   cancelChatModelDownload: vi.fn(() => false),
   deleteChatModel: vi.fn(() => false),
 }));
 vi.mock('./llama/runtime', () => ({ acquireModel: vi.fn(), releaseModel: vi.fn(async () => {}) }));
+// 测试进程即记忆服务：op 分发直调核心，utilityProcess 不进场
+vi.mock('./memoryHost', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./memoryHost')>();
+  const { dispatchMemoryOp } = await import('../../memoryService/ops');
+  return {
+    ...actual,
+    memoryServiceOp: (op: string, args?: unknown) => dispatchMemoryOp(op, args),
+    refreshMemoryEmbedding: (opts?: { reembed?: boolean }) =>
+      dispatchMemoryOp('reembed', { force: opts?.reembed !== false }),
+  };
+});
 
 import { createMemory, listEvolves } from './memory/store';
 import {
@@ -66,18 +78,29 @@ import {
   getMemoryEmbeddingError,
   getMemoryKgJobs,
   getMemoryReembedProgress,
+  initMemoryService,
   invokeMemory,
   memoryDatabase,
   refreshMemoryEmbedding,
   rootSessionId,
   runMemoryReconcileNow,
   scheduleMemoryDistill,
-  setMemoryChangeListener,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
   syncMemoryReconcileFromSettings,
-} from './memoryHost';
+} from './memoryServiceCore';
+
+/** 服务侧变更通知（生产走 postEvent → client 防抖广播；测试直接看回调） */
+let changeListener: (() => void) | null = null;
+function setMemoryChangeListener(listener: (() => void) | null): void {
+  changeListener = listener;
+  initMemoryService({
+    postEvent: (event) => {
+      if (event.type === 'changed') changeListener?.();
+    },
+  });
+}
 
 import {
   cancelEmbeddingModelDownload,
@@ -86,6 +109,13 @@ import {
   setEmbeddingProgressSink,
   startEmbeddingModelDownload,
 } from './memoryModels';
+
+initMemoryService({
+  paths: {
+    memoryRoot: path.join(userData, 'memory'),
+    sessionDir: path.join(userData, 'agent', 'sessions'),
+  },
+});
 
 afterAll(() => {
   closeMemoryDb();

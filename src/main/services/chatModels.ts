@@ -1,8 +1,7 @@
 import { rmSync } from 'node:fs';
 import path from 'node:path';
-import { app } from '@platform';
 import type { ChatModelDto, EmbeddingDownloadProgressDto } from '@shared/memory/dto';
-import { releaseLocalChatSlot } from './llama/chat';
+import { userDataPath } from './appPaths';
 import {
   type ChatModelSpec,
   chatModelDir,
@@ -38,7 +37,7 @@ export function __setChatModelsRootForTest(root: string | null): void {
 }
 
 function modelsRoot(): string {
-  return rootOverride ?? path.join(app.getPath('userData'), 'memory', 'chat-models');
+  return rootOverride ?? path.join(userDataPath(), 'memory', 'chat-models');
 }
 
 function modelDir(spec: ChatModelSpec): string {
@@ -127,6 +126,12 @@ export function cancelChatModelDownload(modelId: string): boolean {
   return true;
 }
 
+/** 持有模型槽的一侧（记忆服务）注入释放钩子；未注入时假定没有活模型，删文件即可 */
+let chatSlotReleaser: (() => Promise<unknown>) | null = null;
+export function setChatSlotReleaser(releaser: (() => Promise<unknown>) | null): void {
+  chatSlotReleaser = releaser;
+}
+
 /** 删除已下载权重；正在下载的先取消。必须等 KV/模型槽释放完再 rm，否则 Windows 上 mmap 会让删除失败。 */
 export async function deleteChatModel(modelId: string): Promise<boolean> {
   const spec = resolveChatModelSpec(modelId);
@@ -136,7 +141,7 @@ export async function deleteChatModel(modelId: string): Promise<boolean> {
   cancelChatModelDownload(modelId);
   try {
     await task?.settled;
-    await releaseLocalChatSlot();
+    await chatSlotReleaser?.();
     rmSync(modelDir(spec), { recursive: true, force: true });
     return true;
   } catch {

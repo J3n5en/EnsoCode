@@ -11,8 +11,9 @@ import {
   configureMemoryEmbedding,
   getMemoryEmbeddingError,
   getMemoryReembedProgress,
+  initMemoryService,
   invokeMemory,
-} from './memoryHost';
+} from './memoryServiceCore';
 
 const env = vi.hoisted(() => ({ userData: '' }));
 vi.mock('electron', () => ({ app: { getPath: () => env.userData } }));
@@ -38,6 +39,12 @@ async function seedClosedDb(content: string): Promise<number> {
 
 beforeEach(() => {
   env.userData = mkdtempSync(path.join(tmpdir(), 'enso-host-lazy-'));
+  initMemoryService({
+    paths: {
+      memoryRoot: path.join(env.userData, 'memory'),
+      sessionDir: path.join(env.userData, 'agent', 'sessions'),
+    },
+  });
 });
 afterEach(async () => {
   await awaitMemoryReembed();

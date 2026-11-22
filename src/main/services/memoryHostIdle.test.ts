@@ -15,9 +15,10 @@ import {
   closeMemoryDb,
   configureMemoryEmbedding,
   getMemoryEmbedder,
+  initMemoryService,
   memoryDatabase,
   syncMemoryEmbeddingFromSettings,
-} from './memoryHost';
+} from './memoryServiceCore';
 
 const env = vi.hoisted(() => ({ userData: '' }));
 vi.mock('electron', () => ({ app: { getPath: () => env.userData } }));
@@ -27,6 +28,12 @@ const settings = { memoryEmbeddingModel: spec.id, memoryEmbeddingAutoDownload: t
 beforeEach(() => {
   vi.useFakeTimers();
   env.userData = mkdtempSync(path.join(tmpdir(), 'enso-host-idle-'));
+  initMemoryService({
+    paths: {
+      memoryRoot: path.join(env.userData, 'memory'),
+      sessionDir: path.join(env.userData, 'agent', 'sessions'),
+    },
+  });
   const dir = path.join(env.userData, 'memory', 'models', embeddingModelDirName(spec));
   mkdirSync(dir, { recursive: true });
   const vector = Array(256).fill(0);

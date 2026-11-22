@@ -18,6 +18,7 @@ import {
   utilityProcess,
 } from 'electron';
 import agentWorkerPath from '../../agent/index?modulePath';
+import memoryWorkerPath from '../../memoryService/index?modulePath';
 import pluginHostPath from '../../pluginHost/index?modulePath';
 import type { DecodedImage, ProcessMetric } from '../platform/types';
 import { showSystemNotification } from './systemNotification';
@@ -28,6 +29,7 @@ export {
   agentWorkerPath,
   app,
   ipcMain,
+  memoryWorkerPath,
   net,
   pluginHostPath,
   powerMonitor,

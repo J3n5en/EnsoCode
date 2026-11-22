@@ -93,8 +93,8 @@ export function hasPackagedAddon(name: string): boolean {
 }
 
 async function defaultRoot(): Promise<string> {
-  const { app } = await import('@platform');
-  return path.join(app.getPath('userData'), 'llama-gpu-backends');
+  const { userDataPath } = await import('../appPaths');
+  return path.join(userDataPath(), 'llama-gpu-backends');
 }
 
 async function downloadGpuBackend(

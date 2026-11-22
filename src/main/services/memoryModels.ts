@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import path from 'node:path';
-import { app } from '@platform';
 import type { EmbeddingDownloadProgressDto, EmbeddingModelDto } from '@shared/memory/dto';
+import { userDataPath } from './appPaths';
 import {
   cancelModelDownload,
   downloadedBytes,
@@ -48,7 +48,7 @@ export function setEmbeddingProgressSink(next: ProgressSink | null): void {
 }
 
 function modelDir(spec: EmbeddingModelSpec): string {
-  return path.join(app.getPath('userData'), 'memory', 'models', embeddingModelDirName(spec));
+  return path.join(userDataPath(), 'memory', 'models', embeddingModelDirName(spec));
 }
 
 function toDto(spec: EmbeddingModelSpec): EmbeddingModelDto {

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { app, ipcMain } from '@platform';
+import { ipcMain } from '@platform';
 import { normalizeLocale } from '@shared/i18n';
 import {
   type ContactLang,
@@ -16,7 +15,6 @@ import type {
 } from '@shared/types/secretary';
 import { getExtensionPlugins, setPluginContactBridge } from '../services/extensionPlugins';
 import { redactSecrets } from '../services/memory/distill';
-import { listMemoriesForAdmin, openExistingMemoryDb } from '../services/memoryAdmin';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { createContactCommands } from '../services/secretary/contact/commands';
@@ -363,18 +361,13 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       schedules: async () => listSchedules(schedulePortsFor(ctx)),
       memories: async () => {
         const projectId = ctx.projectId;
-        const db = openExistingMemoryDb(path.join(app.getPath('userData'), 'memory', 'memory.db'));
-        if (!db || !projectId) return { titles: [], total: 0 };
-        try {
-          const result = listMemoriesForAdmin(db, {
-            spaceId: `proj:${projectId}`,
-            limit: 20,
-            offset: 0,
-          });
-          return { titles: result.items.map((item) => item.title), total: result.total };
-        } finally {
-          db.close();
-        }
+        if (!projectId) return { titles: [], total: 0 };
+        const { isMissingDb, memoryServiceOp } = await import('../services/memoryHost');
+        const result = await memoryServiceOp<
+          { items: { title: string }[]; total: number } | { missing: true }
+        >('list', { spaceId: `proj:${projectId}`, limit: 20, offset: 0 });
+        if (isMissingDb(result)) return { titles: [], total: 0 };
+        return { titles: result.items.map((item) => item.title), total: result.total };
       },
     });
     service = new ContactService(store, ports);

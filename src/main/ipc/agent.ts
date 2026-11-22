@@ -139,7 +139,6 @@ import {
   setBrowserFileRootResolver,
 } from '../services/browserFileRoot';
 import type { BrowserActor } from '../services/browserTabClaims';
-import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import { coldResumeReady, failColdResume, wakeColdRestartSession } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
@@ -157,7 +156,6 @@ import { listAllSessions, listProjectSessions } from '../services/extensionPlugi
 import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/externalFileReveal';
 import { searchFiles } from '../services/fileSearch';
 import { resolveLocalUnderCwd } from '../services/filesWorkspace';
-import { memoryCompleteFromSettings } from '../services/llama/chat';
 import { setSecretaryReportResolver } from '../services/localImageProtocol';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import { type Complete, redactSecrets } from '../services/memory/distill';
@@ -1245,17 +1243,14 @@ async function readRegisteredChildRun(
 }
 
 /**
- * 记忆蒸馏的 LLM 入口。设置为本地 GGUF 时走 llama.cpp；否则复用标题总结的远程回退链。
- * worker 不在线 / 本地权重未就绪返 null，让任务保留 pending 到下次开库续跑。
+ * 记忆服务的远程 LLM 补全入口（本地 GGUF chat 在服务进程内走 llama.cpp，不经 Main）。
+ * worker 不在线 / 无候选模型时返回 null：服务侧任务保留 pending 到下次开库续跑。
  */
 async function distillCompletion(): Promise<Complete | null> {
   const state = (
     readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
   )?.state;
-  return memoryCompleteFromSettings(state, {
-    modelsRoot: chatModelsRoot(),
-    remoteComplete: () => remoteDistillCompletion(state),
-  });
+  return remoteDistillCompletion(state);
 }
 
 async function remoteDistillCompletion(

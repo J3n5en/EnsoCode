@@ -42,14 +42,13 @@ function titleOf(row: Record<string, unknown> | undefined, fallback: string): st
 
 async function memoryCount(projectId: string | null): Promise<number> {
   if (!projectId) return 0;
-  const { listMemoriesForAdmin, openExistingMemoryDb } = await import('../memoryAdmin');
-  const db = openExistingMemoryDb(path.join(app.getPath('userData'), 'memory', 'memory.db'));
-  if (!db) return 0;
-  try {
-    return listMemoriesForAdmin(db, { spaceId: `proj:${projectId}`, limit: 1, offset: 0 }).total;
-  } finally {
-    db.close();
-  }
+  const { isMissingDb, memoryServiceOp } = await import('../memoryHost');
+  const result = await memoryServiceOp<{ total: number } | { missing: true }>('list', {
+    spaceId: `proj:${projectId}`,
+    limit: 1,
+    offset: 0,
+  });
+  return isMissingDb(result) ? 0 : result.total;
 }
 
 /** 删除前的提醒：它正在管的会话、待办、定时、联系方式绑定与记忆条数 */

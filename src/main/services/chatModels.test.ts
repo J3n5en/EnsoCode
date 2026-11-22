@@ -7,20 +7,17 @@ vi.mock('electron', () => ({
   app: { getPath: () => '/unused-user-data' },
 }));
 
-vi.mock('./llama/runtime', () => ({
-  releaseModel: vi.fn(async () => {}),
-}));
-
 import {
   __setChatModelsRootForTest,
   deleteChatModel,
   listChatModels,
+  setChatSlotReleaser,
   startChatModelDownload,
 } from './chatModels';
-import { releaseModel } from './llama/runtime';
 
 afterEach(() => {
   __setChatModelsRootForTest(null);
+  setChatSlotReleaser(null);
 });
 
 describe('chat model manager', () => {
@@ -75,7 +72,7 @@ describe('chat model manager', () => {
     writeFileSync(path.join(dir, '.ready'), '');
 
     let released = false;
-    vi.mocked(releaseModel).mockImplementationOnce(async () => {
+    setChatSlotReleaser(async () => {
       expect(existsSync(dir)).toBe(true);
       released = true;
     });
