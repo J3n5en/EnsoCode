@@ -41,11 +41,17 @@ export function FileImageViewer({
   useEffect(() => {
     void version;
     let alive = true;
-    setState({ status: 'loading' });
+    // 重新取图期间保留旧图，已点开的大图不退回「点击加载」
     resolveImage(rel).then(
       (dataUrl) => {
-        if (alive)
-          setState(dataUrl ? { status: 'ready', dataUrl, forced: false } : { status: 'error' });
+        if (!alive) return;
+        setState((prev) =>
+          !dataUrl
+            ? { status: 'error' }
+            : prev.status === 'ready' && prev.dataUrl === dataUrl
+              ? prev
+              : { status: 'ready', dataUrl, forced: prev.status === 'ready' && prev.forced }
+        );
       },
       () => {
         if (alive) setState({ status: 'error' });

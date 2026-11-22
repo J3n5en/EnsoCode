@@ -238,7 +238,11 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
         showDoc(rel);
         return;
       }
-      if (isImageRel(rel) && viewMode !== 'source') {
+      if (
+        isImageRel(rel) &&
+        viewMode !== 'source' &&
+        !pluginFileViewersFor(rel, fileViewersRef.current).some((viewer) => viewer.default)
+      ) {
         setOpenDocs((docs) => [
           ...docs,
           { rel, contents: '', draft: '', version: 0, dirty: false, conflict: false, image: true },

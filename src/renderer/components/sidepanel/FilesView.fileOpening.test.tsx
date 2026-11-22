@@ -2,6 +2,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, type ReactNode, useEffect, useMemo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setPluginFileViewers } from '../../plugins/fileViewers';
 import { IMAGE_INLINE_MAX_CHARS } from './FileImageViewer';
 import { FilesView } from './FilesView';
 
@@ -11,6 +12,7 @@ const harness = vi.hoisted(() => ({
   editors: [] as { focus: ReturnType<typeof vi.fn> }[],
   read: vi.fn(),
   readImage: vi.fn(),
+  onChange: null as ((event: { conversationId: string; rel: string }) => void) | null,
   t: (key: string) => key,
   state: {
     workspaceRevisionByConversation: {},
@@ -105,6 +107,9 @@ vi.mock('@/components/ui/context-menu', () => {
     ),
   };
 });
+vi.mock('../../plugins/PluginView', () => ({
+  PluginFrame: ({ title }: { title: string }) => <div data-viewer="plugin">{title}</div>,
+}));
 vi.mock('./FilesSearchPane', () => ({ FilesSearchPane: () => null }));
 vi.mock('./fileTreeMenu', () => ({
   isMarkdownRel: (rel: string) => /\.(md|markdown|mdx)$/i.test(rel),
@@ -146,7 +151,10 @@ beforeEach(() => {
         listDir: vi.fn(async () => ({ ok: true, entries: [] })),
         watchStart: vi.fn(async () => ({ ok: true })),
         watchStop: vi.fn(async () => ({ ok: true })),
-        onChange: () => vi.fn(),
+        onChange: (listener: NonNullable<typeof harness.onChange>) => {
+          harness.onChange = listener;
+          return vi.fn();
+        },
       },
     },
   });
@@ -161,6 +169,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   vi.unstubAllGlobals();
+  setPluginFileViewers([]);
 });
 
 describe('FilesView 文件链接预览', () => {
@@ -286,5 +295,45 @@ describe('FilesView 图片预览', () => {
     expect(load).toBeDefined();
     await act(async () => (load as HTMLButtonElement).click());
     expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
+  });
+
+  it('文件变更重新取图时不闪回加载态，已点开的大图保持显示', async () => {
+    const huge = `data:image/png;base64,${'A'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
+    harness.readImage.mockResolvedValue({ ok: true, dataUrl: huge });
+    await mount();
+    await openRel('big.jpg');
+    await act(async () =>
+      (buttonByText('Image is too large. Click to load.') as HTMLButtonElement).click()
+    );
+    let resolve: (value: unknown) => void = () => {};
+    harness.readImage.mockReturnValue(new Promise((done) => (resolve = done)));
+    await act(async () => harness.onChange?.({ conversationId: 'owner', rel: 'big.jpg' }));
+    expect(harness.readImage).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain('Loading...');
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
+    const next = `data:image/png;base64,${'B'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
+    await act(async () => resolve({ ok: true, dataUrl: next }));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(next);
+  });
+
+  it('插件为该图片后缀声明了默认查看器时仍按插件查看器打开', async () => {
+    setPluginFileViewers([
+      {
+        pluginId: 'drawio',
+        pluginName: 'Draw.io',
+        id: 'editor',
+        title: 'Draw.io',
+        entry: 'index.html',
+        extensions: ['.drawio.svg'],
+        default: true,
+      },
+    ]);
+    harness.read.mockResolvedValue({ ok: true, content: '<svg/>' });
+    await mount();
+    await openRel('docs/flow.drawio.svg');
+    expect(container.querySelector('[data-viewer="plugin"]')?.textContent).toBe('Draw.io');
+    expect(harness.readImage).not.toHaveBeenCalled();
+    await openRel('docs/plain.svg');
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(PNG_DATA_URL);
   });
 });
