@@ -46,7 +46,6 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # 仓库没有在 main 上跑测试的工作流：构建前先过 typecheck 与 lint
   verify:
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'

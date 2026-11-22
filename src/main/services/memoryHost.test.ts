@@ -89,6 +89,7 @@ import {
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
   syncMemoryReconcileFromSettings,
+  warmMemoryService,
 } from './memoryServiceCore';
 
 /** 服务侧变更通知（生产走 postEvent → client 防抖广播；测试直接看回调） */
@@ -197,9 +198,15 @@ describe('memoryHost embedding 接线', () => {
     const other = await capture('kafka');
     expect((await search('cache')).results).toEqual([]);
     expect((await search('kafka')).results.map((r) => r.id)).toEqual([other.id]);
-    // 切回真模型 id：旧向量仍可用；none 期间写的 kafka 行没向量，查同义词不命中
+    // 切回真模型 id：旧向量仍可用；none 期间写的 kafka 行由后台重嵌补上向量（与 cache 正交，相关度 0）。
+    // 先等重嵌落定再查：否则结果取决于查询与重嵌谁先排进 embedding 队列
     configureMemoryEmbedding({ modelId: spec.id });
-    expect((await search('cache')).results.map((r) => r.id)).toEqual([memory.id]);
+    await getMemoryEmbedder();
+    await awaitMemoryReembed();
+    expect((await search('cache')).results.map((r) => [r.id, r.relevance])).toEqual([
+      [memory.id, 1],
+      [other.id, 0],
+    ]);
     rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -232,6 +239,8 @@ describe('memoryHost 滚动重嵌触发点（3b Major 2）', () => {
         results: { id: string }[];
       }>;
     await search();
+    // 检索不等模型加载（只起加载）；等 embedder 就绪后它触发的重嵌
+    await getMemoryEmbedder();
     await awaitMemoryReembed();
     // 库内还有前面测试留下的、小模型词表覆盖不到的行（嵌入为 null 计 failed），只断言任务跑过且结束
     const job = getMemoryReembedProgress();
@@ -954,6 +963,66 @@ describe('memoryHost embedding 配置与生命周期', () => {
     if (after) await after.embed('private after removal', 'query');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(after).toBeNull();
+  });
+
+  it('模型冷加载中：并发首查不等模型，先回全文结果并标注向量未就绪，模型只加载一次', async () => {
+    const gguf = loadGguf();
+    configureMemoryEmbedding({ modelId: gguf.modelId, autoDownload: false });
+    try {
+      const db = memoryDatabase();
+      const created = await createMemory(db, {
+        content: 'zzcoldstart probe note',
+        spaceId: 'global',
+      });
+      const id = created.status === 'inserted' ? created.memory.id : '';
+      const search = () =>
+        invokeMemory(
+          'search',
+          { query: 'zzcoldstart', limit: 5, spaceId: 'global' },
+          null
+        ) as Promise<{
+          results: { id: string }[];
+          vector?: string;
+          note?: string;
+        }>;
+      const started = Date.now();
+      const [a, b] = await Promise.all([search(), search()]);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      for (const r of [a, b]) {
+        expect(r.results.map((x) => x.id)).toEqual([id]);
+        expect(r.vector).toBe('warming');
+        expect(r.note).toBeTruthy();
+      }
+      expect(acquireModel).toHaveBeenCalledTimes(1);
+      gguf.resolve(gguf.model);
+      expect(await getMemoryEmbedder()).not.toBeNull();
+      expect((await search()).vector).toBeUndefined();
+      expect(acquireModel).toHaveBeenCalledTimes(1);
+    } finally {
+      gguf.resolve(gguf.model);
+    }
+  });
+
+  it('预热：库存在时开库、加载模型并跑一次查询向量；库不存在时什么都不做', async () => {
+    const memoryDir = path.join(userData, 'memory');
+    for (const f of readdirSync(memoryDir)) {
+      if (f.startsWith('memory.db')) rmSync(path.join(memoryDir, f), { force: true });
+    }
+    const gguf = loadGguf();
+    configureMemoryEmbedding({ modelId: gguf.modelId, autoDownload: false });
+    expect(await warmMemoryService()).toMatchObject({ db: false, embedder: false });
+    expect(existsSync(path.join(memoryDir, 'memory.db'))).toBe(false);
+    expect(acquireModel).not.toHaveBeenCalled();
+
+    // 模型为 none 时建库，不触发加载；再切回 GGUF 让预热去加载
+    configureMemoryEmbedding({ modelId: 'none' });
+    memoryDatabase();
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: gguf.modelId });
+    const pending = warmMemoryService();
+    gguf.resolve(gguf.model);
+    expect(await pending).toMatchObject({ db: true, embedder: true });
+    expect(gguf.context.getEmbeddingFor).toHaveBeenCalled();
   });
 
   it('无关设置与未选中的服务变更不清缓存、不释放已加载 GGUF', async () => {

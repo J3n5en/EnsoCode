@@ -38,6 +38,7 @@
 | [history-paging-stuck-at-top.md](history-paging-stuck-at-top.md) | 长会话上滑翻一两页就停，顶部钉着「上下文已压缩」；或每翻一页跳回底部 |
 | [coworker-adopt-phantom-run.md](coworker-adopt-phantom-run.md) | subagent 雇的 coworker 回复完了 Run 仍一直「进行中」，send 带 wait:true 永远不返回；单测全绿 |
 | [virtuoso-scrolltoindex-index-space.md](virtuoso-scrolltoindex-index-space.md) | 导航条/搜索跳转点哪条都跳到最新一条：scrollToIndex 误叠 firstItemIndex 原点被钳到末行 |
+| [memory-search-cold-start-timeout.md](memory-search-cold-start-timeout.md) | 新版首次 memory_search 连续 15s 超时；之后 project 范围秒回、默认 all 范围仍要十几秒 |
 | [coworker-restart-adopt.md](coworker-restart-adopt.md) | 重启后 coworker 的 tab 还在，subagent list 却是空的，给原 agentId 发消息报 not-found |
 | [pi-project-trust-default.md](pi-project-trust-default.md) | 无报错；打开带 `.pi/extensions` 或项目包的仓库，其代码即在 worker 里运行、缺包还会自动安装 |
 | [koffi-view-electron-sandbox.md](koffi-view-electron-sandbox.md) | Windows `ax()`/`getState` 报 AX_WORKER_EXITED；单测和 Node 探针全绿，只在 Electron 里崩 |

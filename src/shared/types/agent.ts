@@ -710,6 +710,10 @@ export type AgentServiceErrorCode =
   | 'forbidden'
   | 'mode-disabled'
   | 'not-found'
+  /** id 属于 Main 重启前：内存里的 Run / Agent 记录已丢 */
+  | 'restart-lost'
+  /** id 属于别的会话或别的 agent */
+  | 'other-owner'
   | 'invalid-state'
   | 'run-mismatch'
   | 'runtime-unavailable';
@@ -915,6 +919,8 @@ function parseAgentControlToolResponse(value: unknown): AgentControlToolResponse
     'forbidden',
     'mode-disabled',
     'not-found',
+    'restart-lost',
+    'other-owner',
     'invalid-state',
     'run-mismatch',
     'runtime-unavailable',

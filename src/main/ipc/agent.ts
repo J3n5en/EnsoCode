@@ -128,6 +128,7 @@ import {
   summarizeConversationTitle,
   withdrawSteerSession,
 } from '../services/agentHost';
+import { fileAgentRunLedger } from '../services/agentRunLedger';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
 import { backgroundTaskStates, type ObservedTask } from '../services/backgroundTaskTracker';
@@ -1891,6 +1892,7 @@ export function registerAgentHandlers(): void {
   });
 
   agentService = new AgentService({
+    ledger: fileAgentRunLedger(path.join(app.getPath('userData'), 'agent', 'subagent-runs.json')),
     notify: (context, text, urgent) => {
       // 投给父会话当前 generation：换代前派出的 Run 结束后照样通知接续的会话
       const identity = rootIdentity(context.owner.ownerId);
@@ -2041,6 +2043,9 @@ export function registerAgentHandlers(): void {
     }
     if (workerEvent.type === 'parent-ready') {
       coldResumeReady(workerEvent.identity.sessionId);
+      // 重启 / worker 退出打断、父会话还不知情的子代理 Run：父会话回来后补一次通知
+      const context = agentControlContext(workerEvent.identity);
+      if (context) agentService?.recoverOwner(context);
       sourceAuthority?.markReady(
         workerEvent.identity.sessionId,
         workerEvent.sessionFile,

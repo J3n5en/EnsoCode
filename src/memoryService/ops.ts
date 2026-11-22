@@ -159,6 +159,8 @@ export async function dispatchMemoryOp(op: string, args: unknown): Promise<unkno
     case 'await-embedding-close':
       await core.awaitMemoryEmbeddingClose();
       return true;
+    case 'warmup':
+      return core.warmMemoryService();
     case 'forgetting-run': {
       const summary = core.runMemoryForgettingNow();
       core.notifyMemoryChanged();

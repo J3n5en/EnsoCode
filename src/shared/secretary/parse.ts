@@ -560,6 +560,13 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (sentAt !== undefined) record.sentAt = sentAt;
   const reopenedAt = time(value.reopenedAt);
   if (reopenedAt !== undefined) record.reopenedAt = reopenedAt;
+  if (isObject(value.failurePending) && time(value.failurePending.at) !== undefined) {
+    const detail = text(value.failurePending.detail);
+    record.failurePending = {
+      at: time(value.failurePending.at) as number,
+      ...(detail ? { detail } : {}),
+    };
+  }
   const manualUndoneAt = time(value.manualUndoneAt);
   if (manualUndoneAt !== undefined) record.manualUndoneAt = manualUndoneAt;
   if (
