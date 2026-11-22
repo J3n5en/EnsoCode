@@ -81,7 +81,12 @@ export function presentToolCalls(
 export function cardPlainText(card: ToolCardView): string {
   const parts = [card.title, card.status?.label ?? ''];
   for (const block of card.blocks) {
-    if (block.kind === 'markdown' || block.kind === 'note' || block.kind === 'error')
+    if (
+      block.kind === 'markdown' ||
+      block.kind === 'note' ||
+      block.kind === 'error' ||
+      block.kind === 'prompt'
+    )
       parts.push(block.text);
     else if (block.kind === 'session') parts.push(block.label);
     else if (block.kind === 'kv' || block.kind === 'diff') {
@@ -312,8 +317,11 @@ register('session_send', (call, ctx) => {
   const steer = str(args?.mode) === 'steer';
   const title = ctx.t('Send message {{title}}', { title: sessionLabel(id, ctx) });
   const blocks: ToolCardBlock[] = [];
+  const goal = str(args?.goal);
+  if (goal)
+    blocks.push({ kind: 'kv', rows: [{ label: ctx.t('Goal'), value: goal, display: 'long' }] });
   const message = str(args?.message);
-  if (message) blocks.push({ kind: 'markdown', text: message, collapsed: longText(message) });
+  if (message) blocks.push({ kind: 'prompt', label: ctx.t('Message'), text: message });
   const error = errorText(call, ctx);
   if (error) blocks.unshift({ kind: 'error', text: error });
   let status: ToolCardStatus | undefined;
@@ -489,7 +497,13 @@ function dispatchCard(
         args?.worktree === true ? ctx.t('Run in a worktree') : ctx.t('Run in the project checkout'),
     },
     ...(str(args?.checkout)
-      ? [{ label: ctx.t('Checkout'), value: str(args?.checkout) as string }]
+      ? [
+          {
+            label: ctx.t('Checkout'),
+            value: str(args?.checkout) as string,
+            display: 'path' as const,
+          },
+        ]
       : []),
     ...(str(args?.baseRef) ? [{ label: ctx.t('Base'), value: str(args?.baseRef) as string }] : []),
     ...(str(args?.branch)
@@ -498,7 +512,10 @@ function dispatchCard(
     ...(Array.isArray(args?.after) && args.after.length > 0
       ? [{ label: ctx.t('After'), value: (args.after as unknown[]).map(String).join(', ') }]
       : []),
-    ...(str(args?.goal) ? [{ label: ctx.t('Goal'), value: str(args?.goal) as string }] : []),
+    ...(str(args?.model) ? [{ label: ctx.t('Model'), value: str(args?.model) as string }] : []),
+    ...(str(args?.goal)
+      ? [{ label: ctx.t('Goal'), value: str(args?.goal) as string, display: 'long' as const }]
+      : []),
   ];
   const prompt = str(args?.prompt);
   const error = errorText(call, ctx);
@@ -506,8 +523,9 @@ function dispatchCard(
   const blocks: ToolCardBlock[] = [
     ...(error ? [{ kind: 'error' as const, text: error }] : []),
     ...(rows.length > 0 ? [{ kind: 'kv' as const, rows }] : []),
-    // 提示词在详情里再折一层，默认只留一行
-    ...(prompt ? [{ kind: 'markdown' as const, text: prompt, collapsed: true }] : []),
+    ...(prompt
+      ? [{ kind: 'prompt' as const, label: ctx.t('Dispatch instructions'), text: prompt }]
+      : []),
     ...(created ? [created] : []),
   ];
   const key = mode === 'dispatch' ? 'Dispatch session {{title}}' : 'Create session {{title}}';

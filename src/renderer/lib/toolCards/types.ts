@@ -31,7 +31,10 @@ export type ToolCardStatus = {
 
 export type ToolCardBlock =
   | { kind: 'markdown' | 'note' | 'error'; text: string; collapsed?: boolean }
-  | { kind: 'kv'; rows: { label: string; value: string }[] }
+  /** 派活指令与发给会话的消息：自带小标题，默认折叠，展开后在框内滚动 */
+  | { kind: 'prompt'; label: string; text: string }
+  /** display：path 单行截断、悬停看全文；long 默认截断、可展开 */
+  | { kind: 'kv'; rows: { label: string; value: string; display?: 'path' | 'long' }[] }
   | { kind: 'diff'; rows: { label: string; before: string; after: string }[] }
   | {
       kind: 'list';
