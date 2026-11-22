@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { childProfileShell, childProfileToolIds } from '@shared/childProfileTools';
+import { toolSchemaForModel } from '@shared/providers/antigravity';
 import { DEFAULT_PERSONA_PROMPT } from '@shared/systemPrompt';
+import { geminiSchemaIssues, portableSchemaIssues } from '@shared/tools/portableSchema';
 import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -567,6 +569,95 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       await supervisor.shutdown();
     }
   );
+
+  it('各会话形态注册的工具参数 schema 都可移植，经 Gemini 清洗后仍合法', async () => {
+    const variants: Array<Partial<Extract<AgentCommand, { type: 'spawn-parent' }>>> = [
+      { editMode: 'replace', exploreFoldEnabled: true, compactStrategy: 'continuous-memory' },
+      {
+        editMode: 'apply_patch',
+        botMode: true,
+        botGroupTasks: true,
+        botRoutines: true,
+        botDelegationTask: true,
+      },
+      { secretaryMode: true },
+    ];
+    for (const extra of variants) {
+      const events: AgentWorkerEvent[] = [];
+      const supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: '/tmp/agent',
+        sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-schema-')),
+      });
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+        ...extra,
+      });
+      await waitFor(events, 'parent-ready');
+      if (extra.editMode === 'replace') {
+        supervisor.handleCommand({
+          type: 'spawn-child',
+          identity: { ...child, typeKey: 'builtin:worker' },
+          cwd: '/workspace',
+          config: {
+            typeKey: 'builtin:worker',
+            displayName: 'worker',
+            description: 'Worker',
+            spawnSpecId: 'spawn-worker',
+            systemPrompt: 'worker role',
+            model,
+            tools: 'all',
+            skillPaths: [],
+            skillBindingIds: [],
+            mcpServers: [],
+            mcpBindingIds: [],
+            systemPromptHash: 'worker-hash',
+          },
+        });
+        await waitFor(events, 'child-ready');
+      }
+      await supervisor.shutdown();
+    }
+    const tools: ToolDefinition[] = [];
+    const pi = {
+      registerTool: (tool: ToolDefinition) => tools.push(tool),
+      on: () => undefined,
+      getActiveTools: () => [],
+      getAllTools: () => tools,
+      appendEntry: () => undefined,
+      sendMessage: () => undefined,
+      getSettings: () => ({}),
+    };
+    for (const options of mocks.loaderOptions) {
+      const factories = (options.extensionFactories ?? []) as Array<{
+        factory?: (api: typeof pi) => void;
+      }>;
+      for (const extension of factories) extension.factory?.(pi);
+    }
+    for (const [options] of mocks.createAgentSession.mock.calls) {
+      tools.push(...((options as { customTools?: ToolDefinition[] }).customTools ?? []));
+    }
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'subagent',
+        'codemode',
+        'recall',
+        'edit',
+        'apply_patch',
+        'delegate',
+        'session_send',
+      ])
+    );
+    expect(
+      tools.flatMap((tool) => [
+        ...portableSchemaIssues(tool.parameters, tool.name),
+        ...geminiSchemaIssues(toolSchemaForModel('gemini', tool.parameters), tool.name),
+      ])
+    ).toEqual([]);
+  });
 
   it('内置工具热开关：禁用的只注册不激活，set-builtin-tools 增删激活集并联动 plan', async () => {
     const events: AgentWorkerEvent[] = [];

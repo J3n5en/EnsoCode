@@ -1,4 +1,6 @@
 import { normalizeContext } from '@earendil-works/pi-ai';
+import { MCP_SCHEMA_ZOO } from '@shared/tools/mcpSchema.fixture';
+import { geminiSchemaIssues } from '@shared/tools/portableSchema';
 import { OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -483,6 +485,13 @@ describe('expandSchemaRefs', () => {
       $defs: { S: { type: 'string', description: '原始' } },
     });
     expect(out).toMatchObject({ properties: { p: { type: 'string', description: '覆盖' } } });
+  });
+
+  it('convertTools 把 MCP 写法合集清洗成 Gemini 能接受的 schema', () => {
+    const declaration = convertTools([
+      { name: 'mcp', description: 'd', parameters: MCP_SCHEMA_ZOO as never },
+    ])?.[0]?.functionDeclarations[0] as { parameters: unknown } | undefined;
+    expect(geminiSchemaIssues(declaration?.parameters, 'mcp')).toEqual([]);
   });
 
   it('convertTools 输出的 parameters 不含 $ref/$defs/definitions', () => {
