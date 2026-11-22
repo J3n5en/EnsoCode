@@ -1,4 +1,5 @@
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { toolParameters } from '@shared/tools/portableSchema';
 import type {
   AgentControlToolRequest,
   AgentControlToolResponse,
@@ -282,7 +283,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
           ]
         : []),
     ],
-    parameters: {
+    parameters: toolParameters({
       type: 'object',
       properties: {
         operation: {
@@ -360,7 +361,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       },
       required: ['operation'],
       additionalProperties: false,
-    } as unknown as ToolDefinition['parameters'],
+    }),
     prepareArguments: normalizeSubagentArgs as unknown as ToolDefinition['prepareArguments'],
     async execute(toolCallId, params, signal) {
       const input = normalizeSubagentArgs(params) as Record<string, unknown>;
