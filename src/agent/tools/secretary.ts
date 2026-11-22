@@ -309,12 +309,13 @@ export function normalizeSecretaryParams(op: SecretaryOp, raw: unknown): unknown
     const value = params[key];
     if (typeof value === 'string') params[key] = value.trim();
   }
-  // attachments 的空白条目没有语义，丢掉；丢完为空下面按没传删键，免得被 minItems / minLength 整次拒绝
-  if (spec.keys.includes('attachments') && Array.isArray(params.attachments)) {
-    const kept = params.attachments.filter(
-      (entry: unknown) => typeof entry !== 'string' || entry.trim() !== ''
-    );
-    params.attachments = kept.length > 0 ? kept : undefined;
+  // 这几个列表的空白条目没有语义（Main 本来就跳过），丢掉；丢完为空下面按没传删键，免得被 minItems / minLength 整次拒绝。
+  // ids 丢空后 Main 报「缺 ids」，不会变成全部；visibleProjectIds 这类空数组有含义的不在此列
+  for (const key of ['attachments', 'ids', 'after']) {
+    const value = params[key];
+    if (!spec.keys.includes(key) || !Array.isArray(value)) continue;
+    const kept = value.filter((entry: unknown) => typeof entry !== 'string' || entry.trim() !== '');
+    params[key] = kept.length > 0 ? kept : undefined;
   }
   for (const key of spec.keys)
     if (params[key] === null || params[key] === undefined || params[key] === '') delete params[key];
