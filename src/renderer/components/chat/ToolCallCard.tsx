@@ -207,30 +207,91 @@ function CardDetails({
 }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState(false);
-  return (
-    <div
-      data-enso="tool-card-body"
-      data-framed={framed ? 'true' : undefined}
-      className={
-        framed
-          ? cn(
-              'mt-0.5 mb-1.5 min-w-0 space-y-1 rounded-lg border border-border/60 border-l-2 border-l-muted-foreground/30 bg-muted/25 px-2.5 py-2 text-[12px]',
-              !nested && 'ml-5'
-            )
-          : 'space-y-1 py-0.5 pl-5 text-[12px]'
-      }
+  const rawToggle = (
+    <button
+      type="button"
+      data-enso="tool-card-raw"
+      aria-expanded={raw}
+      onClick={() => setRaw((value) => !value)}
+      className="text-[11px] text-muted-foreground hover:text-foreground"
     >
-      <div className={framed ? 'min-w-0 space-y-2' : 'space-y-1'}>
-        {card.blocks.map((block, index) => (
-          <Block
-            // biome-ignore lint/suspicious/noArrayIndexKey: 块顺序随工具结果整体替换
-            key={`${block.kind}-${index}`}
-            block={block}
-            known={known}
-            onOpen={onOpen}
-          />
-        ))}
+      {t('View raw data')}
+    </button>
+  );
+  const rawBody = raw ? (
+    <div className={cn('mt-1 space-y-1', framed && 'max-h-60 overflow-auto')}>
+      {card.rawArgs && (
+        <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {card.rawArgs}
+        </pre>
+      )}
+      {card.rawOutput && (
+        <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {card.rawOutput}
+        </pre>
+      )}
+    </div>
+  ) : null;
+  const renderBlock = (block: ToolCardBlock, index: number) => (
+    <Block key={`${block.kind}-${index}`} block={block} known={known} onOpen={onOpen} />
+  );
+  if (framed) {
+    // 与普通工具行展开详情（tool-details）同一外框，不加 shadow-xs；
+    // 字段一段，指令像命令输出一样另起一段，段间细线分隔
+    const sections: { prompt: boolean; blocks: [ToolCardBlock, number][] }[] = [];
+    card.blocks.forEach((block, index) => {
+      const prompt = block.kind === 'prompt';
+      const last = sections.at(-1);
+      if (!prompt && last && !last.prompt) last.blocks.push([block, index]);
+      else sections.push({ prompt, blocks: [[block, index]] });
+    });
+    // 「查看原始数据」跟在最后一段字段后面；最后是指令段或没有内容时单起一段
+    const tail = sections.at(-1);
+    const footer = !tail || tail.prompt;
+    const rawSection = (
+      <div>
+        {rawToggle}
+        {rawBody}
       </div>
+    );
+    return (
+      <div
+        data-enso="tool-card-body"
+        data-framed="true"
+        className={cn(
+          'mt-1 mb-1.5 min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card text-[12px]',
+          !nested && 'ml-5'
+        )}
+      >
+        {sections.map((section, index) => (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段顺序随工具结果整体替换
+            key={index}
+            className={cn(
+              'min-w-0',
+              index > 0 && 'border-t border-border/60',
+              !section.prompt && 'space-y-1.5 px-3 py-2'
+            )}
+          >
+            {section.blocks.map(([block, at]) =>
+              block.kind === 'prompt' ? (
+                <PromptBlock key={at} label={block.label} text={block.text} />
+              ) : (
+                renderBlock(block, at)
+              )
+            )}
+            {!footer && section === tail ? rawSection : null}
+          </div>
+        ))}
+        {footer ? (
+          <div className={cn('px-3 py-2', tail && 'border-t border-border/60')}>{rawSection}</div>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <div data-enso="tool-card-body" className="space-y-1 py-0.5 pl-5 text-[12px]">
+      <div className="space-y-1">{card.blocks.map(renderBlock)}</div>
       <button
         type="button"
         data-enso="tool-card-raw"
@@ -240,20 +301,7 @@ function CardDetails({
       >
         {t('View raw data')}
       </button>
-      {raw && (
-        <div className={cn('mt-1 space-y-1', framed && 'max-h-60 overflow-auto')}>
-          {card.rawArgs && (
-            <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {card.rawArgs}
-            </pre>
-          )}
-          {card.rawOutput && (
-            <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {card.rawOutput}
-            </pre>
-          )}
-        </div>
-      )}
+      {rawBody}
     </div>
   );
 }
@@ -290,10 +338,10 @@ function PromptBlock({ label, text }: { label: string; text: string }) {
     <section
       data-enso="tool-card-prompt"
       data-open={expanded ? 'true' : 'false'}
-      className="min-w-0 overflow-hidden rounded-md border border-border/60 bg-background/70"
+      className="min-w-0"
     >
-      <div className="flex min-w-0 items-center gap-2 border-b border-border/50 px-2 py-1 text-[11px] text-muted-foreground">
-        <span className="min-w-0 truncate font-medium">{label}</span>
+      <div className="flex min-w-0 items-center gap-2 px-3 pt-1.5 text-[11px] text-muted-foreground">
+        <span className="min-w-0 truncate">{label}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2.5">
           {folded && (
             <button
@@ -313,7 +361,7 @@ function PromptBlock({ label, text }: { label: string; text: string }) {
         <div
           data-enso="tool-card-prompt-body"
           style={PROMPT_TYPOGRAPHY}
-          className="max-h-80 min-w-0 overflow-y-auto overscroll-contain px-2.5 py-1.5 text-[12px] leading-relaxed [&_:is(h1,h2,h3,h4)]:mt-2.5 [&_:is(h1,h2,h3,h4)]:mb-1"
+          className="max-h-80 min-w-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-2 text-xs leading-relaxed [&_:is(h1,h2,h3,h4)]:mt-2.5 [&_:is(h1,h2,h3,h4)]:mb-1 [&_[data-enso=code-block]>:first-child]:border-0"
         >
           <Markdown text={text} />
         </div>
@@ -322,7 +370,7 @@ function PromptBlock({ label, text }: { label: string; text: string }) {
           type="button"
           data-enso="tool-card-prompt-preview"
           onClick={() => setOpen(true)}
-          className="line-clamp-4 block w-full min-w-0 px-2.5 py-1.5 text-left text-[12px] leading-relaxed text-muted-foreground break-words whitespace-pre-wrap"
+          className="line-clamp-4 block w-full min-w-0 px-3 pt-1 pb-2 text-left text-xs leading-relaxed text-muted-foreground break-words whitespace-pre-wrap"
         >
           {preview}
         </button>
