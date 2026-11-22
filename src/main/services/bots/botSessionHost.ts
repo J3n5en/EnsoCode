@@ -1222,7 +1222,14 @@ export class BotSessionHost {
         const delivery = [...this.pendingSteers.keys()].find(
           (item) => item.conversationId === id && item.deliveryId === event.deliveryId
         );
-        if (!delivery) return;
+        if (!delivery) {
+          if (
+            event.type === 'delivery-rejected' &&
+            this.activeDeliveries.get(id) === event.deliveryId
+          )
+            this.rejectPrompt(id, event.deliveryId);
+          return;
+        }
         const seen = this.pendingSteers.get(delivery);
         if (event.type === 'delivery-settled' && seen !== undefined) this.notesSeen.set(id, seen);
         if (this.settleRedirect(delivery, event.type === 'delivery-settled')) {
@@ -1932,6 +1939,18 @@ export class BotSessionHost {
     const records = this.deliveries.get(conversationId) ?? new Map();
     if (records.get(deliveryId) !== 'started') records.set(deliveryId, state);
     this.deliveries.set(conversationId, records);
+  }
+
+  /**
+   * worker 拒收了开这一格的 prompt（上一轮仍卡着不响应中断，或撞上叫停）：本次投递报错收尾并让出会话。
+   * 不原地重排：拒收时上一轮还没结束，立刻重投只会再撞上；上一轮迟到的终态也不能记到这次投递头上。
+   */
+  private rejectPrompt(conversationId: string, deliveryId: string): void {
+    this.running.delete(conversationId);
+    this.finish(conversationId, undefined, false, 'prompt-rejected', '', deliveryId);
+    this.lastAssistant.delete(conversationId);
+    this.release(conversationId);
+    this.pump();
   }
 
   private deliveryStarted(conversationId: string): void {

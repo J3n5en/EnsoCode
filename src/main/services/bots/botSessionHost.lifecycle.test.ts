@@ -1202,6 +1202,25 @@ describe('BotSessionHost turn results', () => {
     host.observe(ev({ type: 'turn-completed', turnId: 'x' }, crypto.randomUUID()));
     expect(finished).toHaveLength(2);
   });
+
+  it('prompt 被 worker 按 deliveryId 拒收：本次投递报错收尾并让出会话，迟到的上一轮终态不记到它头上', async () => {
+    const alice = bot('Alice');
+    const chat = direct(alice.id);
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const result = await host.deliver(chat.id, alice.id, 'hi', { deliveryId: 'd1' });
+    if (!result.ok) throw new Error(result.error);
+    const id = result.conversationId;
+    host.observe(ev({ type: 'delivery-rejected', deliveryId: 'd1' }, id));
+    host.observe(ev({ type: 'turn-completed', turnId: 'earlier' }, id));
+    expect(finished).toEqual([
+      expect.objectContaining({ deliveryId: 'd1', ok: false, error: 'prompt-rejected' }),
+    ]);
+    expect(host.hasStartedDelivery(id, 'd1')).toBe(false);
+
+    await host.deliver(chat.id, alice.id, 'again', { deliveryId: 'd2' });
+    expect(runtime.prompts.map((prompt) => prompt.text)).toEqual(['hi', 'again']);
+  });
 });
 
 describe('BotSessionHost cleanup', () => {
