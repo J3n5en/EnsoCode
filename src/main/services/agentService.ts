@@ -30,6 +30,11 @@ import {
   AGENT_WAIT_DEFAULT_MS,
   AGENT_WAIT_MAX_MS,
 } from '@shared/types/agent';
+import {
+  AGENT_RUN_LEDGER_LIMIT,
+  type AgentRunLedgerEntry,
+  type AgentRunLedgerStore,
+} from './agentRunLedger';
 import type { ObservedTask } from './backgroundTaskTracker';
 
 interface RuntimeResult {
@@ -175,6 +180,8 @@ export interface AgentServiceOptions {
   childTasks?: (sessionId: string) => readonly ChildTask[];
   /** 某父会话名下未结束 Run 的进度变化：负载是该 owner 的全量快照（REPLACE 语义） */
   onProgress?: (ownerId: string, runs: AgentRunProgress[]) => void;
+  /** Run 身份台账：Main 重启后内存里的 Run 表会丢，靠它认出旧 id 并说明原因 */
+  ledger?: AgentRunLedgerStore;
 }
 
 const TERMINAL_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
@@ -188,6 +195,9 @@ const RESUME_LIMIT_TEXT = `It was already resumed ${AGENT_TASK_MAX_RESUMES} time
 
 const USER_STOPPED_TEXT =
   '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
+
+const LIST_HINT = 'Use subagent list to see the subagents this conversation has now.';
+const RESPAWN_HINT = `Its subagent cannot be resumed: check what it already changed (files, git status), then spawn a new subagent for whatever is left. ${LIST_HINT}`;
 
 type ChildTask = Pick<ObservedTask, 'taskId' | 'command' | 'status' | 'startedAt' | 'exitCode'>;
 
@@ -273,12 +283,15 @@ export class AgentService implements AgentServiceContract {
   private readonly runs = new Map<string, RunRecord>();
   private readonly waiters = new Set<Waiter>();
   private readonly queues = new Map<string, Promise<void>>();
+  /** 上次 Main 运行留下的 Run 台账：只用于认出重启前的 id */
+  private readonly previousRuns = new Map<string, AgentRunLedgerEntry>();
   private readonly randomUuid: () => string;
   private readonly now: () => number;
 
   constructor(private readonly options: AgentServiceOptions) {
     this.randomUuid = options.randomUuid ?? randomUUID;
     this.now = options.now ?? Date.now;
+    for (const entry of options.ledger?.load() ?? []) this.previousRuns.set(entry.runId, entry);
   }
 
   /** Main 从权威 child metadata 恢复持久 coworker；task 与非 agent-tool child 不得调用。 */
@@ -368,6 +381,7 @@ export class AgentService implements AgentServiceContract {
       });
       return started;
     }
+    this.persistRuns();
     return { ok: true, value: { agentId, runId, mode, status: 'running' } };
   }
 
@@ -429,6 +443,7 @@ export class AgentService implements AgentServiceContract {
       const runId = this.randomUuid();
       const run = this.createRun(agent.value, runId, request.message, request.schema, request.gate);
       this.runs.set(runId, run);
+      this.persistRuns();
       if (active) {
         agent.value.queuedRunIds.push(runId);
         this.pushProgress(request.context.owner.ownerId);
@@ -643,6 +658,7 @@ export class AgentService implements AgentServiceContract {
       // 会话里最后一条回复已写完时续跑无回合可跑，结果就是中断前投影到的这段文本
       if (previous?.text !== undefined) run.text = previous.text;
       this.runs.set(run.runId, run);
+      this.persistRuns();
       const started = await this.startRun(agent, run, true);
       if (!started.ok) return started;
       agent.resumes = (agent.resumes ?? 0) + 1;
@@ -863,7 +879,7 @@ export class AgentService implements AgentServiceContract {
     if (invalid) return invalid;
     const agent = this.agents.get(agentId);
     if (!agent || !this.sameOwner(agent.context, context)) {
-      return failure('not-found', 'Agent was not found in this owner.');
+      return this.missingAgent(context, agentId);
     }
     return { ok: true, value: agent };
   }
@@ -873,9 +889,104 @@ export class AgentService implements AgentServiceContract {
     if (invalid) return invalid;
     const run = this.runs.get(runId);
     if (!run || !this.sameOwner(run.context, context)) {
-      return failure('not-found', 'Run was not found in this owner.');
+      return this.missingRun(context, runId);
     }
     return { ok: true, value: run };
+  }
+
+  /** 找不到 Run 时说清原因与下一步：重启前的（内存 Run 表已丢）、属于别处、agentId 传成了 runId、不存在 */
+  private missingRun<T>(context: AgentControlContext, runId: string): AgentServiceResult<T> {
+    const live = this.runs.get(runId);
+    if (live) return this.otherOwner('Run', runId);
+    const previous = this.previousRuns.get(runId);
+    if (previous) {
+      if (!this.ledgerOwned(previous, context)) return this.otherOwner('Run', runId);
+      const before = TERMINAL_RUN_STATUSES.has(previous.status)
+        ? `It had already ${previous.status} before the restart; if you were notified of its result then, use that.`
+        : 'It was still running when the app restarted, so it was interrupted and its result was never delivered.';
+      const agent = this.agents.get(previous.agentId);
+      const next =
+        agent && agent.status !== 'closed' && this.sameOwner(agent.context, context)
+          ? `Its coworker is still available: use subagent send with agentId ${previous.agentId} to ask what it finished, or to continue the work.`
+          : RESPAWN_HINT;
+      return failure(
+        'restart-lost',
+        `Run ${runId} (agentId ${previous.agentId}) was started before EnsoCode restarted. Run records do not survive a restart, so it can no longer be waited on, reported or stopped. ${before} ${next}`
+      );
+    }
+    if (this.agents.has(runId) || this.previousAgent(runId)) {
+      return failure(
+        'not-found',
+        `${runId} is an agentId, not a runId. wait / report / stop take the runId from the spawn, send or resume receipt; use subagent list to find this agent's activeRunId or latestRun.runId, or use send / resume / dismiss with the agentId.`
+      );
+    }
+    return this.unknownId('Run', runId);
+  }
+
+  private missingAgent<T>(context: AgentControlContext, agentId: string): AgentServiceResult<T> {
+    if (this.agents.has(agentId)) return this.otherOwner('Agent', agentId);
+    const previous = this.previousAgent(agentId);
+    if (previous) {
+      if (!this.ledgerOwned(previous, context)) return this.otherOwner('Agent', agentId);
+      return failure(
+        'restart-lost',
+        `Agent ${agentId} was spawned before EnsoCode restarted, and its record did not survive the restart, so it cannot be sent to, resumed or dismissed. ${RESPAWN_HINT}`
+      );
+    }
+    const run = this.runs.get(agentId) ?? this.previousRuns.get(agentId);
+    if (run) {
+      return failure(
+        'not-found',
+        `${agentId} is a runId, not an agentId; it belongs to agentId ${run.agentId}. send / resume / dismiss take the agentId.`
+      );
+    }
+    return this.unknownId('Agent', agentId);
+  }
+
+  private otherOwner<T>(kind: 'Run' | 'Agent', id: string): AgentServiceResult<T> {
+    return failure(
+      'other-owner',
+      `${kind} ${id} belongs to a different conversation (for example the one this conversation was forked from) or to another agent, so it cannot be controlled from here. ${LIST_HINT} Spawn a new subagent if you still need the work.`
+    );
+  }
+
+  private unknownId<T>(kind: 'Run' | 'Agent', id: string): AgentServiceResult<T> {
+    return failure(
+      'not-found',
+      `No ${kind} with id ${id} exists in this conversation: it may be mistyped or made up. Copy ids exactly from a spawn / send / resume receipt or a completion notification (agentId and runId are different). ${LIST_HINT}`
+    );
+  }
+
+  private previousAgent(agentId: string): AgentRunLedgerEntry | undefined {
+    for (const entry of this.previousRuns.values()) if (entry.agentId === agentId) return entry;
+    return undefined;
+  }
+
+  private ledgerOwned(entry: AgentRunLedgerEntry, context: AgentControlContext): boolean {
+    return (
+      entry.ownerId === context.owner.ownerId &&
+      entry.projectId === context.owner.projectId &&
+      entry.ownerKind === context.owner.kind
+    );
+  }
+
+  private persistRuns(): void {
+    const { ledger } = this.options;
+    if (!ledger) return;
+    const current = [...this.runs.values()].map(
+      (run): AgentRunLedgerEntry => ({
+        runId: run.runId,
+        agentId: run.agentId,
+        ownerId: run.context.owner.ownerId,
+        projectId: run.context.owner.projectId,
+        ownerKind: run.context.owner.kind,
+        mode: run.mode,
+        status: run.status,
+        createdAt: run.createdAt,
+        ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
+      })
+    );
+    ledger.save([...this.previousRuns.values(), ...current].slice(-AGENT_RUN_LEDGER_LIMIT));
   }
 
   private sameOwner(left: AgentControlContext, right: AgentControlContext): boolean {
@@ -1089,6 +1200,7 @@ export class AgentService implements AgentServiceContract {
     run.activity = undefined;
     if (error !== undefined) run.error = error;
     this.pushProgress(run.context.owner.ownerId);
+    this.persistRuns();
     // 在等它的 wait 同步结算并标记已知情；仍有 wait 在等它（until:all）则交给那次回执
     this.flushWaiters();
     this.notifyUndelivered(run);

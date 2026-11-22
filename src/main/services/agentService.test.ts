@@ -6,6 +6,7 @@ import type {
   AgentWorkerEvent,
 } from '@shared/types/agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentRunLedgerEntry, AgentRunLedgerStore } from './agentRunLedger';
 import { AgentService, type AgentServiceOptions, type AgentServiceRuntime } from './agentService';
 
 const owner: AgentOwnerIdentity = {
@@ -242,7 +243,7 @@ describe('AgentService lifecycle', () => {
         requestId: 'sibling-read',
         runId: spawned.value.runId,
       })
-    ).resolves.toMatchObject({ ok: false, code: 'not-found' });
+    ).resolves.toMatchObject({ ok: false, code: 'other-owner' });
   });
 
   it('schema/gate 在完成后进入 validating，并以 Main runtime 结果结算报告', async () => {
@@ -1660,5 +1661,154 @@ describe('AgentService 用户在子代理 tab 里停止', () => {
     ).toMatchObject({ ok: true, value: { run: { status: 'cancelled' } } });
     expect(await listStatus(service)).toEqual(['closed']);
     expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentService 找不到 Run / Agent 时说明原因', () => {
+  /** 内存台账：同一份数据交给重启后的新 AgentService，模拟 Main 重启 */
+  function memoryLedger() {
+    let saved: AgentRunLedgerEntry[] = [];
+    const store: AgentRunLedgerStore = {
+      load: () => saved.map((entry) => ({ ...entry })),
+      save: (entries) => {
+        saved = entries.map((entry) => ({ ...entry }));
+      },
+    };
+    return store;
+  }
+
+  const target = (runId: string) => ({ context, requestId: `t-${runId}`, runId });
+
+  it('现场：coworker 在跑时 Main 重启，旧 runId 报 restart-lost 并指向 send，而不是裸 not-found', async () => {
+    const ledger = memoryLedger();
+    const before = setup({ ledger });
+    const spawned = await before.service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+
+    // 更新重启：新 AgentService 内存为空，coworker 由 child-ready 重新认领
+    const after = setup({ ledger });
+    expect(after.service.adoptCoworker(context, before.children[0])).toBe(true);
+    for (const result of [
+      await after.service.report(target(spawned.value.runId)),
+      await after.service.stop(target(spawned.value.runId)),
+      await after.service.wait({ context, requestId: 'w', runIds: [spawned.value.runId] }),
+    ]) {
+      expect(result).toMatchObject({ ok: false, code: 'restart-lost' });
+      if (result.ok) continue;
+      expect(result.error).toContain('before EnsoCode restarted');
+      expect(result.error).toContain('still running when the app restarted');
+      expect(result.error).toContain(`send with agentId ${spawned.value.agentId}`);
+    }
+  });
+
+  it('重启前已结束的 task：report 说明已结束，resume 说明不能续跑、要检查改动后重新 spawn', async () => {
+    const ledger = memoryLedger();
+    const before = setup({ ledger });
+    const spawned = await before.service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    before.service.observe({
+      type: 'turn-completed',
+      identity: before.children[0],
+      seq: 1,
+      turnId: spawned.value.runId,
+    });
+
+    const after = setup({ ledger });
+    const report = await after.service.report(target(spawned.value.runId));
+    expect(report).toMatchObject({ ok: false, code: 'restart-lost' });
+    expect(!report.ok && report.error).toContain('already succeeded before the restart');
+    expect(!report.ok && report.error).toContain('spawn a new subagent');
+    const resumed = await after.service.resume({
+      context,
+      requestId: 'resume',
+      agentId: spawned.value.agentId,
+    });
+    expect(resumed).toMatchObject({ ok: false, code: 'restart-lost' });
+    expect(!resumed.ok && resumed.error).toContain('subagent list');
+  });
+
+  it('resume 换了新 runId 后，旧 runId 仍可 report / stop，不报 not-found', async () => {
+    const { service, runtime, children } = setup();
+    runtime.resume = vi.fn(async ({ identity }) => ({
+      ...identity,
+      generation: '55555555-5555-4555-8555-555555555555',
+    }));
+    runtime.retry = vi.fn(async () => ({ ok: true }));
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 1,
+      turnId: spawned.value.runId,
+      aborted: true,
+    });
+    const resumed = await service.resume({
+      context,
+      requestId: 'resume',
+      agentId: spawned.value.agentId,
+    });
+    if (!resumed.ok) throw new Error(resumed.error);
+    expect(resumed.value.runId).not.toBe(spawned.value.runId);
+    await expect(service.report(target(spawned.value.runId))).resolves.toMatchObject({
+      ok: true,
+      value: { run: { status: 'interrupted' } },
+    });
+    await expect(service.stop(target(spawned.value.runId))).resolves.toMatchObject({
+      ok: true,
+      value: { status: 'interrupted' },
+    });
+  });
+
+  it('agentId 与 runId 传反时指出类型错了', async () => {
+    const { service } = setup();
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    const asRun = await service.report(target(spawned.value.agentId));
+    expect(asRun).toMatchObject({ ok: false, code: 'not-found' });
+    expect(!asRun.ok && asRun.error).toContain('is an agentId, not a runId');
+    const asAgent = await service.dismiss({
+      context,
+      requestId: 'dismiss',
+      agentId: spawned.value.runId,
+    });
+    expect(asAgent).toMatchObject({ ok: false, code: 'not-found' });
+    expect(!asAgent.ok && asAgent.error).toContain(
+      `is a runId, not an agentId; it belongs to agentId ${spawned.value.agentId}`
+    );
+  });
+
+  it('别的会话（如 fork 出来的会话）拿父会话的 id：说明属于别的会话；重启后台账里的也一样', async () => {
+    const ledger = memoryLedger();
+    const { service } = setup({ ledger });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    const forked: AgentControlContext = {
+      owner: { ...owner, ownerId: 'chat-fork' },
+      actor: {
+        kind: 'agent',
+        actorId: 'chat-fork',
+        ownerId: 'chat-fork',
+        projectId: owner.projectId,
+        identity: { sessionId: 'chat-fork', generation: '66666666-6666-4666-8666-666666666666' },
+      },
+    };
+    const fromFork = { context: forked, requestId: 'fork', runId: spawned.value.runId };
+    await expect(service.report(fromFork)).resolves.toMatchObject({
+      ok: false,
+      code: 'other-owner',
+    });
+    await expect(setup({ ledger }).service.report(fromFork)).resolves.toMatchObject({
+      ok: false,
+      code: 'other-owner',
+    });
+  });
+
+  it('不存在的 id 说明可能抄错或编造，并引导 list', async () => {
+    const { service } = setup();
+    const result = await service.report(target('made-up-run'));
+    expect(result).toMatchObject({ ok: false, code: 'not-found' });
+    expect(!result.ok && result.error).toContain('mistyped or made up');
+    expect(!result.ok && result.error).toContain('subagent list');
   });
 });
