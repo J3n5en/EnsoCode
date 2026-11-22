@@ -11,6 +11,7 @@ import {
   scopedDefaultModels,
 } from '@shared/defaultModel';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
+import { normalizeLocale, translate } from '@shared/i18n';
 import {
   EMPTY_PLAN_STATE,
   type PlanRespondAction,
@@ -4094,8 +4095,26 @@ export const useSessionsStore = create<SessionsState>()(
 
         compact(conversationId, instructions) {
           const conversation = get().conversations[conversationId];
-          if (!conversation?.started || conversation.workspaceMigrating || conversation.compaction)
+          if (!conversation) return;
+          const blocked = !conversation.started
+            ? 'Session not started yet — nothing to compact'
+            : conversation.workspaceMigrating
+              ? 'Workspace operation in progress — compact again when it finishes'
+              : conversation.compaction === 'running'
+                ? 'Compaction already in progress'
+                : conversation.compaction === 'queued'
+                  ? 'Compaction is queued and runs after this turn'
+                  : undefined;
+          if (blocked) {
+            const description = translate(
+              normalizeLocale(useSettingsStore.getState().language),
+              blocked
+            );
+            void import('@/components/ui/toast')
+              .then(({ addToast }) => addToast({ type: 'info', description }))
+              .catch(() => {});
             return;
+          }
           void window.electronAPI.agent.compact(conversationId, instructions);
         },
 

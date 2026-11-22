@@ -42,6 +42,13 @@ function CompactButton({ conversationId }: { conversationId: string }) {
     <button
       type="button"
       disabled={Boolean(compaction)}
+      title={
+        compaction === 'running'
+          ? t('Compaction already in progress')
+          : compaction === 'queued'
+            ? t('Compaction is queued and runs after this turn')
+            : undefined
+      }
       className="w-full rounded-sm border border-border px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
       onClick={() => useSessionsStore.getState().compact(conversationId)}
     >
