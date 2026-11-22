@@ -7,6 +7,7 @@ import type {
   SecretaryDispatchFile,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
+import type { RetireResult } from '../worktree/trash';
 import {
   applyCleanup,
   branchItemId,
@@ -26,6 +27,7 @@ import {
   selectCleanupItems,
   sessionItemId,
   worktreeItemId,
+  worktreeState,
 } from './cleanup';
 import type { GitResult } from './repoStatus';
 
@@ -36,6 +38,10 @@ interface FakeWorktree {
   path: string;
   branch: string | null;
   dirty?: boolean;
+  /** git status --porcelain 的原样输出，优先于 dirty */
+  status?: string;
+  /** .git 文件丢了：rev-parse --show-toplevel 找到的是外层仓库 */
+  lostGitFile?: boolean;
 }
 
 interface FakeRepo {
@@ -70,12 +76,15 @@ function makePorts(options: {
   hangRepos?: string[];
   /** GitHub 上已合并的 PR；null 表示 gh 不可用 */
   pulls?: Record<string, MergedPull[] | null>;
+  /** removeWorktree 的结果，缺省 trashed */
+  retire?: RetireResult['status'];
 }) {
   const repos = options.repos ?? [];
   const calls: string[] = [];
   const sizeCalls: string[] = [];
   const archived: { conversationId: string; at: number }[] = [];
   const audits: SecretaryAuditEntry[] = [];
+  const retired: { repoPath: string; target: string; root: string }[] = [];
   const repoOf = (cwd: string): FakeRepo | undefined =>
     repos.find(
       (repo) => repo.root === cwd || repo.worktrees.some((worktree) => worktree.path === cwd)
@@ -88,7 +97,10 @@ function makePorts(options: {
       if (options.hangRepos?.includes(repo.root)) return new Promise<GitResult>(() => {});
       if (options.gitDelayMs) await sleep(options.gitDelayMs);
       const [command, ...rest] = args;
-      if (command === 'rev-parse' && rest[0] === '--show-toplevel') return ok(repo.root);
+      if (command === 'rev-parse' && rest[0] === '--show-toplevel') {
+        const worktree = repo.worktrees.find((entry) => entry.path === cwd);
+        return ok(worktree && !worktree.lostGitFile ? worktree.path : repo.root);
+      }
       if (command === 'rev-parse' && rest[0] === '--abbrev-ref') return ok(repo.current);
       if (command === 'for-each-ref') {
         const mergedFlag = rest.find((arg) => arg.startsWith('--merged='));
@@ -122,6 +134,7 @@ function makePorts(options: {
       if (command === 'status') {
         const worktree = repo.worktrees.find((entry) => entry.path === cwd);
         if (!worktree) return ok();
+        if (worktree.status !== undefined) return ok(worktree.status);
         return worktree.dirty ? ok('?? scratch.txt\n') : ok();
       }
       if (command === 'branch' && rest[0] === '-D') {
@@ -155,10 +168,19 @@ function makePorts(options: {
     archive: (conversationId, at) => {
       archived.push({ conversationId, at });
     },
+    // 与生产一致：改名进回收目录后用 git worktree remove 注销登记
+    async removeWorktree(repoPath, target, root) {
+      retired.push({ repoPath, target, root });
+      const status = options.retire ?? 'trashed';
+      if (status === 'failed') return { status, reason: 'rename-failed' };
+      if (status === 'background') return { status };
+      await ports.git(repoPath, ['worktree', 'remove', '--force', target]);
+      return { status, trashPath: `${root}/.trash/x` };
+    },
     audit: (entry) => audits.push(entry),
     now: () => options.now ?? 10 * CLEANUP_IDLE_MS,
   };
-  return { ports, calls, sizeCalls, archived, audits };
+  return { ports, calls, sizeCalls, archived, audits, retired };
 }
 
 function project(): ProjectAuthority {
@@ -240,6 +262,28 @@ describe('collectCleanupItems', () => {
       sizeBytes: 2048,
       mergedInto: ['main'],
     });
+  });
+
+  it('回收目录里的与正在后台删的 worktree 不再列', async () => {
+    const { ports } = makePorts({
+      repos: [
+        baseRepo({
+          worktrees: [
+            { path: `${WT_ROOT}/.trash/wt-old-1`, branch: 'feat/done' },
+            { path: `${WT_ROOT}/wt-moving`, branch: 'chore/merged' },
+            { path: `${WT_ROOT}/wt-2`, branch: 'chore/merged' },
+          ],
+        }),
+      ],
+    });
+    const removing = new Set([`${WT_ROOT}/wt-moving`]);
+    const items = await collectCleanupItems(
+      { ...ports, removingWorktree: (target) => removing.has(target) },
+      { sizeBudgetMs: false }
+    );
+    expect(items.filter((item) => item.kind === 'worktree').map((item) => item.path)).toEqual([
+      `${WT_ROOT}/wt-2`,
+    ]);
   });
 
   it('worktree 根之外的检出不算会话 worktree', async () => {
@@ -436,6 +480,102 @@ describe('applyCleanup', () => {
     const deleteAt = calls.findIndex((call) => call.includes('branch -D'));
     expect(removeAt).toBeGreaterThan(-1);
     expect(deleteAt).toBeGreaterThan(removeAt);
+  });
+
+  const worktreeItem = (target: string) =>
+    item({
+      id: worktreeItemId(target),
+      kind: 'worktree',
+      name: 'feat/done',
+      path: target,
+      repoPath: ROOT,
+    });
+
+  it('worktree 走改名进回收目录：报告已删、空间后台释放，审计带上', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const { ports, retired, audits } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done' }] })],
+    });
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(retired).toEqual([{ repoPath: ROOT, target, root: WT_ROOT }]);
+    expect(result.report[0]).toMatchObject({ action: 'deleted', background: 'free-space' });
+    expect(cleanupReportText(result)).toContain('freed in the background');
+    expect(audits[0]?.detail).toContain('background: free-space');
+  });
+
+  it('半删残局（只剩 " D" 删除）判定为可清理', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const status = ' D src/a.ts\n D src/b.ts\n D package.json\n';
+    const { ports, retired, audits } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done', status }] })],
+    });
+    expect(await worktreeState(ports, target)).toBe('half-removed');
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(retired).toHaveLength(1);
+    expect(result.report[0]).toMatchObject({ action: 'deleted', halfRemoved: true });
+    expect(audits[0]?.detail).toContain('half-removed');
+  });
+
+  it.each([
+    ['夹着一个修改', ' D src/a.ts\n M src/b.ts\n'],
+    ['夹着一个未跟踪文件', ' D src/a.ts\n?? notes.md\n'],
+    ['暂存区里的删除', 'D  src/a.ts\n'],
+    ['删除又暂存了改动', 'MD src/a.ts\n'],
+  ])('残局里%s照旧跳过', async (_label, status) => {
+    const target = `${WT_ROOT}/wt-1`;
+    const { ports, retired } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done', status }] })],
+    });
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(result.report[0]).toMatchObject({ action: 'skipped', reason: 'uncommitted-changes' });
+    expect(retired).toEqual([]);
+  });
+
+  it('.git 文件也被删了、git 落到外层仓库时不按外层状态判', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const { ports, retired } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done', lostGitFile: true }] })],
+    });
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(result.report[0]).toMatchObject({ action: 'skipped', reason: 'uncommitted-changes' });
+    expect(retired).toEqual([]);
+  });
+
+  it('不在 worktree 根下的不删', async () => {
+    const target = '/private/tmp/author/wt-1';
+    const { ports, retired } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done' }] })],
+    });
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(result.report[0]).toMatchObject({
+      action: 'skipped',
+      reason: 'outside-worktree-root',
+    });
+    expect(retired).toEqual([]);
+  });
+
+  it('跨卷退回后台删除：报告 background remove', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const { ports } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done' }] })],
+      retire: 'background',
+    });
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(result.report[0]).toMatchObject({ action: 'deleted', background: 'remove' });
+    expect(cleanupReportText(result)).toContain('removed in the background');
+  });
+
+  it('改名失败：跳过并报告，原样保留', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const { ports } = makePorts({
+      repos: [baseRepo({ worktrees: [{ path: target, branch: 'feat/done' }] })],
+      retire: 'failed',
+    });
+    const result = await applyCleanup(ports, { items: [worktreeItem(target)] });
+    expect(result.report[0]).toMatchObject({
+      action: 'skipped',
+      reason: 'remove-failed: rename-failed',
+    });
   });
 
   it('未合入的分支在执行时也拒绝', async () => {
