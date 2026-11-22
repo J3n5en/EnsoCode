@@ -1916,21 +1916,6 @@ export const useSessionsStore = create<SessionsState>()(
                   )
                 )
               : {}),
-            // 未提交的消息被 reducer 收回乐观回显（最早一条）：连同图片回到队首，
-            // 多条连续失败也不互相覆盖；队列区可编辑/删除/立即发送
-            ...(event.type === 'turn-failed' &&
-            event.undelivered &&
-            next.messages.length < conversation.messages.length
-              ? {
-                  // 追加到队尾：连续多条失败按 FIFO 回流，保持原发送顺序（A,B → [A,B]）
-                  queuedMessages: [
-                    ...(conversation.queuedMessages ?? []),
-                    toQueuedMessage(
-                      conversation.messages.find((m) => m.optimistic && !m.deliveryRejected)!
-                    ),
-                  ],
-                }
-              : {}),
             ...(event.type === 'parent-ready'
               ? {
                   started: true,

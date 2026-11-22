@@ -40,9 +40,9 @@ pnpm test:formal
 | 模型部分 | 代码 |
 | --- | --- |
 | 回显形状与追加到尾部 | `src/renderer/stores/sessions/index.ts` `optimisticUserMessage` |
-| 渲染层归并 | `src/renderer/stores/sessions/reducer.ts` `applyAgentEvent` 的 `message-upsert`、`delivery-settled`、`delivery-rejected`、`status`、`turn-failed`、`turn-completed`、`snapshot`；`retainedOptimisticTail`、`sameUserText`、`authoritativeLength`、`dropOldestOptimistic`、`upsertOutOfRange` |
+| 渲染层归并 | `src/renderer/stores/sessions/reducer.ts` `applyAgentEvent` 的 `message-upsert`、`delivery-settled`、`delivery-rejected`、`status`、`turn-failed`、`turn-completed`、`snapshot`；`retainedOptimisticTail`、`sameUserText`、`authoritativeLength`、`upsertOutOfRange` |
 | store 越界补快照 | `src/renderer/stores/sessions/index.ts` 中 `upsertOutOfRange` 触发 `resyncSnapshot` |
-| idle 收到 prompt：accepted / rejected / timeout / handled | `src/agent/supervisor.ts` `case 'prompt'`、`promptTracked`、`failTurn` |
+| idle 收到 prompt：accepted / rejected / timeout / handled | `src/agent/supervisor.ts` `case 'prompt'`、`promptTracked`、`failTurn`；timeout 是僵尸等待超时，只发 `delivery-rejected`，不发 `turn-*`、不动 status |
 | running 收到 prompt：queued / handled | `steerTracked` |
 | running 中撤回未读插话：仍在 pi 队列则移除并回执 `delivery-rejected`，否则无事；回显带 `withdrawRequested` 时收到拒收即移除 | `supervisor.ts` `case 'withdraw-steer'` 与 `steerTracked` 的 `withdraw` 句柄；store `withdrawMessage`；reducer `delivery-rejected` |
 | user 消息落地后发 `delivery-settled` | user `message-upsert` 处的 `takeDelivery` |
@@ -66,4 +66,4 @@ git diff --stat f32fa5e95bc4..HEAD -- src/renderer/stores/sessions/reducer.ts sr
 
 ## 已知发现
 
-`已知发现：input hook 消费（handled）的投递留下永不收回的回显` 断言反例存在。`promptTracked` 与 `steerTracked` 遇到 disposition `handled` 时不发任何回执，回显永远是 pending，snapshot 也会保留它。按代码推断（未单独跑反例），之后一次 `turn-failed undelivered` 会经 `dropOldestOptimistic` 先删掉这个旧回显，而不是本次的。修复后这条测试会变红，届时把 `handled` 并入 `core` 配置并删掉这条测试。
+`已知发现：input hook 消费（handled）的投递留下永不收回的回显` 断言反例存在。`promptTracked` 与 `steerTracked` 遇到 disposition `handled` 时不发任何回执，回显永远是 pending，snapshot 也会保留它。修复后这条测试会变红，届时把 `handled` 并入 `core` 配置并删掉这条测试。

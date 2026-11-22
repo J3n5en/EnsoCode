@@ -12,7 +12,7 @@ description: >
 
 属性：pi 的每一次运行（一个用户轮次）恰好收到一个 `turn-completed` 或 `turn-failed`，终态之后 pi 不再为这一轮发出 `agent_start` 或 `auto_retry_start`，用户中断的轮次终态带 `aborted`；每条发给 worker 的 prompt 恰好进入 pi 一次，否则收到一次带它 deliveryId 的 `delivery-rejected`，且只在它发出后有过叫停（中断、取消重试、新 prompt 打断重试、僵尸时限到点）时才收；全部静止后 worker 不停在 running。
 
-终态按消费者的视角数：bots、headless、Main 和 renderer 都按会话、不按 turnId 把任何 `turn-*` 当作本轮结束，所以观察者把 worker 发出的每个 `turn-*`（含 `undelivered`）都记到 pi 当前这一轮。未送达回执不是终态，不能借用 `turn-*`。
+终态按消费者的视角数：bots、headless、Main 和 renderer 都按会话、不按 turnId 把任何 `turn-*` 当作本轮结束，所以观察者把 worker 发出的每个 `turn-*` 都记到 pi 当前这一轮。未送达回执不是终态，不能借用 `turn-*`。
 
 危害：违反时输入框提前解锁、agent 随后自己又跑起来，或者一直卡在 running；用户中断后其他窗口和 headless 照常泵队列、续跑 goal；排队消息被重复发送、静默丢失，或报 `Cannot submit a prompt while compaction is in progress`。
 

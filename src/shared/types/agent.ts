@@ -2184,8 +2184,6 @@ export type AgentWorkerEvent =
       seq: number;
       turnId: string;
       error: string;
-      /** 消息从未提交给 pi（僵尸轮超时等）：renderer 应收回乐观回显并把文本退回输入框 */
-      undelivered?: true;
       /** pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx） */
       retryExhausted?: true;
       /** 应用退出窗口内的断流/断连：不是会话失败，按 interrupted 收口（Main 判定） */
@@ -5237,7 +5235,6 @@ const agentWorkerEventParsers = {
     (value: Record<string, unknown>): AgentWorkerEvent | null => {
       return isNonEmptyString(value.turnId) &&
         isNonEmptyString(value.error) &&
-        (value.undelivered === undefined || value.undelivered === true) &&
         (value.retryExhausted === undefined || value.retryExhausted === true) &&
         (value.aborted === undefined || value.aborted === true)
         ? (value as unknown as AgentWorkerEvent)

@@ -222,57 +222,6 @@ describe('applyAgentEvent', () => {
     expect(revived.status).toBe('running');
   });
 
-  it('turn-failed with undelivered drops the unconfirmed optimistic tail', () => {
-    const withOptimistic: SessionProjection = {
-      ...base,
-      messages: [
-        { role: 'user', content: [{ type: 'text', text: 'first' }], timestamp: 1 },
-        {
-          role: 'user',
-          content: [{ type: 'text', text: 'never sent' }],
-          timestamp: 2,
-          optimistic: true,
-        },
-      ],
-    };
-    const next = applyAgentEvent(withOptimistic, 's1', {
-      type: 'turn-failed',
-      identity: identity(),
-      seq: 1,
-      turnId: 't',
-      error: 'stuck',
-      undelivered: true,
-    });
-    expect(next.status).toBe('failed');
-    expect(next.messages).toHaveLength(1);
-    // 并发两条未确认：worker 按序失败，先收回最早一条（A）而非尾部（B）
-    const twoPending: SessionProjection = {
-      ...base,
-      messages: [
-        { role: 'user', content: [{ type: 'text', text: 'A' }], timestamp: 1, optimistic: true },
-        { role: 'user', content: [{ type: 'text', text: 'B' }], timestamp: 2, optimistic: true },
-      ],
-    };
-    const afterFirst = applyAgentEvent(twoPending, 's1', {
-      type: 'turn-failed',
-      identity: identity(),
-      seq: 1,
-      turnId: 't',
-      error: 'stuck',
-      undelivered: true,
-    });
-    expect(afterFirst.messages.map((m) => (m.content[0] as { text: string }).text)).toEqual(['B']);
-    // 普通 turn-failed（消息已送达）不动时间线
-    const plain = applyAgentEvent(withOptimistic, 's1', {
-      type: 'turn-failed',
-      identity: identity(),
-      seq: 1,
-      turnId: 't',
-      error: 'boom',
-    });
-    expect(plain.messages).toHaveLength(2);
-  });
-
   it('parent-ended does not mark ended (flag is child-only)', () => {
     const next = applyAgentEvent(base, 's1', {
       type: 'parent-ended',
@@ -881,15 +830,6 @@ describe('applyAgentEvent', () => {
     });
     expect(after.messages).toEqual([delivered, rejected]);
     expect(retainedOptimisticTail(before.messages, [delivered])).toEqual([rejected]);
-    const failed = applyAgentEvent(before, 's1', {
-      type: 'turn-failed',
-      identity: identity(),
-      seq: 1,
-      turnId: 'turn',
-      error: 'undelivered',
-      undelivered: true,
-    });
-    expect(failed.messages).toEqual([rejected]);
   });
 
   it('delivery-settled 按 deliveryId 收回文本对不上的乐观回显', () => {

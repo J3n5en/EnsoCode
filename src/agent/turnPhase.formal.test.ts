@@ -741,9 +741,7 @@ function observeWorker(w: World, event: AgentWorkerEvent): void {
   // 消费者（bots、headless、Main、renderer）按会话把任何 turn-* 当作本轮终态，不看 turnId
   if (event.type !== 'turn-completed' && event.type !== 'turn-failed') return;
   w.client.retry = false;
-  const label = `${event.type}${event.aborted ? '(aborted)' : ''}${
-    event.type === 'turn-failed' && event.undelivered ? '(undelivered)' : ''
-  }`;
+  const label = `${event.type}${event.aborted ? '(aborted)' : ''}`;
   const run = currentRun(w);
   if (!run) {
     w.broken ??= `pi 还没开始任何一轮就收到 ${label}`;
