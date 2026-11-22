@@ -58,6 +58,7 @@ ENSO_FORMAL_FULL=1 npx vitest run src/agent/turnPhase.formal.test.ts
 | 僵尸时限与让一拍 | `waitPromptable`、`waitIdleBounded`、`ZOMBIE_TURN_WAIT_MS`、`activityNonce`，超时走 `emitDeliveryRejected` |
 | `Pi` 的 prompt / abort / abortRetry | `agent-session.js` `prompt`、`_preparePrompt`（流式中要求 `streamingBehavior`，排进 followUp）、`_startRun`、`abort`（只在运行活跃时记 `_agentRunAbortRequested`，不清 followUp 队列）、`abortRetry`、`isStreaming` / `isCompacting` / `isRetrying` / `isIdle` |
 | `Pi` 的收尾一步 | `_willRetryAfterAgentEnd`、`_handlePostAgentRun`、`_prepareRetry`、`_finishCancelledRetry`、`_checkCompaction`（溢出压缩续跑）、`_runBeforeSettleBoundary`、`_emitAgentSettled`（延后的 prompt 在公开 `agent_settled` 之后执行） |
+| 撤回排队 prompt | `src/agent/sessionAdapter.ts` `withdrawFollowUps`：pi 没有只清 followUp 的公开接口，靠 `getFollowUpMessages()` 返回的标签数组原地清空、`agent.clearFollowUpQueue()`、私有 `_emitQueueUpdate`；`sessionAdapter.test.ts` 的真实 SDK 测试锁定这些形状，并断言 pi 的 `abort()` 不清 followUp。supervisor 在 `promptFresh` 收到 `queued` 时记下 pi 队尾文本，撤回时据此对上 deliveryId |
 | 回复 error / aborted 不取排队消息 | `@earendil-works/pi-agent-core` `dist/agent-loop.js` |
 | 记忆压缩 | `src/agent/continuousMemory/vendor/hooks/compaction-trigger.ts`：`agent_settled` 时排 `setTimeout(0)`，到点不空闲就放弃 |
 | `agent_before_settle` 续跑 | `src/agent/oauthAccountPool.ts` |
@@ -83,6 +84,7 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 | `case 'abort'` 里 `const retrying = false` | `9985bae34` 之前 | 重试倒计时中中断：`第 1 轮没有终态` |
 | `case 'prompt'` 在 `let activityAt` 前加 `if (managed.session.isStreaming) { await this.steerTracked(...); return; }` | idle 投影但 pi 仍在跑时插话 | p1 还在准备时发 p2：`p2 没进 pi，未送达回执 0 次` |
 | `case 'prompt'` 僵尸超时分支的 `emitDeliveryRejected(...)` 换成 `this.failTurn(managed, 'zombie')` | 已知发现 3 修复之前（当时还带 `undelivered`） | 中断后工具 5 秒内没停、期间发 p2：`第 1 轮收到 2 个终态：turn-failed(aborted)、turn-completed` |
+| `case 'abort'` 删掉 `withdrawQueuedPrompts` 那一行 | 已知发现 1 修复之前 | 随时发送时 p2 排进活轮后中断：`p2 没进 pi，未送达回执 0 次` |
 
 ## 范围
 
@@ -100,7 +102,6 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 
 ## 已知发现
 
-两条测试断言对应配置恰好只有这一类反例。修复后或混进新类别时对应测试会变红，修复的话把触发条件并入 `core` 配置并删掉那条测试。
+一条测试断言对应配置恰好只有这一类反例。修复后或混进新类别时对应测试会变红，修复的话把触发条件并入 `core` 配置并删掉那条测试。
 
-1. 排队进活轮的 prompt 遇上中断，既不送达也没有回执。p1 在跑时到达的 p2 经 `promptFresh` 以 followUp 排进 pi；用户中断后 agent loop 不取排队消息，`abort()` 也不清队列，supervisor 不调 `clearQueue()`。p2 留在 pi 队列里，直到下一次 prompt 才夹在它后面送达。触发需要"随时发送"的来源。
-2. 取消重试后，pi 带着排队 prompt 在同一轮续跑。p2 排进活轮后 p1 遇 503 进入重试倒计时，用户取消重试或新 prompt 经 `interruptRetryIfAny` 打断重试。`auto_retry_end(false)` 让 supervisor `failTurn`，而 `_handlePostAgentRun` 见到排队消息继续 `agent.continue()`。用户看到失败、输入解锁，agent 随后又自己跑起来，该轮最后再收到一个 `turn-completed`。
+1. 取消重试后，pi 带着排队 prompt 在同一轮续跑。p2 排进活轮后 p1 遇 503 进入重试倒计时，用户取消重试或新 prompt 经 `interruptRetryIfAny` 打断重试。`auto_retry_end(false)` 让 supervisor `failTurn`，而 `_handlePostAgentRun` 见到排队消息继续 `agent.continue()`。用户看到失败、输入解锁，agent 随后又自己跑起来，该轮最后再收到一个 `turn-completed`。

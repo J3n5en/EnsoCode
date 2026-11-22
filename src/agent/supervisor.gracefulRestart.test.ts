@@ -147,6 +147,7 @@ function fakeSession(options: Record<string, unknown>) {
     agent: { state: { messages }, prepareNextTurnWithContext: nextTurnPrepared },
     nextTurnPrepared,
     pendingMessageCount: 0,
+    getFollowUpMessages: () => [],
     subscribe: vi.fn((listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

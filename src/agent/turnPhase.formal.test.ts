@@ -649,9 +649,16 @@ function piSession(pi: Pi): unknown {
   return Object.defineProperties(
     {
       sessionFile: path.join(tempRoot, 'turn.jsonl'),
-      agent: { state: { messages: pi.messages }, continue: async () => {}, abort: () => {} },
+      agent: {
+        state: { messages: pi.messages },
+        continue: async () => {},
+        abort: () => {},
+        clearFollowUpQueue: () => void pi.followUps.splice(0),
+      },
       subscribe: pi.subscribe,
       prompt: pi.prompt,
+      getFollowUpMessages: () => pi.followUps,
+      _emitQueueUpdate: () => {},
       steer: async () => {},
       abort: pi.abort,
       abortRetry: pi.abortRetry,
@@ -968,7 +975,7 @@ const none: Budget = { errors: 0, overflows: 0, memCompactions: 0, beforeSettle:
 /**
  * 桌面 renderer 只在非 running 时发 prompt（running 时进本地队列）；其他发送方（bots、定时任务、
  * enso-server run、跨窗口竞态）随时可能发。僵尸时限先到点即 abort 后工具 5 秒内没停下。
- * 已知发现的触发条件（见文件末）各自从核心配置里拿掉：随时发送 + 中断、随时发送 + 打断重试。
+ * 已知发现的触发条件（见文件末）从核心配置里拿掉：随时发送 + 打断重试。
  */
 const core: { name: string; cfg: Config; min: number }[] = [
   {
@@ -1000,10 +1007,10 @@ const core: { name: string; cfg: Config; min: number }[] = [
       ]
     : []),
   {
-    name: '随时发送：排队消息遇上重试、溢出压缩续跑与 agent_before_settle 续跑',
+    name: '随时发送：排队消息遇上中断、重试、溢出压缩续跑与 agent_before_settle 续跑',
     cfg: {
       prompts: 2,
-      aborts: 0,
+      aborts: 1,
       abortRetries: 0,
       budget: { errors: FULL ? 2 : 1, overflows: 1, memCompactions: 1, beforeSettle: 1 },
       sendWhileRunning: true,
@@ -1040,18 +1047,6 @@ describe('worker 轮次相位（有界穷举，驱动真实 SessionSupervisor）
     },
     FULL ? 900_000 : 120_000
   );
-
-  it('已知发现：排队进活轮的 prompt 遇上中断，既不送达也没有未送达回执', async () => {
-    const result = await explore({
-      prompts: 2,
-      aborts: 1,
-      abortRetries: 0,
-      budget: none,
-      sendWhileRunning: true,
-      zombie: false,
-    });
-    expectOnlyKnown(result, '# 没进 pi，未送达回执 # 次');
-  }, 60_000);
 
   it('已知发现：取消重试后 pi 带着排队 prompt 续跑，已发出的 turn-failed 之后同一轮又开跑', async () => {
     const result = await explore({

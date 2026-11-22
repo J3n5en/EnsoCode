@@ -303,6 +303,7 @@ import {
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
+  withdrawFollowUps,
 } from './sessionAdapter';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
@@ -499,6 +500,8 @@ interface ManagedSession {
   abortedTurnId?: string;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
   settlePending?: boolean;
+  /** 排进 pi followUp 队列的用户 prompt：text 是 pi 队列里的那条文本，叫停撤回时据此对上 deliveryId */
+  queuedPrompts?: { text: string; deliveryId?: string }[];
   /** 当前用户轮已做过一次空回复自动续跑 */
   silentTurnNudgeUsed: boolean;
   /** 推脱补发正文；缺省不重试 */
@@ -2484,6 +2487,7 @@ export class SessionSupervisor {
         // 重试倒计时中 pi 只发 auto_retry_end、不再有 agent_end：须按取消重试同口径收口，
         // 否则 renderer 的中断标记吞掉下一轮收束（队列不再泵），排队压缩永远停在 queued
         const retrying = managed.session.isRetrying;
+        if (managed.status === 'running') this.withdrawQueuedPrompts(managed);
         managed.gate.cancelAll();
         managed.asks.cancelAll();
         cancelContinuousMemory(managed.session.sessionManager);
@@ -5364,7 +5368,13 @@ export class SessionSupervisor {
     managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
     const body = consumeRole(managed, text);
-    const options = { ...(images ? { images } : {}), streamingBehavior: 'followUp' as const };
+    const options = {
+      ...(images ? { images } : {}),
+      streamingBehavior: 'followUp' as const,
+      preflightResult: (disposition: PromptDisposition) => {
+        if (disposition === 'queued') this.noteQueuedPrompt(managed, deliveryId);
+      },
+    };
     const state: PromptDeliveryState = { dispatched: false, queued: false };
     const submit = () => this.promptTracked(managed, body, options, deliveryId, state);
     // 没开出新轮（被拒收或排进活轮）就把轮次号还给正在跑的那一轮
@@ -5456,6 +5466,27 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       deliveryId,
     });
+  }
+
+  /** pi 刚把这条 prompt 排进 followUp 队列，队尾就是它；已被 pi 取走的记录顺手丢掉 */
+  private noteQueuedPrompt(managed: ManagedSession, deliveryId?: string): void {
+    const labels = managed.session.getFollowUpMessages();
+    const text = labels.at(-1);
+    if (text === undefined) return;
+    managed.queuedPrompts = [
+      ...stillQueued(managed.queuedPrompts ?? [], labels.slice(0, -1)),
+      { text, ...(deliveryId ? { deliveryId } : {}) },
+    ];
+  }
+
+  /**
+   * 用户叫停时排进活轮的 prompt 不会再跑：pi 的 abort 不清 followUp 队列，留着就夹在下一次 prompt
+   * 后面送达。撤出队列，按 deliveryId 回执；回执不是终态，原轮照常由 agent_settled 收口。
+   */
+  private withdrawQueuedPrompts(managed: ManagedSession): void {
+    const withdrawn = stillQueued(managed.queuedPrompts ?? [], withdrawFollowUps(managed.session));
+    managed.queuedPrompts = undefined;
+    for (const { deliveryId } of withdrawn) this.emitDeliveryRejected(managed, deliveryId);
   }
 
   private async steerActive(
@@ -6777,6 +6808,22 @@ interface PromptDeliveryState {
 /** pi 在活轮里拒收不带 streamingBehavior 的 prompt：会话仍在跑，不是失败 */
 function isAlreadyProcessing(message: string): boolean {
   return message.includes('Agent is already processing');
+}
+
+/** 记录里仍在 pi 队列中的那些。pi 从队首取，同文本从队尾往前对账 */
+function stillQueued<T extends { text: string }>(
+  entries: readonly T[],
+  labels: readonly string[]
+): T[] {
+  const left = [...labels];
+  const kept: T[] = [];
+  for (const entry of [...entries].reverse()) {
+    const index = left.lastIndexOf(entry.text);
+    if (index < 0) continue;
+    left.splice(index, 1);
+    kept.unshift(entry);
+  }
+  return kept;
 }
 
 /** 回复里的可见正文，不含 thinking 与工具调用 */

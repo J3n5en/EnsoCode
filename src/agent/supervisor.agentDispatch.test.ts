@@ -146,6 +146,7 @@ function session(options: Record<string, unknown>) {
     ),
     agent: { steeringQueue: { messages: [] as unknown[] } },
     getSteeringMessages: () => labels,
+    getFollowUpMessages: () => [],
     _emitQueueUpdate: vi.fn(),
     _queueSteer: async (text: string) => {
       labels.push(text);

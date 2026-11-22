@@ -71,6 +71,20 @@ export function steerDetachable(
   return (detachableSteer(session, onQueued, (input) => input) ?? session).steer(text, images);
 }
 
+/**
+ * 撤出 followUp 队列里还没进上下文的消息并返回它们的文本，插话队列不动。pi 没有只清 followUp 的
+ * 公开接口：clearQueue() 连插话一起清，agent.clearFollowUpQueue() 不清 session 的标签也不发
+ * queue_update。标签数组与 _emitQueueUpdate 是私有形状，由真实 SDK 契约测试锁定。
+ */
+export function withdrawFollowUps(session: AgentSession): string[] {
+  const labels = session.getFollowUpMessages() as string[];
+  if (labels.length === 0) return [];
+  const withdrawn = labels.splice(0);
+  session.agent.clearFollowUpQueue();
+  (session as unknown as { _emitQueueUpdate: () => void })._emitQueueUpdate();
+  return withdrawn;
+}
+
 /** Pi 1.4：仅在本次 steer 的同步入队点检查活轮，不触碰 prompt 的压缩/nextTurn 副作用。
  */
 export async function steerActiveSession(

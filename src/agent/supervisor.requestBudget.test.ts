@@ -130,6 +130,7 @@ function session(options: Record<string, unknown>) {
     },
     prompt: vi.fn(async () => undefined),
     steer: vi.fn(async () => undefined),
+    getFollowUpMessages: () => [],
     abort: vi.fn(async () => undefined),
     dispose: vi.fn(),
     setThinkingLevel: vi.fn(),

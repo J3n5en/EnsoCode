@@ -185,6 +185,7 @@ function fakePi(options: Record<string, unknown>) {
       });
     }),
     getFollowUpMessages: () => pi.followUps,
+    _emitQueueUpdate: () => {},
     steer: vi.fn(async () => undefined),
     abort: vi.fn(async () => {
       pi.abortRetry();
@@ -288,6 +289,34 @@ describe('worker 轮次相位：formal 模型曾报出的反例', () => {
       supervisor.handleCommand({ type: 'prompt', identity: parent, text, deliveryId });
     return { events, supervisor, pi, prompt };
   }
+
+  it('排进活轮的 prompt 遇上中断：撤出 pi 队列、按 deliveryId 回执，原轮只有一个带 aborted 的终态', async () => {
+    const { events, supervisor, pi, prompt } = await spawn();
+    prompt('first', 'd1');
+    await settle();
+    prompt('second', 'd2');
+    await settle();
+    expect(pi.followUps.some((text) => text.includes('second'))).toBe(true);
+
+    supervisor.handleCommand({ type: 'abort', identity: parent });
+    await settle();
+    // agent-loop：回复 aborted 直接 agent_end，不取 followUp；_startRun 见 abort 跳出循环直接收束
+    pi.reply('aborted');
+    pi.emit({ type: 'agent_end', messages: [], willRetry: false });
+    pi.settle(true);
+    await settle();
+
+    expect({
+      stillQueuedInPi: pi.followUps.some((text) => text.includes('second')),
+      rejected: rejected(events),
+      terminals: terminals(events).map(({ type, aborted }) => ({ type, aborted })),
+    }).toEqual({
+      stillQueuedInPi: false,
+      rejected: ['d2'],
+      terminals: [{ type: 'turn-completed', aborted: true }],
+    });
+    await supervisor.shutdown();
+  });
 
   it('中断后 5 秒内再发 prompt 且工具不响应：prompt 按 deliveryId 回执，被中断的那一轮只有一个带 aborted 的终态', async () => {
     const { events, supervisor, pi, prompt } = await spawn();
