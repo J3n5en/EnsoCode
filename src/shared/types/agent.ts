@@ -1917,6 +1917,8 @@ export type ParentLifecycleEvent =
       seq: number;
       sessionFile: string;
       model: ModelRef;
+      /** 当前模型是否接收图片输入；Main 据此决定转发的图是给图片块还是只给路径 */
+      imageInput?: boolean;
     }
   | {
       /**
@@ -1927,6 +1929,7 @@ export type ParentLifecycleEvent =
       identity: SessionIdentity;
       seq: number;
       model: ModelRef;
+      imageInput?: boolean;
     }
   | {
       type: 'parent-rejected';
@@ -4557,11 +4560,16 @@ function parseLifecycleEvent(value: Record<string, unknown>): AgentWorkerEvent |
   if (!identity || !isSequence(value.seq)) return null;
   switch (value.type) {
     case 'parent-ready':
-      return isNonEmptyString(value.sessionFile) && parseModelRef(value.model)
+      return isNonEmptyString(value.sessionFile) &&
+        parseModelRef(value.model) &&
+        (value.imageInput === undefined || typeof value.imageInput === 'boolean')
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'model-changed':
-      return parseModelRef(value.model) ? (value as unknown as AgentWorkerEvent) : null;
+      return parseModelRef(value.model) &&
+        (value.imageInput === undefined || typeof value.imageInput === 'boolean')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'parent-rejected':
     case 'parent-ended':
       return hasOnlyKeys(value, ['type', 'identity', 'seq', 'reason', 'instanceId']) &&

@@ -8,10 +8,16 @@ import {
 } from '@shared/defaultModel';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { goalKickoffText } from '@shared/pair/headlessQueue';
+import {
+  forwardedMessage,
+  type LoadedImage,
+  type UnavailableImage,
+} from '@shared/secretary/attachments';
 import { extractRepresentativeTitle } from '@shared/titleSource';
 import type {
   AgentSpawnRequest,
   ApprovalMode,
+  AttachedImage,
   ConversationAuthority,
   ModelRef,
   ProjectAuthority,
@@ -41,6 +47,8 @@ export interface MainSessionRequest {
   unattended?: boolean;
   /** 秘书派出的会话：ask_user 先转给秘书，而不是按无人值守直接拒绝 */
   askRelay?: { name: string };
+  /** 随首条消息转发的图片：模型能看图就作为图片块，否则退回路径加 image_view */
+  attachments?: { images: LoadedImage[]; unavailable?: UnavailableImage[] };
 }
 
 export type MainSessionResult = { ok: true; conversationId: string } | { ok: false; error: string };
@@ -71,7 +79,14 @@ export interface SessionFactoryPorts {
   spawn(request: AgentSpawnRequest): Promise<{ ok: boolean; error?: string }>;
   /** 释放已 spawn 的根会话 */
   release(id: string): Promise<unknown>;
-  prompt(id: string, text: string, deliveryId: string): { ok: boolean; error?: string };
+  prompt(
+    id: string,
+    text: string,
+    deliveryId: string,
+    images?: AttachedImage[]
+  ): { ok: boolean; error?: string };
+  /** 会话就绪后报的模型能否看图；不知道时 undefined */
+  imageInput(id: string): Promise<boolean | undefined>;
   newId(): string;
   now(): number;
 }
@@ -169,11 +184,17 @@ export async function createSessionFromMain(
     return { ok: false, error: spawned.error ?? 'spawn failed' };
   }
 
-  const prompted = ports.prompt(
-    id,
-    goal ? `${prompt}\n\n${goalKickoffText(goal)}` : prompt,
-    ports.newId()
-  );
+  const text = goal ? `${prompt}\n\n${goalKickoffText(goal)}` : prompt;
+  const forwarded = request.attachments;
+  const message = forwarded
+    ? forwardedMessage(text, forwarded.images, {
+        // 只有带图时才等 worker 报模型能力
+        inline: forwarded.images.length > 0 && (await ports.imageInput(id)) === true,
+        canView: true,
+        ...(forwarded.unavailable ? { unavailable: forwarded.unavailable } : {}),
+      })
+    : { text };
+  const prompted = ports.prompt(id, message.text, ports.newId(), message.images);
   if (!prompted.ok) {
     await ports.release(id).catch(() => undefined);
     await rollback();

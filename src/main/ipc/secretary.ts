@@ -108,6 +108,7 @@ import {
   promptRootFromMain,
   releaseRootFromMain,
   resumeRootFromMain,
+  rootImageInput,
   setSecretaryDriverObserver,
   spawnRootFromMain,
 } from './agent';
@@ -167,7 +168,8 @@ function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactor
     },
     spawn: (request) => spawnRootFromMain(request),
     release: (id) => releaseRootFromMain(id),
-    prompt: (id, text, deliveryId) => promptRootFromMain(id, text, deliveryId),
+    prompt: (id, text, deliveryId, images) => promptRootFromMain(id, text, deliveryId, images),
+    imageInput: (id) => rootImageInput(id),
     newId: () => randomUUID(),
     now: () => Date.now(),
   };

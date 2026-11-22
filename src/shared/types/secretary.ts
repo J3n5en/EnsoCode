@@ -82,6 +82,8 @@ export interface DispatchDraft {
   branch?: string;
   /** 先后依赖：这些会话都真正结束后才开始；不建会话、不占派出上限 */
   after?: string[];
+  /** 随第一条 prompt 转发的图片路径；等依赖的派发只存路径，真正开始时再读 */
+  attachments?: string[];
 }
 
 /** 派发基线：三项都要在派发前校验，卡片与简报显示实际用到的值 */

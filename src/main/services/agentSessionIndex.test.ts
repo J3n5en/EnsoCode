@@ -170,6 +170,31 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.isAlive(parent.sessionId)).toBe(false);
   });
 
+  it('记下 worker 报的模型能否看图：就绪前与结束后都算不知道，换模型时跟着变', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    expect(sessions.imageInput(parent.sessionId)).toBeUndefined();
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+      imageInput: true,
+    });
+    expect(sessions.imageInput(parent.sessionId)).toBe(true);
+    sessions.observe({
+      type: 'model-changed',
+      identity: parent,
+      seq: 2,
+      model: { providerId: 'p', modelId: 'text-only' },
+      imageInput: false,
+    });
+    expect(sessions.imageInput(parent.sessionId)).toBe(false);
+    sessions.observe({ type: 'parent-ended', identity: parent, seq: 3, reason: 'released' });
+    expect(sessions.imageInput(parent.sessionId)).toBeUndefined();
+  });
+
   it('worker 释放后标记 detached，同代重新 prepareParent 或 parent-ready 后解除', () => {
     const sessions = index();
     sessions.prepareParent(parent);

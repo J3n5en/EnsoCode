@@ -797,11 +797,33 @@ export function promptRootFromMain(
 export function steerRootFromMain(
   sessionId: string,
   text: string,
-  deliveryId: string
+  deliveryId: string,
+  images?: AttachedImage[]
 ): AgentActionResult {
   const identity = exactIdentity(sessionId);
   if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
-  return steerSession(identity, text, undefined, deliveryId);
+  return steerSession(identity, text, images, deliveryId);
+}
+
+/** 根会话刚 spawn / 恢复时 worker 还没报 parent-ready：等它报，最多等 timeoutMs */
+const IMAGE_INPUT_WAIT_MS = 30_000;
+
+/**
+ * 根会话当前模型能否看图（worker 在 parent-ready / model-changed 里报）。
+ * 正在启动的会话等就绪；会话没在跑、启动失败或超时都返回 undefined，调用方按不能看图处理。
+ */
+export async function rootImageInput(
+  sessionId: string,
+  timeoutMs = IMAGE_INPUT_WAIT_MS
+): Promise<boolean | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const identity = exactIdentity(sessionId);
+    if (identity && agentSessionIndex.isReady(identity))
+      return agentSessionIndex.imageInput(sessionId);
+    if (!agentSessionIndex.isAlive(sessionId) || Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 export async function releaseRootFromMain(sessionId: string): Promise<AgentActionResult> {
