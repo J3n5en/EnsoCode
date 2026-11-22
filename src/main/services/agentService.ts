@@ -153,6 +153,8 @@ interface RunRecord {
   requestIndexes: Set<number>;
   /** 续跑之前各段已用的模型请求数 */
   priorRequests: number;
+  /** 模型自己 subagent stop 的：同一轮的中止回执由 stop 收口，不当成用户停止 */
+  stopRequested?: boolean;
 }
 
 interface Waiter {
@@ -180,6 +182,9 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
 ]);
 
 const RESUME_LIMIT_TEXT = `It was already resumed ${AGENT_TASK_MAX_RESUMES} times, the limit, so it cannot be resumed again: check what it already did, then spawn a fresh task for the rest or finish it yourself.`;
+
+const USER_STOPPED_TEXT =
+  '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
 
 function failure<T>(
   code: Extract<AgentServiceResult<T>, { ok: false }>['code'],
@@ -455,6 +460,7 @@ export class AgentService implements AgentServiceContract {
       if (!agent) return failure('not-found', 'Agent was not found.');
       // 模型自己停的：stop 回执即知情；停的途中恰好跑完也不再另发通知
       run.value.delivered = true;
+      run.value.stopRequested = true;
       if (run.value.status === 'queued') {
         agent.queuedRunIds = agent.queuedRunIds.filter((id) => id !== run.value.runId);
       } else if (run.value.status !== 'validating') {
@@ -467,6 +473,7 @@ export class AgentService implements AgentServiceContract {
         if (!stopped.ok) {
           // 停的途中已自然结束：模型只看到 stop 失败，补发通知
           run.value.delivered = false;
+          run.value.stopRequested = false;
           if (TERMINAL_RUN_STATUSES.has(run.value.status)) this.notifyUndelivered(run.value);
           return failure('runtime-unavailable', stopped.error ?? 'Stop failed.');
         }
@@ -764,6 +771,12 @@ export class AgentService implements AgentServiceContract {
       active &&
       event.turnId === active.runId
     ) {
+      // 用户在子代理 tab 里停止：可恢复的中断，task 停放待 resume；模型自己 stop 的交给 stop 收口
+      if (event.aborted) {
+        if (!active.stopRequested)
+          this.settleRun(agent, active, 'interrupted', USER_STOPPED_TEXT, true);
+        return;
+      }
       if (event.type === 'turn-completed' && event.requestBudgetStop) {
         active.requestBudgetStop = true;
         if (event.requestBudgetError) {
@@ -1008,7 +1021,7 @@ export class AgentService implements AgentServiceContract {
   private settleRun(
     agent: AgentRecord,
     run: RunRecord,
-    status: Extract<AgentRunStatus, 'succeeded' | 'failed'>,
+    status: Extract<AgentRunStatus, 'succeeded' | 'failed' | 'interrupted'>,
     error?: string,
     interrupted = false
   ): void {
@@ -1084,7 +1097,13 @@ export class AgentService implements AgentServiceContract {
   private completionText(run: RunRecord): string {
     const title = this.agents.get(run.agentId)?.title ?? run.agentId;
     const durationMs = (run.finishedAt ?? this.now()) - (run.startedAt ?? run.createdAt);
-    const body = run.status === 'succeeded' ? run.text?.trim() : run.error;
+    const partial = run.status === 'interrupted' ? run.text?.trim() : undefined;
+    const body =
+      run.status === 'succeeded'
+        ? run.text?.trim()
+        : partial
+          ? `${run.error ?? ''}\n\n停止前已有的部分输出：\n${partial}`.trim()
+          : run.error;
     const truncated = !!body && body.length > NOTIFY_TEXT_LIMIT;
     // 截断要可感知：模型得知道被裁了多少，才会去 report 拿全文
     const excerpt = truncated
