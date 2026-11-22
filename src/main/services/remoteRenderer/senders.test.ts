@@ -304,6 +304,32 @@ describe('RemoteSender snapshot trimming', () => {
       true
     );
   });
+
+  it('尾窗外工具批次标签不随快照下发；其它自定义条目和尾窗内的标签保留', () => {
+    const { sender, first } = setup();
+    const count = SNAPSHOT_TAIL_MESSAGES + 40;
+    const event = snapshot(count);
+    const session = event.sessions[0] as { messages: unknown[]; customEntries?: unknown[] };
+    session.messages[5] = { role: 'assistant', content: [{ type: 'toolCall', id: 'old' }] };
+    session.messages[count - 2] = {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 'recent' }],
+    };
+    const nudge = { kind: 'task-wrap-up-nudge', count: 1, at: 1 };
+    session.customEntries = [
+      { kind: 'tool-batch-label', callId: 'old', label: 'old', at: 1 },
+      nudge,
+      { kind: 'tool-batch-label', callId: 'recent', label: 'recent', at: 2 },
+    ];
+    sender.send('agent:event', event);
+    const out = decodeRemoteValue<[{ sessions: { customEntries?: unknown[] }[] }]>(
+      (first[0] as { args: unknown }).args
+    )[0];
+    expect(out.sessions[0]?.customEntries).toEqual([
+      nudge,
+      { kind: 'tool-batch-label', callId: 'recent', label: 'recent', at: 2 },
+    ]);
+  });
 });
 
 describe('RemoteSender settings change coalesce', () => {
@@ -339,6 +365,13 @@ describe('remoteLeaderId', () => {
       expect(remoteLeaderId(false)).toBe(earlier.id);
       earlier.destroy();
       expect(remoteLeaderId(false)).toBe(later.id);
+      // 挂起的页面收不到事件，leader 让给还在线的
+      later.suspend();
+      const online = new RemoteSender('p1', 'c-online', 'main', () => {});
+      addRemoteSender(online);
+      expect(remoteLeaderId(false)).toBe(online.id);
+      online.destroy();
+      expect(remoteLeaderId(false)).toBeNull();
       later.destroy();
       expect(remoteLeaderId(false)).toBeNull();
     } finally {

@@ -26,6 +26,11 @@ export interface SecretaryProfile {
   maxRunningDispatches: number;
   /** 自动巡检：有进行中的会话时按默认间隔检查、每小时扫一次遗留后台任务，只在发现异常时推一条 */
   patrolEnabled: boolean;
+  /**
+   * 清理不用确认：cleanup_apply 直接删除，不再弹确认卡。
+   * 缺省（字段不存在）视为关；能删什么不变，只省掉确认这一步。
+   */
+  cleanupSkipConfirm?: boolean;
   addressAs?: string;
   replyLanguage: 'ui' | 'zh' | 'en';
   style: 'concise' | 'detailed';
@@ -77,6 +82,8 @@ export interface DispatchDraft {
   branch?: string;
   /** 先后依赖：这些会话都真正结束后才开始；不建会话、不占派出上限 */
   after?: string[];
+  /** 随第一条 prompt 转发的图片路径；等依赖的派发只存路径，真正开始时再读 */
+  attachments?: string[];
 }
 
 /** 派发基线：三项都要在派发前校验，卡片与简报显示实际用到的值 */
@@ -316,6 +323,15 @@ export const NEEDS_YOU_RESULTS: ReadonlySet<SecretaryResultKind> = new Set([
   'needs-user',
 ]);
 
+/** 可以被手动收掉、也可以被追加任务替换的目标状态：不会再自己续跑 */
+export const REPLACEABLE_GOAL_STATUSES = ['blocked', 'paused'] as const;
+
+export interface ClosedGoal {
+  text: string;
+  status: (typeof REPLACEABLE_GOAL_STATUSES)[number];
+  note?: string;
+}
+
 export interface DispatchRecord {
   conversationId: string;
   projectId: string;
@@ -355,12 +371,14 @@ export interface DispatchRecord {
     manual?: true;
   };
   /**
-   * 已有终态结果后被 session_send 重新唤起的时间：这一轮还没结束，仍算在跑。
-   * 轮次一结束就清掉，会话真正空闲时回到原来的终态。
+   * 秘书 session_send 追加任务的时间：旧终态已撤下、重新跟踪，这一轮还没结束。
+   * 轮次一结束就清掉；这一轮的结果照常推给秘书。
    */
   reopenedAt?: number;
   /** 用户撤销手动标记的时间：放回进行中，直到这一轮出现新结果 */
   manualUndoneAt?: number;
+  /** 手动标记完成时一起收掉的受阻/暂停目标：撤销标记时恢复，重新跟踪后作废 */
+  closedGoal?: ClosedGoal;
   /**
    * 接管来的会话：权限与推送同派出会话，可撤销；不计入派出上限。
    * via=scope 表示项目在接管范围内、秘书实际用过它之后才建的跟踪记录。
@@ -379,8 +397,21 @@ export interface DispatchRecord {
    * 新结果、重新派出或手动标记完成都会清掉它。
    */
   dismissedFromBoard?: true;
+  /**
+   * goal-complete 收口后由 Main 自动归档的时刻，等于会话行上的 archivedAt：
+   * 只有对得上时才算自动归档，被唤醒才自动恢复；用户手动归档的对不上，不碰。
+   */
+  autoArchivedAt?: number;
+  /** 已经自动归档过的那次结果（lastResult.at）：用户手动取消归档后，同一次结果不再归档 */
+  autoArchiveResultAt?: number;
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
   patrol?: { reason: PatrolReason; turn: number; at: number };
+  /**
+   * 秘书最近一次发消息（session_send）的时间：发过之后这一轮一直没有可见回复
+   * （没有新的助手文字、也没有新的工具调用）时，巡检按空闲阈值兜底报停住。
+   * 有了可见回复就清掉。
+   */
+  sentAt?: number;
 }
 
 export type SecretaryUpdate = {
@@ -719,6 +750,52 @@ export interface SecretaryDaily {
   earliest?: string;
   /** 结果记录的保留天数，界面据此说明能回看多久 */
   retentionDays: number;
+}
+
+/** 完成结果里的 PR：号与链接来自汇报，状态与 squash 后的 sha 来自 gh */
+export interface SecretaryReportPull {
+  number: number;
+  url: string;
+  state?: 'OPEN' | 'MERGED' | 'CLOSED';
+  /** 合并后的提交（squash 即 squash 提交）；没合并不给 */
+  mergeSha?: string;
+}
+
+/** 改动文件一行：只有路径与增删行数；二进制文件 git 给不出行数，记 null */
+export interface SecretaryReportFile {
+  path: string;
+  additions: number | null;
+  deletions: number | null;
+}
+
+/**
+ * 报告截图：name 是 Main 存下的内容哈希文件名，renderer 只拿它拼图片地址；
+ * gone 只出现在给 renderer 的视图里：副本已因过期或资源页清理删掉。missing 是复制时就没成或副本无故丢了
+ */
+export type SecretaryReportImage =
+  | { label: string; name: string; gone?: 'expired' | 'cleared' }
+  | { label: string; missing: true };
+
+/** 会话报完成时存下的汇报与截图副本 */
+export interface SecretaryStoredReport {
+  at: number;
+  text: string;
+  images: SecretaryReportImage[];
+  /** 截图已删：expired 过了保留期，cleared 在资源页清理掉了；报告文字照常保留 */
+  imagesGone?: 'expired' | 'cleared';
+  /** 截图被删的时刻 */
+  imagesGoneAt?: number;
+  /** 只在视图里：截图保留天数 */
+  retentionDays?: number;
+}
+
+/** 已完成条目的「结果」视图；没存下报告（旧数据、手动标记完成）时 report 为 null */
+export interface SecretaryDoneReport {
+  report: SecretaryStoredReport | null;
+  pr?: SecretaryReportPull;
+  files?: SecretaryReportFile[];
+  /** 文件列表超过上限时截掉的条数 */
+  moreFiles?: number;
 }
 
 /**

@@ -1516,6 +1516,7 @@ export const zhTranslations: Record<string, string> = {
   Collapse: '收起',
   Expand: '展开',
   'Expand sidebar': '展开侧边栏',
+  'Show or hide sidebar': '显示/隐藏侧边栏',
   'Approval required': '需要审批',
   'Timed out · denied': '已超时拒绝',
   'Timed out · no answer': '已超时未回答',
@@ -1738,6 +1739,9 @@ export const zhTranslations: Record<string, string> = {
   'job:entities': '实体',
   'job:vectors': '向量',
   'Show less': '收起',
+  'Show full text': '展开全文',
+  'Dispatch instructions': '派发指令',
+  Message: '消息',
   'Show all {{count}}': '查看全部 {{count}} 条',
   '{{count}} task(s) in progress': '{{count}} 个任务进行中',
   'Exact match': '精确匹配',
@@ -2523,6 +2527,7 @@ export const zhTranslations: Record<string, string> = {
   'Showing {{shown}} of {{total}} models': '显示 {{shown}} / 共 {{total}} 个模型',
   // Status line · 段位与预设
   'Status line settings': '状态栏设置',
+  'Session stats': '会话统计',
   'Recent request body': '最近请求体',
   'Serialized payload': '已序列化',
   'Before send': '发送前',
@@ -2601,6 +2606,7 @@ export const zhTranslations: Record<string, string> = {
   'Turn on notifications': '开启推送通知',
   'Turn off notifications': '关闭推送通知',
   'Push notifications': '推送通知',
+  'Computers and notifications': '电脑与通知',
   'Turning on notifications…': '正在开启推送…',
   'Notifications need a newer desktop app.': '需先升级桌面端才能开启推送。',
   'Add this app to the Home Screen before notifications can be turned on.':
@@ -3725,7 +3731,15 @@ export const zhTranslations: Record<string, string> = {
   'Takeover granted': '已授权接管',
   'Takeover revoked': '已撤销接管',
   'The secretary has not saved anything yet.': '秘书还没有保存任何记忆。',
-  'Dispatched by {{name}}': '由{{name}}派出',
+  'Dispatched by {{name}}': '由 {{name}} 派出',
+  'All archived': '全部归档',
+  'Archived in group “{{name}}”': '范围：分组「{{name}}」的归档',
+  'Archived in ungrouped projects': '范围：未分组项目的归档',
+  'Archived sessions dispatched by {{name}}': '范围：{{name}} 派出的已归档会话',
+  '“Recent” has no archive scope; showing all archived': '范围：全部归档（「最近」不按项目划分）',
+  'Showing all archived': '范围：全部归档',
+  'Dispatched by a deleted secretary': '由已删除的秘书派出',
+  '{{label}} · muted': '{{label}} · 已静音',
   'Set up your secretary': '设置你的秘书',
   'Open secretary': '打开秘书',
   'Only when the secretary agent is enabled in Experimental settings':
@@ -3750,6 +3764,11 @@ export const zhTranslations: Record<string, string> = {
     '只要有会话在跑，秘书就定期检查，只在发现异常时推一条：goal 会话空闲 3 分钟、目标没完成且没有在跑的后台任务；空闲 20 分钟、后台任务一直没叫醒它；或运行 30 分钟没有任何事件。每小时还会汇报已完成会话里遗留的后台任务，不杀进程。一切正常时什么都不推。',
   'Patrol on': '巡检开',
   'Patrol off': '巡检关',
+  'Clean up without asking': '清理不用确认',
+  "Off by default. When on, this secretary's cleanup deletes immediately, with no confirmation card: merged local branches and their worktrees. Sessions are only archived, never deleted. Unmerged branches, branches in use, feat/secretary-agent, main, the current branch and worktrees with uncommitted changes are still refused or skipped.":
+    '默认关。打开后，这个秘书的清理直接删除，不再弹确认卡：已合并的本地分支，以及对应的 worktree。会话只是归档，不会删除。没合并的分支、正在使用的分支、feat/secretary-agent、main、当前分支，以及有未提交改动的 worktree，照旧拒绝或跳过。',
+  'Cleanup without confirmation': '清理不用确认',
+  'Cleanup asks first': '清理先确认',
   'One page: name, avatar, visible projects and patrol. Every field has a default.':
     '一页填完：名字、头像、可见项目与巡检。每一项都有默认值。',
   'Name, avatar, visible projects and patrol.': '名字、头像、可见项目与巡检。',
@@ -4001,6 +4020,11 @@ export const zhTranslations: Record<string, string> = {
   'Recent output': '最近输出',
   '{{count}} background tasks are still undeclared; the next message asks the agent to stop each one or state why it keeps running':
     '还有 {{count}} 个后台任务没表态，下一条消息会要求 agent 逐个停止或写明保留理由',
+  '{{count}} background tasks to wrap up: stop them or say why they keep running':
+    '有 {{count}} 个后台任务待收尾：停掉或说明保留原因',
+  'Show in task bar': '在任务条中查看',
+  'Workspace switched to branch {{branch}}': '工作区已切换到分支 {{branch}}',
+  'Workspace switched branch': '工作区已切换分支',
   '{{count}} suspected idle': '{{count}} 个疑似闲置',
   'from {{count}} sessions': '来自 {{count}} 个会话',
   'Stop selected': '停止所选',
@@ -4015,6 +4039,9 @@ export const zhTranslations: Record<string, string> = {
   'Stop {{count}} background tasks?': '停止 {{count}} 个后台任务？',
   '{{title}} (not open)': '{{title}}（未打开）',
   'Stop {{count}}': '停止 {{count}} 个',
+  '{{count}} background tasks': '{{count}} 个后台任务',
+  'longest running {{duration}}': '最久的已跑 {{duration}}',
+  'Stop all': '全部停止',
   '{{n}} background tasks running': '{{n}} 个后台任务在跑',
   '{{n}} suspected idle': '{{n}} 个疑似闲置',
   'Background tasks of {{title}}': '{{title}} 的后台任务',
@@ -4023,6 +4050,30 @@ export const zhTranslations: Record<string, string> = {
   'Stop suspected idle leftover tasks': '停止疑似闲置的遗留任务',
   Status: '状态',
   'Done ({{count}} kept tasks)': '已完成（保留 {{count}} 个任务）',
+  'This session no longer exists, or you do not have access to it':
+    '这条会话已不存在，或你没有权限查看',
+  'This session is archived. Restore it from the archive to view it.':
+    '这条会话已归档，从归档里恢复后才能查看',
+  'Needs your approval or answer': '等你审批或回答',
+  'Back to secretary': '返回秘书',
+  'PR open': '未合并',
+  'PR merged': '已合并',
+  'PR closed': '已关闭',
+  'No report was saved': '没有存下完成报告',
+  Screenshots: '截图',
+  '{{count}} screenshots expired': '{{count}} 张截图已过期',
+  '{{count}} screenshots were cleaned up': '{{count}} 张截图已在资源页清理',
+  'Completed {{done}}': '完成于 {{done}}',
+  'Completed {{done}}, kept for {{days}} days, cleaned up on {{gone}}':
+    '完成于 {{done}}，保留 {{days}} 天，已于 {{gone}} 清理',
+  'Completed {{done}}, cleaned up on {{gone}}': '完成于 {{done}}，已于 {{gone}} 清理',
+  'Cleaned up': '已清理',
+  'Changed files ({{count}})': '改动文件（{{count}}）',
+  Binary: '二进制',
+  '{{count}} more files': '还有 {{count}} 个文件',
+  'Report screenshots': '报告截图',
+  'Copies of screenshots in finished reports, kept for 7 days after completion. Cleaning removes all of them; report text is kept.':
+    '已完成报告里截图的副本，完成后保留 7 天。清理会删掉全部截图，报告文字保留。',
 };
 
 export function normalizeLocale(input?: string): Locale {

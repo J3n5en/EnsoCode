@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -9,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +35,7 @@ type Server struct {
 	hub    *hub
 	static fs.FS
 	desk   func() *deskBundle
+	shell  sync.Map
 	now    func() int64
 	log    *slog.Logger
 }
@@ -310,11 +315,81 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
-	ctype := mime.TypeByExtension(path.Ext(rel))
+	ext := path.Ext(rel)
+	ctype := mime.TypeByExtension(ext)
 	if ctype != "" {
 		w.Header().Set("Content-Type", ctype)
 	}
+	if !compressibleShell[ext] {
+		http.ServeContent(w, r, rel, time.Time{}, bytes.NewReader(b))
+		return
+	}
+	// 内嵌文件运行期不变：按文件缓存 ETag 与 gzip 结果；两种编码的 ETag 不同，304 不会串
+	f := s.shellFile(rel, b)
+	w.Header().Add("Vary", "Accept-Encoding")
+	if acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("ETag", `"`+f.tag+`-gz"`)
+		http.ServeContent(w, r, rel, time.Time{}, bytes.NewReader(f.gz))
+		return
+	}
+	w.Header().Set("ETag", `"`+f.tag+`"`)
 	http.ServeContent(w, r, rel, time.Time{}, bytes.NewReader(b))
+}
+
+// 页面壳里值得压缩的文本类型
+var compressibleShell = map[string]bool{
+	".html": true, ".js": true, ".mjs": true, ".css": true, ".json": true,
+	".webmanifest": true, ".svg": true, ".txt": true,
+}
+
+type shellFile struct {
+	tag string
+	gz  []byte
+}
+
+func (s *Server) shellFile(rel string, data []byte) *shellFile {
+	if hit, ok := s.shell.Load(rel); ok {
+		return hit.(*shellFile)
+	}
+	sum := sha256.Sum256(data)
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	_, _ = zw.Write(data)
+	_ = zw.Close()
+	f := &shellFile{tag: hex.EncodeToString(sum[:16]), gz: buf.Bytes()}
+	actual, _ := s.shell.LoadOrStore(rel, f)
+	return actual.(*shellFile)
+}
+
+// Accept-Encoding 协商：显式列出 gzip 时按它的 q，否则看 *；q=0 是拒绝
+func acceptsGzip(header string) bool {
+	gz, star := -1.0, -1.0
+	for _, part := range strings.Split(header, ",") {
+		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "gzip" && name != "x-gzip" && name != "*" {
+			continue
+		}
+		q := 1.0
+		for _, p := range strings.Split(params, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+			if ok && strings.EqualFold(strings.TrimSpace(k), "q") {
+				if parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+					q = parsed
+				}
+			}
+		}
+		if name == "*" {
+			star = q
+		} else {
+			gz = max(gz, q)
+		}
+	}
+	if gz >= 0 {
+		return gz > 0
+	}
+	return star > 0
 }
 
 func readJSON(r *http.Request, dst any) error {

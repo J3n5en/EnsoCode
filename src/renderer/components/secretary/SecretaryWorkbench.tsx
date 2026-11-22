@@ -25,6 +25,8 @@ import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
+import { openSessionFromSecretary } from '@/stores/secretaryReturn';
+import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
 import { SecretaryFace } from './SecretaryFace';
 import { SecretaryProposalRow } from './SecretaryProposalRow';
@@ -128,7 +130,6 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const face = useSecretaryFace();
   const approvals = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingApprovals);
   const asks = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingAsks);
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [stopping, setStopping] = useState(false);
   const stop = () => {
     setStopping(true);
@@ -194,7 +195,8 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
       <div className="mt-2 flex items-center gap-1.5">
         <button
           type="button"
-          onClick={() => selectConversation(card.conversationId)}
+          data-enso="secretary-card-open"
+          onClick={() => openSessionFromSecretary(card.conversationId)}
           className="rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
         >
           {t('Open session')}
@@ -226,10 +228,10 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
 
 function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?: string }) {
   const { t, locale } = useI18n();
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [draft, setDraft] = useState<string | null>(null);
   const phase = todo.phase ?? 'todo';
-  const openable = Boolean(todo.conversationId) && todo.sessionState !== 'gone';
+  // 会话已删也打开弹窗：由弹窗说明原因，而不是一个点不动的按钮
+  const openable = Boolean(todo.conversationId);
   if (draft !== null) {
     return (
       <div className="rounded-lg border border-border px-2.5 py-1.5">
@@ -277,7 +279,7 @@ function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?
             data-enso="secretary-todo-session"
             disabled={!openable}
             onClick={() => {
-              if (todo.conversationId && openable) selectConversation(todo.conversationId);
+              if (todo.conversationId) openSessionPeek(todo.conversationId);
             }}
             className="mt-0.5 block max-w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground disabled:cursor-default"
           >
@@ -387,11 +389,10 @@ function AddTodoRow({ onAdd }: { onAdd: () => void }) {
 function FeedEntry({ event }: { event: FeedEvent }) {
   const { t, locale } = useI18n();
   const face = useSecretaryFace();
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [stopping, setStopping] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const conversationId = event.conversationId;
-  const open = conversationId ? () => selectConversation(conversationId) : undefined;
+  const open = conversationId ? () => openSessionFromSecretary(conversationId) : undefined;
   const stop = conversationId
     ? () => {
         setStopping(true);

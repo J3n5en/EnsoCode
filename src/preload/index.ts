@@ -243,6 +243,7 @@ import type {
   SecretaryContactTopicsResult,
   SecretaryDaily,
   SecretaryDeletePreview,
+  SecretaryDoneReport,
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryProposal,
@@ -438,6 +439,11 @@ const electronAPI = {
       secretaryId?: string
     ): Promise<{ ok: true; daily: SecretaryDaily } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DAILY, day ? { day } : {}, secretaryId),
+    /** 已完成条目的结果：汇报、截图标识、PR 与改动文件 */
+    doneReport: (
+      conversationId: string
+    ): Promise<{ ok: true; result: SecretaryDoneReport } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DONE_REPORT, conversationId),
     onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
       const listener = (_event: unknown, state: SecretaryState) => callback(state);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);
@@ -1666,8 +1672,15 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TITLE_BAR_APPEARANCE, appearance),
     setTrafficLightsVisible: (visible: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
+    refreshDragRegions: (): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_REFRESH_DRAG_REGIONS),
     openSettings: (link?: SettingsDeepLink): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, link),
+    onToggleSidebar: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);
+    },
     onSettingsDeepLink: (callback: (link: SettingsDeepLink) => void): (() => void) => {
       const listener = (_: unknown, link: SettingsDeepLink) => callback(link);
       ipcRenderer.on(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);

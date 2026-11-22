@@ -12,6 +12,7 @@ import {
   parseSessionCleanRequest,
   parseWinProcesses,
   pickCleanTargets,
+  STORAGE_CLEANABILITY,
   sessionCleanIds,
   sessionStorageOwner,
   storageEntryKey,
@@ -75,6 +76,8 @@ describe('cpuPercent', () => {
 describe('isCleanableStorageCategory', () => {
   it('秘书图片可清理，会话与 other 不可', () => {
     expect(isCleanableStorageCategory('secretaryImages')).toBe(true);
+    expect(isCleanableStorageCategory('secretaryReports')).toBe(true);
+    expect(STORAGE_CLEANABILITY.secretaryReports).toBe('confirm');
     expect(isCleanableStorageCategory('sessions')).toBe(false);
     expect(isCleanableStorageCategory('other')).toBe(false);
     expect(isCleanableStorageCategory('bot-chats')).toBe(false);
@@ -112,6 +115,8 @@ describe('classifyStoragePath', () => {
     ['agent/sessions/enso-abc__cw-def.jsonl', 'coworkers'],
     ['bot-chats/secretary-images/0b3f6c1e-7a52-4c3e-9d1a-2f6e8b4c5d7a/ab.png', 'secretaryImages'],
     ['bot-chats/secretary-images/x/a.log', 'secretaryImages'],
+    ['secretary-reports/0b3f6c1e-7a52-4c3e-9d1a-2f6e8b4c5d7a/ab.png', 'secretaryReports'],
+    ['secretary-reports/0b3f6c1e-7a52-4c3e-9d1a-2f6e8b4c5d7a/report.json', 'secretaryReports'],
     ['bot-chats/11111111-1111-4111-8111-111111111111/media/ab.png', 'other'],
     ['bot-chats/a.log', 'other'],
     ['bot-chats/settings.json.bak', 'other'],

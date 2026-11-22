@@ -233,43 +233,64 @@ interface LiveSessionDialogProps {
   /** null = 关闭 */
   conversationId: string | null;
   title: string;
-  speaker: ChatSpeaker;
+  /** 默认时间线（Bot 投影）的发言人；传 children 时不用 */
+  speaker?: ChatSpeaker;
   /** 会话还没有消息时的占位标题（如委派排队中） */
   emptyTitle?: string;
   /** 空态副标题；传 '' 隐藏（如委派排队中） */
   emptyDescription?: string;
+  /** 标题下的信息行（状态、项目、操作） */
+  meta?: ReactNode;
+  /** 标题栏右侧的操作，位于关闭按钮左边 */
+  actions?: ReactNode;
+  /** 替换默认的 Bot 投影时间线（普通会话走 sessions store） */
+  children?: ReactNode;
   /** 弹窗底部（该会话的审批 / 提问） */
   footer?: React.ReactNode;
+  dataEnso?: string;
   onClose: () => void;
 }
 
-/** 群里正在回复的成员：实时查看其群会话 */
+/** 实时查看一条会话：群里正在回复的成员、秘书派出的会话 */
 export function LiveSessionDialog({
   conversationId,
   title,
   speaker,
   emptyTitle,
   emptyDescription,
+  meta,
+  actions,
+  children,
   footer,
+  dataEnso,
   onClose,
 }: LiveSessionDialogProps) {
   const runDividers = useRunDividers(conversationId);
   return (
     <Dialog open={conversationId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex h-[80vh] max-w-3xl flex-col">
+      <DialogContent data-enso={dataEnso} className="flex h-[80vh] max-w-3xl flex-col">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          {actions ? (
+            <div className="flex items-start gap-2 pe-8">
+              <DialogTitle className="min-w-0 flex-1">{title}</DialogTitle>
+              {actions}
+            </div>
+          ) : (
+            <DialogTitle>{title}</DialogTitle>
+          )}
+          {meta}
         </DialogHeader>
-        {conversationId && (
-          <LiveSessionTimeline
-            className="border-t"
-            conversationId={conversationId}
-            speaker={speaker}
-            emptyTitle={emptyTitle ?? title}
-            emptyDescription={emptyDescription}
-            runDividers={runDividers}
-          />
-        )}
+        {children ??
+          (conversationId && speaker && (
+            <LiveSessionTimeline
+              className="border-t"
+              conversationId={conversationId}
+              speaker={speaker}
+              emptyTitle={emptyTitle ?? title}
+              emptyDescription={emptyDescription}
+              runDividers={runDividers}
+            />
+          ))}
         {footer && <div className={CHAT_COL}>{footer}</div>}
       </DialogContent>
     </Dialog>

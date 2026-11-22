@@ -3,6 +3,7 @@ import { phoneOutboxStorage } from './botOutbox';
 import { migrateStore, type StoredDevice } from './deviceList';
 import { parseSessionId } from './launchSession';
 import { phoneCache } from './sessionCache';
+import { requestPersistence, syncPairedMark } from './storageGuard';
 
 /**
  * 配对凭据持久化（多桌面）。含 contentKey，故存 localStorage（浏览器沙箱内），
@@ -46,6 +47,9 @@ export function loadDevices(): StoredDevice[] {
 
 export function saveDevices(devices: StoredDevice[]): void {
   localStorage.setItem(DEVICES_KEY, JSON.stringify(devices));
+  // 配对凭据落盘时顺带申请持久存储、更新「配过对」标记（存储被清后据此说明原因）
+  void syncPairedMark(devices.length > 0);
+  if (devices.length > 0) void requestPersistence();
 }
 
 export function loadActiveDeviceId(): string | null {

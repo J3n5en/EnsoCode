@@ -129,6 +129,13 @@ function replyOverride(messages) {
   return match ? match[1] : null;
 }
 
+/** 工具跑完后的收尾正文：整轮里写过 `[[final:正文]]` 就用它（验完成汇报里的截图与 PR） */
+function finalOverride(messages) {
+  if (!hasToolResult(messages)) return null;
+  const match = /\[\[final:([\s\S]*?)\]\]/u.exec((messages ?? []).map(messageText).join('\n'));
+  return match ? match[1] : null;
+}
+
 function textReply(text, parts = 1) {
   return [
     {
@@ -195,6 +202,13 @@ const server = createServer((req, res) => {
     try {
       parsed = JSON.parse(body);
     } catch {}
+    const imagesIn = (message) =>
+      (Array.isArray(message?.content) ? message.content : []).filter(
+        (part) => part?.type === 'image' || part?.type === 'image_url'
+      ).length;
+    const userMessages = Array.isArray(parsed?.messages)
+      ? parsed.messages.filter((message) => message?.role === 'user')
+      : [];
     requests.push({
       at: Date.now(),
       url,
@@ -205,6 +219,9 @@ const server = createServer((req, res) => {
         parsed?.messages?.at(-1)?.content?.[0]?.text ?? parsed?.messages?.at(-1)?.content ?? ''
       ).slice(0, 120),
       toolNames: Array.isArray(parsed?.tools) ? parsed.tools.map((t) => t.name) : [],
+      // 只记图片块张数，不记内容：验收据此确认图片是作为图片发进去的
+      lastUserImages: imagesIn(userMessages.at(-1)),
+      userImages: userMessages.reduce((sum, message) => sum + imagesIn(message), 0),
       // 用来区分请求实际用了哪个 provider 条目的凭证（AC12/AC18 需要）
       authKey: String(req.headers['x-api-key'] || req.headers.authorization || '').slice(-6),
     });
@@ -222,7 +239,8 @@ const server = createServer((req, res) => {
     if (calls.length > 0) return void sse(res, toolUseReply(calls));
     const slow = slowMs(messages);
     const parts = slow > 0 ? Math.max(2, Math.round(slow / 500)) : 1;
-    void sse(res, textReply(replyOverride(messages) ?? 'fake-ok', parts), slow / parts);
+    const reply = replyOverride(messages) ?? finalOverride(messages) ?? 'fake-ok';
+    void sse(res, textReply(reply, parts), slow / parts);
   });
 });
 

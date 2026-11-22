@@ -2,6 +2,29 @@
 <html lang="zh">
   <head>
     <meta charset="utf-8" />
+    <!--
+      主屏图标打开的是 /：上次在桌面模式且有可用配对时，模块脚本下载执行前就跳 /desk，
+      不必先拉精简版整包。逻辑须与 src/uiMode.ts launchTarget 一致（uiMode.test.ts 校验）。
+    -->
+    <script>
+      (() => {
+        try {
+          if (localStorage.getItem('enso-phone-ui-mode') !== 'desk') return;
+          const params = new URLSearchParams(location.search);
+          if (params.get('mode') === 'phone' || params.get('pair') === 'desk') return;
+          const list = JSON.parse(localStorage.getItem('enso-phone-devices') || 'null');
+          if (!Array.isArray(list)) return;
+          const activeId = localStorage.getItem('enso-phone-active-device');
+          const device = list.find((d) => d && d.pairId === activeId) || list[0];
+          if (!device || typeof device.pairId !== 'string' || device.scope === 'read') return;
+          const target = new URLSearchParams({ device: device.pairId });
+          const session = (params.get('session') || '').trim();
+          if (session && session.length <= 200 && /^[\w.:-]+$/.test(session))
+            target.set('session', session);
+          location.replace(`/desk?${target}`);
+        } catch {}
+      })();
+    </script>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"

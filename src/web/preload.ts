@@ -23,6 +23,7 @@ const {
   setPushSubscription,
   setPushPending,
   exitDesk,
+  openDevices,
   local,
   localPlatform,
 } = remoteBridge;
@@ -34,6 +35,7 @@ const remote: RemoteApi = {
   upload: uploadToHost,
   localImagePrefix,
   ...(exitDesk ? { exitDesk: () => remoteBridge.exitDesk?.() } : {}),
+  ...(openDevices ? { openDevices: () => remoteBridge.openDevices?.() } : {}),
   ...(local && localPlatform ? { nativePlatform: localPlatform } : {}),
   ...(linkStatus && onLinkStatus && vapidPublicKey && setPushSubscription && setPushPending
     ? { linkStatus, onLinkStatus, vapidPublicKey, setPushSubscription, setPushPending }

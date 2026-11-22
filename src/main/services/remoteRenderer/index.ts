@@ -21,6 +21,7 @@ import { isRemoteChannelAllowed } from './channels';
 import { withoutConversations } from './conversationSync';
 import { type RemoteLink, setRemoteHostHooks } from './hostHooks';
 import { installIpcRegistry, registeredHandler, registeredListeners } from './ipcRegistry';
+import { resumeGrace } from './resumeGrace';
 import { REMOTE_SECRET_SENTINEL, redactSecrets, restoreSecrets } from './secrets';
 import {
   addRemoteSender,
@@ -40,8 +41,6 @@ export function allowRemoteHostControl(): void {
   hostControl = true;
 }
 
-/** 断线后保留远端 renderer 的时长：期间事件缓冲，同 cid 回来即续上 */
-const RESUME_GRACE_MS = 30_000;
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_LOCAL_IMAGE_BYTES = 25 * 1024 * 1024;
 
@@ -372,14 +371,30 @@ export function remoteLinkDown(pairId: string): void {
     if (!sender.online) continue;
     sender.suspend();
     cancelGrace(sender);
-    graceTimers.set(
-      sender.id,
-      setTimeout(() => {
-        dispose(sender);
-        refreshRemoteLeadership();
-      }, RESUME_GRACE_MS)
-    );
+    scheduleGrace(sender, Date.now());
   }
+  // 挂起的页面收不到事件，立刻把 leader 让给还在线的页面
+  refreshRemoteLeadership();
+}
+
+/** 缓冲没溢出就留着续；溢出或挂起太久才销毁。到点再看，期间回来即取消 */
+function scheduleGrace(sender: RemoteSender, suspendedAt: number): void {
+  const elapsed = Date.now() - suspendedAt;
+  const action = resumeGrace({
+    retainedBytes: sender.bufferedBytes,
+    maxBytes: sender.bufferLimit,
+    suspendedMs: elapsed,
+  });
+  if (action === 'dispose') {
+    graceTimers.delete(sender.id);
+    dispose(sender);
+    refreshRemoteLeadership();
+    return;
+  }
+  graceTimers.set(
+    sender.id,
+    setTimeout(() => scheduleGrace(sender, suspendedAt), 5_000)
+  );
 }
 
 /** 设备被解绑：立即销毁 */

@@ -178,6 +178,7 @@ import {
 } from './childContract';
 import {
   type ChildThinkingLevel,
+  fitChildReasoningToModel,
   pickChildReasoningOverride,
   resolveChildReasoning,
 } from './childReasoning';
@@ -857,6 +858,11 @@ export function persistRewindLeaf(session: AgentSession): void {
 function requiredSessionFile(session: AgentSession): string {
   if (!session.sessionFile) throw new Error('SessionManager did not provide a session file.');
   return session.sessionFile;
+}
+
+/** pi 模型声明的输入类型里有没有图片：秘书转发的图据此决定给图片块还是只给路径 */
+function acceptsImageInput(model: AgentSession['model']): boolean {
+  return model?.input?.includes('image') === true;
 }
 
 function settingsModelRef(model: SpawnModelConfig): ModelRef {
@@ -2130,6 +2136,7 @@ export class SessionSupervisor {
           identity: managed.identity,
           seq: ++managed.seq,
           model: settingsModelRef(command.model),
+          imageInput: acceptsImageInput(managed.session.model),
         });
         return;
       }
@@ -2563,6 +2570,7 @@ export class SessionSupervisor {
         seq: ++existing.seq,
         sessionFile: requiredSessionFile(existing.session),
         model: settingsModelRef(model),
+        imageInput: acceptsImageInput(existing.session.model),
       });
       return;
     }
@@ -3000,9 +3008,10 @@ export class SessionSupervisor {
           reasoningEnabled,
           thinkingLevel
         );
+        const fittedReasoning = fitChildReasoningToModel(childReasoning, base);
         const subModel = applyReasoningToModel(
           { ...base, compat: base.compat ? { ...base.compat } : undefined },
-          childReasoning.enabled,
+          fittedReasoning.enabled,
           selectedModel.modelId
         );
         const childExploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
@@ -3108,7 +3117,7 @@ export class SessionSupervisor {
           agentDir: this.options.agentDir,
           modelRuntime: runtime,
           model: subModel,
-          thinkingLevel: childReasoning.level,
+          thinkingLevel: fittedReasoning.level,
           noTools: 'builtin',
           customTools: subTools,
           resourceLoader: subLoader,
@@ -3592,6 +3601,7 @@ export class SessionSupervisor {
       seq: ++managedRef.seq,
       sessionFile: requiredSessionFile(session),
       model: settingsModelRef(model),
+      imageInput: acceptsImageInput(session.model),
     });
     this.continueAfterRestart(managedRef);
     this.wakeAfterOpen(managedRef);

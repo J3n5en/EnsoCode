@@ -2,6 +2,7 @@ import type { SecretaryBoard, SecretaryCard, SecretaryState } from '@shared/type
 import { Loader2 } from 'lucide-react';
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from '@/components/ui/preview-card';
 import { useI18n } from '@/i18n';
+import { openSessionPeek } from '@/stores/sessionPeek';
 
 export interface RunningOriginGroup {
   /** null = 未知来源：记录没有发起会话，或那条会话已不在 */
@@ -95,7 +96,7 @@ export interface RunningOriginsLink {
   onSelect: (conversationId: string) => void;
 }
 
-/** 头部「N 件在跑」：悬停列出每件属于哪条秘书会话，点击跳过去 */
+/** 头部「N 件在跑」：悬停列出每件属于哪条秘书会话；点组头跳秘书会话，点某件弹窗看它 */
 export function SecretaryRunningOriginsCard({
   label,
   groups,
@@ -142,14 +143,26 @@ export function SecretaryRunningOriginsCard({
                   {head}
                 </div>
               )}
-              {group.cards.map((card) => (
-                <div
-                  key={cardKey(card)}
-                  className="truncate pr-1.5 pl-4 text-[11.5px] text-muted-foreground"
-                >
-                  {cardTitle(card) || t('Unnamed')}
-                </div>
-              ))}
+              {group.cards.map((card) =>
+                card.kind === 'session' ? (
+                  <button
+                    key={cardKey(card)}
+                    type="button"
+                    data-enso="secretary-running-origin-card"
+                    onClick={() => openSessionPeek(card.conversationId, undefined, id ?? undefined)}
+                    className="block w-full truncate rounded-md pr-1.5 pl-4 text-left text-[11.5px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  >
+                    {cardTitle(card) || t('Unnamed')}
+                  </button>
+                ) : (
+                  <div
+                    key={cardKey(card)}
+                    className="truncate pr-1.5 pl-4 text-[11.5px] text-muted-foreground"
+                  >
+                    {cardTitle(card) || t('Unnamed')}
+                  </div>
+                )
+              )}
             </div>
           );
         })}

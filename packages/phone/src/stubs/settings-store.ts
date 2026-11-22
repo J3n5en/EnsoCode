@@ -13,14 +13,13 @@ import type { SettingsState, Theme } from '../../../../src/renderer/stores/setti
 
 interface SettingsSlice
   extends PairTimelinePrefs,
-    Pick<SettingsState, 'privacyMasking' | 'contextMenuOpen'> {
+    Pick<SettingsState, 'privacyMasking' | 'contextMenuOpen' | 'projects'> {
   language: Locale | 'system';
   theme: Theme;
   terminalTheme: string;
   terminalFontFamily: string;
   syncTerminalTheme: boolean;
   providers: never[];
-  projects: never[];
   skills: never[];
   presets: never[];
   agentTypes: never[];

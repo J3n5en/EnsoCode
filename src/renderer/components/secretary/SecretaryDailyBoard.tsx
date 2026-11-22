@@ -30,6 +30,7 @@ import { HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
 
 /**
@@ -140,7 +141,6 @@ function DailyCard({
   day: string;
 }) {
   const { t, locale } = useI18n();
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [expanded, setExpanded] = useState(false);
   const [stopping, setStopping] = useState(false);
   const body = item.summary ?? item.detail;
@@ -159,6 +159,14 @@ function DailyCard({
   // 已停止的会话同时给「标记完成」和「移出」：一个收口成完成，一个只从看板上拿掉。
   const mark = !item.tracked ? null : item.manual && column.key === 'done' ? 'undo' : null;
   const settle = item.tracked && (column.key === 'running' || column.key === 'stopped');
+  // 已完成的会话卡不再行内展开：点开就是弹窗，先看结果
+  const peekResult =
+    column.key === 'done' && item.conversationId
+      ? { title: item.title, ...(detail ? { fallback: detail } : {}) }
+      : undefined;
+  const openPeek = () => {
+    if (item.conversationId) openSessionPeek(item.conversationId, peekResult);
+  };
   // 已完成但还有遗留任务：卡片内逐个保留/停止；悬停的停止只停疑似闲置的，已保留的不动
   const liveTasks = useSessionsStore((state) =>
     item.conversationId ? state.conversations[item.conversationId]?.backgroundTasks : undefined
@@ -252,8 +260,8 @@ function DailyCard({
       <button
         type="button"
         data-enso="secretary-daily-expand"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
+        {...(peekResult ? { 'aria-haspopup': 'dialog' as const } : { 'aria-expanded': expanded })}
+        onClick={peekResult ? openPeek : () => setExpanded((value) => !value)}
         className="block w-full text-left"
       >
         <span
@@ -328,7 +336,7 @@ function DailyCard({
             data-enso="secretary-daily-open"
             title={t('Open session')}
             aria-label={t('Open session')}
-            onClick={() => selectConversation(item.conversationId as string)}
+            onClick={openPeek}
             className={cn(
               CHIP_CLASS,
               'cursor-pointer text-foreground transition-colors hover:bg-brand/15 hover:text-brand'

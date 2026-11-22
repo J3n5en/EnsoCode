@@ -22,7 +22,7 @@ export function PlanModeToggle({
       }
       onClick={() => onToggle(!active)}
       className={cn(
-        'flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-lg px-2 text-xs transition-colors',
+        'flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-lg px-2 text-xs transition-colors max-md:h-[32px] max-md:min-w-[32px] max-md:justify-center',
         active
           ? 'bg-primary/10 text-primary hover:bg-primary/15'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground'

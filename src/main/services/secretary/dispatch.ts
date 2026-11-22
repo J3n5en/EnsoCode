@@ -3,10 +3,12 @@ import { projectNameFromPath } from '@shared/projectName';
 import {
   describeForwardedImages,
   type ForwardedImage,
-  formatAttachmentBlock,
+  forwardedMessage,
+  type LoadedImage,
+  type UnavailableImage,
 } from '@shared/secretary/attachments';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
-import { probeImageView } from '@shared/secretary/imageView';
+import { probeImageView, readImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
 import {
@@ -32,6 +34,7 @@ import {
 } from '@shared/secretary/tools';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import {
+  type AttachedImage,
   type ConversationAuthority,
   type ProjectAuthority,
   THINKING_LEVELS,
@@ -39,11 +42,13 @@ import {
 } from '@shared/types/agent';
 import {
   type CleanupItem,
+  type ClosedGoal,
   type DispatchDraft,
   type DispatchModelRef,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
   type PendingProblem,
+  REPLACEABLE_GOAL_STATUSES,
   type SecretaryAuditEntry,
   type SecretaryBoard,
   type SecretaryDispatchFile,
@@ -149,6 +154,8 @@ export interface SecretaryQueuedMessage {
   /** 排队的秘书会话；撤回时要求与调用方一致 */
   by?: string;
   at: number;
+  /** 模型能看图时随消息转发的图片块；与用户自己排队贴图同一个字段 */
+  images?: AttachedImage[];
 }
 
 /** Main 侧的写数据源；测试注入假实现，生产走文件末尾的 secretaryDispatchPorts */
@@ -169,7 +176,8 @@ export interface SecretaryDispatchPorts {
   prompt(
     conversationId: string,
     text: string,
-    deliveryId: string
+    deliveryId: string,
+    images?: AttachedImage[]
   ): MaybePromise<{ ok: boolean; error?: string }>;
   /** 恢复被释放的 worker */
   resume(conversationId: string): Promise<{ ok: boolean; error?: string }>;
@@ -179,14 +187,34 @@ export interface SecretaryDispatchPorts {
   steer(
     conversationId: string,
     text: string,
-    deliveryId: string
+    deliveryId: string,
+    images?: AttachedImage[]
   ): MaybePromise<{ ok: boolean; error?: string }>;
+  /**
+   * 目标会话当前模型能否看图（worker 就绪时报）；正在启动的会话等它就绪。
+   * undefined 表示不知道，按不能看图处理。缺省表示一律不知道
+   */
+  imageInput?(conversationId: string): MaybePromise<boolean | undefined>;
   /** 追加排队消息；行不存在时返回 false */
   appendQueued(conversationId: string, message: SecretaryQueuedMessage): MaybePromise<boolean>;
   /** 按 id 从队列里删消息，返回真正删掉的条数 */
   dropQueued(conversationId: string, messageIds: readonly string[]): MaybePromise<number>;
   /** 有目标的会话被停止时置为暂停 */
   pauseGoal(conversationId: string): MaybePromise<void>;
+  /**
+   * 给已完成或没有目标的会话挂上新目标（与 session_create 同一种）。
+   * 原来的目标状态在 replaceable 里时替换并交回旧目标；否则返回 ok:false，目标原样保留。
+   * 缺省表示不支持挂目标。
+   */
+  attachGoal?(
+    conversationId: string,
+    goal: string,
+    replaceable: readonly string[]
+  ): MaybePromise<{ ok: boolean; error?: string; replaced?: { text: string; status: string } }>;
+  /** 目标状态在 statuses 里时把它从会话行上撤下并交回；否则不动、返回 null */
+  closeGoal?(conversationId: string, statuses: readonly string[]): MaybePromise<ClosedGoal | null>;
+  /** 会话行上没有目标时放回收掉的目标；已有目标就不动、返回 false */
+  restoreGoal?(conversationId: string, goal: ClosedGoal): MaybePromise<boolean>;
   /** 收尾清理要的 git / 目录 / 归档能力；清理提案确认时用 */
   cleanup: CleanupPorts;
   /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
@@ -298,6 +326,8 @@ const DENIALS = {
     "permission denied (not-visible): the session's project is not in the secretary's visible projects",
   'needs-user':
     'refused (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+  'goal-active':
+    "refused (goal-active): the session's current goal is still running or waiting on something external. A goal is only attached when the session has no goal, already reported goal-complete, or its goal is blocked or paused; do not replace a live one.",
   'managed-by-other':
     'permission denied (managed-by-other): another secretary manages this session. Only the user can transfer it to you; do not retry.',
   'not-yours':
@@ -319,6 +349,8 @@ interface SessionFields {
   taskId: string;
   /** 要转发的图片路径（未做文件校验）；不转发时为空数组 */
   attachments: string[];
+  /** 追加任务时挂上的新目标；不带时为空串 */
+  goal: string;
 }
 
 /** 逐字段校验，失败时写明哪个字段、哪里不合法 */
@@ -368,6 +400,10 @@ function sessionFields(
     ? attachmentPaths(params.attachments)
     : ({ ok: true, value: [] as string[] } as const);
   if (!attachments.ok) return attachments;
+  const goal = allowed.includes('goal')
+    ? optionalText(params.goal, 'goal', 4000)
+    : ({ ok: true, value: '' } as const);
+  if (!goal.ok) return goal;
   return {
     ok: true,
     value: {
@@ -377,8 +413,27 @@ function sessionFields(
       clearQueue: clearQueue === true,
       taskId: taskId.value,
       attachments: attachments.value,
+      goal: goal.value,
     },
   };
+}
+
+/** 可选文本：缺省是空串；给了就必须是非空字符串且不超过上限 */
+function optionalText(value: unknown, key: string, max: number): FieldsResult<string> {
+  if (value === undefined) return { ok: true, value: '' };
+  if (typeof value !== 'string')
+    return {
+      ok: false,
+      error: `invalid arguments: "${key}" must be a string, got ${typeof value}`,
+    };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: false, error: `invalid arguments: "${key}" must not be empty` };
+  if (trimmed.length > max)
+    return {
+      ok: false,
+      error: `invalid arguments: "${key}" is ${trimmed.length} characters, max ${max}`,
+    };
+  return { ok: true, value: trimmed };
 }
 
 /** attachments 只收字符串数组：单张路径越界、格式不对在文件校验里逐张报 */
@@ -410,7 +465,7 @@ function attachmentPaths(value: unknown): FieldsResult<string[]> {
 
 /**
  * 逐张校验要转发的图片：越界、不存在、不是图片、太大都写明是哪一张、为什么。
- * 只读文件头，不把图片读进 Main 内存。
+ * 只读文件头：等依赖的派发只存路径，真正开始时再读。
  */
 async function probeAttachments(
   paths: readonly string[]
@@ -423,6 +478,60 @@ async function probeAttachments(
     images.push({ path: probe.path, size: probe.size });
   }
   return { ok: true, value: images };
+}
+
+/** 校验并读出要转发的图片；任何一张不合法整条拒绝，写明是哪一张、为什么 */
+async function loadAttachments(
+  paths: readonly string[]
+): Promise<{ ok: true; value: LoadedImage[] } | { ok: false; error: string }> {
+  const images: LoadedImage[] = [];
+  for (const [index, requested] of paths.entries()) {
+    const read = await readImageView(realImageViewDeps, requested);
+    if (!read.ok)
+      return { ok: false, error: `attachments[${index + 1}] ${requested}: ${read.error}` };
+    images.push({
+      path: read.path,
+      size: read.size,
+      data: read.data,
+      mimeType: read.facts.mimeType,
+    });
+  }
+  return { ok: true, value: images };
+}
+
+/** 等依赖的派发真正开始时读图：读不到的不挡派发，记下原因写进 prompt */
+async function loadPendingAttachments(
+  paths: readonly string[]
+): Promise<{ images: LoadedImage[]; unavailable?: UnavailableImage[] }> {
+  const images: LoadedImage[] = [];
+  const unavailable: UnavailableImage[] = [];
+  for (const requested of paths) {
+    const read = await readImageView(realImageViewDeps, requested);
+    if (read.ok)
+      images.push({
+        path: read.path,
+        size: read.size,
+        data: read.data,
+        mimeType: read.facts.mimeType,
+      });
+    else unavailable.push({ path: requested, reason: read.error });
+  }
+  return { images, ...(unavailable.length > 0 ? { unavailable } : {}) };
+}
+
+/** 投递给目标会话的消息：模型能看图就带图片块，否则退回路径加 image_view */
+async function sendableMessage(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  text: string,
+  images: readonly LoadedImage[]
+): Promise<{ text: string; images?: AttachedImage[] }> {
+  if (images.length === 0) return { text };
+  const inline = (await ports.imageInput?.(conversationId)) === true;
+  return forwardedMessage(text, images, {
+    inline,
+    canView: inline || (await targetCanViewImages(ports, conversationId)),
+  });
 }
 
 /**
@@ -598,11 +707,19 @@ async function noteDispatchResumed(
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
+  // 发过消息：这一轮没有可见回复时巡检按空闲阈值兜底
+  record.sentAt = now;
   // 重新派活就是重新开始：上一次的停止与移出都不再生效
   delete record.stoppedAt;
   delete record.dismissedFromBoard;
-  // 已经有终态结果的会话被重新唤起：这一轮结束前仍算在跑，结束后回到原来的终态
-  if (record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)) record.reopenedAt = now;
+  // 追加任务就重新跟踪：撤下旧结果（含手动标完成），这一轮的结束、完成、受阻、失败、停滞照常推，
+  // 不会被旧终态或旧的停滞标记去重掉。收掉的旧目标也随手动标记一起作废
+  record.reopenedAt = now;
+  delete record.lastResult;
+  delete record.manualUndoneAt;
+  delete record.closedGoal;
+  delete record.stalledTurn;
+  delete record.patrol;
   ports.saveDispatch(file);
   const resumed = resumeLinkedTodo(await ports.todos(), conversationId, now);
   if (resumed.changed) ports.saveTodos(resumed.todos);
@@ -741,12 +858,14 @@ async function executeDispatch(
   ports: SecretaryDispatchPorts,
   draft: DispatchDraft,
   secretaryConversationId: string,
-  profile: SecretaryProfile
+  profile: SecretaryProfile,
+  attachments?: MainSessionRequest['attachments']
 ): Promise<MainSessionResult> {
   const created = await ports.createSession({
     projectId: draft.projectId,
     prompt: draft.prompt,
     worktree: draft.worktree,
+    ...(attachments ? { attachments } : {}),
     ...(draft.title ? { title: draft.title } : {}),
     ...(draft.model
       ? { model: { providerId: draft.model.providerId, modelId: draft.model.modelId } }
@@ -832,7 +951,8 @@ async function startDispatch(
   ports: SecretaryDispatchPorts,
   draft: DispatchDraft,
   secretaryConversationId: string,
-  profile: SecretaryProfile
+  profile: SecretaryProfile,
+  attachments?: MainSessionRequest['attachments']
 ): Promise<DispatchOutcome> {
   if ((draft.after?.length ?? 0) > 0) {
     return {
@@ -840,7 +960,13 @@ async function startDispatch(
       pendingId: await queuePending(ports, draft, secretaryConversationId),
     };
   }
-  const created = await executeDispatch(ports, draft, secretaryConversationId, profile);
+  const created = await executeDispatch(
+    ports,
+    draft,
+    secretaryConversationId,
+    profile,
+    attachments
+  );
   return created.ok
     ? { kind: 'created', conversationId: created.conversationId }
     : { kind: 'failed', error: created.error };
@@ -877,10 +1003,41 @@ async function dispatchDraft(
   if (!validated.ok) return { kind: 'failed', error: validated.error };
   const base = await checkBase(ports, validated.draft);
   if (!base.ok) return { kind: 'failed', error: base.error };
+  const prepared = await prepareAttachments(validated.draft);
+  if (!prepared.ok) return { kind: 'failed', error: prepared.error };
   // 派发固定直接执行，不出确认卡；派出的会话无人值守，审批照样自动拒绝
-  const outcome = await startDispatch(ports, validated.draft, secretaryConversationId, profile);
+  const outcome = await startDispatch(
+    ports,
+    prepared.draft,
+    secretaryConversationId,
+    profile,
+    prepared.attachments
+  );
   noteFollow(ports, secretaryConversationId, validated.draft, outcome);
   return outcome;
+}
+
+/**
+ * 派发带图：现在就开始的当场读图；等依赖的只校验并存真实路径，开始时再读。
+ * 任何一张不合法整条拒绝，什么都不建。
+ */
+async function prepareAttachments(
+  draft: DispatchDraft
+): Promise<
+  | { ok: true; draft: DispatchDraft; attachments?: MainSessionRequest['attachments'] }
+  | { ok: false; error: string }
+> {
+  const paths = draft.attachments ?? [];
+  if (paths.length === 0) return { ok: true, draft };
+  if ((draft.after?.length ?? 0) > 0) {
+    const probed = await probeAttachments(paths);
+    if (!probed.ok) return probed;
+    return { ok: true, draft: { ...draft, attachments: probed.value.map((image) => image.path) } };
+  }
+  const loaded = await loadAttachments(paths);
+  if (!loaded.ok) return loaded;
+  const { attachments: _paths, ...rest } = draft;
+  return { ok: true, draft: rest, attachments: { images: loaded.value } };
 }
 
 /** 原始需求的一句话摘要：标题优先，没有就取 prompt 的首个非空行 */
@@ -1099,11 +1256,13 @@ export async function startPendingDispatches(
       await failPending(ports, pending, 'dispatch-failed', undefined, base.error);
       continue;
     }
+    const { attachments: paths, ...draft } = validated.draft;
     const created = await executeDispatch(
       ports,
-      validated.draft,
+      draft,
       pending.secretaryConversationId,
-      profile
+      profile,
+      paths?.length ? await loadPendingAttachments(paths) : undefined
     );
     if (!created.ok) {
       await failPending(ports, pending, 'dispatch-failed', undefined, created.error);
@@ -1497,16 +1656,16 @@ export function untrack(ports: SecretaryDispatchPorts, conversationId: string): 
 }
 
 /** 秘书侧的手动收口：与看板按钮同一条逻辑，审计里标明是秘书点的 */
-function markResultOp(
+async function markResultOp(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
   params: Record<string, unknown>,
   action: MarkResultAction
-): SecretaryOpResult {
+): Promise<SecretaryOpResult> {
   const fields = sessionFields(params, ['conversationId']);
   if (!fields.ok) return fields;
   const { conversationId } = fields.value;
-  const result = markResult(ports, conversationId, action, 'secretary');
+  const result = await markResult(ports, conversationId, action, 'secretary');
   if (!result.ok) {
     const op =
       action === 'done'
@@ -1533,28 +1692,35 @@ export function createSecretaryDispatchHandlers(
     async session_create(params, ctx) {
       const draft = draftFromParams(params);
       if (!draft || !ctx.secretaryConversationId) return invalidArguments;
+      const paths = attachmentPaths(params.attachments);
+      if (!paths.ok) return paths;
+      if (paths.value.length > 0) draft.attachments = paths.value;
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
       return outcomeResult(ports, ctx, 'session_create', outcome, draft.projectId);
     },
 
     async session_send(params, ctx) {
-      const fields = sessionFields(params, ['conversationId', 'message', 'mode', 'attachments']);
+      const fields = sessionFields(params, [
+        'conversationId',
+        'message',
+        'mode',
+        'attachments',
+        'goal',
+      ]);
       if (!fields.ok) return fields;
-      const { conversationId, message: text, mode, attachments } = fields.value;
+      const { conversationId, message: text, mode, attachments, goal } = fields.value;
       const profile = await profileOf(ports);
       const check = await checkOperate(ports, conversationId, profile);
       if (!check.ok) return deny(ports, ctx, 'session_send', check.code, conversationId);
       const source = check.source;
       // 权限过了再读文件：图片全部校验通过才投递，任何一张不合法都在发出之前拒绝
-      const forwarded = await probeAttachments(attachments);
+      const forwarded = await loadAttachments(attachments);
       if (!forwarded.ok)
         return auditFailure(ports, ctx, 'session_send', forwarded.error, conversationId);
       const images = forwarded.value;
       const imageNote = images.length > 0 ? `; images: ${describeForwardedImages(images)}` : '';
-      const body =
-        images.length === 0
-          ? text
-          : `${text}\n\n${formatAttachmentBlock(images, await targetCanViewImages(ports, conversationId))}`;
+      // 能不能看图要等会话就绪才知道：在每条投递路径上、真正发出前再拼
+      const message = () => sendableMessage(ports, conversationId, text, images);
       const track = async () => {
         if (source === 'scope')
           await trackScopeSession(ports, conversationId, check.projectId, ctx);
@@ -1564,10 +1730,33 @@ export function createSecretaryDispatchHandlers(
       if (status.pendingAsks + status.pendingApprovals > 0) {
         return deny(ports, ctx, 'session_send', 'needs-user', conversationId);
       }
+      // 带目标时先挂上再发：受阻、暂停的旧目标不会再续跑，可以替换；
+      // 正在跑或在等外部条件的目标拒绝，不能把进行中的目标盖掉
+      if (goal) {
+        const attached = await ports.attachGoal?.(conversationId, goal, REPLACEABLE_GOAL_STATUSES);
+        if (!attached?.ok) return deny(ports, ctx, 'session_send', 'goal-active', conversationId);
+        if (attached.replaced) {
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_goal_replace',
+            targetId: conversationId,
+            ok: true,
+            detail: `${attached.replaced.status}: ${redactSecrets(attached.replaced.text).slice(0, 500)}`,
+          });
+        }
+        const file = ports.dispatchFile();
+        const record = file.dispatched[conversationId];
+        if (record) {
+          record.goal = goal;
+          ports.saveDispatch(file);
+        }
+      }
       if (status.state === 'running') {
         // 插话复用用户自己的 steer 通道：pi 在当前工具调用结束后读到它，不等整轮结束
         if (mode === 'steer') {
-          const steered = await ports.steer(conversationId, body, ports.newId());
+          const body = await message();
+          const steered = await ports.steer(conversationId, body.text, ports.newId(), body.images);
           if (!steered.ok) {
             return auditFailure(
               ports,
@@ -1590,9 +1779,11 @@ export function createSecretaryDispatchHandlers(
           notifySecretaryChanged();
           return { ok: true, result: { status: 'steered' } };
         }
+        const body = await message();
         const queued = await ports.appendQueued(conversationId, {
           id: ports.newId(),
-          text: body,
+          text: body.text,
+          ...(body.images ? { images: body.images } : {}),
           origin: 'secretary',
           ...(ctx.secretaryConversationId ? { by: ctx.secretaryConversationId } : {}),
           at: ports.now(),
@@ -1625,7 +1816,8 @@ export function createSecretaryDispatchHandlers(
           );
         }
       }
-      const prompted = await ports.prompt(conversationId, body, ports.newId());
+      const body = await message();
+      const prompted = await ports.prompt(conversationId, body.text, ports.newId(), body.images);
       if (!prompted.ok) {
         return auditFailure(
           ports,
@@ -2182,6 +2374,8 @@ export function createSecretaryDispatchHandlers(
     async todo_item_dispatch(params, ctx) {
       const todoId = stringParam(params, 'todoId');
       if (!todoId || !ctx.secretaryConversationId) return invalidArguments;
+      const paths = attachmentPaths(params.attachments);
+      if (!paths.ok) return paths;
       const todos = await ports.todos();
       const todo = todos.find((candidate) => candidate.id === todoId);
       if (!todo) return auditFailure(ports, ctx, 'todo_item_dispatch', 'not-found', todoId);
@@ -2217,6 +2411,7 @@ export function createSecretaryDispatchHandlers(
       if (after) draft.after = after;
       const model = modelParam(params.model);
       if (model) draft.model = model;
+      if (paths.value.length > 0) draft.attachments = paths.value;
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
       return outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
     },
@@ -2430,13 +2625,28 @@ export type MarkResultSource = 'ui' | 'secretary';
 /**
  * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
  * undo 把这条手动结果撤掉、放回进行中。只认派发或接管的记录，普通会话不动。
+ * done 时受阻、暂停的目标不会再续跑，一并收掉，免得之后追加任务被它挡住；undo 放回去。
  */
-export function markResult(
+export async function markResult(
   ports: SecretaryDispatchPorts,
   conversationId: string,
   action: MarkResultAction,
   source: MarkResultSource = 'ui'
-): MarkResultResult {
+): Promise<MarkResultResult> {
+  const before = ports.dispatchFile().dispatched[conversationId];
+  if (!before) return { ok: false, error: 'not-found' };
+  if (action === 'undo' && before.lastResult?.manual !== true)
+    return { ok: false, error: 'not-manual' };
+  // 改会话行要等异步写回：先动目标，再读最新的派发记录改，免得用旧快照覆盖
+  let goalNote: string | undefined;
+  let closedGoal: ClosedGoal | null = null;
+  if (action === 'done') {
+    closedGoal = (await ports.closeGoal?.(conversationId, REPLACEABLE_GOAL_STATUSES)) ?? null;
+    if (closedGoal) goalNote = `goal closed (${closedGoal.status})`;
+  } else if (action === 'undo' && before.closedGoal) {
+    if (await ports.restoreGoal?.(conversationId, before.closedGoal))
+      goalNote = `goal restored (${before.closedGoal.status})`;
+  }
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
   if (!record) return { ok: false, error: 'not-found' };
@@ -2457,6 +2667,8 @@ export function markResult(
     delete record.reopenedAt;
     delete record.manualUndoneAt;
     delete record.dismissedFromBoard;
+    if (closedGoal) record.closedGoal = closedGoal;
+    else delete record.closedGoal;
   } else if (action === 'dismiss') {
     // 移出只动看板记录：不标完成，不碰会话与历史
     if (record.lastState !== 'idle') record.stateSince = now;
@@ -2474,6 +2686,7 @@ export function markResult(
     record.lastState = 'running';
     record.manualUndoneAt = now;
     delete record.dismissedFromBoard;
+    delete record.closedGoal;
   }
   ports.saveDispatch(file);
   ports.audit({
@@ -2482,7 +2695,7 @@ export function markResult(
     op,
     targetId: conversationId,
     ok: true,
-    detail: source === 'secretary' ? 'secretary' : 'manual',
+    detail: [source === 'secretary' ? 'secretary' : 'manual', goalNote].filter(Boolean).join('; '),
   });
   notifySecretaryChanged();
   return { ok: true };
@@ -2726,16 +2939,23 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
       (await import('../../ipc/agent')).observedSessionStatus(conversationId),
     createSession: async (request) =>
       (await import('../../ipc/secretary')).createSessionViaMain(request),
-    prompt: async (conversationId, text, deliveryId) =>
-      (await import('../../ipc/agent')).promptRootFromMain(conversationId, text, deliveryId),
+    prompt: async (conversationId, text, deliveryId, images) =>
+      (await import('../../ipc/agent')).promptRootFromMain(
+        conversationId,
+        text,
+        deliveryId,
+        images
+      ),
     resume: async (conversationId) =>
       (await import('../../ipc/agent')).resumeRootFromMain(conversationId),
     alive: async (conversationId) =>
       (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
     abort: async (conversationId) =>
       (await import('../../ipc/agent')).abortRootFromMain(conversationId),
-    steer: async (conversationId, text, deliveryId) =>
-      (await import('../../ipc/agent')).steerRootFromMain(conversationId, text, deliveryId),
+    steer: async (conversationId, text, deliveryId, images) =>
+      (await import('../../ipc/agent')).steerRootFromMain(conversationId, text, deliveryId, images),
+    imageInput: async (conversationId) =>
+      (await import('../../ipc/agent')).rootImageInput(conversationId),
     appendQueued: async (conversationId, message) => {
       const { patchConversationsState } = await import('../../ipc/settings');
       let found = false;
@@ -2766,6 +2986,43 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
         state.conversations[conversationId] = { ...row, queuedMessages: kept };
       });
       return removed;
+    },
+    attachGoal: async (conversationId, goal, replaceable) => {
+      const { getDispatchDriver } = await import('../../ipc/secretary');
+      const driver = getDispatchDriver();
+      if (!driver) return { ok: false, error: 'driver unavailable' };
+      return driver.attachGoal(conversationId, goal, replaceable);
+    },
+    closeGoal: async (conversationId, statuses) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      let closed: ClosedGoal | null = null;
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        const goal = row?.goal as Record<string, unknown> | undefined;
+        if (!row || !goal || typeof goal !== 'object' || typeof goal.text !== 'string') return;
+        if (!statuses.includes(goal.status as string)) return;
+        closed = {
+          text: goal.text,
+          status: goal.status as ClosedGoal['status'],
+          ...(typeof goal.note === 'string' && goal.note ? { note: goal.note } : {}),
+        };
+        state.conversations[conversationId] = { ...row, goal: undefined };
+      });
+      return closed;
+    },
+    restoreGoal: async (conversationId, goal) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      let restored = false;
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row || (row.goal && typeof row.goal === 'object')) return;
+        restored = true;
+        state.conversations[conversationId] = {
+          ...row,
+          goal: { ...goal, autoTurns: 0, noProgressRuns: 0 },
+        };
+      });
+      return restored;
     },
     pauseGoal: async (conversationId) => {
       const { patchConversationsState } = await import('../../ipc/settings');

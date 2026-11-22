@@ -352,6 +352,42 @@ describe('界面改目标走 Main', () => {
   });
 });
 
+describe('追加任务挂目标', () => {
+  it('受阻、暂停的目标在允许替换时换成新目标，并交回旧目标', () => {
+    for (const status of ['blocked', 'paused'] as const) {
+      const h = harness({ goal: { text: '旧目标', status, autoTurns: 4, note: '缺 token' } });
+      expect(h.driver.attachGoal(SID, '新目标', ['blocked', 'paused'])).toEqual({
+        ok: true,
+        replaced: { text: '旧目标', status },
+      });
+      expect(goalOf(h)).toEqual({
+        text: '新目标',
+        status: 'active',
+        autoTurns: 0,
+        noProgressRuns: 0,
+      });
+    }
+  });
+
+  it('不在允许名单里的目标原样保留：active、waiting 都拒绝', () => {
+    for (const status of ['active', 'waiting'] as const) {
+      const goal = { text: '旧目标', status, autoTurns: 1, noProgressRuns: 0 };
+      const h = harness({ goal });
+      expect(h.driver.attachGoal(SID, '新目标', ['blocked', 'paused'])).toEqual({
+        ok: false,
+        error: 'goal-active',
+      });
+      expect(goalOf(h)).toEqual(goal);
+    }
+  });
+
+  it('不给名单时只挂到没有目标的会话上', () => {
+    const h = harness({ goal: { text: '旧目标', status: 'blocked', autoTurns: 0 } });
+    expect(h.driver.attachGoal(SID, '新目标')).toMatchObject({ ok: false });
+    expect(goalOf(h)).toMatchObject({ status: 'blocked' });
+  });
+});
+
 describe('派出会话的后台任务看门狗', () => {
   const clock = { now: 1_000 };
 

@@ -183,6 +183,15 @@ export class RemoteSender extends EventEmitter {
     return !this.destroyed && !this.suspended;
   }
 
+  /** 断链后积压的帧字节数：溢出后旧帧会被丢，续连就只能重载 */
+  get bufferedBytes(): number {
+    return this.retainedBytes;
+  }
+
+  get bufferLimit(): number {
+    return this.maxBytes;
+  }
+
   suspend(): void {
     if (this.destroyed || this.suspended) return;
     this.suspended = true;
@@ -256,7 +265,12 @@ interface SnapshotEvent {
   partial?: boolean;
   resumeFull?: boolean;
   sessionId?: string;
-  sessions: { identity?: { sessionId?: unknown }; messages: unknown[]; baseIndex?: number }[];
+  sessions: {
+    identity?: { sessionId?: unknown };
+    messages: unknown[];
+    baseIndex?: number;
+    customEntries?: unknown[];
+  }[];
 }
 
 /** 顶层字段顺序无关（尾窗的 baseIndex 位置与裁剪后的全量不同） */
@@ -291,6 +305,28 @@ function isSnapshotEvent(event: unknown): event is SnapshotEvent {
  * 全量概览（非 partial，启动时要一次）含 worker 持有的所有会话，只给最近几条：
  * 打开会话时另要定向快照取完整尾窗，reducer 按 baseIndex 保留本地已有的前缀。
  */
+/** 尾窗消息里的工具调用 id */
+function toolCallIds(messages: unknown[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    const content = (message as { content?: unknown } | null)?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content as { type?: unknown; id?: unknown }[]) {
+      if (part?.type === 'toolCall' && typeof part.id === 'string') ids.add(part.id);
+    }
+  }
+  return ids;
+}
+
+/** 工具批次标签每批一条、随会话无限增长（长会话数百 KB）：只留尾窗里用得上的 */
+function trimBatchLabels(entries: unknown[], messages: unknown[]): unknown[] {
+  const ids = toolCallIds(messages);
+  return entries.filter((entry) => {
+    const e = entry as { kind?: unknown; callId?: unknown } | null;
+    return e?.kind !== 'tool-batch-label' || (typeof e.callId === 'string' && ids.has(e.callId));
+  });
+}
+
 function trimSnapshot(event: SnapshotEvent): SnapshotEvent {
   const limits = event.partial
     ? {}
@@ -304,6 +340,9 @@ function trimSnapshot(event: SnapshotEvent): SnapshotEvent {
         ...session,
         messages: tail.messages,
         baseIndex: (session.baseIndex ?? 0) + tail.baseIndex,
+        ...(session.customEntries
+          ? { customEntries: trimBatchLabels(session.customEntries, tail.messages) }
+          : {}),
       };
     }),
   };
@@ -383,7 +422,8 @@ export function remoteLeaderId(desktopMainAlive: boolean): number | null {
   if (desktopMainAlive) return null;
   let leader: RemoteSender | null = null;
   for (const sender of byId.values()) {
-    if (sender.kind !== 'main') continue;
+    // 挂起的页面收不到事件，不能继续当 leader
+    if (sender.kind !== 'main' || !sender.online) continue;
     if (!leader || sender.id < leader.id) leader = sender;
   }
   return leader?.id ?? null;

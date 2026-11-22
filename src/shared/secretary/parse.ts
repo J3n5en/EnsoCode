@@ -4,6 +4,7 @@ import type {
   CleanupDraft,
   CleanupItem,
   CleanupItemKind,
+  ClosedGoal,
   DispatchDraft,
   DispatchModelRef,
   DispatchRecord,
@@ -29,6 +30,7 @@ import {
   CLEANUP_ITEM_KINDS,
   PATROL_REASONS as PATROL_REASON_KINDS,
   RELAY_ASK_STATUSES,
+  REPLACEABLE_GOAL_STATUSES,
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
@@ -174,6 +176,8 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     maxRunningDispatches:
       clampInt(value.maxRunningDispatches, MIN_RUNNING_DISPATCHES, MAX_RUNNING_DISPATCHES) ?? 3,
     patrolEnabled: flag(value.patrolEnabled, true),
+    // 缺省关且不落盘：直接删除是用户显式打开的行为，旧档案不能因为缺字段就跳过确认
+    ...(value.cleanupSkipConfirm === true ? { cleanupSkipConfirm: true } : {}),
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
     style: oneOf(value.style, STYLES, 'concise'),
     notify: oneOf(value.notify, NOTIFY_MODES, 'needs-user'),
@@ -286,6 +290,11 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
       return { ok: false, error: 'invalid patrolEnabled' };
     draft.patrolEnabled = value.patrolEnabled;
   }
+  if (value.cleanupSkipConfirm !== undefined) {
+    if (typeof value.cleanupSkipConfirm !== 'boolean')
+      return { ok: false, error: 'invalid cleanupSkipConfirm' };
+    draft.cleanupSkipConfirm = value.cleanupSkipConfirm;
+  }
   if (value.addressAs !== undefined) {
     if (value.addressAs === null) draft.addressAs = null;
     else if (text(value.addressAs)) draft.addressAs = text(value.addressAs) as string;
@@ -333,6 +342,8 @@ function parseDraft(value: unknown): DispatchDraft | undefined {
   if (branch) draft.branch = branch;
   const after = texts(value.after);
   if (after.length > 0) draft.after = after;
+  const attachments = texts(value.attachments);
+  if (attachments.length > 0) draft.attachments = attachments;
   return draft;
 }
 
@@ -541,6 +552,28 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   const stoppedAt = time(value.stoppedAt);
   if (stoppedAt !== undefined) record.stoppedAt = stoppedAt;
   if (value.dismissedFromBoard === true) record.dismissedFromBoard = true;
+  const autoArchivedAt = time(value.autoArchivedAt);
+  if (autoArchivedAt !== undefined) record.autoArchivedAt = autoArchivedAt;
+  const autoArchiveResultAt = time(value.autoArchiveResultAt);
+  if (autoArchiveResultAt !== undefined) record.autoArchiveResultAt = autoArchiveResultAt;
+  const sentAt = time(value.sentAt);
+  if (sentAt !== undefined) record.sentAt = sentAt;
+  const reopenedAt = time(value.reopenedAt);
+  if (reopenedAt !== undefined) record.reopenedAt = reopenedAt;
+  const manualUndoneAt = time(value.manualUndoneAt);
+  if (manualUndoneAt !== undefined) record.manualUndoneAt = manualUndoneAt;
+  if (
+    isObject(value.closedGoal) &&
+    text(value.closedGoal.text) &&
+    (REPLACEABLE_GOAL_STATUSES as readonly unknown[]).includes(value.closedGoal.status)
+  ) {
+    const note = text(value.closedGoal.note);
+    record.closedGoal = {
+      text: text(value.closedGoal.text) as string,
+      status: value.closedGoal.status as ClosedGoal['status'],
+      ...(note ? { note } : {}),
+    };
+  }
   if (
     isObject(value.patrol) &&
     PATROL_REASONS.includes(value.patrol.reason as PatrolReason) &&
@@ -585,6 +618,7 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
         turn,
         at,
         ...(value.lastResult.dismissed === true ? { dismissed: true as const } : {}),
+        ...(value.lastResult.manual === true ? { manual: true as const } : {}),
       };
   }
   if (value.takeover !== undefined) {

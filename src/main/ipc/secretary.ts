@@ -7,6 +7,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretarySkillView, SecretaryState, SecretarySummary } from '@shared/types/secretary';
 import { resumesAfterQuit } from '../services/agentHost';
+import { backgroundTaskStates } from '../services/backgroundTaskTracker';
 import { coldResumedSessionIds, onColdResumeFailed } from '../services/coldRestart';
 import { notifyDesktop } from '../services/desktopHooks';
 import { interruptedTurnReason } from '../services/interruptedTurns';
@@ -38,6 +39,7 @@ import {
   stopLeftoverTasks,
   untrack,
 } from '../services/secretary/dispatch';
+import { doneReportFor } from '../services/secretary/doneReport';
 import {
   createDispatchDriver,
   type DispatchDriver,
@@ -59,6 +61,7 @@ import {
 import { openSecretaryTarget } from '../services/secretary/links';
 import { reportPeerTodos, setPeerDeliveryListener } from '../services/secretary/peers';
 import { secretaryProfileFor } from '../services/secretary/profile';
+import { getSecretaryReportStore } from '../services/secretary/reportImages';
 import {
   parseAvatarRequest,
   parseDismissRequest,
@@ -105,6 +108,7 @@ import {
   promptRootFromMain,
   releaseRootFromMain,
   resumeRootFromMain,
+  rootImageInput,
   setSecretaryDriverObserver,
   spawnRootFromMain,
 } from './agent';
@@ -113,6 +117,7 @@ import {
   patchConversationsState,
   readPersistedConversation,
   readPersistedConversations,
+  readSettings,
   readSettingsState,
 } from './settings';
 import { createConversationWorktree, removeRegisteredWorktree } from './worktree';
@@ -163,7 +168,8 @@ function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactor
     },
     spawn: (request) => spawnRootFromMain(request),
     release: (id) => releaseRootFromMain(id),
-    prompt: (id, text, deliveryId) => promptRootFromMain(id, text, deliveryId),
+    prompt: (id, text, deliveryId, images) => promptRootFromMain(id, text, deliveryId, images),
+    imageInput: (id) => rootImageInput(id),
     newId: () => randomUUID(),
     now: () => Date.now(),
   };
@@ -238,11 +244,33 @@ const driverPorts: DispatchDriverPorts = {
 };
 
 let driver: DispatchDriver | null = null;
+
+/** 派发模块挂目标用：驱动者在注册 handler 时才建好，不能静态依赖 */
+export function getDispatchDriver(): DispatchDriver | null {
+  return driver;
+}
 let contacts: SecretaryContacts | null = null;
 /** 每个秘书一个回传宿主：各自的定时器、巡检、投递槽位与定时任务 */
 const hosts = new Map<string, SecretaryHost>();
 /** 各秘书宿主对冷启动续跑失败的订阅 */
 const resumeFailureSubscriptions = new Map<string, () => void>();
+
+/** 界面上报的当前打开的会话；undefined 表示还没上报（刚启动），这时按上次落盘的 activeId 算 */
+let viewedSession: string | null | undefined;
+
+function viewedConversation(): string | null {
+  if (viewedSession !== undefined) return viewedSession;
+  const store = readSettings()?.['enso-conversations'] as
+    | { state?: { activeId?: unknown } }
+    | undefined;
+  return typeof store?.state?.activeId === 'string' ? store.state.activeId : null;
+}
+
+/** 当前打开的会话变了：之前因为正开着而没收走的已完成派出会话，这时归档 */
+export function onViewedConversationChanged(sessionId: string | null): void {
+  viewedSession = sessionId;
+  for (const instance of hosts.values()) instance.sweepAutoArchive();
+}
 
 /** 档案与定时在设置窗口里编辑，聊天侧的操作仍只认主界面 */
 function isProfileEditor(webContentsId: number): boolean {
@@ -289,6 +317,7 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     now: () => Date.now(),
     backgroundStalls: (now) => driver?.watch(now) ?? [],
     tasks: (conversationId) => observedBackgroundTasks(conversationId),
+    tasksReported: () => backgroundTaskStates.reported(),
     subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
     // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
     interruptDetail: (conversationId) =>
@@ -305,9 +334,27 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
       });
     },
     reportPeerTodos: () => reportPeerTodos(ctx),
+    archive: (conversationId, at) => {
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row || row.archived === true) return;
+        state.conversations[conversationId] = { ...row, archived: true, archivedAt: at };
+      });
+    },
+    unarchive: (conversationId) => {
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row) return;
+        const { archived: _archived, archivedAt: _archivedAt, ...rest } = row;
+        state.conversations[conversationId] = rest;
+      });
+    },
+    viewed: (conversationId) => viewedConversation() === conversationId,
     newId: () => randomUUID(),
     audit: (entry) => appendAudit(ctx.dir, entry),
     recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
+    archiveReport: (conversationId, at, text) =>
+      void getSecretaryReportStore()?.archive(conversationId, at, text),
   };
 }
 
@@ -523,6 +570,10 @@ const NO_SECRETARY = { ok: false as const, error: 'secretary-required' };
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  // worker 报完启动时的任务表：启动时没敢判的自动归档、被误归档的会话在这里补判
+  backgroundTaskStates.onReported(() => {
+    for (const instance of hosts.values()) instance.sweepAutoArchive();
+  });
   // 停止会话后撤掉续跑与看门狗：驱动者与派发模块互相不认识，只在这里接上
   setSecretaryForgetListener((conversationId) => driver?.forget(conversationId));
   setSecretaryAvatarResolver((secretaryId) => {
@@ -688,6 +739,13 @@ export function registerSecretaryHandlers(): void {
       return { ok: true, daily: await buildDaily(dailyPortsFor(ctx), day) };
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DONE_REPORT, async (event, conversationId: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    if (!isNonEmptyString(conversationId)) return { ok: false, error: 'invalid request' };
+    return { ok: true, result: await doneReportFor(conversationId) };
+  });
 
   // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_PROFILE, async (event, secretaryId: unknown) => {

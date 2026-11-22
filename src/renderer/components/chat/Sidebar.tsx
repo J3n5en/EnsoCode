@@ -7,6 +7,13 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import {
+  type ArchiveScope,
+  archivedTotal,
+  archiveScopeForTab,
+  archiveSecretaryIds,
+  filterArchivedByScope,
+} from '@shared/archiveScope';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import {
   ALL_GROUP_ID,
@@ -55,11 +62,10 @@ import type * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWindowChromeKind } from '@/components/app/WindowChrome';
-import {
-  BackgroundTaskMarker,
-  BackgroundTasksEntry,
-} from '@/components/backgroundTasks/BackgroundTaskMarker';
+import { BackgroundTaskMarker } from '@/components/backgroundTasks/BackgroundTaskMarker';
+import { BackgroundTasksButton } from '@/components/backgroundTasks/BackgroundTasksButton';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
+import { ArchiveEntryButton, ArchiveScopeChip } from '@/components/chat/ArchiveEntryButton';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
 import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
@@ -91,8 +97,9 @@ import {
   restartConversationFromMenu,
 } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
-import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
-import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
+import { PhoneDeviceChip, PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
+import { phoneLinkEntry, showCompactButton } from '@/components/nodes/phoneLinkEntry';
+import { SecretaryOriginBadge, showsMutedBell } from '@/components/secretary/SecretaryOriginBadge';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
   type RunningOrigins,
@@ -195,6 +202,11 @@ import {
   writeSidebarOrder,
 } from '@/stores/settings/sidebarOrderStorage';
 import { SessionTabCounts } from './SessionTabCounts';
+import {
+  GROUP_EDIT_BUTTON_CLASS,
+  PROJECT_ROW_ACTION_CLASS,
+  PROJECT_ROW_MENU_CLASS,
+} from './sidebarRowActions';
 import { WorktreeBadge } from './WorktreeBadge';
 import { WorktreeRenameDialog } from './WorktreeRenameDialog';
 
@@ -236,6 +248,8 @@ export function Sidebar({
   const projects = useSettingsStore((state) => state.projects);
   const chromeKind = useWindowChromeKind();
   const mobile = chromeKind === 'mobile';
+  const phoneEntry = phoneLinkEntry(window.electronAPI.remote);
+  const compactButton = showCompactButton(window.electronAPI.remote);
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const createProjectGroup = useSettingsStore((state) => state.createProjectGroup);
@@ -828,6 +842,11 @@ export function Sidebar({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveQuery, setArchiveQuery] = useState('');
   const [archiveCleanupOpen, setArchiveCleanupOpen] = useState<string | null>(null);
+  // 入口按当前 tab 的范围计数；弹窗里可临时切到全部归档或某个秘书派出的
+  const tabArchiveScope = archiveScopeForTab(resolvedGroupId, projectGroups);
+  const [archiveScopeOverride, setArchiveScopeOverride] = useState<ArchiveScope | null>(null);
+  const archiveScope = archiveScopeOverride ?? tabArchiveScope;
+  const archiveScopeContext = { projects, projectGroups, conversations };
   // 搜索时:归档项目名命中则整组保留(与活动项目一致),否则只留命中的会话
   const visibleArchivedGroups = archiveQuery.trim()
     ? archivedGroups
@@ -850,21 +869,43 @@ export function Sidebar({
         })
         .filter((group) => group.ids.length > 0)
     : archivedGroups;
-  const archivedInSlice = (group: (typeof archivedGroups)[number]) => {
-    if (resolvedGroupId === ALL_GROUP_ID) return true;
-    const project = projects.find((item) => item.id === group.projectId);
-    if (!project) return resolvedGroupId === UNGROUPED_GROUP_ID;
-    if (resolvedGroupId === UNGROUPED_GROUP_ID) {
-      return !project.groupId || !projectGroups.some((item) => item.id === project.groupId);
-    }
-    return project.groupId === resolvedGroupId;
-  };
-  const slicedArchivedGroups = visibleArchivedGroups.filter(archivedInSlice);
-  const archivedCount = archivedGroups
-    .filter(archivedInSlice)
-    .reduce((count, group) => count + group.ids.length, 0);
+  const slicedArchivedGroups = filterArchivedByScope(
+    visibleArchivedGroups,
+    archiveScope,
+    archiveScopeContext
+  );
+  const archivedCount = archivedTotal(
+    filterArchivedByScope(archivedGroups, tabArchiveScope, archiveScopeContext)
+  );
+  const scopedArchivedCount = archivedTotal(
+    filterArchivedByScope(archivedGroups, archiveScope, archiveScopeContext)
+  );
+  const archiveSecretaries = archiveSecretaryIds(archivedGroups, conversations);
+  const secretaryName = (id: string) =>
+    (multiSecretary
+      ? secretaryEntries.find((entry) => entry.id === id)?.view.name
+      : secretaryView?.name) ?? t('Secretary');
+  const tabScopeLabel =
+    tabArchiveScope.kind === 'group'
+      ? (projectGroups.find((group) => group.id === tabArchiveScope.groupId)?.name ?? '')
+      : tabArchiveScope.kind === 'ungrouped'
+        ? t('Ungrouped')
+        : t('All archived');
+  const archiveScopeHint =
+    archiveScope.kind === 'group'
+      ? t('Archived in group “{{name}}”', { name: tabScopeLabel })
+      : archiveScope.kind === 'ungrouped'
+        ? t('Archived in ungrouped projects')
+        : archiveScope.kind === 'secretary'
+          ? t('Archived sessions dispatched by {{name}}', {
+              name: secretaryName(archiveScope.secretaryId),
+            })
+          : archiveScope.fallbackFrom === 'recent'
+            ? t('“Recent” has no archive scope; showing all archived')
+            : t('Showing all archived');
   const openArchive = () => {
     setArchiveQuery('');
+    setArchiveScopeOverride(null);
     setArchiveOpen(true);
   };
 
@@ -1033,18 +1074,15 @@ export function Sidebar({
             <FolderPlus className="h-4 w-4" />
           </button>
           <div className="flex-1" />
-          {window.electronAPI.remote?.linkStatus && <PhoneLinkStatus />}
-          {archivedCount > 0 && (
-            <button
-              type="button"
-              onClick={openArchive}
-              className={ICON_BUTTON_CLASS}
-              title={`${t('Archived')} (${archivedCount})`}
-            >
-              <Archive className="h-4 w-4" />
-            </button>
-          )}
-          {window.electronAPI.remote?.exitDesk && (
+          {phoneEntry === 'devices' && <PhoneDeviceChip compact />}
+          {phoneEntry === 'info' && <PhoneLinkStatus />}
+          <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
+          <ArchiveEntryButton
+            count={archivedCount}
+            onClick={openArchive}
+            className={ICON_BUTTON_CLASS}
+          />
+          {compactButton && (
             <button
               type="button"
               onClick={() => window.electronAPI.remote?.exitDesk?.()}
@@ -1225,7 +1263,6 @@ export function Sidebar({
               </SecretarySidebarSection>
             )
           )}
-          <BackgroundTasksEntry />
           {orderedProjects.length === 0 && (
             <button
               type="button"
@@ -1695,7 +1732,7 @@ export function Sidebar({
                                   <button
                                     type="button"
                                     onClick={() => void newConversation(project.id)}
-                                    className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100"
+                                    className={PROJECT_ROW_ACTION_CLASS}
                                     title={t('New conversation')}
                                   >
                                     <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -1934,7 +1971,12 @@ export function Sidebar({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 p-1.5">
-          {window.electronAPI.remote?.linkStatus ? (
+          {phoneEntry === 'devices' ? (
+            <>
+              <PhoneDeviceChip />
+              <div className="min-w-0 flex-1" />
+            </>
+          ) : phoneEntry === 'info' ? (
             <>
               <div className="min-w-0 flex-1" />
               <PhoneLinkStatus />
@@ -1942,18 +1984,13 @@ export function Sidebar({
           ) : (
             <NodeSwitcher />
           )}
-          {archivedCount > 0 && (
-            <button
-              type="button"
-              data-slot="archived-button"
-              onClick={openArchive}
-              className={ICON_BUTTON_CLASS}
-              title={`${t('Archived')} (${archivedCount})`}
-            >
-              <Archive className="h-4 w-4" />
-            </button>
-          )}
-          {window.electronAPI.remote?.exitDesk && (
+          <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
+          <ArchiveEntryButton
+            count={archivedCount}
+            onClick={openArchive}
+            className={ICON_BUTTON_CLASS}
+          />
+          {compactButton && (
             <button
               type="button"
               onClick={() => window.electronAPI.remote?.exitDesk?.()}
@@ -2009,9 +2046,40 @@ export function Sidebar({
             <DialogTitle className="flex items-baseline gap-2">
               {t('Archived')}
               <span className="font-sans text-sm text-muted-foreground tabular-nums">
-                {archivedCount}
+                {scopedArchivedCount}
               </span>
             </DialogTitle>
+            <p data-slot="archive-scope" className="text-xs text-muted-foreground">
+              {archiveScopeHint}
+            </p>
+            {(tabArchiveScope.kind !== 'all' || archiveSecretaries.length > 0) && (
+              <div className="flex flex-wrap gap-1.5">
+                {tabArchiveScope.kind !== 'all' && (
+                  <ArchiveScopeChip
+                    label={tabScopeLabel}
+                    selected={archiveScopeOverride === null}
+                    onClick={() => setArchiveScopeOverride(null)}
+                  />
+                )}
+                <ArchiveScopeChip
+                  label={t('All archived')}
+                  selected={archiveScope.kind === 'all'}
+                  onClick={() =>
+                    setArchiveScopeOverride(tabArchiveScope.kind === 'all' ? null : { kind: 'all' })
+                  }
+                />
+                {archiveSecretaries.map((secretaryId) => (
+                  <ArchiveScopeChip
+                    key={secretaryId}
+                    label={t('Dispatched by {{name}}', { name: secretaryName(secretaryId) })}
+                    selected={
+                      archiveScope.kind === 'secretary' && archiveScope.secretaryId === secretaryId
+                    }
+                    onClick={() => setArchiveScopeOverride({ kind: 'secretary', secretaryId })}
+                  />
+                ))}
+              </div>
+            )}
             <div className="mt-1 flex items-center gap-2">
               <InputGroup data-size="sm">
                 <InputGroupAddon>
@@ -2406,7 +2474,7 @@ function ProjectGroupHeader({
           {count}
         </span>
       </button>
-      {/* 编辑按钮绝对定位盖在计数上,不占流:否则未分组(无 onEdit)的计数会比其他分组右移 */}
+      {/* 编辑按钮桌面绝对定位盖在计数上,不占流:否则未分组(无 onEdit)的计数会比其他分组右移;触屏无悬停,改为排在计数右侧 */}
       {onEdit && (
         <button
           type="button"
@@ -2415,7 +2483,7 @@ function ProjectGroupHeader({
             onEdit();
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="absolute right-1.5 bottom-0.5 flex size-5 items-center justify-center rounded-[5px] opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+          className={GROUP_EDIT_BUTTON_CLASS}
         >
           <Pencil className="size-3.25" />
         </button>
@@ -2701,7 +2769,7 @@ interface ConversationRowProps {
     /** 手动重读在途（菜单项禁用 + 图标转圈） */
     reloading?: boolean;
     /** 由秘书派出；只用于显示标记，权限判断不读它 */
-    secretaryOrigin?: { secretaryConversationId: string };
+    secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
   };
   active: boolean;
   locale: Parameters<typeof formatRelativeTime>[1];
@@ -2869,7 +2937,7 @@ function ConversationRow({
               )}
             </span>
           )}
-          {muted && !renaming && (
+          {showsMutedBell(muted, conversation.secretaryOrigin !== undefined) && !renaming && (
             <BellOff
               className="h-3 w-3 shrink-0 text-subtle-foreground"
               aria-label={t('Muted')}
@@ -2877,8 +2945,16 @@ function ConversationRow({
             />
           )}
         </div>
-        {conversation.secretaryOrigin && <SecretaryOriginBadge />}
-        {!conversation.secretaryOrigin && takenOver && <SecretaryTakeoverBadge />}
+        {conversation.secretaryOrigin && (
+          <SecretaryOriginBadge
+            secretaryId={conversation.secretaryOrigin.secretaryId}
+            conversationId={id}
+            muted={muted}
+          />
+        )}
+        {!conversation.secretaryOrigin && takenOver && (
+          <SecretaryTakeoverBadge conversationId={id} />
+        )}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />
@@ -3251,7 +3327,7 @@ function ProjectOverflowMenu({ actions }: { actions: ProjectAction[] }) {
       <MenuTrigger
         data-enso="row-menu"
         aria-label={t('More actions')}
-        className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 data-popup-open:bg-muted data-popup-open:text-foreground data-popup-open:opacity-100"
+        className={PROJECT_ROW_MENU_CLASS}
         title={t('More actions')}
         onPointerDown={(event) => event.stopPropagation()}
       >

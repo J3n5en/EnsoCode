@@ -8,7 +8,7 @@ import { modelLabel } from '@/lib/modelLabel';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
-import { useSessionsStore } from '@/stores/sessions';
+import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSettingsStore } from '@/stores/settings';
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
@@ -38,7 +38,6 @@ function badgeOf(card: SessionCard): { label: string; className: string } {
 /** 一行进行中的会话：点主体展开更多进度，右侧图标才打开会话 */
 function RunningRow({ card }: { card: SessionCard }) {
   const { t, locale } = useI18n();
-  const selectConversation = useSessionsStore((state) => state.selectConversation);
   const providers = useSettingsStore((state) => state.providers) ?? [];
   const [expanded, setExpanded] = useState(false);
   const badge = badgeOf(card);
@@ -133,7 +132,7 @@ function RunningRow({ card }: { card: SessionCard }) {
         aria-label={t('Open session')}
         onClick={(event) => {
           event.stopPropagation();
-          selectConversation(card.conversationId);
+          openSessionPeek(card.conversationId);
         }}
         className="relative flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
@@ -185,8 +184,11 @@ export function SecretaryRunningList({ secretaryId }: { secretaryId?: string } =
   const { t } = useI18n();
   const running = useSecretaryStore(
     (state) =>
-      (secretaryId ? state.states[secretaryId] : undefined)?.board.running ??
-      state.secretary.board.running
+      (secretaryId
+        ? (state.states[secretaryId] ??
+          (state.focusedId === secretaryId ? state.secretary : undefined))
+        : state.secretary
+      )?.board.running ?? []
   );
   return (
     <section data-enso="secretary-running" className="flex flex-col px-3 pt-2">

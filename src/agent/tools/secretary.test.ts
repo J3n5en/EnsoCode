@@ -51,6 +51,7 @@ describe('secretary tools', () => {
       items: { type: 'string' },
     });
     expect(send.required).toEqual(['conversationId', 'message']);
+    expect(send.properties.goal).toMatchObject({ type: 'string', maxLength: 4000 });
     const stop = schemaOf('session_stop');
     expect(stop.properties.clearQueue).toMatchObject({ type: 'boolean' });
     expect(stop.required).toEqual(['conversationId']);
@@ -71,7 +72,16 @@ describe('secretary tools', () => {
       expect(schema.properties.branch).toMatchObject({ type: 'string' });
       expect(schema.properties.after).toMatchObject({ type: 'array' });
       expect(schema.properties.after.items).toMatchObject({ type: 'string' });
+      expect(schema.properties.attachments).toMatchObject({
+        type: 'array',
+        maxItems: 5,
+        items: { type: 'string' },
+      });
     }
+    for (const name of ['session_create', 'todo_item_dispatch'] as const)
+      expect(
+        normalizeSecretaryParams(name, { projectId: 'p1', prompt: 'x', images: ' /tmp/a.png ' })
+      ).toMatchObject({ attachments: ['/tmp/a.png'] });
   });
 
   it('secretary_profile_propose 只暴露保留的设置项，派发工具不再提确认卡', () => {

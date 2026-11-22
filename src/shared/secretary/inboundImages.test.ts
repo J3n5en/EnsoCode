@@ -44,4 +44,16 @@ describe('splitInboundImageBlock', () => {
     const text = appendInboundImageLines(typed, [{ path: PATH }]);
     expect(splitInboundImageBlock(text)?.text).toBe(typed);
   });
+
+  it('秘书转发的图：已有缩略图的那几行接受任意绝对路径，多出来的仍只认秘书图片目录', () => {
+    const text = appendInboundImageLines('按图改', [{ path: '/tmp/a.png' }]);
+    expect(splitInboundImageBlock(text)).toBeNull();
+    expect(splitInboundImageBlock(text, 1)).toEqual({
+      text: '按图改',
+      entries: [{ index: 1, path: '/tmp/a.png' }],
+    });
+    const two = appendInboundImageLines('按图改', [{ path: '/tmp/a.png' }, { path: '/tmp/b.png' }]);
+    expect(splitInboundImageBlock(two, 1)).toBeNull();
+    expect(splitInboundImageBlock('看\n\n[图片 1] 相对/a.png', 1)).toBeNull();
+  });
 });

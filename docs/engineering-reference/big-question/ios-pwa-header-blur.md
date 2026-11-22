@@ -22,7 +22,18 @@ header 没有 `filter` / `backdrop-filter`，`safe-area-inset-top` 为 0；只�
 保留原 header 高度、safe-area、消息区滚动和 iOS 原生键盘避让，不硬编码顶部补偿。
 
 普通 Safari 页面不使用此固定定位：其布局视口可能高于工具栏之间的可视区域，
-应继续沿用现有 `body: 100dvh` 布局。不要重新引入 JS 视口高度覆盖。
+应继续沿用现有 `body: 100dvh` 布局。不要重新引入「按比例猜键盘、把高度钉成像素」的 JS 视口覆盖。
+
+## 键盘避让（keyboard.ts）
+
+早期用 `visualViewport.height < innerHeight * 0.85` 猜键盘并覆盖 `--app-height`，standalone 下
+误判后把高度钉死，输入框下方大片空白，最终整套移除。现在的 `packages/phone/src/keyboard.ts`
+只在三个条件同时成立时生效：触屏（`hover: none` 且 `pointer: coarse`）、确有可编辑元素聚焦
+（穿过完整版的 renderer iframe 查）、可见区比布局视口矮 120px 以上且没在缩放。生效时只加
+`html.kb-open` 和 `--kb-top` / `--kb-height`，把根容器（精简版 `.phone-app-root`、完整版 `#frames`）
+摆到可见区上；任何一条不成立立即去掉 class 和变量，并把 iOS 留下的上推滚动归零。
+原有 `100dvh`、standalone 固定层、安全区规则都不改。焦点事件不冒泡出 iframe，完整版每次 iframe
+加载都要重新挂监听。Chromium 没有软键盘，只能用替身 `visualViewport` 验证，iOS 必须真机看。
 
 ## 复发：WebView 偶发钻到状态栏下（iOS 27.2）
 

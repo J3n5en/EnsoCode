@@ -33,6 +33,7 @@ import type {
 } from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
+import { autoArchivable, autoArchived, liveTasks } from './autoArchive';
 import type { SecretaryContactPort } from './contact/service';
 import {
   type DeliveryPorts,
@@ -62,8 +63,9 @@ import {
   type ResultEvent,
   reportLastText,
   SETTLED_RESULTS,
-  sessionStateOf,
+  sessionLiveState,
   shouldNotify,
+  silentFinishDetail,
   skipsUpdateWindow,
   stalled,
   UPDATE_WINDOW_MS,
@@ -116,6 +118,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   backgroundStalls?(now: number): readonly BackgroundStall[];
   /** 会话最近一次已知的后台任务；缺省表示没有投影 */
   tasks?(conversationId: string): readonly ObservedTask[];
+  /** worker 已把启动时的任务全量报上来；false 时空任务表只是还不知道。缺省表示已报 */
+  tasksReported?(): boolean;
   /** 主会话名下还有没回来的子代理 Run；缺省表示没有 */
   subagentsRunning?(conversationId: string): boolean;
   /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
@@ -129,8 +133,16 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
+  /** 会话报完成：存下完整汇报并复制里面点名的截图，供看板「结果」视图 */
+  archiveReport?(conversationId: string, at: number, text: string): void;
   /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
   reportPeerTodos?(): boolean;
+  /** 派出会话收口后自动归档：和用户手动归档写同一份会话行；缺省表示不自动归档 */
+  archive?(conversationId: string, at: number): void;
+  /** 自动归档的会话被唤醒：收回归档 */
+  unarchive?(conversationId: string): void;
+  /** 用户此刻正开着这个会话：先不收走，切走后再归档 */
+  viewed?(conversationId: string): boolean;
 }
 
 export interface SecretaryHost {
@@ -142,6 +154,8 @@ export interface SecretaryHost {
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
   /** 冷启动没能按恢复清单接着跑这个会话：照常报失败 */
   onRestartResumeFailed(conversationId: string, error: string, now?: number): void;
+  /** 当前打开的会话变了：之前因为正开着而没收走的已完成会话，这时归档 */
+  sweepAutoArchive(now?: number): void;
   recover(): void;
   start(): void;
   stop(): void;
@@ -150,6 +164,14 @@ export interface SecretaryHost {
 function sessionIdOf(event: RendererAgentEvent): string | undefined {
   if (!('identity' in event) || !event.identity) return undefined;
   return 'sessionId' in event.identity ? event.identity.sessionId : undefined;
+}
+
+/** 审计里列出的任务：id 与命令摘要，最多三个 */
+function taskList(tasks: readonly ObservedTask[]): string {
+  const listed = tasks
+    .slice(0, 3)
+    .map((task) => `${task.taskId} ${summarizeCommand(task.command)}`);
+  return tasks.length > 3 ? `${listed.join('; ')} (+${tasks.length - 3})` : listed.join('; ');
 }
 
 /** 子代理事件归到主会话：主会话等子代理时状态仍是 running，不刷新活动时间会误报停滞 */
@@ -167,6 +189,25 @@ function assistantTextOf(event: RendererAgentEvent): string | undefined {
   return event.digest?.assistantText;
 }
 
+/**
+ * 这一下有没有可见的回复：助手写出了文字，或调用了工具。
+ * 秘书发消息后的无回复兜底只认这两种；状态、心跳之类的事件不算回复。
+ */
+function visibleReply(event: RendererAgentEvent): boolean {
+  if (event.type === 'turn-completed') {
+    return Boolean(event.digest?.assistantText?.trim() || event.digest?.lastTool);
+  }
+  if (event.type !== 'message-upsert') return false;
+  const message = event.message;
+  if (message.role === 'toolResult') return true;
+  if (message.role !== 'assistant') return false;
+  return message.content.some(
+    (part) =>
+      (part.type === 'text' && part.text.trim().length > 0) ||
+      (part.type === 'toolCall' && part.name.trim().length > 0)
+  );
+}
+
 function resultEventOf(
   event: RendererAgentEvent,
   row: Record<string, unknown> | undefined
@@ -174,10 +215,13 @@ function resultEventOf(
   switch (event.type) {
     case 'turn-completed': {
       const goalStatus = goalStatusOf(row);
+      // 整轮没有任何文字回复、最后一步是工具调用：静默收工
+      const lastTool = event.digest?.assistantText?.trim() ? undefined : event.digest?.lastTool;
       return {
         type: 'turn-completed',
         ...(event.aborted ? { aborted: true } : {}),
         ...(goalStatus ? { goalStatus } : {}),
+        ...(lastTool ? { silentFinish: lastTool } : {}),
       };
     }
     case 'turn-failed':
@@ -210,6 +254,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let coalesceAt: number | undefined;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
+  /** 因后台任务暂不归档时最近记过的审计：同一批任务只记一次 */
+  const archiveHolds = new Map<string, string>();
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
   let patrolAt: number | undefined;
   /** 下一次遗留任务巡检的时间；与进行中巡检分开计时，没有进行中的会话也照常扫 */
@@ -332,6 +378,87 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
   function remember(file: SecretaryDispatchFile, entry: SecretaryActivity): void {
     file.activity = [...(file.activity ?? []), entry].slice(-ACTIVITY_LIMIT);
+  }
+
+  /**
+   * 派出会话 goal-complete 收口就归档；自动归档的会话重新跑起来就收回。
+   * 正开着的会话先不收走；用户手动归档或手动取消归档的不碰。返回是否改了记录。
+   * 后台任务以 Main 的任务表为准：还有没结束的就不收，已自动归档的收回；表还没报上来时两样都不做。
+   */
+  function syncAutoArchive(
+    file: SecretaryDispatchFile,
+    ids: Iterable<string>,
+    rows: Record<string, Record<string, unknown>>,
+    now: number,
+    woken: ReadonlySet<string> = new Set()
+  ): boolean {
+    if (!ports.archive) return false;
+    const reported = ports.tasksReported?.() ?? true;
+    let changed = false;
+    for (const conversationId of ids) {
+      const record = file.dispatched[conversationId];
+      if (!record) continue;
+      const row = rows[conversationId];
+      const live = reported ? liveTasks(ports.tasks?.(conversationId) ?? []) : [];
+      if (autoArchived(record, row)) {
+        const woke = woken.has(conversationId);
+        if (!woke && live.length === 0) continue;
+        ports.unarchive?.(conversationId);
+        delete record.autoArchivedAt;
+        // 因为任务还在跑才收回的：任务都结束后要能再归档一次
+        if (!woke) delete record.autoArchiveResultAt;
+        ports.audit?.({
+          at: now,
+          secretaryConversationId: record.secretaryConversationId,
+          op: 'auto_unarchive',
+          targetId: conversationId,
+          ok: true,
+          ...(woke ? {} : { detail: `background tasks running: ${taskList(live)}` }),
+        });
+        changed = true;
+        continue;
+      }
+      // 用户取消了归档或又手动归档：这条标记不再代表当前的归档
+      if (record.autoArchivedAt !== undefined) {
+        delete record.autoArchivedAt;
+        changed = true;
+      }
+      if (ports.viewed?.(conversationId)) continue;
+      const status = ports.status(conversationId);
+      if (!autoArchivable(record, row, status)) {
+        archiveHolds.delete(conversationId);
+        continue;
+      }
+      if (!reported || live.length > 0) {
+        const detail = reported
+          ? `background tasks running: ${taskList(live)}`
+          : 'background tasks not reported yet';
+        if (archiveHolds.get(conversationId) === detail) continue;
+        archiveHolds.set(conversationId, detail);
+        ports.audit?.({
+          at: now,
+          secretaryConversationId: record.secretaryConversationId,
+          op: 'auto_archive_held',
+          targetId: conversationId,
+          ok: true,
+          detail,
+        });
+        continue;
+      }
+      archiveHolds.delete(conversationId);
+      ports.archive(conversationId, now);
+      record.autoArchivedAt = now;
+      record.autoArchiveResultAt = record.lastResult?.at;
+      ports.audit?.({
+        at: now,
+        secretaryConversationId: record.secretaryConversationId,
+        op: 'auto_archive',
+        targetId: conversationId,
+        ok: true,
+      });
+      changed = true;
+    }
+    return changed;
   }
 
   /** 会话的一句话标签：项目 · 标题，回传正文与卡片都用它 */
@@ -570,6 +697,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       text: record.lastText || update.text,
     });
     rememberDaily(record, kind, now, title, report);
+    const finalReport = kind === 'goal-complete' ? turnReport?.text.trim() || report?.trim() : '';
+    if (finalReport) ports.archiveReport?.(record.conversationId, now, redactSecrets(finalReport));
     notifyResult(update, kind, {
       title,
       projectName,
@@ -599,29 +728,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       // 只认这一轮的最终汇报：停滞、中断没有正文，不能拿上一轮的提交号充数
       ...(report ? extractReportRefs(report) : {}),
     });
-  }
-
-  /**
-   * 已有终态结果的会话被重新唤起，这一轮以 turn-ended 收尾：回到原来的终态。
-   * 只把时间挪到这一轮，不再推一条重复的完成回传；记录也回到空闲，
-   * 否则残留的 running 会让它一直被算在跑。
-   */
-  function restoreSettled(
-    record: DispatchRecord,
-    previous: NonNullable<DispatchRecord['lastResult']>,
-    now: number
-  ): void {
-    if (record.lastState !== 'idle') record.stateSince = now;
-    record.lastState = 'idle';
-    record.lastResult = {
-      kind: previous.kind,
-      turn: record.turn,
-      at: now,
-      ...(previous.dismissed ? { dismissed: true as const } : {}),
-    };
-    // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
-    delete record.backgroundRunning;
-    delete record.backgroundPersistent;
   }
 
   /** 同一轮只报一次。返回是否写进了回传队列 */
@@ -666,8 +772,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       delete record.patrol;
       changed = true;
     }
-    const live = records.filter((record) =>
-      countsAsRunning(record, rows[record.conversationId], statuses[record.conversationId])
+    const live = records.filter(
+      (record) =>
+        countsAsRunning(record, rows[record.conversationId], statuses[record.conversationId]) ||
+        // 发过消息后没有任何可见回复：记录还标着运行中，但会话其实已空闲，
+        // 不在「在跑」口径里，3 分钟兜底仍要看着它
+        (record.sentAt !== undefined &&
+          statuses[record.conversationId]?.state === 'idle' &&
+          (statuses[record.conversationId]?.pendingAsks ?? 0) +
+            (statuses[record.conversationId]?.pendingApprovals ?? 0) ===
+            0)
     );
     // 没有进行中的会话：巡检自己停下，等下一次有活再重新计时
     if (live.length === 0) {
@@ -680,7 +794,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const facts: PatrolFacts[] = live.map((record) => {
       const status = statuses[record.conversationId];
       const row = rows[record.conversationId];
-      const state = sessionStateOf(record, row, status);
+      // 巡检看真实状态：刚发过消息时记录标着 running，但会话其实已空闲，
+      // 用 sessionStateOf 会把它报成运行中，3 分钟的无回复兜底就永远等不到
+      const state = sessionLiveState(row, status);
       const goalStatus = goalStatusOf(row);
       return {
         conversationId: record.conversationId,
@@ -694,6 +810,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         stallReported: record.stalledTurn === record.turn,
         ...(record.lastResult ? { result: record.lastResult.kind } : {}),
         ...(record.lastText ? { lastText: record.lastText } : {}),
+        ...(record.sentAt !== undefined &&
+        record.sentAt >= record.lastEventAt &&
+        record.backgroundRunning !== true
+          ? { awaitingReplySince: record.sentAt }
+          : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {
@@ -712,6 +833,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           ...(goalStatus ? { goalStatus } : {}),
           backgroundRunning: record.backgroundRunning === true,
           ...(record.lastText ? { lastText: record.lastText } : {}),
+          awaitingReply: record.sentAt !== undefined && record.sentAt >= record.lastEventAt,
         })
       );
       changed = true;
@@ -834,9 +956,22 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     return true;
   }
 
+  /** 只重算自动归档；ids 缺省为全部派出会话 */
+  function sweepArchive(ids: readonly string[] | undefined, now: number): void {
+    const file = withEventStamps(ports.file());
+    if (!syncAutoArchive(file, ids ?? Object.keys(file.dispatched), ports.rows(), now)) return;
+    ports.save(file);
+    ports.publish();
+  }
+
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
+      // 没打开的会话（重启认回的命令）任务变了：只重算它的自动归档
+      if (event.type === 'unopened-background-tasks') {
+        sweepArchive([event.sessionId], ports.now());
+        return;
+      }
       const sessionId = sessionIdOf(event);
       // 没有身份也没有状态变化的事件与派出会话无关，不读盘
       if (!sessionId && changes.length === 0) return;
@@ -895,10 +1030,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         const turnReport = own && event.type === 'turn-completed' ? event.report : undefined;
         const lastText = capLastText(report);
         if (lastText) record.lastText = lastText;
+        // 有了可见回复：助手文字，或任何工具调用。发消息后的无回复兜底到此为止
+        if (own && visibleReply(event)) delete record.sentAt;
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
         // 这一轮结束就不再是「被唤起、还没收尾」：之后按空闲状态判定
-        const previous = record.lastResult;
         const reopened = record.reopenedAt !== undefined;
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed'))
           delete record.reopenedAt;
@@ -916,6 +1052,19 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             resultEvent.goalCompleted = true;
           }
           if (resultEvent) kind = classify(record, resultEvent, status);
+          // 秘书追加任务唤起的这一轮：目标停在受阻或暂停不会续跑，这一轮结束就是停下了，照常报。
+          // 这一轮已经有了结果（如又报了受阻）就不再盖掉
+          if (
+            !kind &&
+            reopened &&
+            record.lastResult === undefined &&
+            resultEvent?.type === 'turn-completed' &&
+            !resultEvent.aborted &&
+            (resultEvent.goalStatus === 'blocked' || resultEvent.goalStatus === 'paused')
+          )
+            kind = 'turn-ended';
+          if (resultEvent?.type === 'turn-completed' && resultEvent.silentFinish)
+            detail = silentFinishDetail(resultEvent.silentFinish);
           if (resultEvent?.type === 'turn-interrupted')
             detail = interruptReason({
               at: resultEvent.at,
@@ -950,11 +1099,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           detail = undefined;
         }
         const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
-        if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
-          // session_send 唤起的一轮结束了、没有再给结果：回到原来的终态，不重复推送
-          restoreSettled(record, previous, now);
-        else if (kind && !awaiting)
-          recordResult(file, record, kind, now, detail, report, turnReport);
+        if (kind && !awaiting) recordResult(file, record, kind, now, detail, report, turnReport);
         else if (
           own &&
           event.type === 'turn-completed' &&
@@ -1011,6 +1156,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const aborted = new Set<string>();
       if (sessionId && event.type === 'turn-completed' && event.aborted)
         aborted.add(rootIdOf(event, sessionId));
+      // 用户或秘书发来消息都会让会话跑起来：自动归档的就此回到活跃中
+      const woken = new Set(
+        changes.filter((entry) => entry.state === 'running').map((entry) => entry.sessionId)
+      );
+      if (syncAutoArchive(file, touched, rows, now, woken)) changed = true;
       if (changed) changed = saveEventFile(file, now);
       const todosChanged = syncLinkedTodos(ports, file, rows, aborted);
       const reported = ports.reportPeerTodos?.() ?? false;
@@ -1067,6 +1217,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (runPatrol(file, records, statuses, now)) changed = true;
       // 遗留任务巡检：已完成会话里还在跑的后台任务，每小时推一次，不自动杀
       if (runLeftoverPatrol(file, records, now)) changed = true;
+      // 收口时还有后台任务、或当时正开着的会话：任务结束、切走后在这里补归档
+      if (syncAutoArchive(file, Object.keys(file.dispatched), ports.rows(), now)) changed = true;
       for (const proposal of Object.values(file.proposals)) {
         const transitioned = transitionProposal(proposal, { type: 'expire' }, now);
         if (!transitioned.changed) continue;
@@ -1120,6 +1272,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       syncLinkedTodos(ports, file, ports.rows(), new Set());
       ports.publish();
       flush(now);
+    },
+
+    sweepAutoArchive(now = ports.now()) {
+      if (!ports.enabled()) return;
+      sweepArchive(undefined, now);
     },
 
     recover() {
@@ -1191,6 +1348,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       // 一次性任务错过就在启动时补投一次
       if (fireSchedules(file, now)) changed = true;
+      // 升级前已经完成、还堆在活跃中的派出会话：启动时补归档一次
+      if (syncAutoArchive(file, Object.keys(file.dispatched), ports.rows(), now)) changed = true;
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
       if (changed || todosChanged) ports.publish();

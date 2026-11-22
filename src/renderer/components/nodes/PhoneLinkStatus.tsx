@@ -1,4 +1,4 @@
-import { formatLinkSubtitle } from '@shared/pair/linkLabel';
+import { formatLinkSubtitle, linkTone } from '@shared/pair/linkLabel';
 import type { RemoteLinkStatus, RemotePushError } from '@shared/remoteBridge';
 import { subscribePush } from '@shared/webPush';
 import { Info, Laptop } from 'lucide-react';
@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 
 const ICON_BUTTON_CLASS =
   'flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-40';
@@ -86,6 +87,40 @@ export function PhoneLinkStatus() {
         )}
       </PopoverPopup>
     </Popover>
+  );
+}
+
+const DOT_CLASS = { ok: 'bg-success', pending: 'bg-warning', error: 'bg-destructive' } as const;
+
+/** 新版手机壳：电脑名 + 状态点，点开壳里的「电脑与通知」抽屉 */
+export function PhoneDeviceChip({ compact = false }: { compact?: boolean }) {
+  const { t } = useI18n();
+  const status = useRemoteLink();
+  if (!status) return null;
+  const title = `${status.deviceLabel} · ${formatLinkSubtitle(status, t)}`;
+  const dot = cn('size-1.5 shrink-0 rounded-full', DOT_CLASS[linkTone(status.state)]);
+  return (
+    <button
+      type="button"
+      onClick={() => window.electronAPI.remote?.openDevices?.()}
+      title={title}
+      aria-label={`${t('Computers and notifications')} · ${title}`}
+      className={
+        compact
+          ? cn(ICON_BUTTON_CLASS, 'relative')
+          : 'flex h-8 min-w-0 max-w-40 items-center gap-1.5 rounded-lg px-2 text-foreground text-sm transition-colors hover:bg-foreground/5'
+      }
+    >
+      <Laptop className="size-4 shrink-0 text-muted-foreground" />
+      {compact ? (
+        <span className={cn(dot, 'absolute top-1.5 right-1.5')} />
+      ) : (
+        <>
+          <span className="truncate">{status.deviceLabel}</span>
+          <span className={dot} />
+        </>
+      )}
+    </button>
   );
 }
 

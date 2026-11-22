@@ -20,17 +20,23 @@ vi.mock('@/i18n', () => ({
     locale: 'zh',
   }),
 }));
-vi.mock('@/stores/settings', () => ({
-  useSettingsStore: (selector: (state: { projects: unknown[] }) => unknown) =>
-    selector({ projects: [] }),
-}));
-vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      conversations: {},
-      selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
-    }),
-}));
+vi.mock('@/stores/settings', () => {
+  const state = { projects: [{ id: 'p-sec', kind: 'secretary' }] };
+  const useSettingsStore = (selector: (s: unknown) => unknown) => selector(state);
+  useSettingsStore.getState = () => state;
+  return { useSettingsStore };
+});
+vi.mock('@/stores/sessions', () => {
+  const state = {
+    activeId: 'sec',
+    conversations: { sec: { projectId: 'p-sec' }, c1: { projectId: 'p1' } },
+    selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
+  };
+  const useSessionsStore = (selector: (s: Record<string, unknown>) => unknown) => selector(state);
+  useSessionsStore.getState = () => state;
+  useSessionsStore.subscribe = () => () => undefined;
+  return { useSessionsStore };
+});
 vi.mock('@/stores/secretary', () => ({
   focusedSecretaryId: () => undefined,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
@@ -38,6 +44,7 @@ vi.mock('@/stores/secretary', () => ({
 }));
 
 const { SecretaryWorkbench } = await import('./SecretaryWorkbench');
+const { useSecretaryReturn } = await import('@/stores/secretaryReturn');
 
 const NOW = new Date(2024, 4, 15, 15, 0).getTime();
 
@@ -94,6 +101,7 @@ beforeEach(() => {
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
+  useSecretaryReturn.setState({ back: null });
   h.board = board([]);
   h.feed = [];
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
@@ -140,6 +148,16 @@ describe('SecretaryWorkbench 结果卡', () => {
     await render(<SecretaryWorkbench name="小安" />);
     expect(container.querySelector('[data-enso="secretary-needs-you"]')).not.toBeNull();
     expect(dismissButton()).toBeNull();
+  });
+
+  it('「打开会话」跳过去后，目标会话给返回秘书', async () => {
+    h.board = board([sessionCard({ result: 'failed' })]);
+    await render(<SecretaryWorkbench name="小安" />);
+    act(() => {
+      (container.querySelector('[data-enso="secretary-card-open"]') as HTMLElement).click();
+    });
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(useSecretaryReturn.getState().back).toEqual({ from: 'sec', to: 'c1' });
   });
 
   it('在跑的卡没有结果，不给「知道了」', async () => {
@@ -193,6 +211,7 @@ describe('SecretaryWorkbench 动态行：停止与跳转', () => {
     act(() => openButton()?.click());
     await act(async () => {});
     expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(useSecretaryReturn.getState().back).toEqual({ from: 'sec', to: 'c1' });
     expect(h.calls.some((call) => call.name === 'abort')).toBe(false);
     expect(expandButton()?.getAttribute('aria-expanded')).toBe('false');
   });

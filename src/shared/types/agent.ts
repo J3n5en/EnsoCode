@@ -154,8 +154,13 @@ export interface TurnDigest {
   firstUserText: string;
   /** 本轮全部 user 文本（清洗后 '\n' 拼接，截头） */
   userText: string;
-  /** 本轮最后一条含 text 的 assistant 文本（截尾） */
+  /** 本轮最后一条含 text 的 assistant 文本（截尾）；整轮只有工具调用时为空串 */
   assistantText: string;
+  /**
+   * 整轮没有任何文字回复时的最后一个工具：秘书据此把静默收工当成异常。
+   * 有文字结论时不带，避免把正常收工误报成卡住。
+   */
+  lastTool?: { name: string; ok: boolean };
 }
 
 /** 本轮汇报的硬上限：装得下一份正常汇报，又挡住异常长输出 */
@@ -1912,6 +1917,8 @@ export type ParentLifecycleEvent =
       seq: number;
       sessionFile: string;
       model: ModelRef;
+      /** 当前模型是否接收图片输入；Main 据此决定转发的图是给图片块还是只给路径 */
+      imageInput?: boolean;
     }
   | {
       /**
@@ -1922,6 +1929,7 @@ export type ParentLifecycleEvent =
       identity: SessionIdentity;
       seq: number;
       model: ModelRef;
+      imageInput?: boolean;
     }
   | {
       type: 'parent-rejected';
@@ -2862,7 +2870,10 @@ const isMcpOAuthRefreshResult = (value: unknown): boolean =>
 
 /** turn-completed.digest 的形状校验：三段必须是字符串（允许空），不允许多余键 */
 export function parseTurnDigest(value: unknown): TurnDigest | null {
-  if (!isRecord(value) || !hasExactKeys(value, ['firstUserText', 'userText', 'assistantText'])) {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['firstUserText', 'userText', 'assistantText', 'lastTool'])
+  ) {
     return null;
   }
   if (
@@ -2872,7 +2883,24 @@ export function parseTurnDigest(value: unknown): TurnDigest | null {
   ) {
     return null;
   }
-  return value as unknown as TurnDigest;
+  const digest: TurnDigest = {
+    firstUserText: value.firstUserText,
+    userText: value.userText,
+    assistantText: value.assistantText,
+  };
+  if (value.lastTool !== undefined) {
+    if (
+      !isRecord(value.lastTool) ||
+      !hasExactKeys(value.lastTool, ['name', 'ok']) ||
+      typeof value.lastTool.name !== 'string' ||
+      value.lastTool.name.trim().length === 0 ||
+      typeof value.lastTool.ok !== 'boolean'
+    ) {
+      return null;
+    }
+    digest.lastTool = { name: value.lastTool.name, ok: value.lastTool.ok };
+  }
+  return digest;
 }
 
 export function parseTurnReport(value: unknown): TurnReport | null {
@@ -4532,11 +4560,16 @@ function parseLifecycleEvent(value: Record<string, unknown>): AgentWorkerEvent |
   if (!identity || !isSequence(value.seq)) return null;
   switch (value.type) {
     case 'parent-ready':
-      return isNonEmptyString(value.sessionFile) && parseModelRef(value.model)
+      return isNonEmptyString(value.sessionFile) &&
+        parseModelRef(value.model) &&
+        (value.imageInput === undefined || typeof value.imageInput === 'boolean')
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'model-changed':
-      return parseModelRef(value.model) ? (value as unknown as AgentWorkerEvent) : null;
+      return parseModelRef(value.model) &&
+        (value.imageInput === undefined || typeof value.imageInput === 'boolean')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'parent-rejected':
     case 'parent-ended':
       return hasOnlyKeys(value, ['type', 'identity', 'seq', 'reason', 'instanceId']) &&

@@ -3,6 +3,7 @@ import {
   absolutizeCssUrls,
   canSaveSnapshot,
   createSnapshotTracker,
+  offlineSnapshotNote,
   packReads,
   snapshotReady,
   unpackReads,
@@ -15,6 +16,7 @@ const base = {
   settingsLoaded: true,
   stableFor: 0,
   liveLoading: false,
+  hostOnline: true,
 };
 
 describe('snapshotReady', () => {
@@ -44,26 +46,79 @@ describe('snapshotReady', () => {
     expect(snapshotReady({ ...base, settingsLoaded: false, elapsed: 20_000 })).toBe(true);
   });
 
+  it('桌面不在线时一直保留快照，不受上限约束', () => {
+    expect(snapshotReady({ ...base, hostOnline: false, elapsed: 600_000, liveChars: 9000 })).toBe(
+      false
+    );
+  });
+
+  it('上限只按桌面在线的时长累计；上线后照常揭开', () => {
+    const step = createSnapshotTracker(0, 5000);
+    const offline = { liveChars: 27, settingsLoaded: false, liveLoading: true, hostOnline: false };
+    expect(step({ now: 1000, ...offline })).toBe(false);
+    expect(step({ now: 60_000, ...offline })).toBe(false);
+    // 上线了但 renderer 起不来：在线满 20s 才撤，离线的那一分钟不算
+    const stuck = { liveChars: 27, settingsLoaded: false, liveLoading: true, hostOnline: true };
+    expect(step({ now: 60_200, ...stuck })).toBe(false);
+    expect(step({ now: 79_000, ...stuck })).toBe(false);
+    expect(step({ now: 80_300, ...stuck })).toBe(true);
+  });
+
+  it('上线后内容追上就揭开，离线期间的稳定时长不算', () => {
+    const step = createSnapshotTracker(0, 5000);
+    const sample = { liveChars: 4500, settingsLoaded: true, liveLoading: false };
+    expect(step({ now: 1000, ...sample, hostOnline: false })).toBe(false);
+    expect(step({ now: 30_000, ...sample, hostOnline: false })).toBe(false);
+    expect(step({ now: 30_200, ...sample, hostOnline: true })).toBe(true);
+  });
+
   it('does not count time spent waiting for settings or history toward settled duration', () => {
     const step = createSnapshotTracker(0, 5000);
+    const on = { hostOnline: true };
     // 隧道握手期间（0~3s）子页面一直停在初始空态，文字量未变
-    expect(step({ now: 200, liveChars: 45, settingsLoaded: false, liveLoading: false })).toBe(
-      false
-    );
-    expect(step({ now: 3000, liveChars: 45, settingsLoaded: false, liveLoading: false })).toBe(
-      false
-    );
+    expect(
+      step({ now: 200, liveChars: 45, settingsLoaded: false, liveLoading: false, ...on })
+    ).toBe(false);
+    expect(
+      step({ now: 3000, liveChars: 45, settingsLoaded: false, liveLoading: false, ...on })
+    ).toBe(false);
     // settings 刚到达父窗口的瞬间，不能把前面等网络的 2.8s 算成已稳定而提前揭开快照
-    expect(step({ now: 3200, liveChars: 45, settingsLoaded: true, liveLoading: false })).toBe(
-      false
-    );
+    expect(
+      step({ now: 3200, liveChars: 45, settingsLoaded: true, liveLoading: false, ...on })
+    ).toBe(false);
     // 历史加载期间也不累计稳定时长
-    expect(step({ now: 6000, liveChars: 45, settingsLoaded: true, liveLoading: true })).toBe(false);
-    expect(step({ now: 6200, liveChars: 45, settingsLoaded: true, liveLoading: false })).toBe(
+    expect(step({ now: 6000, liveChars: 45, settingsLoaded: true, liveLoading: true, ...on })).toBe(
       false
     );
+    expect(
+      step({ now: 6200, liveChars: 45, settingsLoaded: true, liveLoading: false, ...on })
+    ).toBe(false);
     // 加载结束后真正稳定满 2.5s 才揭开
-    expect(step({ now: 8700, liveChars: 45, settingsLoaded: true, liveLoading: false })).toBe(true);
+    expect(
+      step({ now: 8700, liveChars: 45, settingsLoaded: true, liveLoading: false, ...on })
+    ).toBe(true);
+  });
+});
+
+describe('offlineSnapshotNote', () => {
+  const now = new Date(2026, 10, 21, 18, 30);
+  it('写明快照是什么时候的', () => {
+    expect(offlineSnapshotNote(new Date(2026, 10, 21, 9, 5).getTime(), now)).toBe(
+      '桌面不在线 · 显示 09:05 的内容'
+    );
+    expect(offlineSnapshotNote(new Date(2026, 10, 19, 23, 40).getTime(), now)).toBe(
+      '桌面不在线 · 显示 11月19日 23:40 的内容'
+    );
+  });
+  it('旧快照没有时间或时间不合理时只说不在线', () => {
+    expect(offlineSnapshotNote(null, now)).toBe('桌面不在线');
+    expect(offlineSnapshotNote(Number.NaN, now)).toBe('桌面不在线');
+    expect(offlineSnapshotNote(now.getTime() + 3_600_000, now)).toBe('桌面不在线');
+  });
+  it('手机没网时换成对应说法', () => {
+    expect(offlineSnapshotNote(new Date(2026, 10, 21, 9, 5).getTime(), now, '网络未连接')).toBe(
+      '网络未连接 · 显示 09:05 的内容'
+    );
   });
 });
 

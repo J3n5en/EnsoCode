@@ -5,6 +5,7 @@ import {
   pairProjectDisplayName,
   sshProjectLabel,
 } from '@enso/pair';
+import { archiveScopeForTab, filterArchivedByScope } from '@shared/archiveScope';
 import {
   isDrawerActive,
   orderPinned,
@@ -57,6 +58,7 @@ import {
 } from '@/stores/sessions/sessionSwitchSlots';
 import type { StoredDevice } from './deviceList';
 import type { PushFailureReason } from './push';
+import { pushHints } from './pushToggle';
 import {
   getThemePreference,
   setThemePreference,
@@ -77,13 +79,6 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'light', label: '浅' },
   { value: 'dark', label: '深' },
 ];
-
-const PUSH_ERROR_TEXT: Record<PushFailureReason, string> = {
-  unsupported: '当前浏览器不支持推送。',
-  'permission-denied': '通知权限被拒绝，请在浏览器站点设置中允许后重试。',
-  'service-unreachable': '无法连接 Google 推送服务（FCM），请检查网络或代理后重试。',
-  'subscribe-failed': '订阅失败，请稍后重试。',
-};
 
 interface Props {
   open: boolean;
@@ -165,6 +160,8 @@ export function SessionDrawer({
   const [revealedExtras, setRevealedExtras] = useState<Record<string, number>>({});
   // 底部「已归档」栏目的折叠态（与桌面一致：缺省收起）
   const [archivedOpen, setArchivedOpen] = useState(false);
+  // 归档栏默认按当前分组过滤；展开后可临时看全部，换分组即复位
+  const [archivedShowAll, setArchivedShowAll] = useState(false);
   /** 待确认解绑的 pairId；null = 无确认框 */
   const [confirmUnpair, setConfirmUnpair] = useState<string | null>(null);
   const deskDevice = remoteDesktop
@@ -185,6 +182,8 @@ export function SessionDrawer({
     groups.some((group) => group.id === selectedGroupId)
       ? selectedGroupId
       : ALL_GROUP_ID;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 换分组时复位
+  useEffect(() => setArchivedShowAll(false), [resolvedGroupId]);
 
   // 主题可能由桌面下发触发变化，订阅后同步按钮高亮
   useEffect(() => subscribeTheme(() => setThemePref(getThemePreference())), []);
@@ -228,18 +227,24 @@ export function SessionDrawer({
     topLevel.filter((c) => c.pinned && !isArchived(c) && inSlice(c)),
     pinnedOrder
   );
-  const archivedSessions = sortByActivity(
-    topLevel.filter((c) => {
-      if (!isArchived(c)) return false;
-      if (resolvedGroupId === ALL_GROUP_ID) return true;
-      const project = projects.find((item) => item.id === c.projectId);
-      if (!project) return resolvedGroupId === UNGROUPED_GROUP_ID;
-      if (resolvedGroupId === UNGROUPED_GROUP_ID) {
-        return !project.groupId || !groups.some((item) => item.id === project.groupId);
-      }
-      return project.groupId === resolvedGroupId;
-    })
+  const allArchived = sortByActivity(topLevel.filter(isArchived));
+  const tabArchiveScope = archiveScopeForTab(resolvedGroupId, groups);
+  const tabArchivedIds = new Set(
+    filterArchivedByScope(
+      allArchived.map((c) => ({ projectId: c.projectId, ids: [c.id] })),
+      tabArchiveScope,
+      { projects, projectGroups: groups, conversations: {} }
+    ).flatMap((group) => group.ids)
   );
+  const tabArchived = allArchived.filter((c) => tabArchivedIds.has(c.id));
+  const scopedTab = tabArchiveScope.kind !== 'all';
+  const archivedSessions = archivedShowAll ? allArchived : tabArchived;
+  const archivedScopeLabel =
+    !scopedTab || archivedShowAll
+      ? '范围：全部归档'
+      : tabArchiveScope.kind === 'group'
+        ? `范围：分组「${groups.find((group) => group.id === tabArchiveScope.groupId)?.name ?? ''}」的归档`
+        : '范围：未分组项目的归档';
   const active = topLevel.filter((c) => !isArchived(c));
 
   // 没有项目归属的会话（项目已删等）单独归到「其他」
@@ -522,11 +527,33 @@ export function SessionDrawer({
           </div>
         )}
 
-        {/* 与桌面一致：归档栏固定底部（滚动区外），列表在折叠头上方向上展开 */}
-        {!botActive && archivedSessions.length > 0 && (
+        {/* 与桌面一致：归档栏固定底部（滚动区外），列表在折叠头上方向上展开；每个分组都常驻，0 条时弱化 */}
+        {!botActive && (
           <div className="shrink-0 border-t p-2">
             {archivedOpen && (
               <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
+                <div className="flex items-center gap-2 px-2 py-1">
+                  <span
+                    data-slot="archive-scope"
+                    className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+                  >
+                    {archivedScopeLabel}
+                  </span>
+                  {scopedTab && (
+                    <button
+                      type="button"
+                      onClick={() => setArchivedShowAll((prev) => !prev)}
+                      className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60"
+                    >
+                      {archivedShowAll ? '仅本分组' : '全部归档'}
+                    </button>
+                  )}
+                </div>
+                {archivedSessions.length === 0 && (
+                  <p className="px-2 py-3 text-center text-muted-foreground text-xs">
+                    没有归档会话
+                  </p>
+                )}
                 {archivedSessions.map((session) => (
                   <SessionRow
                     key={session.id}
@@ -544,8 +571,13 @@ export function SessionDrawer({
             )}
             <button
               type="button"
+              data-slot="archived-button"
+              data-empty={tabArchived.length === 0 || undefined}
               onClick={() => setArchivedOpen((prev) => !prev)}
-              className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/60"
+              className={cn(
+                'flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/60',
+                tabArchived.length === 0 && 'opacity-55'
+              )}
             >
               <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                 <ChevronRight
@@ -558,7 +590,7 @@ export function SessionDrawer({
               <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-muted-foreground text-sm">已归档</span>
               <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-                {archivedSessions.length}
+                {tabArchived.length}
               </span>
             </button>
           </div>
@@ -621,27 +653,23 @@ export function SessionDrawer({
                   onCheckedChange={onTogglePush}
                 />
               </div>
-              {pushBusy && <p className="mt-1 pl-6 text-[11px] text-muted-foreground">正在开启…</p>}
-              {pushError && !pushBusy && (
-                <p className="mt-1 pl-6 text-[11px] text-destructive">
-                  {PUSH_ERROR_TEXT[pushError]}
+              {pushHints({
+                busy: pushBusy,
+                error: pushError,
+                availability: pushAvailability,
+                connected,
+                configReady: pushConfigReady,
+              }).map((hint) => (
+                <p
+                  key={hint.text}
+                  className={cn(
+                    'mt-1 pl-6 text-[11px]',
+                    hint.error ? 'text-destructive' : 'text-muted-foreground'
+                  )}
+                >
+                  {hint.text}
                 </p>
-              )}
-              {pushAvailability === 'ok' && connected && !pushConfigReady && (
-                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                  需先升级桌面端 EnsoCode 才能开启推送。
-                </p>
-              )}
-              {pushAvailability === 'needs-install' && (
-                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                  iOS 需先用分享菜单「添加到主屏幕」，从主屏幕打开后才能开启。
-                </p>
-              )}
-              {pushAvailability === 'unsupported' && (
-                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                  当前浏览器不支持推送。
-                </p>
-              )}
+              ))}
             </div>
           )}
 

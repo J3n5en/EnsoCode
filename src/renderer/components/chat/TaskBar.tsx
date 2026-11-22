@@ -15,6 +15,7 @@ import {
   Pin,
   Search,
   Terminal,
+  TerminalSquare,
   Unplug,
   Wrench,
   X,
@@ -81,15 +82,45 @@ const trackRunning = (sessionId: string, ids: string[]): ReadonlySet<string> => 
   return seen;
 };
 
+/** 多条后台任务折叠后的展开状态：按会话记住，刷新页面（sessionStorage）也不收回 */
+const EXPANDED_KEY = 'enso:task-bar-expanded';
+const expandedBySession = new Map<string, boolean>();
+
+const storedExpanded = (): string[] => {
+  try {
+    const raw = JSON.parse(window.sessionStorage.getItem(EXPANDED_KEY) ?? '[]');
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const readExpanded = (sessionId: string): boolean =>
+  expandedBySession.get(sessionId) ?? storedExpanded().includes(sessionId);
+
+const writeExpanded = (sessionId: string, expanded: boolean): boolean => {
+  expandedBySession.set(sessionId, expanded);
+  try {
+    const rest = storedExpanded().filter((id) => id !== sessionId);
+    window.sessionStorage.setItem(
+      EXPANDED_KEY,
+      JSON.stringify(expanded ? [...rest, sessionId] : rest)
+    );
+  } catch {}
+  return expanded;
+};
+
 /**
  * 后台任务状态行（grok-build 风）：输入框上方每任务一行；
  * 点「查看」在行下内嵌展开输出;done 5s 自动移除,failed 手动关闭。
+ * 两条及以上默认折叠成一行摘要，展开后仍是逐条行。
  */
 export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps) {
   const virtualModels = useSettingsStore((state) => state.virtualModels);
   const { t } = useI18n();
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => readDismissed(sessionId));
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(() => readExpanded(sessionId));
   const pendingOpen = useSessionsStore((s) => s.pendingAgentOpen);
 
   useEffect(() => {
@@ -133,6 +164,7 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
 
   const openTask = visible.find((task) => task.taskId === openTaskId) ?? null;
   const openAgent = visibleAgents.find((agent) => agent.id === openTaskId) ?? null;
+  const collapsible = visible.length >= 2;
 
   return (
     <div className="relative mb-1.5">
@@ -159,17 +191,27 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
         </div>
       )}
       <div className="flex flex-col gap-0.5 rounded-xl border bg-card p-1 shadow-xs">
-        {visible.map((task) => (
-          <TaskRow
-            key={task.taskId}
+        {collapsible && (
+          <TaskSummaryRow
             sessionId={sessionId}
-            task={task}
+            tasks={visible}
+            expanded={expanded}
             readOnly={readOnly}
-            open={openTaskId === task.taskId}
-            onToggle={() => setOpenTaskId(openTaskId === task.taskId ? null : task.taskId)}
-            onDismiss={() => dismiss(task.taskId)}
+            onToggle={() => setExpanded(writeExpanded(sessionId, !expanded))}
           />
-        ))}
+        )}
+        {(!collapsible || expanded) &&
+          visible.map((task) => (
+            <TaskRow
+              key={task.taskId}
+              sessionId={sessionId}
+              task={task}
+              readOnly={readOnly}
+              open={openTaskId === task.taskId}
+              onToggle={() => setOpenTaskId(openTaskId === task.taskId ? null : task.taskId)}
+              onDismiss={() => dismiss(task.taskId)}
+            />
+          ))}
         {visibleAgents.map((agent) => (
           <DockRow
             key={agent.id}
@@ -202,6 +244,100 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
           </DockRow>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** 多条后台任务的摘要行：条数、最久运行时长、疑似闲置数，行上「全部停止」先确认再停 */
+function TaskSummaryRow({
+  sessionId,
+  tasks,
+  expanded,
+  readOnly,
+  onToggle,
+}: {
+  sessionId: string;
+  tasks: BackgroundTaskInfo[];
+  expanded: boolean;
+  readOnly?: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  const now = useNow(1000);
+  const [confirming, setConfirming] = useState(false);
+  const running = tasks.filter((task) => task.status === 'running');
+  const idle = tasks.filter((task) => taskView(task) === 'idle').length;
+  const oldest = running.reduce((min, task) => Math.min(min, task.startedAt), now);
+  const canStop = !readOnly && running.length > 0;
+  useEffect(() => {
+    if (!canStop) setConfirming(false);
+  }, [canStop]);
+
+  return (
+    <div
+      data-enso="background-task-summary"
+      className="flex min-h-[30px] min-w-0 items-center gap-2 rounded-lg px-1 text-[13px]"
+    >
+      <StepNode icon={TerminalSquare} state={running.length > 0 ? 'running' : 'ok'} />
+      {confirming ? (
+        <>
+          <span className="min-w-0 flex-1 truncate text-xs">
+            {t('Stop {{count}} background tasks?', { count: running.length })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="flex h-6 shrink-0 items-center rounded-md px-1.5 text-xs whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {t('Cancel')}
+          </button>
+          <button
+            type="button"
+            data-enso="background-task-stop-all-confirm"
+            onClick={() => {
+              for (const task of running) stopBackgroundTask(sessionId, task.taskId);
+              setConfirming(false);
+            }}
+            className="flex h-6 shrink-0 items-center rounded-md bg-destructive/10 px-1.5 text-xs whitespace-nowrap text-destructive transition-colors hover:bg-destructive/15"
+          >
+            {t('Stop {{count}}', { count: running.length })}
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            data-enso="background-task-summary-toggle"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className="flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span className="min-w-0 truncate">
+              {t('{{count}} background tasks', { count: tasks.length })}
+              {running.length > 0 &&
+                ` · ${t('longest running {{duration}}', { duration: formatDuration(now - oldest) })}`}
+            </span>
+            {idle > 0 && (
+              <TaskBadge tone="pending" className="whitespace-nowrap">
+                {t('{{count}} suspected idle', { count: idle })}
+              </TaskBadge>
+            )}
+            <ChevronDown
+              className={cn('h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-180')}
+            />
+          </button>
+          {canStop && (
+            <button
+              type="button"
+              data-enso="background-task-stop-all"
+              onClick={() => setConfirming(true)}
+              className="flex h-6 shrink-0 items-center rounded-md px-1.5 text-xs whitespace-nowrap text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            >
+              {t('Stop all')}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

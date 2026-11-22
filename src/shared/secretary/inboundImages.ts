@@ -57,18 +57,21 @@ const REJECTION_OF = new Map(
   Object.entries(REJECTION_TEXT).map(([kind, text]) => [text, kind as InboundImageRejection])
 );
 
+function isAbsolutePath(value: string): boolean {
+  return /^(?:\/|[A-Za-z]:\/)/u.test(value.replace(/\\/gu, '/'));
+}
+
 function isSavedImagePath(value: string): boolean {
-  const normalized = value.replace(/\\/gu, '/');
-  return (
-    /^(?:\/|[A-Za-z]:\/)/u.test(normalized) && normalized.includes(`/${SECRETARY_IMAGES_REL}/`)
-  );
+  return isAbsolutePath(value) && value.replace(/\\/gu, '/').includes(`/${SECRETARY_IMAGES_REL}/`);
 }
 
 /**
  * 严格按 formatInboundImageLines 的格式解析一整块：从 1 连续编号，
  * 路径须在秘书图片目录下，原因须是固定文案；有一行对不上就整块不认。
+ * attached：消息本身带的图片块张数。秘书转发的图随消息作为图片块发出，
+ * 前 attached 行对应这些缩略图，路径可以是任意绝对路径。
  */
-export function parseInboundImageEntries(block: string): InboundImageEntry[] | null {
+export function parseInboundImageEntries(block: string, attached = 0): InboundImageEntry[] | null {
   const entries: InboundImageEntry[] = [];
   for (const [i, row] of block.split('\n').entries()) {
     const match = /^\[图片 (\d+)( 未收下)?\] (.+)$/u.exec(row);
@@ -79,7 +82,7 @@ export function parseInboundImageEntries(block: string): InboundImageEntry[] | n
       if (!rejected) return null;
       entries.push({ index: i + 1, rejected });
     } else {
-      if (!isSavedImagePath(value)) return null;
+      if (!(i < attached ? isAbsolutePath(value) : isSavedImagePath(value))) return null;
       entries.push({ index: i + 1, path: value });
     }
   }
@@ -95,11 +98,12 @@ const DISPLAY_BLOCK = new RegExp(
 
 /** 界面用：把正文末尾 Main 追加的路径块拆出来，正文其余部分（含 pi 提示）原样返回 */
 export function splitInboundImageBlock(
-  text: string
+  text: string,
+  attached = 0
 ): { text: string; entries: InboundImageEntry[] } | null {
   const match = DISPLAY_BLOCK.exec(text);
   if (!match) return null;
-  const entries = parseInboundImageEntries(match[1] as string);
+  const entries = parseInboundImageEntries(match[1] as string, attached);
   if (!entries) return null;
   const body = text.slice(0, match.index);
   const hints = match[2] ?? '';

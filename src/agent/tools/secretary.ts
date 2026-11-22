@@ -77,17 +77,21 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'baseRef',
       'branch',
       'after',
+      'attachments',
     ],
     booleans: ['worktree'],
+    arrays: ['attachments'],
     aliases: {
       task: 'prompt',
       instruction: 'prompt',
       instructions: 'prompt',
       name: 'title',
+      images: 'attachments',
+      imagePaths: 'attachments',
     },
   },
   session_send: {
-    keys: ['conversationId', 'message', 'mode', 'attachments'],
+    keys: ['conversationId', 'message', 'mode', 'attachments', 'goal'],
     arrays: ['attachments'],
     aliases: {
       sessionId: 'conversationId',
@@ -195,9 +199,18 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'baseRef',
       'branch',
       'after',
+      'attachments',
     ],
     booleans: ['worktree'],
-    aliases: { id: 'todoId', task: 'prompt', instruction: 'prompt', name: 'title' },
+    arrays: ['attachments'],
+    aliases: {
+      id: 'todoId',
+      task: 'prompt',
+      instruction: 'prompt',
+      name: 'title',
+      images: 'attachments',
+      imagePaths: 'attachments',
+    },
   },
   schedule_add: {
     keys: ['name', 'prompt', 'at', 'cron'],
@@ -219,6 +232,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'visibleProjectIds',
       'maxRunningDispatches',
       'patrolEnabled',
+      'cleanupSkipConfirm',
       'addressAs',
       'replyLanguage',
       'style',
@@ -345,6 +359,21 @@ const AFTER_PARAM: JsonSchema = {
   description:
     'Optional: session ids this dispatch must wait for. It starts only after every one of them has really finished (goal complete and idle, or turn ended and idle for a session without a goal). It waits without creating a session and without using a dispatch slot; if any of them fails, is stopped or is deleted, this dispatch never starts and you get a result. Cancel a waiting dispatch with session_stop and its pendingId.',
 };
+
+const IMAGE_RULES =
+  'absolute paths of up to 5 images. Each must be a png, jpg, jpeg, webp or gif (judged by the file header) under the session worktree root, a system temp directory or the app chat image directory, at most 10MB. If any image is out of scope, missing, not an image or too large, the whole call is refused with the reason and nothing is sent.';
+
+const attachmentsParam = (description: string): JsonSchema => ({
+  type: 'array',
+  items: { type: 'string', minLength: 1, maxLength: SECRETARY_ATTACHMENT_PATH_MAX },
+  minItems: 1,
+  maxItems: SECRETARY_ATTACHMENT_MAX,
+  description,
+});
+
+const DISPATCH_ATTACHMENTS = attachmentsParam(
+  `Optional: screenshots that go with the first prompt, ${IMAGE_RULES} When the session's model can see images they arrive as images in that first message, the same as the user pasting them, and their paths are listed at the end of the prompt. Put screenshots here instead of dispatching first and sending them afterwards. With after, only the paths are kept and the images are read when the dispatch actually starts; an image gone by then is named in the prompt as unavailable.`
+);
 
 const SCHEMAS: Record<
   SecretaryOp,
@@ -479,13 +508,14 @@ const SCHEMAS: Record<
         },
         ...BASE_PARAMS,
         after: AFTER_PARAM,
+        attachments: DISPATCH_ATTACHMENTS,
       },
       ['projectId', 'prompt']
     ),
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images instead of describing them: when the target model can see images they go in as images with the message, the same as the user pasting them, so the session does not need image_view (a model without image input gets the paths and opens them with image_view). Pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete, was marked done by hand, never had a goal, or its goal is blocked or paused: the new goal is attached (a blocked or paused goal is replaced and audited) and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still active or waiting — a live goal is never replaced. Every send starts tracking the session again, even after it was marked done, completed, failed, was interrupted or stalled: the results of the follow-up reach you as usual.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -496,18 +526,16 @@ const SCHEMAS: Record<
           description:
             'queue (default): wait behind the current turn. steer: cut in at the next tool boundary to change priority or correct direction.',
         },
-        attachments: {
-          type: 'array',
-          items: {
-            type: 'string',
-            minLength: 1,
-            maxLength: SECRETARY_ATTACHMENT_PATH_MAX,
-          },
-          minItems: 1,
-          maxItems: SECRETARY_ATTACHMENT_MAX,
+        goal: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4000,
           description:
-            'Optional: absolute paths of up to 5 images to forward. Each must be a png, jpg, jpeg, webp or gif under the session worktree root, a system temp directory or the app chat image directory, at most 10MB. The paths are appended to the message so the target session can open them with image_view.',
+            'Optional: a new goal, when the session already reported goal-complete, was marked done by hand, has no goal, or its goal is blocked or paused (that goal is replaced). The session then keeps running until the goal is done or blocked, and the patrol watches it. Refused while its current goal is still active or waiting.',
         },
+        attachments: attachmentsParam(
+          `Optional: images to forward with this message, ${IMAGE_RULES} They arrive as images in the message when the target model can see images, and their paths are listed at the end of the message so the session can refer to them again.`
+        ),
       },
       ['conversationId', 'message']
     ),
@@ -569,7 +597,7 @@ const SCHEMAS: Record<
   },
   result_mark_done: {
     description:
-      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. Only sessions you dispatched or track are accepted; the session itself is not touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
+      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. A blocked or paused goal on the session is closed with it, so a later session_send with goal is not refused; result_mark_undo puts that goal back. Only sessions you dispatched or track are accepted; nothing else in the session is touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
     parameters: object({ conversationId: id('Session id from session_list or the board') }, [
       'conversationId',
     ]),
@@ -679,7 +707,7 @@ const SCHEMAS: Record<
   },
   cleanup_apply: {
     description:
-      'Ask the user to confirm deleting the given cleanup_list ids. Nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted. Tell the user which card is waiting and do not retry the same call.',
+      'Delete the given cleanup_list ids. When this secretary\'s "Clean up without asking" setting is off (the default), nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. When that setting is on, the same deletions happen immediately with no card: the result is { status: "applied", total, deleted, archived, skipped, items }, where each item has id, kind, name and result (deleted, archived or skipped) plus reason when it was skipped, and your reply must list what was deleted, archived and skipped. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason and nothing is deleted. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted.',
     parameters: object({
       ids: {
         type: 'array',
@@ -691,7 +719,7 @@ const SCHEMAS: Record<
       all: {
         type: 'boolean',
         description:
-          'Optional: clean every item that is cleanable right now instead of passing ids. Still opens the confirmation card. Refused when more than 100 items are cleanable.',
+          'Optional: clean every item that is cleanable right now instead of passing ids. With the setting off it still opens the confirmation card; with it on it deletes them immediately. Refused when more than 100 items are cleanable.',
       },
       projectId: id('Optional with all: only this project'),
     }),
@@ -754,6 +782,7 @@ const SCHEMAS: Record<
         },
         ...BASE_PARAMS,
         after: AFTER_PARAM,
+        attachments: DISPATCH_ATTACHMENTS,
       },
       ['todoId']
     ),
@@ -845,6 +874,11 @@ const SCHEMAS: Record<
         type: 'boolean',
         description:
           'Watch running sessions automatically and report only anomalies, including background tasks left running in finished sessions. On by default.',
+      },
+      cleanupSkipConfirm: {
+        type: 'boolean',
+        description:
+          'Clean up without asking: cleanup_apply deletes immediately instead of opening a confirmation card. Off by default. It only skips the confirmation; unmerged branches, branches in use, feat/secretary-agent, main, the current branch and worktrees with uncommitted changes are still refused or skipped. Sessions are archived, never deleted.',
       },
       addressAs: { type: 'string', minLength: 1, maxLength: 64 },
       replyLanguage: { type: 'string', enum: ['ui', 'zh', 'en'] },

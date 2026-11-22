@@ -1,15 +1,14 @@
-import {
-  type CatalogEntry,
-  type PairBotActivity,
-  type PairBotChatState,
-  type PairBotChatSummary,
-  type PairBotInboxItem,
-  type PairBotMember,
-  type PairedDevice,
-  type ProjectEntry,
-  type ProjectGroupEntry,
-  type ProviderEntry,
-  revokePairing,
+import type {
+  CatalogEntry,
+  PairBotActivity,
+  PairBotChatState,
+  PairBotChatSummary,
+  PairBotInboxItem,
+  PairBotMember,
+  PairedDevice,
+  ProjectEntry,
+  ProjectGroupEntry,
+  ProviderEntry,
 } from '@enso/pair';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { emptyGuestView } from '@shared/pair/guestProjection';
@@ -32,8 +31,9 @@ import {
 import { BotThreadPort } from './botThreadPort';
 import { ChatScreen } from './ChatScreen';
 import { type ConnState, PairClient, type SessionView } from './client';
-import { formatOnlineConnectionLabel } from './connectionLabel';
-import { pickActive, removeDevice, renameDevice, upsertDevice } from './deviceList';
+import { CONN_STATE_LABEL, formatOnlineConnectionLabel } from './connectionLabel';
+import { renameStoredDevice, unpairStoredDevice } from './deviceActions';
+import { pickActive, upsertDevice } from './deviceList';
 import { resolveDrawerSegment, saveDrawerSegment } from './drawerSegment';
 import { GroupChatScreen, type MemberPending } from './GroupChatScreen';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from './launchSession';
@@ -48,8 +48,8 @@ import {
   type PushFailureReason,
   registerServiceWorker,
   subscribePush,
-  unsubscribePush,
 } from './push';
+import { pushDeps, turnPushOff, turnPushOn } from './pushToggle';
 import {
   captureQueueSendEcho,
   type QueueSendEcho,
@@ -61,7 +61,6 @@ import { READ_ONLY_ERROR } from './readOnly';
 import { SessionConfigSheet } from './SessionConfigSheet';
 import { SessionDrawer } from './SessionDrawer';
 import {
-  clearDeviceData,
   type LastView,
   loadActiveDeviceId,
   loadDevices,
@@ -70,8 +69,10 @@ import {
   saveDevices,
   saveLastView,
 } from './storage';
+import { hadPairing, storageLossNotice } from './storageGuard';
 import { setPhoneAgentActions } from './stubs/electron-api';
 import { setQueueActions } from './stubs/sessions-store';
+import { deskUrl, takePairFromDesk } from './uiMode';
 import { shouldHoldWakeLock, syncWakeLock } from './wakeLock';
 
 /**
@@ -85,15 +86,6 @@ function takeInviteFromUrl(): string | null {
   history.replaceState(null, '', window.location.pathname + window.location.search);
   return link;
 }
-
-const STATE_LABEL: Record<ConnState, string> = {
-  connecting: '连接中…',
-  online: '已连接',
-  'host-offline': '桌面端离线',
-  unauthorized: '配对已失效',
-  replaced: '已在其他页面打开',
-  offline: '重连中…',
-};
 
 const SIDEBAR_PINNED_KEY = 'enso-phone-sidebar-pinned';
 
@@ -125,8 +117,24 @@ export function App() {
   const device = pickActive(devices, activeDeviceId);
   // 只在首次挂载时取一次：内部会抹掉 hash，重复调用取不到
   const [urlInvite] = useState(takeInviteFromUrl);
+  /** 从完整版的「配对新电脑」跳来：配完（或取消）回完整版 */
+  const [fromDesk] = useState(takePairFromDesk);
   /** 已配对状态下的「配对新电脑」流程（覆盖 PairScreen） */
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(fromDesk);
+  /** 没有配对时：本地存储疑似被系统清理就说明原因 */
+  const [lossNotice, setLossNotice] = useState<string | null>(null);
+  const hasDevice = device !== null;
+  useEffect(() => {
+    if (hasDevice) return;
+    let cancelled = false;
+    void hadPairing().then((marked) => {
+      if (!cancelled)
+        setLossNotice(storageLossNotice({ paired: false, marked, standalone: isStandalone() }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasDevice]);
   const [state, setState] = useState<ConnState>('connecting');
   const [transport, setTransport] = useState<'relay' | 'direct'>('relay');
   const [rttMs, setRttMs] = useState<number | null>(null);
@@ -506,16 +514,22 @@ export function App() {
       if (document.visibilityState === 'visible') {
         client.nudge('visibility');
         client.send({ type: 'presence', visible: true });
+        clearBadge();
       } else {
         client.conceal();
         client.send({ type: 'presence', visible: false });
         client.flushCache();
       }
     };
+    // 回到前台即清角标：待处理项在列表里看得到
+    const clearBadge = () =>
+      navigator.serviceWorker?.controller?.postMessage({ type: 'badge-clear' });
+    clearBadge();
     const onOnline = () => {
       if (document.visibilityState === 'visible') {
         client.nudge('online');
         client.send({ type: 'presence', visible: true });
+        clearBadge();
       }
     };
     const onPageShow = (event: PageTransitionEvent) => {
@@ -523,6 +537,7 @@ export function App() {
       // bfcache 回来的 socket 几乎一定是半开，当网络恢复拆掉
       client.nudge(event.persisted ? 'online' : 'visibility');
       client.send({ type: 'presence', visible: true });
+      clearBadge();
     };
     const onFocus = () => {
       if (document.visibilityState === 'visible') client.nudge('visibility');
@@ -731,7 +746,7 @@ export function App() {
 
   // 在线时附带业务帧出口（直连 / 中继）：顶栏副标题与抽屉设备行共用
   const connectionLabel =
-    state === 'online' ? formatOnlineConnectionLabel(transport, rttMs) : STATE_LABEL[state];
+    state === 'online' ? formatOnlineConnectionLabel(transport, rttMs) : CONN_STATE_LABEL[state];
 
   /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
   const resetHostState = (nextView: LastView) => {
@@ -772,27 +787,24 @@ export function App() {
 
   const addDevice = (d: PairedDevice) => {
     const next = upsertDevice(devices, d);
-    setDevices(next);
     saveDevices(next);
     saveActiveDeviceId(d.pairId);
+    if (fromDesk && d.scope !== 'read') {
+      window.location.replace(deskUrl(d.pairId));
+      return;
+    }
+    setDevices(next);
     setActiveDeviceId(d.pairId);
     resetHostState(loadLastView(d.pairId));
     setAdding(false);
   };
 
   const unpairDevice = (pairId: string) => {
-    const target = devices.find((d) => d.pairId === pairId);
-    // 手机侧持 deviceToken，可一并清掉中继房间（桌面重连即被拒）；已被对端解绑时失败无妄
-    if (target) void revokePairing(target.relayUrl, target.pairId, target.token).catch(() => {});
     // 先停旧 client 的缓存写入，再删缓存；不能等 React effect 清理时重新写回。
     if (pairId === device?.pairId) clientRef.current?.close();
-    clearDeviceData(pairId);
-    const next = removeDevice(devices, pairId);
+    const { devices: next, fallback } = unpairStoredDevice(devices, pairId, device?.pairId ?? null);
     setDevices(next);
-    saveDevices(next);
-    if (pairId === (device?.pairId ?? null)) {
-      const fallback = pickActive(next, null);
-      saveActiveDeviceId(fallback?.pairId ?? null);
+    if (fallback !== undefined) {
       setActiveDeviceId(fallback?.pairId ?? null);
       if (fallback) setState('connecting');
       resetHostState(loadLastView(fallback?.pairId ?? null));
@@ -801,9 +813,7 @@ export function App() {
   };
 
   const handleRename = (pairId: string, label: string) => {
-    const next = renameDevice(devices, pairId, label);
-    setDevices(next);
-    saveDevices(next);
+    setDevices(renameStoredDevice(devices, pairId, label));
   };
 
   if (!device || adding) {
@@ -811,7 +821,15 @@ export function App() {
       <PairScreen
         autoInvite={urlInvite}
         onPaired={addDevice}
-        onCancel={device ? () => setAdding(false) : undefined}
+        onCancel={
+          device
+            ? () => {
+                if (fromDesk) window.location.replace(deskUrl(device.pairId));
+                else setAdding(false);
+              }
+            : undefined
+        }
+        notice={device ? null : lossNotice}
       />
     );
   }
@@ -1105,11 +1123,10 @@ export function App() {
 
   const togglePush = async (next: boolean) => {
     setPushError(null);
+    const deps = pushDeps(send);
     if (!next) {
-      localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'off');
       setPushEnabled(false);
-      send({ type: 'push-unsubscribe' });
-      void unsubscribePush();
+      turnPushOff(deps);
       return;
     }
     const key = vapidKeyRef.current;
@@ -1117,15 +1134,12 @@ export function App() {
     // 乐观翻开 + busy：权限弹框与 FCM 注册要几秒，开关不动会被误认为没开
     setPushEnabled(true);
     setPushBusy(true);
-    const result = await subscribePush(key);
+    const result = await turnPushOn(key, deps);
     setPushBusy(false);
     if (!result.ok) {
       setPushEnabled(false);
       setPushError(result.reason);
-      return;
     }
-    send({ type: 'push-subscribe', subscription: result.subscription });
-    localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'on');
   };
 
   return (

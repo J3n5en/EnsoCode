@@ -10,11 +10,13 @@ import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ChromeRow, useShellChrome } from '@/components/app/WindowChrome';
+import { SecretaryReturnButton } from '@/components/secretary/SecretaryReturnButton';
 import { SecretaryTakeoverControl } from '@/components/secretary/SecretaryTakeover';
 import { SecretaryTransferControl } from '@/components/secretary/SecretaryTransfer';
 import { addToast } from '@/components/ui/toast';
 import { useMemberName } from '@/hooks/useMemberName';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
+import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -74,6 +76,7 @@ const pickSuggestion = (prompt: string) => {
 
 export function ChatView() {
   const { t } = useI18n();
+  const isMobile = useIsMobile();
   const shellChrome = useShellChrome();
   const providers = useMaterializedProviders();
   const virtualModels = useSettingsStore((state) => state.virtualModels);
@@ -354,6 +357,7 @@ export function ChatView() {
         displayedId={chrome.id}
         trailing={
           <div className="flex min-w-0 shrink-0 items-center gap-1">
+            <SecretaryReturnButton conversationId={chrome.parentId} />
             <SecretaryTakeoverControl conversationId={chrome.parentId} />
             <SecretaryTransferControl conversationId={chrome.parentId} />
             <ChildRunsButton parentId={chrome.parentId} coworkerIds={coworkerIds ?? []} />
@@ -528,6 +532,7 @@ export function ChatView() {
                     <ModelPicker
                       listenHotkey
                       refreshAllModels
+                      compact={isMobile}
                       providers={enabledProviders}
                       virtualModels={virtualModels}
                       routedModelLabel={routedModelLabel}

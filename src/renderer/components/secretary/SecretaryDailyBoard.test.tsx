@@ -29,6 +29,7 @@ vi.mock('@/stores/sessions', () => ({
 }));
 
 const { SecretaryDailyBoard } = await import('./SecretaryDailyBoard');
+const { useSessionPeek } = await import('@/stores/sessionPeek');
 
 const NOW = new Date(2024, 4, 15, 15, 0).getTime();
 const TODAY = '2024-05-15';
@@ -115,6 +116,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
   h.stateListeners = [];
+  useSessionPeek.setState({ conversationId: null, result: null, tab: 'session', from: null });
   h.daily = { [TODAY]: daily(), [YESTERDAY]: daily({ day: YESTERDAY, today: false }) };
   const api = {
     secretary: {
@@ -269,16 +271,44 @@ describe('SecretaryDailyBoard', () => {
     ).toBeNull();
   });
 
-  it('点卡片展开全文，点会话徽标才跳转', async () => {
+  it('没完成的卡片点开仍是行内展开全文，点会话徽标弹窗看会话', async () => {
+    h.daily[TODAY] = daily({ groups: [{ key: 'running', items: [item({ label: 'Running' })] }] });
     await render(createElement(SecretaryDailyBoard));
     const expand = () => container.querySelector('[data-enso="secretary-daily-expand"]');
     expect(expand()?.getAttribute('aria-expanded')).toBe('false');
     click('[data-enso="secretary-daily-expand"]');
     expect(expand()?.getAttribute('aria-expanded')).toBe('true');
     expect(text('[data-enso="secretary-daily-card"]')).toContain('branch: feat/login');
-    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(useSessionPeek.getState().conversationId).toBeNull();
     click('[data-enso="secretary-daily-open"]');
-    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(useSessionPeek.getState()).toMatchObject({
+      conversationId: 'c1',
+      result: null,
+      tab: 'session',
+    });
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('已完成的卡片不再行内展开：点卡片或会话徽标都打开弹窗并默认看结果', async () => {
+    await render(createElement(SecretaryDailyBoard));
+    const card = () => container.querySelector('[data-enso="secretary-daily-expand"]');
+    expect(card()?.getAttribute('aria-expanded')).toBeNull();
+    expect(card()?.getAttribute('aria-haspopup')).toBe('dialog');
+    click('[data-enso="secretary-daily-expand"]');
+    expect(useSessionPeek.getState()).toMatchObject({
+      conversationId: 'c1',
+      tab: 'result',
+      result: {
+        title: '重构登录流程',
+        fallback: '登录流程拆成三步\nbranch: feat/login\ncommit: a1b2c3d4',
+      },
+    });
+    expect(text('[data-enso="secretary-daily-card"]')).not.toContain('branch: feat/login');
+    act(() => useSessionPeek.getState().close());
+    click('[data-enso="secretary-daily-open"]');
+    expect(useSessionPeek.getState()).toMatchObject({ conversationId: 'c1', tab: 'result' });
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
   });
 
   it('分支与提交号有就显示成徽标，没有就不留空位', async () => {

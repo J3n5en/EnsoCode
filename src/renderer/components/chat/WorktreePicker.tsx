@@ -398,7 +398,7 @@ export function WorktreePicker({
         <PopoverTrigger
           ref={triggerRef}
           disabled={disabled}
-          className="flex h-7 min-w-0 max-w-52 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          className="flex h-7 min-w-0 max-w-52 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 max-md:h-[32px] max-md:@max-[28rem]:shrink-0 max-md:@max-[28rem]:gap-0.5 max-md:@max-[28rem]:px-1 max-md:@max-[28rem]:min-w-[32px] max-md:@max-[28rem]:justify-center"
           title={
             conversation.worktree
               ? `${pickerLabel}\n${worktreeHoverText(conversation.worktree, statuses[conversationId], t)}`
@@ -412,7 +412,7 @@ export function WorktreePicker({
           ) : (
             <House className="h-3 w-3 shrink-0" />
           )}
-          <span className="min-w-0 truncate">{pickerLabel}</span>
+          <span className="max-md:@max-[28rem]:hidden min-w-0 truncate">{pickerLabel}</span>
           <ChevronDown className="h-3 w-3 shrink-0" />
         </PopoverTrigger>
         <PopoverPopup

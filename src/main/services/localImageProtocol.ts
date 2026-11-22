@@ -14,6 +14,7 @@ import {
   PLUGIN_ASSET_HOST,
   REMOTE_FETCH_HOST,
   SECRETARY_AVATAR_HOST,
+  SECRETARY_REPORT_HOST,
 } from '@shared/localImage';
 import { isBotId } from '@shared/types/bot';
 
@@ -29,6 +30,15 @@ export function setSecretaryAvatarResolver(
   resolve: (secretaryId: string | null) => string | null
 ): void {
   secretaryAvatarResolver = resolve;
+}
+
+let secretaryReportResolver: (conversationId: string, name: string) => string | null = () => null;
+
+/** 报告截图：会话 id + 内容哈希文件名 → 副本路径；不认的返回 null */
+export function setSecretaryReportResolver(
+  resolve: (conversationId: string, name: string) => string | null
+): void {
+  secretaryReportResolver = resolve;
 }
 
 let pluginAssetResolver: ((pluginId: string, rel: string) => string | null) | null = null;
@@ -96,6 +106,7 @@ export async function handleLocalImageRequest(
   }
   if (url.hostname === SECRETARY_AVATAR_HOST) return serveSecretaryAvatar(url);
   if (url.hostname === PLUGIN_ASSET_HOST) return servePluginAsset(url);
+  if (url.hostname === SECRETARY_REPORT_HOST) return serveSecretaryReport(url);
   return serveLocalMedia(url, rangeHeader);
 }
 
@@ -141,6 +152,27 @@ async function servePluginAsset(url: URL): Promise<Response> {
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'max-age=31536000',
       },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+}
+
+async function serveSecretaryReport(url: URL): Promise<Response> {
+  const parts = url.pathname
+    .split('/')
+    .filter((part) => part.length > 0)
+    .map(decodeSegment);
+  const [conversationId, name] = parts;
+  if (parts.length !== 2 || !conversationId || !name)
+    return new Response('Bad path', { status: 400 });
+  const file = secretaryReportResolver(conversationId, name);
+  const type = MIME_TYPES[mediaExtension(name)];
+  if (!file || !type) return new Response('Not found', { status: 404 });
+  try {
+    // 文件名就是内容哈希，同一地址内容不变
+    return new Response(new Uint8Array(await readFile(file)), {
+      headers: { 'Content-Type': type, 'Cache-Control': 'max-age=31536000' },
     });
   } catch {
     return new Response('Not found', { status: 404 });

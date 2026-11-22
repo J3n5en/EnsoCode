@@ -18,7 +18,15 @@ import {
   SquarePen,
   UnfoldHorizontal,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { ChatAreaFrame } from '@/components/app/ChatAreaFrame';
 import { HeaderSessionTabs } from '@/components/app/HeaderSessionTabs';
@@ -45,7 +53,7 @@ import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBoot
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
-import { SidePanel } from '@/components/sidepanel/SidePanel';
+import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
 import {
   AlertDialog,
   AlertDialogClose,
@@ -66,9 +74,15 @@ import { useOpenFolderRequests } from '@/hooks/useOpenFolderRequests';
 import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewport';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
-import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
+import {
+  effectiveKeybindings,
+  eventToBinding,
+  isEventInSidePanel,
+  menuAlreadyHandled,
+} from '@/lib/keybindings';
 import { easeOutLayout, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
+import { subscribeSidebarToggle } from '@/lib/sidebarToggle';
 import {
   addSidePanelBtw,
   addSidePanelTerminal,
@@ -97,6 +111,12 @@ import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
 import { bindSidePanelFullscreen, useSidePanelStore } from '@/stores/sidePanel';
+
+// 右面板含 dockview / xterm / diffs，手机首屏用不到，打开时再加载
+const SidePanel = lazy(() =>
+  import('@/components/sidepanel/SidePanel').then((m) => ({ default: m.SidePanel }))
+);
+
 import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
@@ -194,6 +214,23 @@ export default function App() {
     setCloseRequestId(null);
     window.electronAPI.app.respondCloseRequest(requestId, { action });
   };
+  // 桌面折叠与窄屏抽屉是两套状态；⌘B 与 View 菜单都走这里
+  const toggleSidebarView = useCallback(() => {
+    if (isMobileWidth(window.innerWidth)) setDrawerOpen((v) => !v);
+    else setCollapsed((v) => !v);
+  }, []);
+  // macOS 透明窗口的点击形状按已绘制内容缓存，侧栏折叠动画让顶栏按钮换位后
+  // 命中区可能停在旧位置，按钮点上去没反应；动画结束后重算一次。
+  const refreshDragRegions = useCallback(() => {
+    if (window.electronAPI.env.platform !== 'darwin') return;
+    window.setTimeout(() => window.electronAPI.window.refreshDragRegions(), 400);
+  }, []);
+  const toggleSidebar = useCallback(() => {
+    toggleSidebarView();
+    refreshDragRegions();
+  }, [toggleSidebarView, refreshDragRegions]);
+  useEffect(() => subscribeSidebarToggle(toggleSidebar), [toggleSidebar]);
+  useEffect(() => window.electronAPI.window.onToggleSidebar(toggleSidebar), [toggleSidebar]);
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
   const [sideResizing, setSideResizing] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -331,8 +368,8 @@ export default function App() {
       }
       if (pressed === bindings['toggle-sidebar']) {
         e.preventDefault();
-        if (isMobileWidth(window.innerWidth)) setDrawerOpen((v) => !v);
-        else setCollapsed((v) => !v);
+        if (menuAlreadyHandled(e, pressed)) return;
+        toggleSidebar();
       } else if (pressed === bindings['open-settings']) {
         e.preventDefault();
         void window.electronAPI.window.openSettings();
@@ -394,7 +431,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [keybindings]);
+  }, [keybindings, toggleSidebar]);
 
   useEffect(() => {
     if (!sideOpen || !sideFullscreen) return;
@@ -514,7 +551,7 @@ export default function App() {
                   type="button"
                   data-enso="sidebar-toggle"
                   className={TOOLBAR_BUTTON}
-                  onClick={() => setCollapsed((v) => !v)}
+                  onClick={toggleSidebar}
                   title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
                 >
                   {collapsed ? (
@@ -596,7 +633,7 @@ export default function App() {
           <BotView
             sidebarWidth={width}
             collapsed={collapsed}
-            onToggleCollapse={() => setCollapsed((v) => !v)}
+            onToggleCollapse={toggleSidebar}
             onResize={handleResize}
           />
         ) : (
@@ -638,7 +675,7 @@ export default function App() {
                 <Sidebar
                   width={collapsed ? undefined : width}
                   collapsed={collapsed}
-                  onToggleCollapse={() => setCollapsed((v) => !v)}
+                  onToggleCollapse={toggleSidebar}
                   onOpenSearch={() => setSearchOpen(true)}
                 />
                 {!collapsed && <ResizeHandle edge={desktopShell} onResize={handleResize} />}
@@ -695,18 +732,21 @@ export default function App() {
                   onResizingChange={setSideResizing}
                 />
               )}
-              <SidePanel
-                width={sideWidth}
-                resizing={sideResizing}
-                card={desktopShell}
-                titleRow={titleRowPanel}
-              />
+              <Suspense fallback={null}>
+                <SidePanel
+                  width={sideWidth}
+                  resizing={sideResizing}
+                  card={desktopShell}
+                  titleRow={titleRowPanel}
+                />
+              </Suspense>
             </div>
           </DndContext>
         )}
       </div>
       {settingsHydrated && !onboarded && !window.electronAPI.remote && <Onboarding />}
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <SessionPeekDialog />
       <PairNodeDialog
         open={pairDialogOpen}
         onOpenChange={useRemoteNodesStore.getState().setPairDialogOpen}

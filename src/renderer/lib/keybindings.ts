@@ -121,6 +121,17 @@ export function isSendMessageKey(e: KeyboardEvent | React.KeyboardEvent, binding
 }
 
 /**
+ * macOS View 菜单的「显示/隐藏侧边栏」带同一加速键。菜单加速键会先执行菜单项，
+ * 再把 keydown 交给页面且 defaultPrevented 为真；页面再切换一次就把菜单的切换抵消了。
+ */
+export function menuAlreadyHandled(
+  e: KeyboardEvent | React.KeyboardEvent,
+  binding: string
+): boolean {
+  return e.defaultPrevented && eventToBinding(e) === binding;
+}
+
+/**
  * 空格记作 space：否则绑定串里是看不见的空格，mac 的 ⌥Space 还会给出不换行空格。
  * 按 ⌥ 时字母、数字取物理键：mac 上 ⌥P 的 key 是 π，按字符记就永远匹配不上 alt+p。
  */

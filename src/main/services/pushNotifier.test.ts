@@ -10,13 +10,32 @@ describe('buildPushPayload', () => {
       body: '修复登录',
       sessionId: 's1',
     });
-    expect(buildPushPayload({ type: 'ask-request', identity }, '修复登录')?.title).toBe(
-      '等待你的回答'
-    );
+    expect(buildPushPayload({ type: 'ask-request', identity }, '修复登录')?.body).toBe('修复登录');
     expect(buildPushPayload({ type: 'turn-completed', identity }, '修复登录')?.title).toBe(
       '回合已完成'
     );
     expect(buildPushPayload({ type: 'turn-failed', identity }, '修复登录')?.title).toBe('回合失败');
+  });
+
+  it('正文带上要处理的内容：审批命令、提问原文，超长截断', () => {
+    expect(
+      buildPushPayload(
+        { type: 'approval-request', identity, request: { summary: 'rm -rf dist' } },
+        '修复登录'
+      )?.body
+    ).toBe('rm -rf dist');
+    expect(
+      buildPushPayload(
+        { type: 'ask-request', identity, ask: { question: '用哪个端口' } },
+        '修复登录'
+      )?.body
+    ).toBe('用哪个端口');
+    const long = buildPushPayload(
+      { type: 'ask-request', identity, ask: { question: `为什么${'长'.repeat(200)}` } },
+      '修复登录'
+    );
+    expect(long?.body).toHaveLength(100);
+    expect(long?.body.startsWith('为什么')).toBe(true);
   });
 
   it('无关事件与缺 sessionId 的事件返回 null', () => {

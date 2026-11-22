@@ -24,13 +24,16 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: { projects: unknown[] }) => unknown) =>
     selector({ projects: [] }),
 }));
-vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      conversations: {},
-      selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
-    }),
-}));
+vi.mock('@/stores/sessions', () => {
+  const state = {
+    conversations: { c1: { projectId: 'p1' } },
+    selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
+  };
+  const useSessionsStore = (selector: (s: Record<string, unknown>) => unknown) => selector(state);
+  useSessionsStore.getState = () => state;
+  useSessionsStore.subscribe = () => () => undefined;
+  return { useSessionsStore };
+});
 vi.mock('@/stores/secretary', () => ({
   focusedSecretaryId: () => undefined,
   secretaryIdOfProject: () => null,
@@ -46,6 +49,7 @@ vi.mock('@/stores/secretary', () => ({
 }));
 
 const { SecretaryPanel } = await import('./SecretaryPanel');
+const { useSessionPeek } = await import('@/stores/sessionPeek');
 const { SecretaryRunningList } = await import('./SecretaryRunningList');
 
 const NOW = new Date(2024, 4, 15, 15, 0).getTime();
@@ -124,6 +128,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
   h.stateListeners = [];
+  useSessionPeek.setState({ conversationId: null, from: null });
   h.schedules = [
     {
       id: 's1',
@@ -362,8 +367,9 @@ describe('SecretaryPanel', () => {
     expect(row?.textContent).toContain('看构建');
     expect(row?.textContent).toContain('[Running]');
     click('[data-enso="secretary-todo-session"]');
+    expect(useSessionPeek.getState().conversationId).toBe('c9');
+    expect(h.calls.some((call) => call.name === 'selectConversation')).toBe(false);
     click('[data-enso="secretary-todo-reopen"]');
-    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c9' });
     expect(h.calls).toContainEqual({
       name: 'mutateTodo',
       args: { action: 'reopen', todoId: 't1' },
@@ -455,7 +461,7 @@ describe('SecretaryPanel', () => {
     expect(list).not.toContain('挂掉的活');
   });
 
-  it('进行中行点主体只展开，右侧图标才打开会话', async () => {
+  it('进行中行点主体只展开，右侧图标弹窗看会话，关掉后展开状态不变', async () => {
     h.board = h.secretary.board = board({
       running: [sessionCard('c1', { title: '跑全量测试', lastText: '第 3 步' })],
     });
@@ -474,7 +480,13 @@ describe('SecretaryPanel', () => {
     expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
 
     click('[data-enso="secretary-running-open"]');
-    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(useSessionPeek.getState().conversationId).toBe('c1');
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+
+    act(() => useSessionPeek.getState().close());
+    expect(useSessionPeek.getState().conversationId).toBeNull();
+    expect(container.querySelector('[data-enso="secretary-running"]')).not.toBeNull();
     expect(expand()?.getAttribute('aria-expanded')).toBe('true');
   });
 

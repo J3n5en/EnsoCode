@@ -4,7 +4,6 @@ import {
   resolveDisabledBuiltinTools,
 } from '@shared/types/builtinTools';
 import type { DockviewApi } from 'dockview-react';
-import { releaseTerminal } from '@/lib/terminalRegistry';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import type { SettingsState } from '@/stores/settings/types';
@@ -469,7 +468,8 @@ export function disposeConversationResources(conversationId: string): void {
       if (panel.id === 'changes' || panel.id === 'files') continue;
       if (panel.id === 'secretary') continue;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) continue;
-      releaseTerminal(panel.id);
+      // xterm 只在打开过终端时才加载
+      void import('@/lib/terminalRegistry').then((m) => m.releaseTerminal(panel.id));
       void window.electronAPI?.terminal?.dispose(panel.id);
     }
   }

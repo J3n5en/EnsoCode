@@ -1,7 +1,6 @@
 import { toUsageTotals } from '@shared/sessionStats';
 import {
   DEFAULT_STATUS_LINE_SEGMENTS,
-  isStatusLineSegmentPinned,
   STATUS_LINE_SEGMENT_IDS,
   type StatusLineSegmentId,
 } from '@shared/statusLine';
@@ -13,6 +12,7 @@ import {
   Coins,
   Cpu,
   Database,
+  Ellipsis,
   FolderOpen,
   Gauge,
   Hourglass,
@@ -29,9 +29,10 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { fetchAccountUsage, USAGE_CACHE_TTL_MS, usageCache } from '@/hooks/useAccountUsage';
+import { useIsMobile } from '@/hooks/useViewport';
 import { type TFunction, useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -47,6 +48,11 @@ import { buildRequestBodySegment } from './requestBodySegment';
 import { StatusLineSettings } from './StatusLineSettings';
 import { resolveSessionUsageAccount } from './sessionUsageAccount';
 import {
+  fitStatusLine,
+  STATUS_LINE_GEAR_RESERVE_PX,
+  statusLineLayoutSegments,
+} from './statusLineFit';
+import {
   buildUsageSegmentValues,
   CRITICAL_PERCENT,
   resolveContextUsage,
@@ -55,6 +61,37 @@ import {
 } from './usageSegments';
 
 export type { SegmentValue };
+
+type SegmentWidths = Partial<Record<StatusLineSegmentId, number>>;
+
+interface StatusLineMetrics {
+  available: number;
+  triggerWidth: number;
+  moreWidth: number;
+  widths: SegmentWidths;
+}
+
+function sameMetrics(a: StatusLineMetrics | undefined, b: StatusLineMetrics): boolean {
+  if (
+    !a ||
+    a.available !== b.available ||
+    a.triggerWidth !== b.triggerWidth ||
+    a.moreWidth !== b.moreWidth
+  )
+    return false;
+  const keys = Object.keys(b.widths) as StatusLineSegmentId[];
+  return (
+    keys.length === Object.keys(a.widths).length &&
+    keys.every((id) => a.widths[id] === b.widths[id])
+  );
+}
+
+function segmentTone(id: StatusLineSegmentId, value: SegmentValue): string {
+  if (value.critical) return 'text-destructive';
+  if (id === 'context' && value.percent !== undefined && value.percent >= CONTEXT_BAR_WARN_PERCENT)
+    return 'text-warning';
+  return 'text-subtle-foreground';
+}
 
 interface StatsLineProps {
   conversationId: string;
@@ -403,7 +440,8 @@ function buildSegmentValues(
 /** composer 下方的会话统计条：段位驱动、每段「图标 + 值」的紧凑呈现，段名只在悬停提示与设置弹层里。
  *  段位顺序 = `statusLineSegments` 数组自身顺序（用户可在设置弹层拖拽），预设不进存储，
  *  见 `statusLinePresetOf`。外层恒占一行高度（h-7）：避免统计从无到有时输入框跳动；
- *  全部段位关掉时仍渲染空容器 + hover 齿轮，否则用户关完就再也打不开设置。 */
+ *  全部段位关掉时仍渲染空容器 + hover 齿轮，否则用户关完就再也打不开设置。
+ *  段位从不压缩：放不下的整段收进行尾详情弹层（见 fitStatusLine），手机同样逐项放置、上下文保底。 */
 export function StatsLine({ conversationId, cwd }: StatsLineProps) {
   const { t } = useI18n();
   const conversation = useSessionsStore((state) => state.conversations[conversationId]);
@@ -432,6 +470,11 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
   const [hoveredId, setHoveredId] = useState<StatusLineSegmentId | null>(null);
   // 上下文弹层打开期间保持展开：否则鼠标移向弹层时悬停段收起，居中的锚点横移，弹层跟着跳
   const [contextOpen, setContextOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const isMobile = useIsMobile();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [metrics, setMetrics] = useState<StatusLineMetrics>();
 
   const accountKey = useMemo(() => {
     if (!enabledSegments.includes('usage')) return undefined;
@@ -466,52 +509,136 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
         : null,
     [t, conversation, messages, labelProviders, projects, now, usageData]
   );
+  const layoutSegments = statusLineLayoutSegments(enabledSegments, isMobile);
+  const visibleKey = values ? layoutSegments.filter((id) => values[id]).join(',') : '';
+
+  // 隐藏测量层给出每段自然宽度；容器或文字宽度变化时重算，绘制前生效不闪
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const layer = measureRef.current;
+    if (!visibleKey || !container || !layer) return;
+    const read = () => {
+      const widths: SegmentWidths = {};
+      let triggerWidth = 0;
+      let moreWidth = 0;
+      for (const child of Array.from(layer.children)) {
+        const key = (child as HTMLElement).dataset.measure;
+        const width = Math.ceil(child.getBoundingClientRect().width);
+        if (key === 'trigger') triggerWidth = width;
+        else if (key === 'more') moreWidth = width;
+        else if (key) widths[key as StatusLineSegmentId] = width;
+      }
+      const next = {
+        available: container.clientWidth - 2 * STATUS_LINE_GEAR_RESERVE_PX,
+        triggerWidth,
+        moreWidth,
+        widths,
+      };
+      setMetrics((prev) => (sameMetrics(prev, next) ? prev : next));
+    };
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(container);
+    observer.observe(layer);
+    return () => observer.disconnect();
+  }, [visibleKey]);
 
   if (!conversation || !icons || !values) return null;
 
   // 渲染顺序恒按 statusLineSegments 数组自身顺序（用户拖拽排序的落点），⛔ 不要改回按
   // STATUS_LINE_SEGMENT_IDS 声明序 filter —— 那是旧契约，已被拖拽排序需求反转。
   const contextSegments = conversation.occupancy ? contextBarSegments(conversation.occupancy) : [];
-  const visibleSegments = enabledSegments.filter((id) => values[id]);
+  const visibleSegments = layoutSegments.filter((id) => values[id]);
+  const fit = fitStatusLine({
+    segments: visibleSegments,
+    widths: metrics?.widths,
+    available: metrics?.available,
+    triggerWidth: metrics?.triggerWidth,
+    moreWidth: metrics?.moreWidth,
+    mobile: isMobile,
+  });
+  const rowSegments = visibleSegments.filter(
+    (id) => fit.inline.includes(id) || fit.hoverable.includes(id)
+  );
+  const showDetails = fit.collapsed && visibleSegments.length > 0;
+  // 上下文没在行内时，详情按钮直接带上下文百分比，否则只是一个「更多」图标
+  const summary = values.context && !fit.inline.includes('context') ? values.context : undefined;
+
+  const segmentBody = (id: StatusLineSegmentId, value: SegmentValue) => {
+    const Icon = icons[id];
+    return (
+      <>
+        {id === 'context' && value.percent !== undefined ? (
+          contextSegments.length > 0 ? (
+            <ContextBar segments={contextSegments} />
+          ) : (
+            <ContextMeter percent={value.percent} critical={Boolean(value.critical)} />
+          )
+        ) : (
+          <Icon className="h-3 w-3 shrink-0 opacity-75" />
+        )}
+        {value.compact && <span className="truncate">{value.compact}</span>}
+      </>
+    );
+  };
+  const segmentClass = (id: StatusLineSegmentId, value: SegmentValue) =>
+    cn('relative flex items-center gap-1 text-[11px] tabular-nums', segmentTone(id, value));
+  const triggerClass = (value: SegmentValue | undefined) =>
+    cn(
+      'flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] tabular-nums outline-none hover:bg-muted',
+      value ? segmentTone('context', value) : 'text-subtle-foreground'
+    );
+  const triggerBody = (value: SegmentValue | undefined) =>
+    value ? (
+      <>
+        <Gauge className="h-3 w-3 shrink-0 opacity-75" />
+        <span>{value.compact}</span>
+      </>
+    ) : (
+      <Ellipsis className="h-3.5 w-3.5 shrink-0" />
+    );
 
   return (
     <div
+      ref={containerRef}
       data-slot="stats-line"
       data-enso="status-line"
       className="group relative flex h-7 items-center justify-center px-1"
     >
       {visibleSegments.length > 0 && (
+        <div aria-hidden className="pointer-events-none invisible absolute inset-0 overflow-hidden">
+          <div ref={measureRef} className="absolute top-0 left-0 flex w-max">
+            {visibleSegments.map((id) => {
+              const value = values[id];
+              return value ? (
+                <span key={id} data-measure={id} className={segmentClass(id, value)}>
+                  {segmentBody(id, value)}
+                </span>
+              ) : null;
+            })}
+            <span data-measure="trigger" className={triggerClass(values.context)}>
+              {triggerBody(values.context)}
+            </span>
+            <span data-measure="more" className={triggerClass(undefined)}>
+              {triggerBody(undefined)}
+            </span>
+          </div>
+        </div>
+      )}
+      {(rowSegments.length > 0 || showDetails) && (
         <div className="flex min-w-0 flex-nowrap items-center gap-3 overflow-hidden">
-          {visibleSegments.map((id, index) => {
+          {rowSegments.map((id) => {
             const value = values[id];
             if (!value) return null;
-            const Icon = icons[id];
             const segment = (
               <span
                 title={`${t(SEGMENT_LABEL_KEYS[id])} · ${value.full}`}
                 onMouseEnter={() => setHoveredId(id)}
                 onMouseLeave={() => setHoveredId((current) => (current === id ? null : current))}
-                className={cn(
-                  'relative flex items-center gap-1 text-[11px] tabular-nums',
-                  value.critical
-                    ? 'text-destructive'
-                    : id === 'context' &&
-                        value.percent !== undefined &&
-                        value.percent >= CONTEXT_BAR_WARN_PERCENT
-                      ? 'text-warning'
-                      : 'text-subtle-foreground'
-                )}
+                className={segmentClass(id, value)}
               >
-                {id === 'context' && value.percent !== undefined ? (
-                  contextSegments.length > 0 ? (
-                    <ContextBar segments={contextSegments} />
-                  ) : (
-                    <ContextMeter percent={value.percent} critical={Boolean(value.critical)} />
-                  )
-                ) : (
-                  <Icon className="h-3 w-3 shrink-0 opacity-75" />
-                )}
-                {value.compact && <span className="truncate">{value.compact}</span>}
+                {segmentBody(id, value)}
                 {hoveredId === id && id !== 'context' && (
                   <div
                     style={{ zIndex: Z_INDEX.TOOLTIP }}
@@ -524,12 +651,12 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
               </span>
             );
             return (
-              // 常驻段见 isStatusLineSegmentPinned，其余悬停/聚焦时展开，降低常驻噪音
+              // 常驻段见 isStatusLineSegmentPinned，其余悬停/聚焦时展开（只展开放得下的），降低常驻噪音
               <span
                 key={id}
                 className={cn(
                   'shrink-0 items-center',
-                  contextOpen || isStatusLineSegmentPinned(id, index)
+                  contextOpen || fit.inline.includes(id)
                     ? 'flex'
                     : 'hidden group-focus-within:flex group-hover:flex'
                 )}
@@ -552,6 +679,55 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
               </span>
             );
           })}
+          {showDetails && (
+            <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+              <PopoverTrigger
+                data-slot="status-line-details"
+                aria-label={t('Session stats')}
+                title={t('Session stats')}
+                className={triggerClass(summary)}
+              >
+                {triggerBody(summary)}
+              </PopoverTrigger>
+              <PopoverPopup side="top" className="w-72 [&_[data-slot=popover-viewport]]:p-0">
+                <div data-slot="status-line-details-list" className="py-1">
+                  {visibleSegments
+                    .filter((id) => id !== 'context')
+                    .map((id) => {
+                      const value = values[id];
+                      if (!value) return null;
+                      const Icon = icons[id];
+                      return (
+                        <div key={id} className="flex items-start gap-2 px-3 py-1.5 text-xs">
+                          <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="shrink-0 text-muted-foreground">
+                            {t(SEGMENT_LABEL_KEYS[id])}
+                          </span>
+                          <span
+                            className={cn(
+                              'ml-auto min-w-0 break-words text-right tabular-nums',
+                              value.critical && 'text-destructive'
+                            )}
+                          >
+                            {value.full}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+                {visibleSegments.includes('context') && (
+                  <div className="border-t">
+                    <ContextInspector
+                      occupancy={conversation.occupancy}
+                      conversationId={conversation.id}
+                      cwd={cwd}
+                      onNavigate={() => setDetailsOpen(false)}
+                    />
+                  </div>
+                )}
+              </PopoverPopup>
+            </Popover>
+          )}
         </div>
       )}
       <Popover>

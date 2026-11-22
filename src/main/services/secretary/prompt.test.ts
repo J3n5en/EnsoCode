@@ -59,6 +59,20 @@ describe('buildSecretarySystemPrompt', () => {
     ).toContain('Chinese');
   });
 
+  it('清理不用确认开着时写明直接删除，关着时不提', () => {
+    const on = buildSecretarySystemPrompt({
+      profile: { ...profile, cleanupSkipConfirm: true },
+      persona: '',
+      uiLanguage: 'en',
+    });
+    expect(on).toContain('cleanup_apply');
+    expect(on).toContain('deletes immediately without a confirmation card');
+    expect(on).toContain('do not say a card is waiting');
+    const off = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
+    expect(off).not.toContain('deletes immediately without a confirmation card');
+    expect(off).toContain('cleanup_apply only opens a confirmation card');
+  });
+
   it('没有档案时引导用户完成初次设置并走提案工具', () => {
     const prompt = buildSecretarySystemPrompt({ profile: null, persona: '', uiLanguage: 'zh' });
     expect(prompt).toContain('secretary_profile_propose');
@@ -82,6 +96,9 @@ describe('buildSecretarySystemPrompt', () => {
     // 会话说截图在某路径时先自己看一眼
     expect(prompt).toContain('image_view');
     expect(prompt).toMatch(/screenshot or an image is at some path/);
+    // 转图直接作为图片块；派活带图放进首条 prompt，不先派再补发
+    expect(prompt).toMatch(/without calling image_view/);
+    expect(prompt).toMatch(/session_create or todo_item_dispatch attachments/);
     // 定期看清单，清理走确认卡，不自己删
     expect(prompt).toContain('cleanup_list');
     expect(prompt).toContain('cleanup_apply');
@@ -120,6 +137,21 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/needs another branch or another base, or is a different task/);
     expect(prompt).toMatch(/already reported goal-complete, say .*continues the earlier work/);
     expect(prompt).toMatch(/another worktree and another branch/);
+  });
+
+  it('给已完成的会话追加任务时带上 goal，巡检才会盯着它', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toMatch(
+      /already reported goal-complete, or one that never had a goal, pass goal/
+    );
+    expect(prompt).toMatch(/patrol only watches a session that still has a goal/);
+  });
+
+  it('手动标完成或目标受阻、暂停的会话追加任务时也能带 goal，正在跑或在等的不行', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toMatch(/marked done by hand, or whose goal is blocked or paused/);
+    expect(prompt).toMatch(/refused while the current goal is still active or waiting/);
+    expect(prompt).toMatch(/every follow-up you send starts tracking it again/);
   });
 
   it('派发直接执行不出卡，worktree 由秘书每次按任务决定，模型默认跟随项目', () => {

@@ -324,6 +324,53 @@ describe('parseDispatchFile', () => {
     });
   });
 
+  it('自动归档标记读回来还在：重启后仍分得清自动归档与手动归档', () => {
+    const file = parseDispatchFile({
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 's1',
+          createdAt: 10,
+          lastEventAt: 10,
+          lastState: 'idle',
+          autoArchivedAt: 30,
+          autoArchiveResultAt: 20,
+        },
+      },
+    });
+    expect(file.dispatched.c1).toMatchObject({ autoArchivedAt: 30, autoArchiveResultAt: 20 });
+  });
+
+  it('手动标记、重新打开、撤销与收掉的目标读回来还在：重启后撤销标记与追加跟踪照常', () => {
+    const base = {
+      conversationId: 'c1',
+      projectId: 'p1',
+      secretaryConversationId: 's1',
+      createdAt: 10,
+      lastEventAt: 10,
+      lastState: 'idle',
+    };
+    const file = parseDispatchFile({
+      dispatched: {
+        c1: {
+          ...base,
+          lastResult: { kind: 'goal-complete', turn: 1, at: 20, manual: true },
+          closedGoal: { text: '旧目标', status: 'blocked', note: '缺 token' },
+        },
+        c2: { ...base, conversationId: 'c2', reopenedAt: 30, manualUndoneAt: 25 },
+        c3: { ...base, conversationId: 'c3', closedGoal: { text: '旧目标', status: 'active' } },
+      },
+    });
+    expect(file.dispatched.c1).toMatchObject({
+      lastResult: { kind: 'goal-complete', turn: 1, at: 20, manual: true },
+      closedGoal: { text: '旧目标', status: 'blocked', note: '缺 token' },
+    });
+    expect(file.dispatched.c2).toMatchObject({ reopenedAt: 30, manualUndoneAt: 25 });
+    // 只收受阻与暂停的目标：别的状态不认
+    expect(file.dispatched.c3.closedGoal).toBeUndefined();
+  });
+
   it('派发记录与提案草案里的模型（含思考档位）读回来还在', () => {
     const file = parseDispatchFile({
       dispatched: {

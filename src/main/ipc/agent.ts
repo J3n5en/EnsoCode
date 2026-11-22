@@ -158,6 +158,7 @@ import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/ex
 import { searchFiles } from '../services/fileSearch';
 import { resolveLocalUnderCwd } from '../services/filesWorkspace';
 import { memoryCompleteFromSettings } from '../services/llama/chat';
+import { setSecretaryReportResolver } from '../services/localImageProtocol';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import { type Complete, redactSecrets } from '../services/memory/distill';
 import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
@@ -191,6 +192,13 @@ import {
 } from '../services/secretary/inboundImages';
 import { turnRestriction } from '../services/secretary/peers';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
+import {
+  getSecretaryReportStore,
+  reportImageRoots,
+  SecretaryReportStore,
+  secretaryReportsRoot,
+  setSecretaryReportStore,
+} from '../services/secretary/reportImages';
 import {
   ensureSecretaryProjects,
   type SecretaryContext,
@@ -502,6 +510,7 @@ function removeConversationFiles(conversation: {
   const project = sourceAuthority?.project(conversation.projectId);
   peekExtensionPlugins()?.forgetSession(conversation.conversationId);
   getSecretaryImageStore()?.remove(conversation.conversationId);
+  getSecretaryReportStore()?.remove(conversation.conversationId);
   removeConversationSessionFiles({
     sessionDir: path.join(app.getPath('userData'), 'agent', 'sessions'),
     conversationId: conversation.conversationId,
@@ -788,11 +797,33 @@ export function promptRootFromMain(
 export function steerRootFromMain(
   sessionId: string,
   text: string,
-  deliveryId: string
+  deliveryId: string,
+  images?: AttachedImage[]
 ): AgentActionResult {
   const identity = exactIdentity(sessionId);
   if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
-  return steerSession(identity, text, undefined, deliveryId);
+  return steerSession(identity, text, images, deliveryId);
+}
+
+/** 根会话刚 spawn / 恢复时 worker 还没报 parent-ready：等它报，最多等 timeoutMs */
+const IMAGE_INPUT_WAIT_MS = 30_000;
+
+/**
+ * 根会话当前模型能否看图（worker 在 parent-ready / model-changed 里报）。
+ * 正在启动的会话等就绪；会话没在跑、启动失败或超时都返回 undefined，调用方按不能看图处理。
+ */
+export async function rootImageInput(
+  sessionId: string,
+  timeoutMs = IMAGE_INPUT_WAIT_MS
+): Promise<boolean | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const identity = exactIdentity(sessionId);
+    if (identity && agentSessionIndex.isReady(identity))
+      return agentSessionIndex.imageInput(sessionId);
+    if (!agentSessionIndex.isAlive(sessionId) || Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 export async function releaseRootFromMain(sessionId: string): Promise<AgentActionResult> {
@@ -1763,6 +1794,20 @@ export function registerAgentHandlers(): void {
   setSecretaryImageStore(secretaryImages);
   // 启动后扫一次，不和启动抢 IO
   setTimeout(() => void secretaryImages.sweep(), 15_000).unref();
+  const secretaryReports = new SecretaryReportStore({
+    root: secretaryReportsRoot(app.getPath('userData')),
+    roots: (conversationId) =>
+      reportImageRoots(sessionWorktree(agentSessionIndex.workspaceRoot(conversationId))?.path),
+  });
+  setSecretaryReportStore(secretaryReports);
+  setSecretaryReportResolver((conversationId, name) =>
+    secretaryReports.imageFile(conversationId, name)
+  );
+  // 报告截图留 7 天：启动后扫一次，之后每天一次
+  setTimeout(() => {
+    void secretaryReports.sweep();
+    setInterval(() => void secretaryReports.sweep(), 24 * 60 * 60 * 1000).unref();
+  }, 20_000).unref();
   setBrowserFileRootResolver((conversationId) => {
     const conversation = sourceAuthority?.conversation(conversationId);
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
@@ -3176,6 +3221,10 @@ export function registerAgentHandlers(): void {
     notifyDesktop().setViewedSession(isNonEmptyString(sessionId) ? sessionId : null);
     // 正在查看的会话不参与 worker 侧闲置回收，否则 release 后 ChatView 会立刻 resume 形成拉锯
     setPinnedSessions('viewed', isNonEmptyString(sessionId) ? [sessionId] : []);
+    // 正开着而先没收走的已完成派出会话：切走后归档
+    void import('./secretary').then((secretary) =>
+      secretary.onViewedConversationChanged(isNonEmptyString(sessionId) ? sessionId : null)
+    );
   });
 
   ipcMain.on(IPC_CHANNELS.AGENT_SESSION_MUTED, (_event, sessionId: unknown, muted: unknown) => {

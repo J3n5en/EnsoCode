@@ -105,8 +105,12 @@ vi.mock('@/components/ui/menu', () => {
     if (onClick) harness.menuItemClicks.push(onClick);
     return createElement('div', null, children);
   };
-  const MenuTrigger = ({ children, title }: WrapperProps & { title?: string }) =>
-    createElement('button', { type: 'button', title }, children);
+  const MenuTrigger = ({
+    children,
+    title,
+    className,
+  }: WrapperProps & { title?: string; className?: string }) =>
+    createElement('button', { type: 'button', title, className }, children);
   return {
     Menu,
     MenuGroup: Wrap,
@@ -861,6 +865,91 @@ describe('duplicateModelLabels', () => {
   });
 });
 
+describe('模型行收缩优先级', () => {
+  const xaiSource = 'xAI (Grok/X subscription) · grok@j3.do';
+  const rowProviders: ModelProvider[] = [
+    {
+      ...providers[0],
+      id: 'xai',
+      name: xaiSource,
+      models: [
+        { id: 'grok-4.7-build-fast', contextWindow: 500_000 },
+        { id: 'claude-opus-5-5', contextWindow: 1_000_000 },
+      ],
+    },
+  ];
+  const rowOf = (html: string, modelId: string) => {
+    const start = html.indexOf(`data-model-pin="${pinnedModelKey('xai', modelId)}"`);
+    const next = html.indexOf('data-model-pin=', start + 1);
+    return html.slice(start, next === -1 ? undefined : next);
+  };
+  const classOf = (row: string, attr: string) =>
+    row.match(new RegExp(`<span ${attr}="[^"]*"[^>]*class="([^"]*)"`))?.[1]?.split(' ') ?? [];
+
+  it('星标行：长来源小字先收缩，模型名不让位，上下文长度不收缩，名字悬停显示全名', () => {
+    harness.pinnedModels = [
+      pinnedModelKey('xai', 'grok-4.7-build-fast'),
+      pinnedModelKey('xai', 'claude-opus-5-5'),
+    ];
+    try {
+      // 当前选中不在任何分组里时右栏落在「星标与虚拟」
+      const html = renderToStaticMarkup(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: rowProviders,
+          providerId: 'gone',
+          modelId: 'gone',
+          virtualModels: [],
+        })
+      );
+      for (const [modelId, context] of [
+        ['grok-4.7-build-fast', '500K'],
+        ['claude-opus-5-5', '1M'],
+      ]) {
+        const row = rowOf(html, modelId);
+        expect(row).toContain(`title="${modelId}"`);
+        expect(row).toContain(`title="Custom · ${xaiSource}"`);
+        expect(row).toContain(`>${context}<`);
+        const name = classOf(row, 'data-model-row-name');
+        const source = classOf(row, 'data-model-row-source');
+        // 名字按自身宽度排、最后才截断；小字 basis 0 先让空间、从账号一端截断
+        expect(name).toEqual(expect.arrayContaining(['min-w-0', 'truncate', 'flex-initial']));
+        expect(name).not.toContain('flex-1');
+        expect(source).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'truncate']));
+        expect(source).not.toContain('shrink-0');
+        expect(classOf(row, 'data-model-row-context')).toContain('shrink-0');
+        expect(row.indexOf('data-model-row-name')).toBeLessThan(
+          row.indexOf('data-model-row-source')
+        );
+        expect(row.indexOf('data-model-row-source')).toBeLessThan(
+          row.indexOf('data-model-row-context')
+        );
+      }
+    } finally {
+      harness.pinnedModels = [];
+    }
+  });
+
+  it('分组行无来源小字时模型名占满剩余宽度，✓ 不收缩', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: rowProviders,
+        providerId: 'xai',
+        modelId: 'claude-opus-5-5',
+        virtualModels: [],
+      })
+    );
+    const row = rowOf(html, 'grok-4.7-build-fast');
+    expect(classOf(row, 'data-model-row-name')).toContain('flex-1');
+    expect(row).not.toContain('data-model-row-source');
+    const selected = rowOf(html, 'claude-opus-5-5');
+    expect(selected).toContain('title="claude-opus-5-5"');
+    expect(classOf(selected, 'data-model-row-context')).toContain('shrink-0');
+    expect(selected).toMatch(/<svg[^>]*class="[^"]*lucide-check[^"]*shrink-0/);
+  });
+});
+
 function pickerProvider(id: string, name: string): ModelProvider {
   return {
     ...providers[0],
@@ -1296,5 +1385,111 @@ describe('model picker 打开时滚到当前渠道', () => {
     const list = navList() as HTMLElement;
     const target = navItem('__custom:gateway');
     expect(scrollWrites).toEqual([{ el: list, value: centeredScrollTop(list, target) }]);
+  });
+});
+
+describe('ModelPicker 窄屏 compact 触发器', () => {
+  const auto: VirtualModelEntry = {
+    id: 'auto',
+    name: 'Auto',
+    enabled: true,
+    primary: { providerId: 'api', modelId: 'model' },
+    fallbacks: [],
+  };
+  const doc = (html: string) =>
+    parseHTML(`<!doctype html><html><body>${html}</body></html>`).document;
+  const trigger = (html: string) => doc(html).querySelector('button[title]') as HTMLElement;
+  const label = (html: string) =>
+    doc(html).querySelector('[data-model-picker-label]')?.textContent ?? null;
+
+  it('虚拟模型窄屏只显示虚拟名，成员名留在 title 与弹层当前项里', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        virtualModels: [auto],
+        routedModelLabel: 'claude-opus-5-5',
+      })
+    );
+    expect(label(html)).toBe('Auto');
+    expect(trigger(html).getAttribute('title')).toBe('Auto · claude-opus-5-5');
+    expect(doc(html).querySelector('[data-model-picker-routed]')?.textContent).toBe(
+      'claude-opus-5-5'
+    );
+  });
+
+  it('桌面（非 compact）仍显示「虚拟名 · 成员名」，弹层不额外列成员', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        virtualModels: [auto],
+        routedModelLabel: 'claude-opus-5-5',
+      })
+    );
+    expect(label(html)).toBe('Auto · claude-opus-5-5');
+    expect(doc(html).querySelector('[data-model-picker-routed]')).toBeNull();
+    expect(trigger(html).className).toContain('max-w-64');
+    expect(doc(html).body.firstElementChild?.className ?? '').not.toContain('max-w-[10rem]');
+  });
+
+  it('单个长模型名窄屏限宽单行截断，推理档位与箭头不参与截断', () => {
+    const long = 'claude-opus-4-1-20250805-thinking-extended-preview';
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        providers: [{ ...providers[0], models: [{ id: 'model', label: long }] }],
+      })
+    );
+    const button = trigger(html);
+    expect(button.getAttribute('title')).toBe(long);
+    expect(doc(html).body.firstElementChild?.className).toContain('max-w-[10rem]');
+    // 可收缩但有下限：档位与箭头始终留在芯片内
+    expect(doc(html).body.firstElementChild?.className).toContain('min-w-[4.5rem]');
+    expect(button.className).not.toContain('max-w-64');
+    const span = doc(html).querySelector('[data-model-picker-label]') as HTMLElement;
+    expect(span.textContent).toBe(long);
+    expect(span.className).toContain('truncate');
+    expect(span.className).toContain('min-w-0');
+    const thinking = doc(html).querySelector('[data-trigger-thinking]') as HTMLElement;
+    expect(thinking.className).toContain('shrink-0');
+    expect(thinking.textContent).toBe('Med');
+  });
+
+  it('账号池模型窄屏去掉渠道前缀，完整名留在 title', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        providers: [
+          {
+            ...providers[0],
+            name: 'ChatGPT (automatic failover)',
+            oauthAccountKey: 'openai-codex',
+            oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+          },
+        ],
+      })
+    );
+    expect(label(html)).toBe('Chosen model');
+    expect(trigger(html).getAttribute('title')).toContain('/ Chosen model');
+  });
+
+  it('短模型名、无推理档位时 compact 正常显示且不渲染档位', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        reasoningEnabled: false,
+        providers: [{ ...providers[0], models: [{ id: 'model', label: 'deepseek-v4.1-flash' }] }],
+      })
+    );
+    expect(label(html)).toBe('deepseek-v4.1-flash');
+    expect(doc(html).querySelector('[data-trigger-thinking]')).toBeNull();
+    expect(doc(html).body.firstElementChild?.className).toContain('min-w-[2.75rem]');
   });
 });

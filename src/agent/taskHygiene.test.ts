@@ -1,3 +1,4 @@
+import { splitTaskWrapUpPrefix } from '@shared/turnNotes';
 import { describe, expect, it } from 'vitest';
 import {
   ActivitySampler,
@@ -175,5 +176,29 @@ describe('settleChecklist', () => {
     expect(text).not.toContain('t3');
     expect(text).toContain('task_settle');
     expect(settleChecklist([], NOW)).toBeUndefined();
+  });
+
+  it('发给模型的原文逐字不变，展示层解析得出同样的任务', () => {
+    const command = `ssh green 'cd /opt && sleep 90'\n  && echo done`;
+    const text = settleChecklist(
+      [{ taskId: 'task-48-x', command, status: 'running', tail: '', startedAt: NOW - 61 * 60_000 }],
+      NOW
+    );
+    expect(text).toBe(
+      [
+        '<background-tasks-wrap-up>',
+        'These background tasks are still running and you have not said what happens to them:',
+        `- task-48-x: ssh green 'cd /opt && sleep 90' && echo done (running 1h 1m)`,
+        'Call task_settle once for all of them: stop each one you no longer need, or keep it with a one-line reason the user will see. Do not leave them undeclared.',
+        '</background-tasks-wrap-up>',
+      ].join('\n')
+    );
+    expect(splitTaskWrapUpPrefix(`${text}\n\n继续`)?.items).toEqual([
+      {
+        taskId: 'task-48-x',
+        command: `ssh green 'cd /opt && sleep 90' && echo done`,
+        ran: '1h 1m',
+      },
+    ]);
   });
 });

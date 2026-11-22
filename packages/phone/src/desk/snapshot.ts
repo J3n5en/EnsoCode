@@ -8,13 +8,15 @@
 
 const SNAPSHOT_FILE = '__snapshot.html';
 const CHARS_HEADER = 'x-desk-chars';
-/** 盖着的上限：桌面不在线等情况下也不能一直挡住 */
+const SAVED_HEADER = 'x-desk-saved';
+/** 桌面在线后盖着的上限：在线却迟迟起不来时不能一直挡住（桌面不在线的时间不计） */
 const MAX_SNAPSHOT_MS = 20_000;
 const SETTLED_MS = 2_500;
 /** 文字太少的快照（存的时候 renderer 正在重载）盖上去只是一片空白 */
 const MIN_SNAPSHOT_CHARS = 200;
 
 export interface SnapshotProgress {
+  /** 桌面在线的累计时长 */
   elapsed: number;
   /** renderer 当前可见文字量 */
   liveChars: number;
@@ -24,6 +26,8 @@ export interface SnapshotProgress {
   stableFor: number;
   /** 时间线还在「正在读取历史」：文字量稳定也不算追上 */
   liveLoading: boolean;
+  /** 桌面在线（不在线时快照一直留着，好过空白页） */
+  hostOnline: boolean;
 }
 
 export interface SnapshotSample {
@@ -31,9 +35,11 @@ export interface SnapshotSample {
   liveChars: number;
   settingsLoaded: boolean;
   liveLoading: boolean;
+  hostOnline: boolean;
 }
 
 export function snapshotReady(p: SnapshotProgress): boolean {
+  if (!p.hostOnline) return false;
   if (p.elapsed >= MAX_SNAPSHOT_MS) return true;
   if (!p.settingsLoaded || p.liveLoading) return false;
   return p.liveChars >= p.snapChars * 0.8 || p.stableFor >= SETTLED_MS;
@@ -42,6 +48,7 @@ export function snapshotReady(p: SnapshotProgress): boolean {
 /**
  * 跟踪快照何时可揭开：等待设置或读取历史期间不累计「已稳定」时长，
  * 否则网络握手耗时 >= SETTLED_MS 时会在设置刚到达、会话尚未渲染出的瞬间提前撤下快照。
+ * 上限只累计桌面在线的时长。
  */
 export function createSnapshotTracker(
   startedAt: number,
@@ -49,20 +56,47 @@ export function createSnapshotTracker(
 ): (sample: SnapshotSample) => boolean {
   let lastChars = -1;
   let changedAt = startedAt;
+  let lastAt = startedAt;
+  let wasOnline = false;
+  let onlineMs = 0;
   return (sample) => {
-    if (!sample.settingsLoaded || sample.liveLoading || sample.liveChars !== lastChars) {
+    if (wasOnline) onlineMs += sample.now - lastAt;
+    lastAt = sample.now;
+    wasOnline = sample.hostOnline;
+    if (
+      !sample.hostOnline ||
+      !sample.settingsLoaded ||
+      sample.liveLoading ||
+      sample.liveChars !== lastChars
+    ) {
       lastChars = sample.liveChars;
       changedAt = sample.now;
     }
     return snapshotReady({
-      elapsed: sample.now - startedAt,
+      elapsed: onlineMs,
       liveChars: sample.liveChars,
       snapChars,
       settingsLoaded: sample.settingsLoaded,
       stableFor: sample.now - changedAt,
       liveLoading: sample.liveLoading,
+      hostOnline: sample.hostOnline,
     });
   };
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** 桌面不在线（或手机没网、壳从缓存起来）时盖着快照的提示：写明是什么时候的内容 */
+export function offlineSnapshotNote(
+  savedAt: number | null,
+  now: Date,
+  reason = '桌面不在线'
+): string {
+  if (savedAt === null || !Number.isFinite(savedAt) || savedAt > now.getTime()) return reason;
+  const at = new Date(savedAt);
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const sameDay = at.toDateString() === now.toDateString();
+  return `${reason} · 显示 ${sameDay ? '' : `${at.getMonth() + 1}月${at.getDate()}日 `}${time} 的内容`;
 }
 
 export function canSaveSnapshot(chars: number, liveLoading: boolean): boolean {
@@ -132,22 +166,27 @@ export async function saveSnapshot(cacheName: string, base: string, doc: Documen
   await cache.put(
     snapshotUrl(base),
     new Response(html, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8', [CHARS_HEADER]: String(chars) },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        [CHARS_HEADER]: String(chars),
+        [SAVED_HEADER]: String(Date.now()),
+      },
     })
   );
 }
 
-/** 读出快照及其文字量（文字量用于判断 renderer 何时追上） */
+/** 读出快照及其文字量（文字量用于判断 renderer 何时追上）和保存时间 */
 export async function loadSnapshot(
   cacheName: string,
   base: string
-): Promise<{ html: string; chars: number } | null> {
+): Promise<{ html: string; chars: number; savedAt: number | null } | null> {
   try {
     const hit = await (await caches.open(cacheName)).match(snapshotUrl(base));
     if (!hit) return null;
     const chars = Number(hit.headers.get(CHARS_HEADER)) || 0;
     if (chars < MIN_SNAPSHOT_CHARS) return null;
-    return { html: await hit.text(), chars };
+    const savedAt = Number(hit.headers.get(SAVED_HEADER)) || null;
+    return { html: await hit.text(), chars, savedAt };
   } catch {
     return null;
   }

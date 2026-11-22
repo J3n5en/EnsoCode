@@ -1,9 +1,12 @@
+import './stubs/install-electron-api';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installKeyboardInset } from './keyboard';
+import { watchShellUpdate } from './shellUpdate';
 import { installStatusBarOverlapGuard } from './statusBarOverlap';
 import { loadActiveDeviceId, loadDevices } from './storage';
-import { installElectronApiShim } from './stubs/electron-api';
+import { requestPersistence, syncPairedMark } from './storageGuard';
 import { initTheme } from './theme';
 import { launchTarget, loadUiMode, saveUiMode } from './uiMode';
 import './styles.css';
@@ -16,11 +19,13 @@ if (params.get('mode') === 'phone') {
   const query = params.toString();
   history.replaceState(null, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`);
 }
-const deskTarget = launchTarget(location.search, loadUiMode(), loadDevices(), loadActiveDeviceId());
+const devices = loadDevices();
+const deskTarget = launchTarget(location.search, loadUiMode(), devices, loadActiveDeviceId());
 if (deskTarget) location.replace(deskTarget);
-
-// 复用的桌面组件里有少量 electronAPI 调用，先装降级实现（必须早于组件加载）
-installElectronApiShim();
+else if (devices.length > 0) {
+  void requestPersistence();
+  void syncPairedMark(true);
+}
 
 // 主题：本地覆盖 > 桌面下发 > 跟随系统（桌面偏好经 client 的 appearance 帧到达）
 initTheme();
@@ -28,12 +33,18 @@ initTheme();
 // iOS 独立 PWA 偶发钻到状态栏下被系统模糊盖住标题：检测到才退出 viewport-fit=cover
 installStatusBarOverlapGuard();
 
-/*
- * 不用 JS 干预视口高度：布局直接吃 CSS 的 100dvh。
- * 曾用 visualViewport 覆盖 --app-height 来避让键盘，但在 standalone 下反复
- * 误判、把高度钉死成偏小的像素值，造成输入框下方大片空白；而 iOS 本来就会
- * 在键盘弹起时把聚焦的输入框滚进可视区，这层机制得不偿失。
- */
+// 键盘避让：只在触屏、有输入框聚焦且可见区确实被压掉时把根容器摆到可见区上，其余时候不碰布局
+if (!deskTarget) installKeyboardInset(window);
+
+// 壳是旧版本缓存出来的：等下次回到前台再整页换新
+if (!deskTarget && 'serviceWorker' in navigator)
+  watchShellUpdate({
+    container: navigator.serviceWorker,
+    doc: document,
+    storage: sessionStorage,
+    canReloadNow: () => false,
+    reload: () => location.reload(),
+  });
 
 const root = document.getElementById('root');
 if (root && !deskTarget)
