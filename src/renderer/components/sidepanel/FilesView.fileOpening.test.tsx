@@ -314,6 +314,13 @@ describe('FilesView 图片预览', () => {
     const next = `data:image/png;base64,${'B'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
     await act(async () => resolve({ ok: true, dataUrl: next }));
     expect(container.querySelector('img')?.getAttribute('src')).toBe(next);
+    // 写入途中读到半截文件短暂失败，写完再取到图时仍直接显示
+    harness.readImage.mockResolvedValueOnce({ ok: false, error: 'unsupported' });
+    await act(async () => harness.onChange?.({ conversationId: 'owner', rel: 'big.jpg' }));
+    expect(container.textContent).toContain('Unable to preview this image.');
+    harness.readImage.mockResolvedValueOnce({ ok: true, dataUrl: huge });
+    await act(async () => harness.onChange?.({ conversationId: 'owner', rel: 'big.jpg' }));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
   });
 
   it('插件为该图片后缀声明了默认查看器时仍按插件查看器打开', async () => {

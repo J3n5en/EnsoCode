@@ -21,7 +21,7 @@ const CHECKERBOARD = {
 type ImageState =
   | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; dataUrl: string; forced: boolean };
+  | { status: 'ready'; dataUrl: string };
 
 export function FileImageViewer({
   rel,
@@ -37,11 +37,13 @@ export function FileImageViewer({
   const { t } = useI18n();
   const [state, setState] = useState<ImageState>({ status: 'loading' });
   const [fit, setFit] = useState(true);
+  // 与取图结果分开存：重新取图（含写入途中短暂读失败）后已点开的大图不退回「点击加载」
+  const [forced, setForced] = useState(false);
 
   useEffect(() => {
     void version;
     let alive = true;
-    // 重新取图期间保留旧图，已点开的大图不退回「点击加载」
+    // 重新取图期间保留旧图，不闪回加载态
     resolveImage(rel).then(
       (dataUrl) => {
         if (!alive) return;
@@ -50,7 +52,7 @@ export function FileImageViewer({
             ? { status: 'error' }
             : prev.status === 'ready' && prev.dataUrl === dataUrl
               ? prev
-              : { status: 'ready', dataUrl, forced: prev.status === 'ready' && prev.forced }
+              : { status: 'ready', dataUrl }
         );
       },
       () => {
@@ -79,15 +81,10 @@ export function FileImageViewer({
       </div>
     );
   }
-  if (state.dataUrl.length > IMAGE_INLINE_MAX_CHARS && !state.forced) {
+  if (state.dataUrl.length > IMAGE_INLINE_MAX_CHARS && !forced) {
     return (
       <div className="flex h-full items-center justify-center px-6">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setState({ ...state, forced: true })}
-        >
+        <Button type="button" variant="outline" size="sm" onClick={() => setForced(true)}>
           {t('Image is too large. Click to load.')}
         </Button>
       </div>
