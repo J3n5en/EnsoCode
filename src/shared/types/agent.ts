@@ -2135,6 +2135,8 @@ export type AgentWorkerEvent =
       retryExhausted?: true;
       /** 应用退出窗口内的断流/断连：不是会话失败，按 interrupted 收口（Main 判定） */
       interrupted?: { at: number; kind: ExitKind };
+      /** 本轮被 abort 命令中断（如重试倒计时中停止） */
+      aborted?: true;
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -5039,7 +5041,8 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.turnId) &&
         isNonEmptyString(value.error) &&
         (value.undelivered === undefined || value.undelivered === true) &&
-        (value.retryExhausted === undefined || value.retryExhausted === true)
+        (value.retryExhausted === undefined || value.retryExhausted === true) &&
+        (value.aborted === undefined || value.aborted === true)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'turn-retry':
