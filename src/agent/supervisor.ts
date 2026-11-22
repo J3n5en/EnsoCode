@@ -2096,7 +2096,8 @@ export class SessionSupervisor {
           return;
         }
         ensureAssistantUsage(agent.state.messages as unknown[]);
-        managed.currentTurnId = randomUUID();
+        managed.currentTurnId = command.turnId ?? randomUUID();
+        if (command.requestBudget) managed.requestBudget?.arm();
         resetOauthPoolActivity(managed.session);
         void continueSessionActivity(managed.session).catch((error) =>
           this.failTurn(managed, toErrorMessage(error))
@@ -3189,6 +3190,7 @@ export class SessionSupervisor {
       }
     );
     const coworkerIdle = new CoworkerIdleReminder();
+    const spawnedAgentTypes = new Map<string, string>();
     reminders.register(
       'coworker-idle',
       () =>
@@ -3211,6 +3213,12 @@ export class SessionSupervisor {
       invoke: async (request, signal, detach) => {
         const response = await agentControl.invoke(request, signal, detach);
         coworkerIdle.observe(request, response);
+        const receipt = (response.ok ? response.value : undefined) as
+          | { agentId?: unknown }
+          | undefined;
+        if (request.operation === 'spawn' && typeof receipt?.agentId === 'string') {
+          spawnedAgentTypes.set(receipt.agentId, request.agentType ?? '');
+        }
         return response;
       },
       trackWait: (toolCallId) => this.bgTasks.trackBlockingWait(sessionId, toolCallId),
@@ -3464,7 +3472,13 @@ export class SessionSupervisor {
       agentTypes.filter((type) => type.tools === 'readonly').map((type) => type.name)
     );
     const planGated = (tools: Def[]): Def[] =>
-      tools.map((tool) => withPlanGate(tool, { host: planHost, readonlyAgentTypes }));
+      tools.map((tool) =>
+        withPlanGate(tool, {
+          host: planHost,
+          readonlyAgentTypes,
+          agentTypeOf: (agentId) => spawnedAgentTypes.get(agentId),
+        })
+      );
     // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具、插件工具与自造工具都不在其中。
     // 插件工具与自造工具的名字只认 Main 本次下发的描述符，不按前缀放行
     const secretaryExtraToolNames = new Set([

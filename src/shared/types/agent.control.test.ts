@@ -195,6 +195,27 @@ describe('agent control tool protocol', () => {
       expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
   });
 
+  it('subagent resume 只接受非空 agentId，不带其他字段', () => {
+    const request = { operation: 'resume', agentId: 'agent-1' };
+    expect(parseAgentControlToolRequest(request)).toEqual(request);
+    for (const patch of [{ agentId: '' }, { agentId: '  ' }, { agentId: 7 }, { prompt: 'again' }])
+      expect(parseAgentControlToolRequest({ ...request, ...patch })).toBeNull();
+    expect(parseAgentControlToolRequest({ operation: 'resume' })).toBeNull();
+  });
+
+  it('子会话 retry 可带 turnId 与 requestBudget，供 Main 对上续跑的 Run', () => {
+    const command = {
+      type: 'retry',
+      identity: child,
+      unfinishedOnly: true,
+      turnId: 'run-1',
+      requestBudget: true,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    for (const patch of [{ turnId: '' }, { turnId: 3 }, { requestBudget: false }])
+      expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
+  });
+
   it('set-system-prompt 只接受父会话 identity 与非空正文', () => {
     const command = {
       type: 'set-system-prompt',

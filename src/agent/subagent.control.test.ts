@@ -38,6 +38,7 @@ describe('unified subagent tool', () => {
       'message',
       'stop',
       'dismiss',
+      'resume',
     ]);
     expect(`${tool.description}\n${tool.promptSnippet}`).not.toMatch(/coworker tool/i);
     expect(`${tool.description}\n${tool.promptSnippet}`).toMatch(

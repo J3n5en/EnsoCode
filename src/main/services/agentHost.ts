@@ -2548,14 +2548,17 @@ export function withdrawSteerSession(
 
 /** 终态失败后手动续跑：不新增 user 消息，从当前上下文 continue */
 export function retrySession(
-  identity: SessionIdentity,
-  unfinishedOnly = false
+  identity: SessionIdentity | ChildSessionIdentity,
+  unfinishedOnly = false,
+  run?: { turnId: string; requestBudget?: boolean }
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({
     type: 'retry',
     identity,
     ...instanceField(identity),
     ...(unfinishedOnly ? { unfinishedOnly: true as const } : {}),
+    ...(run ? { turnId: run.turnId } : {}),
+    ...(run?.requestBudget ? { requestBudget: true as const } : {}),
   });
 }
 

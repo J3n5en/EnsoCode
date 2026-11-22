@@ -598,6 +598,9 @@ export interface AgentControlDismissRequest {
   agentId: string;
 }
 
+/** 续跑被中断（parked）的 task：重开原会话文件，接着未完成的回合跑，不追加新 prompt */
+export type AgentControlResumeRequest = AgentControlDismissRequest;
+
 export interface AgentControlWaitRequest {
   context: AgentControlContext;
   requestId: string;
@@ -747,7 +750,8 @@ export type AgentControlToolRequest =
   | { operation: 'list'; status?: AgentInstanceStatus; cursor?: string; limit: number }
   | { operation: 'message'; to: string; text: string }
   | { operation: 'stop'; runId: string }
-  | { operation: 'dismiss'; agentId: string };
+  | { operation: 'dismiss'; agentId: string }
+  | { operation: 'resume'; agentId: string };
 
 export type AgentControlToolResponse =
   | { ok: true; value: unknown }
@@ -849,6 +853,7 @@ export function parseAgentControlToolRequest(value: unknown): AgentControlToolRe
         ? (value as unknown as AgentControlToolRequest)
         : null;
     case 'dismiss':
+    case 'resume':
       return hasExactKeys(value, ['operation', 'agentId']) && nonEmpty(value.agentId)
         ? (value as unknown as AgentControlToolRequest)
         : null;
@@ -1663,6 +1668,9 @@ export type AgentCommand =
       instanceId?: string;
       /** 只移出未完成（出错/中断/停在工具调用）的最后一条 assistant；已正常完成则回执 nothing-to-retry */
       unfinishedOnly?: true;
+      /** 子代理续跑：沿用 Main 的 runId 作为本轮 turnId，并像 prompt-child 一样计请求预算 */
+      turnId?: string;
+      requestBudget?: true;
     }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
    *  用于 Move to worktree 等需要换 cwd 重新 spawn 的场景。 */
@@ -4457,9 +4465,18 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'retry':
-      return hasOnlyKeys(value, ['type', 'identity', 'instanceId', 'unfinishedOnly']) &&
+      return hasOnlyKeys(value, [
+        'type',
+        'identity',
+        'instanceId',
+        'unfinishedOnly',
+        'turnId',
+        'requestBudget',
+      ]) &&
         parseAnySessionIdentity(value.identity) &&
         (value.unfinishedOnly === undefined || value.unfinishedOnly === true) &&
+        (value.turnId === undefined || isNonEmptyString(value.turnId)) &&
+        (value.requestBudget === undefined || value.requestBudget === true) &&
         (value.instanceId === undefined ||
           (isUuid(value.instanceId) && parseSessionIdentity(value.identity) !== null))
         ? (value as unknown as AgentCommand)

@@ -811,3 +811,66 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     expect(fixture.resumeCoworkerCalls).toHaveLength(0);
   });
 });
+
+describe('agent-tool task 中断后续跑', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  async function interruptedTask(withSessionFile: boolean) {
+    const fixture = await setup();
+    const parent = { sessionId: fixture.conversationId, generation: crypto.randomUUID() };
+    fixture.index.prepareParent(parent);
+    fixture.service.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: path.join(fixture.root, 'parent.jsonl'),
+      model: { providerId: 'provider', modelId: 'model' },
+    });
+    await settle();
+    const child = await fixture.service.spawnControlledAgent({
+      agentId: crypto.randomUUID(),
+      parentConversationId: fixture.conversationId,
+      name: 'research',
+      agentType: 'builtin:scout',
+      mode: 'task',
+    });
+    if (withSessionFile) writeFileSync(path.join(fixture.root, 'child.jsonl'), '{}\n');
+    fixture.service.observe({
+      type: 'child-ended',
+      identity: child as ChildSessionIdentity,
+      seq: 2,
+      reason: 'dismissed',
+    });
+    return { fixture, parent, child: child as ChildSessionIdentity };
+  }
+
+  it('按原 instanceId 预约新 generation，spawnChild 带原会话文件', async () => {
+    const { fixture, parent, child } = await interruptedTask(true);
+    const resumed = await fixture.service.resumeControlledAgent(fixture.conversationId, child);
+    expect(fixture.spawnChildCalls).toHaveLength(2);
+    expect(fixture.spawnChildCalls[1]).toMatchObject({
+      resumeFile: path.join(fixture.root, 'child.jsonl'),
+      identity: { instanceId: child.instanceId, instanceName: child.instanceName },
+    });
+    expect(resumed).toMatchObject({ sessionId: child.sessionId, instanceId: child.instanceId });
+    expect(resumed.generation).not.toBe(child.generation);
+    expect(resumed.parent).toEqual(parent);
+  });
+
+  it('第一条回复前就断了、没有会话文件：明确报错且不 spawn', async () => {
+    const { fixture, child } = await interruptedTask(false);
+    await expect(
+      fixture.service.resumeControlledAgent(fixture.conversationId, child)
+    ).rejects.toThrow(/before its first reply was saved/);
+    expect(fixture.spawnChildCalls).toHaveLength(1);
+  });
+
+  it('不是本次 Main 生命周期里由工具派出的 task：拒绝续跑', async () => {
+    const { fixture, child } = await interruptedTask(true);
+    const stranger = { ...child, sessionId: `${fixture.conversationId}::cw-other` };
+    await expect(
+      fixture.service.resumeControlledAgent(fixture.conversationId, stranger)
+    ).rejects.toThrow(/cannot be resumed/);
+    expect(fixture.spawnChildCalls).toHaveLength(1);
+  });
+});

@@ -1070,3 +1070,172 @@ describe('AgentService wait bounds and completion notify', () => {
     expect(notify.mock.calls[0][1]).toContain('succeeded');
   });
 });
+
+describe('AgentService 中断的 task 停放与续跑', () => {
+  const listStatus = async (service: AgentService) => {
+    const listed = await service.list({ context, requestId: 'list', limit: 20 });
+    if (!listed.ok) throw new Error(listed.error);
+    return listed.value.agents.map((agent) => agent.status);
+  };
+
+  function resumable(options: Partial<AgentServiceOptions> = {}) {
+    const fixture = setup(options);
+    let generation = 100;
+    fixture.runtime.resume = vi.fn(async ({ identity }) => ({
+      ...identity,
+      generation: `33333333-3333-4333-8333-${String(++generation).padStart(12, '0')}`,
+    }));
+    fixture.runtime.retry = vi.fn(async () => ({ ok: true }));
+    return fixture;
+  }
+
+  it('turn-failed 的 task 停放为 parked：释放子会话但不关闭，之后的 child-ended 不改状态', async () => {
+    const notify = vi.fn();
+    const { service, runtime, children } = resumable({ notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-failed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+      error: 'network down',
+    });
+    expect(await listStatus(service)).toEqual(['parked']);
+    expect(runtime.dismiss).toHaveBeenCalledTimes(1);
+    service.observe({ type: 'child-ended', identity: children[0], seq: 3, reason: 'dismissed' });
+    expect(await listStatus(service)).toEqual(['parked']);
+    expect(notify.mock.calls[0][1]).toContain(
+      `subagent resume with agentId ${spawned.value.agentId}`
+    );
+  });
+
+  it('worker 退出时在跑的 task 停放为 parked', async () => {
+    const { service } = resumable();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+    expect(await listStatus(service)).toEqual(['parked']);
+  });
+
+  it('正常完成与模型自己 stop 的 task 仍是 closed，不能 resume', async () => {
+    const { service, runtime, children } = resumable();
+    const done = await service.spawn(spawnRequest());
+    const stopped = await service.spawn(spawnRequest({ requestId: 'request-2' }));
+    if (!done.ok || !stopped.ok) throw new Error('spawn failed');
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: done.value.runId,
+    });
+    await service.stop({ context, requestId: 'stop', runId: stopped.value.runId });
+    expect(await listStatus(service)).toEqual(['closed', 'closed']);
+    for (const agentId of [done.value.agentId, stopped.value.agentId]) {
+      expect(
+        await service.resume({ context, requestId: `resume-${agentId}`, agentId })
+      ).toMatchObject({ ok: false, code: 'invalid-state' });
+    }
+    expect(runtime.resume).not.toHaveBeenCalled();
+  });
+
+  it('resume 用原会话文件重开子会话并续跑未完成的回合，不新 spawn、不再发 prompt', async () => {
+    const { service, runtime, children } = resumable();
+    const spawned = await service.spawn(spawnRequest({ schema: { type: 'object' } }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+    const resumed = await service.resume({
+      context,
+      requestId: 'resume-1',
+      agentId: spawned.value.agentId,
+    });
+    if (!resumed.ok) throw new Error(resumed.error);
+    expect(resumed.value).toMatchObject({
+      agentId: spawned.value.agentId,
+      mode: 'task',
+      status: 'running',
+    });
+    expect(resumed.value.runId).not.toBe(spawned.value.runId);
+    expect(runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(runtime.prompt).toHaveBeenCalledTimes(1);
+    expect(runtime.resume).toHaveBeenCalledWith(
+      expect.objectContaining({ identity: children[0], agentId: spawned.value.agentId })
+    );
+    const relaunched = await vi.mocked(runtime.resume!).mock.results[0].value;
+    expect(runtime.retry).toHaveBeenCalledWith(
+      expect.objectContaining({ identity: relaunched, runId: resumed.value.runId })
+    );
+    expect(await listStatus(service)).toEqual(['active']);
+    service.observe({
+      type: 'turn-completed',
+      identity: relaunched,
+      seq: 5,
+      turnId: resumed.value.runId,
+    });
+    // 原 Run 的 schema 跟着续跑的 Run 走：完成后照样校验
+    await vi.waitFor(async () =>
+      expect(
+        await service.report({ context, requestId: 'report', runId: resumed.value.runId })
+      ).toMatchObject({ ok: true, value: { run: { status: 'succeeded' } } })
+    );
+    expect(runtime.validate).toHaveBeenCalledTimes(1);
+    expect(await listStatus(service)).toEqual(['closed']);
+  });
+
+  it('子会话没留下会话文件时 resume 明确报错，保持 parked，不静默重开', async () => {
+    const { service, runtime } = resumable();
+    vi.mocked(runtime.resume!).mockRejectedValueOnce(
+      new Error('The subagent stopped before its first reply was saved.')
+    );
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+    expect(
+      await service.resume({ context, requestId: 'resume', agentId: spawned.value.agentId })
+    ).toEqual({
+      ok: false,
+      code: 'runtime-unavailable',
+      error: 'The subagent stopped before its first reply was saved.',
+    });
+    expect(runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(runtime.retry).not.toHaveBeenCalled();
+    expect(await listStatus(service)).toEqual(['parked']);
+  });
+
+  it('续跑时 worker 回执没有可续的回合：按已完成收口', async () => {
+    const { service, runtime } = resumable();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+    const resumed = await service.resume({
+      context,
+      requestId: 'resume',
+      agentId: spawned.value.agentId,
+    });
+    if (!resumed.ok) throw new Error(resumed.error);
+    const relaunched = await vi.mocked(runtime.resume!).mock.results[0].value;
+    service.observe({
+      type: 'retry-skipped',
+      identity: relaunched,
+      seq: 2,
+      reason: 'nothing-to-retry',
+    });
+    expect(
+      await service.report({ context, requestId: 'report', runId: resumed.value.runId })
+    ).toMatchObject({ ok: true, value: { run: { status: 'succeeded' } } });
+  });
+
+  it('resume 未知 agentId 报 not-found，coworker 报 invalid-state', async () => {
+    const { service } = resumable();
+    expect(await service.resume({ context, requestId: 'r', agentId: 'missing' })).toMatchObject({
+      ok: false,
+      code: 'not-found',
+    });
+    const coworker = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!coworker.ok) throw new Error(coworker.error);
+    service.observe({ type: 'worker-exited' });
+    expect(
+      await service.resume({ context, requestId: 'r2', agentId: coworker.value.agentId })
+    ).toMatchObject({ ok: false, code: 'invalid-state' });
+  });
+});

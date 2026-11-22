@@ -5,6 +5,7 @@ import type {
   AgentControlDismissRequest,
   AgentControlListRequest,
   AgentControlMessageRequest,
+  AgentControlResumeRequest,
   AgentControlRunTargetRequest,
   AgentControlSendRequest,
   AgentControlSpawnRequest,
@@ -72,6 +73,19 @@ export interface AgentServiceRuntime {
   validate?(
     input: AgentRuntimeRunInput & { text?: string }
   ): Promise<RuntimeResult & { value?: unknown }>;
+  /** 用原会话文件重开被中断 task 的子会话；没有可续的会话文件时抛错 */
+  resume?(input: {
+    context: AgentControlContext;
+    identity: ChildSessionIdentity;
+    agentId: string;
+  }): Promise<ChildSessionIdentity>;
+  /** 对重开的子会话续跑未完成的回合（unfinishedOnly retry），不追加 prompt */
+  retry?(input: {
+    context: AgentControlContext;
+    identity: ChildSessionIdentity;
+    agentId: string;
+    runId: string;
+  }): Promise<RuntimeResult>;
 }
 
 export interface AgentServiceContract {
@@ -86,6 +100,7 @@ export interface AgentServiceContract {
   ): Promise<AgentServiceResult<AgentWaitReceipt>>;
   list(request: AgentControlListRequest): Promise<AgentServiceResult<AgentListReceipt>>;
   message(request: AgentControlMessageRequest): Promise<AgentServiceResult<AgentSendReceipt>>;
+  resume(request: AgentControlResumeRequest): Promise<AgentServiceResult<AgentSpawnReceipt>>;
 }
 
 interface AgentRecord {
@@ -122,6 +137,8 @@ interface RunRecord {
   delivered: boolean;
   /** 子代理因请求预算被强制停止：带着已有部分输出收口，不算失败 */
   requestBudgetStop?: boolean;
+  /** 续跑被中断的 task：启动走 runtime.retry 而不是 prompt */
+  resumed?: boolean;
 }
 
 interface Waiter {
@@ -331,6 +348,12 @@ export class AgentService implements AgentServiceContract {
           'Agent is dismissed and cannot receive messages. Spawn a new agent with the context it needs.'
         );
       }
+      if (agent.value.status === 'parked' && agent.value.mode === 'task') {
+        return failure(
+          'invalid-state',
+          'This task was interrupted. Use resume with its agentId to continue it from where it stopped.'
+        );
+      }
       const active = agent.value.activeRunId ? this.runs.get(agent.value.activeRunId) : undefined;
       if (request.expectedRunId && request.expectedRunId !== active?.runId) {
         return failure('run-mismatch', 'The active Run changed before delivery.');
@@ -533,6 +556,61 @@ export class AgentService implements AgentServiceContract {
     });
   }
 
+  /** 被中断的 task 从断点续跑：按原会话文件重开子会话，续跑未完成的回合，不追加新 prompt */
+  resume(request: AgentControlResumeRequest): Promise<AgentServiceResult<AgentSpawnReceipt>> {
+    return this.serial(request.context.owner.ownerId, async () => {
+      const owned = this.ownedAgent(request.context, request.agentId);
+      if (!owned.ok) return owned;
+      const agent = owned.value;
+      if (agent.mode !== 'task') {
+        return failure(
+          'invalid-state',
+          'Only an interrupted task Agent can be resumed. Use send to continue a coworker.'
+        );
+      }
+      if (agent.status !== 'parked') {
+        return failure(
+          'invalid-state',
+          agent.status === 'closed'
+            ? 'Agent already finished or was dismissed and cannot be resumed.'
+            : 'Agent was not interrupted and does not need resuming.'
+        );
+      }
+      const { resume, retry } = this.options.runtime;
+      if (!resume || !retry) return failure('runtime-unavailable', 'Agent resume is unavailable.');
+      try {
+        agent.identity = await resume({
+          context: request.context,
+          identity: agent.identity,
+          agentId: agent.agentId,
+        });
+      } catch (error) {
+        return failure(
+          'runtime-unavailable',
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      const previous = [...this.runs.values()]
+        .filter((run) => run.agentId === agent.agentId)
+        .sort((left, right) => right.createdAt - left.createdAt)[0];
+      const run = this.createRun(
+        agent,
+        this.randomUuid(),
+        previous?.prompt ?? '',
+        previous?.schema,
+        previous?.gate
+      );
+      run.resumed = true;
+      this.runs.set(run.runId, run);
+      const started = await this.startRun(agent, run, true);
+      if (!started.ok) return started;
+      return {
+        ok: true,
+        value: { agentId: agent.agentId, runId: run.runId, mode: 'task', status: 'running' },
+      };
+    });
+  }
+
   async wait(
     request: AgentControlWaitRequest,
     signal?: AbortSignal
@@ -598,13 +676,18 @@ export class AgentService implements AgentServiceContract {
     if (event.type === 'worker-exited') {
       for (const agent of this.agents.values()) {
         const active = agent.activeRunId ? this.runs.get(agent.activeRunId) : undefined;
-        if (active && !TERMINAL_RUN_STATUSES.has(active.status)) {
+        const interrupted = Boolean(active && !TERMINAL_RUN_STATUSES.has(active.status));
+        if (active && interrupted) {
           // 父会话随 worker 一起没了，无人可通知
           active.delivered = true;
           this.finishRun(active, 'interrupted', 'Agent worker exited.');
         }
         agent.activeRunId = undefined;
-        agent.status = agent.mode === 'coworker' ? 'parked' : 'closed';
+        // 中断的 task 停放待 resume；子会话已随 worker 没了，无需回收
+        agent.status =
+          agent.mode === 'coworker' || interrupted || agent.status === 'parked'
+            ? 'parked'
+            : 'closed';
       }
       return;
     }
@@ -661,15 +744,24 @@ export class AgentService implements AgentServiceContract {
         }
       }
       if (event.type === 'turn-failed') {
-        this.settleRun(agent, active, 'failed', event.error);
-      } else if (active.schema !== undefined || active.gate !== undefined) {
-        active.status = 'validating';
-        void this.validateRun(agent, active);
+        this.settleRun(agent, active, 'failed', event.error, true);
       } else {
-        this.settleRun(agent, active, 'succeeded');
+        this.completeRun(agent, active);
       }
       return;
     }
+    // 续跑时子会话最后一条回复其实已完整：没有可续的回合，按完成收口
+    if (
+      event.type === 'retry-skipped' &&
+      event.reason === 'nothing-to-retry' &&
+      active?.resumed &&
+      active.status === 'running'
+    ) {
+      this.completeRun(agent, active);
+      return;
+    }
+    // 停放的 task 回收子会话时的 child-ended 不改状态
+    if (event.type === 'child-ended' && agent.status === 'parked' && agent.mode === 'task') return;
     if (event.type === 'child-ended' || event.type === 'child-rejected') {
       const terminal = event.type === 'child-rejected' ? 'failed' : 'interrupted';
       if (active) {
@@ -780,18 +872,24 @@ export class AgentService implements AgentServiceContract {
     run.status = 'running';
     run.startedAt = this.now();
     this.pushProgress(agent.context.owner.ownerId);
-    const prompted = await this.options.runtime.prompt({
+    const target = {
       context: agent.context,
       identity: agent.identity,
       agentId: agent.agentId,
       runId: run.runId,
-      prompt: promptForRun(run),
-      ...(run.schema !== undefined ? { schema: run.schema } : {}),
-      ...(run.gate !== undefined ? { gate: run.gate } : {}),
-    });
+    };
+    const prompted = run.resumed
+      ? await this.options.runtime.retry!(target)
+      : await this.options.runtime.prompt({
+          ...target,
+          prompt: promptForRun(run),
+          ...(run.schema !== undefined ? { schema: run.schema } : {}),
+          ...(run.gate !== undefined ? { gate: run.gate } : {}),
+        });
     if (prompted.ok) return { ok: true };
     agent.activeRunId = undefined;
     agent.status = 'ready';
+    if (run.resumed) this.parkTask(agent);
     // spawn / send 当场启动失败由回执告知；排队后才启动的失败要另行通知
     if (callerAwaits) run.delivered = true;
     this.finishRun(run, 'failed', prompted.error ?? 'Prompt failed.');
@@ -843,28 +941,53 @@ export class AgentService implements AgentServiceContract {
     }
   }
 
+  private completeRun(agent: AgentRecord, run: RunRecord): void {
+    if (run.schema !== undefined || run.gate !== undefined) {
+      run.status = 'validating';
+      void this.validateRun(agent, run);
+    } else {
+      this.settleRun(agent, run, 'succeeded');
+    }
+  }
+
   private settleRun(
     agent: AgentRecord,
     run: RunRecord,
     status: Extract<AgentRunStatus, 'succeeded' | 'failed'>,
-    error?: string
+    error?: string,
+    interrupted = false
   ): void {
     if (TERMINAL_RUN_STATUSES.has(run.status)) return;
+    if (agent.mode === 'task') {
+      // 先停放再结束 Run：完成通知据此提示模型用 resume 续跑
+      if (interrupted) this.parkTask(agent);
+      this.finishRun(run, status, error);
+      if (!interrupted) this.closeTask(agent);
+      return;
+    }
     this.finishRun(run, status, error);
     agent.activeRunId = undefined;
     agent.status = 'ready';
-    if (agent.mode === 'task') {
-      this.closeTask(agent);
-    } else {
-      void this.serial(agent.context.owner.ownerId, () => this.startNext(agent));
-    }
+    void this.serial(agent.context.owner.ownerId, () => this.startNext(agent));
   }
 
-  /** task 只有一轮：完成、失败或被 stop 后都不能再用，关闭并回收子会话，否则留下孤儿 */
+  /** task 只有一轮：完成、校验失败或被 stop 后都不能再用，关闭并回收子会话，否则留下孤儿 */
   private closeTask(agent: AgentRecord): void {
     if (agent.status === 'closed') return;
     agent.activeRunId = undefined;
     agent.status = 'closed';
+    void this.options.runtime.dismiss({
+      context: agent.context,
+      identity: agent.identity,
+      agentId: agent.agentId,
+    });
+  }
+
+  /** 中断的 task 停放：回收子会话，会话文件留盘，resume 时按原文件重开 */
+  private parkTask(agent: AgentRecord): void {
+    if (agent.status === 'closed' || agent.status === 'parked') return;
+    agent.activeRunId = undefined;
+    agent.status = 'parked';
     void this.options.runtime.dismiss({
       context: agent.context,
       identity: agent.identity,
@@ -919,7 +1042,9 @@ export class AgentService implements AgentServiceContract {
         truncated ? `Use subagent report with runId ${run.runId} for the full result.` : '',
         run.mode === 'coworker'
           ? `To continue this coworker, use subagent send with agentId ${run.agentId}.`
-          : '',
+          : this.agents.get(run.agentId)?.status === 'parked'
+            ? `Its progress is saved: to continue from where it stopped, use subagent resume with agentId ${run.agentId} — do not spawn it again.`
+            : '',
       ]
         .filter(Boolean)
         .join(' '),
