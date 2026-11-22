@@ -155,24 +155,32 @@ function ftsChannel(db: Database.Database, q: string, scope: Scope, pool: number
 // 反过来在查询里找实体比给查询分词更稳；单字实体噪声太大，按归一后长度设下限。
 const ENTITY_MIN_CHARS = 2;
 
+// 先从实体表找出命中的种子，再沿 mentions_entity 索引取记忆。CROSS JOIN 固定连接顺序：
+// 交给规划器时，spaceIds 多于一个会被排成「space 内全部实体 × space 内全部记忆」的嵌套循环
+// （用户库 1.1 万实体 × 2300 记忆单次 18.8s），而种子通常只有个位数。
 function entityChannel(db: Database.Database, q: string, scope: Scope, pool: number): string[] {
   const key = normalizeEntityName(q);
   if (!key) return [];
   try {
     const rows = db
       .prepare(
-        `SELECT m.id AS id, max(mn.confidence) AS conf
-         FROM memories m
-         JOIN mentions mn ON mn.memory_id = m.id
-         JOIN entities e ON e.id = mn.entity_id AND e.space_id = m.space_id
-         LEFT JOIN entity_aliases a ON a.entity_id = e.id
+        `WITH seeds AS MATERIALIZED (
+           SELECT e.id AS id FROM entities e
+           WHERE length(e.normalized_name) >= ? AND instr(?, e.normalized_name) > 0
+           UNION
+           SELECT a.entity_id AS id FROM entity_aliases a
+           WHERE length(a.normalized_alias) >= ? AND instr(?, a.normalized_alias) > 0
+         )
+         SELECT m.id AS id, max(mn.confidence) AS conf
+         FROM seeds s
+         CROSS JOIN entities e ON e.id = s.id
+         CROSS JOIN mentions mn ON mn.entity_id = e.id
+         CROSS JOIN memories m ON m.id = mn.memory_id AND m.space_id = e.space_id
          WHERE ${scope.sql}
-           AND ((length(e.normalized_name) >= ? AND instr(?, e.normalized_name) > 0)
-             OR (length(a.normalized_alias) >= ? AND instr(?, a.normalized_alias) > 0))
          GROUP BY m.id
          ORDER BY conf DESC, m.updated_at DESC, m.id ASC LIMIT ?`
       )
-      .all(...scope.params, ENTITY_MIN_CHARS, key, ENTITY_MIN_CHARS, key, pool) as { id: string }[];
+      .all(ENTITY_MIN_CHARS, key, ENTITY_MIN_CHARS, key, ...scope.params, pool) as { id: string }[];
     return rows.map((r) => r.id);
   } catch {
     // 与其它通道一致：单通道失败不能拖垮整次检索
@@ -223,12 +231,14 @@ async function vectorChannel(
   spaceIds: string[],
   scope: Scope,
   pool: number,
-  relevance: Map<string, number>
+  relevance: Map<string, number>,
+  budgetMs?: number,
+  onSkipped?: () => void
 ): Promise<string[]> {
   // 扩展未加载或该维度还没有任何向量：通道为空，RRF 退化为纯 FTS
   if (!hasVec(db)) return [];
   if (embedder.dim !== null && !vecTableExists(db, embedder.dim)) return [];
-  const query = await embedder.embed(q, 'query');
+  const query = await withinBudget(embedder.embed(q, 'query'), budgetMs, onSkipped);
   if (!query || query.length === 0) return [];
   // 维度可能到这里才首次已知（onnx / remote）
   const dim = embedder.dim ?? query.length;
@@ -257,6 +267,33 @@ async function vectorChannel(
     ) as { id: string; distance: number }[];
   for (const r of rows) relevance.set(r.id, 1 - r.distance);
   return rows.map((r) => r.id);
+}
+
+/** 限时等待：超时返回 null 并回调 onSkipped，原任务继续在后台落定（不产生未处理拒绝） */
+export function withinBudget<T>(
+  work: Promise<T>,
+  budgetMs: number | undefined,
+  onSkipped: (() => void) | undefined
+): Promise<T | null> {
+  if (budgetMs === undefined) return work;
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      // 后台那次 embed 仍会落定（结果进查询缓存），失败也不能变成未处理拒绝
+      work.catch(() => {});
+      onSkipped?.();
+      resolve(null);
+    }, budgetMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function loadVectors(
@@ -378,9 +415,17 @@ export async function searchMemories(
     // 生产不传 embedder（memoryHost.ts）时向量通道为空，RRF 退化为纯 FTS 排名；
     // 单通道失败/缺失的兜底见 search.test.ts「falls back to …」两例
     opts.embedder
-      ? vectorChannel(db, opts.embedder, q, opts.spaceIds, scope, pool, relevance).catch(
-          () => [] as string[]
-        )
+      ? vectorChannel(
+          db,
+          opts.embedder,
+          q,
+          opts.spaceIds,
+          scope,
+          pool,
+          relevance,
+          opts.vectorBudgetMs,
+          opts.onVectorSkipped
+        ).catch(() => [] as string[])
       : Promise.resolve([] as string[]),
     Promise.resolve()
       .then(() => entityChannel(db, q, scope, pool))

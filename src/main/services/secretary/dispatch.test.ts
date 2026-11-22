@@ -1229,6 +1229,72 @@ describe('session_send 转发图片', () => {
     expect(h.prompts).toEqual([]);
   });
 
+  it('空白条目直接丢弃，不让整次调用失败；全空等同没传', async () => {
+    const empty = harness({ file: dispatchedFile() });
+    const none = await call(empty.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [''],
+    });
+    expect(none).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(empty.prompts[0]?.text).not.toContain('[图片');
+
+    const a = image('a.png');
+    const b = image('b.png');
+    const one = harness({ file: dispatchedFile() });
+    expect(
+      await call(one.handlers.session_send, {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments: ['  ', a],
+      })
+    ).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(one.prompts[0]?.text).toContain(`[图片 1] ${a}`);
+    expect(one.prompts[0]?.text).not.toContain('[图片 2]');
+
+    const two = harness({ file: dispatchedFile() });
+    expect(
+      await call(two.handlers.session_send, {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments: [a, '', b],
+      })
+    ).toEqual({ ok: true, result: { status: 'sent' } });
+    const text = two.prompts[0]?.text ?? '';
+    expect(text).toContain(`[图片 1] ${a}`);
+    expect(text).toContain(`[图片 2] ${b}`);
+  });
+
+  it('空白条目不占张数上限', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [...Array.from({ length: 5 }, (_unused, index) => image(`a${index}.png`)), ''],
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.prompts[0]?.text).toContain('[图片 5]');
+  });
+
+  it('非字符串条目与超长路径仍然拒绝', async () => {
+    for (const [attachments, expected] of [
+      [[123], 'must be a string, got number'],
+      [['', 'x'.repeat(1025)], 'entry 2 is 1025 characters, max 1024'],
+    ] as const) {
+      const h = harness({ file: dispatchedFile() });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments,
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toMatch(/^invalid arguments: /u);
+      expect(result.error).toContain(expected);
+      expect(h.prompts).toEqual([]);
+    }
+  });
+
   const block = (data: Uint8Array = PNG) => ({
     data: Buffer.from(data).toString('base64'),
     mimeType: 'image/png',

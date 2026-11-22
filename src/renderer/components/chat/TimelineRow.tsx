@@ -159,7 +159,7 @@ import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { StepDot } from './StepNode';
 import { SubagentResult } from './SubagentResult';
-import { parseSubagentReceipt } from './subagentReceipt';
+import { parseSubagentReceipt, subagentErrorReason } from './subagentReceipt';
 import { TaskWrapUpCard } from './TaskWrapUpCard';
 
 // 只有出现 diff / 读文件行时才需要，按需加载以把 @pierre/diffs 移出首屏
@@ -2841,6 +2841,8 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
     expanded && item.name === 'subagent' && item.state !== 'error'
       ? parseSubagentReceipt(item.subagentOp, item.output)
       : null;
+  const subagentError =
+    item.name === 'subagent' && item.state === 'error' ? subagentErrorReason(item.output) : null;
   const previouslyHadFileChanges = useRef(hasFileChanges);
   // apply_patch 只在终态结果中拿到真实 diff：必须按「本行从无到有」识别直播，历史首次挂载不展开。
   useEffect(() => {
@@ -2898,7 +2900,9 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
             {item.state === 'error' && item.output
               ? summary && item.name === 'apply_patch' && hasFileChanges
                 ? `${headerSummary} · ${firstLine(item.output)}`
-                : shellFailureHeadline(stripAnsi(item.output))
+                : subagentError
+                  ? t(subagentError)
+                  : shellFailureHeadline(stripAnsi(item.output))
               : summary
                 ? headerSummary
                 : null}

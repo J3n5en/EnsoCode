@@ -375,6 +375,11 @@ export interface DispatchRecord {
    * 轮次一结束就清掉；这一轮的结果照常推给秘书。
    */
   reopenedAt?: number;
+  /**
+   * 空闲时只来了 status=failed、还在等 turn-failed 配对的失败（detail 已脱敏截断）。
+   * 配对窗口过了仍在报错就补记失败；落盘是为了窗口内重启也能在启动时补报
+   */
+  failurePending?: { at: number; detail?: string };
   /** 用户撤销手动标记的时间：放回进行中，直到这一轮出现新结果 */
   manualUndoneAt?: number;
   /** 手动标记完成时一起收掉的受阻/暂停目标：撤销标记时恢复，重新跟踪后作废 */
