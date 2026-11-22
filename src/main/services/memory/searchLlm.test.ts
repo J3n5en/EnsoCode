@@ -46,6 +46,46 @@ describe('createSearchAssist budgets', () => {
     expect(signal()?.aborted).toBe(true);
     expect(assist!.outcome?.()).toEqual({ assist: 'fallback', assistReason: 'timeout' });
   });
+
+  it('一次检索内 analyze + rerank 共用一份预算：慢模型不会把检索拖到两倍超时', async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    let rerankSignal: AbortSignal | undefined;
+    const complete: Complete = (_system, _user, options) => {
+      call += 1;
+      if (call === 1) return new Promise((resolve) => setTimeout(() => resolve(ANALYSIS), 6_000));
+      rerankSignal = options?.signal;
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    };
+    complete.searchTimeoutMs = searchLlmTimeoutMs('remote');
+    const assist = createSearchAssist(complete, { gate: new SearchLlmGate() });
+    const analyzed = assist!.analyze('Postgres');
+    await vi.advanceTimersByTimeAsync(6_000);
+    await expect(analyzed).resolves.toMatchObject({ intent: 'factual' });
+    const reranked = assist!.rerank('Postgres', [{ title: 'Postgres', content: 'primary db' }]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(reranked).resolves.toBeNull();
+    expect(rerankSignal?.aborted).toBe(true);
+  });
+
+  it('预算已耗尽时 rerank 直接回退，不再发请求', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const complete: Complete = () => {
+      calls += 1;
+      return new Promise((resolve) => setTimeout(() => resolve(ANALYSIS), 1_490));
+    };
+    const assist = createSearchAssist(complete, { gate: new SearchLlmGate() });
+    const analyzed = assist!.analyze('Postgres');
+    await vi.advanceTimersByTimeAsync(1_490);
+    await analyzed;
+    await expect(
+      assist!.rerank('Postgres', [{ title: 'Postgres', content: 'primary db' }])
+    ).resolves.toBeNull();
+    expect(calls).toBe(1);
+  });
 });
 
 describe('createSearchAssist outcome', () => {

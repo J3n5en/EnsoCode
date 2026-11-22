@@ -196,4 +196,35 @@ describe('memory service client', () => {
     child.reply(opMsg.requestId, null);
     await op;
   });
+
+  it('冷启动期间多个会话同时发 op：只拉起一个服务，ready 后全部按序投递并各自回结果', async () => {
+    const ops = ['a', 'b', 'c'].map((query) => client.invoke('invoke', { query }));
+    expect(forks).toHaveLength(1);
+    const child = forks[0];
+    await vi.advanceTimersByTimeAsync(0);
+    expect(child.posted).toHaveLength(0);
+    child.becomeReady();
+    await vi.advanceTimersByTimeAsync(0);
+    const sent = child.posted.filter((m) => (m as { type?: string }).type === 'op') as {
+      requestId: number;
+      args: { query: string };
+    }[];
+    expect(sent.map((m) => m.args.query)).toEqual(['a', 'b', 'c']);
+    for (const m of sent) child.reply(m.requestId, m.args.query.toUpperCase());
+    await expect(Promise.all(ops)).resolves.toEqual(['A', 'B', 'C']);
+  });
+
+  it('服务起不来（一直等不到 ready）：op 按超时失败并杀掉这一代，不无限挂起', async () => {
+    const op = client.invoke('invoke', { query: 'never' }).catch((e) => e);
+    const child = forks[0];
+    await vi.advanceTimersByTimeAsync(30_001);
+    const error = await op;
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain('timed out');
+    expect(child.killed).toBe(true);
+    // 超时之后才到的 ready 不会把已失败的 op 再投递出去
+    child.becomeReady();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(child.posted.filter((m) => (m as { op?: string }).op === 'invoke')).toHaveLength(0);
+  });
 });

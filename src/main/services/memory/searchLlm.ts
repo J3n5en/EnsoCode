@@ -23,6 +23,8 @@ const RERANK_SYSTEM =
   'Score each memory 0-10 for the query. Reply JSON only: {"scores":[...]} in the same order. No extra keys.';
 
 const gate = new SearchLlmGate();
+// 剩余预算低于此值不再发请求：远程补全的往返本身就要这么久，发了也只会被掐断
+const MIN_CALL_MS = 200;
 
 function budgetMs(complete: Complete): number {
   const value = complete.searchTimeoutMs;
@@ -38,6 +40,8 @@ export function createSearchAssist(
   if (!complete) return null;
   const llmGate = opts?.gate ?? gate;
   const timeoutMs = budgetMs(complete);
+  // analyze 与 rerank 共用一份预算：分开计时时慢模型能把一次检索拖到 2 × timeoutMs
+  let deadline: number | null = null;
   let succeeded = false;
   let failure: SearchAssistReason | undefined;
   const fail = (reason: SearchAssistReason, trip: boolean) => {
@@ -45,7 +49,13 @@ export function createSearchAssist(
     if (trip) llmGate.trip();
   };
   const call = async (system: string, user: string): Promise<string | null> => {
-    const result = await completeWithin((signal) => complete(system, user, { signal }), timeoutMs);
+    deadline ??= Date.now() + timeoutMs;
+    const remaining = deadline - Date.now();
+    if (remaining < MIN_CALL_MS) {
+      fail('timeout', false);
+      return null;
+    }
+    const result = await completeWithin((signal) => complete(system, user, { signal }), remaining);
     if (!result.ok) {
       fail(result.reason, true);
       return null;

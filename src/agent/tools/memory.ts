@@ -33,8 +33,10 @@ interface Pending {
   reject(error: Error): void;
 }
 
-// 本地 SQLite 查询远快于浏览器动作，但 Main 可能正忙于首次建库 / WAL 恢复
-const DEFAULT_TIMEOUT_MS = 15_000;
+// 检索在服务侧有界（向量冷加载不等、LLM 辅助有预算），15s 只兜进程级故障；
+// 写入要等 embedding 模型算向量做去重，冷加载（新版本首次编译 Metal 管线）可能超过 15s
+const SEARCH_TIMEOUT_MS = 15_000;
+const WRITE_TIMEOUT_MS = 30_000;
 
 /**
  * worker ↔ Main 的记忆库挂起调用表（同 BrowserInvoker 范式）。请求经 `memory-invoke` 事件上抛，
@@ -54,7 +56,10 @@ export class MemoryInvoker<Op extends string = MemoryOp> {
     if (signal?.aborted) return Promise.reject(new Error('Memory action aborted'));
     const requestId = randomUUID();
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
-    const waitMs = timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const waitMs =
+      timeoutMs ??
+      this.options.timeoutMs ??
+      (op === 'search' ? SEARCH_TIMEOUT_MS : WRITE_TIMEOUT_MS);
     const timer = setTimeout(
       () => settle(new Error(`Memory action ${op} timed out after ${waitMs}ms`)),
       waitMs
