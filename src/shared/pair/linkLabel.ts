@@ -9,6 +9,12 @@ const OFFLINE_KEY: Record<Exclude<RemoteLinkState, 'online'>, string> = {
   offline: 'Reconnecting…',
 };
 
+/** 状态点颜色：在线 / 正在连 / 连不上 */
+export function linkTone(state: RemoteLinkState): 'ok' | 'pending' | 'error' {
+  if (state === 'online') return 'ok';
+  return state === 'connecting' || state === 'offline' ? 'pending' : 'error';
+}
+
 /** 完整版侧栏副标题。文案键交给调用方翻译，和精简版「已连接 · 中继 · 32ms」同一结构 */
 export function formatLinkSubtitle(
   status: { state: RemoteLinkState; transport: 'relay' | 'direct'; rttMs: number | null },

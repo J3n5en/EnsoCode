@@ -58,6 +58,7 @@ import {
 } from '@/stores/sessions/sessionSwitchSlots';
 import type { StoredDevice } from './deviceList';
 import type { PushFailureReason } from './push';
+import { pushHints } from './pushToggle';
 import {
   getThemePreference,
   setThemePreference,
@@ -78,13 +79,6 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'light', label: '浅' },
   { value: 'dark', label: '深' },
 ];
-
-const PUSH_ERROR_TEXT: Record<PushFailureReason, string> = {
-  unsupported: '当前浏览器不支持推送。',
-  'permission-denied': '通知权限被拒绝，请在浏览器站点设置中允许后重试。',
-  'service-unreachable': '无法连接 Google 推送服务（FCM），请检查网络或代理后重试。',
-  'subscribe-failed': '订阅失败，请稍后重试。',
-};
 
 interface Props {
   open: boolean;
@@ -659,27 +653,23 @@ export function SessionDrawer({
                   onCheckedChange={onTogglePush}
                 />
               </div>
-              {pushBusy && <p className="mt-1 pl-6 text-[11px] text-muted-foreground">正在开启…</p>}
-              {pushError && !pushBusy && (
-                <p className="mt-1 pl-6 text-[11px] text-destructive">
-                  {PUSH_ERROR_TEXT[pushError]}
+              {pushHints({
+                busy: pushBusy,
+                error: pushError,
+                availability: pushAvailability,
+                connected,
+                configReady: pushConfigReady,
+              }).map((hint) => (
+                <p
+                  key={hint.text}
+                  className={cn(
+                    'mt-1 pl-6 text-[11px]',
+                    hint.error ? 'text-destructive' : 'text-muted-foreground'
+                  )}
+                >
+                  {hint.text}
                 </p>
-              )}
-              {pushAvailability === 'ok' && connected && !pushConfigReady && (
-                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                  需先升级桌面端 EnsoCode 才能开启推送。
-                </p>
-              )}
-              {pushAvailability === 'needs-install' && (
-                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                  iOS 需先用分享菜单「添加到主屏幕」，从主屏幕打开后才能开启。
-                </p>
-              )}
-              {pushAvailability === 'unsupported' && (
-                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                  当前浏览器不支持推送。
-                </p>
-              )}
+              ))}
             </div>
           )}
 

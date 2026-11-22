@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { formatLinkSubtitle } from './linkLabel';
+import { formatLinkSubtitle, linkTone } from './linkLabel';
 
 const t = (key: string) => key;
+
+describe('linkTone', () => {
+  it('在线绿、连接中黄、连不上红', () => {
+    expect(linkTone('online')).toBe('ok');
+    expect(linkTone('connecting')).toBe('pending');
+    expect(linkTone('offline')).toBe('pending');
+    expect(linkTone('host-offline')).toBe('error');
+    expect(linkTone('unauthorized')).toBe('error');
+    expect(linkTone('replaced')).toBe('error');
+  });
+});
 
 describe('formatLinkSubtitle', () => {
   it('在线时带通道和延迟', () => {

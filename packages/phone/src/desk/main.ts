@@ -12,22 +12,21 @@ import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
 import { installKeyboardInset } from '../keyboard';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
-import {
-  isStandalone,
-  PHONE_PUSH_ENABLED_KEY,
-  pushAvailability,
-  subscribePush,
-  unsubscribePush,
-} from '../push';
+import { isStandalone, PHONE_PUSH_ENABLED_KEY, pushAvailability, subscribePush } from '../push';
+import { acceptPushSubscription, pushDeps, turnPushOff, turnPushOn } from '../pushToggle';
 import { watchShellUpdate } from '../shellUpdate';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
 import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } from '../storageGuard';
 import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
+import { createDeviceDrawer } from './deviceDrawer';
+import { createDeskDevices, toggleDeskPush } from './devices';
+import { themeOfFrame, watchFrameTheme } from './drawerTheme';
 import {
   buildReady,
   clearBootRetry,
+  clearDeskMeta,
   type DeskMeta,
   deskBase,
   downloadProgress,
@@ -325,6 +324,43 @@ async function main(): Promise<void> {
     keyboard?.sync();
   };
 
+  const push = pushDeps((message) => tunnel.sendGuest(message));
+  const navigate = (url: string) => {
+    leaveGuard?.release();
+    location.replace(url);
+  };
+  const drawer = createDeviceDrawer({
+    doc: document,
+    currentId: device.pairId,
+    devices: createDeskDevices({
+      currentId: device.pairId,
+      load: loadDevices,
+      navigate,
+      saveUiMode,
+      onCurrentLabel: (label) => publishLink(reduceDeskLink(link, { type: 'label', label })),
+      stopCurrent: () => {
+        leaving = true;
+        tunnel.stop();
+      },
+      forgetDesk: (pairId) => clearDeskMeta(localStorage, pairId),
+    }),
+    link: () => toRemoteLinkStatus(link, pushAvailability()),
+    onLink(listener) {
+      linkListeners.add(listener);
+      return () => linkListeners.delete(listener);
+    },
+    togglePush: () =>
+      void toggleDeskPush({
+        enabled: () => link.pushEnabled,
+        vapidPublicKey: () => link.vapidPublicKey,
+        setPending: (pending) => publishLink(reduceDeskLink(link, { type: 'push', ...pending })),
+        turnOn: (key) => turnPushOn(key, push),
+        turnOff: () => bridge.setPushSubscription?.(null),
+      }),
+    theme: () => themeOfFrame(iframes.main),
+    watchTheme: (listener) => watchFrameTheme(iframes.main, listener),
+  });
+
   const bridge: RemoteBridge = {
     platform: 'linux',
     attach(kind) {
@@ -382,6 +418,7 @@ async function main(): Promise<void> {
       leaveGuard?.release();
       location.href = PHONE_URL;
     },
+    openDevices: () => drawer.open(),
     linkStatus: () => toRemoteLinkStatus(link, pushAvailability()),
     onLinkStatus(callback) {
       linkListeners.add(callback);
@@ -390,18 +427,15 @@ async function main(): Promise<void> {
     vapidPublicKey: () => link.vapidPublicKey,
     setPushSubscription(subscription) {
       if (subscription === null) {
-        tunnel.sendGuest({ type: 'push-unsubscribe' });
-        localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'off');
+        turnPushOff(push);
         publishLink(
           reduceDeskLink(link, { type: 'push', enabled: false, busy: false, error: null })
         );
-        void unsubscribePush();
         return;
       }
       const parsed = parseRemotePushSubscription(subscription);
       if (!parsed) return;
-      tunnel.sendGuest({ type: 'push-subscribe', subscription: parsed });
-      localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'on');
+      acceptPushSubscription(parsed, push);
       publishLink(reduceDeskLink(link, { type: 'push', enabled: true, busy: false, error: null }));
     },
     setPushPending(pending) {
@@ -411,8 +445,12 @@ async function main(): Promise<void> {
     },
   };
   (window as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote = bridge;
-  // 后退先关设置层，其余情况确认后才离开
+  // 后退先关抽屉、设置层，其余情况确认后才离开
   leaveGuard = installLeaveGuard(window, '确定离开 EnsoCode 完整版？', () => {
+    if (drawer.isOpen()) {
+      drawer.close();
+      return true;
+    }
     if (!iframes.settings) return false;
     closeSettings();
     return true;

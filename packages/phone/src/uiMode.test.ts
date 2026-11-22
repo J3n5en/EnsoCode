@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { StoredDevice } from './deviceList';
-import { deskUrl, launchTarget, loadUiMode, PHONE_URL, saveUiMode } from './uiMode';
+import {
+  deskUrl,
+  launchTarget,
+  loadUiMode,
+  PAIR_FROM_DESK_URL,
+  PHONE_URL,
+  saveUiMode,
+} from './uiMode';
 
 function memoryStorage(): void {
   const data = new Map<string, string>();
@@ -40,6 +47,12 @@ describe('uiMode', () => {
     expect(launchTarget('', 'desk', [device('a', 'read')], 'a')).toBeNull();
     expect(launchTarget(PHONE_URL.slice(1), 'desk', [device('a')], 'a')).toBeNull();
     expect(launchTarget('?session=s1&mode=phone', 'desk', [device('a')], 'a')).toBeNull();
+  });
+
+  it('从完整版去配对新电脑时留在精简版，且不改记住的模式', () => {
+    saveUiMode('desk');
+    expect(launchTarget(PAIR_FROM_DESK_URL.slice(1), 'desk', [device('a')], 'a')).toBeNull();
+    expect(loadUiMode()).toBe('desk');
   });
 
   it('keeps a notification deep link inside desk mode', () => {

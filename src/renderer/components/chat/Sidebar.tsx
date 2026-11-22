@@ -97,7 +97,8 @@ import {
   restartConversationFromMenu,
 } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
-import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
+import { PhoneDeviceChip, PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
+import { phoneLinkEntry, showCompactButton } from '@/components/nodes/phoneLinkEntry';
 import { SecretaryOriginBadge, showsMutedBell } from '@/components/secretary/SecretaryOriginBadge';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
@@ -247,6 +248,8 @@ export function Sidebar({
   const projects = useSettingsStore((state) => state.projects);
   const chromeKind = useWindowChromeKind();
   const mobile = chromeKind === 'mobile';
+  const phoneEntry = phoneLinkEntry(window.electronAPI.remote);
+  const compactButton = showCompactButton(window.electronAPI.remote);
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const createProjectGroup = useSettingsStore((state) => state.createProjectGroup);
@@ -1071,14 +1074,15 @@ export function Sidebar({
             <FolderPlus className="h-4 w-4" />
           </button>
           <div className="flex-1" />
-          {window.electronAPI.remote?.linkStatus && <PhoneLinkStatus />}
+          {phoneEntry === 'devices' && <PhoneDeviceChip compact />}
+          {phoneEntry === 'info' && <PhoneLinkStatus />}
           <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
           <ArchiveEntryButton
             count={archivedCount}
             onClick={openArchive}
             className={ICON_BUTTON_CLASS}
           />
-          {window.electronAPI.remote?.exitDesk && (
+          {compactButton && (
             <button
               type="button"
               onClick={() => window.electronAPI.remote?.exitDesk?.()}
@@ -1967,7 +1971,12 @@ export function Sidebar({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 p-1.5">
-          {window.electronAPI.remote?.linkStatus ? (
+          {phoneEntry === 'devices' ? (
+            <>
+              <PhoneDeviceChip />
+              <div className="min-w-0 flex-1" />
+            </>
+          ) : phoneEntry === 'info' ? (
             <>
               <div className="min-w-0 flex-1" />
               <PhoneLinkStatus />
@@ -1981,7 +1990,7 @@ export function Sidebar({
             onClick={openArchive}
             className={ICON_BUTTON_CLASS}
           />
-          {window.electronAPI.remote?.exitDesk && (
+          {compactButton && (
             <button
               type="button"
               onClick={() => window.electronAPI.remote?.exitDesk?.()}

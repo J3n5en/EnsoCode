@@ -31,6 +31,8 @@ export interface RemoteBridge {
   consumeSettingsLink(): unknown;
   /** 离开桌面模式回手机版；只有手机壳提供 */
   exitDesk?(): void;
+  /** 打开壳里的「电脑与通知」抽屉（推送、已配对电脑）；只有新版手机壳提供 */
+  openDevices?(): void;
   /**
    * 桌面远程节点层专属：所在电脑（guest）main 的通道。REMOTE_LOCAL_PREFIXES 前缀的调用改走这里，
    * 由 guest main 白名单裁决；invoke 回 `{ ok, value | error }` 的 JSON。
@@ -58,6 +60,8 @@ export interface RemoteApi {
   /** 本地图片 URL 前缀：`local-image://…` 在浏览器里改走壳的 SW 代理 */
   localImagePrefix: string;
   exitDesk?(): void;
+  /** 有它时侧栏用电脑标签打开壳里的抽屉，「精简版」也收进抽屉；没有时保留 Info 弹层 */
+  openDevices?(): void;
   /** 跑在另一台桌面的原生窗口里（远程节点层）：所在电脑的平台；窗口按钮与节点切换器可用 */
   nativePlatform?: string;
   /** 旧壳没有这组方法：renderer 据此保留原来的节点切换器 */

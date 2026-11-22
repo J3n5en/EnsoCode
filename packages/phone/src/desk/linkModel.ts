@@ -19,6 +19,7 @@ export interface DeskLinkModel {
 
 export type DeskLinkEvent =
   | { type: 'state'; state: ConnState }
+  | { type: 'label'; label: string }
   | { type: 'transport'; transport: 'relay' | 'direct' }
   | { type: 'rtt'; rttMs: number }
   | { type: 'push-config'; key: string }
@@ -41,6 +42,8 @@ export function reduceDeskLink(model: DeskLinkModel, event: DeskLinkEvent): Desk
   switch (event.type) {
     case 'state':
       return model.state === event.state ? model : { ...model, state: event.state };
+    case 'label':
+      return model.deviceLabel === event.label ? model : { ...model, deviceLabel: event.label };
     case 'transport':
       return model.transport === event.transport ? model : { ...model, transport: event.transport };
     case 'rtt':

@@ -166,6 +166,11 @@ export class DeskTunnel {
     this.client.send(message);
   }
 
+  /** 取消配对前停链：不再重连，也不再往这台的存储里写 */
+  stop(): void {
+    this.client.close();
+  }
+
   start(): void {
     const client = this.client;
     client.connect();
