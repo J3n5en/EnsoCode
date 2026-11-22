@@ -381,7 +381,8 @@ import {
   consumeUnattendedNote,
   UNATTENDED_OFF_NOTE,
   UNATTENDED_ON_NOTE,
-  UNATTENDED_PROMPT,
+  unattendedPrompt,
+  unattendedSwitchNote,
 } from './unattended';
 import { createVirtualChooser, resolveClassifierModel } from './virtualClassifier';
 import { registerVirtualModel } from './virtualModels';
@@ -703,6 +704,8 @@ function createSessionResourceLoader(options: {
   childContract?: boolean;
   /** 无人值守：把「没人在线」写进系统提示词（同样为了不随压缩丢失） */
   autoRejectApprovals?: boolean;
+  /** 无人值守时 ask_user 会转给秘书：换用转发变体 */
+  askRelay?: boolean;
 }): DefaultResourceLoader {
   const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
   const skillPaths = harness
@@ -792,7 +795,7 @@ function createSessionResourceLoader(options: {
         ? [appendSystemPromptExtension('subagent-contract', SUBAGENT_CONTRACT_PROMPT)]
         : []),
       ...(options.autoRejectApprovals
-        ? [appendSystemPromptExtension('unattended', UNATTENDED_PROMPT)]
+        ? [appendSystemPromptExtension('unattended', unattendedPrompt(options.askRelay === true))]
         : []),
       ...(options.systemPromptAppend
         ? [tailSystemPromptSection('preset_tail', options.systemPromptAppend)]
@@ -2204,10 +2207,13 @@ export class SessionSupervisor {
         const managed = this.must(command.identity);
         managed.gate.mode = command.mode;
         if (command.autoReject !== undefined) {
-          if (managed.gate.autoReject !== command.autoReject) {
-            // 系统提示词改不了，用一次性提示告知模型「人没了 / 人回来了」
-            managed.unattendedNote = command.autoReject ? UNATTENDED_ON_NOTE : UNATTENDED_OFF_NOTE;
-          }
+          // 系统提示词改不了，用一次性提示告知模型「人没了 / 人回来了」
+          const relay = Boolean(managed.asks.relay);
+          const note = unattendedSwitchNote(
+            { autoReject: managed.gate.autoReject, relay },
+            { autoReject: command.autoReject, relay }
+          );
+          if (note) managed.unattendedNote = note;
           managed.gate.autoReject = command.autoReject;
           managed.asks.autoReject = command.autoReject;
         }
@@ -2221,6 +2227,12 @@ export class SessionSupervisor {
         return;
       case 'set-ask-relay': {
         const managed = this.must(command.identity);
+        const autoReject = managed.asks.autoReject;
+        const note = unattendedSwitchNote(
+          { autoReject, relay: Boolean(managed.asks.relay) },
+          { autoReject, relay: Boolean(command.relay) }
+        );
+        if (note) managed.unattendedNote = note;
         if (command.relay) managed.asks.relay = command.relay;
         else delete managed.asks.relay;
         return;
@@ -2703,6 +2715,7 @@ export class SessionSupervisor {
       systemPromptAppend,
       systemPromptBoost,
       autoRejectApprovals,
+      askRelay: Boolean(askRelay),
       ...(compactStrategy !== 'standard'
         ? {
             compactStrategy,

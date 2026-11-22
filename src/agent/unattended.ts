@@ -25,6 +25,39 @@ export const UNATTENDED_OFF_NOTE = `<unattended>
 Unattended mode is OFF: a human is available again. ask_user and approval requests now reach them and wait for an answer.
 </unattended>`;
 
+/** 秘书派出/跟踪的无人值守会话：ask_user 会转给秘书，提示词改为「技术细节自己定，取舍和不可逆才问」 */
+export const UNATTENDED_RELAY_PROMPT = `<unattended>
+This session has no human watching it. Questions you ask with ask_user go to the secretary that dispatched you, who answers them or asks the user when needed.
+- Decide technical details yourself: implementation choices, either-or approaches, and anything you can infer from the code or context. Pick the most reasonable assumption, state it in one line, and keep working.
+- Use ask_user for product trade-offs or preferences, unclear requirements where a wrong guess is costly, and irreversible actions (deleting data, publishing, merging to main, deleting branches, touching accounts or money). Give 2-4 options and a default_option.
+- After asking, wait for the answer; do not go ahead and do it yourself meanwhile. Never ask a question in prose and stop.
+- Actions that need approval are still rejected automatically. Use an approach that needs no approval, or say in your report what was blocked.
+</unattended>`;
+
+export const UNATTENDED_RELAY_ON_NOTE = `<unattended>
+Unattended mode is ON: this session has no human watching it. ask_user now goes to the secretary that dispatched you; actions that need confirmation fail immediately.
+Decide technical details yourself on the most reasonable assumption. Use ask_user, with 2-4 options and a default_option, only for product trade-offs, costly unclear requirements or irreversible actions, then wait for the answer.
+</unattended>`;
+
+export function unattendedPrompt(relay: boolean): string {
+  return relay ? UNATTENDED_RELAY_PROMPT : UNATTENDED_PROMPT;
+}
+
+interface UnattendedState {
+  autoReject: boolean;
+  relay: boolean;
+}
+
+/** 无人值守 / 提问转发状态变化后该给模型的一次性提示；没有可感知的变化时不发 */
+export function unattendedSwitchNote(
+  prev: UnattendedState,
+  next: UnattendedState
+): string | undefined {
+  if (!next.autoReject) return prev.autoReject ? UNATTENDED_OFF_NOTE : undefined;
+  if (prev.autoReject && prev.relay === next.relay) return undefined;
+  return next.relay ? UNATTENDED_RELAY_ON_NOTE : UNATTENDED_ON_NOTE;
+}
+
 /** 取出待发的一次性提示并前缀到消息上：只追加、消费一次，与 plan-mode 提示同语义 */
 export function consumeUnattendedNote(state: { unattendedNote?: string }, text: string): string {
   const note = state.unattendedNote;
