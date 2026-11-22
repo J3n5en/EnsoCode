@@ -227,7 +227,7 @@ describe('全局标签跨 dock 同步', () => {
     expect(harness.state.globalTabs).toEqual([RADIO]);
   });
 
-  it('删除会话、dock 卸载都不动 globalTabs', () => {
+  it('删除会话、dock 卸载都不动 globalTabs', async () => {
     const a = mount('a');
     mount('b');
     openGlobalTab(RADIO, 'a');
@@ -235,6 +235,8 @@ describe('全局标签跨 dock 同步', () => {
     a.userClose(RADIO);
     disposeConversationResources('b');
     expect(harness.state.globalTabs).toEqual([RADIO]);
+    // 回收终端是 fire-and-forget 的动态 import，留到环境拆除后会去加载真 xterm
+    await vi.dynamicImportSettled();
   });
 
   it('右键改作用域：会话→全局补进其他 dock；全局→会话只留在当前会话', () => {
