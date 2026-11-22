@@ -9,10 +9,11 @@ import {
 } from '@shared/exitInterrupt';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { agentSessionIndex } from '../ipc/sessionIndex';
+import { isAppQuitting } from './appQuitWatchdog';
 import { coldResumedSessionIds } from './coldRestart';
 import { setExitInterruption } from './exitWindow';
 import { recoverInterruptedTurns } from './interruptedTurns';
-import { startRunningAtExitHeartbeat, writeRunningAtExit } from './runningAtExit';
+import { createExitRecorder, startRunningAtExitHeartbeat } from './runningAtExit';
 import { projectParentHistoryAll, resolveParentHistoryFile } from './sessionHistoryTail';
 
 /** 本次启动时刻：退出窗口的右边界从这里算 */
@@ -31,15 +32,20 @@ export function markExitForUpdate(): void {
   exitKind = 'update';
 }
 
-/** 退出路径上同步写：只记正在跑的会话，没有就不留文件（顺带清掉旧心跳） */
+let heartbeat: { stop: () => void } | null = null;
+let exitRecorder: ReturnType<typeof createExitRecorder> | null = null;
+
+/** 退出路径上同步写：只记正在跑的会话，没有就不留文件（顺带清掉旧心跳）；同一次退出不被后来的空快照抹掉 */
 export function recordRunningSessionsAtExit(kind: ExitKind = exitKind): void {
   try {
-    writeRunningAtExit(agentDir(), {
+    exitRecorder ??= createExitRecorder({
+      dir: agentDir(),
       pid: process.pid,
-      kind,
-      at: Date.now(),
-      sessions: agentSessionIndex.runningTurnSnapshot(),
+      snapshot: () => agentSessionIndex.runningTurnSnapshot(),
+      committed: isAppQuitting,
+      stopHeartbeat: () => heartbeat?.stop(),
     });
+    exitRecorder.record(kind);
   } catch (error) {
     console.error('Failed to record running sessions at exit:', error);
   }
@@ -50,12 +56,13 @@ export function recordRunningSessionsAtExit(kind: ExitKind = exitKind): void {
  * 没有正在跑的会话时心跳不写盘，空闲不影响性能。
  */
 export function startRunningSessionsHeartbeat(): { stop: () => void } {
-  return startRunningAtExitHeartbeat({
+  heartbeat = startRunningAtExitHeartbeat({
     dir: agentDir(),
     pid: process.pid,
     kind: 'quit',
     snapshot: (): readonly RunningAtExitEntry[] => agentSessionIndex.runningTurnSnapshot(),
   });
+  return heartbeat;
 }
 
 async function readSessionMessages(

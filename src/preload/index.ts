@@ -295,7 +295,7 @@ function parseRestartOverlay(value: unknown): RestartOverlayState | null {
   if (phase !== 'waiting') return null;
   return {
     phase,
-    reason: reason === 'background-not-detachable' ? reason : 'tool',
+    reason: reason === 'background-not-detachable' || reason === 'reply' ? reason : 'tool',
     exit: exit === 'update' || exit === 'quit' ? exit : 'restart',
   };
 }

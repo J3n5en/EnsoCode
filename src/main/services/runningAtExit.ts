@@ -51,6 +51,37 @@ export function clearRunningAtExit(dir: string): void {
 }
 
 /**
+ * 退出记录：同一次退出 before-quit 会来两次（will-quit 收尾完再 app.quit），第二次时回合已被
+ * 收尾停掉，不能把第一次记下的在跑会话删掉；记下之后心跳也停，免得收尾期间被清空。
+ * 只在退出已确定（committed）时这样做：被拦下的 before-quit（确认框取消）照旧按当下快照写。
+ */
+export function createExitRecorder(input: {
+  dir: string;
+  pid: number;
+  snapshot: () => readonly RunningAtExitEntry[];
+  committed: () => boolean;
+  now?: () => number;
+  stopHeartbeat?: () => void;
+}): { record: (kind: ExitKind) => void } {
+  let kept = false;
+  return {
+    record(kind) {
+      const sessions = input.snapshot();
+      const committed = input.committed();
+      if (committed && kept && sessions.length === 0) return;
+      if (committed) input.stopHeartbeat?.();
+      writeRunningAtExit(input.dir, {
+        pid: input.pid,
+        kind,
+        at: (input.now ?? Date.now)(),
+        sessions,
+      });
+      kept = committed && (kept || sessions.length > 0);
+    },
+  };
+}
+
+/**
  * 心跳：被 SIGKILL 时来不及写退出记录，靠最后一次心跳把「退出时刻」框到 20 秒内，
  * 启动时才能判断断流错误是否落在退出窗口里。没有正在跑的会话时不写盘。
  */

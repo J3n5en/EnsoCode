@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
-import { createQuitWatchdog, QUIT_WATCHDOG_LIMIT_MS } from './appQuitWatchdog';
+import {
+  QUIT_REPLY_IDLE_MS,
+  QUIT_REPLY_WAIT_CAP_MS,
+  QUIT_REPLY_WAIT_FLOOR_MS,
+  QUIT_TOOL_WAIT_LIMIT_MS,
+} from './agentQuitLimits';
+import {
+  createQuitWatchdog,
+  QUIT_FINISH_LIMIT_MS,
+  QUIT_WATCHDOG_LIMIT_MS,
+} from './appQuitWatchdog';
 
 const limits = { totalMs: 60_000, finishMs: 10_000, exitGraceMs: 1_000 };
 
@@ -23,6 +32,16 @@ afterEach(() => vi.useRealTimers());
 describe('退出看门狗', () => {
   it('总上限是工具等待上限再加 30 秒', () => {
     expect(QUIT_WATCHDOG_LIMIT_MS).toBe(QUIT_TOOL_WAIT_LIMIT_MS + 30_000);
+  });
+
+  it('等回复写完的上限落在工具等待上限内，等完后的收尾时间不比关窗收尾期限短：两者不打架', () => {
+    expect(QUIT_REPLY_WAIT_FLOOR_MS).toBeGreaterThanOrEqual(30_000);
+    expect(QUIT_REPLY_IDLE_MS).toBeLessThan(QUIT_REPLY_WAIT_FLOOR_MS);
+    expect(QUIT_REPLY_WAIT_FLOOR_MS).toBeLessThan(QUIT_REPLY_WAIT_CAP_MS);
+    expect(QUIT_REPLY_WAIT_CAP_MS).toBeLessThan(QUIT_TOOL_WAIT_LIMIT_MS);
+    expect(QUIT_WATCHDOG_LIMIT_MS - QUIT_TOOL_WAIT_LIMIT_MS).toBeGreaterThanOrEqual(
+      QUIT_FINISH_LIMIT_MS
+    );
   });
 
   it('安装更新超过总上限：日志写明卡在哪一步，先 relaunch 再 app.exit；还没退出就 SIGKILL', async () => {

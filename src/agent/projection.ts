@@ -187,6 +187,7 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (typeof value.errorMessage === 'string') projected.errorMessage = value.errorMessage;
   if (typeof value.timestamp === 'number') projected.timestamp = value.timestamp;
   if (value.role === 'assistant' && typeof value.model === 'string') projected.model = value.model;
+  if (value.role === 'assistant' && value.restartResumed === true) projected.restartResumed = true;
   if (value.role === 'assistant' && value.privacyMask !== undefined) {
     const privacyMask = parseMaskReport(value.privacyMask);
     if (privacyMask) projected.privacyMask = privacyMask;

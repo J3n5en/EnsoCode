@@ -138,6 +138,8 @@ export function inExitWindow(at: number, window: ExitWindow): boolean {
 
 /**
  * 进程被杀时模型层只会看到连接断掉，报出来的都是这几种。
+ * 退出收尾中止模型请求时则是 undici fetch 的 AbortError（This operation was aborted）
+ * 或 pi-ai 重试等待被中止（Request aborted）；只有落在退出窗口内的才算退出导致。
  * 只认明确的断流/断连；鉴权、限流、5xx、上下文超限仍按真实失败处理。
  */
 const EXIT_CAUSED_ERROR_PATTERNS = [
@@ -147,6 +149,8 @@ const EXIT_CAUSED_ERROR_PATTERNS = [
   /other side closed/i,
   /UND_ERR_SOCKET/i,
   /\bEPIPE\b/,
+  /^This operation was aborted$/,
+  /^Request aborted$/,
 ];
 
 export function isExitCausedStreamError(text: string | undefined): boolean {

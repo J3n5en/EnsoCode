@@ -58,7 +58,9 @@ import {
   DETACH_ACK_TIMEOUT_MS,
   forceAgentWorkerQuit,
   prepareAgentWorkerForQuit,
-  QUIT_NO_TOOL_WAIT_MS,
+  QUIT_REPLY_IDLE_MS,
+  QUIT_REPLY_WAIT_CAP_MS,
+  QUIT_REPLY_WAIT_FLOOR_MS,
   QUIT_TOOL_WAIT_LIMIT_MS,
   rememberRestorableSpawn,
   requestGracefulWorkerRestart,
@@ -118,6 +120,15 @@ const dataDir = () => path.join(fork.userData, 'agent');
 const deferred = (toolsInFlight: string[], reason = 'tool-in-flight') => ({
   type: 'graceful-restart-deferred',
   sessions: [{ identity, reason, toolsInFlight }],
+});
+/** 回复在写：带这次请求的出 token 时刻 */
+const writing = (reply: {
+  requestStartMs: number;
+  firstTokenMs?: number;
+  lastOutputMs?: number;
+}) => ({
+  type: 'graceful-restart-deferred',
+  sessions: [{ identity, reason: 'turn-in-progress', toolsInFlight: [], reply }],
 });
 const manifestFile = () => path.join(dataDir(), RESTART_MANIFEST_FILE);
 
@@ -253,11 +264,13 @@ describe('应用退出走优雅重启', () => {
     void pending.then(() => {
       done = true;
     });
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS - 1);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS - 1);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await expect(pending).resolves.toBe('timeout');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${QUIT_NO_TOOL_WAIT_MS}ms`));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`停止出 token 超过 ${QUIT_REPLY_IDLE_MS}ms`)
+    );
     expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain('照常退出');
     expect(graceful(index)).toHaveLength(1);
     // 超时后再触发退出：拿同一个结果，不再发第二次请求
@@ -294,9 +307,11 @@ describe('应用退出走优雅重启', () => {
     ).toBe(pending);
     expect(joined).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS * 3);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS * 3);
     expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS - QUIT_NO_TOOL_WAIT_MS * 3 - 1_000);
+    await vi.advanceTimersByTimeAsync(
+      QUIT_TOOL_WAIT_LIMIT_MS - QUIT_REPLY_WAIT_FLOOR_MS * 3 - 1_000
+    );
     expect(done).toBe(false);
     expect(graceful(index)).toHaveLength(1);
 
@@ -324,7 +339,7 @@ describe('应用退出走优雅重启', () => {
       done = true;
     });
     expect(waiting).toHaveBeenCalledExactlyOnceWith('tool');
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS * 3);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS * 3);
     expect(done).toBe(false);
   });
 
@@ -336,8 +351,181 @@ describe('应用退出走优雅重启', () => {
     fork.children[index].emit('message', deferred(['call-1']));
     await vi.advanceTimersByTimeAsync(60_000);
     fork.children[index].emit('message', deferred([], 'turn-in-progress'));
-    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS);
     await expect(pending).resolves.toBe('timeout');
+    warn.mockRestore();
+  });
+
+  it('回复在写、没有工具在跑：告诉弹层在等回复，等到回复写完（不到上限不中止），落断点后放行', async () => {
+    vi.useFakeTimers();
+    const index = bootWithSession();
+    const waiting = vi.fn();
+    let done = false;
+    const pending = prepareAgentWorkerForQuit({
+      reason: 'update',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+    });
+    void pending.then(() => {
+      done = true;
+    });
+    fork.children[index].emit('message', deferred([], 'turn-in-progress'));
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('reply');
+    // 以前 10 秒就中止正在写的回复；现在要等它写完
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS - 1_000);
+    expect(done).toBe(false);
+    fork.children[index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    await expect(pending).resolves.toBe('checkpointed');
+    const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    expect(log).toContain(
+      'update: 到安全点，恢复清单 1 个会话：session-=model-request（冷启动续跑）'
+    );
+  });
+
+  it('回复写太久超时：日志写明每个会话退出时在干什么，按收尾落的断点写清单并逐个记下处理结果', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'update', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred([], 'turn-in-progress'));
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS);
+    await expect(pending).resolves.toBe('timeout');
+    vi.mocked(killAndWaitExit).mockImplementationOnce(async (child) => {
+      child.kill();
+      // worker 收尾中止回复后把这一轮记成 model-request
+      writeCheckpoint({ ...checkpoint, writtenAt: Date.now() });
+    });
+    await stopAgentWorkerForQuit(100);
+    const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    expect(log).toContain(`停止出 token 超过 ${QUIT_REPLY_IDLE_MS}ms`);
+    expect(log).toContain('会话状态：session-=回复在写');
+    expect(log).toContain('session-=model-request（冷启动续跑）');
+    expect(loadColdRestartPlan(dataDir())?.resume.map((entry) => entry.sessionId)).toEqual([
+      identity.sessionId,
+    ]);
+    warn.mockRestore();
+  });
+
+  /** 起一次退出，worker 报告回复在写；返回推进时间并按需报告新 token 的工具 */
+  function startReplyWait(reason: 'update' | 'quit' = 'update') {
+    const index = bootWithSession();
+    const t0 = Date.now();
+    const state = { done: false };
+    const pending = prepareAgentWorkerForQuit({ reason, hasRunningSessions: () => true });
+    void pending.then(() => {
+      state.done = true;
+    });
+    const reply = { requestStartMs: t0 - 5_000, firstTokenMs: t0 - 3_000 };
+    const output = () =>
+      fork.children[index].emit('message', writing({ ...reply, lastOutputMs: Date.now() }));
+    /** 每 stepMs 出一次 token，持续 totalMs */
+    const streamFor = async (totalMs: number, stepMs = 5_000) => {
+      for (let elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
+        await vi.advanceTimersByTimeAsync(stepMs);
+        output();
+      }
+    };
+    const exitLog = () => readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    output();
+    return { index, t0, state, pending, output, streamFor, exitLog };
+  }
+
+  it('保底 60 秒后仍在出 token 就接着等；停止输出超过 20 秒才中止，日志记下这次请求的时间线与结果', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const run = startReplyWait();
+    await run.streamFor(100_000);
+    expect(run.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(QUIT_REPLY_IDLE_MS - 1);
+    expect(run.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(run.pending).resolves.toBe('timeout');
+    const log = run.exitLog();
+    expect(log).toContain(`停止出 token 超过 ${QUIT_REPLY_IDLE_MS}ms`);
+    expect(log).toContain(
+      `会话 session- 回复：请求发出 ${new Date(run.t0 - 5_000).toISOString()}，首 token +2.0s，最后出字 +105.0s，等了 120.0s，结果：空闲中止`
+    );
+    warn.mockRestore();
+  });
+
+  it('一直在出 token：等到回复等待上限 180 秒就中止', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const run = startReplyWait();
+    await run.streamFor(QUIT_REPLY_WAIT_CAP_MS - 5_000);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(run.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(run.pending).resolves.toBe('timeout');
+    const log = run.exitLog();
+    expect(log).toContain(`回复等待上限 ${QUIT_REPLY_WAIT_CAP_MS}ms`);
+    expect(log).toContain('等了 180.0s，结果：总上限中止');
+    warn.mockRestore();
+  });
+
+  it('保底内写完：不中止，到安全点放行并记成写完', async () => {
+    vi.useFakeTimers();
+    const run = startReplyWait();
+    await run.streamFor(30_000);
+    // 回复写完、回合结束：worker 不再报告这个会话在写，随后落断点
+    fork.children[run.index].emit('message', deferred([], 'turn-in-progress'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    fork.children[run.index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    await expect(run.pending).resolves.toBe('checkpointed');
+    expect(run.exitLog()).toContain('等了 30.0s，结果：写完');
+  });
+
+  it('保底后写完、回合还在收口：不因为不再出 token 立刻超时，等到安全点放行', async () => {
+    vi.useFakeTimers();
+    const run = startReplyWait();
+    await run.streamFor(100_000);
+    fork.children[run.index].emit('message', deferred([], 'turn-in-progress'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run.state.done).toBe(false);
+    fork.children[run.index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    await expect(run.pending).resolves.toBe('checkpointed');
+    expect(run.exitLog()).toContain('等了 100.0s，结果：写完');
+  });
+
+  it('工具跑了很久之后回复在写：仍受等安全点的总上限约束', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred(['call-1']));
+    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS - 30_000);
+    const t = Date.now();
+    fork.children[index].emit('message', writing({ requestStartMs: t, lastOutputMs: t }));
+    for (let i = 0; i < 5; i += 1) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      fork.children[index].emit(
+        'message',
+        writing({ requestStartMs: t, firstTokenMs: t + 1, lastOutputMs: Date.now() })
+      );
+    }
+    await vi.advanceTimersByTimeAsync(4_999);
+    let done = false;
+    void pending.then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBe('timeout');
+    expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain(
+      `总上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`
+    );
+    warn.mockRestore();
+  });
+
+  it('等回复时点强制退出：这次请求记成强制退出', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const run = startReplyWait('quit');
+    await run.streamFor(10_000);
+    expect(forceAgentWorkerQuit()).toBe(true);
+    await expect(run.pending).resolves.toBe('timeout');
+    expect(run.exitLog()).toContain('等了 10.0s，结果：强制退出');
     warn.mockRestore();
   });
 

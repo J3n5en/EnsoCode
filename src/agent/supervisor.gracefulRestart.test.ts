@@ -21,6 +21,16 @@ const mocks = vi.hoisted(() => ({
   prefill: [] as unknown[][],
   createAgentSession: vi.fn(),
   continueSessionActivity: vi.fn(async () => undefined),
+  editUnfinishedAssistantForResume: vi.fn(
+    (session: {
+      agent: { state: { messages: Array<{ role?: string; stopReason?: string }> } };
+    }) => {
+      const last = session.agent.state.messages.at(-1);
+      if (last?.role !== 'assistant' || last.stopReason !== 'aborted') return false;
+      session.agent.state.messages.pop();
+      return true;
+    }
+  ),
 }));
 
 // 仅供 hoisted 声明类型
@@ -54,6 +64,7 @@ vi.mock('./mcp', () => ({
 vi.mock('./sessionAdapter', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   continueSessionActivity: mocks.continueSessionActivity,
+  editUnfinishedAssistantForResume: mocks.editUnfinishedAssistantForResume,
 }));
 
 vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
@@ -252,7 +263,12 @@ describe('SessionSupervisor graceful restart', () => {
     supervisor.handleCommand({ type: 'graceful-restart' });
     await settle();
     expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
-      { identity: parent, reason: 'turn-in-progress', toolsInFlight: [] },
+      {
+        identity: parent,
+        reason: 'turn-in-progress',
+        toolsInFlight: [],
+        reply: { requestStartMs: expect.any(Number) },
+      },
     ]);
     expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
 
@@ -381,6 +397,190 @@ describe('SessionSupervisor graceful restart', () => {
       ofType(second.events, 'tool-output').filter((event) => event.toolCallId === 'call-1')
     ).toEqual([]);
     await second.supervisor.shutdown();
+  });
+
+  it('回复写到一半等不到安全点被中止（This operation was aborted）：断点记成 model-request，新进程拿掉中止的回复同一轮续跑', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-abort-stream-'));
+    const first = await startSupervisor(dataDir);
+    first.supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await waitFor(first.events, 'parent-ready');
+    const session = mocks.sessions[0];
+    session.messages.push(user);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'turn_start' });
+    session.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    const turnId = ofType(first.events, 'status').find((event) => event.turnId)?.turnId;
+    expect(turnId).toBeTruthy();
+
+    first.supervisor.handleCommand({ type: 'graceful-restart' });
+    await settle();
+    expect(ofType(first.events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
+      {
+        identity: parent,
+        reason: 'turn-in-progress',
+        toolsInFlight: [],
+        reply: { requestStartMs: expect.any(Number) },
+      },
+    ]);
+
+    // Main 等安全点超时后终止 worker：收尾中止模型请求，pi 写下 stopReason=aborted 的半截回复
+    const abortedReply = {
+      role: 'assistant',
+      content: [{ type: 'text', text: '先看一下' }],
+      stopReason: 'aborted',
+      errorMessage: 'This operation was aborted',
+      timestamp: 4,
+    };
+    session.abort.mockImplementation(async () => {
+      await Promise.resolve();
+      session.messages.push(abortedReply);
+      session.emit({ type: 'message_end', message: abortedReply });
+      session.emit({ type: 'turn_end', message: abortedReply, toolResults: [] });
+      session.emit({ type: 'agent_end', messages: [abortedReply] });
+      session.emit({ type: 'agent_settled' });
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await first.supervisor.shutdown();
+    expect(session.abort).toHaveBeenCalled();
+    const [ready] = ofType(first.events, 'graceful-restart-ready');
+    expect(ready?.checkpoint.sessions).toEqual([
+      expect.objectContaining({
+        sessionId: 'parent',
+        nextStep: 'model-request',
+        turnId,
+        toolsInFlight: [],
+        messageCount: 2,
+      }),
+    ]);
+    expect(log.mock.calls.flat().join('\n')).toContain('parent 回复写到一半被重启中止');
+    log.mockRestore();
+    // Main 据此写的清单冷启动会主动续跑
+    const manifest = buildRestartManifest({
+      reason: 'update',
+      checkpoint: ready!.checkpoint,
+      settingsOf: () => ({ providerId: 'p', modelId: 'm', cwd: '/workspace' }),
+    });
+    expect(manifest.sessions.map((entry) => entry.nextStep)).toEqual(['model-request']);
+
+    mocks.prefill.push([user, abortedReply]);
+    const second = await startSupervisor(dataDir, path.join(dataDir, RESTART_CHECKPOINT_FILE));
+    second.supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      resumeFile: SESSION_FILE,
+    });
+    await waitFor(second.events, 'parent-ready');
+    const resumed = mocks.sessions[1];
+    expect(mocks.editUnfinishedAssistantForResume).toHaveBeenCalledWith(resumed);
+    expect(resumed.agent.state.messages).toEqual([user]);
+    expect(mocks.continueSessionActivity).toHaveBeenCalledExactlyOnceWith(resumed);
+    expect(resumed.prompt).not.toHaveBeenCalled();
+    resumed.emit({ type: 'agent_start' });
+    expect(ofType(second.events, 'status').find((event) => event.turnId)?.turnId).toBe(turnId);
+    await second.supervisor.shutdown();
+  });
+
+  it('回复在写：推迟报告带请求发出 / 首 token / 最近出 token 时刻并按秒重报，写完时计时随消息落盘', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(1_000_000);
+      const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-reply-progress-'));
+      const { events, supervisor } = await startSupervisor(dataDir);
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+      });
+      await waitFor(events, 'parent-ready');
+      const session = mocks.sessions[0];
+      session.messages.push(user);
+      session.emit({ type: 'agent_start' });
+      session.emit({ type: 'turn_start' });
+      session.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+      supervisor.handleCommand({ type: 'graceful-restart' });
+      await settle();
+      const reports = () =>
+        ofType(events, 'graceful-restart-deferred').map((event) => event.sessions[0]?.reply);
+      expect(reports().at(-1)).toEqual({ requestStartMs: 1_000_000 });
+
+      const partial = (text: string) => ({
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        stopReason: 'pending',
+      });
+      const token = async (at: number, text: string) => {
+        vi.setSystemTime(at);
+        session.emit({ type: 'message_update', message: partial(text) });
+        await settle();
+      };
+      await token(1_002_000, '先');
+      expect(reports().at(-1)).toEqual({
+        requestStartMs: 1_000_000,
+        firstTokenMs: 1_002_000,
+        lastOutputMs: 1_002_000,
+      });
+      const count = reports().length;
+      // 同一秒里的新 token 不重报，进下一秒才带着最新时刻重报
+      await token(1_002_400, '先看');
+      expect(reports()).toHaveLength(count);
+      await token(1_003_100, '先看一');
+      expect(reports()).toHaveLength(count + 1);
+      expect(reports().at(-1)?.lastOutputMs).toBe(1_003_100);
+
+      const done = { ...partial('先看一下'), stopReason: 'stop' } as Record<string, unknown>;
+      vi.setSystemTime(1_005_000);
+      session.emit({ type: 'message_end', message: done });
+      await settle();
+      // pi 在监听者之后才落盘这条消息：计时已挂在它上面
+      expect(done.timing).toMatchObject({
+        stepStartMs: 1_000_000,
+        firstTokenMs: 1_002_000,
+        completedMs: 1_005_000,
+      });
+      expect(reports().at(-1)).toBeUndefined();
+      await supervisor.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('工具在跑时被中止（超过上限 / 强制退出）：不自动续跑，断点记成 await-user', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-abort-tool-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    session.messages.push(user, assistantCall);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'message_end', message: assistantCall });
+    session.emit({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'bash' });
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    await settle();
+    const abortedResult = {
+      ...toolResult,
+      isError: true,
+      content: [{ type: 'text', text: 'aborted' }],
+    };
+    session.abort.mockImplementation(async () => {
+      await Promise.resolve();
+      session.messages.push(abortedResult);
+      session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'bash' });
+      session.emit({ type: 'message_end', message: abortedResult });
+      session.emit({ type: 'agent_end', messages: [abortedResult] });
+      session.emit({ type: 'agent_settled' });
+    });
+    await supervisor.shutdown();
+    expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'parent', nextStep: 'await-user', turnId: null }),
+    ]);
   });
 
   it('别的会话有工具在跑时，不在边界上挂起（防止互相等待）', async () => {

@@ -194,6 +194,13 @@ describe('phone session cache', () => {
     expect(raw).not.toContain('provider-secret');
   });
 
+  it('被重启中止、已续跑的半截回复离线打开仍折叠', async () => {
+    const cache = createPhoneCacheStore({ backend: new MemoryBackend() });
+    await cache.save('pair-a', data('a', [[8, { ...projected('half'), restartResumed: true }]]));
+    const loaded = await cache.load('pair-a');
+    expect(loaded?.sessions[0]?.view.messages.get(8)?.restartResumed).toBe(true);
+  });
+
   it('只保留最近会话及每个会话的连续消息尾窗', async () => {
     const backend = new MemoryBackend();
     const cache = createPhoneCacheStore({

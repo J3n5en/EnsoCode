@@ -62,6 +62,7 @@ import {
   MessageCircleQuestion,
   MessagesSquare,
   PackageMinus,
+  Pause,
   RefreshCw,
   SkipForward,
   Sparkles,
@@ -344,6 +345,14 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       return b.kind === 'divider' && a.text === b.text;
     case 'plugin-message':
       return b.kind === 'plugin-message' && a.text === b.text && a.pluginId === b.pluginId;
+    case 'resumed-reply':
+      return (
+        b.kind === 'resumed-reply' &&
+        a.expanded === b.expanded &&
+        a.text === b.text &&
+        a.thinking === b.thinking &&
+        a.tools.length === b.tools.length
+      );
     case 'discarded-turn':
       return (
         b.kind === 'discarded-turn' &&
@@ -1469,6 +1478,8 @@ export const TimelineRow = memo(function TimelineRow({
       return <PluginMessageRow item={item} />;
     case 'discarded-turn':
       return <DiscardedTurnRow item={item} onToggle={onToggleGroup} />;
+    case 'resumed-reply':
+      return <ResumedReplyRow item={item} onToggle={onToggleGroup} />;
     case 'divider':
       return (
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
@@ -1577,6 +1588,58 @@ function DiscardedTurnRow({
           ))}
           {item.tools.map((tool, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: 只读工具记录只读、顺序固定
+            <p key={i} className={cn('truncate', SUBTLE_TEXT)}>
+              {toolLabel(tool.name, t)} {tool.summary}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 重启时写到一半被中止、已在下方接着写的回复：默认一行，展开看原文（模型上下文里已拿掉） */
+function ResumedReplyRow({
+  item,
+  onToggle,
+}: {
+  item: Extract<TimelineItem, { kind: 'resumed-reply' }>;
+  onToggle?: (key: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div data-resumed-reply="">
+      <button
+        type="button"
+        onClick={() => onToggle?.(item.key)}
+        aria-expanded={item.expanded}
+        data-enso="tool-row"
+        className={cn(
+          'group/step flex min-h-6 w-full items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground',
+          SUBTLE_TEXT
+        )}
+      >
+        <Pause className="h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          {t('Interrupted by a restart, continued below')}
+          <span className="ml-1.5 opacity-70">
+            {item.expanded ? t('Hide the interrupted part') : t('Show the interrupted part')}
+          </span>
+        </span>
+        <ChevronRight
+          className={cn('h-3 w-3 shrink-0 transition-transform', item.expanded && 'rotate-90')}
+        />
+      </button>
+      {item.expanded && (
+        <div className="t-acc-reveal mt-1 mb-1.5 ml-5 space-y-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs">
+          {item.thinking && (
+            <p className={cn('whitespace-pre-wrap break-words', SUBTLE_TEXT)}>{item.thinking}</p>
+          )}
+          {item.text && (
+            <p className="whitespace-pre-wrap break-words text-foreground">{item.text}</p>
+          )}
+          {item.tools.map((tool, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 半截回复只读、顺序固定
             <p key={i} className={cn('truncate', SUBTLE_TEXT)}>
               {toolLabel(tool.name, t)} {tool.summary}
             </p>
