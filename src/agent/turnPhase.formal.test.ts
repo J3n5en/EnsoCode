@@ -961,21 +961,10 @@ function report(result: Result): string {
   return [...result.counterexamples.values()].join('\n\n');
 }
 
-/** 已知发现只允许恰好这一类反例：修好了会变红，混进新类别也会变红 */
-function expectOnlyKnown(result: Result, kind: string): void {
-  expect(
-    [...result.counterexamples.keys()],
-    `已知发现的反例集合变了。修好了就把触发条件并入 core 并删掉本测试；多出新类别先按 SKILL 判断真 bug 还是模型错。\n${report(result)}`
-  ).toEqual([kind]);
-}
-
 const FULL = process.env.ENSO_FORMAL_FULL === '1';
-const none: Budget = { errors: 0, overflows: 0, memCompactions: 0, beforeSettle: 0 };
-
 /**
  * 桌面 renderer 只在非 running 时发 prompt（running 时进本地队列）；其他发送方（bots、定时任务、
  * enso-server run、跨窗口竞态）随时可能发。僵尸时限先到点即 abort 后工具 5 秒内没停下。
- * 已知发现的触发条件（见文件末）从核心配置里拿掉：随时发送 + 打断重试。
  */
 const core: { name: string; cfg: Config; min: number }[] = [
   {
@@ -1007,11 +996,11 @@ const core: { name: string; cfg: Config; min: number }[] = [
       ]
     : []),
   {
-    name: '随时发送：排队消息遇上中断、重试、溢出压缩续跑与 agent_before_settle 续跑',
+    name: '随时发送：排队消息遇上中断、重试与取消重试、溢出压缩续跑与 agent_before_settle 续跑',
     cfg: {
       prompts: 2,
       aborts: 1,
-      abortRetries: 0,
+      abortRetries: 1,
       budget: { errors: FULL ? 2 : 1, overflows: 1, memCompactions: 1, beforeSettle: 1 },
       sendWhileRunning: true,
       zombie: false,
@@ -1047,16 +1036,4 @@ describe('worker 轮次相位（有界穷举，驱动真实 SessionSupervisor）
     },
     FULL ? 900_000 : 120_000
   );
-
-  it('已知发现：取消重试后 pi 带着排队 prompt 续跑，已发出的 turn-failed 之后同一轮又开跑', async () => {
-    const result = await explore({
-      prompts: 2,
-      aborts: 0,
-      abortRetries: 1,
-      budget: { ...none, errors: 1 },
-      sendWhileRunning: true,
-      zombie: false,
-    });
-    expectOnlyKnown(result, '终态 turn-failed 之后 pi 仍为第 # 轮发出 agent_start');
-  }, 60_000);
 });

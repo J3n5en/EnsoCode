@@ -2079,7 +2079,7 @@ export class SessionSupervisor {
         return;
       }
       case 'abort-retry':
-        this.must(command.identity).session.abortRetry();
+        this.cancelRetry(this.must(command.identity));
         return;
       case 'withdraw-steer': {
         const managed = this.must(command.identity);
@@ -5344,9 +5344,19 @@ export class SessionSupervisor {
 
   /** 重试倒计时中则打断并等待本轮收尾；返回是否发生了打断（用户输入接管重试） */
   private async interruptRetryIfAny(managed: ManagedSession): Promise<boolean> {
-    if (!managed.session.isRetrying) return false;
-    managed.session.abortRetry();
+    if (!this.cancelRetry(managed)) return false;
     await managed.session.waitForIdle();
+    return true;
+  }
+
+  /**
+   * 取消重试即放弃这一轮，auto_retry_end(false) 按失败收口。pi 取消重试后见到排队消息会在同一轮
+   * 续跑，所以先撤回排进来的 prompt。返回是否真的取消了重试。
+   */
+  private cancelRetry(managed: ManagedSession): boolean {
+    if (!managed.session.isRetrying) return false;
+    this.withdrawQueuedPrompts(managed);
+    managed.session.abortRetry();
     return true;
   }
 

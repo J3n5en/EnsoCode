@@ -318,6 +318,38 @@ describe('worker 轮次相位：formal 模型曾报出的反例', () => {
     await supervisor.shutdown();
   });
 
+  it('排队 prompt 遇上 503 重试被取消：撤回并回执，这一轮只有一个终态，终态之后 pi 不再为它开跑', async () => {
+    const { events, supervisor, pi, prompt } = await spawn();
+    prompt('first', 'd1');
+    await settle();
+    prompt('second', 'd2');
+    await settle();
+
+    // 503：agent_end(willRetry) → _prepareRetry 发 auto_retry_start，进入退避
+    pi.reply('error');
+    pi.emit({ type: 'agent_end', messages: [], willRetry: true });
+    pi.emit({
+      type: 'auto_retry_start',
+      attempt: 1,
+      maxAttempts: 1,
+      delayMs: 1000,
+      errorMessage: '503 Service Unavailable',
+    });
+    pi.isRetrying = true;
+    await settle();
+
+    supervisor.handleCommand({ type: 'abort-retry', identity: parent });
+    await settle();
+
+    const all = terminals(events);
+    expect({
+      terminals: all.map(({ type }) => type),
+      rejected: rejected(events),
+      piStartsAfterTerminal: pi.agentStarts.filter((at) => at > (all[0]?.index ?? Infinity)).length,
+    }).toEqual({ terminals: ['turn-failed'], rejected: ['d2'], piStartsAfterTerminal: 0 });
+    await supervisor.shutdown();
+  });
+
   it('中断后 5 秒内再发 prompt 且工具不响应：prompt 按 deliveryId 回执，被中断的那一轮只有一个带 aborted 的终态', async () => {
     const { events, supervisor, pi, prompt } = await spawn();
     prompt('first', 'd1');

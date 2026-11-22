@@ -85,6 +85,7 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 | `case 'prompt'` 在 `let activityAt` 前加 `if (managed.session.isStreaming) { await this.steerTracked(...); return; }` | idle 投影但 pi 仍在跑时插话 | p1 还在准备时发 p2：`p2 没进 pi，未送达回执 0 次` |
 | `case 'prompt'` 僵尸超时分支的 `emitDeliveryRejected(...)` 换成 `this.failTurn(managed, 'zombie')` | 已知发现 3 修复之前（当时还带 `undelivered`） | 中断后工具 5 秒内没停、期间发 p2：`第 1 轮收到 2 个终态：turn-failed(aborted)、turn-completed` |
 | `case 'abort'` 删掉 `withdrawQueuedPrompts` 那一行 | 已知发现 1 修复之前 | 随时发送时 p2 排进活轮后中断：`p2 没进 pi，未送达回执 0 次` |
+| `cancelRetry` 删掉 `withdrawQueuedPrompts` 那一行 | 已知发现 2 修复之前 | p2 排进活轮、p1 遇 503 后取消重试：`终态 turn-failed 之后 pi 仍为第 1 轮发出 agent_start` |
 
 ## 范围
 
@@ -102,6 +103,6 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 
 ## 已知发现
 
-一条测试断言对应配置恰好只有这一类反例。修复后或混进新类别时对应测试会变红，修复的话把触发条件并入 `core` 配置并删掉那条测试。
+暂无。曾报出的三条（僵尸超时清掉中断标记、排进活轮的 prompt 遇上中断、取消重试后同轮续跑）已修，触发条件已并入 `core`，确定性复现在 `src/agent/supervisor.turnFindings.test.ts`，自检表最后三行对应它们。
 
-1. 取消重试后，pi 带着排队 prompt 在同一轮续跑。p2 排进活轮后 p1 遇 503 进入重试倒计时，用户取消重试或新 prompt 经 `interruptRetryIfAny` 打断重试。`auto_retry_end(false)` 让 supervisor `failTurn`，而 `_handlePostAgentRun` 见到排队消息继续 `agent.continue()`。用户看到失败、输入解锁，agent 随后又自己跑起来，该轮最后再收到一个 `turn-completed`。
+再报出真 bug 又不能当场修时：从 `core` 拿掉触发条件，另加一条断言该配置恰好只有这一类反例的测试，并记在本节；修好后并回 `core`、删掉那条测试。
