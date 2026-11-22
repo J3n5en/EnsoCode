@@ -514,6 +514,31 @@ it('剪贴板异常返回结果', async () => {
     error: 'unavailable',
   });
 });
+it('聊天链接批量判定：按会话 cwd 校验存在性，SSH 与错会话一律判断不了', async () => {
+  mkdirSync(path.join(root, 'src'));
+  writeFileSync(path.join(root, 'src/a.ts'), '');
+  expect(
+    await invoke(IPC_CHANNELS.FILES_RESOLVE_LINKS, { rels: ['src/a.ts', 'src', 'x.ts', '../y'] })
+  ).toEqual({
+    ok: true,
+    items: [{ rel: 'src/a.ts', kind: 'file' }, { rel: 'src', kind: 'dir' }, null, null],
+  });
+  expect(await invoke(IPC_CHANNELS.FILES_RESOLVE_LINKS, { rels: 'src/a.ts' })).toEqual({
+    ok: false,
+    error: 'unavailable',
+  });
+  remote();
+  expect(await invoke(IPC_CHANNELS.FILES_RESOLVE_LINKS, { rels: ['src/a.ts'] })).toEqual({
+    ok: false,
+    error: 'unsupported',
+  });
+  mocks.project.kind = 'local';
+  mocks.conversation.projectId = 'other';
+  expect(await invoke(IPC_CHANNELS.FILES_RESOLVE_LINKS, { rels: ['src/a.ts'] })).toEqual({
+    ok: false,
+    error: 'unavailable',
+  });
+});
 it('工作区搜索拒绝不匹配的会话且不跑 rg', async () => {
   mocks.conversation.projectId = 'other';
   expect(

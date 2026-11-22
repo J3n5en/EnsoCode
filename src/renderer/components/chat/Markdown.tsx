@@ -1,7 +1,7 @@
 import { previewImageMime } from '@shared/markdownPreviewImage';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import type { Element, ElementContent } from 'hast';
-import { ArrowDown, ArrowUp, FolderOpen, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Copy, FolderOpen, Search } from 'lucide-react';
 import type { Root } from 'mdast';
 import {
   Children,
@@ -12,6 +12,7 @@ import {
   type ReactElement,
   type ReactNode,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -28,6 +29,7 @@ import {
 } from '@/components/ui/context-menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { copyText } from '@/lib/copyText';
 import { IS_MAC } from '@/lib/keybindings';
 import { isRemoteClient } from '@/lib/remoteClient';
 import { openSidePanelBrowserUrl, openSidePanelFile } from '@/lib/sidePanelDock';
@@ -38,6 +40,7 @@ import { PluginBlock, PluginMessageLeaf } from '../../plugins/slots';
 import { usePluginSlotsVersion } from '../../plugins/usePluginSlots';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
+import { confirmFileLink, useFileLink } from './fileLinkResolver';
 import { highlightNode } from './highlightQuery';
 import { JsonTree } from './JsonTree';
 import { MermaidRenderer } from './MermaidRenderer';
@@ -107,13 +110,16 @@ function remarkGithubAlerts() {
 }
 
 /**
- * 仓库内路径判定（行内 code 渲染成 chip，无链接上下文时复制）：文件需含目录分隔或 file.ext:line 形式，
- * 点开 Files 面板；目录只认末尾带 `/` 的相对路径（避免 and/or、TCP/IP 误判；纯 `./`、`../` 不算），
- * 点开系统文件管理器，远程客户端调不了宿主文件管理器，不渲染成 chip。
+ * 仓库内路径候选（行内 code）：文件需含目录分隔或 file.ext:line 形式，点开 Files 面板；
+ * 目录只认末尾带 `/` 的相对路径（避免 and/or、TCP/IP 误判；纯 `./`、`../` 不算），点开系统文件管理器。
+ * 候选先经 Main 判定存在才渲染成 chip；打不开（不存在、越界、SSH、远程客户端的目录、无链接上下文）
+ * 显示成普通代码，点击复制原文。
  */
 const FILE_PATH_RE =
   /^(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,8}(?::\d+(?:-\d+)?)?$|^[\w.-]+\.\w{1,8}:\d+(?:-\d+)?$/;
 const DIR_PATH_RE = /^(?!(?:\.+\/)+$)(?:[\w.@-]+\/)+$/;
+const CODE_CLASS =
+  'rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)]';
 
 const REMARK_PLUGINS = [remarkGfm, remarkGithubAlerts];
 
@@ -144,6 +150,90 @@ export interface MarkdownLinkContextValue {
  * 本地聊天链接的权限上下文；Files 预览不提供它，保持原有外链行为。
  */
 export const MarkdownLinkContext = createContext<MarkdownLinkContextValue | null>(null);
+
+/** 本条消息是否可以发起文件链接判定：接近视口且不在流式输出中 */
+const FileLinkGateContext = createContext(true);
+
+/** 打不开的路径：普通代码样式，悬停显示复制图标，点击复制原文；拖选文字时不复制 */
+function CopyableCode({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const selection = window.getSelection?.();
+    if (selection && !selection.isCollapsed && selection.toString()) return;
+    // copyText 内同步调用 clipboard.writeText，保住 iOS 的用户手势
+    void copyText(text).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+      addToast({ type: 'success', title: t('Copied') });
+    });
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      title={t('Copy')}
+      data-copy-code=""
+      className="group/copy relative cursor-copy"
+      onClick={copy}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          copy();
+        }
+      }}
+    >
+      <code className={CODE_CLASS}>{text}</code>
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute -top-2.5 -right-2 inline-flex rounded-[4px] border border-border bg-background p-0.5 text-muted-foreground shadow-sm transition-opacity',
+          copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'
+        )}
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      </span>
+    </span>
+  );
+}
+
+function nearestScroller(node: HTMLElement): HTMLElement | null {
+  for (let element = node.parentElement; element; element = element.parentElement) {
+    const { overflowY } = getComputedStyle(element);
+    if (overflowY === 'auto' || overflowY === 'scroll') return element;
+  }
+  return null;
+}
+
+/** 进入滚动容器视口前后各一屏范围后置 true 并保持；不支持 IntersectionObserver 时直接 true */
+function useNearViewport(enabled: boolean) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const [near, setNear] = useState(() => typeof IntersectionObserver !== 'function');
+  useEffect(() => {
+    if (!enabled || !node || near) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
+      },
+      { root: nearestScroller(node), rootMargin: '100% 0px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [enabled, node, near]);
+  return [setNode, near] as const;
+}
+
+/** 非流式立即可用；流式中正文停顿 300ms 才算稳定 */
+function useSettled(text: string, streaming: boolean): boolean {
+  const [settled, setSettled] = useState<string | null>(null);
+  useEffect(() => {
+    if (!streaming) return;
+    const id = setTimeout(() => setSettled(text), 300);
+    return () => clearTimeout(id);
+  }, [text, streaming]);
+  return !streaming || settled === text;
+}
 
 function revealErrorDescription(error: string, t: (key: string) => string): string {
   switch (error) {
@@ -450,6 +540,13 @@ function MarkdownAnchor({
   );
   const local = classification.kind === 'local' && linkContext !== null;
   const codeText = local ? soleInlineCodeText(node) : null;
+  const gate = useContext(FileLinkGateContext);
+  // 工作区内的本地链接先判定能否打开；工作区外的绝对路径沿用只定位（#157）
+  const rel =
+    local && !external && classification.kind === 'local'
+      ? toWorkspaceRelativePath(classification.path, linkContext?.cwd) || null
+      : null;
+  const link = useFileLink(rel ? linkContext : null, rel, gate);
   const builtinBrowser = useSettingsStore(
     (state) =>
       state.openLinksInBuiltinBrowser &&
@@ -478,7 +575,22 @@ function MarkdownAnchor({
       return;
     }
     event.preventDefault();
-    if (local) void openLocal(false);
+    if (local) void confirmThenOpen();
+  };
+
+  const confirmThenOpen = async () => {
+    if (rel && linkContext) {
+      const state = await confirmFileLink(linkContext, rel);
+      if (state.status !== 'ok') {
+        addToast({
+          type: 'error',
+          title: t('Could not open local file link'),
+          description: revealErrorDescription('unavailable', t),
+        });
+        return;
+      }
+    }
+    await openLocal(false);
   };
 
   const anchorElement = (
@@ -500,7 +612,7 @@ function MarkdownAnchor({
       onKeyDown={(event) => {
         if (local && event.key === 'Enter') {
           event.preventDefault();
-          void openLocal(false);
+          void confirmThenOpen();
         }
       }}
     >
@@ -508,6 +620,15 @@ function MarkdownAnchor({
     </a>
   );
   if (!local || classification.kind !== 'local' || !linkContext) return anchorElement;
+  if (!external && link?.status !== 'ok') {
+    // 判定中：中性样式；打不开（含越界）：普通文本，inline code 链接可点击复制
+    if (codeText === null) return <span>{children}</span>;
+    return rel && !link ? (
+      <code className={CODE_CLASS}>{codeText}</code>
+    ) : (
+      <CopyableCode text={codeText} />
+    );
+  }
   // 工作区外：菜单不提供按设置打开的应用，只保留定位
   const anchor = external ? (
     <FileLinkContextMenu
@@ -572,6 +693,65 @@ export function markdownUrlTransform(value: string, key?: string, allowLocal = t
 }
 
 const P_CLASS = 'my-2 leading-[1.625] first:mt-0 last:mb-0';
+
+function InlineCode({ children }: { children?: ReactNode }) {
+  const { t } = useI18n();
+  const linkContext = useContext(MarkdownLinkContext);
+  const gate = useContext(FileLinkGateContext);
+  const value = typeof children === 'string' ? children : '';
+  const candidate = DIR_PATH_RE.test(value) || FILE_PATH_RE.test(value);
+  const { path, line } = splitFileLineRef(value);
+  // 远程客户端调不了宿主文件管理器：目录不判定，直接按打不开处理
+  const rel =
+    candidate && linkContext && !(DIR_PATH_RE.test(value) && isRemoteClient())
+      ? toWorkspaceRelativePath(path, linkContext.cwd) || null
+      : null;
+  const link = useFileLink(rel ? linkContext : null, rel, gate);
+  if (!candidate) return <code className={CODE_CLASS}>{children}</code>;
+  if (!rel || !linkContext || link?.status === 'missing') return <CopyableCode text={value} />;
+  if (!link) return <code className={CODE_CLASS}>{children}</code>;
+  if (link.kind === 'dir' && isRemoteClient()) return <CopyableCode text={value} />;
+
+  const fail = (error: string) =>
+    addToast({
+      type: 'error',
+      title: t('Could not open local file link'),
+      description: revealErrorDescription(error, t),
+    });
+  const onClick = async () => {
+    const state = await confirmFileLink(linkContext, rel);
+    if (state.status !== 'ok') {
+      fail('unavailable');
+      return;
+    }
+    if (state.kind === 'file') {
+      openSidePanelFile(linkContext.conversationId, state.rel, line);
+      return;
+    }
+    try {
+      const result = await window.electronAPI.workspaceFiles.reveal({
+        conversationId: linkContext.conversationId,
+        projectId: linkContext.projectId,
+        rel: state.rel,
+      });
+      if (!result.ok) fail(result.error);
+    } catch (error: unknown) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+  };
+  return (
+    <FileLinkContextMenu context={linkContext} file={link.rel}>
+      <button
+        type="button"
+        onClick={() => void onClick()}
+        title={value}
+        className="inline-flex max-w-full items-center rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px align-baseline font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)] text-brand transition-colors hover:bg-muted"
+      >
+        <span className="truncate">{value}</span>
+      </button>
+    </FileLinkContextMenu>
+  );
+}
 const H1_CLASS =
   'mt-4 mb-2 text-(length:--chat-h1-size) leading-tight [font-weight:var(--chat-h1-weight)]';
 const H2_CLASS =
@@ -791,72 +971,7 @@ export const markdownComponents: Components = {
       </blockquote>
     );
   },
-  code: ({ children }) => {
-    const { t } = useI18n();
-    const linkContext = useContext(MarkdownLinkContext);
-    const value = typeof children === 'string' ? children : '';
-    const dir = DIR_PATH_RE.test(value) && !isRemoteClient();
-    if (dir || FILE_PATH_RE.test(value)) {
-      const { path, line } = splitFileLineRef(value);
-      const onClick = () => {
-        if (!linkContext) {
-          void navigator.clipboard.writeText(path);
-          return;
-        }
-        const rel = toWorkspaceRelativePath(path, linkContext.cwd);
-        if (!rel) {
-          addToast({
-            type: 'error',
-            title: t('Could not open local file link'),
-            description: t('The link is outside the current workspace.'),
-          });
-          return;
-        }
-        if (!dir) {
-          openSidePanelFile(linkContext.conversationId, rel, line);
-          return;
-        }
-        const fail = (error: string) =>
-          addToast({
-            type: 'error',
-            title: t('Could not open local file link'),
-            description: revealErrorDescription(error, t),
-          });
-        window.electronAPI.workspaceFiles
-          .reveal({
-            conversationId: linkContext.conversationId,
-            projectId: linkContext.projectId,
-            rel,
-          })
-          .then(
-            (result) => !result.ok && fail(result.error),
-            (error: unknown) => fail(error instanceof Error ? error.message : String(error))
-          );
-      };
-      const chip = (
-        <button
-          type="button"
-          onClick={onClick}
-          title={value}
-          className="inline-flex max-w-full items-center rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px align-baseline font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)] text-brand transition-colors hover:bg-muted"
-        >
-          <span className="truncate">{value}</span>
-        </button>
-      );
-      return linkContext ? (
-        <FileLinkContextMenu context={linkContext} file={path}>
-          {chip}
-        </FileLinkContextMenu>
-      ) : (
-        chip
-      );
-    }
-    return (
-      <code className="rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)]">
-        {children}
-      </code>
-    );
-  },
+  code: InlineCode,
   pre: ({ node }) => {
     const { streaming } = useContext(MarkdownCtx);
     const codeNode = node?.children?.[0];
@@ -1099,6 +1214,9 @@ function MarkdownView({
 }) {
   const linkContext = useContext(MarkdownLinkContext);
   const allowLocalMarkdownLinks = linkContext !== null;
+  const [viewportRef, near] = useNearViewport(allowLocalMarkdownLinks);
+  const settled = useSettled(text, streaming);
+  const gate = near && settled;
   const ctx = useMemo(
     () => ({ text, streaming, searchQuery, activeNth, ...(leafSlot ? { leafSlot } : {}) }),
     [text, streaming, searchQuery, activeNth, leafSlot]
@@ -1109,15 +1227,20 @@ function MarkdownView({
   );
   return (
     <MarkdownCtx.Provider value={ctx}>
-      <div className={cn('[font-weight:var(--chat-body-weight)]', streaming && 't-stream-live')}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          components={leafSlot ? leafMarkdownComponents : markdownComponents}
-          urlTransform={urlTransform}
+      <FileLinkGateContext.Provider value={gate}>
+        <div
+          ref={viewportRef}
+          className={cn('[font-weight:var(--chat-body-weight)]', streaming && 't-stream-live')}
         >
-          {text}
-        </ReactMarkdown>
-      </div>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            components={leafSlot ? leafMarkdownComponents : markdownComponents}
+            urlTransform={urlTransform}
+          >
+            {text}
+          </ReactMarkdown>
+        </div>
+      </FileLinkGateContext.Provider>
     </MarkdownCtx.Provider>
   );
 }

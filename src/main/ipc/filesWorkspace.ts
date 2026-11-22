@@ -15,6 +15,7 @@ import type {
   FilesOpenResult,
   FilesReadImageResult,
   FilesReadRelResult,
+  FilesResolveLinksResult,
   FilesWatchEvent,
   FilesWatchResult,
   FilesWriteResult,
@@ -51,6 +52,7 @@ import {
   openLocalWorkspaceFileContext,
 } from '../services/workspaceFileOpening';
 import { searchWorkspaceFiles } from '../services/workspaceFileSearch';
+import { resolveWorkspaceLinks } from '../services/workspaceLinkResolve';
 import { getSourceAuthorityRegistry } from './agent';
 import {
   readContextMenuOpen,
@@ -755,4 +757,23 @@ export function registerFilesWorkspaceHandlers(): void {
       if (workspaceSearches.get(key) === controller) workspaceSearches.delete(key);
     }
   });
+
+  // 聊天文件链接渲染前的批量判定；SSH 项目判断不了，renderer 一律按打不开处理
+  handle(
+    IPC_CHANNELS.FILES_RESOLVE_LINKS,
+    async (_event, request: unknown): Promise<FilesResolveLinksResult> => {
+      const parsed = parseRequest(request);
+      const rels =
+        typeof request === 'object' && request !== null && 'rels' in request
+          ? request.rels
+          : undefined;
+      if (!parsed || !Array.isArray(rels)) return { ok: false, error: 'unavailable' };
+      if (getSourceAuthorityRegistry()?.project(parsed.projectId)?.kind === 'ssh')
+        return { ok: false, error: 'unsupported' };
+      if (sessionWorktreeBusy(parsed.conversationId)) return { ok: false, error: 'unavailable' };
+      const cwd = resolveLocalCwd(parsed.conversationId, parsed.projectId);
+      if (!cwd) return { ok: false, error: 'unavailable' };
+      return { ok: true, items: await resolveWorkspaceLinks(cwd, rels) };
+    }
+  );
 }

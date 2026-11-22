@@ -23,6 +23,7 @@ import {
 import { useSettingsStore } from '@/stores/settings';
 import { ChatFindBar, consumePendingFindQuery, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { timelineSearchHits } from './chatSearch';
+import { markFileLinksStale } from './fileLinkResolver';
 import { MarkdownLinkContext } from './Markdown';
 import { MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 
@@ -261,17 +262,17 @@ export function ChatSessionTimeline({
     return () => window.removeEventListener('keydown', onKey);
   }, [findOpen, stepFind]);
 
-  const markdownLinkContext = useMemo(
-    () =>
-      projectId
-        ? {
-            conversationId,
-            projectId,
-            ...(cwd ? { cwd } : {}),
-          }
-        : null,
-    [conversationId, cwd, projectId]
-  );
+  const markdownLinkContext = useMemo(() => {
+    // 进入（切换到）会话：能打开的链接缓存在子组件挂载时后台复查
+    markFileLinksStale();
+    return projectId
+      ? {
+          conversationId,
+          projectId,
+          ...(cwd ? { cwd } : {}),
+        }
+      : null;
+  }, [conversationId, cwd, projectId]);
 
   /*
    * 全量渲染时（远程桌面）上滑分页的滚动锚定：iOS Safari 不支持 overflow-anchor，
