@@ -5,6 +5,7 @@ import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
+import { desktopStubs } from './src/desktopStubs';
 import { injectShellManifest, shellFiles, stampShellVersion } from './src/shellPrecache';
 import { startupImageLinks } from './src/startupImages';
 
@@ -25,6 +26,14 @@ const commit = (() => {
 
 const renderer = path.resolve(import.meta.dirname, '../../src/renderer');
 const stub = (name: string) => path.resolve(import.meta.dirname, `src/stubs/${name}`);
+
+/** 复用桌面聊天组件，但把它们对宿主的依赖换成 PWA 桩（桌面源码零改动）：`@/` 模块名 → [真实文件, 桩] */
+const stubbed: [string, string, string][] = [
+  ['i18n', 'i18n.ts', 'i18n.tsx'],
+  ['stores/settings', 'stores/settings/index.ts', 'settings-store.ts'],
+  ['stores/sessions', 'stores/sessions/index.ts', 'sessions-store.ts'],
+  ['lib/ghosttyTheme', 'lib/ghosttyTheme.ts', 'ghostty-theme.ts'],
+];
 
 /** iOS 启动图（public/splash，scripts/startup-images.ts 生成）：两个入口页都要声明，主屏打开哪个都能用上 */
 const startupImages = (): Plugin => ({
@@ -59,7 +68,15 @@ const shellPrecache = (): Plugin => {
 
 export default defineConfig({
   define: { __COMMIT__: JSON.stringify(commit) },
-  plugins: [react(), tailwindcss(), startupImages(), shellPrecache()],
+  plugins: [
+    desktopStubs(
+      Object.fromEntries(stubbed.map(([, real, name]) => [path.join(renderer, real), stub(name)]))
+    ),
+    react(),
+    tailwindcss(),
+    startupImages(),
+    shellPrecache(),
+  ],
   resolve: {
     // 数组形式：按顺序匹配，桩必须排在通配的 '@' 之前
     alias: [
@@ -67,11 +84,11 @@ export default defineConfig({
         find: '@enso/pair',
         replacement: path.resolve(import.meta.dirname, '../pair/src/index.ts'),
       },
-      // 复用桌面聊天组件，但把它们对宿主的依赖换成 PWA 桩（桌面源码零改动）
-      { find: /^@\/i18n$/, replacement: stub('i18n.tsx') },
-      { find: /^@\/stores\/settings$/, replacement: stub('settings-store.ts') },
-      { find: /^@\/stores\/sessions$/, replacement: stub('sessions-store.ts') },
-      { find: /^@\/lib\/ghosttyTheme$/, replacement: stub('ghostty-theme.ts') },
+      // 只认整名：字符串形式会按前缀把 @/stores/sessions/timeline 也换掉
+      ...stubbed.map(([name, , file]) => ({
+        find: new RegExp(`^@/${name}$`),
+        replacement: stub(file),
+      })),
       { find: /^@\//, replacement: `${renderer}/` },
       { find: '@shared', replacement: path.resolve(import.meta.dirname, '../../src/shared') },
     ],

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
+import { useSessionsStore } from '@/stores/sessions';
+import { useSettingsStore } from '@/stores/settings';
 import { useSessionPeek } from './sessionPeek';
-import { useSessionsStore } from './sessions';
-import { useSettingsStore } from './settings';
 
 export interface SecretaryReturn {
   /** 发起跳转的秘书会话 */

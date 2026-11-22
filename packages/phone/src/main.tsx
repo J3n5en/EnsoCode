@@ -1,3 +1,4 @@
+import './stubs/install-electron-api';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
@@ -6,7 +7,6 @@ import { watchShellUpdate } from './shellUpdate';
 import { installStatusBarOverlapGuard } from './statusBarOverlap';
 import { loadActiveDeviceId, loadDevices } from './storage';
 import { requestPersistence, syncPairedMark } from './storageGuard';
-import { installElectronApiShim } from './stubs/electron-api';
 import { initTheme } from './theme';
 import { launchTarget, loadUiMode, saveUiMode } from './uiMode';
 import './styles.css';
@@ -26,9 +26,6 @@ else if (devices.length > 0) {
   void requestPersistence();
   void syncPairedMark(true);
 }
-
-// 复用的桌面组件里有少量 electronAPI 调用，先装降级实现（必须早于组件加载）
-installElectronApiShim();
 
 // 主题：本地覆盖 > 桌面下发 > 跟随系统（桌面偏好经 client 的 appearance 帧到达）
 initTheme();
