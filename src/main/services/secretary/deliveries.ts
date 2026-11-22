@@ -21,6 +21,8 @@ export interface DeliveryPorts {
   rows(): Readonly<Record<string, Record<string, unknown>>>;
   conversations(): readonly ConversationAuthority[];
   projects(): readonly ProjectAuthority[];
+  /** projectId → 用户起的别名；缺省按无别名 */
+  projectAliases?(): Readonly<Record<string, string>>;
   status(conversationId: string): SecretarySessionStatus;
   alive(conversationId: string): boolean;
   prompt(conversationId: string, text: string, deliveryId: string): { ok: boolean; error?: string };

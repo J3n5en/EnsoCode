@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { projectNameFromPath } from '@shared/projectName';
 import {
   describeForwardedImages,
   type ForwardedImage,
@@ -76,6 +75,7 @@ import {
   unfollowTarget,
 } from './following';
 import { realImageViewDeps } from './imageView';
+import { projectAliasesFromSettings, secretaryProjectName } from './projectLabel';
 import { type SavedProposal, saveProposalRecord } from './proposals';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
@@ -169,6 +169,8 @@ export interface SecretaryDispatchPorts {
   saveTodos(todos: SecretaryTodo[]): void;
   audit(entry: SecretaryAuditEntry): void;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
+  /** projectId → 用户起的别名；缺省按无别名 */
+  projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
@@ -690,7 +692,7 @@ async function sessionLabelOf(
     ? (await ports.projects()).find((candidate) => candidate.projectId === record.projectId)
     : undefined;
   return sessionLabel(
-    project ? projectNameFromPath(project.canonicalPath) : '',
+    secretaryProjectName(project, (await ports.projectAliases?.()) ?? {}),
     typeof row?.title === 'string' ? row.title : '',
     conversationId
   );
@@ -1625,16 +1627,26 @@ export function revokeTakeover(
 }
 
 export async function listTakeovers(
-  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects'>
+  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects' | 'projectAliases'>
 ): Promise<SecretaryTakeoverView[]> {
-  return takeoverViews(ports.dispatchFile(), await ports.rows(), await ports.projects());
+  return takeoverViews(
+    ports.dispatchFile(),
+    await ports.rows(),
+    await ports.projects(),
+    (await ports.projectAliases?.()) ?? {}
+  );
 }
 
 /** 「不再跟踪」名单：设置页列出，用户可以逐个移除 */
 export async function listUntracked(
-  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects'>
+  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects' | 'projectAliases'>
 ): Promise<SecretaryUntrackedView[]> {
-  return untrackedViews(ports.dispatchFile(), await ports.rows(), await ports.projects());
+  return untrackedViews(
+    ports.dispatchFile(),
+    await ports.rows(),
+    await ports.projects(),
+    (await ports.projectAliases?.()) ?? {}
+  );
 }
 
 /** 把会话从「不再跟踪」名单里移除：只是恢复范围权限，不建立接管记录 */
@@ -2195,6 +2207,7 @@ export function createSecretaryDispatchHandlers(
       const projects = visibleProjects(await ports.projects(), profile);
       if (projectId && !projects.some((project) => project.projectId === projectId))
         return { ok: false, error: 'not-found' };
+      const aliases = (await ports.projectAliases?.()) ?? {};
       const rows = await ports.rows();
       const file = ports.dispatchFile();
       const todos = [];
@@ -2228,9 +2241,7 @@ export function createSecretaryDispatchHandlers(
           text: wrapUntrusted(`todo:${todo.id}`, redactSecrets(todo.text)),
           status: phase,
           ...(todo.projectId ? { projectId: todo.projectId } : {}),
-          ...(project
-            ? { projectName: redactSecrets(projectNameFromPath(project.canonicalPath)) }
-            : {}),
+          ...(project ? { projectName: secretaryProjectName(project, aliases) } : {}),
           ...(todo.dueAt !== undefined ? { dueAt: todo.dueAt } : {}),
           ...(todo.conversationId ? { conversationId: todo.conversationId } : {}),
           ...(session ? { sessionState: session.present ? session.state : 'gone' } : {}),
@@ -2848,6 +2859,7 @@ export interface SecretaryStatePorts {
   todos(): MaybePromise<SecretaryTodo[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
+  projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
 }
 
@@ -2864,7 +2876,7 @@ export async function buildSecretaryState(
     persona: await ports.persona(),
     board,
     proposals: loaded.file.proposals,
-    takeovers: takeoverViews(loaded.file, loaded.rows, loaded.projects),
+    takeovers: takeoverViews(loaded.file, loaded.rows, loaded.projects, loaded.aliases),
   };
 }
 
@@ -2886,11 +2898,13 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
   file: SecretaryDispatchFile;
   rows: Record<string, Record<string, unknown>>;
   projects: readonly ProjectAuthority[];
+  aliases: Readonly<Record<string, string>>;
   board: SecretaryBoard;
 }> {
   const file = ports.dispatchFile();
   const rows = await ports.rows();
   const projects = await ports.projects();
+  const aliases = (await ports.projectAliases?.()) ?? {};
   const statuses: Record<string, SecretarySessionStatus> = {};
   for (const record of Object.values(file.dispatched)) {
     if (!rows[record.conversationId]) continue;
@@ -2900,7 +2914,8 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
     file,
     rows,
     projects,
-    board: buildBoard(file, { rows, statuses, projects, todos: await ports.todos() }),
+    aliases,
+    board: buildBoard(file, { rows, statuses, projects, aliases, todos: await ports.todos() }),
   };
 }
 
@@ -2931,6 +2946,9 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     cleanup: realCleanupPorts(ctx),
     projects: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
+    async projectAliases() {
+      return projectAliasesFromSettings((await import('../../ipc/settings')).readSettings());
+    },
     conversations: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().conversations ??
       [],

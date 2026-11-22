@@ -1,4 +1,3 @@
-import { projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   chunkMessageText,
@@ -22,6 +21,7 @@ import {
 } from '../sessionActivity';
 import { currentBranch, repoIsClean } from '../worktree/service';
 import { leftoverReason, taskIsPersistent } from './leftover';
+import { projectAliasesFromSettings, secretaryProjectNames } from './projectLabel';
 import {
   REPO_STATUS_COMMIT_DEFAULT,
   REPO_STATUS_COMMIT_MAX,
@@ -35,6 +35,8 @@ import {
 import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpHandler, SecretaryOpResult } from './tools';
+
+export { projectAliasesFromSettings };
 
 const DEFAULT_SESSION_LIMIT = 50;
 const MAX_SESSION_LIMIT = 100;
@@ -57,6 +59,8 @@ type MaybePromise<T> = T | Promise<T>;
 /** Main 侧的只读数据源；测试注入假实现，生产走下面的 defaultPorts */
 export interface SecretaryReadPorts {
   projects(): MaybePromise<readonly ProjectAuthority[]>;
+  /** projectId → 用户起的别名；别名只存在 settings.json 的项目列表里，不在权威注册表 */
+  projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
@@ -279,9 +283,10 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
   return {
     async project_list() {
       const { projects, sessions } = await collect(ports);
+      const aliases = (await ports.projectAliases?.()) ?? {};
       const rows = projects.map((project) => ({
         projectId: project.projectId,
-        name: redactSecrets(projectNameFromPath(project.canonicalPath)),
+        ...secretaryProjectNames(project, aliases),
         kind: projectKind(project),
         path: redactSecrets(project.canonicalPath),
         lastActivityAt: lastActivity(sessions, project.projectId),
@@ -309,13 +314,14 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const { projects, sessions } = await collect(ports);
       const project = projects.find((candidate) => candidate.projectId === projectId);
       if (!project) return notFound;
+      const aliases = (await ports.projectAliases?.()) ?? {};
       // ssh 项目的分支在远端，本机跑 git 只会得到错误
       const git = project.kind === 'ssh' ? null : await ports.git(project.canonicalPath);
       return {
         ok: true,
         result: {
           projectId,
-          name: redactSecrets(projectNameFromPath(project.canonicalPath)),
+          ...secretaryProjectNames(project, aliases),
           kind: projectKind(project),
           path: redactSecrets(project.canonicalPath),
           lastActivityAt: lastActivity(sessions, projectId),
@@ -530,6 +536,9 @@ export function readPortsFor(
     async projects() {
       const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();
       return registry?.projection().projects ?? [];
+    },
+    async projectAliases() {
+      return projectAliasesFromSettings((await import('../../ipc/settings')).readSettings());
     },
     async conversations() {
       const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();

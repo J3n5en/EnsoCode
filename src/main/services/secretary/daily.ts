@@ -1,4 +1,3 @@
-import { projectNameFromPath } from '@shared/projectName';
 import {
   buildSecretaryDaily,
   DAILY_RETENTION_DAYS,
@@ -9,6 +8,7 @@ import type { ProjectAuthority } from '@shared/types/agent';
 import type { SecretaryDaily, SecretaryDispatchFile, SecretaryTodo } from '@shared/types/secretary';
 import { readAudit } from './audit';
 import { readDailyRecords } from './dailyLog';
+import { projectAliasesFromSettings, secretaryProjectName } from './projectLabel';
 import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 
@@ -21,6 +21,7 @@ export interface SecretaryDailyPorts {
   todos(): MaybePromise<SecretaryTodo[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
+  projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   now(): number;
 }
 
@@ -41,6 +42,7 @@ export async function buildDaily(ports: SecretaryDailyPorts, day: string): Promi
   const file = ports.dispatchFile();
   const rows = await ports.rows();
   const projects = await ports.projects();
+  const aliases = (await ports.projectAliases?.()) ?? {};
   const results = readDailyRecords(ports.dir());
   const audit = readAudit(ports.dir());
   const todos = await ports.todos();
@@ -48,7 +50,7 @@ export async function buildDaily(ports: SecretaryDailyPorts, day: string): Promi
 
   const projectName = (projectId: string): string => {
     const project = projects.find((candidate) => candidate.projectId === projectId);
-    return project ? projectNameFromPath(project.canonicalPath) : '';
+    return secretaryProjectName(project, aliases);
   };
 
   const session = (conversationId: string): { title?: string; projectName?: string } => {
@@ -109,6 +111,9 @@ export function dailyPortsFor(ctx: SecretaryContext): SecretaryDailyPorts {
     rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
     projects: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
+    async projectAliases() {
+      return projectAliasesFromSettings((await import('../../ipc/settings')).readSettings());
+    },
     now: () => Date.now(),
   };
 }

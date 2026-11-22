@@ -384,12 +384,12 @@ const SCHEMAS: Record<
 > = {
   project_list: {
     description:
-      'List the projects you can see, with name, kind, path and last activity. Use it before naming a projectId.',
+      'List the projects you can see, with name, kind, path and last activity. name is the user alias when one is set (also in alias, with directoryName for the folder); otherwise name is the directory name. Use it before naming a projectId.',
     parameters: object({}),
   },
   project_info: {
     description:
-      'Metadata for one project: name, kind, path, current branch, whether it has uncommitted changes, last activity. Never returns file contents.',
+      'Metadata for one project: name, kind, path, current branch, whether it has uncommitted changes, last activity. name is the user alias when one is set (also in alias, with directoryName for the folder). Never returns file contents.',
     parameters: object({ projectId: id('Project id from project_list') }, ['projectId']),
   },
   repo_status: {

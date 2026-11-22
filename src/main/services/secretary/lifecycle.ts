@@ -1,12 +1,12 @@
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { app } from '@platform';
-import { projectNameFromPath } from '@shared/projectName';
 import type { DispatchRecord, SecretaryDeletePreview } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import type { ContactService } from './contact/service';
 import { managerOfSync } from './crossSecretary';
 import { forgetSecretaryProfile } from './profile';
+import { projectAliasesFromSettings, secretaryProjectName } from './projectLabel';
 import { DEFAULT_SECRETARY_ID } from './registry';
 import { dropRelaysFor } from './relay';
 import { enqueueUpdate } from './results';
@@ -58,10 +58,11 @@ export async function deletePreview(
   contact: ContactService | undefined
 ): Promise<SecretaryDeletePreview> {
   const store = new SecretaryStore(ctx.dir);
-  const { readPersistedConversations } = await import('../../ipc/settings');
+  const { readPersistedConversations, readSettings } = await import('../../ipc/settings');
   const { getSourceAuthorityRegistry } = await import('../../ipc/agent');
   const rows = readPersistedConversations();
   const projects = getSourceAuthorityRegistry()?.projection().projects ?? [];
+  const aliases = projectAliasesFromSettings(readSettings());
   const sessions = Object.values(store.dispatch().dispatched)
     .filter((record) => rows[record.conversationId]?.archived !== true)
     .map((record) => {
@@ -69,7 +70,7 @@ export async function deletePreview(
       return {
         conversationId: record.conversationId,
         title: titleOf(rows[record.conversationId], record.conversationId),
-        projectName: project ? projectNameFromPath(project.canonicalPath) : '',
+        projectName: secretaryProjectName(project, aliases),
         takeover: record.takeover !== undefined,
       };
     });

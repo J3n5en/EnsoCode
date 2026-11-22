@@ -1550,6 +1550,19 @@ describe('系统通知', () => {
     expect(h.state.notifications).toHaveLength(1);
   });
 
+  it('有别名时回传与通知用别名称呼项目', () => {
+    const h = harness({ notify: 'needs-user' });
+    h.ports.projects = () => [
+      { projectId: 'p1', canonicalPath: '/repo/alpha', state: 'active', version: 1 },
+    ];
+    h.ports.projectAliases = () => ({ p1: '官网前端' });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: 'no creds' }), []);
+    expect(h.state.file.outbox[0]?.text).toContain('官网前端');
+    expect(h.state.notifications[0]?.body).toContain('官网前端');
+    expect(h.state.file.outbox[0]?.text).not.toContain('alpha');
+  });
+
   it('含完成时完成也通知，关闭时一律不通知', () => {
     const withDone = harness({ notify: 'with-done' });
     withDone.state.statuses.c1 = idle;
