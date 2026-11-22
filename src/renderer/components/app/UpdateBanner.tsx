@@ -31,10 +31,17 @@ export function UpdateBanner() {
     };
   }, []);
 
-  if (dismissed || !status) return null;
+  if (!status) return null;
+  // 横幅隐藏（下载失败 / 检查中 / 已关闭）时对话框照常挂着：开着的不会被卸载，关着的也不会在之后自己弹出
+  const notes = (
+    <ReleaseNotesDialog key="notes" open={notesOpen} onOpenChange={setNotesOpen} status={status} />
+  );
   const isAvailable = status.status === 'available' && desktop;
-  if (status.status !== 'downloaded' && status.status !== 'downloading' && !isAvailable) {
-    return null;
+  if (
+    dismissed ||
+    (status.status !== 'downloaded' && status.status !== 'downloading' && !isAvailable)
+  ) {
+    return <>{notes}</>;
   }
 
   const version = status.info?.version;
@@ -43,7 +50,7 @@ export function UpdateBanner() {
 
   return (
     <>
-      <BannerBar>
+      <BannerBar key="banner">
         {isDownloaded ? (
           <RotateCw className="h-3.5 w-3.5 shrink-0 text-blue-500" />
         ) : (
@@ -107,7 +114,7 @@ export function UpdateBanner() {
           <X className="h-3.5 w-3.5" />
         </button>
       </BannerBar>
-      <ReleaseNotesDialog open={notesOpen} onOpenChange={setNotesOpen} status={status} />
+      {notes}
     </>
   );
 }

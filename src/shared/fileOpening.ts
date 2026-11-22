@@ -66,7 +66,17 @@ const TEXT_EXTENSIONS = new Set(
   )
 );
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx']);
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg']);
+const IMAGE_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'ico',
+  'svg',
+  'avif',
+]);
 const TEXT_NAMES = new Set(
   'readme license licence copying notice authors changelog dockerfile containerfile makefile gemfile rakefile procfile justfile .gitignore .gitattributes .gitmodules .editorconfig .npmrc .yarnrc .bashrc .zshrc .profile .env'.split(
     ' '

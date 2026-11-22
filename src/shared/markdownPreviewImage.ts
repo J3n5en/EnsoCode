@@ -13,6 +13,7 @@ const MIME_BY_EXT: Record<string, string> = {
   webp: 'image/webp',
   bmp: 'image/bmp',
   ico: 'image/x-icon',
+  avif: 'image/avif',
   // svg 支持：仅因为整条链路自始至终只把它当 <img src> 的二进制载体用（从不用
   // dangerouslySetInnerHTML/内联 <svg>/object/embed/iframe）——浏览器对作为图片
   // 加载的 SVG 实施“图片上下文”隔离（禁脚本/禁外部资源拉取/交互失效），

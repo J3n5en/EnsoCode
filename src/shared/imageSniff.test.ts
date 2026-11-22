@@ -15,6 +15,14 @@ describe('sniffImageMime', () => {
     expect(sniffImageMime(Buffer.from([0, 0, 1, 0]))).toBe('image/x-icon');
   });
 
+  it('识别 AVIF（ftyp avif/avis），其他 ftyp 品牌不算', () => {
+    const ftyp = (brand: string) =>
+      Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from(`ftyp${brand}`)]);
+    expect(sniffImageMime(ftyp('avif'))).toBe('image/avif');
+    expect(sniffImageMime(ftyp('avis'))).toBe('image/avif');
+    expect(sniffImageMime(ftyp('isom'))).toBeNull();
+  });
+
   it('SVG 文本内容识别为 image/svg+xml（只通过 <img> 标签渲染，浏览器会按图片上下文禁脚本，见 imageSniff.ts 注释）', () => {
     expect(sniffImageMime(Buffer.from('<svg onload="alert(1)"></svg>'))).toBe('image/svg+xml');
     expect(sniffImageMime(Buffer.from('<?xml version="1.0"?><svg><script>x</script></svg>'))).toBe(

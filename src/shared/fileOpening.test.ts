@@ -178,6 +178,7 @@ describe('文件打开规则', () => {
     expect(fileOpenViewer('a.html')).toBe('text');
     expect(fileOpenViewer('a.md')).toBe('markdown');
     expect(fileOpenViewer('a.png')).toBe('image');
+    expect(fileOpenViewer('photo.AVIF')).toBe('image');
     expect(fileOpenViewer('a.pdf')).toBe('pdf');
   });
 

@@ -2,6 +2,8 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, type ReactNode, useEffect, useMemo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setPluginFileViewers } from '../../plugins/fileViewers';
+import { IMAGE_INLINE_MAX_CHARS } from './FileImageViewer';
 import { FilesView } from './FilesView';
 
 const harness = vi.hoisted(() => ({
@@ -9,6 +11,8 @@ const harness = vi.hoisted(() => ({
   pending: null as [string, undefined, 'markdown'] | null,
   editors: [] as { focus: ReturnType<typeof vi.fn> }[],
   read: vi.fn(),
+  readImage: vi.fn(),
+  onChange: null as ((event: { conversationId: string; rel: string }) => void) | null,
   t: (key: string) => key,
   state: {
     workspaceRevisionByConversation: {},
@@ -103,6 +107,9 @@ vi.mock('@/components/ui/context-menu', () => {
     ),
   };
 });
+vi.mock('../../plugins/PluginView', () => ({
+  PluginFrame: ({ title }: { title: string }) => <div data-viewer="plugin">{title}</div>,
+}));
 vi.mock('./FilesSearchPane', () => ({ FilesSearchPane: () => null }));
 vi.mock('./fileTreeMenu', () => ({
   isMarkdownRel: (rel: string) => /\.(md|markdown|mdx)$/i.test(rel),
@@ -140,10 +147,14 @@ beforeEach(() => {
     electronAPI: {
       workspaceFiles: {
         read: harness.read,
+        readImage: harness.readImage,
         listDir: vi.fn(async () => ({ ok: true, entries: [] })),
         watchStart: vi.fn(async () => ({ ok: true })),
         watchStop: vi.fn(async () => ({ ok: true })),
-        onChange: () => vi.fn(),
+        onChange: (listener: NonNullable<typeof harness.onChange>) => {
+          harness.onChange = listener;
+          return vi.fn();
+        },
       },
     },
   });
@@ -151,12 +162,14 @@ beforeEach(() => {
   harness.pending = null;
   harness.editors = [];
   harness.read.mockReset().mockResolvedValue({ ok: true, content: '# README\ncontent' });
+  harness.readImage.mockReset().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
   container = dom.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
   vi.unstubAllGlobals();
+  setPluginFileViewers([]);
 });
 
 describe('FilesView 文件链接预览', () => {
@@ -203,5 +216,140 @@ describe('FilesView 文件链接预览', () => {
       projectId: 'project',
       rel: 'README.md',
     });
+  });
+});
+
+const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgo=';
+
+async function openRel(rel: string) {
+  await act(async () => harness.opener?.(rel));
+}
+function buttonByText(text: string) {
+  return [...container.querySelectorAll('button')].find((node) => node.textContent === text);
+}
+
+describe('FilesView 图片预览', () => {
+  it('图片扩展名（含大写）走图片查看器，不按文本读入编辑器', async () => {
+    await mount();
+    await openRel('assets/logo.PNG');
+    const img = container.querySelector('img');
+    expect(img?.getAttribute('src')).toBe(PNG_DATA_URL);
+    expect(container.querySelector('[data-viewer="source"]')).toBeNull();
+    expect(harness.read).not.toHaveBeenCalled();
+    expect(harness.readImage).toHaveBeenCalledWith({
+      conversationId: 'owner',
+      projectId: 'project',
+      rel: 'assets/logo.PNG',
+    });
+  });
+
+  it('非图片扩展名仍走代码编辑器', async () => {
+    harness.read.mockResolvedValue({ ok: true, content: 'export const a = 1;' });
+    await mount();
+    await openRel('src/main.ts');
+    expect(container.querySelector('[data-viewer="source"]')?.textContent).toBe(
+      'export const a = 1;'
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(harness.readImage).not.toHaveBeenCalled();
+  });
+
+  it('适应窗口与原始尺寸可切换', async () => {
+    await mount();
+    await openRel('a.webp');
+    expect(container.querySelector('img')?.getAttribute('data-fit')).toBe('contain');
+    await toggle('Actual size');
+    expect(container.querySelector('img')?.getAttribute('data-fit')).toBe('actual');
+    await toggle('Fit to window');
+    expect(container.querySelector('img')?.getAttribute('data-fit')).toBe('contain');
+  });
+
+  it.each([
+    [
+      '读图返回失败',
+      () => harness.readImage.mockResolvedValue({ ok: false, error: 'unsupported' }),
+    ],
+    ['读图抛错', () => harness.readImage.mockRejectedValue(new Error('boom'))],
+  ])('%s 时显示兜底文案，可改用代码编辑器打开', async (_name, arrange) => {
+    arrange();
+    harness.read.mockResolvedValue({
+      ok: true,
+      content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    });
+    await mount();
+    await openRel('icons/broken.svg');
+    expect(container.textContent).toContain('Unable to preview this image.');
+    expect(container.querySelector('img')).toBeNull();
+    await act(async () => (buttonByText('Open in code editor') as HTMLButtonElement).click());
+    expect(container.querySelector('[data-viewer="source"]')?.textContent).toContain('<svg');
+    expect(container.textContent).not.toContain('Unable to preview this image.');
+  });
+
+  it('超过读图上限时明确提示图片过大，而不是笼统的无法预览', async () => {
+    harness.readImage.mockResolvedValue({ ok: false, error: 'too-large' });
+    await mount();
+    await openRel('huge.png');
+    expect(container.textContent).toContain('The image is too large to preview.');
+    expect(container.textContent).not.toContain('Unable to preview this image.');
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('超大图不直接渲染，点击后才加载', async () => {
+    const huge = `data:image/png;base64,${'A'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
+    harness.readImage.mockResolvedValue({ ok: true, dataUrl: huge });
+    await mount();
+    await openRel('big.jpg');
+    expect(container.querySelector('img')).toBeNull();
+    const load = buttonByText('Image is too large. Click to load.');
+    expect(load).toBeDefined();
+    await act(async () => (load as HTMLButtonElement).click());
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
+  });
+
+  it('文件变更重新取图时不闪回加载态，已点开的大图保持显示', async () => {
+    const huge = `data:image/png;base64,${'A'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
+    harness.readImage.mockResolvedValue({ ok: true, dataUrl: huge });
+    await mount();
+    await openRel('big.jpg');
+    await act(async () =>
+      (buttonByText('Image is too large. Click to load.') as HTMLButtonElement).click()
+    );
+    let resolve: (value: unknown) => void = () => {};
+    harness.readImage.mockReturnValue(new Promise((done) => (resolve = done)));
+    await act(async () => harness.onChange?.({ conversationId: 'owner', rel: 'big.jpg' }));
+    expect(harness.readImage).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain('Loading...');
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
+    const next = `data:image/png;base64,${'B'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
+    await act(async () => resolve({ ok: true, dataUrl: next }));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(next);
+    // 写入途中读到半截文件短暂失败，写完再取到图时仍直接显示
+    harness.readImage.mockResolvedValueOnce({ ok: false, error: 'unsupported' });
+    await act(async () => harness.onChange?.({ conversationId: 'owner', rel: 'big.jpg' }));
+    expect(container.textContent).toContain('Unable to preview this image.');
+    harness.readImage.mockResolvedValueOnce({ ok: true, dataUrl: huge });
+    await act(async () => harness.onChange?.({ conversationId: 'owner', rel: 'big.jpg' }));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(huge);
+  });
+
+  it('插件为该图片后缀声明了默认查看器时仍按插件查看器打开', async () => {
+    setPluginFileViewers([
+      {
+        pluginId: 'drawio',
+        pluginName: 'Draw.io',
+        id: 'editor',
+        title: 'Draw.io',
+        entry: 'index.html',
+        extensions: ['.drawio.svg'],
+        default: true,
+      },
+    ]);
+    harness.read.mockResolvedValue({ ok: true, content: '<svg/>' });
+    await mount();
+    await openRel('docs/flow.drawio.svg');
+    expect(container.querySelector('[data-viewer="plugin"]')?.textContent).toBe('Draw.io');
+    expect(harness.readImage).not.toHaveBeenCalled();
+    await openRel('docs/plain.svg');
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(PNG_DATA_URL);
   });
 });
