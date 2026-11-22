@@ -18,6 +18,11 @@ vi.mock('@/stores/sessions', () => ({
 }));
 vi.mock('@/stores/sidePanel', () => ({
   useSidePanelStore: (select: (state: unknown) => unknown) => select(harness.sidePanel),
+  useSidePanelShown: (id: string) =>
+    Boolean(
+      (harness.sidePanel as { uiByConversation: Record<string, { open?: boolean }> })
+        .uiByConversation[id]?.open
+    ),
 }));
 
 /** dockview 面板 api 的替身：可随时改 isActive / isVisible 并广播 */

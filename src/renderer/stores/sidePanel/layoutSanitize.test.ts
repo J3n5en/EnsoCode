@@ -1,9 +1,51 @@
+import type { SerializedDockview } from 'dockview-react';
 import { describe, expect, it } from 'vitest';
-import { sanitizeSidePanelLayout } from './layoutSanitize';
+import { removeLayoutPanel, sanitizeSidePanelLayout } from './layoutSanitize';
 
 const known = new Set(['terminal', 'browser', 'changes', 'files']);
 
 describe('sanitizeSidePanelLayout', () => {
+  it('removeLayoutPanel 摘掉一个面板，摘空了返回 undefined', () => {
+    const layout = {
+      grid: {
+        root: {
+          type: 'branch',
+          data: [
+            {
+              type: 'leaf',
+              data: { views: ['files', 'plugin:r:p'], activeView: 'plugin:r:p', id: 'g1' },
+              size: 50,
+            },
+            {
+              type: 'leaf',
+              data: { views: ['plugin:t:c'], activeView: 'plugin:t:c', id: 'g2' },
+              size: 50,
+            },
+          ],
+          size: 100,
+        },
+        width: 100,
+        height: 100,
+        orientation: 'HORIZONTAL',
+      },
+      panels: {
+        files: { id: 'files', contentComponent: 'files' },
+        'plugin:r:p': { id: 'plugin:r:p', contentComponent: 'plugin' },
+        'plugin:t:c': { id: 'plugin:t:c', contentComponent: 'plugin' },
+      },
+    } as unknown as SerializedDockview;
+    const next = removeLayoutPanel(layout, 'plugin:r:p');
+    expect(Object.keys(next?.panels ?? {})).toEqual(['files', 'plugin:t:c']);
+    expect(next?.grid.root).toMatchObject({
+      data: [
+        { data: { views: ['files'], activeView: 'files' } },
+        { data: { views: ['plugin:t:c'] } },
+      ],
+    });
+    expect(removeLayoutPanel(removeLayoutPanel(next, 'files'), 'plugin:t:c')).toBeUndefined();
+    expect(removeLayoutPanel(layout, 'missing')).toBe(layout);
+  });
+
   it('returns undefined for dirty layouts', () => {
     expect(sanitizeSidePanelLayout(undefined, known)).toBeUndefined();
     expect(sanitizeSidePanelLayout(null, known)).toBeUndefined();

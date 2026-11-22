@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { useSessionsStore } from '@/stores/sessions';
 import { inlinePluginViewHtml } from './inlineAssets';
 import {
   createViewBridge,
@@ -8,6 +9,7 @@ import {
   viewEventPush,
   viewFileEdit,
   viewFilePush,
+  viewSessionPush,
   viewStoragePatch,
   viewThemePush,
 } from './viewBridge';
@@ -70,6 +72,11 @@ export function PluginFrame({
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
+  const projectId = useSessionsStore((s) =>
+    sessionId ? (s.conversations[sessionId]?.projectId ?? null) : null
+  );
+  const projectRef = useRef(projectId);
+  projectRef.current = projectId;
   const fileRef = useRef(file);
   fileRef.current = file;
   const channelRef = useRef<MessageChannel | null>(null);
@@ -157,6 +164,7 @@ export function PluginFrame({
           html,
           theme: documentTheme(),
           storage: state.ok ? state.state : {},
+          session: viewSessionPush(sessionRef.current, projectRef.current),
           ...(doc ? { file: { rel: doc.rel, text: doc.text } } : {}),
         },
         '*',
@@ -175,6 +183,15 @@ export function PluginFrame({
       frame.removeAttribute('src');
     };
   }, [pluginId, entry]);
+
+  // 全局页面跨会话常驻：当前会话变了告诉页面，不重载
+  useEffect(() => {
+    try {
+      channelRef.current?.port1.postMessage(viewSessionPush(sessionId, projectId));
+    } catch {
+      /* 端口已关闭 */
+    }
+  }, [sessionId, projectId]);
 
   const fileRel = file?.rel;
   const fileText = file?.text;

@@ -1,9 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { viewThemePush } from './viewBridge';
+import { viewSessionPush, viewThemePush } from './viewBridge';
 
-function bootShell(file?: { rel: string; text: string }) {
+function bootShell(
+  file?: { rel: string; text: string },
+  session?: { sessionId: string | null; projectId: string | null }
+) {
   const html = readFileSync(new URL('../public/plugin-view.html', import.meta.url), 'utf8');
   const script = html.match(/id="enso-view-bridge">([\s\S]*?)<\/script>/)?.[1];
   if (!script) throw new Error('找不到侧栏桥脚本');
@@ -59,6 +62,7 @@ function bootShell(file?: { rel: string; text: string }) {
         html: '<p>notes</p>',
         storage: {},
         ...(file ? { file } : {}),
+        ...(session ? { session: viewSessionPush(session.sessionId, session.projectId) } : {}),
       },
       ports: [port],
     });
@@ -77,11 +81,18 @@ function bootShell(file?: { rel: string; text: string }) {
     pushFile(rel: string, text: string) {
       portHandler?.({ data: { type: 'enso-file', rel, text } });
     },
+    pushSession(sessionId: string | null, projectId: string | null) {
+      portHandler?.({ data: viewSessionPush(sessionId, projectId) });
+    },
   };
 }
 
 interface ShellEnso {
   theme: string;
+  session: null | { sessionId: string | null; projectId: string | null };
+  onSession(
+    listener: (session: { sessionId: string | null; projectId: string | null }) => void
+  ): () => void;
   onTheme(listener: (theme: string) => void): () => void;
   on(name: string, listener: (data: unknown) => void): () => void;
   file: null | {
@@ -91,6 +102,32 @@ interface ShellEnso {
     update(text: string): void;
   };
 }
+
+describe('当前会话', () => {
+  it('初始化带会话；全局页面换会话时收到推送，不变不回调', () => {
+    const shell = bootShell(undefined, { sessionId: 's1', projectId: 'p1' });
+    expect(shell.enso.session).toEqual({ sessionId: 's1', projectId: 'p1' });
+    const seen: unknown[] = [];
+    const off = shell.enso.onSession((next) => seen.push(next));
+    shell.enso.onSession(() => {
+      throw new Error('bad listener');
+    });
+    shell.pushSession('s1', 'p1');
+    expect(seen).toEqual([]);
+    shell.pushSession('s2', 'p2');
+    expect(seen).toEqual([{ sessionId: 's2', projectId: 'p2' }]);
+    expect(shell.enso.session).toEqual({ sessionId: 's2', projectId: 'p2' });
+    shell.pushSession(null, null);
+    expect(shell.enso.session).toBeNull();
+    off();
+    shell.pushSession('s3', 'p1');
+    expect(seen).toHaveLength(2);
+  });
+
+  it('宿主没带会话时为 null', () => {
+    expect(bootShell().enso.session).toBeNull();
+  });
+});
 
 describe('文件查看器', () => {
   it('侧栏页面没有 enso.file', () => {

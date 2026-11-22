@@ -12,7 +12,7 @@ import { syncOverlayGuard } from '@/lib/overlayGuard';
 import { resolveSidePanelDockConversationId } from '@/lib/sidePanelDockId';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
-import { useSidePanelStore } from '@/stores/sidePanel';
+import { useSidePanelShown, useSidePanelStore } from '@/stores/sidePanel';
 import {
   AnnotateToolbarControl,
   BrowserAnnotateStageOverlay,
@@ -120,9 +120,7 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   const dockConversationId = useSessionsStore((s) =>
     resolveSidePanelDockConversationId(s.conversations, conversationId)
   );
-  const sidebarOpen = useSidePanelStore(
-    (s) => s.uiByConversation[dockConversationId]?.open ?? false
-  );
+  const sidebarOpen = useSidePanelShown(dockConversationId);
   const isActiveConversation = useSessionsStore((s) => s.activeId === dockConversationId);
   const hostVisible = active ?? (sidebarOpen && isActiveConversation);
   // 标注快捷键：Bot 面板由宿主传 active。Code 侧栏按可见优先，多个可见浏览器才用分组是否激活区分

@@ -85,7 +85,10 @@ export interface PluginViewContrib {
   id: string;
   title: string;
   entry: string;
+  /** global：所有会话共用一个常驻实例；不写或非法值按 session */
+  scope?: PluginViewScope;
 }
+export type PluginViewScope = 'global' | 'session';
 /** 按扩展名打开文件的查看器；页面和侧栏页面一样跑在沙箱 iframe 里 */
 export interface PluginFileViewerContrib {
   id: string;
@@ -572,7 +575,13 @@ export function parseExtensionPluginManifest(
       !v.entry.endsWith('.html')
     )
       errors.push('侧栏页面不合法');
-    else views.push({ id: v.id, title: v.title as string, entry: v.entry });
+    else
+      views.push({
+        id: v.id,
+        title: v.title as string,
+        entry: v.entry,
+        scope: v.scope === 'global' ? 'global' : 'session',
+      });
   }
   uniqueIds(views, '侧栏页面');
 

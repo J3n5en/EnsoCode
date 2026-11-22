@@ -22,6 +22,14 @@
   --dv-inactivegroup-visiblepanel-tab-color: var(--color-foreground);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--color-muted-foreground);
 }
+/* 全局插件常驻层整体不接事件，只有 iframe 接；dockview 拖拽时会给所有 iframe 内联 pointer-events:none */
+.enso-global-plugin-layer iframe {
+  pointer-events: auto;
+}
+/* 占位块所在的 always 浮层（z-index:1）叠在常驻层之上，必须透传点击 */
+.enso-side-dock .dv-render-overlay:has([data-global-plugin-slot]) {
+  pointer-events: none;
+}
 /* 浮层类元素（溢出下拉、键盘提示）不能全透，否则压在内容上看不清 */
 .enso-side-dock .dv-tabs-overflow-container,
 .enso-side-dock .dv-keyboard-docking-hint {

@@ -110,7 +110,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
-import { bindSidePanelFullscreen, useSidePanelStore } from '@/stores/sidePanel';
+import { bindSidePanelFullscreen, useSidePanelShown, useSidePanelStore } from '@/stores/sidePanel';
 
 // 右面板含 dockview / xterm / diffs，手机首屏用不到，打开时再加载
 const SidePanel = lazy(() =>
@@ -179,9 +179,7 @@ export default function App() {
   const { t } = useI18n();
   const chatWide = useSettingsStore((s) => s.chatWide);
   const activeConversationId = useSessionsStore((s) => s.activeId);
-  const sideOpen = useSidePanelStore((s) =>
-    activeConversationId ? Boolean(s.uiByConversation[activeConversationId]?.open) : false
-  );
+  const sideOpen = useSidePanelShown(activeConversationId);
   const sideWidth = useSidePanelStore(
     (s) => s.uiByConversation[activeConversationId ?? '']?.width ?? s.lastWidth
   );

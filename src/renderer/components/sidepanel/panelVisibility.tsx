@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useSessionsStore } from '@/stores/sessions';
-import { useSidePanelStore } from '@/stores/sidePanel';
+import { useSidePanelShown } from '@/stores/sidePanel';
 
 /**
  * 侧栏面板此刻是否在屏幕上。dock 按会话常驻（mountedIds 只增不减），隐藏会话里的面板照常挂载，
@@ -45,7 +45,7 @@ export function PanelVisibilityProvider({
 }) {
   // 与 SidePanel 隐藏 dock 的口径一致：非当前会话的 dock 整块 hidden，侧栏收起则整体 invisible
   const current = useSessionsStore((s) => s.activeId === dockConversationId);
-  const open = useSidePanelStore((s) => Boolean(s.uiByConversation[dockConversationId]?.open));
+  const open = useSidePanelShown(dockConversationId);
   const subscribe = useCallback(
     (onChange: () => void) => {
       const active = api.onDidActiveChange(onChange);

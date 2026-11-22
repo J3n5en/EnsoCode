@@ -1,5 +1,11 @@
-/** v4：snapshotsByConversation 不再 persist（几 MB 文件文本拖慢每次 set），改由主进程按会话落盘 */
-export const SIDE_PANEL_VERSION = 4;
+import { normalizeGlobalState } from './globalTabs';
+
+/**
+ * v4：snapshotsByConversation 不再 persist（几 MB 文件文本拖慢每次 set），改由主进程按会话落盘。
+ * v5：只加 globalTabs / globalScopeOverrides，其余字段原样保留。
+ */
+export const SIDE_PANEL_VERSION = 5;
+const SNAPSHOTS_ON_DISK_VERSION = 4;
 
 type Snapshots = Record<string, Record<string, string>>;
 
@@ -30,7 +36,7 @@ export function splitLegacySnapshots(
 ): { state: Record<string, unknown>; snapshots: Snapshots } {
   const old: Record<string, unknown> = isPlainObject(persisted) ? persisted : {};
   if (version < 2) return { state: { uiByConversation: {}, layouts: {} }, snapshots: {} };
-  if (version < SIDE_PANEL_VERSION) {
+  if (version < SNAPSHOTS_ON_DISK_VERSION) {
     return {
       state: {
         uiByConversation: version < 3 ? {} : (old.uiByConversation ?? {}),
@@ -42,4 +48,12 @@ export function splitLegacySnapshots(
   }
   const { snapshotsByConversation: _dropped, ...state } = old;
   return { state, snapshots: {} };
+}
+
+export function migrateSidePanelState(
+  persisted: unknown,
+  version: number
+): { state: Record<string, unknown>; snapshots: Snapshots } {
+  const { state, snapshots } = splitLegacySnapshots(persisted, version);
+  return { state: { ...state, ...normalizeGlobalState(state) }, snapshots };
 }

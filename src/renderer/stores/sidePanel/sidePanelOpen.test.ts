@@ -203,3 +203,108 @@ describe('侧栏开关按会话独立', () => {
     expect(state.uiByConversation.normal?.open).toBe(true);
   });
 });
+
+describe('全局标签与三态开关', () => {
+  beforeEach(() => {
+    vi.mocked(useSettingsStore.getState).mockReturnValue({
+      projects: [{ id: 'code', kind: 'project' }],
+    } as unknown as ReturnType<typeof useSettingsStore.getState>);
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      fullscreen: false,
+      fullscreenByConversation: {},
+      uiByConversation: {},
+      layouts: {},
+      globalTabs: ['plugin:radio:player'],
+      liveGlobalTabs: ['plugin:radio:player'],
+    }));
+  });
+
+  it('全局标签自动显示的会话，点开关是收起并记成明确关过', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(false);
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
+  });
+
+  it('只调宽度不会把没开关过的会话写成关着', () => {
+    sessions('normal');
+    useSidePanelStore.getState().nudgeWidth(-20, 2000, 8);
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBeUndefined();
+  });
+
+  it('删除会话不影响 globalTabs 与作用域覆盖', () => {
+    useSidePanelStore.setState({
+      globalScopeOverrides: { 'plugin:radio:player': 'global' },
+      uiByConversation: { normal: { open: true, width: 400 } },
+    });
+    useSidePanelStore.getState().forgetConversation('normal');
+    const state = useSidePanelStore.getState();
+    expect(state.globalTabs).toEqual(['plugin:radio:player']);
+    expect(state.globalScopeOverrides).toEqual({ 'plugin:radio:player': 'global' });
+    expect(state.uiByConversation.normal).toBeUndefined();
+  });
+
+  it('全局关闭从没挂载会话的布局里摘掉该面板，摘空且开着的侧栏收起，保留的会话不动', () => {
+    const leaf = (views: string[]) => ({
+      grid: {
+        root: {
+          type: 'branch',
+          data: [{ type: 'leaf', data: { views, id: 'g' }, size: 1 }],
+          size: 1,
+        },
+        width: 1,
+        height: 1,
+        orientation: 'HORIZONTAL',
+      },
+      panels: Object.fromEntries(views.map((id) => [id, { id, contentComponent: 'plugin' }])),
+    });
+    useSidePanelStore.setState({
+      layouts: {
+        a: leaf(['plugin:radio:player']),
+        b: leaf(['plugin:radio:player', 'plugin:notes:board']),
+        keep: leaf(['plugin:radio:player']),
+      } as never,
+      uiByConversation: { a: { open: true, width: 400 }, keep: { open: true, width: 400 } },
+    });
+    useSidePanelStore.getState().dropPanelFromLayouts('plugin:radio:player', new Set(['keep']));
+    const state = useSidePanelStore.getState();
+    expect(state.layouts.a).toBeUndefined();
+    expect(state.uiByConversation.a?.open).toBe(false);
+    expect(Object.keys(state.layouts.b?.panels ?? {})).toEqual(['plugin:notes:board']);
+    expect(Object.keys(state.layouts.keep?.panels ?? {})).toEqual(['plugin:radio:player']);
+    expect(state.uiByConversation.keep?.open).toBe(true);
+  });
+
+  it('读回 v4 数据：老字段都在，全局字段为空', async () => {
+    sessions('normal');
+    localStorage.setItem(
+      'enso-side-panel',
+      JSON.stringify({
+        state: {
+          lastWidth: 480,
+          uiByConversation: { normal: { open: true, width: 480 } },
+          fullscreenByConversation: {},
+          layouts: { normal: { panels: {} } },
+          pinnedTabs: ['files'],
+          changesModeByConversation: { normal: 'git' },
+        },
+        version: 4,
+      })
+    );
+    try {
+      await useSidePanelStore.persist.rehydrate();
+      const state = useSidePanelStore.getState();
+      expect(state.lastWidth).toBe(480);
+      expect(state.pinnedTabs).toEqual(['files']);
+      expect(state.layouts.normal).toEqual({ panels: {} });
+      expect(state.uiByConversation.normal?.open).toBe(true);
+      expect(state.changesModeByConversation.normal).toBe('git');
+      expect(state.globalTabs).toEqual([]);
+      expect(state.globalScopeOverrides).toEqual({});
+    } finally {
+      localStorage.removeItem('enso-side-panel');
+    }
+  });
+});

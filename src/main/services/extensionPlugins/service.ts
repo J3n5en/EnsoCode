@@ -410,7 +410,12 @@ export class ExtensionPluginService {
             description,
           })),
           commands: manifest.contributes.commands,
-          views: manifest.contributes.views.map(({ id, title, entry }) => ({ id, title, entry })),
+          views: manifest.contributes.views.map(({ id, title, entry, scope }) => ({
+            id,
+            title,
+            entry,
+            scope: scope ?? 'session',
+          })),
           fileViewers: manifest.contributes.fileViewers,
           statusItems: mergeStatusItems(
             manifest.contributes.statusItems,
