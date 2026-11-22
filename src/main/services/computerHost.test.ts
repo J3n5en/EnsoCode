@@ -54,6 +54,16 @@ import { openMacPrivacySettings } from './computer/macPrivacySettings';
 import { ComputerOccupancy } from './computer/occupancy';
 import { ComputerHost } from './computerHost';
 
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+  const previous = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    return await run();
+  } finally {
+    if (previous) Object.defineProperty(process, 'platform', previous);
+  }
+}
+
 describe('ComputerHost', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,17 +119,34 @@ describe('ComputerHost', () => {
   });
 
   it('打开辅助功能设置不弹阻塞 TCC', async () => {
-    const host = new ComputerHost(() => new FakeDesktopBackend());
-    await host.openPermissionSettings('accessibility');
-    expect(systemPreferences.isTrustedAccessibilityClient).not.toHaveBeenCalled();
-    expect(openMacPrivacySettings).toHaveBeenCalledWith('accessibility');
+    await withPlatform('darwin', async () => {
+      const host = new ComputerHost(() => new FakeDesktopBackend());
+      await host.openPermissionSettings('accessibility');
+      expect(systemPreferences.isTrustedAccessibilityClient).not.toHaveBeenCalled();
+      expect(openMacPrivacySettings).toHaveBeenCalledWith('accessibility');
+    });
   });
 
   it('打开屏幕录制设置不阻塞在截屏 TCC', async () => {
-    const host = new ComputerHost(() => new FakeDesktopBackend());
-    await host.openPermissionSettings('screen');
-    expect(desktopCapturer.getSources).not.toHaveBeenCalled();
-    expect(openMacPrivacySettings).toHaveBeenCalledWith('screen');
+    await withPlatform('darwin', async () => {
+      const host = new ComputerHost(() => new FakeDesktopBackend());
+      await host.openPermissionSettings('screen');
+      expect(desktopCapturer.getSources).not.toHaveBeenCalled();
+      expect(openMacPrivacySettings).toHaveBeenCalledWith('screen');
+    });
+  });
+
+  it('非 macOS 打开权限设置返回失败且不调用系统设置', async () => {
+    await withPlatform('linux', async () => {
+      const host = new ComputerHost(() => new FakeDesktopBackend());
+      await expect(host.openPermissionSettings('accessibility')).resolves.toMatchObject({
+        ok: false,
+      });
+      await expect(host.openPermissionSettings('screen')).resolves.toMatchObject({ ok: false });
+      expect(openMacPrivacySettings).not.toHaveBeenCalled();
+      expect(systemPreferences.isTrustedAccessibilityClient).not.toHaveBeenCalled();
+      expect(desktopCapturer.getSources).not.toHaveBeenCalled();
+    });
   });
 
   it('非只读占用桌面，Esc 中止等待', async () => {
