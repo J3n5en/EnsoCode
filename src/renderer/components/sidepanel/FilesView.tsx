@@ -616,6 +616,11 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     [req]
   );
 
+  const readViewerImage = useCallback(
+    (rel: string) => window.electronAPI.workspaceFiles.readImage({ ...req, rel }),
+    [req]
+  );
+
   const resolveRemotePreviewImage = useCallback(
     (url: string) =>
       window.electronAPI.workspaceFiles
@@ -1283,7 +1288,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
                 key={active.rel}
                 rel={active.rel}
                 version={active.version}
-                resolveImage={resolvePreviewImage}
+                resolveImage={readViewerImage}
                 onOpenSource={() => void openImageAsSource(active.rel)}
               />
             ) : activeViewer ? (

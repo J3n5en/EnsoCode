@@ -285,6 +285,15 @@ describe('FilesView 图片预览', () => {
     expect(container.textContent).not.toContain('Unable to preview this image.');
   });
 
+  it('超过读图上限时明确提示图片过大，而不是笼统的无法预览', async () => {
+    harness.readImage.mockResolvedValue({ ok: false, error: 'too-large' });
+    await mount();
+    await openRel('huge.png');
+    expect(container.textContent).toContain('The image is too large to preview.');
+    expect(container.textContent).not.toContain('Unable to preview this image.');
+    expect(container.querySelector('img')).toBeNull();
+  });
+
   it('超大图不直接渲染，点击后才加载', async () => {
     const huge = `data:image/png;base64,${'A'.repeat(IMAGE_INLINE_MAX_CHARS)}`;
     harness.readImage.mockResolvedValue({ ok: true, dataUrl: huge });

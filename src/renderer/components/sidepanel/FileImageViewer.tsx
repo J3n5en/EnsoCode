@@ -1,3 +1,4 @@
+import type { FilesReadImageResult } from '@shared/types/filesWorkspace';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ const CHECKERBOARD = {
 
 type ImageState =
   | { status: 'loading' }
-  | { status: 'error' }
+  | { status: 'error'; tooLarge: boolean }
   | { status: 'ready'; dataUrl: string };
 
 export function FileImageViewer({
@@ -31,7 +32,7 @@ export function FileImageViewer({
 }: {
   rel: string;
   version: number;
-  resolveImage: (rel: string) => Promise<string | null>;
+  resolveImage: (rel: string) => Promise<FilesReadImageResult>;
   onOpenSource: () => void;
 }) {
   const { t } = useI18n();
@@ -45,18 +46,18 @@ export function FileImageViewer({
     let alive = true;
     // 重新取图期间保留旧图，不闪回加载态
     resolveImage(rel).then(
-      (dataUrl) => {
+      (result) => {
         if (!alive) return;
         setState((prev) =>
-          !dataUrl
-            ? { status: 'error' }
-            : prev.status === 'ready' && prev.dataUrl === dataUrl
+          !result.ok
+            ? { status: 'error', tooLarge: result.error === 'too-large' }
+            : prev.status === 'ready' && prev.dataUrl === result.dataUrl
               ? prev
-              : { status: 'ready', dataUrl }
+              : { status: 'ready', dataUrl: result.dataUrl }
         );
       },
       () => {
-        if (alive) setState({ status: 'error' });
+        if (alive) setState({ status: 'error', tooLarge: false });
       }
     );
     return () => {
@@ -74,7 +75,11 @@ export function FileImageViewer({
   if (state.status === 'error') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-        <span>{t('Unable to preview this image.')}</span>
+        <span>
+          {state.tooLarge
+            ? t('The image is too large to preview.')
+            : t('Unable to preview this image.')}
+        </span>
         <Button type="button" variant="outline" size="sm" onClick={onOpenSource}>
           {t('Open in code editor')}
         </Button>
