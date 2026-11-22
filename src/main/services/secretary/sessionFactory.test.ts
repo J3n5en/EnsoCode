@@ -51,13 +51,22 @@ interface Harness {
   removedConversations: string[];
   removedWorktrees: SessionWorktree[];
   spawns: AgentSpawnRequest[];
-  prompts: { id: string; text: string; deliveryId: string }[];
+  prompts: {
+    id: string;
+    text: string;
+    deliveryId: string;
+    images?: { data: string; mimeType: string }[];
+  }[];
   spawnResult: { ok: boolean; error?: string };
   promptResult: { ok: boolean; error?: string };
 }
 
 function harness(
-  options: { project?: ProjectAuthority | null; defaults?: MainSessionDefaults | null } = {}
+  options: {
+    project?: ProjectAuthority | null;
+    defaults?: MainSessionDefaults | null;
+    imageInput?: boolean;
+  } = {}
 ): Harness {
   const log: string[] = [];
   const rows = new Map<string, Record<string, unknown>>();
@@ -115,11 +124,12 @@ function harness(
       release: async () => {
         log.push('release');
       },
-      prompt: (id, text, deliveryId) => {
+      prompt: (id, text, deliveryId, images) => {
         log.push('prompt');
-        state.prompts.push({ id, text, deliveryId });
+        state.prompts.push({ id, text, deliveryId, ...(images ? { images } : {}) });
         return state.promptResult;
       },
+      imageInput: async () => options.imageInput,
       newId: () => 'delivery-1',
       now: () => 1700000000000,
     },
@@ -130,6 +140,46 @@ function harness(
 const REQUEST = { projectId: 'proj-1', prompt: '看看这个 bug', worktree: false };
 
 describe('createSessionFromMain', () => {
+  const SHOT = { path: '/tmp/shot.png', size: 3, data: 'AAAA', mimeType: 'image/png' };
+
+  it('带图且模型能看图：图片块跟着首条 prompt，路径行在目标之后的末尾', async () => {
+    const h = harness({ imageInput: true });
+    await createSessionFromMain(h.ports, {
+      ...REQUEST,
+      goal: '修好',
+      attachments: { images: [SHOT] },
+    });
+    expect(h.prompts[0]?.images).toEqual([{ data: 'AAAA', mimeType: 'image/png' }]);
+    expect(h.prompts[0]?.text.startsWith('看看这个 bug\n\n')).toBe(true);
+    expect(h.prompts[0]?.text.endsWith('\n\n[图片 1] /tmp/shot.png')).toBe(true);
+    expect(h.prompts[0]?.text).not.toContain('image_view');
+  });
+
+  it('带图但模型不能看图：不发图片块，退回路径加 image_view', async () => {
+    const h = harness({ imageInput: false });
+    await createSessionFromMain(h.ports, { ...REQUEST, attachments: { images: [SHOT] } });
+    expect(h.prompts[0]?.images).toBeUndefined();
+    expect(h.prompts[0]?.text).toBe(
+      '看看这个 bug\n\n[图片 1] /tmp/shot.png\n用 image_view 查看这些图片。'
+    );
+  });
+
+  it('开始时已不可用的图写进 prompt，其余照常附上', async () => {
+    const h = harness({ imageInput: true });
+    await createSessionFromMain(h.ports, {
+      ...REQUEST,
+      attachments: {
+        images: [SHOT],
+        unavailable: [{ path: '/tmp/gone.png', reason: 'no such file: /tmp/gone.png' }],
+      },
+    });
+    const text = h.prompts[0]?.text ?? '';
+    expect(text).toContain('/tmp/gone.png');
+    expect(text).toContain('不可用');
+    expect(text.endsWith('\n\n[图片 1] /tmp/shot.png')).toBe(true);
+    expect(h.prompts[0]?.images).toHaveLength(1);
+  });
+
   it('先写行再 spawn，首条 prompt 带 Main 生成的 deliveryId', async () => {
     const h = harness();
     const result = await createSessionFromMain(h.ports, REQUEST);

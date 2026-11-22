@@ -202,6 +202,13 @@ const server = createServer((req, res) => {
     try {
       parsed = JSON.parse(body);
     } catch {}
+    const imagesIn = (message) =>
+      (Array.isArray(message?.content) ? message.content : []).filter(
+        (part) => part?.type === 'image' || part?.type === 'image_url'
+      ).length;
+    const userMessages = Array.isArray(parsed?.messages)
+      ? parsed.messages.filter((message) => message?.role === 'user')
+      : [];
     requests.push({
       at: Date.now(),
       url,
@@ -212,6 +219,9 @@ const server = createServer((req, res) => {
         parsed?.messages?.at(-1)?.content?.[0]?.text ?? parsed?.messages?.at(-1)?.content ?? ''
       ).slice(0, 120),
       toolNames: Array.isArray(parsed?.tools) ? parsed.tools.map((t) => t.name) : [],
+      // 只记图片块张数，不记内容：验收据此确认图片是作为图片发进去的
+      lastUserImages: imagesIn(userMessages.at(-1)),
+      userImages: userMessages.reduce((sum, message) => sum + imagesIn(message), 0),
       // 用来区分请求实际用了哪个 provider 条目的凭证（AC12/AC18 需要）
       authKey: String(req.headers['x-api-key'] || req.headers.authorization || '').slice(-6),
     });

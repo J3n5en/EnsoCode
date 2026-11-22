@@ -96,6 +96,9 @@ describe('buildSecretarySystemPrompt', () => {
     // 会话说截图在某路径时先自己看一眼
     expect(prompt).toContain('image_view');
     expect(prompt).toMatch(/screenshot or an image is at some path/);
+    // 转图直接作为图片块；派活带图放进首条 prompt，不先派再补发
+    expect(prompt).toMatch(/without calling image_view/);
+    expect(prompt).toMatch(/session_create or todo_item_dispatch attachments/);
     // 定期看清单，清理走确认卡，不自己删
     expect(prompt).toContain('cleanup_list');
     expect(prompt).toContain('cleanup_apply');

@@ -342,6 +342,8 @@ function parseDraft(value: unknown): DispatchDraft | undefined {
   if (branch) draft.branch = branch;
   const after = texts(value.after);
   if (after.length > 0) draft.after = after;
+  const attachments = texts(value.attachments);
+  if (attachments.length > 0) draft.attachments = attachments;
   return draft;
 }
 

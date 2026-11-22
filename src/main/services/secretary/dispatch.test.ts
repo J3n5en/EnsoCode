@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseDispatchFile, parseProfile } from '@shared/secretary/parse';
@@ -130,11 +130,21 @@ interface Harness {
   todos: SecretaryTodo[];
   audits: SecretaryAuditEntry[];
   created: MainSessionRequest[];
-  prompts: { conversationId: string; text: string; deliveryId: string }[];
+  prompts: {
+    conversationId: string;
+    text: string;
+    deliveryId: string;
+    images?: { data: string; mimeType: string }[];
+  }[];
   resumes: string[];
   aborts: string[];
   queued: { conversationId: string; message: SecretaryQueuedMessage }[];
-  steers: { conversationId: string; text: string; deliveryId: string }[];
+  steers: {
+    conversationId: string;
+    text: string;
+    deliveryId: string;
+    images?: { data: string; mimeType: string }[];
+  }[];
   pausedGoals: string[];
   /** attachGoal 的调用记录；缺省都成功 */
   attachedGoals: { conversationId: string; goal: string }[];
@@ -179,6 +189,8 @@ function harness(
     tasks?: Record<string, ObservedTask[]>;
     /** 可用模型白名单（`providerId/modelId`）；缺省表示都可用 */
     models?: string[];
+    /** 目标会话的模型能否看图；缺省表示还不知道 */
+    imageInput?: boolean;
   } = {}
 ): Harness {
   let ids = 0;
@@ -260,8 +272,8 @@ function harness(
       h.created.push(request);
       return h.createResult;
     },
-    prompt: (conversationId, text, deliveryId) => {
-      h.prompts.push({ conversationId, text, deliveryId });
+    prompt: (conversationId, text, deliveryId, images) => {
+      h.prompts.push({ conversationId, text, deliveryId, ...(images ? { images } : {}) });
       return { ok: true };
     },
     resume: async (conversationId) => {
@@ -272,10 +284,11 @@ function harness(
     abort: (conversationId) => {
       h.aborts.push(conversationId);
     },
-    steer: (conversationId, text, deliveryId) => {
-      h.steers.push({ conversationId, text, deliveryId });
+    steer: (conversationId, text, deliveryId, images) => {
+      h.steers.push({ conversationId, text, deliveryId, ...(images ? { images } : {}) });
       return { ok: true };
     },
+    imageInput: () => options.imageInput,
     appendQueued: (conversationId, message) => {
       h.queued.push({ conversationId, message });
       const row = h.rows[conversationId] ?? {};
@@ -1213,6 +1226,183 @@ describe('session_send 转发图片', () => {
     if (result.ok) return;
     expect(result.error).toContain('max 5 images per call');
     expect(h.prompts).toEqual([]);
+  });
+
+  const block = (data: Uint8Array = PNG) => ({
+    data: Buffer.from(data).toString('base64'),
+    mimeType: 'image/png',
+  });
+
+  it('模型能看图时作为图片块随消息发出，正文末尾留路径行，不再让它调 image_view', async () => {
+    const shot = image('shot.png');
+    const h = harness({ file: dispatchedFile(), imageInput: true });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '这个界面丑，按图改',
+      attachments: [shot],
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.prompts[0]?.images).toEqual([block()]);
+    expect(h.prompts[0]?.text).toBe(`这个界面丑，按图改\n\n[图片 1] ${shot}`);
+  });
+
+  it('插话与排队同样带图片块', async () => {
+    const shot = image('shot.png');
+    const steered = harness({
+      file: dispatchedFile(),
+      statuses: { c1: running },
+      imageInput: true,
+    });
+    await call(steered.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      mode: 'steer',
+      attachments: [shot],
+    });
+    expect(steered.steers[0]?.images).toEqual([block()]);
+    expect(steered.steers[0]?.text).toBe(`按图改\n\n[图片 1] ${shot}`);
+
+    const queued = harness({ file: dispatchedFile(), statuses: { c1: running }, imageInput: true });
+    await call(queued.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [shot],
+    });
+    expect(queued.queued[0]?.message.images).toEqual([block()]);
+    expect(queued.queued[0]?.message.text).toBe(`按图改\n\n[图片 1] ${shot}`);
+  });
+
+  it('模型不能看图时不发图片块，退回路径加 image_view', async () => {
+    const shot = image('shot.png');
+    const h = harness({ file: dispatchedFile(), imageInput: false });
+    await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [shot],
+    });
+    expect(h.prompts[0]?.images).toBeUndefined();
+    expect(h.prompts[0]?.text).toContain(`[图片 1] ${shot}`);
+    expect(h.prompts[0]?.text).toContain('用 image_view 查看这些图片。');
+  });
+
+  it('超过 10MB 时整条拒绝并说明原因', async () => {
+    const big = new Uint8Array(10 * 1024 * 1024 + 1);
+    big.set(PNG);
+    const h = harness({ file: dispatchedFile(), imageInput: true });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [image('big.png', big)],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('attachments[1]');
+    expect(result.error).toContain('too large');
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('session_create 带图：图片读好交给建会话，跟着第一条 prompt 进去', async () => {
+    const shot = image('shot.png');
+    const h = harness();
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '按图改首页',
+      attachments: [shot],
+    });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(h.created[0]?.attachments).toEqual({
+      images: [{ path: shot, size: PNG.length, ...block() }],
+    });
+  });
+
+  it('session_create 的图不合法时整条拒绝，不建会话', async () => {
+    const h = harness();
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '按图改首页',
+      attachments: ['/etc/hosts'],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('attachments[1] /etc/hosts');
+    expect(h.created).toEqual([]);
+  });
+
+  it('todo_item_dispatch 带图', async () => {
+    const shot = image('shot.png');
+    const h = harness({
+      todos: [{ id: 't1', text: '首页改版', createdAt: 1, updatedAt: 1, projectId: 'p1' }],
+    });
+    const result = await call(h.handlers.todo_item_dispatch, {
+      todoId: 't1',
+      attachments: [shot],
+    });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(h.created[0]?.attachments?.images).toEqual([
+      { path: shot, size: PNG.length, ...block() },
+    ]);
+  });
+
+  describe('等依赖的派发', () => {
+    const dependencyDone = () =>
+      harness({
+        rows: { c1: { projectId: 'p1', title: 'c1', sessionFile: '/s/c1.jsonl' } },
+        statuses: { c1: idle },
+        file: {
+          ...emptyFile(),
+          dispatched: {
+            c1: {
+              conversationId: 'c1',
+              projectId: 'p1',
+              secretaryConversationId: 'sec-1',
+              createdAt: 1,
+              turn: 1,
+              lastState: 'idle',
+              lastEventAt: 1,
+              lastResult: { kind: 'turn-ended', turn: 1, at: 1 },
+            },
+          },
+        },
+      });
+
+    it('只存路径，真正开始时才读图', async () => {
+      const shot = image('shot.png');
+      const h = dependencyDone();
+      const payload = (await run(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '接着改',
+        after: ['c1'],
+        attachments: [shot],
+      })) as { pendingId: string };
+      const stored = parseDispatchFile(JSON.parse(JSON.stringify(h.file)));
+      expect(stored.pending?.[payload.pendingId]?.draft.attachments).toEqual([shot]);
+      // 等待期间图片换了内容：开始时读到的是新的
+      const later = Uint8Array.from([...PNG, 0]);
+      writeFileSync(shot, later);
+      h.file = stored;
+      await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+      expect(h.created[0]?.attachments).toEqual({
+        images: [{ path: shot, size: later.length, ...block(later) }],
+      });
+    });
+
+    it('开始时图片已不在：照常派发，注明哪张不可用', async () => {
+      const shot = image('shot.png');
+      const h = dependencyDone();
+      const payload = (await run(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '接着改',
+        after: ['c1'],
+        attachments: [shot],
+      })) as { pendingId: string };
+      unlinkSync(shot);
+      await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+      expect(h.created).toHaveLength(1);
+      expect(h.created[0]?.attachments?.images).toEqual([]);
+      expect(h.created[0]?.attachments?.unavailable).toEqual([
+        { path: shot, reason: expect.stringContaining('no such file') },
+      ]);
+    });
   });
 });
 
