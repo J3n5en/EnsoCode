@@ -401,6 +401,36 @@ describe('SessionSupervisor 子代理请求预算', () => {
     await supervisor.shutdown();
   });
 
+  it('用户在子代理 tab 里停止：本轮收口仍带原 Run 的 turnId，Main 才能对上这个 Run', async () => {
+    const { events, supervisor, worker } = await spawnChild();
+    promptRun(supervisor, 'run-1');
+    await settle();
+    worker.emit({ type: 'agent_start' });
+    request(worker, toolCall(1));
+    supervisor.handleCommand({ type: 'abort', identity: child });
+    await settle();
+    endRound(worker);
+    await settle();
+    expect(completed(events)).toEqual([
+      expect.objectContaining({ turnId: 'run-1', aborted: true }),
+    ]);
+    await supervisor.shutdown();
+  });
+
+  it('重试倒计时中停止：按失败收口也带原 turnId 并标明是中止', async () => {
+    const { events, supervisor, worker } = await spawnChild();
+    promptRun(supervisor, 'run-1');
+    await settle();
+    request(worker, toolCall(1));
+    worker.isRetrying = true;
+    supervisor.handleCommand({ type: 'abort', identity: child });
+    await settle();
+    expect(events.filter((event) => event.type === 'turn-failed')).toEqual([
+      expect.objectContaining({ turnId: 'run-1', aborted: true }),
+    ]);
+    await supervisor.shutdown();
+  });
+
   it('Run 结束后用户自己在 coworker 里发起的回合不计数', async () => {
     const { events, supervisor, worker } = await spawnChild();
     promptRun(supervisor, 'run-1');

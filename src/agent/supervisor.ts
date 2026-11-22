@@ -492,6 +492,8 @@ interface ManagedSession {
   turnRetried?: boolean;
   /** 本轮被 abort 命令中断：收口时随 turn-completed 下发，各窗口据此不泵队列；新轮起点清掉 */
   turnAborted?: boolean;
+  /** abort 时清掉 currentTurnId 前的原 turnId：中止后的收口仍用它，Main 才对得上这一轮（子代理 Run） */
+  abortedTurnId?: string;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
   settlePending?: boolean;
   /** 当前用户轮已做过一次空回复自动续跑 */
@@ -2471,6 +2473,7 @@ export class SessionSupervisor {
         managed.browser?.cancelAll('Browser action aborted');
         managed.memory?.cancelAll('Memory action aborted');
         managed.delegation?.cancelAll('Delegation action aborted');
+        const abortedTurnId = managed.currentTurnId;
         managed.currentTurnId = undefined;
         // 用户中止：预算 Run 就此结束，不再补交报告，之后的回合也不再计数
         managed.requestBudget?.disarm();
@@ -2482,9 +2485,14 @@ export class SessionSupervisor {
         // 真正结束，工具不响应 signal 时永远等不到，UI 就卡在 running 上）。
         // 中断信号发出即视为本轮终止，后续 agent_end 回流由 status 守卫幂等吸收。
         if (retrying) {
+          managed.turnAborted = true;
+          managed.abortedTurnId = abortedTurnId;
           this.failTurn(managed, managed.lastRetryError ?? 'Auto-retry cancelled.');
         } else {
-          if (managed.status === 'running') managed.turnAborted = true;
+          if (managed.status === 'running') {
+            managed.turnAborted = true;
+            managed.abortedTurnId = abortedTurnId;
+          }
           managed.turnRetried = false;
           managed.status = 'idle';
           this.emitStatus(managed);
@@ -4986,9 +4994,10 @@ export class SessionSupervisor {
 
   /** 本轮成功收口。budget：子代理因请求预算被强制停止，带上标记（及补报告的错误）交回已有输出。 */
   private completeTurn(managed: ManagedSession, budget?: { error?: string }): void {
-    const turnId = managed.currentTurnId ?? randomUUID();
+    const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
     managed.currentTurnId = undefined;
+    managed.abortedTurnId = undefined;
     managed.turnAborted = false;
     managed.turnRetried = false;
     // 预算只管一次 Run：收口即清零，之后用户自己发起的回合不计数
@@ -5525,8 +5534,10 @@ export class SessionSupervisor {
     undelivered = false,
     retryExhausted = false
   ): void {
-    const turnId = managed.currentTurnId ?? randomUUID();
+    const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
+    const aborted = managed.turnAborted === true;
     managed.currentTurnId = undefined;
+    managed.abortedTurnId = undefined;
     managed.turnRetried = false;
     managed.turnAborted = false;
     managed.settlePending = false;
@@ -5559,6 +5570,7 @@ export class SessionSupervisor {
       error,
       ...(undelivered ? { undelivered: true } : {}),
       ...(retryExhausted ? { retryExhausted: true } : {}),
+      ...(aborted ? { aborted: true as const } : {}),
     });
     this.flushPendingReminders(managed);
   }
