@@ -4,6 +4,7 @@ import { act, type ComponentProps, createElement, type ReactNode, useState } fro
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ReleaseNotesDialog } from './ReleaseNotesDialog';
+import { UpdateBanner } from './UpdateBanner';
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
@@ -62,25 +63,45 @@ const buttonOf = (text: string) =>
     | HTMLButtonElement
     | undefined;
 
+let push: (status: UpdateStatus) => void = () => {};
+
+/** 与 Main 一致：downloading / error 状态不带 info */
+const downloading = (percent: number): UpdateStatus => ({
+  status: 'downloading',
+  progress: { percent, bytesPerSecond: 0, total: 0, transferred: 0 },
+});
+
 function Host({ initial }: { initial: UpdateStatus }) {
   const [open, setOpen] = useState(true);
   const [status, setStatus] = useState(initial);
-  downloadUpdate.mockImplementation(async () =>
-    setStatus((s) => ({ ...s, status: 'downloading' }))
-  );
+  push = setStatus;
+  downloadUpdate.mockImplementation(async () => setStatus(downloading(0)));
   return createElement(ReleaseNotesDialog, { open, onOpenChange: setOpen, status });
 }
 
-async function mount(status: UpdateStatus): Promise<void> {
+async function render(element: ReturnType<typeof createElement>): Promise<void> {
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
   vi.stubGlobal('window', window);
   vi.stubGlobal('document', window.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  Object.assign(window, { electronAPI: { updater: { downloadUpdate } } });
+  Object.assign(window, {
+    electronAPI: {
+      updater: {
+        downloadUpdate,
+        getState: async () => ({ host: 'desktop', status: null }),
+        onStatus: (listener: (status: UpdateStatus) => void) => {
+          push = listener;
+          return () => {};
+        },
+      },
+    },
+  });
   container = window.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
-  await act(async () => root.render(createElement(Host, { initial: status })));
+  await act(async () => root.render(element));
 }
+
+const mount = (status: UpdateStatus) => render(createElement(Host, { initial: status }));
 
 const available = {
   status: 'available',
@@ -108,6 +129,38 @@ describe('ReleaseNotesDialog', () => {
     await act(async () => buttonOf('Download update')?.click());
     expect(dialog()).not.toBeNull();
     await act(async () => buttonOf('Later')?.click());
+    expect(dialog()).toBeNull();
+  });
+
+  it('下载中与下载失败的状态不带 info 时仍显示原日志，并在对话框里给出进度与错误', async () => {
+    await mount(available);
+    await act(async () => buttonOf('Download update')?.click());
+    await act(async () => push(downloading(42.4)));
+    expect(dialog()?.textContent).toContain("What's new in 9.9.9");
+    expect(dialog()?.textContent).toContain('Release notes body');
+    expect(dialog()?.textContent).toContain('Downloading update… 42%');
+    await act(async () => push({ status: 'error', error: 'net::ERR_INTERNET_DISCONNECTED' }));
+    expect(dialog()?.textContent).toContain('Release notes body');
+    expect(dialog()?.textContent).toContain('Update failed: net::ERR_INTERNET_DISCONNECTED');
+  });
+});
+
+describe('UpdateBanner', () => {
+  it('下载失败时更新日志对话框不随横幅消失，关掉后也不会在下次发现新版时自己弹出', async () => {
+    await render(createElement(UpdateBanner));
+    await act(async () => push(available));
+    const notes = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Release notes'
+    );
+    await act(async () => notes?.click());
+    await act(async () => buttonOf('Download update')?.click());
+    await act(async () => push(downloading(10)));
+    await act(async () => push({ status: 'error', error: 'boom' }));
+    expect(dialog()?.textContent).toContain('Release notes body');
+    expect(dialog()?.textContent).toContain('Update failed: boom');
+    await act(async () => buttonOf('Later')?.click());
+    expect(dialog()).toBeNull();
+    await act(async () => push(available));
     expect(dialog()).toBeNull();
   });
 });

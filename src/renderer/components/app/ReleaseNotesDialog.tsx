@@ -1,4 +1,5 @@
 import type { UpdateStatus } from '@shared/types/updater';
+import { useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
@@ -35,8 +36,21 @@ export function ReleaseNotesDialog({
   canDownload?: boolean;
 }) {
   const { t } = useI18n();
-  const info = status?.info;
+  // downloading / error / checking 状态不带 info：沿用最近一次的版本信息，下载期间日志不清空
+  const lastInfo = useRef(status?.info);
+  if (status?.info) lastInfo.current = status.info;
+  const info = lastInfo.current;
   const notes = info?.releaseNotes;
+  const progress =
+    status?.status === 'downloading'
+      ? t('Downloading update… {{percent}}%', {
+          percent: Math.round(status.progress?.percent ?? 0),
+        })
+      : status?.status === 'error'
+        ? status.error
+          ? t('Update failed: {{error}}', { error: status.error })
+          : t('Update check failed')
+        : null;
   const action =
     status?.status === 'downloaded' ? (
       <Button size="sm" onClick={() => void window.electronAPI.updater.quitAndInstall()}>
@@ -77,6 +91,9 @@ export function ReleaseNotesDialog({
           )}
         </DialogPanel>
         <DialogFooter>
+          {progress && (
+            <p className="mr-auto self-center text-xs text-muted-foreground">{progress}</p>
+          )}
           <DialogClose render={<Button variant="outline" size="sm" />}>{t('Later')}</DialogClose>
           {action}
         </DialogFooter>
