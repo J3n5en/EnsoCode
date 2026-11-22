@@ -11,6 +11,7 @@ import {
   scopedDefaultModels,
 } from '@shared/defaultModel';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
+import { normalizeLocale, translate } from '@shared/i18n';
 import {
   EMPTY_PLAN_STATE,
   type PlanRespondAction,
@@ -555,8 +556,9 @@ interface SessionsState {
   /** 回退到已确认 user；本地序号先解析为 entryId。冷会话先 resume 并等待 worker 可用。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, anchor: string | number, restoreFiles?: boolean): void;
-  /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
-  compact(conversationId: string, instructions?: string): void;
+  /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行。
+   *  不能压或被 Main 拒绝时弹 toast；quiet 供手机代发：提示该给手机，不该弹在桌面上 */
+  compact(conversationId: string, instructions?: string, options?: { quiet?: boolean }): void;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
@@ -3291,17 +3293,18 @@ export const useSessionsStore = create<SessionsState>()(
           if (!id) return 'no conversation';
           const conversation = get().conversations[id];
           if (!conversation) return 'no conversation';
-          if (conversation.workspaceMigrating) return 'workspace operation in progress';
+          // /compact 应用级命令:压缩上下文,不发给 agent。工作区操作中/未启动由 compact() 提示原因
+          const compactCommand = parseCompactCommand(text);
+          if (conversation.workspaceMigrating && !compactCommand) {
+            return 'workspace operation in progress';
+          }
           if (conversation.rewinding || conversation.restoringFiles) return 'rewind in progress';
           // 只读回放的已结束实例：必须在乐观回显之前拦，否则会往只读历史里插一条
           // 根本没发出去的用户消息。
           if (conversation?.historyOnly) {
             return 'this Agent instance has ended — its history is read-only';
           }
-          // /compact 应用级命令:压缩上下文,不发给 agent。会话未启动时无上下文可压
-          const compactCommand = parseCompactCommand(text);
           if (compactCommand) {
-            if (!conversation.started) return 'nothing to compact yet';
             get().compact(id, compactCommand.instructions);
             return null;
           }
@@ -4092,11 +4095,37 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        compact(conversationId, instructions) {
+        compact(conversationId, instructions, options) {
           const conversation = get().conversations[conversationId];
-          if (!conversation?.started || conversation.workspaceMigrating || conversation.compaction)
+          if (!conversation) return;
+          const t = (key: string) =>
+            translate(normalizeLocale(useSettingsStore.getState().language), key);
+          const toast = (toast: { type: 'info' | 'error'; title?: string; description: string }) =>
+            void import('@/components/ui/toast')
+              .then(({ addToast }) => addToast(toast))
+              .catch(() => {});
+          const blocked = !conversation.started
+            ? 'Session not started yet — nothing to compact'
+            : conversation.workspaceMigrating
+              ? 'Workspace operation in progress — compact again when it finishes'
+              : conversation.compaction === 'running'
+                ? 'Compaction already in progress'
+                : conversation.compaction === 'queued'
+                  ? 'Compaction is queued and runs after this turn'
+                  : undefined;
+          if (blocked) {
+            if (!options?.quiet) toast({ type: 'info', description: t(blocked) });
             return;
-          void window.electronAPI.agent.compact(conversationId, instructions);
+          }
+          // Main 侧拒绝（会话已释放/换代、工作区锁）同样不能静默
+          void window.electronAPI.agent.compact(conversationId, instructions).then((result) => {
+            if (result.ok || options?.quiet) return;
+            toast({
+              type: 'error',
+              title: t('Compaction failed'),
+              description: result.error ?? '',
+            });
+          });
         },
 
         clearCompactionError(conversationId) {

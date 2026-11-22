@@ -26,22 +26,37 @@ const PART_LABELS: Record<ContextPartKind, string> = {
   chat: 'Conversation',
 };
 
-/** 面板底部的手动压缩按钮。忙碌中也可点：worker 排队，本轮收束后自动执行。 */
+/** 面板底部的手动压缩按钮。忙碌中也可点：worker 排队，本轮收束后自动执行。
+ *  不可点时原因写在按钮文字里（触屏看不到 title）。 */
 function CompactButton({ conversationId }: { conversationId: string }) {
   const { t } = useI18n();
   const compaction = useSessionsStore((s) => s.conversations[conversationId]?.compaction);
   const started = useSessionsStore((s) => s.conversations[conversationId]?.started);
+  const migrating = useSessionsStore((s) =>
+    Boolean(s.conversations[conversationId]?.workspaceMigrating)
+  );
   if (!started) return null;
   const label =
     compaction === 'running'
       ? t('Compacting…')
       : compaction === 'queued'
         ? t('Compacts after this turn')
-        : t('Compact context');
+        : migrating
+          ? t('Workspace operation in progress')
+          : t('Compact context');
   return (
     <button
       type="button"
-      disabled={Boolean(compaction)}
+      disabled={Boolean(compaction) || migrating}
+      title={
+        compaction === 'running'
+          ? t('Compaction already in progress')
+          : compaction === 'queued'
+            ? t('Compaction is queued and runs after this turn')
+            : migrating
+              ? t('Workspace operation in progress — compact again when it finishes')
+              : undefined
+      }
       className="w-full rounded-sm border border-border px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
       onClick={() => useSessionsStore.getState().compact(conversationId)}
     >
