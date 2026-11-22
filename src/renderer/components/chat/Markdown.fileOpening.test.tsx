@@ -680,6 +680,10 @@ describe('打不开的文件链接不高亮（先判定再渲染）', () => {
     writeText.mockResolvedValue(undefined);
     harness.missing = new Set(['oauthProviders.ts']);
     await render('`oauthProviders.ts:142`');
+    // macOS 上 cursor: copy 是箭头加绿色「+」，与其他可点元素一致用 pointer
+    const copyable = container.querySelector('[data-copy-code]');
+    expect(copyable?.classList.contains('cursor-copy')).toBe(false);
+    expect(copyable?.classList.contains('cursor-pointer')).toBe(true);
     await click('[data-copy-code]');
     expect(writeText).toHaveBeenCalledWith('oauthProviders.ts:142');
     expect(harness.toast).toHaveBeenCalledWith({ type: 'success', title: 'Copied' });

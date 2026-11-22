@@ -175,7 +175,7 @@ function CopyableCode({ text }: { text: string }) {
       tabIndex={0}
       title={t('Copy')}
       data-copy-code=""
-      className="group/copy relative cursor-copy"
+      className="group/copy relative cursor-pointer"
       onClick={copy}
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
