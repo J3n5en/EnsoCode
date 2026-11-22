@@ -449,13 +449,13 @@ describe('行内 code 路径 chip', () => {
     expect(container.querySelector('code')?.textContent).toBe(text.slice(1, -1));
   });
 
-  it.each([
-    'see src/ and/or 他/她',
-    '```\nsrc/renderer/\n```',
-  ])('正文和代码块里的目录不渲染 chip：%s', async (text) => {
-    await render(text);
-    expect(container.querySelector('button')).toBeNull();
-  });
+  it.each(['see src/ and/or 他/她', '```\nsrc/renderer/\n```'])(
+    '正文和代码块里的目录不渲染 chip：%s',
+    async (text) => {
+      await render(text);
+      expect(container.querySelector('button')).toBeNull();
+    }
+  );
 
   it('工作区外的相对目录点击提示越界，不调 Main', async () => {
     await render('`../shared/`');
