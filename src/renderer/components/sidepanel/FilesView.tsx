@@ -44,6 +44,7 @@ import {
   usePluginFileViewers,
 } from '../../plugins/fileViewers';
 import { PluginFrame } from '../../plugins/PluginView';
+import { FileImageViewer, isImageRel } from './FileImageViewer';
 import { FilesSearchPane } from './FilesSearchPane';
 import { fileTypeIcon, fileTypeIconClass } from './fileIcons';
 import { FileMarkdownPreview } from './filePreviewMarkdown';
@@ -101,6 +102,8 @@ interface OpenDoc {
   viewMode?: 'source' | 'preview';
   /** 正在用的插件文件查看器（pluginId:viewerId）；undefined 为编辑器 */
   viewer?: string;
+  /** 图片查看器：不读文本，version 变化时重新取图 */
+  image?: boolean;
 }
 
 const EMPTY_MESSAGES: ProjectedMessage[] = [];
@@ -224,6 +227,12 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     );
   }, []);
 
+  const bumpDocVersion = useCallback((rel: string) => {
+    setOpenDocs((docs) =>
+      docs.map((doc) => (doc.rel === rel ? { ...doc, version: doc.version + 1 } : doc))
+    );
+  }, []);
+
   const failToast = useCallback(
     (error?: string) => {
       addToast({
@@ -249,6 +258,19 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
           );
         }
         showDoc(rel);
+        return;
+      }
+      if (
+        isImageRel(rel) &&
+        viewMode !== 'source' &&
+        !pluginFileViewersFor(rel, fileViewersRef.current).some((viewer) => viewer.default)
+      ) {
+        setOpenDocs((docs) => [
+          ...docs,
+          { rel, contents: '', draft: '', version: 0, dirty: false, conflict: false, image: true },
+        ]);
+        showDoc(rel);
+        void window.electronAPI.workspaceFiles.watchStart({ ...req, rel });
         return;
       }
       const epoch = opEpochRef.current;
@@ -365,6 +387,10 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
       if (event.conversationId !== conversationId) return;
       const doc = openDocsRef.current.find((item) => item.rel === event.rel);
       if (!doc) return;
+      if (doc.image) {
+        bumpDocVersion(event.rel);
+        return;
+      }
       void readFile(event.rel).then((result) => {
         if (alive && result?.ok) applyDisk(event.rel, result.content);
       });
@@ -373,7 +399,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
       alive = false;
       unsubscribe();
     };
-  }, [applyDisk, conversationId, readFile]);
+  }, [applyDisk, bumpDocVersion, conversationId, readFile]);
 
   const running = useSessionsStore((s) => s.conversations[conversationId]?.status === 'running');
   const root = useSessionsStore((s) =>
@@ -414,7 +440,12 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     let alive = true;
     const rels = new Set(editedRelsKey ? editedRelsKey.split('\n') : []);
     for (const rel of rels) {
-      if (!openDocsRef.current.some((doc) => doc.rel === rel)) continue;
+      const doc = openDocsRef.current.find((item) => item.rel === rel);
+      if (!doc) continue;
+      if (doc.image) {
+        bumpDocVersion(rel);
+        continue;
+      }
       void readFile(rel).then((result) => {
         if (alive && result?.ok) applyDisk(rel, result.content);
       });
@@ -422,7 +453,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     return () => {
       alive = false;
     };
-  }, [applyDisk, readFile, editedRelsKey]);
+  }, [applyDisk, bumpDocVersion, readFile, editedRelsKey]);
 
   const seenWritesRef = useRef<Set<string> | null>(null);
   const seenWritesSessionRef = useRef(conversationId);
@@ -434,6 +465,10 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     let alive = true;
     bumpTree();
     for (const doc of openDocsRef.current) {
+      if (doc.image) {
+        bumpDocVersion(doc.rel);
+        continue;
+      }
       const rel = fromPreviewKey(doc.rel);
       const epoch = opEpochRef.current;
       void readFile(rel).then((result) => {
@@ -450,7 +485,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     return () => {
       alive = false;
     };
-  }, [bumpTree, readFile, workspaceMigrating, workspaceRevision]);
+  }, [bumpDocVersion, bumpTree, readFile, workspaceMigrating, workspaceRevision]);
 
   const expandDir = useCallback((rel: string) => {
     if (!rel) return;
@@ -585,7 +620,9 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
           void openFile(
             rel,
             // 不跳行时让插件的默认查看器生效
-            !line && pluginFileViewersFor(rel, fileViewersRef.current).some((v) => v.default)
+            !line &&
+              (isImageRel(rel) ||
+                pluginFileViewersFor(rel, fileViewersRef.current).some((v) => v.default))
               ? undefined
               : 'source'
           );
@@ -601,12 +638,46 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     [req]
   );
 
+  const readViewerImage = useCallback(
+    (rel: string) => window.electronAPI.workspaceFiles.readImage({ ...req, rel }),
+    [req]
+  );
+
   const resolveRemotePreviewImage = useCallback(
     (url: string) =>
       window.electronAPI.workspaceFiles
         .fetchRemoteImage({ ...req, url })
         .then((result) => (result.ok ? result.dataUrl : null)),
     [req]
+  );
+
+  /** 图片查看器兜底：改按文本读入代码编辑器 */
+  const openImageAsSource = useCallback(
+    async (rel: string) => {
+      const epoch = opEpochRef.current;
+      const result = await readFile(rel);
+      if (!result || wasPathInvalidated(mutationsRef.current, rel, epoch)) return;
+      if (!result.ok && result.error !== 'too-large') {
+        failToast(result.error);
+        return;
+      }
+      setOpenDocs((docs) =>
+        docs.map((doc) =>
+          doc.rel !== rel
+            ? doc
+            : result.ok
+              ? {
+                  ...doc,
+                  image: undefined,
+                  contents: result.content,
+                  draft: result.content,
+                  version: doc.version + 1,
+                }
+              : { ...doc, image: undefined, tooLarge: true }
+        )
+      );
+    },
+    [failToast, readFile]
   );
 
   const openInBrowser = useCallback(
@@ -697,7 +768,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
 
   const active = openDocs.find((doc) => doc.rel === activeRel) ?? null;
   const activeViewers =
-    active && !active.preview && !active.tooLarge
+    active && !active.preview && !active.tooLarge && !active.image
       ? pluginFileViewersFor(active.rel, fileViewers)
       : [];
   const activeViewer = active?.viewer
@@ -1236,6 +1307,14 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
               <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
                 {t('This file is too large to open in the editor.')}
               </div>
+            ) : active.image ? (
+              <FileImageViewer
+                key={active.rel}
+                rel={active.rel}
+                version={active.version}
+                resolveImage={readViewerImage}
+                onOpenSource={() => void openImageAsSource(active.rel)}
+              />
             ) : activeViewer ? (
               <PluginFrame
                 key={`${active.rel}:${fileViewerKey(activeViewer)}`}
