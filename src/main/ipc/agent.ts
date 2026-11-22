@@ -2043,6 +2043,9 @@ export function registerAgentHandlers(): void {
     }
     if (workerEvent.type === 'parent-ready') {
       coldResumeReady(workerEvent.identity.sessionId);
+      // 重启 / worker 退出打断、父会话还不知情的子代理 Run：父会话回来后补一次通知
+      const context = agentControlContext(workerEvent.identity);
+      if (context) agentService?.recoverOwner(context);
       sourceAuthority?.markReady(
         workerEvent.identity.sessionId,
         workerEvent.sessionFile,

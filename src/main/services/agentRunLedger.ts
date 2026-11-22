@@ -13,6 +13,9 @@ export interface AgentRunLedgerEntry {
   status: AgentRunStatus;
   createdAt: number;
   finishedAt?: number;
+  title?: string;
+  /** 父会话已得知它的结局；false = 重启后父会话就绪时要补通知 */
+  notified?: boolean;
 }
 
 export interface AgentRunLedgerStore {
@@ -62,6 +65,8 @@ function parseEntry(value: unknown): AgentRunLedgerEntry | null {
     ...(typeof entry.finishedAt === 'number' && Number.isFinite(entry.finishedAt)
       ? { finishedAt: entry.finishedAt }
       : {}),
+    ...(typeof entry.title === 'string' && entry.title ? { title: entry.title.slice(0, 200) } : {}),
+    ...(typeof entry.notified === 'boolean' ? { notified: entry.notified } : {}),
   };
 }
 

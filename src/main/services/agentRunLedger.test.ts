@@ -37,6 +37,17 @@ describe('parseAgentRunLedger', () => {
     ).toEqual([entry('ok', { finishedAt: 5, status: 'succeeded' })]);
   });
 
+  it('保留标题与父会话是否已知情；类型不对的可选字段丢掉', () => {
+    expect(
+      parseAgentRunLedger({
+        runs: [
+          { ...entry('a'), title: '核实疑似 bug', notified: false },
+          { ...entry('b'), title: 42, notified: 'yes' },
+        ],
+      })
+    ).toEqual([entry('a', { title: '核实疑似 bug', notified: false }), entry('b')]);
+  });
+
   it('不是台账形状时返回空，并只留最近的条目', () => {
     expect(parseAgentRunLedger(null)).toEqual([]);
     expect(parseAgentRunLedger([entry('a')])).toEqual([]);

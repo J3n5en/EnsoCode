@@ -1679,29 +1679,63 @@ describe('AgentService 找不到 Run / Agent 时说明原因', () => {
 
   const target = (runId: string) => ({ context, requestId: `t-${runId}`, runId });
 
-  it('现场：coworker 在跑时 Main 重启，旧 runId 报 restart-lost 并指向 send，而不是裸 not-found', async () => {
+  it('现场：coworker 在跑时更新重启，父会话回来后补一次中断通知，旧 runId 仍可 report / wait / stop', async () => {
     const ledger = memoryLedger();
     const before = setup({ ledger });
     const spawned = await before.service.spawn(spawnRequest({ mode: 'coworker' }));
     if (!spawned.ok) throw new Error(spawned.error);
+    // 更新重启：worker 退出时父会话也没了，此刻不通知
+    before.service.observe({ type: 'worker-exited' });
 
-    // 更新重启：新 AgentService 内存为空，coworker 由 child-ready 重新认领
-    const after = setup({ ledger });
+    const notify = vi.fn();
+    const after = setup({ ledger, notify });
+    after.service.recoverOwner(context);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toContain(`runId ${spawned.value.runId}`);
+    expect(notify.mock.calls[0][1]).toContain(`send with agentId ${spawned.value.agentId}`);
+    // 子会话恢复后 coworker 被重新认领
     expect(after.service.adoptCoworker(context, before.children[0])).toBe(true);
-    for (const result of [
-      await after.service.report(target(spawned.value.runId)),
-      await after.service.stop(target(spawned.value.runId)),
-      await after.service.wait({ context, requestId: 'w', runIds: [spawned.value.runId] }),
-    ]) {
-      expect(result).toMatchObject({ ok: false, code: 'restart-lost' });
-      if (result.ok) continue;
-      expect(result.error).toContain('before EnsoCode restarted');
-      expect(result.error).toContain('still running when the app restarted');
-      expect(result.error).toContain(`send with agentId ${spawned.value.agentId}`);
-    }
+    const report = await after.service.report(target(spawned.value.runId));
+    expect(report).toMatchObject({
+      ok: true,
+      value: { run: { runId: spawned.value.runId, status: 'interrupted' } },
+    });
+    expect(report.ok && report.value.error).toContain('restarted while this Run was in progress');
+    await expect(
+      after.service.wait({ context, requestId: 'w', runIds: [spawned.value.runId] })
+    ).resolves.toMatchObject({ ok: true, value: { runs: [{ status: 'interrupted' }] } });
+    await expect(after.service.stop(target(spawned.value.runId))).resolves.toMatchObject({
+      ok: true,
+      value: { status: 'interrupted' },
+    });
+    // 同一父会话再次就绪、或再重启一次，都不重复通知
+    after.service.recoverOwner(context);
+    const again = vi.fn();
+    setup({ ledger, notify: again }).service.recoverOwner(context);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(again).not.toHaveBeenCalled();
   });
 
-  it('重启前已结束的 task：report 说明已结束，resume 说明不能续跑、要检查改动后重新 spawn', async () => {
+  it('没来得及收到 worker-exited 的崩溃式重启：在跑的 task 也补通知，并说明不能 resume、要重新派', async () => {
+    const ledger = memoryLedger();
+    const before = setup({ ledger });
+    const spawned = await before.service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+
+    const notify = vi.fn();
+    const after = setup({ ledger, notify });
+    after.service.recoverOwner(context);
+    expect(notify.mock.calls[0][1]).toContain('cannot be resumed after a restart');
+    const resumed = await after.service.resume({
+      context,
+      requestId: 'resume',
+      agentId: spawned.value.agentId,
+    });
+    expect(resumed).toMatchObject({ ok: false, code: 'restart-lost' });
+    expect(!resumed.ok && resumed.error).toContain('spawn a new subagent');
+  });
+
+  it('重启前已结束且已通知的 task：不再通知，旧 runId 的 report 说明结果正文不跨重启保留', async () => {
     const ledger = memoryLedger();
     const before = setup({ ledger });
     const spawned = await before.service.spawn(spawnRequest());
@@ -1713,18 +1747,27 @@ describe('AgentService 找不到 Run / Agent 时说明原因', () => {
       turnId: spawned.value.runId,
     });
 
-    const after = setup({ ledger });
+    const notify = vi.fn();
+    const after = setup({ ledger, notify });
+    after.service.recoverOwner(context);
+    expect(notify).not.toHaveBeenCalled();
     const report = await after.service.report(target(spawned.value.runId));
-    expect(report).toMatchObject({ ok: false, code: 'restart-lost' });
-    expect(!report.ok && report.error).toContain('already succeeded before the restart');
-    expect(!report.ok && report.error).toContain('spawn a new subagent');
-    const resumed = await after.service.resume({
-      context,
-      requestId: 'resume',
-      agentId: spawned.value.agentId,
-    });
-    expect(resumed).toMatchObject({ ok: false, code: 'restart-lost' });
-    expect(!resumed.ok && resumed.error).toContain('subagent list');
+    expect(report).toMatchObject({ ok: true, value: { run: { status: 'succeeded' } } });
+    expect(report.ok && report.value.error).toContain('not kept across a restart');
+  });
+
+  it('同一 Main 里 worker 退出停放的 task：父会话重新就绪时补通知并指向 resume', async () => {
+    const notify = vi.fn();
+    const { service } = setup({ notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+    expect(notify).not.toHaveBeenCalled();
+    service.recoverOwner(context);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toContain(`resume with agentId ${spawned.value.agentId}`);
+    service.recoverOwner(context);
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 
   it('resume 换了新 runId 后，旧 runId 仍可 report / stop，不报 not-found', async () => {
