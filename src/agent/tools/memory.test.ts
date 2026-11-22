@@ -51,6 +51,19 @@ describe('MemoryInvoker', () => {
     expect(invoker.pendingCount).toBe(0);
     vi.useRealTimers();
   });
+
+  it('缺省超时按操作区分：检索 15s；写入要等 embedding 模型（冷加载）放宽到 30s', async () => {
+    vi.useFakeTimers();
+    const invoker = new MemoryInvoker(identity, () => {});
+    const search = invoker.invoke('search', {}).catch((e: Error) => e);
+    const capture = invoker.invoke('capture', {}).catch((e: Error) => e);
+    vi.advanceTimersByTime(15_001);
+    expect(String(await search)).toMatch(/timed out after 15000ms/);
+    expect(invoker.pendingCount).toBe(1);
+    vi.advanceTimersByTime(15_000);
+    expect(String(await capture)).toMatch(/timed out after 30000ms/);
+    vi.useRealTimers();
+  });
 });
 
 describe('createMemoryTools', () => {

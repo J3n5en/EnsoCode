@@ -446,22 +446,23 @@ function attachmentPaths(value: unknown): FieldsResult<string[]> {
     error: `invalid arguments: ${detail}`,
   });
   if (!Array.isArray(value)) return invalid(`"attachments" must be an array, got ${typeof value}`);
-  if (value.length > SECRETARY_ATTACHMENT_MAX)
-    return invalid(
-      `"attachments" has ${value.length} entries, max ${SECRETARY_ATTACHMENT_MAX} images per call`
-    );
   const paths: string[] = [];
   for (const [index, entry] of value.entries()) {
     if (typeof entry !== 'string')
       return invalid(`"attachments" entry ${index + 1} must be a string, got ${typeof entry}`);
     const trimmed = entry.trim();
-    if (!trimmed) return invalid(`"attachments" entry ${index + 1} must not be empty`);
+    // 空白条目没有语义（多余逗号、想表达「没有图」），丢掉而不是让整次调用失败
+    if (!trimmed) continue;
     if (trimmed.length > SECRETARY_ATTACHMENT_PATH_MAX)
       return invalid(
         `"attachments" entry ${index + 1} is ${trimmed.length} characters, max ${SECRETARY_ATTACHMENT_PATH_MAX}`
       );
     paths.push(trimmed);
   }
+  if (paths.length > SECRETARY_ATTACHMENT_MAX)
+    return invalid(
+      `"attachments" has ${paths.length} entries, max ${SECRETARY_ATTACHMENT_MAX} images per call`
+    );
   return { ok: true, value: paths };
 }
 

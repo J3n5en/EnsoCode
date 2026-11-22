@@ -155,6 +155,48 @@ describe('secretary tools', () => {
       message: '按图改',
       attachments: ['/tmp/a.png', '/tmp/b.png'],
     });
+    // 空白条目没有语义，schema 校验前丢掉；丢完为空等同没传
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments: ['/tmp/a.png', ' ', '', '/tmp/b.png'],
+      })
+    ).toEqual({
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: ['/tmp/a.png', '/tmp/b.png'],
+    });
+    expect(
+      normalizeSecretaryParams('session_create', { projectId: 'p1', prompt: 'x', images: [''] })
+    ).not.toHaveProperty('attachments');
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: 'hi',
+        attachments: [123, ''],
+      })
+    ).toEqual({ conversationId: 'c1', message: 'hi', attachments: [123] });
+    // 图全空只删 attachments，goal / mode 原样保留
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: 'hi',
+        mode: 'steer',
+        goal: ' 修好 ',
+        attachments: [' '],
+      })
+    ).toEqual({ conversationId: 'c1', message: 'hi', mode: 'steer', goal: '修好' });
+    expect(
+      normalizeSecretaryParams('session_create', {
+        projectId: 'p1',
+        prompt: 'x',
+        after: ['', 's1'],
+      })
+    ).toEqual({ projectId: 'p1', prompt: 'x', after: ['s1'] });
+    expect(normalizeSecretaryParams('todo_item_dispatch', { todoId: 't1', after: [' '] })).toEqual({
+      todoId: 't1',
+    });
     expect(
       normalizeSecretaryParams('session_send', {
         conversation_id: 'c1',
@@ -285,6 +327,18 @@ describe('secretary tools', () => {
     expect(normalizeSecretaryParams('cleanup_apply', { id: 'branch|/repo|feat/x' })).toEqual({
       ids: ['branch|/repo|feat/x'],
     });
+    // 空白 id 丢掉；全空等同没传，由 Main 报缺 ids，绝不变成 all
+    expect(normalizeSecretaryParams('cleanup_apply', { ids: ['', 'branch|/repo|feat/x'] })).toEqual(
+      { ids: ['branch|/repo|feat/x'] }
+    );
+    expect(normalizeSecretaryParams('cleanup_apply', { ids: ['', ' '] })).toEqual({});
+    expect(normalizeSecretaryParams('session_archive', { ids: ['s1', ''] })).toEqual({
+      ids: ['s1'],
+    });
+    // 空数组有含义的列表不动
+    expect(
+      normalizeSecretaryParams('secretary_profile_propose', { visibleProjectIds: [''] })
+    ).toEqual({ visibleProjectIds: [''] });
     expect(normalizeSecretaryParams('cleanup_list', { project_id: 'p1' })).toEqual({
       projectId: 'p1',
     });

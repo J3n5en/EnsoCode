@@ -1100,14 +1100,60 @@ export async function invokeMemory(
   scope: MemorySpaceContext | string | null
 ): Promise<unknown> {
   const space = scope !== null && typeof scope === 'object' ? scope : { projectId: scope };
-  return executeMemoryOp(memoryDb(), op, params, {
+  const conn = memoryDb();
+  const hooks = {
     ...space,
-    embedder: await memoryEmbedder(),
     onCreated: onMemoryCreated,
     onDeleted: notifyMemoryChanged,
     onPending: notifyMemoryChanged,
     complete: () => getMemoryCompletion(),
+  };
+  if (op !== 'search')
+    return executeMemoryOp(conn, op, params, { ...hooks, embedder: await memoryEmbedder() });
+  // 检索不陪模型冷加载：模型没加载好就只起加载、不等它，本次先走全文 + 实体。
+  // 加载的重活（dlopen / 建 Metal 管线）排在动态 import 的 I/O 之后，本次检索的同步 SQL 先跑完；
+  // 已加载的模型（含闲置卸载后重载）在 vectorBudgetMs 内拿不到查询向量也同样跳过
+  const ready = embedder;
+  if (!ready) void memoryEmbedder();
+  return executeMemoryOp(conn, op, params, {
+    ...hooks,
+    embedder: ready,
+    vectorWarming: !ready && embedderLoadable(),
+    vectorBudgetMs: SEARCH_VECTOR_BUDGET_MS,
   });
+}
+
+/** 一次检索等查询向量的上限；热模型单次查询向量在几十毫秒内 */
+const SEARCH_VECTOR_BUDGET_MS = 1_500;
+
+/** 与 memoryEmbedder 的前置条件一致：配置了可用的向量模型（本地已下载 / 远程无配置问题） */
+function embedderLoadable(): boolean {
+  const spec = resolveEmbeddingModelSpec(config.modelId);
+  if (!spec || spec.runtime === 'none') return false;
+  if (spec.runtime === 'openai-compatible') return !config.remoteIssue;
+  const dir = path.join(memoryRoot(), 'models', embeddingModelDirName(spec));
+  return spec.files.length === 0 || isModelReady(dir, spec);
+}
+
+/**
+ * 后台预热：库已存在才开库（不为预热建库），再把 embedding 模型加载好并跑一次查询向量，
+ * 让 GPU 管线在首个真实检索之前就绪。任何失败都只体现在返回值里。
+ */
+export async function warmMemoryService(): Promise<{
+  db: boolean;
+  embedder: boolean;
+  dbMs: number;
+  embedderMs: number;
+}> {
+  const started = Date.now();
+  const conn = memoryDbIfExists();
+  const dbMs = Date.now() - started;
+  if (!conn) return { db: false, embedder: false, dbMs, embedderMs: 0 };
+  const e = await memoryEmbedder();
+  // 只给本地模型跑一次推理把 GPU 管线建好；远程向量不为预热外发请求
+  const local = resolveEmbeddingModelSpec(config.modelId)?.runtime !== 'openai-compatible';
+  if (e && local) await e.embed('warmup', 'query').catch(() => null);
+  return { db: true, embedder: e !== null, dbMs, embedderMs: Date.now() - started - dbMs };
 }
 
 /** 批准 Bot 成员写共享空间的待审批记忆：走与工具写入同一条创建链路（向量、KG 排队、变更通知） */

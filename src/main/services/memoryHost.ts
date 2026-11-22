@@ -8,6 +8,7 @@
  * 本文件只做：配置收窄与推送、op 转发、LLM 远程补全代发、变更广播。
  * 服务崩溃 / 超时会自动重起（下一个 op 重新 fork）。
  */
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app } from '@platform';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
@@ -232,6 +233,24 @@ export function closeMemoryDb(): void {
 /** will-quit 收尾步骤：服务活着就等它关库关模型（超时内部会 SIGKILL） */
 export function memoryServiceActive(): boolean {
   return client.alive();
+}
+
+// 启动后等界面与 worker 先起来，再在后台把记忆服务、库和 embedding 模型热好：
+// 新版本首次加载模型要编译 Metal 管线，冷启动能超过工具 15s 的等待
+const WARMUP_DELAY_MS = 20_000;
+let warmupScheduled = false;
+
+/** 只预热已在用记忆的用户（库已存在）；不为预热建库，也不拖慢启动 */
+export function scheduleMemoryServiceWarmup(delayMs = WARMUP_DELAY_MS): void {
+  if (warmupScheduled) return;
+  warmupScheduled = true;
+  setTimeout(() => {
+    if (!existsSync(path.join(memoryRoot(), 'memory.db'))) return;
+    void memoryServiceOp('warmup').then(
+      (result) => console.info('[memory-service] warmup', result),
+      (error) => console.warn('[memory-service] warmup failed:', error)
+    );
+  }, delayMs).unref?.();
 }
 
 export async function shutdownMemoryService(): Promise<void> {
