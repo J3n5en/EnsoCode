@@ -114,9 +114,13 @@ async function install(service: ExtensionPluginService, files: Record<string, st
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
-/** 先让插件 import 跑完再同步推进，避免 advanceTimersByTimeAsync 等在途 Promise 死锁 */
+/** 插件 import 是真 I/O：等计时器真正挂上再同步拨钟，固定 flush 次数在慢机器上会提前拨走 */
 const armThenAdvance = async (ms: number) => {
-  for (let i = 0; i < 80; i++) await flush();
+  const spy = vi.spyOn(globalThis, 'setTimeout');
+  const armed = () =>
+    spy.mock.calls.some(([, delay]) => typeof delay === 'number' && delay > 0 && delay <= ms);
+  while (!armed()) await flush();
+  spy.mockRestore();
   vi.advanceTimersByTime(ms);
   for (let i = 0; i < 5; i++) await flush();
 };
