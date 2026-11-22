@@ -32,6 +32,22 @@ export type FilesWriteResult = { ok: true } | { ok: false; error: string };
 
 export type FilesMutateResult = { ok: true; rel?: string } | { ok: false; error: string };
 
+/** 聊天文件链接批量判定：rels 为工作区相对路径，结果与之等长，null = 打不开 */
+export interface FilesResolveLinksRequest {
+  conversationId: string;
+  projectId: string;
+  rels: string[];
+}
+
+export interface FilesLinkResolution {
+  rel: string;
+  kind: 'file' | 'dir';
+}
+
+export type FilesResolveLinksResult =
+  | { ok: true; items: (FilesLinkResolution | null)[] }
+  | { ok: false; error: string };
+
 export type FilesAbsResult =
   | { ok: true; abs: string; fileUrl: string; local: true }
   | { ok: true; abs: string; fileUrl?: undefined; local: false }

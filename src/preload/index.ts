@@ -88,6 +88,8 @@ import type {
   FilesOpenResult,
   FilesReadImageResult,
   FilesReadRelResult,
+  FilesResolveLinksRequest,
+  FilesResolveLinksResult,
   FilesSearchRequest,
   FilesSearchResult,
   FilesWatchEvent,
@@ -1123,6 +1125,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.FILES_REVEAL_EXTERNAL, request),
     search: (request: FilesSearchRequest): Promise<FilesSearchResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH_WORKSPACE, request),
+    /** 聊天文件链接批量判定能否打开（单批 ≤ 200） */
+    resolveLinks: (request: FilesResolveLinksRequest): Promise<FilesResolveLinksResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_RESOLVE_LINKS, request),
   },
 
   files: {

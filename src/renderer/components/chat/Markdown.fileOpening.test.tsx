@@ -3,6 +3,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { resetFileLinkCache } from './fileLinkResolver';
 import { LocalFileTrigger, Markdown, MarkdownLinkContext } from './Markdown';
 
 const harness = vi.hoisted(() => ({
@@ -11,6 +12,8 @@ const harness = vi.hoisted(() => ({
   reveal: vi.fn(),
   revealExternal: vi.fn(),
   readImage: vi.fn(),
+  resolveLinks: vi.fn(),
+  missing: new Set<string>(),
   openSidePanelFile: vi.fn(),
   openSidePanelBrowserUrl: vi.fn(),
   toast: vi.fn(),
@@ -89,14 +92,17 @@ let root: Root;
 let container: HTMLElement;
 const context = { conversationId: 'child', projectId: 'project', cwd: 'C:/workspace' };
 
-async function render(text: string, authorized = true) {
+const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 70)));
+
+async function render(text: string, authorized = true, streaming = false) {
   await act(async () =>
     root.render(
       <MarkdownLinkContext.Provider value={authorized ? context : null}>
-        <Markdown text={text} />
+        <Markdown text={text} streaming={streaming} />
       </MarkdownLinkContext.Provider>
     )
   );
+  await settle();
 }
 
 async function click(selector: string, type = 'click', init: Record<string, boolean> = {}) {
@@ -126,12 +132,21 @@ beforeEach(() => {
         reveal: harness.reveal,
         revealExternal: harness.revealExternal,
         readImage: harness.readImage,
+        resolveLinks: harness.resolveLinks,
       },
     },
   });
   container = dom.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
   vi.clearAllMocks();
+  resetFileLinkCache();
+  harness.missing = new Set();
+  harness.resolveLinks.mockImplementation(async ({ rels }: { rels: string[] }) => ({
+    ok: true,
+    items: rels.map((rel) =>
+      harness.missing.has(rel) ? null : { rel, kind: /\.\w+$/.test(rel) ? 'file' : 'dir' }
+    ),
+  }));
   harness.open.mockResolvedValue({ ok: true, target: 'internal', viewer: 'text', rel: 'src/a.ts' });
   harness.reveal.mockResolvedValue({ ok: true });
   harness.revealExternal.mockResolvedValue({ ok: true });
@@ -192,16 +207,16 @@ describe('聊天文件链接的打开方式', () => {
     });
   });
 
-  it('右键不接管外链或无权限链接，越界链接拒绝调用 IPC', async () => {
+  it('右键不接管外链或无权限链接，越界链接不渲染成链接也不调 IPC', async () => {
     await render('[web](https://example.com)');
     expect(await click('a', 'contextmenu')).toBe(false);
     await render('[local](src/a.ts)', false);
     expect(await click('a', 'contextmenu')).toBe(false);
     await render('[escape](../secret.txt)');
-    await click('a', 'contextmenu');
-    await click('[role="menuitem"]');
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.textContent).toBe('escape');
     expect(harness.openContext).not.toHaveBeenCalled();
-    expect(harness.toast).toHaveBeenCalled();
+    expect(harness.resolveLinks).not.toHaveBeenCalled();
   });
 
   it('正文文本调用 open，以原会话 owner 打开内部 Files 而不是 reveal', async () => {
@@ -353,11 +368,10 @@ describe('聊天文件链接的打开方式', () => {
     expect(harness.openSidePanelBrowserUrl).not.toHaveBeenCalled();
   });
 
-  it('越界与危险协议被拒绝，后端不可预览错误仍 toast', async () => {
+  it('越界不可点、危险协议被拒绝，后端不可预览错误仍 toast', async () => {
     await render('[escape](../secret.txt)');
-    await click('a');
+    expect(container.querySelector('a')).toBeNull();
     expect(harness.open).not.toHaveBeenCalled();
-    expect(harness.toast).toHaveBeenCalled();
     await render('[danger](javascript:alert(1))');
     await click('a');
     expect(harness.open).not.toHaveBeenCalled();
@@ -424,7 +438,6 @@ describe('行内 code 路径 chip', () => {
     '`src/renderer/components/`',
     '`./src/`',
     '`.agents/skills/`',
-    '`../shared/`',
   ])('识别为可点 chip：%s', async (text) => {
     await render(text);
     expect(container.querySelector('button')?.textContent).toBe(text.slice(1, -1));
@@ -457,22 +470,26 @@ describe('行内 code 路径 chip', () => {
     }
   );
 
-  it('工作区外的相对目录点击提示越界，不调 Main', async () => {
+  it('工作区外的相对路径不是 chip，点击复制原文，不调 Main', async () => {
+    const writeText = navigator.clipboard.writeText as Mock;
+    writeText.mockResolvedValue(undefined);
     await render('`../shared/`');
-    await click('button');
+    expect(container.querySelector('button')).toBeNull();
+    await click('[data-copy-code]');
+    expect(writeText).toHaveBeenCalledWith('../shared/');
     expect(harness.reveal).not.toHaveBeenCalled();
-    expect(harness.toast).toHaveBeenCalledWith(
-      expect.objectContaining({ description: 'The link is outside the current workspace.' })
-    );
+    expect(harness.resolveLinks).not.toHaveBeenCalled();
   });
 
-  it('远程客户端调不了宿主文件管理器：目录渲染成普通代码，文件 chip 照常', async () => {
+  it('远程客户端调不了宿主文件管理器：目录可复制不判定，文件判定后 chip 照常', async () => {
     Object.assign(window.electronAPI, { remote: {} });
     await render('`src/renderer/` `src/foo.ts`');
     const buttons = container.querySelectorAll('button');
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toBe('src/foo.ts');
-    expect(container.querySelector('code')?.textContent).toBe('src/renderer/');
+    expect(container.querySelector('[data-copy-code] code')?.textContent).toBe('src/renderer/');
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(1);
+    expect(harness.resolveLinks.mock.calls[0][0].rels).toEqual(['src/foo.ts']);
   });
 
   it('末尾带斜杠的目录点击交给系统文件管理器，不打开 Files 面板', async () => {
@@ -631,5 +648,175 @@ describe('工作区外的聊天链接只定位（#157）', () => {
     expect(harness.toast).toHaveBeenCalledWith(
       expect.objectContaining({ description: 'The link is outside the current workspace.' })
     );
+  });
+});
+
+describe('打不开的文件链接不高亮（先判定再渲染）', () => {
+  const chips = () => [...container.querySelectorAll('button')].map((item) => item.textContent);
+  const copies = () =>
+    [...container.querySelectorAll('[data-copy-code] code')].map((item) => item.textContent);
+
+  it('存在的是 chip，不存在、只有文件名且根目录没有、越界的都是可复制普通代码', async () => {
+    harness.missing = new Set(['src/missing.ts', 'oauthProviders.ts']);
+    await render(
+      '`src/a.ts` `src/missing.ts` `oauthProviders.ts:142` `top.ts:3` `../out/x.ts` [web](https://example.com)'
+    );
+    expect(chips()).toEqual(['src/a.ts', 'top.ts:3']);
+    expect(copies()).toEqual(['src/missing.ts', 'oauthProviders.ts:142', '../out/x.ts']);
+    // 只有文件名时只查工作区根目录同名文件，不做模糊匹配
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(1);
+    expect(harness.resolveLinks.mock.calls[0][0]).toEqual({
+      conversationId: 'child',
+      projectId: 'project',
+      rels: ['src/a.ts', 'src/missing.ts', 'oauthProviders.ts', 'top.ts'],
+    });
+    const web = container.querySelector('a');
+    expect(web?.getAttribute('href')).toBe('https://example.com');
+    expect(web?.className).toContain('text-brand');
+  });
+
+  it('点击打不开的路径复制原文并提示已复制；拖选文字时不复制', async () => {
+    const writeText = navigator.clipboard.writeText as Mock;
+    writeText.mockResolvedValue(undefined);
+    harness.missing = new Set(['oauthProviders.ts']);
+    await render('`oauthProviders.ts:142`');
+    await click('[data-copy-code]');
+    expect(writeText).toHaveBeenCalledWith('oauthProviders.ts:142');
+    expect(harness.toast).toHaveBeenCalledWith({ type: 'success', title: 'Copied' });
+    expect(harness.openSidePanelFile).not.toHaveBeenCalled();
+    writeText.mockClear();
+    Object.assign(window, {
+      getSelection: () => ({ isCollapsed: false, toString: () => 'oauth' }),
+    });
+    await click('[data-copy-code]');
+    expect(writeText).not.toHaveBeenCalled();
+    Reflect.deleteProperty(window, 'getSelection');
+  });
+
+  it('剪贴板 API 被拒时退回 execCommand，仍失败则静默', async () => {
+    (navigator.clipboard.writeText as Mock).mockRejectedValue(new Error('denied'));
+    const execCommand = vi.fn(() => false);
+    harness.missing = new Set(['x.ts']);
+    await render('`x.ts:1`');
+    const area = {
+      value: '',
+      style: {},
+      setAttribute() {},
+      select() {},
+      setSelectionRange() {},
+      remove() {},
+    };
+    vi.spyOn(document, 'createElement').mockReturnValue(area as never);
+    vi.spyOn(document.body, 'appendChild').mockReturnValue(area as never);
+    Object.assign(document, { execCommand });
+    await click('[data-copy-code]');
+    await settle();
+    expect(execCommand).toHaveBeenCalledWith('copy');
+    expect(area.value).toBe('x.ts:1');
+    expect(harness.toast).not.toHaveBeenCalled();
+  });
+
+  it('一条消息里的候选路径合并成一次 IPC，重渲染命中缓存不再请求；超 200 条分批', async () => {
+    await render('`src/a.ts` [b](src/b.md) `src/c/` `src/a.ts:9`');
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(1);
+    expect(harness.resolveLinks.mock.calls[0][0].rels).toEqual(['src/a.ts', 'src/b.md', 'src/c']);
+    await render('`src/a.ts` [b](src/b.md) `src/c/` again');
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(1);
+    harness.resolveLinks.mockClear();
+    await render(Array.from({ length: 250 }, (_, index) => `\`p/f${index}.ts\``).join(' '));
+    expect(harness.resolveLinks.mock.calls.map(([request]) => request.rels.length)).toEqual([
+      200, 50,
+    ]);
+  });
+
+  it('判定结果回来前是中性普通代码，不先高亮', async () => {
+    let finish: (value: unknown) => void = () => {};
+    harness.resolveLinks.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    await render('`src/a.ts` [doc](README.md)');
+    expect(chips()).toEqual([]);
+    expect(copies()).toEqual([]);
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.querySelector('code')?.textContent).toBe('src/a.ts');
+    await act(async () =>
+      finish({
+        ok: true,
+        items: [
+          { rel: 'src/a.ts', kind: 'file' },
+          { rel: 'README.md', kind: 'file' },
+        ],
+      })
+    );
+    expect(chips()).toEqual(['src/a.ts', '']);
+    expect(container.querySelector('button[aria-label="Reveal in File Explorer"]')).not.toBeNull();
+    expect(container.querySelector('a')?.textContent).toBe('doc');
+  });
+
+  it('流式输出期间不判定，正文停顿 300ms 后才查', async () => {
+    await render('`src/a.ts`', true, true);
+    expect(harness.resolveLinks).not.toHaveBeenCalled();
+    await render('`src/a.ts` `src/b.ts`', true, true);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(harness.resolveLinks).not.toHaveBeenCalled();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+    await settle();
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(1);
+    expect(chips()).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('只判定接近视口的消息', async () => {
+    const observers: { callback: (entries: { isIntersecting: boolean }[]) => void }[] = [];
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+          observers.push({ callback });
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    vi.stubGlobal('getComputedStyle', () => ({ overflowY: 'visible' }));
+    await render('`src/a.ts`');
+    expect(harness.resolveLinks).not.toHaveBeenCalled();
+    expect(container.querySelector('code')?.textContent).toBe('src/a.ts');
+    await act(async () => observers[0].callback([{ isIntersecting: true }]));
+    await settle();
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(1);
+    expect(chips()).toEqual(['src/a.ts']);
+  });
+
+  it('远程端或 SSH 判断不了（失败/拒绝）按打不开处理：可复制不可点', async () => {
+    harness.resolveLinks.mockResolvedValueOnce({ ok: false, error: 'unsupported' });
+    await render('`src/a.ts`');
+    expect(chips()).toEqual([]);
+    expect(copies()).toEqual(['src/a.ts']);
+    resetFileLinkCache();
+    harness.resolveLinks.mockRejectedValueOnce(new Error('tunnel closed'));
+    await render('`src/b.ts`');
+    expect(copies()).toEqual(['src/b.ts']);
+  });
+
+  it('点击时实时复查：文件已被删除则提示不可用并退回可复制', async () => {
+    await render('`src/a.ts:3`');
+    harness.missing = new Set(['src/a.ts']);
+    await click('button');
+    expect(harness.resolveLinks).toHaveBeenCalledTimes(2);
+    expect(harness.openSidePanelFile).not.toHaveBeenCalled();
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: 'The linked file or folder is unavailable.' })
+    );
+    expect(copies()).toEqual(['src/a.ts:3']);
+  });
+
+  it('无链接上下文（精简版手机、Files 预览）路径一律可复制，不判定', async () => {
+    await render('`src/a.ts:3` `src/dir/`', false);
+    expect(chips()).toEqual([]);
+    expect(copies()).toEqual(['src/a.ts:3', 'src/dir/']);
+    expect(harness.resolveLinks).not.toHaveBeenCalled();
   });
 });
