@@ -658,6 +658,18 @@ function SubagentNotices({ notices }: { notices: SubagentNotice[] }) {
                 <span>{formatDuration(n.usage.durationMs)}</span>
               </div>
             )}
+            {n.tasks && (
+              <div className="border-border/60 border-t px-3 py-1 text-[11px]">
+                <p className="text-foreground/75">
+                  {t('Background tasks started by this subagent')}
+                </p>
+                {n.tasks.map((task) => (
+                  <p key={task} className="truncate font-mono text-muted-foreground">
+                    {task}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         ))}
     </div>
