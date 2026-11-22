@@ -590,9 +590,7 @@ export class AgentService implements AgentServiceContract {
           error instanceof Error ? error.message : String(error)
         );
       }
-      const previous = [...this.runs.values()]
-        .filter((run) => run.agentId === agent.agentId)
-        .sort((left, right) => right.createdAt - left.createdAt)[0];
+      const previous = this.latestRun(agent.agentId);
       const run = this.createRun(
         agent,
         this.randomUuid(),
@@ -601,6 +599,8 @@ export class AgentService implements AgentServiceContract {
         previous?.gate
       );
       run.resumed = true;
+      // 会话里最后一条回复已写完时续跑无回合可跑，结果就是中断前投影到的这段文本
+      if (previous?.text !== undefined) run.text = previous.text;
       this.runs.set(run.runId, run);
       const started = await this.startRun(agent, run, true);
       if (!started.ok) return started;
@@ -837,6 +837,12 @@ export class AgentService implements AgentServiceContract {
       creator.parent.sessionId === right.actor.identity.sessionId &&
       creator.parent.generation === right.actor.identity.generation
     );
+  }
+
+  private latestRun(agentId: string): RunRecord | undefined {
+    return [...this.runs.values()]
+      .filter((run) => run.agentId === agentId)
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
   }
 
   private createRun(

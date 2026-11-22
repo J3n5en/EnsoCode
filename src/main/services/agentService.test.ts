@@ -1225,6 +1225,38 @@ describe('AgentService 中断的 task 停放与续跑', () => {
     ).toMatchObject({ ok: true, value: { run: { status: 'succeeded' } } });
   });
 
+  it('续跑时没有可续的回合：交回中断前已写完的回复，不交空报告', async () => {
+    const notify = vi.fn();
+    const { service, runtime, children } = resumable({ notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'message-upsert',
+      identity: children[0],
+      seq: 1,
+      index: 1,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'final report' }] },
+    });
+    service.observe({ type: 'worker-exited' });
+    const resumed = await service.resume({
+      context,
+      requestId: 'resume',
+      agentId: spawned.value.agentId,
+    });
+    if (!resumed.ok) throw new Error(resumed.error);
+    const relaunched = await vi.mocked(runtime.resume!).mock.results[0].value;
+    service.observe({
+      type: 'retry-skipped',
+      identity: relaunched,
+      seq: 2,
+      reason: 'nothing-to-retry',
+    });
+    expect(
+      await service.report({ context, requestId: 'report', runId: resumed.value.runId })
+    ).toMatchObject({ ok: true, value: { run: { status: 'succeeded' }, text: 'final report' } });
+    expect(notify.mock.calls.at(-1)?.[1]).toContain('final report');
+  });
+
   it('resume 未知 agentId 报 not-found，coworker 报 invalid-state', async () => {
     const { service } = resumable();
     expect(await service.resume({ context, requestId: 'r', agentId: 'missing' })).toMatchObject({
