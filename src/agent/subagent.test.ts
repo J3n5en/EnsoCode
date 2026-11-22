@@ -36,6 +36,10 @@ describe('subagent unified control', () => {
     });
     const guidance = [tool.description, ...(tool.promptGuidelines ?? [])].join('\n');
     expect(guidance).toMatch(/interrupted[^\n]*resume[^\n]*do not spawn/i);
+    // 父会话自己重试不会让子代理停放；触发场景只写真会停放的那几种
+    expect(guidance).not.toMatch(/turn was retried/);
+    expect(guidance).toMatch(/worker crash/);
+    expect(guidance).toMatch(/at most 3 times/);
   });
 
   it('normalizes model thinking before the typed Main invocation', async () => {

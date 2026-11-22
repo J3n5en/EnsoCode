@@ -3,6 +3,7 @@ import type {
   AgentControlContext,
   AgentControlSpawnRequest,
   AgentOwnerIdentity,
+  AgentWorkerEvent,
 } from '@shared/types/agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentService, type AgentServiceOptions, type AgentServiceRuntime } from './agentService';
@@ -1100,6 +1101,7 @@ describe('AgentService 中断的 task 停放与续跑', () => {
       seq: 2,
       turnId: spawned.value.runId,
       error: 'network down',
+      retryExhausted: true,
     });
     expect(await listStatus(service)).toEqual(['parked']);
     expect(runtime.dismiss).toHaveBeenCalledTimes(1);
@@ -1267,6 +1269,7 @@ describe('AgentService 中断的 task 停放与续跑', () => {
       seq: 2,
       turnId: spawned.value.runId,
       error: 'network down',
+      retryExhausted: true,
     });
     const again = await service.spawn(spawnRequest({ requestId: 'request-2' }));
     expect(again).toMatchObject({ ok: false, code: 'invalid-state' });
@@ -1295,5 +1298,163 @@ describe('AgentService 中断的 task 停放与续跑', () => {
     expect(
       await service.resume({ context, requestId: 'r2', agentId: coworker.value.agentId })
     ).toMatchObject({ ok: false, code: 'invalid-state' });
+  });
+
+  it('app 退出窗口里的断连按可恢复中断停放', async () => {
+    const { service, children } = resumable();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-failed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+      error: 'terminated',
+      interrupted: { at: 1, kind: 'quit' },
+    });
+    expect(await listStatus(service)).toEqual(['parked']);
+  });
+
+  it.each(['400 invalid request', '401 invalid api key', 'network down'])(
+    '重试也没用的失败（%s，未标可恢复）照旧关闭：不停放、通知不提示 resume',
+    async (error) => {
+      const notify = vi.fn();
+      const { service, runtime, children } = resumable({ notify });
+      const spawned = await service.spawn(spawnRequest());
+      if (!spawned.ok) throw new Error(spawned.error);
+      service.observe({
+        type: 'turn-failed',
+        identity: children[0],
+        seq: 2,
+        turnId: spawned.value.runId,
+        error,
+      });
+      expect(await listStatus(service)).toEqual(['closed']);
+      expect(notify.mock.calls[0][1]).toContain(error);
+      expect(notify.mock.calls[0][1]).not.toContain('resume');
+      expect(
+        await service.resume({ context, requestId: 'r', agentId: spawned.value.agentId })
+      ).toMatchObject({ ok: false, code: 'invalid-state' });
+      expect(runtime.resume).not.toHaveBeenCalled();
+    }
+  );
+
+  /** 当前 Run 再被可恢复地打断一次（瞬态错误重试用尽） */
+  const interruptActive = async (
+    service: AgentService,
+    runtime: ReturnType<typeof resumable>['runtime'],
+    runId: string,
+    resumes: number
+  ) => {
+    const identity =
+      resumes === 0
+        ? vi.mocked(runtime.spawn).mock.results[0].value
+        : vi.mocked(runtime.resume!).mock.results[resumes - 1].value;
+    service.observe({
+      type: 'turn-failed',
+      identity: await identity,
+      seq: 10 + resumes,
+      turnId: runId,
+      error: 'socket hang up',
+      retryExhausted: true,
+    });
+  };
+
+  it('每个 task 最多 resume 3 次：再被打断就关闭并说明原因，resume 被拒', async () => {
+    const notify = vi.fn();
+    const { service, runtime } = resumable({ notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    let runId = spawned.value.runId;
+    for (let resumes = 0; resumes < 3; resumes++) {
+      await interruptActive(service, runtime, runId, resumes);
+      expect(await listStatus(service)).toEqual(['parked']);
+      const resumed = await service.resume({
+        context,
+        requestId: `resume-${resumes}`,
+        agentId: spawned.value.agentId,
+      });
+      if (!resumed.ok) throw new Error(resumed.error);
+      runId = resumed.value.runId;
+    }
+    await interruptActive(service, runtime, runId, 3);
+    expect(await listStatus(service)).toEqual(['closed']);
+    const last = notify.mock.calls.at(-1)?.[1] as string;
+    expect(last).toContain('resumed 3 times');
+    expect(last).not.toContain(`subagent resume with agentId`);
+    const rejected = await service.resume({
+      context,
+      requestId: 'resume-4',
+      agentId: spawned.value.agentId,
+    });
+    expect(rejected).toMatchObject({ ok: false, code: 'invalid-state' });
+    expect(!rejected.ok && rejected.error).toContain('resumed 3 times');
+    expect(runtime.resume).toHaveBeenCalledTimes(3);
+  });
+
+  it('续跑把之前各段已用的模型请求数交给 worker，请求预算接着累计', async () => {
+    const { service, runtime, children } = resumable();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    const upsert = (identity: (typeof children)[0], index: number, role: string) =>
+      service.observe({
+        type: 'message-upsert',
+        identity,
+        seq: index,
+        index,
+        message: { role, content: [{ type: 'text', text: `m${index}` }] },
+      } as AgentWorkerEvent);
+    upsert(children[0], 1, 'assistant');
+    upsert(children[0], 1, 'assistant'); // 同一条流式更新不重复计
+    upsert(children[0], 2, 'toolResult');
+    upsert(children[0], 3, 'assistant');
+    service.observe({ type: 'worker-exited' });
+    const first = await service.resume({
+      context,
+      requestId: 'r1',
+      agentId: spawned.value.agentId,
+    });
+    if (!first.ok) throw new Error(first.error);
+    expect(runtime.retry).toHaveBeenLastCalledWith(expect.objectContaining({ requestsUsed: 2 }));
+    const relaunched = await vi.mocked(runtime.resume!).mock.results[0].value;
+    upsert(relaunched, 5, 'assistant');
+    service.observe({ type: 'worker-exited' });
+    const second = await service.resume({
+      context,
+      requestId: 'r2',
+      agentId: spawned.value.agentId,
+    });
+    if (!second.ok) throw new Error(second.error);
+    expect(runtime.retry).toHaveBeenLastCalledWith(expect.objectContaining({ requestsUsed: 3 }));
+  });
+
+  it('续跑时子会话正忙（retry-skipped busy）：本次续跑报错收口、重新停放，不占 resume 次数', async () => {
+    const notify = vi.fn();
+    const { service, runtime } = resumable({ notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+    const resumed = await service.resume({
+      context,
+      requestId: 'resume',
+      agentId: spawned.value.agentId,
+    });
+    if (!resumed.ok) throw new Error(resumed.error);
+    const relaunched = await vi.mocked(runtime.resume!).mock.results[0].value;
+    service.observe({ type: 'retry-skipped', identity: relaunched, seq: 2, reason: 'busy' });
+    expect(
+      await service.report({ context, requestId: 'report', runId: resumed.value.runId })
+    ).toMatchObject({ ok: true, value: { run: { status: 'failed' } } });
+    expect(await listStatus(service)).toEqual(['parked']);
+    expect(notify.mock.calls.at(-1)?.[1]).toContain('busy');
+    for (let i = 0; i < 3; i++) {
+      const again = await service.resume({
+        context,
+        requestId: `again-${i}`,
+        agentId: spawned.value.agentId,
+      });
+      expect(again.ok).toBe(true);
+      service.observe({ type: 'worker-exited' });
+    }
   });
 });

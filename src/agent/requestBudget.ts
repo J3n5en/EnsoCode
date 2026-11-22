@@ -53,9 +53,9 @@ export class RequestBudget {
     return this.phase;
   }
 
-  /** 预算 Run 开始。soft<=0 视为关闭，保持 idle，不计不拦。 */
-  arm(): void {
-    this.count = 0;
+  /** 预算 Run 开始；used 是续跑前已用的请求数，接着累计。soft<=0 视为关闭，保持 idle，不计不拦。 */
+  arm(used = 0): void {
+    this.count = used;
     this.noticeSent = false;
     this.pendingNotice = undefined;
     this.phase = this.soft > 0 ? 'running' : 'idle';

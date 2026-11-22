@@ -210,9 +210,21 @@ describe('agent control tool protocol', () => {
       unfinishedOnly: true,
       turnId: 'run-1',
       requestBudget: true,
+      requestsUsed: 12,
     };
     expect(parseAgentCommand(command)).toEqual(command);
-    for (const patch of [{ turnId: '' }, { turnId: 3 }, { requestBudget: false }])
+    expect(parseAgentCommand({ ...command, requestsUsed: 0 })).toEqual({
+      ...command,
+      requestsUsed: 0,
+    });
+    for (const patch of [
+      { turnId: '' },
+      { turnId: 3 },
+      { requestBudget: false },
+      { requestsUsed: -1 },
+      { requestsUsed: 1.5 },
+      { requestsUsed: '3' },
+    ])
       expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
   });
 

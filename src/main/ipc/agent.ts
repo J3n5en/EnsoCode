@@ -1945,7 +1945,11 @@ export function registerAgentHandlers(): void {
       resume: (input) =>
         dispatchService!.resumeControlledAgent(input.context.owner.ownerId, input.identity),
       retry: async (input) =>
-        retrySession(input.identity, true, { turnId: input.runId, requestBudget: true }),
+        retrySession(input.identity, true, {
+          turnId: input.runId,
+          requestBudget: true,
+          requestsUsed: input.requestsUsed,
+        }),
       validate: async (input) => {
         const source = sourceBindings?.resolveParentSource(input.context.owner.ownerId);
         if (!source) return { ok: false, error: 'Agent parent workspace is unavailable.' };

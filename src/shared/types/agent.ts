@@ -612,6 +612,8 @@ export interface AgentControlWaitRequest {
 /** 子代理阻塞等待：不写时限按默认，写了也不超过上限。完成会自动通知，等待只用于下一步离不开结果时 */
 export const AGENT_WAIT_DEFAULT_MS = 30 * 1000;
 export const AGENT_WAIT_MAX_MS = 5 * 60 * 1000;
+/** 每个 task 最多 resume 几次：反复被打断多半不是瞬态问题，再续只是空耗请求 */
+export const AGENT_TASK_MAX_RESUMES = 3;
 
 export interface AgentControlListRequest {
   context: AgentControlContext;
@@ -1671,6 +1673,8 @@ export type AgentCommand =
       /** 子代理续跑：沿用 Main 的 runId 作为本轮 turnId，并像 prompt-child 一样计请求预算 */
       turnId?: string;
       requestBudget?: true;
+      /** 子代理续跑：之前各段已用的模型请求数，预算接着累计 */
+      requestsUsed?: number;
     }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
    *  用于 Move to worktree 等需要换 cwd 重新 spawn 的场景。 */
@@ -4472,11 +4476,14 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         'unfinishedOnly',
         'turnId',
         'requestBudget',
+        'requestsUsed',
       ]) &&
         parseAnySessionIdentity(value.identity) &&
         (value.unfinishedOnly === undefined || value.unfinishedOnly === true) &&
         (value.turnId === undefined || isNonEmptyString(value.turnId)) &&
         (value.requestBudget === undefined || value.requestBudget === true) &&
+        (value.requestsUsed === undefined ||
+          (Number.isInteger(value.requestsUsed) && (value.requestsUsed as number) >= 0)) &&
         (value.instanceId === undefined ||
           (isUuid(value.instanceId) && parseSessionIdentity(value.identity) !== null))
         ? (value as unknown as AgentCommand)

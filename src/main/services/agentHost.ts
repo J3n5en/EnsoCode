@@ -2550,7 +2550,7 @@ export function withdrawSteerSession(
 export function retrySession(
   identity: SessionIdentity | ChildSessionIdentity,
   unfinishedOnly = false,
-  run?: { turnId: string; requestBudget?: boolean }
+  run?: { turnId: string; requestBudget?: boolean; requestsUsed?: number }
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({
     type: 'retry',
@@ -2559,6 +2559,7 @@ export function retrySession(
     ...(unfinishedOnly ? { unfinishedOnly: true as const } : {}),
     ...(run ? { turnId: run.turnId } : {}),
     ...(run?.requestBudget ? { requestBudget: true as const } : {}),
+    ...(run?.requestsUsed ? { requestsUsed: run.requestsUsed } : {}),
   });
 }
 

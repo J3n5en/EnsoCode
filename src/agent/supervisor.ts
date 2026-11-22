@@ -299,6 +299,7 @@ import {
   editLatestAssistantForRetry,
   editUnfinishedAssistantForResume,
   markRestartResumedReply,
+  settleInterruptedToolCalls,
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
@@ -2089,15 +2090,18 @@ export class SessionSupervisor {
           return;
         }
         const agent = managed.session.agent;
-        if (command.unfinishedOnly) editUnfinishedAssistantForResume(managed.session);
-        else editLatestAssistantForRetry(managed.session);
+        if (command.unfinishedOnly) {
+          // 子会话续跑：中断时还在跑的工具补上结果未知的结果，让模型先核对现状而不是原样重放
+          if (managed.childIdentity) settleInterruptedToolCalls(managed.session);
+          editUnfinishedAssistantForResume(managed.session);
+        } else editLatestAssistantForRetry(managed.session);
         if (agent.state.messages.at(-1)?.role === 'assistant') {
           this.emitRetrySkipped(managed, 'nothing-to-retry');
           return;
         }
         ensureAssistantUsage(agent.state.messages as unknown[]);
         managed.currentTurnId = command.turnId ?? randomUUID();
-        if (command.requestBudget) managed.requestBudget?.arm();
+        if (command.requestBudget) managed.requestBudget?.arm(command.requestsUsed);
         resetOauthPoolActivity(managed.session);
         void continueSessionActivity(managed.session).catch((error) =>
           this.failTurn(managed, toErrorMessage(error))

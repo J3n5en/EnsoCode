@@ -7,6 +7,7 @@ import type {
   SubagentModelOption,
 } from '@shared/types/agent';
 import {
+  AGENT_TASK_MAX_RESUMES,
   AGENT_WAIT_DEFAULT_MS,
   AGENT_WAIT_MAX_MS,
   parseAgentControlToolRequest,
@@ -260,7 +261,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       'Every subagent call must pass operation; to spawn, pass operation:"spawn". spawn requires non-empty description and prompt. Omit both for every other operation.',
       'On spawn, description is the title the user sees in subagent history. Write a short human-readable label of the work, not an id or slug. name is an optional internal handle and is not the title.',
       'Agent and Run are different identities: use runId for wait/report/stop and agentId for send/dismiss/resume.',
-      'When a task Run was interrupted (it failed mid-way, the worker restarted, or your own turn was retried), its Agent is parked with its progress saved. Call resume with that agentId to continue from where it stopped — do not spawn the same task again, which starts over from scratch. If you lost the agentId, list with status:"parked" finds it.',
+      `When a task Run is interrupted by something recoverable — a network or provider error that persisted through automatic retries, or an agent worker crash — its Agent is parked with its progress saved and the completion notice says so. Call resume with that agentId to continue from where it stopped (at most ${AGENT_TASK_MAX_RESUMES} times per task) — do not spawn the same task again, which starts over from scratch. If you lost the agentId, list with status:"parked" finds it. Failures that retrying cannot fix (bad request, auth, request budget) close the task instead.`,
       "Delegate when the work matches an available agent type, when two independent investigations can run in parallel, when answering needs broad exploration across several files, or when a long-running job can proceed in the background. For a known file, symbol, or single fact, use the direct tool (read for a known path, grep for a specific symbol) instead, and do not repeat work you delegated. Once you've delegated a search, don't also run it yourself.",
       'Treat the delivered report as your source of record: do not re-read files it covered unless you are about to edit them or the report is incomplete.',
       'Default to doing the work yourself in this thread: a few reads, one search, a short edit, or a single check is faster inline than delegating. Do not fan out several subagents for one small task, do not spawn a subagent to review or re-check work you can verify yourself, and keep the count low — one well-briefed subagent beats several thin ones. When independent subagents should run in parallel, spawn them all in the same message.',
