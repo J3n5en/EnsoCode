@@ -672,8 +672,8 @@ export class BackgroundTaskManager {
     return true;
   }
 
-  /** 会话树里还在跑、没表态（没保留、也没在停）的任务 */
-  undeclared(rootId: string): BackgroundTaskInfo[] {
+  /** 会话自己起的、还在跑、没表态（没保留、也没在停）的任务；子代理起的归子代理，不算在内 */
+  undeclared(sessionId: string): BackgroundTaskInfo[] {
     return [...this.tasks.values()]
       .filter(
         (task) =>
@@ -681,7 +681,7 @@ export class BackgroundTaskManager {
           !task.info.keep &&
           !task.killedByUser &&
           !task.stoppedByModel &&
-          inSessionTree(task.sessionId, rootId)
+          task.sessionId === sessionId
       )
       .map((task) => this.infoOf(task));
   }
@@ -1588,7 +1588,7 @@ export function createTaskTools(
   sessionId?: string
 ): ToolDefinition[] {
   const waitCapMs = manager.limits.taskWaitMaxMs;
-  // 所有会话共用一个 manager：只认本会话树的任务（子代理启动的也登记在父会话名下）。
+  // 所有会话共用一个 manager：只认本会话树的任务（子代理起的登记在子会话名下，父会话也能读、能停）。
   // 别的会话的任务一律按未知处理，免得推进它的读游标、吞掉它的完成通知，或把它静默停掉
   const owned = (taskId: string) => sessionId === undefined || manager.owns(taskId, sessionId);
   return [

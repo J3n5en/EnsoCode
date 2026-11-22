@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   type AgentTypeCandidate,
@@ -13,6 +13,7 @@ import {
   type AgentSessionCustomEntry,
   type AgentSpawnRequest,
   type AgentWorkerEvent,
+  type ChildConversationMetadata,
   type ChildLifecycleEvent,
   type DispatchMainEvent,
   type DispatchProgressPhase,
@@ -167,6 +168,8 @@ interface ActiveDispatch {
 }
 
 const MAX_RECENT_DISPATCHES = 128;
+/** 工具派出的 task 记住 spawn 配置，供中断后 resume；只留最近这么多条 */
+const MAX_RESUMABLE_TASKS = 64;
 const MAX_FILE_MENTION_BYTES = 256 * 1024;
 
 function isSameGeneration(left: SessionIdentity, right: SessionIdentity): boolean {
@@ -184,6 +187,11 @@ export class AgentDispatchService {
   private readonly teamGuards = new Map<string, TeamExecutionGuard>();
   /** 已级联恢复过的父代（sessionId\0generation）：parent-ready 重放不重复 spawn */
   private readonly restoredParents = new Set<string>();
+  /** 工具派出的 task：child sessionId → spawn 时的配置与 metadata（resume 原样复用，不重新解析模型） */
+  private readonly resumableTasks = new Map<
+    string,
+    { config: ResolvedAgentTypeSpawnConfig; metadata: ChildConversationMetadata }
+  >();
   private readonly randomUuid: () => string;
   private readonly now: () => number;
   private readonly readyTimeoutMs: number;
@@ -380,6 +388,17 @@ export class AgentDispatchService {
       const listed = this.options.sessionIndex.listCoworkers(parentConversationId);
       const coworker = listed.ok ? listed.data.find((entry) => entry.id === child.sessionId) : null;
       if (!coworker) throw new Error('Coworker ready state was not indexed.');
+      if (dispatchOrigin === 'agent-tool' && mode === 'task') {
+        this.resumableTasks.set(child.sessionId, {
+          config: spawnConfig,
+          metadata: reserved.reservation.metadata,
+        });
+        while (this.resumableTasks.size > MAX_RESUMABLE_TASKS) {
+          const oldest = this.resumableTasks.keys().next().value;
+          if (typeof oldest !== 'string') break;
+          this.resumableTasks.delete(oldest);
+        }
+      }
       return { ok: true, data: { conversationId: parentConversationId, coworker } };
     } catch (error) {
       this.options.sessionIndex.releaseChild(child);
@@ -427,6 +446,63 @@ export class AgentDispatchService {
       throw new Error('Controlled Agent ready state was not indexed.');
     }
     return identity;
+  }
+
+  /**
+   * 被中断的工具 task 从断点续跑：仿 restoreChildren 的 typed 分支，保留原 instanceId 换新 generation，
+   * 用原会话文件 spawn。会话文件还没落盘（第一条回复前就断了）时明确报错，不静默重开。
+   */
+  async resumeControlledAgent(
+    parentConversationId: string,
+    previous: ChildSessionIdentity
+  ): Promise<ChildSessionIdentity> {
+    const target = this.options.sessionIndex.resolveTeamTarget(parentConversationId);
+    if (!target.ok) throw new Error(target.error);
+    // 父会话 ready 时级联恢复已把它拉起：直接接管，不重复 spawn
+    const live = this.options.sessionIndex.currentIdentity(previous.sessionId);
+    if (
+      live &&
+      'parent' in live &&
+      live.generation !== previous.generation &&
+      isSameGeneration(live.parent, target.identity) &&
+      this.options.sessionIndex.isReady(live)
+    ) {
+      return live;
+    }
+    const task = this.resumableTasks.get(previous.sessionId);
+    if (!task) {
+      throw new Error('This subagent cannot be resumed: its spawn record is gone.');
+    }
+    const resumeFile = this.options.sessionIndex.sessionFile(previous);
+    if (!resumeFile || !existsSync(resumeFile)) {
+      throw new Error(
+        'This subagent cannot be resumed: it was interrupted before its first reply was saved, so there is no progress to continue. Spawn it again.'
+      );
+    }
+    const source = this.options.sourceRegistry.resolveParentSource(parentConversationId);
+    if (!source) throw new Error('The parent source is unavailable.');
+    const reserved = this.options.sessionIndex.reserveChildResume(
+      target.identity,
+      task.metadata,
+      this.randomUuid()
+    );
+    if (!reserved.ok) throw new Error(reserved.error);
+    const child = reserved.reservation.child;
+    try {
+      const spawned = this.options.host.spawnChild(
+        child,
+        await this.resolveSpawnCwd(source),
+        task.config,
+        resumeFile
+      );
+      if (!spawned.ok) throw new Error(spawned.error ?? 'Failed to resume subagent.');
+      await this.waitForChild(child);
+      return child;
+    } catch (error) {
+      this.options.sessionIndex.releaseChild(child);
+      this.options.host.dismissChild(target.identity, child, false);
+      throw error;
+    }
   }
 
   async dismissCoworker(

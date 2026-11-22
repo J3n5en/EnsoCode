@@ -859,6 +859,16 @@ describe('子代理按 runId / agentId 指代的操作行', () => {
     expect(tools[3]).toMatchObject({ summary: 'reviewer', subagentOp: 'dismiss' });
   });
 
+  it('resume 按 agentId 显示标题，续跑出的新 runId 之后也能对回子代理', () => {
+    const tools = rows([
+      call('u1', { operation: 'resume', agentId: a }),
+      result('u1', json({ agentId: a, runId: 'r9', mode: 'task', status: 'running' })),
+      call('q9', { operation: 'report', runId: 'r9' }),
+    ]);
+    expect(tools[3]).toMatchObject({ summary: '子代理连通性测试', subagentOp: 'resume' });
+    expect(tools[4]).toMatchObject({ summary: '子代理连通性测试', subagentOp: 'report' });
+  });
+
   it('wait 行按 agentId 带上各目标的标题，供展开后逐个标注；其它操作不带', () => {
     const tools = rows(
       [

@@ -29,7 +29,11 @@ const tool = (name: string, execute = vi.fn().mockResolvedValue(ok)): ToolDefini
   execute,
 });
 
-function setup(state: PlanState, mode: 'supervised' | 'full' = 'full') {
+function setup(
+  state: PlanState,
+  mode: 'supervised' | 'full' = 'full',
+  agentTypeOf?: (agentId: string) => string | undefined
+) {
   const requests: ApprovalRequestInfo[] = [];
   const gate = new ApprovalGate(
     mode,
@@ -38,13 +42,11 @@ function setup(state: PlanState, mode: 'supervised' | 'full' = 'full') {
   );
   const host = { state: () => state, submit: vi.fn<(doc: PlanDoc) => void>() };
   const run = (definition: ToolDefinition, params: unknown) =>
-    withPlanGate(definition, { host, readonlyAgentTypes: new Set(['scout']) }).execute(
-      'c1',
-      params as never,
-      undefined,
-      undefined,
-      undefined as never
-    );
+    withPlanGate(definition, {
+      host,
+      readonlyAgentTypes: new Set(['scout']),
+      ...(agentTypeOf ? { agentTypeOf } : {}),
+    }).execute('c1', params as never, undefined, undefined, undefined as never);
   return { gate, host, requests, run };
 }
 
@@ -135,6 +137,19 @@ describe('withPlanGate', () => {
       /Plan mode is active/
     );
     expect(subagent.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('规划期间 resume 只放行只读类型的子代理，类型未知一律拒绝', async () => {
+    const types: Record<string, string> = { a1: 'scout', a2: 'worker' };
+    const { run } = setup(planning, 'full', (agentId) => types[agentId]);
+    const subagent = tool('subagent');
+    await run(subagent, { operation: 'resume', agentId: 'a1' });
+    expect(subagent.execute).toHaveBeenCalledTimes(1);
+    for (const agentId of ['a2', 'unknown'])
+      await expect(run(subagent, { operation: 'resume', agentId })).rejects.toThrow(
+        /Plan mode is active/
+      );
+    expect(subagent.execute).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -49,6 +49,24 @@ describe('parseAgentNotification', () => {
     ]);
   });
 
+  it('用量之后的子代理后台任务清单单独取出，供卡片显示', () => {
+    const body = [
+      'Subagent "A" (agentId a-1, runId r-1) succeeded after 1s.',
+      PREAMBLE,
+      'done',
+      '<usage>subagent_tokens: 5\ntool_uses: 1\nduration_ms: 9</usage>',
+      'Background tasks this subagent started (they belong to the subagent, not to you; their completion will not notify you — check one with task_output only if you need its result):',
+      '- task-1-a (running): pnpm dev',
+      '- task-2-b (done, exit 0): pnpm test',
+    ].join('\n');
+    expect(parseAgentNotification(body)?.[0]).toEqual({
+      header: 'Subagent "A" (agentId a-1, runId r-1) succeeded after 1s.',
+      report: 'done',
+      usage: { tokens: 5, toolUses: 1, durationMs: 9 },
+      tasks: ['task-1-a (running): pnpm dev', 'task-2-b (done, exit 0): pnpm test'],
+    });
+  });
+
   it('不是子代理完成通知时返回 null，由调用方回退原文', () => {
     expect(parseAgentNotification('task done')).toBeNull();
     expect(parseAgentNotification(`前置文字\n${notice('A', 'x')}`)).toBeNull();

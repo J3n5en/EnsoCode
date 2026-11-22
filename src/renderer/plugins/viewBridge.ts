@@ -62,6 +62,15 @@ export function viewEventPush(
 }
 
 /** 宿主推给文件查看器的当前文件内容 */
+/** 全局页面换了当前会话时推给页面；会话页面打开时也带一次 */
+export function viewSessionPush(
+  sessionId: string | null,
+  projectId: string | null
+): { type: 'enso-view-session'; sessionId: string | null; projectId: string | null } {
+  return { type: 'enso-view-session', sessionId, projectId };
+}
+
+/** 宿主推给文件查看器的当前文件内容 */
 export function viewFilePush(
   rel: string,
   text: string
@@ -90,24 +99,37 @@ export interface PluginViewRef {
   id: string;
   title: string;
   entry: string;
+  /** global：所有会话共用一个常驻实例 */
+  scope?: 'global' | 'session';
 }
 
 let views: PluginViewRef[] = [];
+/** 插件列表第一次到达前，侧栏不据此删减全局标签 */
+let viewsReady = false;
 const listeners = new Set<() => void>();
 
 /** 已启用插件声明的侧栏页面，由 PluginUiHost 随插件列表刷新 */
 export function setPluginViews(next: PluginViewRef[]): void {
   views = next;
+  viewsReady = true;
   for (const listener of listeners) listener();
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribePluginViews(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
 const snapshot = () => views;
+const readySnapshot = () => viewsReady;
+
+export const getPluginViews = (): PluginViewRef[] => views;
+export const pluginViewsReady = (): boolean => viewsReady;
 
 export function usePluginViews(): PluginViewRef[] {
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
+  return useSyncExternalStore(subscribePluginViews, snapshot, snapshot);
+}
+
+export function usePluginViewsReady(): boolean {
+  return useSyncExternalStore(subscribePluginViews, readySnapshot, readySnapshot);
 }

@@ -4,10 +4,21 @@ import {
   resolveDisabledBuiltinTools,
 } from '@shared/types/builtinTools';
 import type { DockviewApi } from 'dockview-react';
+import { isMobileViewport } from '@/hooks/useViewport';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import type { SettingsState } from '@/stores/settings/types';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import {
+  createSyncGuard,
+  globalPanelIds,
+  liveGlobalTabs,
+  planGlobalTabSync,
+  pluginPanelId,
+  selectSidePanelShown,
+  withGlobalTab,
+} from '@/stores/sidePanel/globalTabs';
+import { getPluginViews, pluginViewsReady, subscribePluginViews } from '../plugins/viewBridge';
 import { isRemoteClient } from './remoteClient';
 import { resolveSidePanelDockConversationId } from './sidePanelDockId';
 
@@ -149,6 +160,169 @@ export function bindSidePanelDock(conversationId: string, api: DockviewApi): voi
       viewId: item.viewId,
       title: item.title,
     });
+  }
+}
+
+/** dock 卸载（Bot 模式、删会话）时先解绑：之后 dockview 自己清空面板不能当成用户关闭 */
+export function unbindSidePanelDock(conversationId: string, api: DockviewApi): void {
+  if (docks.get(conversationId) === api) docks.delete(conversationId);
+}
+
+// ---- 全局标签 ----
+
+const globalSync = createSyncGuard();
+/** 插件 ui.view.open 为全局页面临时打开了侧栏：记下原来的开关，close 时还原 */
+const pluginOpenedGlobal = new Map<string, { dockId: string; open: boolean | undefined }>();
+
+function currentGlobalIds(): Set<string> {
+  return globalPanelIds(getPluginViews(), useSidePanelStore.getState().globalScopeOverrides);
+}
+
+function addGlobalPanel(
+  api: DockviewApi,
+  conversationId: string,
+  panelId: string,
+  focus: boolean
+): void {
+  const existing = api.getPanel(panelId);
+  if (existing) {
+    if (focus) existing.focus();
+    return;
+  }
+  const view = getPluginViews().find((entry) => pluginPanelId(entry) === panelId);
+  if (!view) return;
+  const group = api.groups[0];
+  api.addPanel({
+    id: panelId,
+    component: 'plugin',
+    title: view.title,
+    params: {
+      conversationId,
+      projectId: useSessionsStore.getState().conversations[conversationId]?.projectId,
+      pluginId: view.pluginId,
+      viewId: view.id,
+    },
+    renderer: 'always',
+    // 补进别的会话不抢焦点（秘书面板仍是选中的那个），新补的放在第一个分组末尾。
+    // 空 dock 不能 inactive：分组不激活，之后再加的面板（如秘书面板）会另开一个分屏
+    inactive: !focus && api.panels.length > 0,
+    ...(group ? { position: { referenceGroup: group } } : {}),
+  });
+}
+
+/** 打开一个全局标签：加进 globalTabs，补进所有已挂载的 dock；没挂载的在 onReady 补 */
+export function openGlobalTab(panelId: string, originConversationId?: string): void {
+  const store = useSidePanelStore.getState();
+  store.setGlobalTabs(withGlobalTab(store.globalTabs, panelId));
+  for (const [conversationId, api] of docks) {
+    addGlobalPanel(api, conversationId, panelId, conversationId === originConversationId);
+  }
+}
+
+/**
+ * 关掉一个全局标签：从 globalTabs 移除，所有已挂载 dock 一起关，没挂载会话的已存布局也摘掉。
+ * keepConversationId：改回会话作用域时只留在这个会话。
+ */
+export function closeGlobalTab(panelId: string, keepConversationId?: string): void {
+  globalSync.run(() => {
+    for (const [conversationId, api] of docks) {
+      if (conversationId !== keepConversationId) api.getPanel(panelId)?.api.close();
+    }
+  });
+  const store = useSidePanelStore.getState();
+  store.setGlobalTabs(store.globalTabs.filter((id) => id !== panelId));
+  const keep = new Set(docks.keys());
+  if (keepConversationId) keep.add(keepConversationId);
+  store.dropPanelFromLayouts(panelId, keep);
+}
+
+/**
+ * 用户在某个 dock 加了全局页面（新建菜单、固定标签、插件 open）= 打开全局标签；
+ * 关掉全局标签 = 全局关闭。须在 fromJSON 恢复布局之后挂，恢复出来的由 syncDockGlobalTabs 处理。
+ */
+export function watchGlobalTabs(conversationId: string, api: DockviewApi): { dispose(): void } {
+  const owned = () => !globalSync.active() && docks.get(conversationId) === api;
+  const added = api.onDidAddPanel((panel) => {
+    if (!owned() || useSidePanelStore.getState().globalTabs.includes(panel.id)) return;
+    if (currentGlobalIds().has(panel.id)) openGlobalTab(panel.id, conversationId);
+  });
+  const removed = api.onDidRemovePanel((panel) => {
+    if (!owned() || !useSidePanelStore.getState().globalTabs.includes(panel.id)) return;
+    pluginOpenedGlobal.delete(panel.id);
+    closeGlobalTab(panel.id);
+  });
+  return {
+    dispose: () => {
+      added.dispose();
+      removed.dispose();
+    },
+  };
+}
+
+/**
+ * 一个 dock 与 globalTabs 归并。full（挂载后第一次、插件列表已到）时删掉在别处已关的；
+ * 侧栏明确开着时把旧布局里的全局插件面板收进 globalTabs（v5 迁移、清单改成 global）。
+ */
+export function syncDockGlobalTabs(conversationId: string, api: DockviewApi, full: boolean): void {
+  if (docks.get(conversationId) !== api || !pluginViewsReady()) return;
+  const store = useSidePanelStore.getState();
+  const plan = planGlobalTabSync({
+    globalTabs: store.globalTabs,
+    globalIds: currentGlobalIds(),
+    dockPanelIds: api.panels.map((panel) => panel.id),
+    adopt: store.uiByConversation[conversationId]?.open === true,
+    pruneExtras: full,
+  });
+  if (plan.adopt.length > 0) {
+    store.setGlobalTabs(plan.adopt.reduce(withGlobalTab, store.globalTabs));
+    for (const [id, other] of docks) {
+      if (other === api) continue;
+      for (const panelId of plan.adopt) addGlobalPanel(other, id, panelId, false);
+    }
+  }
+  globalSync.run(() => {
+    for (const panelId of plan.remove) api.getPanel(panelId)?.api.close();
+  });
+  for (const panelId of plan.add) addGlobalPanel(api, conversationId, panelId, false);
+}
+
+/** liveGlobalTabs 跟着 globalTabs、作用域覆盖与插件列表走 */
+export function bindLiveGlobalTabs(): () => void {
+  const update = () => {
+    const { globalTabs, globalScopeOverrides, setLiveGlobalTabs } = useSidePanelStore.getState();
+    setLiveGlobalTabs(
+      liveGlobalTabs(globalTabs, getPluginViews(), globalScopeOverrides, pluginViewsReady())
+    );
+  };
+  update();
+  const stopViews = subscribePluginViews(update);
+  const stopStore = useSidePanelStore.subscribe((state, prev) => {
+    if (
+      state.globalTabs !== prev.globalTabs ||
+      state.globalScopeOverrides !== prev.globalScopeOverrides
+    )
+      update();
+  });
+  return () => {
+    stopViews();
+    stopStore();
+  };
+}
+
+/** 右键菜单「在所有会话中显示」切换插件面板的作用域 */
+export function setPluginPanelScope(
+  panelId: string,
+  conversationId: string,
+  scope: 'global' | 'session'
+): void {
+  const view = getPluginViews().find((entry) => pluginPanelId(entry) === panelId);
+  if (!view) return;
+  const store = useSidePanelStore.getState();
+  store.setGlobalScopeOverride(panelId, (view.scope ?? 'session') === scope ? undefined : scope);
+  if (scope === 'global') openGlobalTab(panelId, conversationId);
+  else {
+    pluginOpenedGlobal.delete(panelId);
+    closeGlobalTab(panelId, conversationId);
   }
 }
 
@@ -358,6 +532,19 @@ export function openSidePanelPluginView(opts: {
   const dockId = resolveSidePanelDockConversationId(sessions.conversations, opts.conversationId);
   const api = docks.get(dockId);
   const id = `plugin:${opts.pluginId}:${opts.viewId}`;
+  if (currentGlobalIds().has(id)) {
+    openPluginGlobalView(dockId, id, Boolean(api));
+    if (!api) {
+      pendingPluginViewReveal.push({
+        conversationId: dockId,
+        ownerId: opts.conversationId,
+        pluginId: opts.pluginId,
+        viewId: opts.viewId,
+        title: opts.title,
+      });
+    }
+    return;
+  }
   const panelWasOpen = useSidePanelStore.getState().uiByConversation[dockId]?.open === true;
   useSidePanelStore.getState().ensureOpen(dockId);
   // 用户已开着右侧栏时清掉旧记录，免得之后 close 收起用户自己开的栏
@@ -395,6 +582,37 @@ export function openSidePanelPluginView(opts: {
 /** 右侧栏是插件 open 时才打开的：关掉该页面且它仍是当前标签时一并收起 */
 const pluginOpenedPanel = new Set<string>();
 
+/** 全局页面：开的是全局列表；目标会话的侧栏没显示时打开它，并记下原开关供 close 还原 */
+function openPluginGlobalView(dockId: string, panelId: string, mounted: boolean): void {
+  const state = useSidePanelStore.getState();
+  const shown = selectSidePanelShown(state, dockId, isMobileViewport());
+  // dock 没挂载时会排队重放一次，那时侧栏已被这里打开，不能把记录当成用户自己开的清掉
+  if (shown) {
+    if (pluginOpenedGlobal.get(panelId)?.dockId !== dockId) pluginOpenedGlobal.delete(panelId);
+  } else if (!state.globalTabs.includes(panelId)) {
+    pluginOpenedGlobal.set(panelId, { dockId, open: state.uiByConversation[dockId]?.open });
+  }
+  openGlobalTab(panelId, mounted ? dockId : undefined);
+  if (!selectSidePanelShown(useSidePanelStore.getState(), dockId, isMobileViewport())) {
+    state.ensureOpen(dockId);
+  }
+}
+
+function closePluginGlobalView(dockId: string, panelId: string): void {
+  const opened = pluginOpenedGlobal.get(panelId);
+  pluginOpenedGlobal.delete(panelId);
+  const active = docks.get(dockId)?.activePanel?.id === panelId;
+  closeGlobalTab(panelId);
+  if (!opened || opened.dockId !== dockId || !active) return;
+  useSidePanelStore.setState((state) => {
+    const ui = state.uiByConversation[dockId];
+    if (!ui || ui.open === opened.open) return {};
+    const { open: _open, ...rest } = ui;
+    const next = opened.open === undefined ? rest : { ...rest, open: opened.open };
+    return { uiByConversation: { ...state.uiByConversation, [dockId]: next } };
+  });
+}
+
 export function closeSidePanelPluginView(opts: {
   conversationId: string;
   pluginId: string;
@@ -406,6 +624,15 @@ export function closeSidePanelPluginView(opts: {
   );
   const id = `plugin:${opts.pluginId}:${opts.viewId}`;
   const key = `${dockId}\n${id}`;
+  if (useSidePanelStore.getState().globalTabs.includes(id)) {
+    pendingPluginViewReveal.splice(
+      0,
+      pendingPluginViewReveal.length,
+      ...pendingPluginViewReveal.filter((item) => `plugin:${item.pluginId}:${item.viewId}` !== id)
+    );
+    closePluginGlobalView(dockId, id);
+    return;
+  }
   const restore = pluginOpenedPanel.delete(key);
   pendingPluginViewReveal.splice(
     0,

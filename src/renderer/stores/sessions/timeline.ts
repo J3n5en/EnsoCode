@@ -619,7 +619,7 @@ function stripDeliveryReceipt(output: string | null): string | null {
 }
 
 /** 回执顶层带 agentId / runId 的操作；report / wait 的大段结果不在建时间线时解析 */
-const RECEIPT_OPS = new Set<unknown>(['spawn', 'send', 'message']);
+const RECEIPT_OPS = new Set<unknown>(['spawn', 'send', 'message', 'resume']);
 
 /** spawn 回执里的 agentId → 派活时起的名字；回执里的 runId → agentId，供后续按 id 指代的行显示标题 */
 function recordSubagent(
@@ -639,8 +639,8 @@ function recordSubagent(
   if (typeof label === 'string') agents.set(agentId, label.trim());
 }
 
-export type SubagentOp = 'report' | 'wait' | 'stop' | 'dismiss' | 'list';
-const SUBAGENT_OPS = new Set<unknown>(['report', 'wait', 'stop', 'dismiss', 'list']);
+export type SubagentOp = 'report' | 'wait' | 'stop' | 'dismiss' | 'list' | 'resume';
+const SUBAGENT_OPS = new Set<unknown>(['report', 'wait', 'stop', 'dismiss', 'list', 'resume']);
 
 /** 会阻塞到对方结束的调用：子代理 wait、spawn / send 带 wait:true、task_output 带正时限 */
 function blockingWaitKind(name: string, args: unknown): 'subagent' | 'task' | null {
@@ -682,7 +682,7 @@ function extractSubagentHeader(
       : { op: 'list', title: '' };
   }
   const ids =
-    operation === 'dismiss'
+    operation === 'dismiss' || operation === 'resume'
       ? [agentId]
       : [runId, ...(Array.isArray(runIds) ? runIds : [])].map((id) =>
           typeof id === 'string' ? runs.get(id) : undefined

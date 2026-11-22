@@ -5,6 +5,7 @@ import type {
   AgentControlDismissRequest,
   AgentControlListRequest,
   AgentControlMessageRequest,
+  AgentControlResumeRequest,
   AgentControlRunTargetRequest,
   AgentControlSendRequest,
   AgentControlSpawnRequest,
@@ -24,7 +25,12 @@ import type {
   AgentWaitReceipt,
   AgentWorkerEvent,
 } from '@shared/types/agent';
-import { AGENT_WAIT_DEFAULT_MS, AGENT_WAIT_MAX_MS } from '@shared/types/agent';
+import {
+  AGENT_TASK_MAX_RESUMES,
+  AGENT_WAIT_DEFAULT_MS,
+  AGENT_WAIT_MAX_MS,
+} from '@shared/types/agent';
+import type { ObservedTask } from './backgroundTaskTracker';
 
 interface RuntimeResult {
   ok: boolean;
@@ -72,6 +78,21 @@ export interface AgentServiceRuntime {
   validate?(
     input: AgentRuntimeRunInput & { text?: string }
   ): Promise<RuntimeResult & { value?: unknown }>;
+  /** 用原会话文件重开被中断 task 的子会话；没有可续的会话文件时抛错 */
+  resume?(input: {
+    context: AgentControlContext;
+    identity: ChildSessionIdentity;
+    agentId: string;
+  }): Promise<ChildSessionIdentity>;
+  /** 对重开的子会话续跑未完成的回合（unfinishedOnly retry），不追加 prompt */
+  retry?(input: {
+    context: AgentControlContext;
+    identity: ChildSessionIdentity;
+    agentId: string;
+    runId: string;
+    /** 之前各段已用的模型请求数：请求预算接着累计 */
+    requestsUsed: number;
+  }): Promise<RuntimeResult>;
 }
 
 export interface AgentServiceContract {
@@ -86,6 +107,7 @@ export interface AgentServiceContract {
   ): Promise<AgentServiceResult<AgentWaitReceipt>>;
   list(request: AgentControlListRequest): Promise<AgentServiceResult<AgentListReceipt>>;
   message(request: AgentControlMessageRequest): Promise<AgentServiceResult<AgentSendReceipt>>;
+  resume(request: AgentControlResumeRequest): Promise<AgentServiceResult<AgentSpawnReceipt>>;
 }
 
 interface AgentRecord {
@@ -97,6 +119,10 @@ interface AgentRecord {
   activeRunId?: string;
   queuedRunIds: string[];
   title: string;
+  /** task 已 resume 的次数 */
+  resumes?: number;
+  /** 用满 resume 次数后又被打断，因此关闭而非停放 */
+  resumeLimitHit?: boolean;
 }
 
 interface RunRecord {
@@ -122,6 +148,14 @@ interface RunRecord {
   delivered: boolean;
   /** 子代理因请求预算被强制停止：带着已有部分输出收口，不算失败 */
   requestBudgetStop?: boolean;
+  /** 续跑被中断的 task：启动走 runtime.retry 而不是 prompt */
+  resumed?: boolean;
+  /** 本段发出的模型请求（assistant 消息 index），流式更新同一条不重复计 */
+  requestIndexes: Set<number>;
+  /** 续跑之前各段已用的模型请求数 */
+  priorRequests: number;
+  /** 模型自己 subagent stop 的：同一轮的中止回执由 stop 收口，不当成用户停止 */
+  stopRequested?: boolean;
 }
 
 interface Waiter {
@@ -137,6 +171,8 @@ export interface AgentServiceOptions {
   allowedModes?: (context: AgentControlContext) => ReadonlySet<AgentMode>;
   /** Run 结束而模型还不知情时通知其父会话 */
   notify?: (context: AgentControlContext, text: string, urgent: boolean) => void;
+  /** 子会话起的后台任务（Main 投影）：Run 结果里列给父会话，它们完成时不会通知父会话 */
+  childTasks?: (sessionId: string) => readonly ChildTask[];
   /** 某父会话名下未结束 Run 的进度变化：负载是该 owner 的全量快照（REPLACE 语义） */
   onProgress?: (ownerId: string, runs: AgentRunProgress[]) => void;
 }
@@ -147,6 +183,15 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
   'cancelled',
   'interrupted',
 ]);
+
+const RESUME_LIMIT_TEXT = `It was already resumed ${AGENT_TASK_MAX_RESUMES} times, the limit, so it cannot be resumed again: check what it already did, then spawn a fresh task for the rest or finish it yourself.`;
+
+const USER_STOPPED_TEXT =
+  '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
+
+type ChildTask = Pick<ObservedTask, 'taskId' | 'command' | 'status' | 'startedAt' | 'exitCode'>;
+
+const CHILD_TASK_COMMAND_LIMIT = 120;
 
 function failure<T>(
   code: Extract<AgentServiceResult<T>, { ok: false }>['code'],
@@ -272,6 +317,14 @@ export class AgentService implements AgentServiceContract {
     if (!request.requestId || !request.description.trim() || !request.prompt.trim()) {
       return failure('invalid-state', 'requestId, description and prompt are required.');
     }
+    // 中断后原样再派同一件事会从头重跑：指向 resume；确要重来先 dismiss
+    const parked = this.parkedTaskWithPrompt(request.context, request.prompt);
+    if (parked) {
+      return failure(
+        'invalid-state',
+        `This exact task was interrupted and is parked with its progress saved: use operation:"resume" with agentId ${parked} to continue it. To start over instead, dismiss that agentId first.`
+      );
+    }
     const reservationId = this.randomUuid();
     const runId = this.randomUuid();
     let identity: ChildSessionIdentity;
@@ -329,6 +382,12 @@ export class AgentService implements AgentServiceContract {
         return failure(
           'invalid-state',
           'Agent is dismissed and cannot receive messages. Spawn a new agent with the context it needs.'
+        );
+      }
+      if (agent.value.status === 'parked' && agent.value.mode === 'task') {
+        return failure(
+          'invalid-state',
+          'This task was interrupted. Use resume with its agentId to continue it from where it stopped.'
         );
       }
       const active = agent.value.activeRunId ? this.runs.get(agent.value.activeRunId) : undefined;
@@ -408,6 +467,7 @@ export class AgentService implements AgentServiceContract {
       if (!agent) return failure('not-found', 'Agent was not found.');
       // 模型自己停的：stop 回执即知情；停的途中恰好跑完也不再另发通知
       run.value.delivered = true;
+      run.value.stopRequested = true;
       if (run.value.status === 'queued') {
         agent.queuedRunIds = agent.queuedRunIds.filter((id) => id !== run.value.runId);
       } else if (run.value.status !== 'validating') {
@@ -420,6 +480,7 @@ export class AgentService implements AgentServiceContract {
         if (!stopped.ok) {
           // 停的途中已自然结束：模型只看到 stop 失败，补发通知
           run.value.delivered = false;
+          run.value.stopRequested = false;
           if (TERMINAL_RUN_STATUSES.has(run.value.status)) this.notifyUndelivered(run.value);
           return failure('runtime-unavailable', stopped.error ?? 'Stop failed.');
         }
@@ -533,6 +594,65 @@ export class AgentService implements AgentServiceContract {
     });
   }
 
+  /** 被中断的 task 从断点续跑：按原会话文件重开子会话，续跑未完成的回合，不追加新 prompt */
+  resume(request: AgentControlResumeRequest): Promise<AgentServiceResult<AgentSpawnReceipt>> {
+    return this.serial(request.context.owner.ownerId, async () => {
+      const owned = this.ownedAgent(request.context, request.agentId);
+      if (!owned.ok) return owned;
+      const agent = owned.value;
+      if (agent.mode !== 'task') {
+        return failure(
+          'invalid-state',
+          'Only an interrupted task Agent can be resumed. Use send to continue a coworker.'
+        );
+      }
+      if (agent.status !== 'parked') {
+        return failure(
+          'invalid-state',
+          agent.status === 'closed'
+            ? agent.resumeLimitHit
+              ? `Agent cannot be resumed. ${RESUME_LIMIT_TEXT}`
+              : 'Agent already finished or was dismissed and cannot be resumed.'
+            : 'Agent was not interrupted and does not need resuming.'
+        );
+      }
+      const { resume, retry } = this.options.runtime;
+      if (!resume || !retry) return failure('runtime-unavailable', 'Agent resume is unavailable.');
+      try {
+        agent.identity = await resume({
+          context: request.context,
+          identity: agent.identity,
+          agentId: agent.agentId,
+        });
+      } catch (error) {
+        return failure(
+          'runtime-unavailable',
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      const previous = this.latestRun(agent.agentId);
+      const run = this.createRun(
+        agent,
+        this.randomUuid(),
+        previous?.prompt ?? '',
+        previous?.schema,
+        previous?.gate
+      );
+      run.resumed = true;
+      run.priorRequests = (previous?.priorRequests ?? 0) + (previous?.requestIndexes.size ?? 0);
+      // 会话里最后一条回复已写完时续跑无回合可跑，结果就是中断前投影到的这段文本
+      if (previous?.text !== undefined) run.text = previous.text;
+      this.runs.set(run.runId, run);
+      const started = await this.startRun(agent, run, true);
+      if (!started.ok) return started;
+      agent.resumes = (agent.resumes ?? 0) + 1;
+      return {
+        ok: true,
+        value: { agentId: agent.agentId, runId: run.runId, mode: 'task', status: 'running' },
+      };
+    });
+  }
+
   async wait(
     request: AgentControlWaitRequest,
     signal?: AbortSignal
@@ -598,13 +718,17 @@ export class AgentService implements AgentServiceContract {
     if (event.type === 'worker-exited') {
       for (const agent of this.agents.values()) {
         const active = agent.activeRunId ? this.runs.get(agent.activeRunId) : undefined;
-        if (active && !TERMINAL_RUN_STATUSES.has(active.status)) {
+        const interrupted = Boolean(active && !TERMINAL_RUN_STATUSES.has(active.status));
+        const park = interrupted && this.mayPark(agent);
+        if (active && interrupted) {
           // 父会话随 worker 一起没了，无人可通知
           active.delivered = true;
           this.finishRun(active, 'interrupted', 'Agent worker exited.');
         }
         agent.activeRunId = undefined;
-        agent.status = agent.mode === 'coworker' ? 'parked' : 'closed';
+        // 中断的 task 停放待 resume；子会话已随 worker 没了，无需回收
+        agent.status =
+          agent.mode === 'coworker' || park || agent.status === 'parked' ? 'parked' : 'closed';
       }
       return;
     }
@@ -635,6 +759,7 @@ export class AgentService implements AgentServiceContract {
       const activity = projectedActivity(event.message);
       if (activity) active.activity = activity;
       for (const id of toolCallIdsOf(event.message)) active.toolCallIds.add(id);
+      if (event.message.role === 'assistant') active.requestIndexes.add(event.index);
       if (event.message.usage) {
         const usage = event.message.usage;
         active.usageByMessage.set(event.index, {
@@ -653,6 +778,12 @@ export class AgentService implements AgentServiceContract {
       active &&
       event.turnId === active.runId
     ) {
+      // 用户在子代理 tab 里停止：可恢复的中断，task 停放待 resume；模型自己 stop 的交给 stop 收口
+      if (event.aborted) {
+        if (!active.stopRequested)
+          this.settleRun(agent, active, 'interrupted', USER_STOPPED_TEXT, true);
+        return;
+      }
       if (event.type === 'turn-completed' && event.requestBudgetStop) {
         active.requestBudgetStop = true;
         if (event.requestBudgetError) {
@@ -661,15 +792,32 @@ export class AgentService implements AgentServiceContract {
         }
       }
       if (event.type === 'turn-failed') {
-        this.settleRun(agent, active, 'failed', event.error);
-      } else if (active.schema !== undefined || active.gate !== undefined) {
-        active.status = 'validating';
-        void this.validateRun(agent, active);
+        // 只有可恢复的中断才停放：瞬态错误重试用尽、应用退出打断；400 / 鉴权等重试也没用的照旧关闭
+        const recoverable = event.retryExhausted === true || event.interrupted !== undefined;
+        this.settleRun(agent, active, 'failed', event.error, recoverable);
       } else {
-        this.settleRun(agent, active, 'succeeded');
+        this.completeRun(agent, active);
       }
       return;
     }
+    if (event.type === 'retry-skipped' && active?.resumed && active.status === 'running') {
+      if (event.reason === 'nothing-to-retry') {
+        // 续跑时子会话最后一条回复其实已完整：没有可续的回合，按完成收口
+        this.completeRun(agent, active);
+      } else {
+        // 子会话正忙没能续跑：本次报错收口、重新停放，不占 resume 次数
+        agent.resumes = Math.max(0, (agent.resumes ?? 0) - 1);
+        this.parkTask(agent);
+        this.finishRun(
+          active,
+          'failed',
+          'The subagent session was busy, so it could not resume. Try resume again shortly.'
+        );
+      }
+      return;
+    }
+    // 停放的 task 回收子会话时的 child-ended 不改状态
+    if (event.type === 'child-ended' && agent.status === 'parked' && agent.mode === 'task') return;
     if (event.type === 'child-ended' || event.type === 'child-rejected') {
       const terminal = event.type === 'child-rejected' ? 'failed' : 'interrupted';
       if (active) {
@@ -747,6 +895,23 @@ export class AgentService implements AgentServiceContract {
     );
   }
 
+  private latestRun(agentId: string): RunRecord | undefined {
+    return [...this.runs.values()]
+      .filter((run) => run.agentId === agentId)
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
+  }
+
+  private parkedTaskWithPrompt(context: AgentControlContext, prompt: string): string | undefined {
+    const wanted = prompt.trim();
+    return [...this.agents.values()].find(
+      (agent) =>
+        agent.mode === 'task' &&
+        agent.status === 'parked' &&
+        this.sameOwner(agent.context, context) &&
+        this.latestRun(agent.agentId)?.prompt.trim() === wanted
+    )?.agentId;
+  }
+
   private createRun(
     agent: AgentRecord,
     runId: string,
@@ -766,6 +931,8 @@ export class AgentService implements AgentServiceContract {
       createdAt: this.now(),
       usageByMessage: new Map(),
       toolCallIds: new Set(),
+      requestIndexes: new Set(),
+      priorRequests: 0,
       delivered: false,
     };
   }
@@ -780,18 +947,24 @@ export class AgentService implements AgentServiceContract {
     run.status = 'running';
     run.startedAt = this.now();
     this.pushProgress(agent.context.owner.ownerId);
-    const prompted = await this.options.runtime.prompt({
+    const target = {
       context: agent.context,
       identity: agent.identity,
       agentId: agent.agentId,
       runId: run.runId,
-      prompt: promptForRun(run),
-      ...(run.schema !== undefined ? { schema: run.schema } : {}),
-      ...(run.gate !== undefined ? { gate: run.gate } : {}),
-    });
+    };
+    const prompted = run.resumed
+      ? await this.options.runtime.retry!({ ...target, requestsUsed: run.priorRequests })
+      : await this.options.runtime.prompt({
+          ...target,
+          prompt: promptForRun(run),
+          ...(run.schema !== undefined ? { schema: run.schema } : {}),
+          ...(run.gate !== undefined ? { gate: run.gate } : {}),
+        });
     if (prompted.ok) return { ok: true };
     agent.activeRunId = undefined;
     agent.status = 'ready';
+    if (run.resumed) this.parkTask(agent);
     // spawn / send 当场启动失败由回执告知；排队后才启动的失败要另行通知
     if (callerAwaits) run.delivered = true;
     this.finishRun(run, 'failed', prompted.error ?? 'Prompt failed.');
@@ -843,24 +1016,42 @@ export class AgentService implements AgentServiceContract {
     }
   }
 
-  private settleRun(
-    agent: AgentRecord,
-    run: RunRecord,
-    status: Extract<AgentRunStatus, 'succeeded' | 'failed'>,
-    error?: string
-  ): void {
-    if (TERMINAL_RUN_STATUSES.has(run.status)) return;
-    this.finishRun(run, status, error);
-    agent.activeRunId = undefined;
-    agent.status = 'ready';
-    if (agent.mode === 'task') {
-      this.closeTask(agent);
+  private completeRun(agent: AgentRecord, run: RunRecord): void {
+    if (run.schema !== undefined || run.gate !== undefined) {
+      run.status = 'validating';
+      void this.validateRun(agent, run);
     } else {
-      void this.serial(agent.context.owner.ownerId, () => this.startNext(agent));
+      this.settleRun(agent, run, 'succeeded');
     }
   }
 
-  /** task 只有一轮：完成、失败或被 stop 后都不能再用，关闭并回收子会话，否则留下孤儿 */
+  private settleRun(
+    agent: AgentRecord,
+    run: RunRecord,
+    status: Extract<AgentRunStatus, 'succeeded' | 'failed' | 'interrupted'>,
+    error?: string,
+    interrupted = false
+  ): void {
+    if (TERMINAL_RUN_STATUSES.has(run.status)) return;
+    if (agent.mode === 'task') {
+      const park = interrupted && this.mayPark(agent);
+      // 先停放再结束 Run：完成通知据此提示模型用 resume 续跑
+      if (park) this.parkTask(agent);
+      this.finishRun(
+        run,
+        status,
+        interrupted && !park && error !== undefined ? `${error}\n${RESUME_LIMIT_TEXT}` : error
+      );
+      if (!park) this.closeTask(agent);
+      return;
+    }
+    this.finishRun(run, status, error);
+    agent.activeRunId = undefined;
+    agent.status = 'ready';
+    void this.serial(agent.context.owner.ownerId, () => this.startNext(agent));
+  }
+
+  /** task 只有一轮：完成、校验失败或被 stop 后都不能再用，关闭并回收子会话，否则留下孤儿 */
   private closeTask(agent: AgentRecord): void {
     if (agent.status === 'closed') return;
     agent.activeRunId = undefined;
@@ -870,6 +1061,25 @@ export class AgentService implements AgentServiceContract {
       identity: agent.identity,
       agentId: agent.agentId,
     });
+  }
+
+  /** 中断的 task 停放：回收子会话，会话文件留盘，resume 时按原文件重开 */
+  private parkTask(agent: AgentRecord): void {
+    if (agent.status === 'closed' || agent.status === 'parked') return;
+    agent.activeRunId = undefined;
+    agent.status = 'parked';
+    void this.options.runtime.dismiss({
+      context: agent.context,
+      identity: agent.identity,
+      agentId: agent.agentId,
+    });
+  }
+
+  /** 被中断的 task 能否停放待 resume；用满次数的记下原因，由调用方改为关闭 */
+  private mayPark(agent: AgentRecord): boolean {
+    if (agent.mode !== 'task' || (agent.resumes ?? 0) < AGENT_TASK_MAX_RESUMES) return true;
+    agent.resumeLimitHit = true;
+    return false;
   }
 
   private finishRun(run: RunRecord, status: AgentRunStatus, error?: string): void {
@@ -894,7 +1104,13 @@ export class AgentService implements AgentServiceContract {
   private completionText(run: RunRecord): string {
     const title = this.agents.get(run.agentId)?.title ?? run.agentId;
     const durationMs = (run.finishedAt ?? this.now()) - (run.startedAt ?? run.createdAt);
-    const body = run.status === 'succeeded' ? run.text?.trim() : run.error;
+    const partial = run.status === 'interrupted' ? run.text?.trim() : undefined;
+    const body =
+      run.status === 'succeeded'
+        ? run.text?.trim()
+        : partial
+          ? `${run.error ?? ''}\n\n停止前已有的部分输出：\n${partial}`.trim()
+          : run.error;
     const truncated = !!body && body.length > NOTIFY_TEXT_LIMIT;
     // 截断要可感知：模型得知道被裁了多少，才会去 report 拿全文
     const excerpt = truncated
@@ -914,18 +1130,49 @@ export class AgentService implements AgentServiceContract {
           ]
         : []),
       `<usage>subagent_tokens: ${tokens}\ntool_uses: ${run.toolCallIds.size}\nduration_ms: ${durationMs}</usage>`,
+      this.childTasksText(run),
       // 全文已在通知里时不引导 report，否则模型会把整份报告再拉一遍
       [
         truncated ? `Use subagent report with runId ${run.runId} for the full result.` : '',
         run.mode === 'coworker'
           ? `To continue this coworker, use subagent send with agentId ${run.agentId}.`
-          : '',
+          : this.agents.get(run.agentId)?.status === 'parked'
+            ? `Its progress is saved: to continue from where it stopped, use subagent resume with agentId ${run.agentId} — do not spawn it again.`
+            : '',
       ]
         .filter(Boolean)
         .join(' '),
     ]
       .filter(Boolean)
       .join('\n');
+  }
+
+  /** 这次 Run 里子代理起的、或仍在跑的后台任务：归子代理，完成时只通知子代理，不叫醒父会话 */
+  private childTasksText(run: RunRecord): string {
+    const sessionId = this.agents.get(run.agentId)?.identity.sessionId;
+    const since = run.startedAt ?? run.createdAt;
+    const tasks = sessionId
+      ? (this.options.childTasks?.(sessionId) ?? []).filter(
+          (task) => task.status === 'running' || task.startedAt >= since
+        )
+      : [];
+    if (tasks.length === 0) return '';
+    const lines = tasks.map((task) => {
+      const state =
+        task.status === 'running'
+          ? 'running'
+          : `${task.status}${task.exitCode === undefined ? '' : `, exit ${task.exitCode}`}`;
+      const command = task.command.replace(/\s+/g, ' ').trim();
+      const short =
+        command.length > CHILD_TASK_COMMAND_LIMIT
+          ? `${command.slice(0, CHILD_TASK_COMMAND_LIMIT)}…`
+          : command;
+      return `- ${task.taskId} (${state}): ${short}`;
+    });
+    return [
+      'Background tasks this subagent started (they belong to the subagent, not to you; their completion will not notify you — check one with task_output only if you need its result):',
+      ...lines,
+    ].join('\n');
   }
 
   private snapshot(run: RunRecord): AgentRunSnapshot {

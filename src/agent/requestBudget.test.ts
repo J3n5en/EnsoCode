@@ -102,6 +102,17 @@ describe('RequestBudget', () => {
     expect(budget.takeNotice()).toBeUndefined();
   });
 
+  it('续跑时 arm 带上已用次数：接着累计，越过软预算的第一次请求就提示', () => {
+    const budget = new RequestBudget(SOFT);
+    budget.arm(SOFT);
+    expect(budget.requests).toBe(SOFT);
+    expect(budget.observe()).toBe('notice');
+    drive(budget, stopAt - SOFT - 2);
+    expect(budget.observe()).toBe('stop');
+    budget.arm(stopAt + 10);
+    expect(budget.observe()).toBe('stop');
+  });
+
   it('最终回答本身不触发中止或硬停，只计数', () => {
     const budget = new RequestBudget(SOFT);
     budget.arm();

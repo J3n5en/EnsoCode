@@ -11,6 +11,7 @@ import type {
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
 import {
+  Check,
   FolderOpen,
   GitCompare,
   Globe,
@@ -41,6 +42,7 @@ import {
   ContextMenu,
   ContextMenuItem,
   ContextMenuPopup,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
@@ -51,18 +53,28 @@ import { isRemoteClient } from '@/lib/remoteClient';
 import {
   addSidePanelBrowser,
   addSidePanelWorkflow,
+  bindLiveGlobalTabs,
   bindSidePanelDock,
   closeSidePanelBrowser,
   disposeConversationResources,
   selectIsSecretaryProject,
   selectWorkflowAvailable,
+  setPluginPanelScope,
+  syncDockGlobalTabs,
+  unbindSidePanelDock,
+  watchGlobalTabs,
   watchSidePanelAutoCollapse,
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
-import { useSidePanelStore } from '@/stores/sidePanel';
+import {
+  type PinnableSidePanelTab,
+  useSidePanelShown,
+  useSidePanelStore,
+} from '@/stores/sidePanel';
+import { resolvePanelScope } from '@/stores/sidePanel/globalTabs';
 import { sanitizeSidePanelLayout } from '@/stores/sidePanel/layoutSanitize';
 import {
   CHAT_MIN_WIDTH,
@@ -73,16 +85,17 @@ import {
 import { useWorkflowRunsStore } from '@/stores/workflowRuns';
 import { PluginIcon } from '../../plugins/PluginIcon';
 import { PluginView } from '../../plugins/PluginView';
-import { type PluginViewRef, usePluginViews } from '../../plugins/viewBridge';
+import { type PluginViewRef, usePluginViews, usePluginViewsReady } from '../../plugins/viewBridge';
 import { SecretaryPanel } from '../secretary/SecretaryPanel';
 import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
 import { restoreHostBrowserTabs } from './browserTabs';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
+import { GlobalPluginLayer, GlobalPluginSlot } from './GlobalPluginLayer';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
-import { pinnableTabForId, planPinnedPanels } from './pinnedTabs';
+import { isPluginPanelId, pinnableTabForId, planPinnedPanels } from './pinnedTabs';
 import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
@@ -347,11 +360,25 @@ function PluginViewPanel(
   props: IDockviewPanelProps<{ conversationId?: string; pluginId?: string; viewId?: string }>
 ) {
   const { conversationId, pluginId, viewId } = props.params;
-  // 插件页面是 iframe，onlyWhenVisible 会在切走时把它移出文档，页面状态和播放都会丢
+  const dockConversationId = useContext(PanelContext).conversationId;
+  const global = useSidePanelStore((s) => s.liveGlobalTabs.includes(props.api.id));
+  // 插件页面是 iframe，onlyWhenVisible 会在切走时把它移出文档，页面状态和播放都会丢。
+  // 全局页面的占位块也保持 always：对未激活面板 setRenderer 会让 dockview 把它塞进分组内容区，打乱标签显示
   useEffect(() => {
     if (props.api.renderer !== 'always') props.api.setRenderer('always');
   }, [props.api]);
   if (!pluginId || !viewId) return null;
+  // 全局页面只有一个常驻实例（GlobalPluginLayer），这里只放占位块
+  if (global && dockConversationId) {
+    return (
+      <GlobalPluginSlot
+        panelId={props.api.id}
+        conversationId={dockConversationId}
+        api={props.api}
+        containerApi={props.containerApi}
+      />
+    );
+  }
   return <PluginView pluginId={pluginId} viewId={viewId} sessionId={conversationId ?? null} />;
 }
 
@@ -378,9 +405,19 @@ function closeGroupTabs(
   return closed;
 }
 
+/** 内置面板的「在所有会话中显示」= 固定标签：各会话各自一份实例 */
+const SHAREABLE_BUILTIN = new Set<PinnableSidePanelTab>(['terminal', 'changes', 'files', 'btw']);
+const pinnedFillListeners = new Set<(tab: PinnableSidePanelTab) => void>();
+
+/** 刚固定的内置标签同时补进所有已挂载的会话 */
+function fillPinnedEverywhere(tab: PinnableSidePanelTab): void {
+  for (const listener of pinnedFillListeners) listener(tab);
+}
+
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
 function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null }>) {
   const { t } = useI18n();
+  const { conversationId } = useContext(PanelContext);
   const tabNode = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(props.api.isActive);
   const [title, setTitle] = useState(props.api.title ?? '');
@@ -390,6 +427,26 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
   const togglePinnedTab = useSidePanelStore((state) => state.togglePinnedTab);
   const pinnableTab = pinnableTabForId(props.api.id);
   const pinned = pinnableTab ? pinnedTabs.includes(pinnableTab) : false;
+  const pluginViews = usePluginViews();
+  const scopeOverrides = useSidePanelStore((state) => state.globalScopeOverrides);
+  const liveGlobal = useSidePanelStore((state) => state.liveGlobalTabs.includes(props.api.id));
+  const pluginPanel = isPluginPanelId(props.api.id);
+  const shareable = pluginPanel
+    ? pluginViews.some((view) => `plugin:${view.pluginId}:${view.id}` === props.api.id)
+    : pinnableTab !== undefined && SHAREABLE_BUILTIN.has(pinnableTab);
+  const shared = pluginPanel
+    ? resolvePanelScope(props.api.id, scopeOverrides, pluginViews) === 'global'
+    : pinned;
+  const toggleShared = () => {
+    if (pluginPanel) {
+      if (conversationId)
+        setPluginPanelScope(props.api.id, conversationId, shared ? 'session' : 'global');
+      return;
+    }
+    if (!pinnableTab) return;
+    togglePinnedTab(pinnableTab);
+    if (!shared) fillPinnedEverywhere(pinnableTab);
+  };
   useEffect(() => {
     const a = props.api.onDidActiveChange(() => setActive(props.api.isActive));
     const t = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ''));
@@ -459,7 +516,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         <SquareTerminal className="h-3 w-3 shrink-0" />
       )}
       <span className="max-w-32 truncate">{title}</span>
-      {pinnableTab ? (
+      {pinnableTab && !liveGlobal ? (
         <button
           type="button"
           aria-label={t(pinned ? 'Unpin default tab' : 'Pin as default tab')}
@@ -508,6 +565,20 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
           {t('Close tabs to the right')}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => closeTabs('all')}>{t('Close all')}</ContextMenuItem>
+        {shareable ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-enso="side-tab-show-everywhere"
+              role="menuitemcheckbox"
+              aria-checked={shared}
+              onClick={toggleShared}
+            >
+              <Check className={cn('h-3.5 w-3.5', !shared && 'invisible')} />
+              {t('Show in all sessions')}
+            </ContextMenuItem>
+          </>
+        ) : null}
       </ContextMenuPopup>
     </ContextMenu>
   );
@@ -871,11 +942,26 @@ function ConversationDock({
   const secretaryName = useSecretaryName();
   const [revealSecretaryConsole] = useState(createSecretaryConsoleReveal);
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
+  const dockApiRef = useRef<DockviewApi | null>(null);
   const activeConversationId = useSessionsStore((state) => state.activeId);
-  const sidePanelOpen = useSidePanelStore(
-    (state) => state.uiByConversation[conversationId]?.open ?? false
+  const sidePanelOpen = useSidePanelShown(conversationId);
+  const explicitOpen = useSidePanelStore(
+    (state) => state.uiByConversation[conversationId]?.open === true
   );
   const pinnedTabs = useSidePanelStore((state) => state.pinnedTabs);
+  const globalTabs = useSidePanelStore((state) => state.globalTabs);
+  const liveGlobalTabs = useSidePanelStore((state) => state.liveGlobalTabs);
+  const scopeOverrides = useSidePanelStore((state) => state.globalScopeOverrides);
+  const viewsReady = usePluginViewsReady();
+  const globalFullSynced = useRef(false);
+  // 卸载（Bot 模式、删会话）前先解绑：dockview 自己清面板时不能当成用户关了全局标签。
+  // StrictMode 会卸了再装一次，装回时重新绑上
+  useLayoutEffect(() => {
+    if (dockApiRef.current) bindSidePanelDock(conversationId, dockApiRef.current);
+    return () => {
+      if (dockApiRef.current) unbindSidePanelDock(conversationId, dockApiRef.current);
+    };
+  }, [conversationId]);
   // 关掉工具时收起已开的工作流 tab；恢复布局带回来的也一并收掉
   useEffect(() => {
     if (!workflowAvailable) dockApi?.getPanel('workflow')?.api.close();
@@ -884,30 +970,37 @@ function ConversationDock({
   useEffect(() => {
     if (!dockApi || !secretary) return;
     const ids = dockApi.panels.map((panel) => panel.id);
-    for (const id of secretaryPluginPanelsToClose(ids, secretaryPluginIds)) {
+    const exempt = new Set([...globalTabs, ...liveGlobalTabs]);
+    for (const id of secretaryPluginPanelsToClose(ids, secretaryPluginIds, exempt)) {
       dockApi.getPanel(id)?.api.close();
     }
-  }, [dockApi, secretary, secretaryPluginIds]);
+  }, [dockApi, secretary, secretaryPluginIds, globalTabs, liveGlobalTabs]);
 
+  // 全局标签：挂载后第一次补齐缺的、删掉别处已关的；之后跟着 globalTabs / 作用域变化补齐
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 同步读 store 最新值，这些依赖只用来触发重算
   useEffect(() => {
-    if (!dockApi || !sidePanelOpen || activeConversationId !== conversationId) return;
+    if (!dockApi || !viewsReady) return;
+    syncDockGlobalTabs(conversationId, dockApi, !globalFullSynced.current);
+    globalFullSynced.current = true;
+  }, [conversationId, dockApi, explicitOpen, globalTabs, pluginViews, scopeOverrides, viewsReady]);
 
+  const addPinned = (
+    api: DockviewApi,
+    tabs: readonly PinnableSidePanelTab[]
+  ): string | undefined => {
     const plans = planPinnedPanels({
-      pinnedTabs,
-      openPanelIds: dockApi.panels.map((panel) => panel.id),
+      pinnedTabs: tabs,
+      openPanelIds: api.panels.map((panel) => panel.id),
       secretary,
       workflowAvailable,
       pluginViews,
       secretaryPluginIds,
     });
-    if (plans.length === 0) return;
-
-    const wasEmpty = dockApi.panels.length === 0;
     let firstAddedId: string | undefined;
     for (const plan of plans) {
       if (plan.kind === 'terminal') {
         const id = crypto.randomUUID();
-        dockApi.addPanel({
+        api.addPanel({
           id,
           component: 'terminal',
           title: t('Terminal'),
@@ -915,21 +1008,21 @@ function ConversationDock({
         });
         firstAddedId ??= id;
       } else if (plan.kind === 'changes') {
-        addChangesPanel(dockApi, conversationId, projectId, t('Changes'));
+        addChangesPanel(api, conversationId, projectId, t('Changes'));
         firstAddedId ??= 'changes';
       } else if (plan.kind === 'files') {
-        addFilesPanel(dockApi, conversationId, projectId, t('Files'));
+        addFilesPanel(api, conversationId, projectId, t('Files'));
         firstAddedId ??= 'files';
       } else if (plan.kind === 'browser') {
         const id = `browser:${crypto.randomUUID()}`;
-        addBrowserPanel(dockApi, conversationId, projectId, t('Browser'), id);
+        addBrowserPanel(api, conversationId, projectId, t('Browser'), id);
         firstAddedId ??= id;
       } else if (plan.kind === 'btw') {
         const id = `btw:${crypto.randomUUID()}`;
-        addBtwPanel(dockApi, conversationId, projectId, t('Btw'), id);
+        addBtwPanel(api, conversationId, projectId, t('Btw'), id);
         firstAddedId ??= id;
       } else if (plan.kind === 'workflow') {
-        addWorkflowPanel(dockApi, conversationId, projectId, t('Workflow'));
+        addWorkflowPanel(api, conversationId, projectId, t('Workflow'));
         firstAddedId ??= 'workflow';
       } else {
         const view = pluginViews.find(
@@ -937,11 +1030,34 @@ function ConversationDock({
         );
         if (!view) continue;
         const id = `plugin:${plan.pluginId}:${plan.viewId}`;
-        addPluginViewPanel(dockApi, conversationId, projectId, view);
+        addPluginViewPanel(api, conversationId, projectId, view);
         firstAddedId ??= id;
       }
     }
+    return firstAddedId;
+  };
+  const addPinnedRef = useRef(addPinned);
+  addPinnedRef.current = addPinned;
 
+  // 右键「在所有会话中显示」固定内置标签：已挂载的会话各补一份，不抢各自选中的标签
+  useEffect(() => {
+    const fill = (tab: PinnableSidePanelTab) => {
+      const api = dockApiRef.current;
+      if (!api) return;
+      const previous = api.activePanel;
+      if (addPinnedRef.current(api, [tab]) && previous) previous.api.setActive();
+    };
+    pinnedFillListeners.add(fill);
+    return () => {
+      pinnedFillListeners.delete(fill);
+    };
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 计划经 addPinnedRef 读最新值，这些依赖只用来触发重算
+  useEffect(() => {
+    if (!dockApi || !sidePanelOpen || activeConversationId !== conversationId) return;
+    const wasEmpty = dockApi.panels.length === 0;
+    const firstAddedId = addPinnedRef.current(dockApi, pinnedTabs);
     if (wasEmpty && firstAddedId) dockApi.getPanel(firstAddedId)?.focus();
   }, [
     activeConversationId,
@@ -994,6 +1110,7 @@ function ConversationDock({
       }
     }
     watchSidePanelAutoCollapse(conversationId, event.api);
+    watchGlobalTabs(conversationId, event.api);
     event.api.onDidLayoutChange(() => {
       const json = event.api.toJSON();
       if (ignoreEmptySave && Object.keys(json.panels ?? {}).length === 0) return;
@@ -1021,6 +1138,7 @@ function ConversationDock({
       void import('@/lib/terminalRegistry').then((m) => m.releaseTerminal(panel.id));
       void window.electronAPI.terminal.dispose(panel.id);
     });
+    dockApiRef.current = event.api;
     setDockApi(event.api);
   };
 
@@ -1055,13 +1173,12 @@ export function SidePanel({
 }) {
   const { t } = useI18n();
   const activeIdForUi = useSessionsStore((s) => s.activeId);
-  const open = useSidePanelStore((s) =>
-    activeIdForUi ? Boolean(s.uiByConversation[activeIdForUi]?.open) : false
-  );
+  const open = useSidePanelShown(activeIdForUi);
   // 窄屏没有并排空间：打开即全屏盖住聊天区
   const isMobile = useIsMobile();
   const storeFullscreen = useSidePanelStore((s) => s.fullscreen);
   const fullscreen = storeFullscreen || (isMobile && open);
+  useEffect(() => bindLiveGlobalTabs(), []);
   useEffect(() => {
     const stopReveal = window.electronAPI.browser.onReveal((event) => {
       if (botBrowserChatId(event.conversationId)) return;
@@ -1232,19 +1349,20 @@ export function SidePanel({
             clipPath: inTitleRow ? (cover ? TITLE_ROW_FULL_CLIP : TITLE_ROW_SEAM_CLIP) : undefined,
           }}
         >
-          {visibleIds.length > 0 ? (
-            <div className="relative min-h-0 flex-1">
-              <TitleRowContext.Provider value={inTitleRow}>
-                {visibleIds.map((id) => (
-                  <MountedConversationDock key={id} conversationId={id} hidden={id !== activeId} />
-                ))}
-              </TitleRowContext.Provider>
-            </div>
-          ) : (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-              {t('Select a conversation to use the side panel.')}
-            </div>
-          )}
+          {/* 全局插件层和各会话 dock 同级常驻：没有当前会话时也不卸载，只藏起来 */}
+          <div className="relative min-h-0 flex-1">
+            <TitleRowContext.Provider value={inTitleRow}>
+              {visibleIds.map((id) => (
+                <MountedConversationDock key={id} conversationId={id} hidden={id !== activeId} />
+              ))}
+            </TitleRowContext.Provider>
+            <GlobalPluginLayer />
+            {visibleIds.length === 0 ? (
+              <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                {t('Select a conversation to use the side panel.')}
+              </div>
+            ) : null}
+          </div>
         </div>
       </motion.aside>
     </>

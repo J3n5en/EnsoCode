@@ -57,10 +57,26 @@ export function sanitizeSidePanelLayout(
   layout: unknown,
   knownComponents: ReadonlySet<string>
 ): SerializedDockview | undefined {
+  return filterLayout(layout, (id, panel) => keepPanel(id, panel, knownComponents));
+}
+
+/** 从已存布局里摘掉一个面板（没挂载的会话同步全局关闭用）；不含该面板时原样返回 */
+export function removeLayoutPanel(
+  layout: SerializedDockview | undefined,
+  panelId: string
+): SerializedDockview | undefined {
+  if (!layout || !isRecord(layout.panels) || !(panelId in layout.panels)) return layout;
+  return filterLayout(layout, (id) => id !== panelId);
+}
+
+function filterLayout(
+  layout: unknown,
+  keepEntry: (id: string, panel: unknown) => boolean
+): SerializedDockview | undefined {
   if (!isRecord(layout) || !isRecord(layout.panels)) return undefined;
   const panels: Record<string, unknown> = {};
   for (const [id, panel] of Object.entries(layout.panels)) {
-    if (keepPanel(id, panel, knownComponents)) panels[id] = panel;
+    if (keepEntry(id, panel)) panels[id] = panel;
   }
   const keep = new Set(Object.keys(panels));
   if (keep.size === 0) return undefined;

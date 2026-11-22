@@ -59,4 +59,10 @@ describe('secretaryPluginPanelsToClose', () => {
   it('档案还没加载到时不收任何面板，免得启动瞬间把恢复的布局清掉', () => {
     expect(secretaryPluginPanelsToClose(panels, null)).toEqual([]);
   });
+
+  it('全局标签豁免：没勾选也不关，否则会触发所有会话一起关', () => {
+    expect(
+      secretaryPluginPanelsToClose(panels, [], new Set(['plugin:enso.tgclient:tgclient']))
+    ).toEqual(['plugin:enso.github:github']);
+  });
 });

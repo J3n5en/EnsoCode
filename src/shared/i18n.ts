@@ -468,6 +468,7 @@ export const zhTranslations: Record<string, string> = {
   Browser: '浏览器',
   'New tab': '新建标签页',
   'Pin as default tab': '固定为默认标签页',
+  'Show in all sessions': '在所有会话中显示',
   'Unpin default tab': '取消固定默认标签页',
   Soon: '即将支持',
   Forward: '前进',
@@ -1725,6 +1726,8 @@ export const zhTranslations: Record<string, string> = {
   'Distill again': '重新提炼',
   'Distilling…': '提炼中…',
   'Background tasks': '后台任务',
+  'Background tasks started by this subagent':
+    '这个子代理起的后台任务（归它所有，结束时不通知主会话）',
   'Clear finished tasks': '清空历史任务',
   'Retry failed extractions ({{count}})': '重试失败项（{{count}}）',
   'Removes completed and cancelled jobs. Running tasks are kept. Sessions will show as not distilled again, since that flag is derived from job history — re-distilling is deduplicated, so it will not create duplicate memories.':
@@ -2430,6 +2433,7 @@ export const zhTranslations: Record<string, string> = {
   Wait: '等待',
   'Dismiss agent': '解雇',
   'List agents': '列出全部',
+  'Resume agent': '续跑',
   'awaiting input': '等待输入',
   validating: '校验中',
   interrupted: '已中断',

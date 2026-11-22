@@ -103,6 +103,12 @@ describe('parseSubagentReceipt', () => {
       runs: [],
       info: receipt,
     });
+    expect(parseSubagentReceipt('resume', receipt)).toEqual({
+      kind: 'receipt',
+      head: '',
+      runs: [],
+      info: receipt,
+    });
   });
 
   it('list：每个子代理一行，有 run 的给最近一次 run 的状态与用时，已关闭 / 没有 run 的给子代理状态', () => {

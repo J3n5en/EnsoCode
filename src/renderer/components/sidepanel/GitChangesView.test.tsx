@@ -23,6 +23,11 @@ vi.mock('@/stores/sessions', () => ({
 }));
 vi.mock('@/stores/sidePanel', () => ({
   useSidePanelStore: (select: (state: unknown) => unknown) => select(harness.sidePanel),
+  useSidePanelShown: (id: string) =>
+    Boolean(
+      (harness.sidePanel as { uiByConversation: Record<string, { open?: boolean }> })
+        .uiByConversation[id]?.open
+    ),
 }));
 vi.mock('@/components/chat/ConfirmDialog', () => ({ ConfirmDialog: () => null }));
 vi.mock('@/components/ui/button', () => ({

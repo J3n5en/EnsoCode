@@ -229,6 +229,41 @@ export function editUnfinishedAssistantForResume(session: AgentSession): boolean
   return true;
 }
 
+export const INTERRUPTED_TOOL_RESULT =
+  'This tool call was still running when the subagent was interrupted, so its result is unknown: it may not have run, or may have partly or fully taken effect. Before continuing, check the current state (file contents, whether the command already took effect) and only redo it if it did not; do not blindly run it again.';
+
+/**
+ * 子代理续跑：最后一条 assistant 停在工具调用上、部分调用没有结果（中断时正在执行），
+ * 给缺结果的调用补一条落盘的错误结果，让模型先核对现状，而不是把它从上下文拿掉后原样重放。
+ * 返回补了几条。
+ */
+export function settleInterruptedToolCalls(session: AgentSession): number {
+  const messages = session.agent.state.messages;
+  const index = messages.findLastIndex((message) => message.role === 'assistant');
+  const last = messages[index];
+  if (last?.role !== 'assistant' || last.stopReason !== 'toolUse') return 0;
+  const answered = new Set<string>();
+  for (const message of messages.slice(index + 1)) {
+    if (message.role !== 'toolResult') return 0;
+    answered.add(message.toolCallId);
+  }
+  const pending = last.content.flatMap((part) =>
+    part.type === 'toolCall' && !answered.has(part.id) ? [part] : []
+  );
+  for (const call of pending) {
+    session.sessionManager.appendMessage({
+      role: 'toolResult',
+      toolCallId: call.id,
+      toolName: call.name,
+      content: [{ type: 'text', text: INTERRUPTED_TOOL_RESULT }],
+      isError: true,
+      timestamp: Date.now(),
+    });
+  }
+  if (pending.length > 0) session.refreshContext();
+  return pending.length;
+}
+
 /** 最新可见 assistant 是被中止的回复时返回它的条目 id（拿不到会话投影时为 undefined） */
 export function abortedReplyEntryId(session: AgentSession): string | undefined {
   if (typeof session.sessionManager.buildSessionProjection !== 'function') return undefined;

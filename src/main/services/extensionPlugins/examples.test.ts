@@ -179,7 +179,7 @@ describe('示例插件', () => {
   it('notes：侧栏页面经 renderer.call 增删查，插入走草稿', async () => {
     const id = await installExample('notes');
     expect(service.list()[0]?.views).toEqual([
-      { id: 'notes', title: 'Notes', entry: 'notes.html' },
+      { id: 'notes', title: 'Notes', entry: 'notes.html', scope: 'session' },
     ]);
     expect(service.assetPath(id, 'notes.html')).toBeTruthy();
     const added = (await ui(id, 'renderer.call', {

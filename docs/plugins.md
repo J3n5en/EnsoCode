@@ -147,7 +147,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 - `agentTools`：`{ name, description, parameters, timeoutMs?, readOnly? }`。`timeoutMs` 是 1000 到 600000 的整数，缺省 60 秒。`readOnly: true` 声明这个工具不改动任何东西（只查询），宿主不核实；模型只用过只读工具的一轮可以用 `turn_discard` 丢弃，写操作或发消息的工具不要标。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
 - `commands`：`{ id, title, key? }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
   - `key` 是默认快捷键，如 `mod+shift+k`：修饰键按 `mod`、`ctrl`、`alt`、`shift` 顺序写，至少一个不是 `shift`；`mod` 在 macOS 是 ⌘，其他平台是 Ctrl。按下时对当前会话执行，`ctx.sessionId` 为当前标签的会话。内置快捷键优先，多个插件抢同一个键时先装的生效；用户可以在设置的快捷键页改键或删除。
-- `views`：`{ id, title, entry }`。`title` 最长 40 字符，`entry` 必须是 `.html`。
+- `views`：`{ id, title, entry, scope? }`。`title` 最长 40 字符，`entry` 必须是 `.html`。`scope` 是 `"session"`（缺省）或 `"global"`，其他值按 `"session"` 处理，见下文「全局侧栏页面」。
 - `fileViewers`：`{ id, title, entry, extensions, default? }`，需要 `ui.view`。`extensions` 是 1 到 32 个小写、带点的后缀，如 `.csv`、`.excalidraw.json`；`default: true` 时匹配的文件默认用它打开，否则只在文件标签右上角给出切换按钮。见下文「文件查看器」。
 - `statusItems`：`{ id, text, tooltip?, command? }`，最多 8 个，不需要权限。显示在主输入框底栏右侧，`text` 最长 24 字符，`tooltip` 最长 200。`command` 是本插件 `commands` 里的 id，点击时对当前会话执行。见下文「状态项」。
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
@@ -257,8 +257,8 @@ export async function activate(enso) {
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
 | `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
-| `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。需要 `ui.view`，不需要用户手势 |
-| `ui.view.close(viewId?)` | 关掉当前会话里本插件的侧栏页面；右侧栏原本是收起的、由 `open` 打开，并且这个页面仍是当前标签时，一并收起右侧栏。需要 `ui.view`，不需要用户手势 |
+| `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。全局页面会加进所有会话。需要 `ui.view`，不需要用户手势 |
+| `ui.view.close(viewId?)` | 关掉当前会话里本插件的侧栏页面；右侧栏原本是收起的、由 `open` 打开，并且这个页面仍是当前标签时，一并收起右侧栏。全局页面会从所有会话一起关掉。需要 `ui.view`，不需要用户手势 |
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
@@ -520,6 +520,8 @@ export function onLoad(enso) {
 - `enso.on(name, listener)`：主进程 `enso.ui.view.emit` 的同名事件到达时调用 `listener(data)`，返回取消订阅的函数。只发给本插件自己的侧栏页面。
 - `enso.call(method, args)`：调用本插件 `renderer.handle` 注册的方法，返回 Promise。
 - `enso.storage.get(key)` / `set(key, value)` / `remove(key)`：页面状态，关闭重开后仍在。值按字符串保存。页面里的 `localStorage` 是另一份包装，方法名是标准的 `getItem` / `setItem` / `removeItem` / `clear`，读写同一份数据。读取是同步的（打开页面时的快照加本页写入），写入异步保存。每个插件合计不超过 1MB，卸载时删除。
+- `enso.session`：`{ sessionId, projectId }`，页面当前对应的会话；没有当前会话时为 `null`。
+- `enso.onSession(listener)`：当前会话变化时调用 `listener(session)`，返回取消订阅的函数。只有全局页面会变。
 
 iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`prompt` 都不可用。
 
@@ -533,6 +535,16 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 ```
 
 从侧栏页面发起的调用算用户操作，所以在这里可以改草稿。页面不能直接发系统通知，需要的话在 `main.mjs` 的处理函数里调 `enso.ui.notify`。
+
+### 全局侧栏页面
+
+`scope: "global"` 的页面适合播放器、聊天客户端这类和会话无关的面板：
+
+- 所有会话共用一个页面实例。打开后切到别的会话、别的项目或新会话，页面一直在，不重新加载，播放、登录和滚动位置都保留。
+- 在任一会话打开，所有会话的侧栏都会出现这个标签；在任一会话关掉，所有会话一起关。标签在各会话里的位置各自保存。
+- 没开关过侧栏的会话有全局标签时会自动显示侧栏；用户主动收起过侧栏的会话不会被强制打开。手机布局下不自动打开。
+- 页面里的 `enso.call` 和 `renderer.handle` 的 `ctx.sessionId` 跟着当前会话走；用 `enso.session` / `enso.onSession` 跟踪当前会话。
+- 用户可以在标签右键菜单里用「在所有会话中显示」改作用域，用户的选择优先于清单。
 
 ## 文件查看器
 

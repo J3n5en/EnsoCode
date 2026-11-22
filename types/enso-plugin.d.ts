@@ -494,6 +494,14 @@ export interface EnsoUi {
 export interface EnsoView {
   readonly theme: 'light' | 'dark';
   onTheme(listener: (theme: 'light' | 'dark') => void): () => void;
+  /**
+   * 页面当前对应的会话。会话页面打开后不变；`scope: "global"` 的页面跨会话常驻，
+   * 用户切会话时更新并回调 `onSession`。没有当前会话时为 null。
+   */
+  readonly session: null | { readonly sessionId: string; readonly projectId: string | null };
+  onSession(
+    listener: (session: null | { sessionId: string; projectId: string | null }) => void
+  ): () => void;
   on(name: string, listener: (data: unknown) => void): () => void;
   call(method: string, args?: unknown): Promise<unknown>;
   readonly storage: {

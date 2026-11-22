@@ -29,9 +29,11 @@
         let seq = 0;
         let theme = 'light';
         let file = null;
+        let session = null;
         const pending = new Map();
         const themeListeners = new Set();
         const fileListeners = new Set();
+        const sessionListeners = new Set();
         const eventListeners = new Map();
         const emitView = (name, data) => {
           const set = eventListeners.get(name);
@@ -53,6 +55,28 @@
           for (const listener of [...themeListeners]) {
             try {
               listener(theme);
+            } catch {
+              /* 单个订阅失败不影响其余 */
+            }
+          }
+        };
+        // 全局页面跨会话常驻：宿主在当前会话变化时推 enso-view-session
+        const applySession = (next, notify) => {
+          const value =
+            next && typeof next.sessionId === 'string'
+              ? Object.freeze({
+                  sessionId: next.sessionId,
+                  projectId: typeof next.projectId === 'string' ? next.projectId : null,
+                })
+              : null;
+          const changed =
+            (value ? value.sessionId : null) !== (session ? session.sessionId : null) ||
+            (value ? value.projectId : null) !== (session ? session.projectId : null);
+          session = value;
+          if (!changed || !notify) return;
+          for (const listener of [...sessionListeners]) {
+            try {
+              listener(session);
             } catch {
               /* 单个订阅失败不影响其余 */
             }
@@ -130,6 +154,14 @@
             get file() {
               return file ? fileApi : null;
             },
+            get session() {
+              return session;
+            },
+            onSession(listener) {
+              if (typeof listener !== 'function') return () => {};
+              sessionListeners.add(listener);
+              return () => sessionListeners.delete(listener);
+            },
             onTheme(listener) {
               if (typeof listener !== 'function') return () => {};
               themeListeners.add(listener);
@@ -180,6 +212,7 @@
           theme = data.theme === 'dark' ? 'dark' : 'light';
           if (data.file && typeof data.file.rel === 'string' && typeof data.file.text === 'string')
             file = { rel: data.file.rel, text: data.file.text };
+          applySession(data.session, false);
           const incoming = data.storage && typeof data.storage === 'object' ? data.storage : {};
           for (const name of Object.keys(store)) delete store[name];
           for (const name of Object.keys(incoming)) {
@@ -193,6 +226,10 @@
             }
             if (reply && reply.type === 'enso-view-event') {
               if (typeof reply.name === 'string') emitView(reply.name, reply.data);
+              return;
+            }
+            if (reply && reply.type === 'enso-view-session') {
+              applySession(reply, true);
               return;
             }
             if (reply && reply.type === 'enso-file') {

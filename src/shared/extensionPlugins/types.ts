@@ -17,7 +17,8 @@ export interface ExtensionPluginSummary {
   tools: { name: string; description: string }[];
   commands: { id: string; title: string; key?: string }[];
   /** entry 是安装目录内的相对路径，渲染层经 asset 通道取内容 */
-  views: { id: string; title: string; entry: string }[];
+  /** scope：global 的页面所有会话共用一个常驻实例 */
+  views: { id: string; title: string; entry: string; scope?: 'global' | 'session' }[];
   /** 按扩展名打开文件的查看器；entry 同 views */
   fileViewers: {
     id: string;
