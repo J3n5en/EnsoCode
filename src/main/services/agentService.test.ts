@@ -1257,6 +1257,32 @@ describe('AgentService 中断的 task 停放与续跑', () => {
     expect(notify.mock.calls.at(-1)?.[1]).toContain('final report');
   });
 
+  it('停放中的 task 被原样再 spawn：拒绝并指向 resume；换了 prompt 或先 dismiss 才放行', async () => {
+    const { service, runtime, children } = resumable();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-failed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+      error: 'network down',
+    });
+    const again = await service.spawn(spawnRequest({ requestId: 'request-2' }));
+    expect(again).toMatchObject({ ok: false, code: 'invalid-state' });
+    expect(!again.ok && again.error).toMatch(
+      new RegExp(`"resume" with agentId ${spawned.value.agentId}`)
+    );
+    expect(runtime.spawn).toHaveBeenCalledTimes(1);
+    const other = await service.spawn(
+      spawnRequest({ requestId: 'request-3', prompt: 'other work' })
+    );
+    expect(other.ok).toBe(true);
+    await service.dismiss({ context, requestId: 'dismiss', agentId: spawned.value.agentId });
+    const fresh = await service.spawn(spawnRequest({ requestId: 'request-4' }));
+    expect(fresh.ok).toBe(true);
+  });
+
   it('resume 未知 agentId 报 not-found，coworker 报 invalid-state', async () => {
     const { service } = resumable();
     expect(await service.resume({ context, requestId: 'r', agentId: 'missing' })).toMatchObject({

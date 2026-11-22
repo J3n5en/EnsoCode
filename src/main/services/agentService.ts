@@ -289,6 +289,14 @@ export class AgentService implements AgentServiceContract {
     if (!request.requestId || !request.description.trim() || !request.prompt.trim()) {
       return failure('invalid-state', 'requestId, description and prompt are required.');
     }
+    // 中断后原样再派同一件事会从头重跑：指向 resume；确要重来先 dismiss
+    const parked = this.parkedTaskWithPrompt(request.context, request.prompt);
+    if (parked) {
+      return failure(
+        'invalid-state',
+        `This exact task was interrupted and is parked with its progress saved: use operation:"resume" with agentId ${parked} to continue it. To start over instead, dismiss that agentId first.`
+      );
+    }
     const reservationId = this.randomUuid();
     const runId = this.randomUuid();
     let identity: ChildSessionIdentity;
@@ -843,6 +851,17 @@ export class AgentService implements AgentServiceContract {
     return [...this.runs.values()]
       .filter((run) => run.agentId === agentId)
       .sort((left, right) => right.createdAt - left.createdAt)[0];
+  }
+
+  private parkedTaskWithPrompt(context: AgentControlContext, prompt: string): string | undefined {
+    const wanted = prompt.trim();
+    return [...this.agents.values()].find(
+      (agent) =>
+        agent.mode === 'task' &&
+        agent.status === 'parked' &&
+        this.sameOwner(agent.context, context) &&
+        this.latestRun(agent.agentId)?.prompt.trim() === wanted
+    )?.agentId;
   }
 
   private createRun(
