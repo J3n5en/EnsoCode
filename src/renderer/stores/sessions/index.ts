@@ -86,6 +86,8 @@ import { shouldFocusChildReservation } from './childReservationFocus';
 import {
   canWakeConversationForRewind,
   extractRewindDraft,
+  forkDepth,
+  MAX_FORK_DEPTH,
   resolveRewindTarget,
   rewindKeepCount,
   rewindWorkerPhase,
@@ -737,6 +739,7 @@ export const useSessionsStore = create<SessionsState>()(
       /** 冷主会话分叉前先 resume；fork 需要源会话的活 generation */
       async function wakeForFork(conversationId: string): Promise<boolean> {
         const conversation = get().conversations[conversationId];
+        if (forkDepth(get().conversations, conversationId) >= MAX_FORK_DEPTH) return false;
         if (!conversation || conversation.started) return true;
         if (!canWakeConversationForRewind(conversation) || forkWakeInFlight.has(conversationId)) {
           return false;
@@ -4682,7 +4685,13 @@ async function forkConversation(
   anchor: { entryId: string } | { userIndexFromEnd: number }
 ): Promise<string | null> {
   const source = get().conversations[sourceId];
-  if (!source?.started || source.status !== 'idle' || source.parentId || source.historyOnly) {
+  if (
+    !source?.started ||
+    source.status !== 'idle' ||
+    source.parentId ||
+    source.historyOnly ||
+    forkDepth(get().conversations, sourceId) >= MAX_FORK_DEPTH
+  ) {
     return null;
   }
   const targetId = await get().newConversation(source.projectId, {

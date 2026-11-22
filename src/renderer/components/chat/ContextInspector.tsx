@@ -6,6 +6,7 @@ import { useI18n } from '@/i18n';
 import { openSidePanelFile } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
+import { forkDepth, MAX_FORK_DEPTH } from '@/stores/sessions/conversationRewind';
 import { formatTokens } from '@/stores/sessions/stats';
 import { CONTEXT_BAR_WARN_PERCENT, ContextBar, SEGMENT_COLOR } from './ContextMeter';
 import {
@@ -82,6 +83,9 @@ export function ContextInspector({
   const [highlight, setHighlight] = useState<ContextPartKind | undefined>();
   /** undefined = 还没手动点过，默认展开占用最大且有明细的一类；null = 全部收起 */
   const [open, setOpen] = useState<ContextPartKind | null | undefined>();
+  const canFork = useSessionsStore(
+    (s) => !conversationId || forkDepth(s.conversations, conversationId) < MAX_FORK_DEPTH
+  );
   if (!occupancy) {
     return (
       <p className="px-2 py-1.5 text-xs text-muted-foreground">
@@ -130,7 +134,7 @@ export function ContextInspector({
               count: occupancy.compactedMessageCount,
             })}
           </p>
-          {conversationId && occupancy.compactionEntryId && (
+          {conversationId && occupancy.compactionEntryId && canFork && (
             <button
               type="button"
               className="shrink-0 text-foreground/80 hover:underline"
