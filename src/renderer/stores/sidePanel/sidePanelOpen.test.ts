@@ -323,6 +323,11 @@ describe('文件树宽度', () => {
     expect(useSidePanelStore.getState().filesTreeWidth).toBe(160);
   });
 
+  it('按面板宽度夹住，编辑区不被挤没', () => {
+    useSidePanelStore.getState().nudgeFilesTreeWidth(1000, 600);
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(359);
+  });
+
   it('宽度随侧栏偏好持久化，读回仍是上次的值', async () => {
     useSidePanelStore.getState().nudgeFilesTreeWidth(76);
     const saved = JSON.parse(localStorage.getItem('enso-side-panel') ?? '{}');

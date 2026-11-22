@@ -37,7 +37,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { hasAuthoritativeMessages } from '@/stores/sessions/messageCache';
 import { buildTimeline, completedEditWriteFingerprint } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
-import { clampFilesTreeWidth, useSidePanelStore } from '@/stores/sidePanel';
+import { resolveFilesTreeWidth, useSidePanelStore } from '@/stores/sidePanel';
 import {
   fileViewerKey,
   pluginFileViewersFor,
@@ -144,8 +144,25 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   // 窄屏下文件树与编辑区逐级显示：打开文件进编辑区，返回回到文件树
   const isMobile = useIsMobile();
   const [mobileTree, setMobileTree] = useState(true);
-  const treeWidth = useSidePanelStore((s) => clampFilesTreeWidth(s.filesTreeWidth));
-  const nudgeTreeWidth = useSidePanelStore((s) => s.nudgeFilesTreeWidth);
+  // 按面板实际宽度夹住文件树，面板被拖窄时编辑区不被挤没
+  const paneRef = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries.at(-1)?.contentRect.width;
+      if (width !== undefined) setPaneWidth(Math.round(width));
+    });
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, []);
+  const treeWidth = useSidePanelStore((s) => resolveFilesTreeWidth(s.filesTreeWidth, paneWidth));
+  const nudgeFilesTreeWidth = useSidePanelStore((s) => s.nudgeFilesTreeWidth);
+  const nudgeTreeWidth = useCallback(
+    (delta: number) => nudgeFilesTreeWidth(delta, paneWidth),
+    [nudgeFilesTreeWidth, paneWidth]
+  );
   const showDoc = useCallback((rel: string) => {
     setActiveRel(rel);
     setMobileTree(false);
@@ -793,7 +810,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
 
   return (
     <EditProvider createEditor={createEditor}>
-      <div className="flex h-full min-h-0 bg-background">
+      <div ref={paneRef} className="flex h-full min-h-0 bg-background">
         <div
           className={cn(
             'flex shrink-0 flex-col overflow-hidden text-sm',

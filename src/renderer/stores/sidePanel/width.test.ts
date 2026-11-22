@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   CHAT_MIN_WIDTH,
   clampFilesTreeWidth,
+  FILES_EDITOR_MIN_WIDTH,
   FILES_TREE_DEFAULT_WIDTH,
   FILES_TREE_MAX_WIDTH,
   FILES_TREE_MIN_WIDTH,
+  resizeFilesTreeWidth,
   resizeSidePanelWidth,
+  resolveFilesTreeWidth,
   resolveSidePanelWidth,
   SIDE_PANEL_GAP_WIDTH,
   SIDE_PANEL_HANDLE_WIDTH,
@@ -85,5 +88,39 @@ describe('clampFilesTreeWidth', () => {
     expect(clampFilesTreeWidth(Number.NaN)).toBe(224);
     expect(clampFilesTreeWidth('300')).toBe(224);
     expect(clampFilesTreeWidth(undefined)).toBe(224);
+  });
+});
+
+describe('resolveFilesTreeWidth', () => {
+  const editorReserve = FILES_EDITOR_MIN_WIDTH + SIDE_PANEL_HANDLE_WIDTH;
+
+  it('面板尚未量到时只按 160–480 夹', () => {
+    expect(resolveFilesTreeWidth(480, 0)).toBe(480);
+    expect(resolveFilesTreeWidth(Number.NaN, 0)).toBe(FILES_TREE_DEFAULT_WIDTH);
+  });
+
+  it('面板变窄时给编辑区留出最小宽度', () => {
+    expect(resolveFilesTreeWidth(480, 1200)).toBe(480);
+    expect(resolveFilesTreeWidth(480, 600)).toBe(600 - editorReserve);
+  });
+
+  it('面板很窄时不低于原先固定的默认宽度，也不放大偏好更窄的值', () => {
+    expect(resolveFilesTreeWidth(480, 360)).toBe(FILES_TREE_DEFAULT_WIDTH);
+    expect(resolveFilesTreeWidth(180, 360)).toBe(180);
+  });
+});
+
+describe('resizeFilesTreeWidth', () => {
+  it('从可见宽度起算，顶到上限时不改偏好', () => {
+    // 偏好 480，面板 600 → 可见 359；继续向右拖不变，偏好保留
+    expect(resizeFilesTreeWidth(480, 50, 600)).toBe(480);
+    // 往回拖立刻变窄，没有死区
+    expect(resizeFilesTreeWidth(480, -50, 600)).toBe(600 - FILES_EDITOR_MIN_WIDTH - 1 - 50);
+  });
+
+  it('面板尚未量到时按偏好加减并夹在 160–480', () => {
+    expect(resizeFilesTreeWidth(224, 40, 0)).toBe(264);
+    expect(resizeFilesTreeWidth(224, 1000, 0)).toBe(480);
+    expect(resizeFilesTreeWidth(224, -1000, 0)).toBe(160);
   });
 });

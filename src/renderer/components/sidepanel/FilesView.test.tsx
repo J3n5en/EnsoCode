@@ -441,6 +441,30 @@ describe('FilesView 文件树宽度', () => {
     expect(treeWidth()).toBe('224px');
   });
 
+  it('面板窄时文件树不超过「面板宽 - 编辑区最小宽」，拖动从可见宽度起算', async () => {
+    let report: (width: number) => void = () => {};
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: (entries: { contentRect: { width: number } }[]) => void) {
+          report = (width) => callback([{ contentRect: { width } }]);
+        }
+        observe() {
+          report(600);
+        }
+        disconnect() {}
+      }
+    );
+    useSidePanelStore.setState({ filesTreeWidth: 480 });
+    await mountDocks(['a']);
+    expect(treeWidth()).toBe('359px');
+    await drag(-59);
+    expect(treeWidth()).toBe('300px');
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(300);
+    await act(async () => report(1200));
+    expect(treeWidth()).toBe('300px');
+  });
+
   it('移动端不渲染手柄，文件树仍铺满', async () => {
     Object.assign(window, { innerWidth: 375 });
     await mountDocks(['a']);

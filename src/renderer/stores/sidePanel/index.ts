@@ -9,14 +9,19 @@ import { normalizeGlobalState, type PanelScope, selectSidePanelShown } from './g
 import { removeLayoutPanel } from './layoutSanitize';
 import { migrateSidePanelState, SIDE_PANEL_VERSION } from './migrate';
 import {
-  clampFilesTreeWidth,
   FILES_TREE_DEFAULT_WIDTH,
+  resizeFilesTreeWidth,
   resizeSidePanelWidth,
   SIDE_PANEL_DEFAULT_WIDTH,
 } from './width';
 
 export type { PanelScope } from './globalTabs';
-export { clampFilesTreeWidth, SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from './width';
+export {
+  clampFilesTreeWidth,
+  resolveFilesTreeWidth,
+  SIDE_PANEL_DEFAULT_WIDTH,
+  SIDE_PANEL_MIN_WIDTH,
+} from './width';
 
 export type ChangesMode = 'all' | 'git';
 export type PinnableSidePanelTab =
@@ -69,7 +74,8 @@ interface SidePanelState {
    */
   reconcileForActiveConversation: () => void;
   nudgeWidth: (delta: number, workspaceWidth: number, handleWidth: number) => void;
-  nudgeFilesTreeWidth: (delta: number) => void;
+  /** paneWidth 为 Files 面板当前宽度，0 表示未量到 */
+  nudgeFilesTreeWidth: (delta: number, paneWidth?: number) => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
   togglePinnedTab: (tab: PinnableSidePanelTab) => void;
@@ -167,10 +173,8 @@ export const useSidePanelStore = create<SidePanelState>()(
         set({ uiByConversation: patchUi(get(), id, { width }), lastWidth: width });
       },
 
-      nudgeFilesTreeWidth: (delta) => {
-        const filesTreeWidth = clampFilesTreeWidth(
-          clampFilesTreeWidth(get().filesTreeWidth) + delta
-        );
+      nudgeFilesTreeWidth: (delta, paneWidth = 0) => {
+        const filesTreeWidth = resizeFilesTreeWidth(get().filesTreeWidth, delta, paneWidth);
         if (filesTreeWidth !== get().filesTreeWidth) set({ filesTreeWidth });
       },
 
