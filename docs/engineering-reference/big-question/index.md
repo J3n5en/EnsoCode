@@ -12,6 +12,7 @@
 | [ios-pwa-header-blur.md](ios-pwa-header-blur.md) | Safari 正常，独立 PWA 顶部标题模糊；透明遮罩又留下灰色状态栏 |
 | [pwa-desk-active-conversation.md](pwa-desk-active-conversation.md) | 手机完整模式切了会话，重启后仍是上一条 |
 | [pwa-desk-snapshot-images.md](pwa-desk-snapshot-images.md) | 手机完整模式冷启动时头像裂图，同步完才正常 |
+| [cross-primary-unread-active.md](cross-primary-unread-active.md) | 桌面和 /desk 同时在线，停在会话里等它完成，侧栏仍亮绿点，切走再切回才熄 |
 | [cross-window-interrupt-queue-pump.md](cross-window-interrupt-queue-pump.md) | 完整模式打断并发送排队消息，同一条又以插话再发一次 |
 | [dedupe-identity.md](dedupe-identity.md) | 去重没生效，同一个东西导入了三份 |
 | [agent-end-run-scoped-messages.md](agent-end-run-scoped-messages.md) | 多轮对话后历史消息消失，只剩最近一轮 |
