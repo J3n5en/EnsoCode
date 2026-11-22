@@ -11,7 +11,6 @@ import type {
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
 import {
-  Check,
   FolderOpen,
   GitCompare,
   Globe,
@@ -99,6 +98,7 @@ import { isPluginPanelId, pinnableTabForId, planPinnedPanels } from './pinnedTab
 import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
+import { ShowEverywhereItem, SideTabTitle } from './sideTabScope';
 import { TerminalView } from './TerminalView';
 import { idsToClose, type TabCloseKind } from './tabCloseActions';
 import { WorkflowView } from './WorkflowView';
@@ -515,7 +515,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
       ) : (
         <SquareTerminal className="h-3 w-3 shrink-0" />
       )}
-      <span className="max-w-32 truncate">{title}</span>
+      <SideTabTitle title={title} global={pluginPanel && shared} />
       {pinnableTab && !liveGlobal ? (
         <button
           type="button"
@@ -568,15 +568,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         {shareable ? (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem
-              data-enso="side-tab-show-everywhere"
-              role="menuitemcheckbox"
-              aria-checked={shared}
-              onClick={toggleShared}
-            >
-              <Check className={cn('h-3.5 w-3.5', !shared && 'invisible')} />
-              {t('Show in all sessions')}
-            </ContextMenuItem>
+            <ShowEverywhereItem checked={shared} onClick={toggleShared} />
           </>
         ) : null}
       </ContextMenuPopup>
