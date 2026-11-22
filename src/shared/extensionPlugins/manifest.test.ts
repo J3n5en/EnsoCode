@@ -174,6 +174,33 @@ describe('parseExtensionPluginManifest', () => {
     expect(result.manifest.net.domains).toEqual([]);
   });
 
+  it('views.scope 只认 global / session，不写或非法值按会话处理', () => {
+    const withViews = (views: unknown) => ({
+      ...base(),
+      permissions: ['agent.tool', 'ui.view'],
+      contributes: { ...base().contributes, views },
+    });
+    const result = parseExtensionPluginManifest(
+      withViews([
+        { id: 'player', title: 'P', entry: 'p.html', scope: 'global' },
+        { id: 'notes', title: 'N', entry: 'n.html', scope: 'session' },
+        { id: 'plain', title: 'L', entry: 'l.html' },
+        { id: 'odd', title: 'O', entry: 'o.html', scope: 'GLOBAL' },
+        { id: 'num', title: 'U', entry: 'u.html', scope: 1 },
+      ]),
+      '0.2.12'
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.views).toEqual([
+      { id: 'player', title: 'P', entry: 'p.html', scope: 'global' },
+      { id: 'notes', title: 'N', entry: 'n.html', scope: 'session' },
+      { id: 'plain', title: 'L', entry: 'l.html', scope: 'session' },
+      { id: 'odd', title: 'O', entry: 'o.html', scope: 'session' },
+      { id: 'num', title: 'U', entry: 'u.html', scope: 'session' },
+    ]);
+  });
+
   it('接受图片 icon，拒绝越界路径和非图片', () => {
     const result = parseExtensionPluginManifest({ ...base(), icon: 'assets/icon.svg' }, '0.2.12');
     expect(result.ok && result.manifest.icon).toBe('assets/icon.svg');
