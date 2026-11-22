@@ -724,6 +724,29 @@ describe('重启保留后台命令的协议', () => {
         sessions: [{ ...entry, undetachableTasks: [1] }],
       })
     ).toBeNull();
+    const writing = { identity: parent, reason: 'turn-in-progress', toolsInFlight: [] };
+    for (const reply of [
+      { requestStartMs: 1 },
+      { requestStartMs: 1, firstTokenMs: 2, lastOutputMs: 3 },
+    ])
+      expect(
+        parseAgentWorkerEvent({
+          type: 'graceful-restart-deferred',
+          sessions: [{ ...writing, reply }],
+        })
+      ).not.toBeNull();
+    for (const reply of [
+      {},
+      { requestStartMs: '1' },
+      { requestStartMs: 1, lastOutputMs: Number.NaN },
+      { requestStartMs: 1, extra: 1 },
+    ])
+      expect(
+        parseAgentWorkerEvent({
+          type: 'graceful-restart-deferred',
+          sessions: [{ ...writing, reply }],
+        })
+      ).toBeNull();
     expect(parseAgentWorkerEvent({ type: 'background-tasks-detached', detached: 2 })).toEqual({
       type: 'background-tasks-detached',
       detached: 2,

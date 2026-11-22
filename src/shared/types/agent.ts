@@ -1761,6 +1761,14 @@ export interface MessageTiming {
   completedMs?: number;
 }
 
+/** 重启等安全点时回复在写的会话：这次模型请求的发出 / 首 token / 最近一次出 token 时刻 */
+export interface RestartReplyProgress {
+  requestStartMs: number;
+  firstTokenMs?: number;
+  /** 正文、思考、工具参数的增量都算出 token */
+  lastOutputMs?: number;
+}
+
 /** todo 工具的清单项（toolResult.details 透出，整表替换语义） */
 export interface TodoItem {
   content: string;
@@ -1807,6 +1815,8 @@ export interface ProjectedMessage {
   duration?: number;
   /** 该 step 的计时打点（仅 assistant 消息带） */
   timing?: MessageTiming;
+  /** 应用重启时写到一半被中止、新进程已在后面接着写的回复（仅 assistant）：时间线折叠成一行 */
+  restartResumed?: boolean;
   /** todo 工具 toolResult 的清单快照 */
   todos?: TodoItem[];
   /** 工具执行耗时（仅 toolResult 消息带；worker 按 tool_execution_start/end 打点，不含排队） */
@@ -2353,6 +2363,8 @@ export type AgentWorkerEvent =
         toolsInFlight: string[];
         /** 要求保留后台命令时仍要等的转后台命令（没法脱离 worker，如走管道的远程命令） */
         undetachableTasks?: string[];
+        /** 回复在写（没有工具在跑）：Main 按出 token 的时刻决定还等不等 */
+        reply?: RestartReplyProgress;
       }[];
     }
   | {
@@ -4606,6 +4618,26 @@ function parseLifecycleEvent(value: Record<string, unknown>): AgentWorkerEvent |
 const isOptionalTimestamp = (value: unknown): boolean =>
   value === undefined || (typeof value === 'number' && Number.isFinite(value));
 
+const DEFERRED_SESSION_KEYS = new Set([
+  'identity',
+  'reason',
+  'toolsInFlight',
+  'undetachableTasks',
+  'reply',
+]);
+
+function isRestartReplyProgress(value: unknown): value is RestartReplyProgress {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every(
+      (key) => key === 'requestStartMs' || key === 'firstTokenMs' || key === 'lastOutputMs'
+    ) &&
+    isNonNegativeNumber(value.requestStartMs) &&
+    (value.firstTokenMs === undefined || isNonNegativeNumber(value.firstTokenMs)) &&
+    (value.lastOutputMs === undefined || isNonNegativeNumber(value.lastOutputMs))
+  );
+}
+
 export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
   if (!isRecord(value) || !isNonEmptyString(value.type)) return null;
   if (value.type === 'privacy-mask-ledger') {
@@ -4752,10 +4784,11 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       value.sessions.every(
         (entry) =>
           isRecord(entry) &&
-          (hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight']) ||
-            (hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight', 'undetachableTasks']) &&
-              Array.isArray(entry.undetachableTasks) &&
+          Object.keys(entry).every((key) => DEFERRED_SESSION_KEYS.has(key)) &&
+          (entry.undetachableTasks === undefined ||
+            (Array.isArray(entry.undetachableTasks) &&
               entry.undetachableTasks.every(isNonEmptyString))) &&
+          (entry.reply === undefined || isRestartReplyProgress(entry.reply)) &&
           parseSessionIdentity(entry.identity) &&
           (entry.reason === 'tool-in-flight' || entry.reason === 'turn-in-progress') &&
           Array.isArray(entry.toolsInFlight) &&

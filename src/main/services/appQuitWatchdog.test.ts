@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QUIT_REPLY_WAIT_MS, QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
+import {
+  QUIT_REPLY_IDLE_MS,
+  QUIT_REPLY_WAIT_CAP_MS,
+  QUIT_REPLY_WAIT_FLOOR_MS,
+  QUIT_TOOL_WAIT_LIMIT_MS,
+} from './agentQuitLimits';
 import {
   createQuitWatchdog,
   QUIT_FINISH_LIMIT_MS,
@@ -30,8 +35,10 @@ describe('退出看门狗', () => {
   });
 
   it('等回复写完的上限落在工具等待上限内，等完后的收尾时间不比关窗收尾期限短：两者不打架', () => {
-    expect(QUIT_REPLY_WAIT_MS).toBeGreaterThanOrEqual(30_000);
-    expect(QUIT_REPLY_WAIT_MS).toBeLessThan(QUIT_TOOL_WAIT_LIMIT_MS);
+    expect(QUIT_REPLY_WAIT_FLOOR_MS).toBeGreaterThanOrEqual(30_000);
+    expect(QUIT_REPLY_IDLE_MS).toBeLessThan(QUIT_REPLY_WAIT_FLOOR_MS);
+    expect(QUIT_REPLY_WAIT_FLOOR_MS).toBeLessThan(QUIT_REPLY_WAIT_CAP_MS);
+    expect(QUIT_REPLY_WAIT_CAP_MS).toBeLessThan(QUIT_TOOL_WAIT_LIMIT_MS);
     expect(QUIT_WATCHDOG_LIMIT_MS - QUIT_TOOL_WAIT_LIMIT_MS).toBeGreaterThanOrEqual(
       QUIT_FINISH_LIMIT_MS
     );

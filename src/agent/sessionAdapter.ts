@@ -9,6 +9,8 @@ import {
 import { transcriptMessages } from './transcript';
 
 export const OAUTH_POOL_TERMINAL_ERROR_ENTRY = 'enso.oauth-pool-terminal-error';
+/** 重启续跑：被中止的回复（targetId）已移出模型上下文、新进程在后面接着写；展示投影据此折叠它 */
+export const RESTART_RESUMED_ENTRY = 'enso.restart-resumed';
 
 /** 同一边界排队的插话一次送达（pi 默认逐条，后一条要多等一次模型请求）。不写 settings。 */
 export function batchSteering(session: AgentSession): void {
@@ -227,6 +229,18 @@ export function editUnfinishedAssistantForResume(session: AgentSession): boolean
   return true;
 }
 
+/** 最新可见 assistant 是被中止的回复时返回它的条目 id（拿不到会话投影时为 undefined） */
+export function abortedReplyEntryId(session: AgentSession): string | undefined {
+  if (typeof session.sessionManager.buildSessionProjection !== 'function') return undefined;
+  const latest = latestVisibleAssistant(session);
+  return latest?.message.stopReason === 'aborted' ? latest.id : undefined;
+}
+
+/** 记下这条被重启中止的回复已续跑：jsonl 留原条目，展示时折叠 */
+export function markRestartResumedReply(session: AgentSession, targetId: string): void {
+  session.sessionManager.appendCustomEntry(RESTART_RESUMED_ENTRY, { targetId });
+}
+
 /**
  * 无新增消息的活动续跑：pi 1.4.0 没有公开的 session.continue，裸 agent.continue 会绕过
  * 自动重试、agent_before_settle 和 agent_settled。通过每次调用独立的代理，让 _startRun
@@ -269,9 +283,18 @@ export function buildSessionDisplayMessages(
   if (!projection) return transcriptMessages(manager, contextMessages);
 
   const editedTargets = new Set<string>();
+  const resumedTargets = new Set<string>();
   const terminalErrors = new Map<string, string>();
   for (const entry of manager.getBranch()) {
     if (entry.type === 'context_edit') editedTargets.add(entry.targetId);
+    if (
+      entry.type === 'custom' &&
+      entry.customType === RESTART_RESUMED_ENTRY &&
+      entry.data &&
+      typeof entry.data === 'object' &&
+      typeof (entry.data as Record<string, unknown>).targetId === 'string'
+    )
+      resumedTargets.add((entry.data as { targetId: string }).targetId);
     if (
       entry.type === 'custom' &&
       entry.customType === OAUTH_POOL_TERMINAL_ERROR_ENTRY &&
@@ -293,7 +316,10 @@ export function buildSessionDisplayMessages(
     )
       return [{ ...entry.sourceEntry.message, errorMessage: error }];
     if (entry.sourceEntry.type === 'message' && editedTargets.has(entry.sourceEntry.id)) {
-      return [entry.sourceEntry.message];
+      return resumedTargets.has(entry.sourceEntry.id) &&
+        entry.sourceEntry.message.role === 'assistant'
+        ? [{ ...entry.sourceEntry.message, restartResumed: true }]
+        : [entry.sourceEntry.message];
     }
     return entry.messages;
   });

@@ -16,11 +16,13 @@ import {
 import { Type } from 'typebox';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  abortedReplyEntryId,
   batchSteering,
   buildSessionDisplayMessages,
   continueSessionActivity,
   editLatestAssistantForRetry,
   editUnfinishedAssistantForResume,
+  markRestartResumedReply,
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
@@ -720,6 +722,45 @@ describe('Pi session adapter integration', () => {
       '<delegation-check-failed id="d">The acceptance check failed.</delegation-check-failed>'
     );
     expect(shape(h.requests[0]!)).toEqual(['user', 'assistant:stop:', 'user']);
+  });
+
+  it('重启续跑：中止的回复移出模型上下文，记一条续跑标记，展示投影据此给它打 restartResumed', async () => {
+    const h = await harness([{ content: [{ type: 'text', text: 'Resumed and done.' }] }]);
+    h.manager.appendMessage({ role: 'user', content: 'Write it.', timestamp: Date.now() });
+    h.manager.appendMessage(
+      assistant(model, {
+        content: [{ type: 'text', text: 'Half written' }],
+        stopReason: 'aborted',
+        errorMessage: 'This operation was aborted',
+      })
+    );
+    h.session.refreshContext();
+    const targetId = abortedReplyEntryId(h.session);
+    expect(targetId).toEqual(expect.any(String));
+    expect(editUnfinishedAssistantForResume(h.session)).toBe(true);
+    markRestartResumedReply(h.session, targetId!);
+    await continueSessionActivity(h.session);
+    expect(shape(h.requests[0]!)).toEqual(['user']);
+    const displayed = buildSessionDisplayMessages(h.session) as Array<{
+      role: string;
+      restartResumed?: boolean;
+    }>;
+    expect(
+      displayed.filter((message) => message.role === 'assistant').map((m) => m.restartResumed)
+    ).toEqual([true, undefined]);
+  });
+
+  it('用户点停止等其它中止（没有续跑标记）：展示照原样，不打 restartResumed', async () => {
+    const h = await harness([{ content: [{ type: 'text', text: 'Retry succeeded.' }] }]);
+    h.manager.appendMessage({ role: 'user', content: 'Write it.', timestamp: Date.now() });
+    h.manager.appendMessage(
+      assistant(model, { content: [{ type: 'text', text: 'Half' }], stopReason: 'aborted' })
+    );
+    h.session.refreshContext();
+    expect(editLatestAssistantForRetry(h.session)).toBe(true);
+    await continueSessionActivity(h.session);
+    const displayed = buildSessionDisplayMessages(h.session) as Array<{ restartResumed?: boolean }>;
+    expect(displayed.some((message) => message.restartResumed)).toBe(false);
   });
 
   it('manual retry 用 canonical context edit 隐藏旧错误而保留原始 session entry', async () => {

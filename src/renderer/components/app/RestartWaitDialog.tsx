@@ -1,4 +1,4 @@
-import { QUIT_REPLY_WAIT_MS } from '@shared/quitLimits';
+import { QUIT_REPLY_IDLE_MS, QUIT_REPLY_WAIT_CAP_MS } from '@shared/quitLimits';
 import type { AppExitReason, RestartOverlayState } from '@shared/types/ipc';
 import { Maximize2 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -106,8 +106,8 @@ export function RestartWaitDialog() {
             <AlertDialogDescription>
               {reply
                 ? t(
-                    'A session is still writing its reply. EnsoCode waits up to {{seconds}} seconds for it; if it is not done by then, the reply is stopped and continues automatically after the restart.',
-                    { seconds: QUIT_REPLY_WAIT_MS / 1000 }
+                    'A session is still writing its reply. EnsoCode waits up to {{minutes}} minutes; if it stops producing output for more than {{idle}} seconds, it is stopped first and continues automatically after the restart.',
+                    { minutes: QUIT_REPLY_WAIT_CAP_MS / 60_000, idle: QUIT_REPLY_IDLE_MS / 1000 }
                   )
                 : t(EXIT_NOTES[shown.exit])}
               {shown.reason === 'background-not-detachable' && (

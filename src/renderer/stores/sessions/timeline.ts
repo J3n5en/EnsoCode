@@ -208,6 +208,15 @@ export type TimelineItem =
   | { kind: 'divider'; key: string; text: string }
   /** 插件经 session.inject 写入的消息；必须标明来源 */
   | { kind: 'plugin-message'; key: string; text: string; pluginId: string; pluginName: string }
+  /** 应用重启时写到一半被中止、新进程已在下方接着写的回复：收成一行，展开看原文 */
+  | {
+      kind: 'resumed-reply';
+      key: string;
+      thinking: string;
+      text: string;
+      tools: { name: string; summary: string }[];
+      expanded: boolean;
+    }
   /** 插件投递被 turn_discard 丢弃的一轮：收成一行，展开看投递原文 */
   | {
       kind: 'discarded-turn';
@@ -1139,6 +1148,10 @@ function buildMessageTimeline(
         currentTurnUserItem.turnDurationMs = turnDurationMs;
       }
     }
+    if (message.restartResumed) {
+      items.push(resumedReplyItem(message, absIndex, cwd));
+      return;
+    }
     // 「流式中」= 最后一个有内容的 part：pi 流式时 thinking/text 后面常已跟着
     // 空占位 part，按「最后一个 part」判会把正在生成的块误判为已完结
     const lastActiveIndex = findLastActivePartIndex(message.content);
@@ -1354,6 +1367,30 @@ function buildMessageTimeline(
     }
   });
   return items;
+}
+
+/** 被重启中止、已续跑的半截回复：折叠行只带原文，不进正文 / 工具卡片 / 错误行 */
+function resumedReplyItem(
+  message: ProjectedMessage,
+  absIndex: number,
+  cwd: string | undefined
+): TimelineItem {
+  const join = (type: 'text' | 'thinking') =>
+    message.content
+      .flatMap((part) => (part.type === type && part.text.trim() ? [part.text.trim()] : []))
+      .join('\n\n');
+  return {
+    kind: 'resumed-reply',
+    key: `${absIndex}-resumed`,
+    thinking: join('thinking'),
+    text: join('text'),
+    tools: message.content.flatMap((part) =>
+      part.type === 'toolCall'
+        ? [{ name: part.name, summary: summarizeArgs(part.arguments, cwd) }]
+        : []
+    ),
+    expanded: false,
+  };
 }
 
 /**
@@ -2489,7 +2526,9 @@ export function foldTimeline(
   options: TimelineFoldOptions = {}
 ): TimelineItem[] {
   const surfaced = foldSecretarySurface(
-    items,
+    items.map((item) =>
+      item.kind === 'resumed-reply' ? { ...item, expanded: expandedKeys.has(item.key) } : item
+    ),
     running,
     expandedKeys,
     options.foldToolOnlyTurns === true

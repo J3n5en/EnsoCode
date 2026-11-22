@@ -116,6 +116,7 @@ import type {
   NodeStatus,
   ProjectedMessage,
   ResolvedAgentTypeSpawnConfig,
+  RestartReplyProgress,
   RetrySkippedReason,
   SessionSnapshot,
   SlashCommand,
@@ -291,11 +292,13 @@ import { projectMessages, projectResumeTail } from './resumeSnapshots';
 import { withRtkOptimization } from './rtk';
 import { RunawayGuard } from './runawayGuard';
 import {
+  abortedReplyEntryId,
   batchSteering,
   buildSessionDisplayMessages,
   continueSessionActivity,
   editLatestAssistantForRetry,
   editUnfinishedAssistantForResume,
+  markRestartResumedReply,
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
@@ -504,6 +507,8 @@ interface ManagedSession {
   timings: (MessageTiming | undefined)[];
   /** 最近一次 turn_start 时刻；pi 在发起每次模型请求前触发，下一条 assistant message_start 消费 */
   requestStartMs?: number;
+  /** 当前模型请求的发出 / 首 token / 最近出 token 时刻；回复写完（message_end）清掉。重启等安全点时报给 Main */
+  replyProgress?: RestartReplyProgress;
   toolStartAt: Map<string, number>;
   toolDurations: Map<string, number>;
   /** 优雅重启：loop 停在工具批结束、下一次模型请求之前；调用即放行 */
@@ -4665,8 +4670,10 @@ export class SessionSupervisor {
         return;
       case 'turn_start':
         managed.requestStartMs = Date.now();
+        managed.replyProgress = { requestStartMs: managed.requestStartMs };
         return;
       case 'turn_end': {
+        managed.replyProgress = undefined;
         // 父会话的工具批次交给 Main 生成一句话标签（子代理不生成）
         if (managed.childIdentity || managed.coworkerName) return;
         const digest = toolBatchDigest(event.message, event.toolResults);
@@ -4698,6 +4705,11 @@ export class SessionSupervisor {
         const index = managed.messages.length - 1;
         const timing = managed.timings[index];
         const projected = projectMessage(event.message);
+        if (managed.replyProgress) {
+          const now = Date.now();
+          managed.replyProgress.firstTokenMs ??= now;
+          managed.replyProgress.lastOutputMs = now;
+        }
         if (timing) {
           if (timing.firstTokenMs === undefined) timing.firstTokenMs = Date.now();
           if (
@@ -4719,6 +4731,11 @@ export class SessionSupervisor {
         const index = managed.messages.length - 1;
         const timing = managed.timings[index];
         if (timing) timing.completedMs = Date.now();
+        if (event.message.role === 'assistant') {
+          managed.replyProgress = undefined;
+          // pi 在监听者之后才把这条写进会话文件：计时随消息落盘，供以后统计（投影白名单不透出）
+          if (timing) (event.message as { timing?: MessageTiming }).timing = { ...timing };
+        }
         this.stampContextSnapshot(managed, event.message);
         if (event.message.role === 'assistant' && managed.forkBase && !managed.forkBase.reply)
           managed.forkBase.reply = event.message;
@@ -5872,6 +5889,9 @@ export class SessionSupervisor {
           reason: gate.reason,
           toolsInFlight,
           ...(keep && blockingTasks.length > 0 ? { undetachableTasks: blockingTasks } : {}),
+          ...(toolsInFlight.length === 0 && managed.replyProgress
+            ? { reply: { ...managed.replyProgress } }
+            : {}),
         });
         continue;
       }
@@ -5903,7 +5923,10 @@ export class SessionSupervisor {
         );
     }
     if (deferred.length > 0) {
-      const key = JSON.stringify(deferred);
+      // 回复在写时每个 token 都会触发检查：出 token 时刻按秒去抖，Main 据此顺延等待
+      const key = JSON.stringify(deferred, (field, value) =>
+        field === 'lastOutputMs' ? Math.floor(value / RESTART_PROGRESS_REPORT_MS) : value
+      );
       if (key !== restart.deferredKey) {
         restart.deferredKey = key;
         this.options.emit({ type: 'graceful-restart-deferred', sessions: deferred });
@@ -6000,6 +6023,7 @@ export class SessionSupervisor {
     managed.restartResume = undefined;
     if (entry?.nextStep !== 'model-request') return;
     // 上一代收尾时中止了写到一半的回复：先把它移出模型上下文（jsonl 原条目保留），再从它之前续跑
+    const abortedEntryId = abortedReplyEntryId(managed.session);
     const abortedReply =
       endsWithAbortedReply(managed.session.agent.state.messages) &&
       editUnfinishedAssistantForResume(managed.session);
@@ -6010,8 +6034,14 @@ export class SessionSupervisor {
       );
       return;
     }
-    if (abortedReply)
+    if (abortedReply) {
       console.log(`[graceful-restart] ${entry.sessionId.slice(0, 8)} 续跑被重启中止的回复`);
+      // 展示上把半截回复折叠成一行：记一条 custom entry（重载时据此打标），并把已下发的那条改掉
+      if (abortedEntryId) {
+        markRestartResumedReply(managed.session, abortedEntryId);
+        this.reconcileMessages(managed, this.transcript(managed));
+      }
+    }
     managed.currentTurnId = entry.turnId ?? randomUUID();
     if (entry.lastCompletedToolCallId)
       managed.lastCompletedToolCallId = entry.lastCompletedToolCallId;
@@ -6574,6 +6604,8 @@ export class SessionSupervisor {
 const ZOMBIE_TURN_WAIT_MS = 5_000;
 /** 流式增量下发间隔：约 20 帧/秒，肉眼连贯，长回复的 IPC 与 markdown 重算降一个量级 */
 const STREAM_UPSERT_WINDOW_MS = 50;
+/** 重启等安全点时回复在写：出 token 时刻按这个粒度重报给 Main（空闲阈值 20s，误差可忽略） */
+const RESTART_PROGRESS_REPORT_MS = 1_000;
 /** 重启收尾中止回复后等它落进会话文件的上限：加上等转后台命令的 1s 仍在 Main 终止 worker 的 3s 内 */
 const RESTART_ABORT_SETTLE_MS = 1_500;
 

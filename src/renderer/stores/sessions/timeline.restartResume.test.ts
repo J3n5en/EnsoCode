@@ -1,6 +1,6 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { buildTimeline } from './timeline';
+import { buildTimeline, foldTimeline } from './timeline';
 
 const user: ProjectedMessage = {
   role: 'user',
@@ -35,5 +35,39 @@ describe('重启中止后续跑的回复', () => {
   it('没有续跑：中止错误照常显示', () => {
     expect(errors([user, aborted])).toEqual(['This operation was aborted']);
     expect(errors([user, aborted, system, user])).toEqual(['This operation was aborted']);
+  });
+
+  it('已续跑的半截回复折叠成一行，展开看原文；续写照常显示', () => {
+    const half: ProjectedMessage = {
+      ...aborted,
+      content: [
+        { type: 'thinking', text: '想一想' },
+        { type: 'text', text: '先看一下' },
+        { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'a.ts' } },
+      ],
+      restartResumed: true,
+    };
+    const items = buildTimeline([user, half, system, resumed], false);
+    expect(items.map((item) => item.kind)).toEqual(['user', 'resumed-reply', 'text']);
+    expect(items[1]).toMatchObject({
+      kind: 'resumed-reply',
+      thinking: '想一想',
+      text: '先看一下',
+      tools: [{ name: 'read' }],
+      expanded: false,
+    });
+    const folded = foldTimeline(items, false, new Set([items[1].key]));
+    expect(folded.find((item) => item.kind === 'resumed-reply')).toMatchObject({
+      expanded: true,
+    });
+    expect(
+      foldTimeline(items, false, new Set()).find((item) => item.kind === 'resumed-reply')
+    ).toMatchObject({ expanded: false });
+  });
+
+  it('用户点停止等其它中止：照原样显示，不折叠', () => {
+    const stopped = buildTimeline([user, aborted, user, resumed], false);
+    expect(stopped.some((item) => item.kind === 'resumed-reply')).toBe(false);
+    expect(stopped.some((item) => item.kind === 'text' && item.text === '先看一下')).toBe(true);
   });
 });

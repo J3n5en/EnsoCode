@@ -263,7 +263,12 @@ describe('SessionSupervisor graceful restart', () => {
     supervisor.handleCommand({ type: 'graceful-restart' });
     await settle();
     expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
-      { identity: parent, reason: 'turn-in-progress', toolsInFlight: [] },
+      {
+        identity: parent,
+        reason: 'turn-in-progress',
+        toolsInFlight: [],
+        reply: { requestStartMs: expect.any(Number) },
+      },
     ]);
     expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
 
@@ -415,7 +420,12 @@ describe('SessionSupervisor graceful restart', () => {
     first.supervisor.handleCommand({ type: 'graceful-restart' });
     await settle();
     expect(ofType(first.events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
-      { identity: parent, reason: 'turn-in-progress', toolsInFlight: [] },
+      {
+        identity: parent,
+        reason: 'turn-in-progress',
+        toolsInFlight: [],
+        reply: { requestStartMs: expect.any(Number) },
+      },
     ]);
 
     // Main 等安全点超时后终止 worker：收尾中止模型请求，pi 写下 stopReason=aborted 的半截回复
@@ -475,6 +485,71 @@ describe('SessionSupervisor graceful restart', () => {
     resumed.emit({ type: 'agent_start' });
     expect(ofType(second.events, 'status').find((event) => event.turnId)?.turnId).toBe(turnId);
     await second.supervisor.shutdown();
+  });
+
+  it('回复在写：推迟报告带请求发出 / 首 token / 最近出 token 时刻并按秒重报，写完时计时随消息落盘', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(1_000_000);
+      const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-reply-progress-'));
+      const { events, supervisor } = await startSupervisor(dataDir);
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+      });
+      await waitFor(events, 'parent-ready');
+      const session = mocks.sessions[0];
+      session.messages.push(user);
+      session.emit({ type: 'agent_start' });
+      session.emit({ type: 'turn_start' });
+      session.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+      supervisor.handleCommand({ type: 'graceful-restart' });
+      await settle();
+      const reports = () =>
+        ofType(events, 'graceful-restart-deferred').map((event) => event.sessions[0]?.reply);
+      expect(reports().at(-1)).toEqual({ requestStartMs: 1_000_000 });
+
+      const partial = (text: string) => ({
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        stopReason: 'pending',
+      });
+      const token = async (at: number, text: string) => {
+        vi.setSystemTime(at);
+        session.emit({ type: 'message_update', message: partial(text) });
+        await settle();
+      };
+      await token(1_002_000, '先');
+      expect(reports().at(-1)).toEqual({
+        requestStartMs: 1_000_000,
+        firstTokenMs: 1_002_000,
+        lastOutputMs: 1_002_000,
+      });
+      const count = reports().length;
+      // 同一秒里的新 token 不重报，进下一秒才带着最新时刻重报
+      await token(1_002_400, '先看');
+      expect(reports()).toHaveLength(count);
+      await token(1_003_100, '先看一');
+      expect(reports()).toHaveLength(count + 1);
+      expect(reports().at(-1)?.lastOutputMs).toBe(1_003_100);
+
+      const done = { ...partial('先看一下'), stopReason: 'stop' } as Record<string, unknown>;
+      vi.setSystemTime(1_005_000);
+      session.emit({ type: 'message_end', message: done });
+      await settle();
+      // pi 在监听者之后才落盘这条消息：计时已挂在它上面
+      expect(done.timing).toMatchObject({
+        stepStartMs: 1_000_000,
+        firstTokenMs: 1_002_000,
+        completedMs: 1_005_000,
+      });
+      expect(reports().at(-1)).toBeUndefined();
+      await supervisor.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('工具在跑时被中止（超过上限 / 强制退出）：不自动续跑，断点记成 await-user', async () => {

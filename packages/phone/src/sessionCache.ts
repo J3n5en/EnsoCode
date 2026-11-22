@@ -469,7 +469,8 @@ function parseMessage(value: unknown): ProjectedMessage | null {
     !optional(value, 'toolDurationMs', isFiniteNumber) ||
     !optional(value, 'tokensBefore', isFiniteNumber) ||
     !optional(value, 'verified', isBoolean) ||
-    !optional(value, 'memory', isBoolean)
+    !optional(value, 'memory', isBoolean) ||
+    !optional(value, 'restartResumed', isBoolean)
   ) {
     return null;
   }
@@ -607,6 +608,7 @@ function parseMessage(value: unknown): ProjectedMessage | null {
   if (typeof value.tokensBefore === 'number') out.tokensBefore = value.tokensBefore;
   if (typeof value.verified === 'boolean') out.verified = value.verified;
   if (typeof value.memory === 'boolean') out.memory = value.memory;
+  if (value.restartResumed === true) out.restartResumed = true;
   return out;
 }
 

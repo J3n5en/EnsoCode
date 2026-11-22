@@ -79,6 +79,7 @@ import type {
   McpServerSpawnConfig,
   ModelRef,
   ResolvedAgentTypeSpawnConfig,
+  RestartReplyProgress,
   SessionReloadResult,
   SpawnModelConfig,
   SubagentModelOption,
@@ -128,7 +129,13 @@ import { parseWebSearchChain, type WebSearchChainEntry } from '@shared/webSearch
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
-import { QUIT_REPLY_WAIT_MS, QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
+import {
+  QUIT_REPLY_IDLE_MS,
+  QUIT_REPLY_WAIT_CAP_MS,
+  QUIT_REPLY_WAIT_FLOOR_MS,
+  QUIT_TOOL_WAIT_LIMIT_MS,
+  replyWaitDeadline,
+} from './agentQuitLimits';
 import {
   AGENT_WORKER_SERVICE_NAME,
   appendAgentWorkerExitLog,
@@ -452,11 +459,14 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
           lastRestartDeferred = event.sessions;
           quitCheckpoint?.observe(event.sessions);
         }
-        console.log(
-          `[agent] graceful restart deferred: ${event.sessions
-            .map((s) => `${s.identity.sessionId.slice(0, 8)}=${s.reason}`)
-            .join(', ')}`
-        );
+        // 回复在写时每秒都会带新的出 token 时刻重报一次：原因变了才打日志
+        const summary = event.sessions
+          .map((s) => `${s.identity.sessionId.slice(0, 8)}=${s.reason}`)
+          .join(', ');
+        if (summary !== lastDeferredLog) {
+          lastDeferredLog = summary;
+          console.log(`[agent] graceful restart deferred: ${summary}`);
+        }
         return;
       }
       if (event.type === 'graceful-restart-ready') {
@@ -701,13 +711,34 @@ function detachBackgroundTasks(child: WorkerProcess, timeoutMs: number): Promise
   });
 }
 
-export { QUIT_REPLY_WAIT_MS, QUIT_TOOL_WAIT_LIMIT_MS };
+export {
+  QUIT_REPLY_IDLE_MS,
+  QUIT_REPLY_WAIT_CAP_MS,
+  QUIT_REPLY_WAIT_FLOOR_MS,
+  QUIT_TOOL_WAIT_LIMIT_MS,
+} from './agentQuitLimits';
 export type QuitCheckpointResult = 'skipped' | 'checkpointed' | 'timeout';
 
 type DeferredSessions = Extract<
   AgentWorkerEvent,
   { type: 'graceful-restart-deferred' }
 >['sessions'];
+
+/** 等安全点结束时一次模型请求的结局：写完 / 保底后停止出 token / 到了上限 / 用户强制退出 */
+type ReplyOutcome = 'done' | 'idle' | 'cap' | 'forced';
+
+const REPLY_OUTCOME_LABEL: Record<ReplyOutcome, string> = {
+  done: '写完',
+  idle: '空闲中止',
+  cap: '总上限中止',
+  forced: '强制退出',
+};
+
+interface ReplyTrack {
+  sessionId: string;
+  progress: RestartReplyProgress;
+  endedAt?: number;
+}
 
 interface QuitCheckpoint {
   reason: RestartExitReason;
@@ -725,6 +756,8 @@ interface QuitCheckpoint {
   waitReason: RestartWaitReason | null;
   /** worker 最近一次报告的推迟：超时时据此记下每个会话在干什么 */
   lastDeferred: DeferredSessions | null;
+  /** 等安全点期间见过的每次模型请求（会话 + 请求发出时刻），结束时逐个记进退出日志 */
+  replies: Map<string, ReplyTrack>;
   waitingForTools: Array<(reason: RestartWaitReason) => void>;
   observe(sessions: DeferredSessions): void;
   settle(result: QuitCheckpointResult): void;
@@ -735,12 +768,13 @@ interface QuitCheckpoint {
 let quitCheckpoint: QuitCheckpoint | null = null;
 /** 本代 worker 最近一次报告的推迟：换代重启已在等时加入的退出没有新事件，据此知道有没有工具在跑 */
 let lastRestartDeferred: DeferredSessions | null = null;
+let lastDeferredLog = '';
 
 /**
  * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
  * 冷启动据此续跑。没有正在跑的会话、也没有在跑的后台命令时直接放行；同一次退出只发一次请求，再调用拿同一个结果。
- * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时等这一轮回复写完、最多 QUIT_REPLY_WAIT_MS
- * （超时 worker 收尾中止回复并记成续跑点）；onWaitingForTools 在 worker 报告推迟时回调在等什么（已在等则立即回调）。
+ * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时等这一轮回复写完：保底 QUIT_REPLY_WAIT_FLOOR_MS，
+ * 之后还在出 token 就顺延、停止超过 QUIT_REPLY_IDLE_MS 或到 QUIT_REPLY_WAIT_CAP_MS 为止（到点 worker 收尾中止回复并记成续跑点）；onWaitingForTools 在 worker 报告推迟时回调在等什么（已在等则立即回调）。
  */
 export function prepareAgentWorkerForQuit(options: {
   reason: RestartExitReason;
@@ -773,26 +807,41 @@ export function prepareAgentWorkerForQuit(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let settled = false;
   let quietSince = requestedAt;
-  const finish = (result: QuitCheckpointResult) => {
+  const finish = (result: QuitCheckpointResult, outcome: ReplyOutcome = 'done') => {
     clearTimeout(timer);
     settled = true;
+    // 撤销的退出（安装更新失败）不算结局
+    if (result !== 'skipped') logReplyOutcomes(state, outcome);
     resolve(result);
   };
+  const timeOut = (why: string, outcome: ReplyOutcome) => {
+    state.timedOut = true;
+    const message = `[graceful-restart] ${options.reason}: worker 等安全点 ${Date.now() - requestedAt}ms 超时（${why}），中止在跑的命令照常退出；会话状态：${describeDeferred(state.lastDeferred)}`;
+    console.warn(message);
+    appendAgentWorkerExitLog(agentDataDir(), message);
+    finish('timeout', outcome);
+  };
+  // 有工具在跑等到总上限；没有时按回复出 token 的情况：保底、之后空闲阈值内还在出就顺延、最多到回复上限
   const arm = () => {
     clearTimeout(timer);
     const limit = requestedAt + QUIT_TOOL_WAIT_LIMIT_MS;
-    const deadline = state.toolsRunning ? limit : Math.min(limit, quietSince + QUIT_REPLY_WAIT_MS);
+    const reply = state.toolsRunning ? null : replyWaitDeadline(quietSince, lastOutputAt(state));
+    const deadline = reply ? Math.min(limit, reply.at) : limit;
     timer = setTimeout(
-      () => {
-        state.timedOut = true;
-        const why = state.toolsRunning
-          ? `工具跑了超过上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`
-          : `没有工具在跑，回复 ${QUIT_REPLY_WAIT_MS}ms 内没写完`;
-        const message = `[graceful-restart] ${options.reason}: worker 等安全点 ${Date.now() - requestedAt}ms 超时（${why}），中止在跑的命令照常退出；会话状态：${describeDeferred(state.lastDeferred)}`;
-        console.warn(message);
-        appendAgentWorkerExitLog(agentDataDir(), message);
-        finish('timeout');
-      },
+      () =>
+        state.toolsRunning
+          ? timeOut(`工具跑了超过上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`, 'cap')
+          : !reply || reply.at >= limit
+            ? timeOut(`等安全点到了总上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`, 'cap')
+            : reply.end === 'cap'
+              ? timeOut(
+                  `没有工具在跑，回复一直在写，到了回复等待上限 ${QUIT_REPLY_WAIT_CAP_MS}ms`,
+                  'cap'
+                )
+              : timeOut(
+                  `没有工具在跑，保底 ${QUIT_REPLY_WAIT_FLOOR_MS}ms 已过，回复停止出 token 超过 ${QUIT_REPLY_IDLE_MS}ms 或还没出 token`,
+                  'idle'
+                ),
       Math.max(0, deadline - Date.now())
     );
     timer.unref?.();
@@ -807,10 +856,12 @@ export function prepareAgentWorkerForQuit(options: {
     toolsRunning: false,
     waitReason: null,
     lastDeferred: null,
+    replies: new Map(),
     waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
     observe(sessions) {
       if (settled) return;
       state.lastDeferred = sessions;
+      trackReplies(state.replies, sessions);
       const running = sessions.some((session) => session.toolsInFlight.length > 0);
       const waitReason: RestartWaitReason | null = running
         ? sessions.some((session) => (session.undetachableTasks?.length ?? 0) > 0)
@@ -823,19 +874,21 @@ export function prepareAgentWorkerForQuit(options: {
         state.waitReason = waitReason;
         for (const notify of state.waitingForTools) notify(waitReason);
       }
-      if (running === state.toolsRunning) return;
-      state.toolsRunning = running;
-      if (!running) quietSince = Date.now();
+      if (running !== state.toolsRunning) {
+        state.toolsRunning = running;
+        if (!running) quietSince = Date.now();
+      }
+      // 新出的 token 会把截止时刻往后推
       arm();
     },
-    settle: finish,
+    settle: (result) => finish(result),
     force() {
       if (settled) return false;
       state.timedOut = true;
       const message = `[graceful-restart] ${options.reason}: 用户强制退出，等安全点 ${Date.now() - requestedAt}ms 后不再等，中止在跑的命令照常退出`;
       console.warn(message);
       appendAgentWorkerExitLog(agentDataDir(), message);
-      finish('timeout');
+      finish('timeout', 'forced');
       return true;
     },
   };
@@ -924,6 +977,51 @@ function writeLateQuitManifest(pending: QuitCheckpoint, settings: RestartSetting
   const line = `[graceful-restart] ${pending.reason}: 超时退出，${message}`;
   console.warn(line);
   appendAgentWorkerExitLog(agentDataDir(), line);
+}
+
+/**
+ * 等待期间最近一次有输出的时刻：在写的回复按最近出 token，刚写完的按写完那刻
+ * （写完到回合收口、落断点还有一小段，不能因为不再出 token 就立刻按空闲中止）
+ */
+function lastOutputAt(state: QuitCheckpoint): number | undefined {
+  let latest: number | undefined;
+  for (const track of state.replies.values()) {
+    const at = track.endedAt ?? track.progress.lastOutputMs;
+    if (at !== undefined && (latest === undefined || at > latest)) latest = at;
+  }
+  return latest;
+}
+
+/** 按会话 + 请求发出时刻记下见过的模型请求；不再报告在写的那次算写完 */
+function trackReplies(replies: Map<string, ReplyTrack>, sessions: DeferredSessions): void {
+  const now = Date.now();
+  const seen = new Set<string>();
+  for (const session of sessions) {
+    if (!session.reply) continue;
+    const key = `${session.identity.sessionId}@${session.reply.requestStartMs}`;
+    seen.add(key);
+    replies.set(key, { sessionId: session.identity.sessionId, progress: session.reply });
+  }
+  for (const [key, track] of replies) if (!seen.has(key)) track.endedAt ??= now;
+}
+
+/** 等安全点结束：每次见过的模型请求记一行（发出 / 首 token / 最后出字 / 等了多久 / 怎么结束的） */
+function logReplyOutcomes(state: QuitCheckpoint, outcome: ReplyOutcome): void {
+  const now = Date.now();
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+  for (const track of state.replies.values()) {
+    const { requestStartMs, firstTokenMs, lastOutputMs } = track.progress;
+    const end = track.endedAt ?? now;
+    const line = `[graceful-restart] ${state.reason}: 会话 ${track.sessionId.slice(0, 8)} 回复：请求发出 ${new Date(requestStartMs).toISOString()}，首 token ${
+      firstTokenMs === undefined ? '无' : `+${seconds(firstTokenMs - requestStartMs)}`
+    }，最后出字 ${
+      lastOutputMs === undefined ? '无' : `+${seconds(lastOutputMs - requestStartMs)}`
+    }，等了 ${seconds(end - Math.max(state.requestedAt, requestStartMs))}，结果：${
+      REPLY_OUTCOME_LABEL[track.endedAt === undefined ? outcome : 'done']
+    }`;
+    console.log(line);
+    appendAgentWorkerExitLog(agentDataDir(), line);
+  }
 }
 
 /** 退出时每个没到安全点的会话在干什么（worker 最近一次推迟报告） */
