@@ -1425,7 +1425,7 @@ export const TimelineRow = memo(function TimelineRow({
       const body = (
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />
-          {card ? <ToolCallCards item={item} /> : <ToolRow item={item} />}
+          {card ? <ToolCallCards item={item} framed={secretaryChat} /> : <ToolRow item={item} />}
           {proposalId ? <SecretaryProposalRow proposalId={proposalId} /> : null}
           {item.pluginArtifacts ? (
             <PluginArtifactsCard

@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import { useI18n } from '@/i18n';
 import {
   aggregateState,
@@ -16,6 +16,7 @@ import { openSessionFromSecretary } from '@/stores/secretaryReturn';
 import { useSessionsStore } from '@/stores/sessions';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { CopyButton } from './CopyButton';
 import { Markdown } from './Markdown';
 import { StepDot } from './StepNode';
 import { ToolImagePreview } from './ToolImagePreview';
@@ -67,7 +68,11 @@ function callsOf(item: ToolItem): ToolCallInput[] {
   ];
 }
 
-export function ToolCallCards({ item }: { item: ToolItem }) {
+/**
+ * framed：展开后的详情收进卡片自己的边框，和外面的聊天正文分开。
+ * 由调用方按显式传入的会话类型决定，只给秘书会话开。
+ */
+export function ToolCallCards({ item, framed = false }: { item: ToolItem; framed?: boolean }) {
   const { t, locale } = useI18n();
   const lookup = useToolCardLookup();
   const knownSessions = useSessionsStore((state) => state.conversations);
@@ -116,11 +121,17 @@ export function ToolCallCards({ item }: { item: ToolItem }) {
               card={card}
               known={knownSessions}
               onOpen={openSessionFromSecretary}
+              framed={framed}
             />
           ))
         : null}
       {open && single ? (
-        <CardDetails card={single} known={knownSessions} onOpen={openSessionFromSecretary} />
+        <CardDetails
+          card={single}
+          known={knownSessions}
+          onOpen={openSessionFromSecretary}
+          framed={framed}
+        />
       ) : null}
     </div>
   );
@@ -148,10 +159,12 @@ function NestedCard({
   card,
   known,
   onOpen,
+  framed,
 }: {
   card: ToolCardView;
   known: Record<string, { title?: string } | undefined>;
   onOpen: (id: string) => void;
+  framed: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -172,7 +185,9 @@ function NestedCard({
           )}
         />
       </button>
-      {open ? <CardDetails card={card} known={known} onOpen={onOpen} /> : null}
+      {open ? (
+        <CardDetails card={card} known={known} onOpen={onOpen} framed={framed} nested />
+      ) : null}
     </div>
   );
 }
@@ -181,16 +196,31 @@ function CardDetails({
   card,
   known,
   onOpen,
+  framed,
+  nested = false,
 }: {
   card: ToolCardView;
   known: Record<string, { title?: string } | undefined>;
   onOpen: (id: string) => void;
+  framed: boolean;
+  nested?: boolean;
 }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState(false);
   return (
-    <div data-enso="tool-card-body" className="space-y-1 py-0.5 pl-5 text-[12px]">
-      <div className="space-y-1">
+    <div
+      data-enso="tool-card-body"
+      data-framed={framed ? 'true' : undefined}
+      className={
+        framed
+          ? cn(
+              'mt-0.5 mb-1.5 min-w-0 space-y-1 rounded-lg border border-border/60 border-l-2 border-l-muted-foreground/30 bg-muted/25 px-2.5 py-2 text-[12px]',
+              !nested && 'ml-5'
+            )
+          : 'space-y-1 py-0.5 pl-5 text-[12px]'
+      }
+    >
+      <div className={framed ? 'min-w-0 space-y-2' : 'space-y-1'}>
         {card.blocks.map((block, index) => (
           <Block
             // biome-ignore lint/suspicious/noArrayIndexKey: 块顺序随工具结果整体替换
@@ -211,7 +241,7 @@ function CardDetails({
         {t('View raw data')}
       </button>
       {raw && (
-        <div className="mt-1 space-y-1">
+        <div className={cn('mt-1 space-y-1', framed && 'max-h-60 overflow-auto')}>
           {card.rawArgs && (
             <pre className="overflow-auto font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
               {card.rawArgs}
@@ -224,6 +254,115 @@ function CardDetails({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 框里的 markdown 降一档：标题与正文同号、只靠粗细区分，代码块也缩小 */
+const PROMPT_TYPOGRAPHY = {
+  '--chat-h1-size': '1em',
+  '--chat-h2-size': '1em',
+  '--chat-h3-size': '1em',
+  '--chat-h4-size': '1em',
+  '--chat-code-block-size': '11px',
+} as CSSProperties;
+
+const PROMPT_PREVIEW_LINES = 4;
+
+/** 折叠时只露前几行纯文本：去掉标题井号与代码围栏，不渲染 markdown */
+function promptPreview(text: string): { preview: string; folded: boolean } {
+  const lines = text
+    .split('\n')
+    .filter((line) => line.trim() && !/^\s*(```|~~~)/.test(line))
+    .map((line) => line.replace(/^\s*#{1,6}\s+/, '').trimEnd());
+  return {
+    preview: lines.slice(0, PROMPT_PREVIEW_LINES).join('\n'),
+    folded: lines.length > PROMPT_PREVIEW_LINES || text.length > 320,
+  };
+}
+
+function PromptBlock({ label, text }: { label: string; text: string }) {
+  const { t } = useI18n();
+  const { preview, folded } = promptPreview(text);
+  const [open, setOpen] = useState(false);
+  const expanded = open || !folded;
+  return (
+    <section
+      data-enso="tool-card-prompt"
+      data-open={expanded ? 'true' : 'false'}
+      className="min-w-0 overflow-hidden rounded-md border border-border/60 bg-background/70"
+    >
+      <div className="flex min-w-0 items-center gap-2 border-b border-border/50 px-2 py-1 text-[11px] text-muted-foreground">
+        <span className="min-w-0 truncate font-medium">{label}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          {folded && (
+            <button
+              type="button"
+              data-enso="tool-card-prompt-toggle"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+              className="hover:text-foreground"
+            >
+              {open ? t('Show less') : t('Show full text')}
+            </button>
+          )}
+          <CopyButton text={text} label={t('Copy')} />
+        </span>
+      </div>
+      {expanded ? (
+        <div
+          data-enso="tool-card-prompt-body"
+          style={PROMPT_TYPOGRAPHY}
+          className="max-h-80 min-w-0 overflow-y-auto overscroll-contain px-2.5 py-1.5 text-[12px] leading-relaxed [&_:is(h1,h2,h3,h4)]:mt-2.5 [&_:is(h1,h2,h3,h4)]:mb-1"
+        >
+          <Markdown text={text} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-enso="tool-card-prompt-preview"
+          onClick={() => setOpen(true)}
+          className="line-clamp-4 block w-full min-w-0 px-2.5 py-1.5 text-left text-[12px] leading-relaxed text-muted-foreground break-words whitespace-pre-wrap"
+        >
+          {preview}
+        </button>
+      )}
+    </section>
+  );
+}
+
+type KvRow = Extract<ToolCardBlock, { kind: 'kv' }>['rows'][number];
+
+/** 长值默认截两行，可展开；路径单行截断，悬停看全文 */
+function KvRowView({ row }: { row: KvRow }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const long = row.display === 'long' && (row.value.length > 120 || row.value.includes('\n'));
+  return (
+    <div className="contents">
+      <dt className="whitespace-nowrap text-muted-foreground">{row.label}</dt>
+      <dd
+        data-enso="tool-card-kv-value"
+        data-display={row.display}
+        title={row.display === 'path' ? row.value : undefined}
+        className={cn(
+          'min-w-0',
+          row.display === 'path' ? 'truncate' : 'whitespace-pre-wrap break-words'
+        )}
+      >
+        {long && !open ? <span className="line-clamp-2">{row.value}</span> : row.value}
+        {long && (
+          <button
+            type="button"
+            data-enso="tool-card-kv-toggle"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            className="block text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            {open ? t('Show less') : t('Show more')}
+          </button>
+        )}
+      </dd>
     </div>
   );
 }
@@ -249,6 +388,7 @@ function Block({
   if (block.kind === 'note') {
     return <p className="whitespace-pre-wrap text-xs">{block.text}</p>;
   }
+  if (block.kind === 'prompt') return <PromptBlock label={block.label} text={block.text} />;
   if (block.kind === 'markdown') {
     const collapsed = block.collapsed && !opened;
     return (
@@ -296,12 +436,9 @@ function Block({
   }
   if (block.kind === 'kv') {
     return (
-      <dl className="space-y-0.5 text-xs">
+      <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">
         {block.rows.map((row) => (
-          <div key={row.label} className="flex min-w-0 gap-2">
-            <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
-            <dd className="min-w-0 whitespace-pre-wrap break-words">{row.value}</dd>
-          </div>
+          <KvRowView key={row.label} row={row} />
         ))}
       </dl>
     );

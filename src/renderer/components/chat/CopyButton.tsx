@@ -7,9 +7,12 @@ import { cn } from '@/lib/utils';
 export function CopyButton({
   text,
   className,
+  label,
 }: {
   text: string | (() => string);
   className?: string;
+  /** 图标后的可见文字；缺省只显示图标 */
+  label?: string;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -34,6 +37,7 @@ export function CopyButton({
           <Check className="h-3 w-3" />
         </span>
       </span>
+      {label}
     </button>
   );
 }
