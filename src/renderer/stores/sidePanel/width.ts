@@ -5,6 +5,16 @@ export const SIDE_PANEL_HANDLE_WIDTH = 1;
 /** 卡片外壳下手柄就是卡片间的画布缝，整宽占位 */
 export const SIDE_PANEL_GAP_WIDTH = 8;
 
+export const FILES_TREE_DEFAULT_WIDTH = 224;
+export const FILES_TREE_MIN_WIDTH = 160;
+export const FILES_TREE_MAX_WIDTH = 480;
+
+/** 持久化读回的值可能是脏数据，非有限数字回落默认宽度 */
+export function clampFilesTreeWidth(width: unknown): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) return FILES_TREE_DEFAULT_WIDTH;
+  return Math.min(FILES_TREE_MAX_WIDTH, Math.max(FILES_TREE_MIN_WIDTH, width));
+}
+
 /**
  * 只限制显示宽度，不覆盖会话偏好；窄窗口优先保留聊天区，允许面板小于通常的最小宽度。
  */

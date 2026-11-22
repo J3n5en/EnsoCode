@@ -13,6 +13,7 @@ import {
   requestFocusComposer,
 } from '@/components/chat/composerMentionBridge';
 import type { DragPayload } from '@/components/chat/dragDrop';
+import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -36,6 +37,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { hasAuthoritativeMessages } from '@/stores/sessions/messageCache';
 import { buildTimeline, completedEditWriteFingerprint } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { clampFilesTreeWidth, useSidePanelStore } from '@/stores/sidePanel';
 import {
   fileViewerKey,
   pluginFileViewersFor,
@@ -142,6 +144,8 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   // 窄屏下文件树与编辑区逐级显示：打开文件进编辑区，返回回到文件树
   const isMobile = useIsMobile();
   const [mobileTree, setMobileTree] = useState(true);
+  const treeWidth = useSidePanelStore((s) => clampFilesTreeWidth(s.filesTreeWidth));
+  const nudgeTreeWidth = useSidePanelStore((s) => s.nudgeFilesTreeWidth);
   const showDoc = useCallback((rel: string) => {
     setActiveRel(rel);
     setMobileTree(false);
@@ -793,8 +797,9 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
         <div
           className={cn(
             'flex shrink-0 flex-col overflow-hidden text-sm',
-            !isMobile ? 'w-56 border-r' : mobileTree ? 'w-full' : 'hidden'
+            isMobile && (mobileTree ? 'w-full' : 'hidden')
           )}
+          style={isMobile ? undefined : { width: treeWidth }}
         >
           <div className="flex justify-end gap-0.5 px-1 py-0.5">
             <Button
@@ -940,6 +945,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
             </div>
           )}
         </div>
+        {!isMobile && <ResizeHandle onResize={nudgeTreeWidth} />}
         <div className={cn('flex min-w-0 flex-1 flex-col', isMobile && mobileTree && 'hidden')}>
           {openDocs.length > 0 && (
             <div

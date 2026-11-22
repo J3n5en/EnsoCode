@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHAT_MIN_WIDTH,
+  clampFilesTreeWidth,
+  FILES_TREE_DEFAULT_WIDTH,
+  FILES_TREE_MAX_WIDTH,
+  FILES_TREE_MIN_WIDTH,
   resizeSidePanelWidth,
   resolveSidePanelWidth,
   SIDE_PANEL_GAP_WIDTH,
@@ -61,5 +65,25 @@ describe('resizeSidePanelWidth', () => {
   it('卡片外壳下拖到上限时聊天区仍留足最小宽度', () => {
     const max = 1000 - CHAT_MIN_WIDTH - SIDE_PANEL_GAP_WIDTH;
     expect(resizeSidePanelWidth(400, 1000, 1000, SIDE_PANEL_GAP_WIDTH)).toBe(max);
+  });
+});
+
+describe('clampFilesTreeWidth', () => {
+  it('默认 224，范围 160–480', () => {
+    expect(FILES_TREE_DEFAULT_WIDTH).toBe(224);
+    expect(FILES_TREE_MIN_WIDTH).toBe(160);
+    expect(FILES_TREE_MAX_WIDTH).toBe(480);
+  });
+
+  it('越界夹到边界，范围内原样保留', () => {
+    expect(clampFilesTreeWidth(100)).toBe(160);
+    expect(clampFilesTreeWidth(900)).toBe(480);
+    expect(clampFilesTreeWidth(300)).toBe(300);
+  });
+
+  it('持久化脏值回落默认宽度', () => {
+    expect(clampFilesTreeWidth(Number.NaN)).toBe(224);
+    expect(clampFilesTreeWidth('300')).toBe(224);
+    expect(clampFilesTreeWidth(undefined)).toBe(224);
   });
 });
