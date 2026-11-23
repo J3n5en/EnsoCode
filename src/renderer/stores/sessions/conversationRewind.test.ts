@@ -313,9 +313,9 @@ describe('forkAnchorForTurnKey', () => {
 
   it('本轮 user 还在未加载的更早页：按其后 user 数从末尾定位，交 worker 校验', () => {
     const tail = { messages: compacted.slice(4), historyBaseIndex: 4 };
-    expect(forkAnchorForTurnKey(tail, 6)).toEqual({ userIndexFromEnd: 1 });
+    expect(forkAnchorForTurnKey(tail, 6)).toEqual({ turnIndexFromEnd: 1 });
     expect(forkAnchorForTurnKey({ ...tail, historyBaseIndex: 40 }, 41)).toEqual({
-      userIndexFromEnd: 1,
+      turnIndexFromEnd: 1,
     });
     expect(forkAnchorForTurnKey(tail, 3)).toBe(null);
   });
@@ -327,8 +327,8 @@ describe('forkAnchorForTurnKey', () => {
       { role: 'user', entryId: 'u2', optimistic: true },
       { role: 'assistant' },
     ];
-    expect(forkAnchorForTurnKey({ messages }, 1)).toEqual({ userIndexFromEnd: 0 });
-    expect(forkAnchorForTurnKey({ messages }, 3)).toEqual({ userIndexFromEnd: 0 });
+    expect(forkAnchorForTurnKey({ messages }, 1)).toEqual({ turnIndexFromEnd: 0 });
+    expect(forkAnchorForTurnKey({ messages }, 3)).toEqual({ turnIndexFromEnd: 0 });
   });
 
   it('本轮 user 未加载时，尾部被拒的未发送气泡不计入从末尾计数', () => {
@@ -341,7 +341,24 @@ describe('forkAnchorForTurnKey', () => {
       ],
       historyBaseIndex: 30,
     };
-    expect(forkAnchorForTurnKey(tail, 30)).toEqual({ userIndexFromEnd: 1 });
+    expect(forkAnchorForTurnKey(tail, 30)).toEqual({ turnIndexFromEnd: 1 });
+  });
+
+  it('插件投递触发的轮次按轮次输入从末尾计数；隐藏 custom 不算轮次输入', () => {
+    const pluginSource = { pluginId: 'enso.github', pluginName: 'GitHub' };
+    const messages = [
+      { role: 'user', entryId: 'u1' },
+      { role: 'assistant' },
+      { role: 'custom' },
+      { role: 'custom', pluginSource },
+      { role: 'assistant' },
+      { role: 'custom', pluginSource },
+      { role: 'user', entryId: 'u2' },
+      { role: 'assistant' },
+    ];
+    expect(forkAnchorForTurnKey({ messages }, 1)).toEqual({ entryId: 'u1' });
+    expect(forkAnchorForTurnKey({ messages }, 4)).toEqual({ turnIndexFromEnd: 2 });
+    expect(forkAnchorForTurnKey({ messages }, 7)).toEqual({ entryId: 'u2' });
   });
 
   it('从头就没有 user 或 key 非法返回 null', () => {

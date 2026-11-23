@@ -925,7 +925,7 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
     expect(agentFork).not.toHaveBeenCalled();
     emitRewindSnapshot();
     await expect(forked).resolves.toBe('forked');
-    expect(agentFork).toHaveBeenCalledWith('parent', 'forked', { userIndexFromEnd: 1 });
+    expect(agentFork).toHaveBeenCalledWith('parent', 'forked', { turnIndexFromEnd: 1 });
   });
 
   it('冷会话 resume 失败不 fork、不建分支会话', async () => {
@@ -1079,7 +1079,7 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
         await expect(
           sessionsModule.useSessionsStore.getState().forkFromTurn('parent', 4)
         ).resolves.toBe('forked');
-        expect(agentFork).toHaveBeenCalledWith('parent', 'forked', { userIndexFromEnd: 1 });
+        expect(agentFork).toHaveBeenCalledWith('parent', 'forked', { turnIndexFromEnd: 1 });
       });
 
       it('层级上限、非 idle、定位不到时仍拒绝', async () => {
@@ -1102,6 +1102,31 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
           sessionsModule.useSessionsStore.getState().forkFromEntry('parent', 'compaction-1')
         ).resolves.toBe('forked');
         expect(agentFork).toHaveBeenCalledWith('parent', 'forked', { entryId: 'compaction-1' });
+      });
+
+      it('插件投递触发的轮次可分叉，按轮次输入从末尾计数', async () => {
+        const plugin = (value: string) => ({
+          role: 'custom' as const,
+          content: [{ type: 'text' as const, text: value }],
+          pluginSource: { pluginId: 'enso.github', pluginName: 'GitHub' },
+        });
+        seedLineage(
+          { parent: undefined },
+          {
+            messages: [
+              text('user', 'q1', 'u1'),
+              text('assistant', 'a1'),
+              plugin('p1'),
+              text('assistant', 'a2'),
+              text('user', 'q3', 'u3'),
+              text('assistant', 'a3'),
+            ],
+          }
+        );
+        await expect(
+          sessionsModule.useSessionsStore.getState().forkFromTurn('parent', 3)
+        ).resolves.toBe('forked');
+        expect(agentFork).toHaveBeenCalledWith('parent', 'forked', { turnIndexFromEnd: 1 });
       });
     });
   });

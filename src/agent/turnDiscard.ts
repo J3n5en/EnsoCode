@@ -1,6 +1,6 @@
 import type { InlineExtension, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import { isReadOnlyCommand } from '@shared/readOnlyCommand';
+import { isTurnInputEntry } from './sessionFork';
 
 const DISCARD = 'turn_discard';
 const RECALL = 'turn_recall';
@@ -75,12 +75,6 @@ function toolCalls(content: unknown): { name: string; args: unknown }[] {
   );
 }
 
-function isTrigger(entry: BranchEntry): boolean {
-  return entry.type === 'custom_message'
-    ? entry.customType === PLUGIN_MESSAGE_TYPE
-    : entry.type === 'message' && entry.message?.role === 'user';
-}
-
 /** 从分支末尾回溯本轮：由用户消息或插件投递触发，且本轮除 turn_discard 外只调用过只读工具 */
 export function planTurnDiscard(
   branch: readonly BranchEntry[],
@@ -90,7 +84,7 @@ export function planTurnDiscard(
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i]!;
     if (PASSIVE.has(entry.type)) continue;
-    if (isTrigger(entry)) {
+    if (isTurnInputEntry(entry)) {
       plan.triggers.unshift(entry.id);
       continue;
     }
@@ -136,7 +130,7 @@ export function recallDiscarded(branch: readonly BranchEntry[], id: string): str
   const entry = branch.find((item) => item.id === id);
   const discarded =
     entry !== undefined &&
-    isTrigger(entry) &&
+    isTurnInputEntry(entry) &&
     branch.some((item) => item.type === 'context_edit' && item.targetId === id);
   if (!discarded) throw new Error(`No discarded turn input with id ${id}.`);
   const content = entry.type === 'message' ? entry.message?.content : entry.content;

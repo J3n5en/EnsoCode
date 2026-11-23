@@ -41,6 +41,20 @@ describe('parent/child commands', () => {
       parseAgentCommand({ type: 'rewind', identity: parent, userIndexFromEnd: 0 })
     ).not.toBeNull();
   });
+
+  it('fork 锚点二选一：entryId 或 turnIndexFromEnd，旧字段与歧义锚点拒绝', () => {
+    const command = {
+      type: 'fork',
+      identity: parent,
+      targetConversationId: '11111111-1111-4111-8111-111111111111',
+    };
+    expect(parseAgentCommand({ ...command, entryId: 'e1' })).not.toBeNull();
+    expect(parseAgentCommand({ ...command, turnIndexFromEnd: 0 })).not.toBeNull();
+    expect(parseAgentCommand({ ...command, entryId: 'e1', turnIndexFromEnd: 0 })).toBeNull();
+    expect(parseAgentCommand({ ...command, turnIndexFromEnd: -1 })).toBeNull();
+    expect(parseAgentCommand({ ...command, userIndexFromEnd: 0 })).toBeNull();
+    expect(parseAgentCommand(command)).toBeNull();
+  });
   it('spawn-parent 必须 exact generation；旧 spawn/sessionId shape 拒绝', () => {
     const command = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     expect(parseAgentCommand(command)).toEqual(command);

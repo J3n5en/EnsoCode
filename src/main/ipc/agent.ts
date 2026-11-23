@@ -3220,8 +3220,8 @@ export function registerAgentHandlers(): void {
       const identity = exactIdentity(sessionId);
       const record = asRecord(anchor);
       const entryId = typeof record?.entryId === 'string' ? record.entryId : undefined;
-      const userIndexFromEnd =
-        typeof record?.userIndexFromEnd === 'number' ? record.userIndexFromEnd : undefined;
+      const turnIndexFromEnd =
+        typeof record?.turnIndexFromEnd === 'number' ? record.turnIndexFromEnd : undefined;
       if (
         !isMainRenderer(event.sender.id) ||
         !identity ||
@@ -3229,8 +3229,8 @@ export function registerAgentHandlers(): void {
         typeof targetConversationId !== 'string' ||
         !/^[0-9a-f-]{36}$/i.test(targetConversationId) ||
         (entryId
-          ? userIndexFromEnd !== undefined
-          : userIndexFromEnd === undefined || userIndexFromEnd < 0)
+          ? turnIndexFromEnd !== undefined
+          : turnIndexFromEnd === undefined || turnIndexFromEnd < 0)
       ) {
         return { ok: false, error: 'invalid fork or stale generation' };
       }
@@ -3258,7 +3258,7 @@ export function registerAgentHandlers(): void {
         const result = forkSession(
           identity,
           targetConversationId,
-          entryId ? { entryId } : { userIndexFromEnd: userIndexFromEnd as number }
+          entryId ? { entryId } : { turnIndexFromEnd: turnIndexFromEnd as number }
         );
         if (!result.ok) discardForkWorktree(targetConversationId);
         return result;
