@@ -74,7 +74,8 @@ function boot(root: string) {
   const bindings: Bindings = existsSync(files.worktrees) ? readJson(files.worktrees) : {};
   const saveRows = () => writeFileSync(files.rows, JSON.stringify(rows));
   const saveBindings = () => writeFileSync(files.worktrees, JSON.stringify(bindings));
-  const point = <A extends unknown[], R>(name: string, fn: (...args: A) => R) =>
+  const point =
+    <A extends unknown[], R>(name: string, fn: (...args: A) => R) =>
     (...args: A): R => {
       hooks.checkpoint(`before ${name}`);
       const result = fn(...args);
@@ -229,7 +230,11 @@ async function crashAtEveryPoint(
       cpSync(setup.root, snapshot, { recursive: true });
     };
     const result = await handleImportProjectSessions(
-      { sourceProjectId: setup.projectA.projectId, targetProjectId: setup.projectB.projectId, mode },
+      {
+        sourceProjectId: setup.projectA.projectId,
+        targetProjectId: setup.projectB.projectId,
+        mode,
+      },
       start.ports
     );
     hooks.checkpoint = () => {};
@@ -247,9 +252,10 @@ async function crashAtEveryPoint(
   for (let at = 1; at <= points; at += 1) await run(at);
 }
 
+/** sessions 目录与权威表之外，agent 目录下不该留下任何文件（暂存副本、事务记录） */
 const residue = (env: ReturnType<typeof boot>) =>
-  readdirSync(path.join(env.root, 'agent')).filter(
-    (name) => !['sessions', 'source-registry.json'].includes(name)
+  Object.keys(tree(path.join(env.root, 'agent'))).filter(
+    (file) => !file.startsWith(`sessions${path.sep}`) && file !== 'source-registry.json'
   );
 
 describe('整项目导入在任意崩溃点之后启动恢复', () => {
