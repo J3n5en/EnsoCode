@@ -1462,6 +1462,50 @@ describe('自动巡检', () => {
     h.host.tick(2_000);
     expect(started).toEqual([['pend-1']]);
   });
+
+  it('出问题的等待派发满 24 小时由巡检清掉并写审计；未满的、等待中的不动', () => {
+    const DAY = 24 * 60 * MINUTE;
+    const base: PendingDispatch = {
+      id: 'x',
+      projectId: 'p1',
+      secretaryConversationId: 'sec1',
+      createdAt: 0,
+      updatedAt: 0,
+      status: 'failed',
+      problem: 'dependency-failed',
+      after: ['c1'],
+      draft: { projectId: 'p1', prompt: '接着改', worktree: false },
+    };
+    const h = harness({
+      file: {
+        pending: {
+          old: { ...base, id: 'old' },
+          fresh: { ...base, id: 'fresh', updatedAt: MINUTE, problem: 'dispatch-failed' },
+          wait: { ...base, id: 'wait', status: 'waiting', problem: undefined },
+        },
+      },
+    });
+    h.ports.startPending = () => undefined;
+    h.host.tick(DAY - 1);
+    expect(Object.keys(h.state.file.pending ?? {}).sort()).toEqual(['fresh', 'old', 'wait']);
+    expect(h.state.audit.filter((entry) => entry.op === 'pending_expire')).toEqual([]);
+
+    h.host.tick(DAY);
+    expect(Object.keys(h.state.file.pending ?? {}).sort()).toEqual(['fresh', 'wait']);
+    expect(h.state.audit.filter((entry) => entry.op === 'pending_expire')).toEqual([
+      {
+        at: DAY,
+        secretaryConversationId: 'sec1',
+        op: 'pending_expire',
+        targetId: 'old',
+        ok: true,
+        detail: 'dependency-failed',
+      },
+    ]);
+
+    h.host.tick(DAY + MINUTE);
+    expect(Object.keys(h.state.file.pending ?? {})).toEqual(['wait']);
+  });
 });
 
 describe('被 session_send 重新唤起后的收口', () => {

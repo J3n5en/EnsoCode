@@ -1290,14 +1290,16 @@ async function cancelPending(
   ctx: SecretaryOpContext,
   pendingId: string
 ): Promise<SecretaryOpResult | null> {
-  const file = ports.dispatchFile();
-  const pending = file.pending?.[pendingId];
+  const pending = ports.dispatchFile().pending?.[pendingId];
   if (!pending) return null;
   const profile = await profileOf(ports);
   const visible = visibleProjects(await ports.projects(), profile).some(
     (candidate) => candidate.projectId === pending.projectId
   );
   if (!visible) return deny(ports, ctx, 'session_stop', 'not-visible', pendingId);
+  // 上面等过：重新读盘再写，别把期间用户忽略、或已开始的派发用旧副本写回去
+  const file = ports.dispatchFile();
+  if (!file.pending?.[pendingId]) return null;
   const now = ports.now();
   const cancelled: PendingDispatch = {
     ...pending,
@@ -2732,6 +2734,30 @@ export function dismissResult(
     op: 'result_dismiss',
     targetId: conversationId,
     ok: true,
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
+
+/** 用户忽略一条出问题的等待派发：它不会再开始，直接从等待表里移除；等待中的不动 */
+export function dismissPending(
+  ports: SecretaryDispatchPorts,
+  pendingId: string
+): DismissResultResult {
+  const file = ports.dispatchFile();
+  const pending = file.pending?.[pendingId];
+  if (!file.pending || !pending) return { ok: false, error: 'not-found' };
+  if (pending.status !== 'failed') return { ok: false, error: 'not-dismissible' };
+  delete file.pending[pendingId];
+  if (Object.keys(file.pending).length === 0) delete file.pending;
+  ports.saveDispatch(file);
+  ports.audit({
+    at: ports.now(),
+    secretaryConversationId: pending.secretaryConversationId,
+    op: 'pending_dismiss',
+    targetId: pendingId,
+    ok: true,
+    detail: pending.problem ?? 'dispatch-failed',
   });
   notifySecretaryChanged();
   return { ok: true };

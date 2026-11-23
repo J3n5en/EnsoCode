@@ -93,7 +93,7 @@ function Stat({ value, label, warn }: { value: number; label: string; warn?: boo
 }
 
 /** 需要你处理的会话：就地审批与提问，主按钮打开会话 */
-/** 等依赖的派发出问题：它没有会话可打开，只说明原因，秘书已经收到同一条结果 */
+/** 等依赖的派发出问题：它没有会话可打开也不能停，只说明原因并可忽略；秘书已经收到同一条结果 */
 function PendingProblemCard({ pending }: { pending: PendingDispatch }) {
   const { t } = useI18n();
   const title = pending.draft.title?.trim() || pending.draft.prompt.split('\n')[0]?.trim() || '';
@@ -113,6 +113,18 @@ function PendingProblemCard({ pending }: { pending: PendingDispatch }) {
       <p className="mt-0.5 text-[12px] text-muted-foreground">
         {t('Waited for {{ids}}', { ids: pending.after.join(', ') })}
       </p>
+      {pending.status === 'failed' && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <button
+            type="button"
+            data-enso="secretary-dismiss-pending"
+            onClick={() => void window.electronAPI.secretary.dismissPending(pending.id)}
+            className="rounded-md px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {t('Ignore')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
