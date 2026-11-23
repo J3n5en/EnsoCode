@@ -9,7 +9,7 @@ import {
   hasProviderCredentials,
   MODEL_REASONING_OVERRIDES,
   MODEL_THINKING_LEVEL_OVERRIDES,
-} from '@shared/types';
+} from '@shared/types/llm';
 import { isVirtualRef, type VirtualModelEntry } from '@shared/virtualModels';
 
 export interface SubagentModelRef {

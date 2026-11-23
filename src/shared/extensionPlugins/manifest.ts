@@ -1,5 +1,6 @@
 import { isReservedAgentTypeName } from '../builtinAgents';
-import { type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from '../types/agent';
+import type { ApprovalMode, ThinkingLevel } from '../types/agent';
+import { THINKING_LEVELS } from '../types/agentConstants';
 import { BUILTIN_AGENT_TYPES } from '../types/assets';
 import { isWorkflowPresetId } from '../types/workflow';
 import {

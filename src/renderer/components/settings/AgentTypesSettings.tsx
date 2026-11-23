@@ -1,12 +1,9 @@
 import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import { MAX_MAX_ACTIVE_COWORKERS, MIN_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
-import {
-  type AgentTypeEntry,
-  type AgentTypeModelMode,
-  MODEL_THINKING_LEVEL_OVERRIDES,
-} from '@shared/types';
+import type { AgentTypeEntry, AgentTypeModelMode } from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
+import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types/llm';
 import { findVirtualModel } from '@shared/virtualModels';
 import { AlertCircle, Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';

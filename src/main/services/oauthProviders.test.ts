@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { OauthFlowEvent } from '@shared/oauthFlow';
 import type { OauthLoginEvent, OauthLoginPrompt } from '@shared/types';
-import { IPC_CHANNELS, OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { OAUTH_LABEL_MAX_LENGTH } from '@shared/types/oauthProviders';
 import type { WebContents } from 'electron';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 

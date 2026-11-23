@@ -1,6 +1,7 @@
 import { MISSED_RUNS_MAX, parseCron } from '../bots/cron';
 import { isMediaId } from '../bots/sendImage';
-import { APPROVAL_MODES, type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from './agent';
+import type { ApprovalMode, ThinkingLevel } from './agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from './agentConstants';
 
 export type BotId = string;
 export type BotChatId = string;

@@ -20,46 +20,43 @@ import {
   toolBatchLabelPrompt,
 } from '@shared/toolBatchLabel';
 import {
-  IPC_CHANNELS,
-  projectDisabledBuiltinTools,
-  resolveDisabledBuiltinTools,
-} from '@shared/types';
-import type {
-  AgentActionResult,
-  AgentControlContext,
-  AgentControlToolResponse,
-  AgentRemoteConfig,
-  AgentSpawnRequest,
-  AgentWorkerEvent,
-  ApprovalMode,
-  AttachedImage,
-  ChildHistoryResult,
-  ChildRunListResult,
-  ConversationReloadResult,
-  McpStatusPush,
-  ParentHistoryTailResult,
-  ProjectedMessage,
-  RendererAgentEvent,
-  SpawnModelConfig,
-  ThinkingLevel,
-  TitleSummaryInput,
-  WorkerExitedEvent,
-} from '@shared/types/agent';
-import {
-  APPROVAL_MODES,
+  type AgentActionResult,
+  type AgentControlContext,
+  type AgentControlToolResponse,
+  type AgentRemoteConfig,
+  type AgentSpawnRequest,
+  type AgentWorkerEvent,
+  type ApprovalMode,
+  type AttachedImage,
+  type ChildHistoryResult,
+  type ChildRunListResult,
+  type ConversationReloadResult,
   isApprovalDecision,
   isDeliveryId,
+  type McpStatusPush,
+  type ParentHistoryTailResult,
+  type ProjectedMessage,
   parseAgentCommand,
   parseConversationAuthorityRequest,
   parseCreateConversationAuthorityRequest,
   parseTitleSummaryInput,
   parseUpdateConversationSelectionRequest,
+  type RendererAgentEvent,
+  type SpawnModelConfig,
   STALE_SESSION_ERROR,
   TASK_KEEP_REASON_MAX,
-  THINKING_LEVELS,
+  type ThinkingLevel,
+  type TitleSummaryInput,
+  type WorkerExitedEvent,
 } from '@shared/types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agentConstants';
 import { DELEGATION_NOTE_MAX, parseTaskCheck } from '@shared/types/bot';
-import { effectiveSubagentAllowedModes } from '@shared/types/builtinTools';
+import {
+  effectiveSubagentAllowedModes,
+  projectDisabledBuiltinTools,
+  resolveDisabledBuiltinTools,
+} from '@shared/types/builtinTools';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   parseAgentDispatchRequest,
   parseParentModelSelectionRequest,

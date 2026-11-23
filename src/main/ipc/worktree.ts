@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { coalesceRuns, mapLimited } from '@shared/coalesceRuns';
-import { IPC_CHANNELS } from '@shared/types';
 import type { GitRequest } from '@shared/types/git';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type {
   SessionWorktree,
   WorkspaceBranches,

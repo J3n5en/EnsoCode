@@ -50,7 +50,8 @@ import type {
   OauthProviderInfo,
   OauthUsageWindow,
 } from '@shared/types';
-import { IPC_CHANNELS, providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types/oauthProviders';
 import { OauthQuotaCoordinator } from './oauthQuotaCoordinator';
 import { sendToRemoteRenderers } from './remoteRenderer/senders';
 import { localUi } from './uiHost';

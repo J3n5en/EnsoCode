@@ -1,4 +1,4 @@
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { describe, expect, it } from 'vitest';
 import { isRemoteChannelAllowed } from './channels';
 
