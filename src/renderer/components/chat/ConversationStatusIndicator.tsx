@@ -1,6 +1,7 @@
 import type { CoworkerTabTone } from '@shared/conversationDotTone';
 import type { ThemeState } from '@shared/theme/themeState';
 import { AlarmClock, CircleHelp } from 'lucide-react';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -51,19 +52,27 @@ export function ConversationStatusIndicator({
   if (tone === 'queued') {
     const label = title ?? t('Queued');
     return (
-      <span
-        role="img"
-        aria-label={label}
-        title={label}
-        data-slot="conversation-status"
-        data-tone="queued"
-        data-enso="conversation-queued"
-        data-conversation-id={conversationId}
-        data-status={status}
-        className={cn('flex shrink-0 items-center text-orange-500', className)}
-      >
-        <AlarmClock className={cn(ICON_SIZE[size], 'stroke-[2.5]')} aria-hidden />
-      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label={label}
+              data-slot="conversation-status"
+              data-tone="queued"
+              data-enso="conversation-queued"
+              data-conversation-id={conversationId}
+              data-status={status}
+              className={cn('flex shrink-0 items-center text-orange-500', className)}
+            />
+          }
+        >
+          <AlarmClock className={cn(ICON_SIZE[size], 'stroke-[2.5]')} aria-hidden />
+        </TooltipTrigger>
+        <TooltipPopup side="right" data-enso="conversation-queued-tooltip">
+          {label}
+        </TooltipPopup>
+      </Tooltip>
     );
   }
   return (

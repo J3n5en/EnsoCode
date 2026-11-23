@@ -6379,10 +6379,11 @@ async function verifyQueuedSessions(cdp, setup) {
   assert(sidebar.found, '排队: 侧栏显示排队指示', sidebar);
   await cdp.mouse('mouseMoved', sidebar.x, sidebar.y);
   const tooltip = await page(`
-    const tip = await until(() => [...document.querySelectorAll('[role=tooltip]')].find((n) => n.innerText.trim()) ?? null, 5000);
+    const tip = await until(() => document.querySelector('[data-enso=conversation-queued-tooltip]'), 5000);
     return JSON.stringify({ text: tip?.innerText ?? null });
   `);
   assert(/1/.test(tooltip.text ?? ''), '排队: 悬停提示写出位次', tooltip);
+  await sleep(300);
   const clip = sidebar.aside ?? { x: 0, y: 0, width: 320, height: 800 };
   await cdp.shotClip(QUEUED_SHOT('sidebar'), {
     x: clip.x,
@@ -6410,7 +6411,25 @@ async function verifyQueuedSessions(cdp, setup) {
 
   const board = await page(`
     S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+      if (!visiblePanel())
+        [...document.querySelectorAll('button')]
+          .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+          ?.click();
+    }
     const panel = await until(() => visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    await sleep(300);
+    const toggle = visiblePanel()?.querySelector('[data-enso=secretary-running-toggle]');
+    if (toggle?.getAttribute('aria-expanded') !== 'true') toggle?.click();
     const cards = await until(() => {
       const nodes = [...(visiblePanel()?.querySelectorAll('[data-enso=secretary-queued-card]') ?? [])];
       return nodes.length >= 2 ? nodes : null;

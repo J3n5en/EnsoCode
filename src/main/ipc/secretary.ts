@@ -112,6 +112,7 @@ import {
 } from '../services/secretary/skills';
 import { createStatePublisher } from '../services/secretary/statePublisher';
 import { SecretaryStore } from '../services/secretary/store';
+import { deleteUntouchedSessionBranch } from '../services/worktree/service';
 import {
   getSourceAuthorityRegistry,
   isRootSessionAlive,
@@ -215,7 +216,11 @@ function queuedSessionPorts(): QueuedSessionPorts {
       });
       return written.row;
     },
-    removeWorktree: conversations.removeWorktree,
+    // 取消排队：没跑过的会话，分支还停在基线上就一起删掉，同名分支能马上重新派发
+    removeWorktree: async (record) => {
+      await conversations.removeWorktree(record);
+      await deleteUntouchedSessionBranch(record);
+    },
     removeRow: conversations.removeRow,
     removeConversation: conversations.removeConversation,
     owner: (secretaryId) => {

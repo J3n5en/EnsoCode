@@ -3741,6 +3741,7 @@ export const zhTranslations: Record<string, string> = {
   'The session was deleted': '会话已删除',
   '{{n}} waiting': '{{n}} 件等你',
   '{{n}} running': '{{n}} 件在跑',
+  '{{n}} queued': '{{n}} 件排队',
   '{{n}} dispatched tasks running': '派出的 {{n}} 件活在跑',
   'Unknown source': '未知来源',
   'Nothing running': '没有在跑的活',
