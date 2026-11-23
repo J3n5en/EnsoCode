@@ -519,7 +519,7 @@ export interface SecretaryBoardTodo extends SecretaryTodo {
   phase?: SecretaryTodoPhase;
   projectName?: string;
   sessionTitle?: string;
-  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone';
+  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone' | 'queued';
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，直接派发 */
@@ -590,7 +590,11 @@ export type SecretaryCard =
       projectId: string;
       projectName: string;
       title: string;
-      state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+      state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
+      /** 排队中：同一秘书内的位次（从 1 开始）；启动失败的不占位，改给 queueFailed */
+      queuePosition?: number;
+      /** 排队会话自动启动失败的原因：等用户立即开始重试或取消 */
+      queueFailed?: string;
       lastText?: string;
       /** 派出时间 */
       startedAt: number;
