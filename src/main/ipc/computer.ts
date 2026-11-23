@@ -1,4 +1,4 @@
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { ipcMain } from 'electron';
 import { computerHost } from '../services/computerHost';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';

@@ -1,6 +1,6 @@
 import { copyFile } from 'node:fs/promises';
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { BrowserWindow, dialog, type OpenDialogOptions, type WebContents } from 'electron';
 import { getExtensionPlugins } from '../services/extensionPlugins';
 import { parsePickPathKind, savePluginArtifact } from './extensionPlugins';

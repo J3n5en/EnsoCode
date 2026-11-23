@@ -7,7 +7,7 @@ import type {
   ConfigSyncPreviewOptions,
   ConfigSyncPreviewResult,
 } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import {
   cancelImportForSender,

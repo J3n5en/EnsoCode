@@ -1,6 +1,6 @@
 import { parseSecretaryUpdates } from '@shared/secretary/updatesText';
 import type { ProjectAuthority } from '@shared/types/agent';
-import { TURN_REPORT_MAX_CHARS } from '@shared/types/agent';
+import { TURN_REPORT_MAX_CHARS } from '@shared/types/agentConstants';
 import type {
   DispatchRecord,
   PendingDispatch,

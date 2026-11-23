@@ -1,6 +1,6 @@
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
 import type { McpStatusEvent } from '@shared/types/agent';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { pushMcpWarmup } from '../services/agentHost';
 import {
   authorizeMcpServer,

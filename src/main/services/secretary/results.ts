@@ -1,7 +1,8 @@
 import { formatGoalResultChecks, formatGoalResultClaims } from '@shared/secretary/goalResult';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import { wrapUntrusted } from '@shared/secretary/transcript';
-import { type ProjectAuthority, TURN_REPORT_MAX_CHARS, type TurnReport } from '@shared/types/agent';
+import type { ProjectAuthority, TurnReport } from '@shared/types/agent';
+import { TURN_REPORT_MAX_CHARS } from '@shared/types/agentConstants';
 import {
   type DispatchRecord,
   NEEDS_YOU_RESULTS,

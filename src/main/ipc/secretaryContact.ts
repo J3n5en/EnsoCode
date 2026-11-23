@@ -7,7 +7,7 @@ import {
   findRouteConflict,
 } from '@shared/secretary/contact';
 import { projectReadableMessages } from '@shared/secretary/transcript';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type {
   SecretaryContactChannelPrefs,
   SecretaryContactState,

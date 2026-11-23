@@ -1,5 +1,5 @@
 import { applyConversationsPatch, diffConversations } from '@shared/conversationsPatch';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface FakePeer {

@@ -8,7 +8,7 @@ import {
   trayClickAction,
   trayIconCandidates,
 } from '@shared/appServerMode';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   app,
   type BrowserWindow,

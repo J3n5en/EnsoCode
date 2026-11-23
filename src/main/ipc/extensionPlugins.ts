@@ -4,7 +4,7 @@ import { extname } from 'node:path';
 import { ipcMain } from '@platform';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import type { ExtensionPluginInstallPreview } from '@shared/extensionPlugins/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { getDraftBroker, getExtensionPlugins } from '../services/extensionPlugins';
 import { parseReadmeRequest } from '../services/extensionPlugins/readme';
 import { setPluginAssetResolver } from '../services/localImageProtocol';

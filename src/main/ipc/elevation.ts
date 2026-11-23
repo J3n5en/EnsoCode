@@ -1,5 +1,5 @@
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { canAnswerElevation, elevationBroker } from '../services/elevation';
 
 const MAX_PASSWORD = 1024;

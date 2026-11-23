@@ -1,4 +1,4 @@
-import { type SessionEntry, sessionEntryToContextMessages } from '@earendil-works/pi-coding-agent';
+import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import {
   type MaskReport,
   mergeMaskReports,
@@ -6,6 +6,7 @@ import {
   parsePrivacyMaskRecord,
 } from '@shared/privacyMask/report';
 import { OM_FOLDED } from './continuousMemory/vendor/session-ledger/types';
+import { sessionEntryToContextMessages } from './sessionEntryMessages';
 
 /**
  * 渲染层要的是完整对话记录，而 pi 的 `session.messages` 是 LLM 上下文视图：

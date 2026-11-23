@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { ManualInstall, RestartToUpdateResult, UpdateStatus } from '@shared/types/updater';
 import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';

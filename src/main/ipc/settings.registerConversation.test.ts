@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const userData = mkdtempSync(path.join(tmpdir(), 'enso-register-conversation-'));

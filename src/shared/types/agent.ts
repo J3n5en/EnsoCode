@@ -30,11 +30,6 @@ import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
 import type { DefaultModelRef } from '../defaultModel';
 import type { ExitKind } from '../exitInterrupt';
 import { parsePluginArtifactInfo } from '../extensionPlugins/artifacts';
-import type {
-  InterceptPayload,
-  PluginEventName,
-  PluginInterceptEvent,
-} from '../extensionPlugins/events';
 import {
   AGENT_END_TEXT_MAX,
   BEFORE_AGENT_START_PROMPT_MAX,
@@ -42,10 +37,13 @@ import {
   CONTEXT_PART_KINDS,
   CONTEXT_USAGE_BUCKETS,
   type ContextPart,
+  type InterceptPayload,
   isChildInterceptEvent,
   isInterceptEvent,
   PLUGIN_EVENTS,
   PLUGIN_INTERCEPT_EVENTS,
+  type PluginEventName,
+  type PluginInterceptEvent,
 } from '../extensionPlugins/events';
 import {
   PLUGIN_AGENT_MAX_TIMEOUT_MS,
@@ -105,6 +103,13 @@ import {
   type WebSearchChainEntry,
 } from '../webSearchChain';
 import { WINDOWS_LOCAL_SHELLS, type WindowsLocalShell } from '../windowsLocalShell';
+import {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+  TURN_REPORT_MAX_CHARS,
+} from './agentConstants';
 import { type EditMode, isEditMode } from './editMode';
 import {
   PROJECTED_APPLY_PATCH_PATH_COUNT_LIMIT,
@@ -131,6 +136,13 @@ import { isWorkflowPresetId, parseWorkflowRunSnapshot, type WorkflowRunSnapshot 
 
 export type { ChildSessionIdentity, SessionIdentity } from '../builtinAgents';
 export { parseChildSessionIdentity, parseSessionIdentity } from '../builtinAgents';
+export {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+  TURN_REPORT_MAX_CHARS,
+};
 
 /**
  * Main → worker 的自定义 provider 注册信息。api 在 shared 侧保持 string，
@@ -163,9 +175,6 @@ export interface TurnDigest {
    */
   lastTool?: { name: string; ok: boolean };
 }
-
-/** 本轮汇报的硬上限：装得下一份正常汇报，又挡住异常长输出 */
-export const TURN_REPORT_MAX_CHARS = 8000;
 
 /** 本轮最后一条 assistant 结论原文，worker 侧截尾到 TURN_REPORT_MAX_CHARS；秘书终态回传用 */
 export interface TurnReport {
@@ -244,14 +253,6 @@ export interface VirtualSpawnConfig {
   fallbacks: SpawnModelConfig[];
   classifier?: VirtualSpawnClassifier;
 }
-
-/** 思考努力档位（reasoning 开启时有效），值域对齐 pi 的 ThinkingLevel。off 由 reasoningEnabled 表达 */
-export const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
-
-/** 审批档位：supervised 全审 / auto-edits 免文件 / assistant 助手代审 / full 全放行 */
-export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full', 'assistant'] as const;
-export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 /** 审批请求的操作类别 */
 export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';

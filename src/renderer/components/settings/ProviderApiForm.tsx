@@ -12,7 +12,7 @@ import {
   normalizeProviderHeaders,
 } from '@shared/providers/providerHeaders';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
-import { MODEL_API_KINDS } from '@shared/types';
+import { MODEL_API_KINDS } from '@shared/types/llm';
 import {
   ChevronDown,
   CircleCheck,

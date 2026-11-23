@@ -8,7 +8,8 @@ import {
 } from '@enso/pair';
 import { isMediaId } from '@shared/bots/sendImage';
 import { takeSnapshotTail } from '@shared/snapshotTail';
-import { isDeliveryId, THINKING_LEVELS } from '@shared/types/agent';
+import { isDeliveryId } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import { parseArtifactTarget } from './bots/artifacts';
 import { isRemoteCommandType, parseRemoteCommand } from './remoteRenderer/commands';
 

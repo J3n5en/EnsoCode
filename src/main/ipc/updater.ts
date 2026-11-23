@@ -1,4 +1,4 @@
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { UpdaterState } from '@shared/types/updater';
 import { isUpdateChannel } from '@shared/updater/channel';
 import { isAutoRestartMode } from '@shared/updater/idleRestart';

@@ -20,7 +20,7 @@ import type {
   FilesWatchResult,
   FilesWriteResult,
 } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { parseWorkspaceFileSearchRequest } from '@shared/workspaceFileSearch';
 import { createSshExecutor } from '../../agent/ssh/executor';
 import { readBotSessionMessages } from '../services/bots/sessionMessages';

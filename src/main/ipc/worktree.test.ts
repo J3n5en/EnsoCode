@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { SessionWorktree } from '@shared/types/worktree';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorktreeRegistry } from '../services/worktree/registry';

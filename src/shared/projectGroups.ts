@@ -1,4 +1,5 @@
-import { THINKING_LEVELS, type ThinkingLevel } from './types/agent';
+import type { ThinkingLevel } from './types/agent';
+import { THINKING_LEVELS } from './types/agentConstants';
 import type { Project, ProjectGroup } from './types/project';
 
 export type { ProjectGroup };

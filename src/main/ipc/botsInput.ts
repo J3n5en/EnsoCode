@@ -8,13 +8,12 @@ import {
 import type { PersonaSuggestInput } from '@shared/bots/personaSuggest';
 import { isTemplateId } from '@shared/bots/templateLibrary';
 import {
-  APPROVAL_MODES,
   type ApprovalMode,
   type AttachedImage,
   isDeliveryId,
-  THINKING_LEVELS,
   type ThinkingLevel,
 } from '@shared/types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   BOT_DISCUSS_MAX_TURNS,
   BOT_ROUTING_MODES,
