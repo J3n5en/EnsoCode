@@ -519,6 +519,8 @@ export const zhTranslations: Record<string, string> = {
   'Protected: secrets': '受保护：密钥',
   'Protected: destructive command': '受保护：破坏性命令',
   'dcg: {{reason}}': 'dcg：{{reason}}',
+  'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.':
+    '在系统共用的 Temp 根目录里删除，那里有其他程序的文件；只应在会话专属临时目录内删除。',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',
   'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.':
     '执行 bash 和 PowerShell 命令前先用 dcg 检查。命中 git reset --hard、递归删除等危险命令时，即使在完全放行模式下也必须由你确认。新会话生效。',
@@ -533,6 +535,12 @@ export const zhTranslations: Record<string, string> = {
   'Install Finder Quick Action': '安装访达快速操作',
   "'enso' terminal command": 'enso 终端命令',
   'Finder Quick Action': '访达快速操作',
+  Troubleshooting: '故障排查',
+  'Developer tools': '开发者工具',
+  'Open the console of the main window to see errors and logs.':
+    '打开主窗口的控制台，查看报错和日志。',
+  'Could not open developer tools': '无法打开开发者工具',
+  'The main window is closed. Open it and try again.': '主窗口已关闭，请先打开主窗口再试。',
   "Couldn't install the 'enso' command": '无法安装 enso 命令',
   "Shell command 'enso' installed in {{dir}}.": '已在 {{dir}} 安装 enso 命令。',
   'Run `enso .` in a terminal to open the current folder in EnsoCode.':
@@ -2068,11 +2076,15 @@ export const zhTranslations: Record<string, string> = {
   '{{name}} installed': '已安装 {{name}}',
   'Turn it on in the list below to use it.': '在下面的列表里打开开关即可使用。',
   'updating from {{version}}': '从 {{version}} 更新',
+  'This update asks for more than {{version}}. {{version}} keeps running until you allow the update in the plugin list.':
+    '这次更新申请的权限比 {{version}} 多。确认后 {{version}} 继续运行，在插件列表里点「允许」才会切到新版。',
+  'Awaiting approval': '待授权',
   'Keep current': '保持现状',
   'Stopped after crashes': '多次崩溃后已停止',
   'Plugin command failed': '插件命令执行失败',
   'Plugin logs': '插件日志',
   'No logs yet': '暂无日志',
+  'Log too large, showing plain text': '日志过大，已切换为纯文本',
   'Reinstall from source': '从来源重新安装',
   'No plugins installed from GitHub to check': '没有从 GitHub 安装的插件可以检查',
   '{{count}} update(s) available': '{{count}} 个插件有新版本',

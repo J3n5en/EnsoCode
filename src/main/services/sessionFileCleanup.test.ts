@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ensureSessionTempDir, sessionTempRoot } from '../../agent/sessionTempDir';
 import { recordChildRun } from './childRunCatalog';
 import { removeConversationSessionFiles, removeScratchWorkspace } from './sessionFileCleanup';
 
@@ -162,6 +163,23 @@ describe('removeConversationSessionFiles', () => {
     removeScratchWorkspace(scratchRoot, CONVERSATION_ID);
     expect(existsSync(own)).toBe(false);
     expect(existsSync(path.join(scratchRoot, 'keep.txt'))).toBe(true);
+  });
+
+  it('删除会话时连带删除系统 Temp 下的会话专属临时目录，不碰 Temp 根与其他会话', () => {
+    const systemTemp = path.join(root, 'Temp');
+    const tempRoot = sessionTempRoot(systemTemp);
+    const own = path.join(tempRoot, CONVERSATION_ID);
+    const other = path.join(tempRoot, '22222222-2222-4222-8222-222222222222');
+    mkdirSync(systemTemp);
+    ensureSessionTempDir(path.join(own, 'cw-a'), tempRoot);
+    ensureSessionTempDir(other, tempRoot);
+    writeFileSync(path.join(systemTemp, 'foreign.txt'), 'x');
+
+    removeConversationSessionFiles({ sessionDir, conversationId: CONVERSATION_ID, systemTemp });
+
+    expect(existsSync(own)).toBe(false);
+    expect(existsSync(other)).toBe(true);
+    expect(existsSync(path.join(systemTemp, 'foreign.txt'))).toBe(true);
   });
 
   it('删除父会话时连带删除 catalog 登记的普通子 pi jsonl', () => {

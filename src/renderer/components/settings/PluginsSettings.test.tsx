@@ -10,9 +10,16 @@ const harness = vi.hoisted(() => ({
   list: vi.fn(),
   setDevWatch: vi.fn(async () => ({ ok: true })),
   configGet: vi.fn(async () => ({ ok: true as const, fields: [] as unknown[] })),
+  marketStage: vi.fn(),
+  restage: vi.fn(),
+  commit: vi.fn(),
+  discard: vi.fn(),
+  setEnabled: vi.fn(async () => ({ ok: true })),
+  addToast: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/ui/toast', () => ({ addToast: harness.addToast }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: unknown) => unknown) =>
     select({
@@ -66,14 +73,48 @@ vi.mock('@/components/ui/select', () => ({
   SelectTrigger: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   SelectValue: () => null,
 }));
-// 弹窗层：只有 open 时才渲染内容，这样"开弹窗"与"插进页面"能被测试区分开
+// 弹窗层：只有 open 时才渲染内容，这样"开弹窗"与"插进页面"能被测试区分开；dialog-dismiss 模拟 ESC/点遮罩
 vi.mock('@/components/ui/dialog', () => ({
-  Dialog: ({ open, children }: { open?: boolean; children?: React.ReactNode }) =>
-    open ? <div data-dialog="open">{children}</div> : null,
+  Dialog: ({
+    open,
+    onOpenChange,
+    children,
+  }: {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    children?: React.ReactNode;
+  }) =>
+    open ? (
+      <div data-dialog="open">
+        <button type="button" data-dismiss="" onClick={() => onOpenChange?.(false)} />
+        {children}
+      </div>
+    ) : null,
   DialogContent: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children?: React.ReactNode }) => <h2>{children}</h2>,
   DialogPanel: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  DialogFooter: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+}));
+vi.mock('./PluginMarket', () => ({
+  PluginMarket: ({
+    disabled,
+    installedKey,
+    onInstall,
+  }: {
+    disabled: boolean;
+    installedKey: string;
+    onInstall: (id: string) => void;
+  }) => (
+    <div data-market="" data-installed={installedKey}>
+      <button
+        type="button"
+        aria-label="market-install"
+        disabled={disabled}
+        onClick={() => onInstall('market.a')}
+      />
+    </div>
+  ),
 }));
 vi.mock('@/plugins/artifactViews', () => ({ PluginArtifactList: () => <div>artifacts</div> }));
 vi.mock('@/plugins/pluginMeta', () => ({
@@ -103,6 +144,24 @@ const plugin = {
 
 let root: Root;
 let container: HTMLElement;
+
+const stagedPreview = {
+  token: 'tok-1',
+  id: 'market.a',
+  name: 'Market A',
+  version: '1.0.0',
+  permissions: ['agent.tool'],
+  env: [],
+  interop: [],
+  resident: false,
+  styles: false,
+  hasRenderer: false,
+  events: [],
+  schedules: [],
+  mcpServers: [],
+  mcpTools: [],
+  warnings: [],
+};
 
 const render = async () => {
   await act(async () => root.render(<PluginsSettings />));
@@ -139,6 +198,11 @@ beforeEach(async () => {
         artifactsList: harness.artifacts,
         configGet: harness.configGet,
         setDevWatch: harness.setDevWatch,
+        marketStage: harness.marketStage,
+        restage: harness.restage,
+        commit: harness.commit,
+        discard: harness.discard,
+        setEnabled: harness.setEnabled,
       },
     },
   });
@@ -269,5 +333,241 @@ describe('ExtensionPluginsSection', () => {
     const dialog = container.querySelector('[data-dialog="open"]');
     expect(dialog?.querySelector('input')?.getAttribute('type')).toBe('text');
     expect(dialog?.querySelector('textarea')?.getAttribute('data-value')).toBe('line1\nline2');
+  });
+});
+
+describe('ExtensionPluginLogs', () => {
+  const LOG = [
+    '2026-11-06T12:29:34.080Z [info] started at /Users/me/plugin',
+    '2026-11-06T12:48:54.789Z [warn] 已丢弃 3 行',
+    '2026-11-06T13:15:49.129Z [error] renderer.call 失败： Error: 请先登录 Telegram',
+    '    at Object.invoke (file:///Users/me/vendor/gramjs.mjs:2161:47198)',
+    '',
+  ].join('\n');
+
+  const openLogs = async (text: string) => {
+    harness.logs.mockResolvedValue({ ok: true, text });
+    await act(async () => byLabel('Plugin logs').click());
+  };
+  const lines = () => [...container.querySelectorAll('[data-log-level]')];
+
+  it('复制按钮把完整日志原文写入剪贴板', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    await openLogs(LOG);
+    await act(async () => byLabel('Copy').click());
+    expect(writeText).toHaveBeenCalledWith(LOG);
+  });
+
+  it('空日志显示暂无日志，复制按钮禁用', async () => {
+    await openLogs('');
+    expect(container.textContent).toContain('No logs yet');
+    expect(byLabel('Copy').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('按行渲染：error 行与其续行带错误样式，warn 行带警告样式，info 行都没有', async () => {
+    await openLogs(LOG);
+    const rendered = lines();
+    expect(rendered.map((line) => line.getAttribute('data-log-level'))).toEqual([
+      'info',
+      'warn',
+      'error',
+      'error',
+    ]);
+    expect(rendered[0]?.className).not.toMatch(/color-(warning|destructive)/);
+    expect(rendered[1]?.className).toContain('color-warning');
+    expect(rendered[2]?.className).toContain('color-destructive');
+    expect(rendered[3]?.className).toBe(rendered[2]?.className);
+  });
+
+  it('行首时间戳单独渲染', async () => {
+    await openLogs(LOG);
+    const stamp = lines()[2]?.querySelector('[data-log-time]');
+    expect(stamp?.textContent).toBe('2026-11-06T13:15:49.129Z');
+    expect(lines()[3]?.querySelector('[data-log-time]')).toBeNull();
+  });
+
+  it('超大日志退回纯文本并提示', async () => {
+    const big = Array.from(
+      { length: 5001 },
+      (_, i) => `2026-11-06T12:00:00.000Z [info] line-${i}`
+    ).join('\n');
+    await openLogs(big);
+    expect(lines()).toHaveLength(0);
+    expect(container.textContent).toContain('Log too large, showing plain text');
+    expect(container.querySelector('pre')?.textContent).toBe(big);
+  });
+});
+
+describe('插件市场安装', () => {
+  const marketDialog = () =>
+    [...container.querySelectorAll('[data-dialog="open"]')].find((dialog) =>
+      dialog.querySelector('[data-market]')
+    ) as HTMLElement | undefined;
+  const marketList = () => marketDialog()?.querySelector('[data-market]')?.parentElement;
+  const dialogButton = (text: string) => {
+    const found = [...(marketDialog()?.querySelectorAll('button') ?? [])].find(
+      (element) => element.textContent === text
+    );
+    expect(found).not.toBeUndefined();
+    return found as HTMLElement;
+  };
+  const openAndInstall = async () => {
+    await act(async () => byText('Marketplace').click());
+    await act(async () => byLabel('market-install').click());
+  };
+  /** 确认按钮出现后要等一小会儿才可点，防止连点/按住回车误确认 */
+  const armConfirm = () =>
+    act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    harness.marketStage.mockResolvedValue({ ok: true, preview: stagedPreview });
+    harness.commit.mockResolvedValue({ ok: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('点安装后市场仍开着，权限确认就地显示在市场里', async () => {
+    await openAndInstall();
+    expect(harness.marketStage).toHaveBeenCalledWith('market.a');
+    expect(marketDialog()).not.toBeUndefined();
+    expect(container.querySelectorAll('[data-dialog="open"]')).toHaveLength(1);
+    expect(marketDialog()?.textContent).toContain('Market A');
+    expect(marketDialog()?.textContent).toContain('label:agent.tool');
+    expect(marketList()?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('暂存失败时错误显示在市场里，市场不关', async () => {
+    harness.marketStage.mockResolvedValue({ ok: false, error: '下载失败 boom' });
+    await openAndInstall();
+    expect(marketDialog()?.textContent).toContain('下载失败 boom');
+    expect(marketList()?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('确认安装后回到市场列表并刷新已装状态，可接着装下一个', async () => {
+    await openAndInstall();
+    harness.list.mockResolvedValue([
+      plugin,
+      { ...plugin, id: 'market.a', name: 'Market A', version: '1.0.0' },
+    ]);
+    await armConfirm();
+    await act(async () => dialogButton('Install').click());
+    expect(harness.commit).toHaveBeenCalledWith('tok-1');
+    expect(harness.setEnabled).toHaveBeenCalledWith('market.a', true);
+    expect(marketDialog()).not.toBeUndefined();
+    expect(marketList()?.hasAttribute('hidden')).toBe(false);
+    expect(
+      marketDialog()?.querySelector('[data-market]')?.getAttribute('data-installed')
+    ).toContain('market.a@1.0.0');
+    expect(byLabel('market-install').hasAttribute('disabled')).toBe(false);
+  });
+
+  it('提交失败时错误留在市场里', async () => {
+    harness.commit.mockResolvedValue({ ok: false, error: '试载失败' });
+    await openAndInstall();
+    await armConfirm();
+    await act(async () => dialogButton('Install').click());
+    expect(marketDialog()?.textContent).toContain('试载失败');
+    expect(marketList()?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('确认按钮刚出现时点不动，连点或按住回车不会直接装上；取消随时可点', async () => {
+    await openAndInstall();
+    const install = dialogButton('Install');
+    expect(install.hasAttribute('disabled')).toBe(true);
+    await act(async () => install.click());
+    expect(harness.commit).not.toHaveBeenCalled();
+    expect(dialogButton('Cancel').hasAttribute('disabled')).toBe(false);
+    await armConfirm();
+    await act(async () => dialogButton('Install').click());
+    expect(harness.commit).toHaveBeenCalledWith('tok-1');
+  });
+
+  it('升级确认里标出新增的权限，并说明扩大授权要再允许一次', async () => {
+    harness.marketStage.mockResolvedValue({
+      ok: true,
+      preview: {
+        ...stagedPreview,
+        version: '2.0.0',
+        existingVersion: '1.0.0',
+        expands: true,
+        permissions: ['agent.tool', 'session.readAll'],
+        addedPermissions: ['session.readAll'],
+      },
+    });
+    await openAndInstall();
+    const items = [...(marketDialog()?.querySelectorAll('li') ?? [])];
+    const line = (permission: string) =>
+      items.find((item) => item.textContent?.includes(permission))?.textContent;
+    expect(line('session.readAll')).toContain('Added');
+    expect(line('agent.tool')).not.toContain('Added');
+    expect(marketDialog()?.textContent).toContain('This update asks for more than');
+  });
+
+  it('扩大授权的升级确认后进入待授权，市场按待授权状态刷新', async () => {
+    harness.marketStage.mockResolvedValue({
+      ok: true,
+      preview: { ...stagedPreview, version: '2.0.0', existingVersion: '1.0.0', expands: true },
+    });
+    await openAndInstall();
+    harness.list.mockResolvedValue([
+      plugin,
+      { ...plugin, id: 'market.a', version: '1.0.0', pendingVersion: '2.0.0' },
+    ]);
+    await armConfirm();
+    await act(async () => dialogButton('Install').click());
+    expect(harness.setEnabled).not.toHaveBeenCalled();
+    // 还没装上新版：不报「已安装」，由 Main 的待授权通知提示去允许
+    expect(harness.addToast).not.toHaveBeenCalled();
+    expect(
+      marketDialog()?.querySelector('[data-market]')?.getAttribute('data-installed')
+    ).toContain('market.a@1.0.0>2.0.0');
+  });
+
+  it('取消确认丢弃暂存并回到市场列表', async () => {
+    await openAndInstall();
+    await act(async () => dialogButton('Cancel').click());
+    expect(harness.discard).toHaveBeenCalledWith('tok-1');
+    expect(marketDialog()).not.toBeUndefined();
+    expect(marketList()?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('有未确认的暂存时关闭市场会丢弃它', async () => {
+    await openAndInstall();
+    const dismiss = marketDialog()?.querySelector('[data-dismiss]') as HTMLElement;
+    await act(async () => dismiss.click());
+    expect(marketDialog()).toBeUndefined();
+    expect(harness.discard).toHaveBeenCalledWith('tok-1');
+    expect(container.querySelector('[data-dialog="open"]')).toBeNull();
+  });
+
+  it('暂存途中关掉市场，晚到的结果被丢弃而不弹确认', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    harness.marketStage.mockReturnValue(new Promise((r) => (resolve = r)));
+    await openAndInstall();
+    expect(byLabel('market-install').hasAttribute('disabled')).toBe(true);
+    const dismiss = marketDialog()?.querySelector('[data-dismiss]') as HTMLElement;
+    await act(async () => dismiss.click());
+    await act(async () => resolve({ ok: true, preview: stagedPreview }));
+    expect(harness.discard).toHaveBeenCalledWith('tok-1');
+    expect(container.querySelector('[data-dialog="open"]')).toBeNull();
+  });
+
+  it('从已装列表重装仍走页面上的确认弹窗', async () => {
+    harness.list.mockResolvedValue([{ ...plugin, source: { kind: 'dir' } }]);
+    harness.restage.mockResolvedValue({ ok: true, preview: { ...stagedPreview, id: plugin.id } });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+
+    await act(async () => byLabel('Reinstall from source').click());
+    expect(harness.restage).toHaveBeenCalledWith('local.missionops');
+    expect(marketDialog()).toBeUndefined();
+    expect(container.querySelector('[data-dialog="open"]')?.textContent).toContain('Market A');
   });
 });

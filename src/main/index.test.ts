@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   dialog: [] as string[],
   needsCheckpoint: false,
   setAsDefaultProtocolClient: vi.fn(),
+  rebuildTrayMenu: vi.fn(),
+  installAppMenu: vi.fn(),
+  desktopHooks: null as null | { app?: { syncAppLanguage?: () => void } },
 }));
 
 vi.mock('electron', () => ({
@@ -74,7 +77,10 @@ vi.mock('./desktop/localImageScheme', () => ({
 }));
 vi.mock('./services/remoteRenderer', () => ({ setupRemoteRenderer: vi.fn() }));
 vi.mock('./services/nodeRemote', () => ({ registerNodeSettingsProtocolHandler: vi.fn() }));
-vi.mock('./services/appMenu', () => ({ installAppMenu: vi.fn(), setAppMenuActions: vi.fn() }));
+vi.mock('./services/appMenu', () => ({
+  installAppMenu: mocks.installAppMenu,
+  setAppMenuActions: vi.fn(),
+}));
 vi.mock('./services/computerHost', () => ({ computerHost: { closeAll: vi.fn() } }));
 vi.mock('./services/pairHost', () => ({
   startPairHost: vi.fn(() => mocks.order.push('pair')),
@@ -155,9 +161,16 @@ vi.mock('./services/appServerMode', () => ({
   enterServerMode: vi.fn(),
   isServerMode: () => false,
   restoreFromSecondInstance: vi.fn(),
+  rebuildTrayMenu: mocks.rebuildTrayMenu,
+  setTrayRestartActions: vi.fn(),
   shouldQuitOnWindowAllClosed: () => false,
   scheduleReenterServerMode: (...args: unknown[]) => mocks.scheduleReenter(...args),
   toggleTrayMode: vi.fn(),
+}));
+vi.mock('./services/desktopHooks', () => ({
+  installDesktopHooks: (hooks: { app?: { syncAppLanguage?: () => void } }) => {
+    mocks.desktopHooks = hooks;
+  },
 }));
 vi.mock('./services/trayToggleShortcut', () => ({
   setTrayToggleHandler: vi.fn(),
@@ -238,6 +251,16 @@ describe('Main startup order', () => {
     await settle();
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.scheduleReenter).toHaveBeenCalledOnce();
+  });
+
+  it('切换语言时同时刷新应用菜单与托盘菜单', async () => {
+    await import('./index');
+    await settle();
+    mocks.installAppMenu.mockClear();
+    mocks.rebuildTrayMenu.mockClear();
+    mocks.desktopHooks?.app?.syncAppLanguage?.();
+    expect(mocks.installAppMenu).toHaveBeenCalledOnce();
+    expect(mocks.rebuildTrayMenu).toHaveBeenCalledOnce();
   });
 });
 

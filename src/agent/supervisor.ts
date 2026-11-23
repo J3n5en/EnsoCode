@@ -222,7 +222,7 @@ import {
   previewModelDirectoryPush,
   registerCustomProviderModels,
 } from './customProviderRegistry';
-import { createDcgGuard } from './dcg';
+import { createDcgGuard, withTempRootGuard } from './dcg';
 import {
   appendInterruptedTasks,
   DETACHED_TASKS_FILE,
@@ -2923,7 +2923,7 @@ export class SessionSupervisor {
         protectedFloor: botMode || protectedActions,
         autoReject: autoRejectApprovals,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
-        ...(dcgPath ? { commandGuard: createDcgGuard(dcgPath) } : {}),
+        commandGuard: withTempRootGuard(dcgPath ? createDcgGuard(dcgPath) : undefined),
       }
     );
     const checkpoints = new CheckpointManager(
