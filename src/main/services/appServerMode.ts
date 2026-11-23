@@ -8,14 +8,24 @@ import {
   trayClickAction,
   trayIconCandidates,
 } from '@shared/appServerMode';
+import { translate } from '@shared/i18n';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { app, type BrowserWindow, ipcMain, Menu, nativeImage, Tray } from 'electron';
+import {
+  app,
+  type BrowserWindow,
+  ipcMain,
+  Menu,
+  type MenuItemConstructorOptions,
+  nativeImage,
+  Tray,
+} from 'electron';
 import {
   flushSettings,
   readSettings,
   readTrayPreventDisplaySleep,
   readTraySleepPolicy,
   writeTrayPreventDisplaySleep,
+  writeTrayReenterAfterUpdate,
   writeTraySleepPolicy,
 } from '../ipc/settings';
 import {
@@ -27,6 +37,7 @@ import { createMainWindow, getMainWindow, isMainWindowAlive } from '../windows/M
 import { getSettingsWindow } from '../windows/SettingsWindow';
 import { isVerifyLaunch, presentWindow } from '../windows/verifyLaunch';
 import { allowAppQuit, destroyWithoutCloseConfirm } from './appCloseConfirm';
+import type { AppRestartState } from './appRestart';
 import { browserHost } from './browserHost';
 import { closeNodeSettingsWindows } from './nodeRemote';
 import { refreshPowerKeepAlive } from './pairHost';
@@ -40,6 +51,19 @@ let active = false;
 let transition = 0;
 let tray: Tray | null = null;
 const watchedWindows = new WeakSet<BrowserWindow>();
+
+/** 托盘「重启」由 Main 入口注入，与应用菜单共用同一个 appRestart（先 relaunch 再退出，只登记一次） */
+export interface TrayRestartActions {
+  restartApp(): void;
+  restartState(): AppRestartState;
+  reportError?(message: string): void;
+}
+
+let trayRestart: TrayRestartActions | undefined;
+
+export function setTrayRestartActions(actions: TrayRestartActions): void {
+  trayRestart = actions;
+}
 
 export function isServerMode(): boolean {
   return active;
@@ -95,7 +119,24 @@ function trayToggleLabel(zh: boolean): string {
   return zh ? '最小化到托盘' : 'Minimize to tray';
 }
 
-function rebuildTrayMenu(): void {
+function trayRestartItems(zh: boolean): MenuItemConstructorOptions[] {
+  if (!trayRestart) return [];
+  switch (trayRestart.restartState()) {
+    case 'waiting-for-tools':
+      return [
+        {
+          label: zh ? '等命令跑完再重启…' : 'Waiting for running commands to restart…',
+          enabled: false,
+        },
+      ];
+    case 'restarting':
+      return [{ label: zh ? '正在重启…' : 'Restarting…', enabled: false }];
+    default:
+      return [{ label: zh ? '重启' : 'Restart', click: () => restartFromTray() }];
+  }
+}
+
+export function rebuildTrayMenu(): void {
   if (!tray || tray.isDestroyed()) return;
   const zh = languageIsZh();
   const sleepPolicy = readTraySleepPolicy();
@@ -139,6 +180,7 @@ function rebuildTrayMenu(): void {
         },
       },
       { type: 'separator' },
+      ...trayRestartItems(zh),
       {
         label: zh ? '退出' : 'Quit',
         click: () => quitFromTray(),
@@ -240,8 +282,10 @@ export async function enterServerMode(): Promise<void> {
 
 export function leaveServerMode(): void {
   transition++;
+  const wasActive = active;
   active = false;
   setPairHeadless(false);
+  if (wasActive) writeTrayReenterAfterUpdate(false);
   flushSettings();
   if (!isVerifyLaunch()) app.dock?.show();
   if (!isMainWindowAlive()) createMainWindow();
@@ -253,6 +297,29 @@ export function leaveServerMode(): void {
 export function quitFromTray(): void {
   allowAppQuit();
   app.quit();
+}
+
+export function restartFromTray(): void {
+  if (trayRestart?.restartState() !== 'idle') return;
+  // 托盘模式下重启：新实例冷启动等 renderer 推来目录后回到托盘，与更新后重启同一机制
+  const reenter = active;
+  if (reenter) {
+    writeTrayReenterAfterUpdate(true);
+    flushSettings();
+  }
+  try {
+    trayRestart.restartApp();
+  } catch (error) {
+    if (reenter) {
+      writeTrayReenterAfterUpdate(false);
+      flushSettings();
+    }
+    console.error('[tray] 重启失败:', error);
+    const reason = error instanceof Error ? error.message : String(error);
+    trayRestart.reportError?.(
+      translate(languageIsZh() ? 'zh' : 'en', 'Restart failed: {{error}}', { error: reason })
+    );
+  }
 }
 
 export function restoreFromSecondInstance(): void {

@@ -20,6 +20,7 @@ import type {
   TodoItem,
   TurnPerf,
 } from '@shared/types/agent';
+import type { DcgWarning } from '@shared/types/dcg';
 import type { ProjectedApplyPatchOutcome, ProjectedFileChange } from '@shared/types/fileChanges';
 import { unwrapMcpProxyCall } from '@/lib/mcpToolName';
 import { mergeRuns, usesToolCard } from '@/lib/toolCards';
@@ -119,6 +120,8 @@ export type TimelineItem =
       backgroundTaskId?: string;
       /** bash / powershell 结果的结构化失败分类；其它缺省 */
       shellFailure?: ShellFailure;
+      /** dcg warn 档命中（不拦，只提示）；其它缺省 */
+      dcgWarning?: DcgWarning;
       /** submit_plan 提交的计划；其它工具缺省 */
       plan?: { title: string; text: string } | null;
       /** 联系主 agent / 队员、子代理 send 发出的正文，或子代理 spawn 交代的任务；其它工具缺省 */
@@ -958,6 +961,7 @@ function buildMessageTimeline(
       approvalReview?: ApprovalReviewRecord;
       backgroundTaskId?: string;
       shellFailure?: ShellFailure;
+      dcgWarning?: DcgWarning;
       pluginArtifacts?: PluginArtifactInfo[];
     }
   >();
@@ -977,6 +981,7 @@ function buildMessageTimeline(
         approvalReview: message.approvalReview,
         backgroundTaskId: message.backgroundTaskId,
         shellFailure: message.shellFailure,
+        dcgWarning: message.dcgWarning,
         pluginArtifacts: message.pluginArtifacts,
         generatedImages: message.generatedImages,
         image: toolImageOf(message.content),
@@ -1349,6 +1354,7 @@ function buildMessageTimeline(
             ...(waiting ? { waiting } : {}),
             ...(result?.backgroundTaskId ? { backgroundTaskId: result.backgroundTaskId } : {}),
             ...(result?.shellFailure ? { shellFailure: result.shellFailure } : {}),
+            ...(result?.dcgWarning ? { dcgWarning: result.dcgWarning } : {}),
             ...(part.name === 'submit_plan'
               ? { plan: extractSubmittedPlan(part.name, part.arguments) }
               : {}),

@@ -8,6 +8,7 @@ import {
   withProtectedFloor,
 } from './approval';
 import { takeApprovalReview } from './approvalReviewRecords';
+import type { CommandGuardHit } from './dcg';
 
 // 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
 // options.review?: (info: ApprovalRequestInfo, signal: AbortSignal | undefined) =>
@@ -937,7 +938,7 @@ describe('dcg 命令守卫', () => {
   const setup = (
     mode: GateMode,
     options: { exemptFull?: boolean; protectedFloor?: boolean } = {},
-    verdict: typeof hit | null = hit
+    verdict: CommandGuardHit | null = hit
   ) => {
     const infos: ApprovalRequestInfo[] = [];
     const commandGuard = vi.fn().mockResolvedValue(verdict);
@@ -986,6 +987,46 @@ describe('dcg 命令守卫', () => {
     await edits.run('edit', { path: '/repo/a.ts' }, 'file-edit');
     expect(edits.commandGuard).not.toHaveBeenCalled();
     expect(commandGuard).toHaveBeenCalledOnce();
+  });
+
+  it('ask 档与 deny 一样进审批链：full 档也要真人确认', async () => {
+    const ask = { ...hit, decision: 'ask' as const, severity: 'critical' as const };
+    const { gate, infos, execute, run } = setup('full', {}, ask);
+    const pending = run('bash', { command: 'git reset --hard' });
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(infos[0]).toMatchObject({ protected: 'destructive', guard: ask });
+    gate.respond(infos[0].requestId, 'deny');
+    await expect(pending).rejects.toThrow(/denied/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('warn 档不拦：full 档直接执行，提示写进结果 details.dcgWarning', async () => {
+    const warn = {
+      ruleId: 'core.git:stash-drop',
+      reason: 'drops a stash',
+      decision: 'warn' as const,
+      severity: 'medium' as const,
+      explanation: 'long text',
+      matched: 'git stash drop',
+    };
+    const { infos, execute, run } = setup('full', {}, warn);
+    const result = await run('bash', { command: 'git stash drop' });
+    expect(infos).toHaveLength(0);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(result.details).toEqual({
+      dcgWarning: { ruleId: 'core.git:stash-drop', reason: 'drops a stash', severity: 'medium' },
+    });
+  });
+
+  it('warn 档在本来就要弹的卡片上附带提示，但不升级为受保护动作', async () => {
+    const warn = { ...hit, decision: 'warn' as const };
+    const { gate, infos, run } = setup('supervised', {}, warn);
+    const pending = run('bash', { command: 'git stash drop' });
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(infos[0].protected).toBeUndefined();
+    expect(infos[0].guard).toEqual(warn);
+    gate.respond(infos[0].requestId, 'allow');
+    await pending;
   });
 
   it('底线已判出类别时保留原类别并附带原因', async () => {

@@ -22,6 +22,7 @@ import {
   ForegroundYieldError,
 } from './foregroundCommand';
 import { killProcessTree } from './killTree';
+import { ensureSessionTempDir, sessionTempDir } from './sessionTempDir';
 import {
   attachFileBacked,
   defaultRunProbe,
@@ -1344,14 +1345,24 @@ function explicitTimeoutSec(record: Record<string, unknown>): number | undefined
     : undefined;
 }
 
+/** PowerShell 临时文件只进会话专属目录；拿不到安全路径时也只给禁令，不再指向 Temp 根 */
+function powerShellTempNote(tempDir: string | null): string {
+  return tempDir
+    ? `Put temporary scripts and files only in ${tempDir} (this session's own temp folder, created ` +
+        'for you); never write to or clean up the shared $env:TEMP root, and when cleaning up delete ' +
+        'only inside that folder. '
+    : 'Avoid temporary files; never write to or clean up the shared $env:TEMP root. ';
+}
+
 /** 说明里点名的命令按工具所在的 shell 写：PowerShell 会话不能看到 bash 写法 */
-function shellTerms(name: string) {
+function shellTerms(name: string, tempDir: string | null) {
   return name === 'powershell'
     ? {
         kind: 'PowerShell',
         syntax:
           'Commands run in PowerShell, not bash: there is no head, tail or /tmp — use ' +
-          'Select-Object -First N / -Last N and $env:TEMP, and chain with ; (&& and || need PowerShell 7). ',
+          'Select-Object -First N / -Last N, and chain with ; (&& and || need PowerShell 7). ' +
+          powerShellTempNote(tempDir),
         sessionState: 'Set-Location, $env: changes',
         follow: 'Get-Content -Wait',
         readCommands: 'Get-Content',
@@ -1464,7 +1475,9 @@ export function withBackground(
   // 描述文案按建工具时的时限生成（新会话随设置更新）；执行路径每次现读 manager.limits
   const limits = manager.limits;
   const name = definition.name;
-  const terms = shellTerms(name);
+  // 只有本机 PowerShell 需要：远程会话的命令跑在远端，本机 Temp 路径对它无意义
+  const tempDir = name === 'powershell' && !transform ? sessionTempDir(sessionId, { cwd }) : null;
+  const terms = shellTerms(name, tempDir);
   const baseParams = definition.parameters as unknown as {
     properties?: Record<string, unknown>;
     [key: string]: unknown;
@@ -1522,6 +1535,7 @@ export function withBackground(
     ],
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
+      if (tempDir) ensureSessionTempDir(tempDir);
       // 重启后认回的同一命令还在跑：不再起第二个（dev server 之类会撞端口）
       const duplicate =
         typeof record.command === 'string' && !transform

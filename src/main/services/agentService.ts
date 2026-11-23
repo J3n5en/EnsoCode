@@ -30,6 +30,7 @@ import {
   AGENT_WAIT_DEFAULT_MS,
   AGENT_WAIT_MAX_MS,
 } from '@shared/types/agent';
+import { classifyUpstreamError } from '@shared/upstreamRecovery';
 import {
   AGENT_RUN_LEDGER_LIMIT,
   type AgentRunLedgerEntry,
@@ -38,6 +39,7 @@ import {
   type AgentSpawnSpec,
 } from './agentRunLedger';
 import type { ObservedTask } from './backgroundTaskTracker';
+import type { UpstreamRecoveryService } from './upstreamRecovery';
 
 export type { AgentSpawnSpec } from './agentRunLedger';
 
@@ -195,6 +197,16 @@ interface RunRecord {
   restartCandidate?: boolean;
   /** 没能自动续跑的原因：随中断通知告诉父会话 */
   restartFallback?: string;
+  /** 因上游瞬态/配额故障正在健康闸门中等待自动恢复（不占手动 resume 额度） */
+  upstreamWaiting?: {
+    provider: string;
+    errorKind: 'transient' | 'quota';
+    nextAt: number;
+    attempt: number;
+    lastError: string;
+  };
+  /** 本次 retry 由上游健康闸门自动唤醒，非手动 resume */
+  upstreamResuming?: boolean;
 }
 
 interface Waiter {
@@ -218,6 +230,8 @@ export interface AgentServiceOptions {
   ledger?: AgentRunLedgerStore;
   /** 冷启动读到的重启断点里的子会话 */
   restartCheckpoint?: readonly RestartChildStep[];
+  /** 全局上游健康闸门与退避调度器 */
+  upstreamRecovery?: UpstreamRecoveryService;
 }
 
 const TERMINAL_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
@@ -581,6 +595,8 @@ export class AgentService implements AgentServiceContract {
       // 模型自己停的：stop 回执即知情；停的途中恰好跑完也不再另发通知
       run.value.delivered = true;
       run.value.stopRequested = true;
+      const wasUpstreamWaiting = run.value.upstreamWaiting !== undefined;
+      this.clearUpstreamWait(run.value);
       if (run.value.status === 'queued') {
         if ('queue' in agent.state) {
           this.transition(agent, {
@@ -588,7 +604,7 @@ export class AgentService implements AgentServiceContract {
             queue: agent.state.queue.filter((id) => id !== run.value.runId),
           });
         }
-      } else if (run.value.status !== 'validating') {
+      } else if (run.value.status !== 'validating' && !wasUpstreamWaiting) {
         const stopped = await this.options.runtime.stop({
           context: request.context,
           identity: agent.identity,
@@ -602,7 +618,7 @@ export class AgentService implements AgentServiceContract {
           if (TERMINAL_RUN_STATUSES.has(run.value.status)) this.notifyUndelivered(run.value);
           return failure('runtime-unavailable', stopped.error ?? 'Stop failed.');
         }
-      } else {
+      } else if (run.value.status === 'validating') {
         run.value.validationAbort?.abort();
       }
       this.finishRun(run.value, 'cancelled');
@@ -633,6 +649,7 @@ export class AgentService implements AgentServiceContract {
         run.stopRequested = true;
         // 等重启续跑的也算停：不再自动接着跑，台账不再留续跑记录
         run.restartCandidate = false;
+        this.clearUpstreamWait(run);
         const agent = this.agents.get(run.agentId);
         if (agent && 'queue' in agent.state) {
           const queue = agent.state.queue.filter((id) => id !== run.runId);
@@ -676,6 +693,7 @@ export class AgentService implements AgentServiceContract {
       if (agent.value.state.status === 'closed') {
         return { ok: true, value: { agentId: agent.value.agentId } };
       }
+      this.options.upstreamRecovery?.cancel(agent.value.agentId);
       const dismissed = await this.options.runtime.dismiss({
         context: request.context,
         identity: agent.value.identity,
@@ -989,10 +1007,58 @@ export class AgentService implements AgentServiceContract {
         }
       }
       if (event.type === 'turn-failed') {
-        // 只有可恢复的中断才停放：瞬态错误重试用尽、应用退出打断；400 / 鉴权等重试也没用的照旧关闭
-        const recoverable = event.retryExhausted === true || event.interrupted !== undefined;
+        const classified = classifyUpstreamError(
+          { error: event.error, retryExhausted: event.retryExhausted },
+          this.now()
+        );
+        if (
+          !event.interrupted &&
+          !active.stopRequested &&
+          this.options.upstreamRecovery &&
+          this.options.runtime.retry &&
+          (classified.kind === 'transient' || classified.kind === 'quota')
+        ) {
+          const provider = event.provider ?? active.upstreamWaiting?.provider ?? 'default';
+          const decision = this.options.upstreamRecovery.reportFailure({
+            id: agent.agentId,
+            kind: 'subagent',
+            provider,
+            errorKind: classified.kind,
+            lastError: event.error,
+            ...(classified.resetAt !== undefined ? { resetAt: classified.resetAt } : {}),
+          });
+          if (decision.action === 'wait') {
+            active.upstreamWaiting = {
+              provider: decision.waiter.provider,
+              errorKind: decision.waiter.errorKind,
+              nextAt: decision.waiter.nextAt,
+              attempt: decision.waiter.attempt,
+              lastError: decision.waiter.lastError,
+            };
+            active.upstreamResuming = false;
+            this.pushProgress(active.context.owner.ownerId);
+            return;
+          }
+          active.upstreamWaiting = undefined;
+          active.upstreamResuming = false;
+          this.settleRun(agent, active, 'failed', event.error, true);
+          return;
+        }
+        // 只有可恢复的中断才停放：瞬态/配额错误、应用退出打断；400 / 鉴权 / IP 封禁照旧关闭
+        const recoverable =
+          event.interrupted !== undefined ||
+          (classified.kind !== 'permanent' &&
+            (event.retryExhausted === true ||
+              classified.kind === 'transient' ||
+              classified.kind === 'quota'));
         this.settleRun(agent, active, 'failed', event.error, recoverable);
       } else {
+        const provider = event.provider ?? active.upstreamWaiting?.provider;
+        active.upstreamWaiting = undefined;
+        active.upstreamResuming = false;
+        if (provider) {
+          this.options.upstreamRecovery?.reportSuccess(provider, agent.agentId);
+        }
         this.completeRun(agent, active);
       }
       return;
@@ -1000,7 +1066,14 @@ export class AgentService implements AgentServiceContract {
     if (event.type === 'retry-skipped' && active?.resumed && active.status === 'running') {
       if (event.reason === 'nothing-to-retry') {
         // 续跑时子会话最后一条回复其实已完整：没有可续的回合，按完成收口
+        const provider = active.upstreamWaiting?.provider;
+        active.upstreamWaiting = undefined;
+        active.upstreamResuming = false;
+        if (provider) this.options.upstreamRecovery?.reportSuccess(provider, agent.agentId);
         this.completeRun(agent, active);
+      } else if (active.upstreamResuming) {
+        // 上游自动续跑遇到子会话正忙：未增加过 resumes，保留运行状态等本轮自然结束
+        active.upstreamResuming = false;
       } else {
         // 子会话正忙没能续跑：本次报错收口、重新停放，不占 resume 次数
         agent.resumes = Math.max(0, (agent.resumes ?? 0) - 1);
@@ -1624,8 +1697,44 @@ export class AgentService implements AgentServiceContract {
     return false;
   }
 
+  /** 上游健康闸门唤醒：同一 runId 直接从断点续跑，不增加手动 resume 计数 */
+  wakeUpstream(agentId: string): Promise<void> {
+    const agent = this.agents.get(agentId);
+    if (!agent || agent.state.status === 'closed') return Promise.resolve();
+    return this.serial(agent.context.owner.ownerId, async () => {
+      const current = this.agents.get(agentId);
+      if (current?.state.status !== 'active') return;
+      const run = this.runs.get(current.state.runId);
+      if (
+        !run ||
+        TERMINAL_RUN_STATUSES.has(run.status) ||
+        run.stopRequested ||
+        !run.upstreamWaiting
+      ) {
+        return;
+      }
+      run.upstreamWaiting = undefined;
+      run.resumed = true;
+      run.upstreamResuming = true;
+      const started = await this.startRun(current, run);
+      if (!started.ok && !TERMINAL_RUN_STATUSES.has(run.status)) {
+        run.upstreamResuming = false;
+        this.options.upstreamRecovery?.cancel(current.agentId);
+      }
+    });
+  }
+
+  private clearUpstreamWait(run: RunRecord): void {
+    if (run.upstreamWaiting || run.upstreamResuming) {
+      run.upstreamWaiting = undefined;
+      run.upstreamResuming = false;
+    }
+    this.options.upstreamRecovery?.cancel(run.agentId);
+  }
+
   private finishRun(run: RunRecord, status: AgentRunStatus, error?: string): void {
     if (TERMINAL_RUN_STATUSES.has(run.status)) return;
+    this.clearUpstreamWait(run);
     run.status = status;
     run.finishedAt = this.now();
     run.activity = undefined;

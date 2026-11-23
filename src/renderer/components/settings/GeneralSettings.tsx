@@ -35,6 +35,7 @@ import {
 } from '@/stores/settings/autoArchiveIdleDays';
 import { CompactReserveTokensSection } from './CompactReserveTokensSection';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
+import { DevToolsSection } from './DevToolsSection';
 import { NewSessionBadge } from './NewSessionBadge';
 import { SmartCompactPicker } from './SmartCompactPicker';
 
@@ -125,6 +126,8 @@ export function GeneralSettings() {
           />
         </section>
       )}
+
+      <DevToolsSection />
     </div>
   );
 }

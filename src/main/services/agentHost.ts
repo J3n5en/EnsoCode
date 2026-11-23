@@ -150,7 +150,8 @@ import { backgroundTaskStates } from './backgroundTaskTracker';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
 import { isComputerPlatformSupported } from './computer/support';
-import { dcgRoot, installedDcgPath } from './dcgBinary';
+import { DCG_VERSION, dcgRoot, installedDcgPath } from './dcgBinary';
+import { activeDcgExemptRules } from './dcgRuleMemory';
 import { ensureElevationServer } from './elevation';
 import {
   getExtensionPlugins,
@@ -1749,6 +1750,7 @@ export function spawnSession(
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
   const dcgPath = state?.dcgEnabled === true ? installedDcgPath(dcgRoot()) : null;
+  const dcgExemptRules = dcgPath ? activeDcgExemptRules(dcgRoot(), DCG_VERSION) : [];
   const sent = sendAgentCommand({
     type: 'spawn-parent',
     identity,
@@ -1763,6 +1765,7 @@ export function spawnSession(
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
     rtkEnabled: state?.rtkEnabled !== false,
     ...(dcgPath ? { dcgPath } : {}),
+    ...(dcgExemptRules.length > 0 ? { dcgExemptRules } : {}),
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     editMode,
     ...(compactStrategy !== 'standard' ? { compactStrategy } : {}),

@@ -20,6 +20,7 @@ export type SettingsCategory =
   | 'ssh'
   | 'usage'
   | 'resources'
+  | 'logs'
   | 'experimental'
   | 'bots'
   | 'botTemplates'

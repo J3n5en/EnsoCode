@@ -351,7 +351,11 @@ describe('ExtensionPluginService', () => {
       }),
     });
     if (!preview.ok) throw new Error(preview.error);
-    expect(preview.preview).toMatchObject({ existingVersion: '1.0.0', expands: true });
+    expect(preview.preview).toMatchObject({
+      existingVersion: '1.0.0',
+      expands: true,
+      addedPermissions: ['net.fetch'],
+    });
     await service.commit(preview.preview.token);
     expect(service.list()[0]).toMatchObject({
       version: '1.0.0',
@@ -2247,6 +2251,11 @@ describe('插件市场', () => {
     const before = market.downloads();
     await svc.checkUpdates();
     expect(svc.list()[0]).toMatchObject({ version: '1.0.0', pendingVersion: '2.0.0' });
+    const list = await svc.marketList(false);
+    expect(list.ok && list.plugins[0]).toMatchObject({
+      installedVersion: '1.0.0',
+      pendingVersion: '2.0.0',
+    });
     expect(notices).toEqual([
       {
         kind: 'update-needs-approval',

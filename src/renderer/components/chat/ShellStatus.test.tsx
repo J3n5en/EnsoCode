@@ -1,14 +1,29 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { ShellFailureBadge, ShellFailureBar } from './ShellStatus';
+import { DcgWarningBadge, ShellFailureBadge, ShellFailureBar } from './ShellStatus';
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, string | number>) =>
       key.replace(/\{\{(\w+)\}\}/g, (token, name: string) => String(params?.[name] ?? token)),
+    locale: 'zh',
   }),
 }));
+
+describe('DcgWarningBadge', () => {
+  it('只显示淡色提醒，悬停给中文解释与规则 id', () => {
+    const html = renderToStaticMarkup(
+      createElement(DcgWarningBadge, {
+        warning: { ruleId: 'core.git:reset-hard', reason: 'english', severity: 'medium' },
+      })
+    );
+    expect(html).toContain('dcg notice');
+    expect(html).toContain('data-dcg-warning="core.git:reset-hard"');
+    expect(html).toMatch(/title="[^"]*git reset --hard[^"]*core\.git:reset-hard"/);
+    expect(html).not.toContain('destructive');
+  });
+});
 
 describe('ShellFailureBadge', () => {
   it('非零退出显示退出码，其它分类显示标签', () => {
