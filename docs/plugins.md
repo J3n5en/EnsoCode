@@ -657,3 +657,13 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 | `INJECT_FAILED` | 会话不在运行或未接受注入 |
 | `AGENT_FAILED` | 只读代理没能启动、超时、模型出错或没有回复，`message` 是原因 |
 | `UNSUPPORTED` | 当前环境不支持（服务端的系统通知、剪贴板和外链，Agent 进程不可用时的 MCP 调用）。用 `host.capabilities()` 提前判断 |
+
+### 处理器的错误与日志级别
+
+处理器抛出的错误把 `code`（没有时为 `PLUGIN_ERROR`）和 `message` 原样回传给调用方，宿主同时在插件日志里记一行：
+
+- 调用被取消（`ctx.signal` 已中止或 `code` 为 `ABORTED`）记 `debug`。
+- 给错误加上 `expected: true`，表示这是给用户看的预期业务错误，例如未登录、仓库不是 GitHub、404、被限流。这类错误记 `info`，不进设置页的错误汇总，`expected` 也随错误回传。例：`throw Object.assign(new Error('当前项目的 origin 不是 GitHub 仓库'), { code: 'NOT_GITHUB', expected: true })`。
+- 其余错误照旧记 `error`。没有 `expected` 字段的旧插件行为不变。
+
+插件停用、卸载、换版或应用退出时进程被停掉，打断的定时任务记 `debug`，不算这次运行失败。

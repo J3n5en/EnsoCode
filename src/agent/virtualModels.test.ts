@@ -273,4 +273,62 @@ describe('registerVirtualModel（真实 ModelRuntime）', () => {
       )
     ).rejects.toThrow('cannot be routed');
   });
+
+  it('分类器被中止（Request aborted / AbortError）时不打 warn；其他失败照旧 warn', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-virtual-'));
+    const runtime = await ModelRuntime.create({
+      authPath: path.join(dir, 'auth.json'),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
+    runtime.registerProvider('p1', {
+      baseUrl: 'https://x.test',
+      api: 'anthropic-messages',
+      apiKey: 'k',
+      models: ['strong', 'weak'].map((id) => ({
+        id,
+        name: id,
+        reasoning: true,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200_000,
+        maxTokens: 8_000,
+      })),
+    });
+    const config = (modelId: string): SpawnModelConfig => ({
+      api: 'anthropic-messages',
+      baseUrl: '',
+      apiKey: '',
+      modelId,
+      settingsProviderId: 'p1',
+    });
+    let failure: unknown;
+    const { model: registered } = await registerVirtualModel(
+      runtime,
+      {
+        ...config('auto-abort'),
+        settingsProviderId: 'enso-virtual',
+        virtual: { name: 'Auto', primary: config('strong'), fast: config('weak'), fallbacks: [] },
+      },
+      async (member) => runtime.getModel(member.settingsProviderId, member.modelId)!,
+      async () => {
+        throw failure;
+      }
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const route = () =>
+      runtime.resolveModel(registered, [user('hi')], { reason: 'user', thinkingLevel: 'medium' });
+    try {
+      failure = new Error('Request aborted');
+      expect((await route()).model.id).toBe('strong');
+      failure = Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+      await route();
+      expect(warn).not.toHaveBeenCalled();
+      failure = new Error('401 unauthorized');
+      await route();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

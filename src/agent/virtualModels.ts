@@ -42,6 +42,10 @@ export const memberKey = (model: Pick<Model<Api>, 'provider' | 'id'>): string =>
 
 const registry = new Map<string, VirtualMembers>();
 
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.name === 'AbortError' || /\bRequest aborted\b/.test(error.message));
+
 export function isVirtualPiModel(model: { api?: string } | undefined): boolean {
   return model?.api === 'pi-virtual';
 }
@@ -358,7 +362,9 @@ export async function registerVirtualModel(
       const choice =
         typed.reason === 'user' && choose && isNewTurn(typed.messages)
           ? await choose(typed, members).catch((error) => {
-              console.warn('[virtual-model] classifier failed:', error);
+              // 用户中止或新请求取代本轮：分类器被取消是预期的，不算失败
+              if (isAbortError(error)) console.debug('[virtual-model] classifier aborted');
+              else console.warn('[virtual-model] classifier failed:', error);
               return undefined;
             })
           : undefined;

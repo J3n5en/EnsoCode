@@ -228,6 +228,41 @@ describe('runPluginHost', () => {
     });
   });
 
+  it('调用被取消记 debug；插件标了 expected 的业务错误记 info 且原样回传；其余照旧记 error', async () => {
+    const h = harness(`export function activate(enso) {
+      enso.commands.register('wait', (ctx) => new Promise((_, reject) => {
+        ctx.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      }));
+      enso.commands.register('coded', async () => { throw Object.assign(new Error('调用已取消'), { code: 'ABORTED' }); });
+      enso.commands.register('origin', async () => {
+        throw Object.assign(new Error('当前项目的 origin 不是 GitHub 仓库'), { code: 'NOT_GITHUB', expected: true });
+      });
+      enso.commands.register('bad', async () => { throw new Error('kaput'); });
+    }`);
+    await h.next((m) => m.t === 'ready');
+    const logOf = async (id: string) => {
+      await h.next((m) => m.t === 'res' && m.id === id);
+      return h.sent.filter((m) => m.t === 'log').at(-1);
+    };
+    h.deliver(call('c1', 'command.run', { id: 'wait' }));
+    await new Promise((r) => setTimeout(r, 10));
+    h.deliver({ t: 'cancel', invocationId: 'inv-c1' });
+    expect(await logOf('c1')).toMatchObject({ level: 'debug' });
+    h.deliver(call('c2', 'command.run', { id: 'coded' }));
+    expect(await logOf('c2')).toMatchObject({ level: 'debug' });
+    h.deliver(call('c3', 'command.run', { id: 'origin' }));
+    expect(await logOf('c3')).toMatchObject({
+      level: 'info',
+      message: expect.stringContaining('origin 不是 GitHub'),
+    });
+    expect(h.sent.find((m) => m.t === 'res' && m.id === 'c3')).toMatchObject({
+      ok: false,
+      error: { code: 'NOT_GITHUB', expected: true },
+    });
+    h.deliver(call('c4', 'command.run', { id: 'bad' }));
+    expect(await logOf('c4')).toMatchObject({ level: 'error' });
+  });
+
   it('未注册的处理器返回 NOT_FOUND', async () => {
     const h = harness('export function activate() {}');
     await h.next((m) => m.t === 'ready');

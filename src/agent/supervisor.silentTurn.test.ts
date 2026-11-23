@@ -566,6 +566,25 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  it('对已换代的会话再发 abort 是幂等终态：只留 debug，不打 error', async () => {
+    const { supervisor } = await spawn();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    try {
+      supervisor.handleCommand({
+        type: 'abort',
+        identity: { ...parent, generation: '33333333-3333-4333-8333-333333333333' },
+      });
+      await settle();
+      expect(error).not.toHaveBeenCalled();
+      expect(debug.mock.calls.flat().join(' ')).toContain('stale session generation');
+    } finally {
+      error.mockRestore();
+      debug.mockRestore();
+    }
+    await supervisor.shutdown();
+  });
+
   it('用户中断：agent_end/agent_settled 回流只收一次轮次终态（renderer 靠它清中断标记）', async () => {
     const { events, supervisor, parentSession } = await spawn();
     parentSession.emit({ type: 'agent_start' });

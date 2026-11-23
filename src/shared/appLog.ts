@@ -2,7 +2,7 @@ import { redactSecrets as sharedRedactSecrets } from './redactSecrets';
 
 /** 应用日志：结构化行（JSONL）的格式、解析、脱敏与错误汇总。纯函数，Main / worker / 测试共用 */
 
-export type AppLogLevel = 'info' | 'warn' | 'error';
+export type AppLogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type AppLogSource = 'main' | 'agent' | 'plugin' | 'mcp';
 
 export interface AppLogEntry {
@@ -31,12 +31,12 @@ export function parseLogSummaryLevel(value: unknown): LogSummaryLevel {
 export function parseLogExportHours(value: unknown): number | null {
   return typeof value === 'number' && LOG_EXPORT_HOURS.some((h) => h === value) ? value : null;
 }
-const LEVEL_RANK: Record<AppLogLevel, number> = { info: 0, warn: 1, error: 2 };
+const LEVEL_RANK: Record<AppLogLevel, number> = { debug: -1, info: 0, warn: 1, error: 2 };
 const MAX_TEXT = 8 * 1024;
 const MAX_MESSAGE = 300;
 
 export function isAppLogLevel(value: unknown): value is AppLogLevel {
-  return value === 'info' || value === 'warn' || value === 'error';
+  return value === 'debug' || value === 'info' || value === 'warn' || value === 'error';
 }
 
 function isAppLogSource(value: unknown): value is AppLogSource {
@@ -103,7 +103,7 @@ export function parseAppLogLines(text: string): AppLogEntry[] {
   return out;
 }
 
-const PLUGIN_LINE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z) \[(info|warn|error)\] (.*)$/;
+const PLUGIN_LINE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z) \[(debug|info|warn|error)\] (.*)$/;
 
 /** 插件日志：`ISO [level] msg`，每行一条 */
 export function parsePluginLogLines(text: string, pluginId: string): AppLogEntry[] {
@@ -119,6 +119,8 @@ export function parsePluginLogLines(text: string, pluginId: string): AppLogEntry
 }
 
 const STAMPED_LINE = /^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\] ?/;
+const CRASH_TEXT = /uncaught|unhandled|error|exception|fatal|oom|crash/i;
+const TAIL_ERROR_LINE = /\b(?:error|fatal|panic)\b|exception|uncaught|unhandled/i;
 
 /** worker-exits.log 混有正常优雅重启记录与崩溃退出：按内容分级，避免把正常日志算成错误 */
 export function classifyWorkerExitLevel(text: string): AppLogLevel {
@@ -128,15 +130,17 @@ export function classifyWorkerExitLevel(text: string): AppLogLevel {
     return /超时|强制退出|没在|失败|出错/.test(first) ? 'warn' : 'info';
   }
   if (first.startsWith('exit pid=')) {
-    if (/\bcode=0(?:\s|\(|$)/.test(first) || /\(graceful restart\)$/.test(first)) {
-      if (!/uncaught|unhandled|error|exception|fatal|oom|crash/i.test(first)) return 'info';
-    }
-    return 'error';
+    const expected =
+      /\bcode=0(?:\s|\(|$)/.test(first) || /\((?:graceful restart|expected stop)\)$/.test(first);
+    return expected && !CRASH_TEXT.test(first) ? 'info' : 'error';
   }
   if (first.startsWith('gone reason=')) {
     return /^gone reason=clean-exit\b/.test(first) ? 'info' : 'error';
   }
-  if (first.startsWith('output tail pid=')) return 'warn';
+  if (first.startsWith('output tail pid=')) {
+    const normal = /\(normal exit\)$/.test(first);
+    return normal && !TAIL_ERROR_LINE.test(text.slice(first.length)) ? 'info' : 'warn';
+  }
   return 'error';
 }
 

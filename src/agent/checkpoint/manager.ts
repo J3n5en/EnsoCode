@@ -12,11 +12,18 @@ import {
 
 /** 触发快照的写盘工具 */
 const MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'bash', 'powershell']);
+/** 另一个 git 进程占着 index.lock 时，等这么久再试一次 */
+const INDEX_LOCK_RETRY_MS = 300;
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+const isIndexLocked = (error: unknown): boolean => /index\.lock/.test(messageOf(error));
 
 /**
  * per 顶级会话的 checkpoint 管理:每轮首个写盘工具执行前打一次工作树快照,
  * 快照关联本轮 user 消息的 session entry(回退还原按 entry 匹配)。
  * 非 git 项目静默禁用;git 连续失败 3 次即禁用(每次失败留日志),绝不影响工具执行。
+ * 预期的中间状态不算失败:未解决冲突跳过本轮,index.lock 被占重试一次,工作目录已删除静默跳过。
  */
 export class CheckpointManager {
   /** undefined = 未探测;null = 非 git 项目 */
@@ -58,36 +65,61 @@ export class CheckpointManager {
   }
 
   private async createTurnCheckpoint(toolName: string): Promise<void> {
+    let root: string | null = null;
     try {
-      const root = await this.resolveRoot();
+      root = await this.resolveRoot();
       if (!root) {
         this.disabled = true;
         return;
       }
-      const { entryId, entryTimestamp } = this.getTurnEntry();
-      await createCheckpoint(
-        {
-          root,
-          id: `tool-${this.sessionId}-${Date.now()}`,
-          sessionId: this.sessionId,
-          trigger: 'tool',
-          toolName,
-          entryId,
-          entryTimestamp,
-        },
-        this.host
-      );
-      void pruneCheckpoints(root, this.sessionId, undefined, this.host).catch(() => {});
+      const repo = root;
+      const snapshot = () => {
+        const { entryId, entryTimestamp } = this.getTurnEntry();
+        return createCheckpoint(
+          {
+            root: repo,
+            id: `tool-${this.sessionId}-${Date.now()}`,
+            sessionId: this.sessionId,
+            trigger: 'tool',
+            toolName,
+            entryId,
+            entryTimestamp,
+          },
+          this.host
+        );
+      };
+      await snapshot().catch(async (error: unknown) => {
+        if (!isIndexLocked(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, INDEX_LOCK_RETRY_MS));
+        await snapshot();
+      });
+      void pruneCheckpoints(repo, this.sessionId, undefined, this.host).catch(() => {});
       this.failures = 0;
     } catch (error) {
+      const tag = `[checkpoint] ${this.sessionId.slice(0, 8)}`;
+      // 合并 / rebase 冲突没解完时 git 写不出树:正常的中间状态,冲突解完下一轮照常快照
+      if (/\bunmerged\b/.test(messageOf(error))) {
+        console.info(`${tag} snapshot skipped: unresolved merge conflicts`);
+        return;
+      }
+      if (root && (error as { code?: unknown }).code === 'ENOENT' && (await this.rootGone(root))) {
+        console.debug(`${tag} snapshot skipped: ${root} no longer exists`);
+        return;
+      }
       if (++this.failures >= 3) this.disabled = true;
       // 非 git 是预期内不可用(上面已返回);git 仓库里打不出快照是「该有而没有」,
       // 只计数会让回退+文件静默失效,至少留下原因
       console.warn(
-        `[checkpoint] ${this.sessionId.slice(0, 8)} snapshot failed (${this.failures}/3${this.disabled ? ', disabled for this session' : ''}):`,
-        error instanceof Error ? error.message : String(error)
+        `${tag} snapshot failed (${this.failures}/3${this.disabled ? ', disabled for this session' : ''}):`,
+        messageOf(error)
       );
     }
+  }
+
+  /** spawn git ENOENT 也可能是没装 git;只有工作目录确实没了(如刚删除的 worktree)才算预期 */
+  private async rootGone(root: string): Promise<boolean> {
+    const stats = await this.host.statBatch(root, ['.']).catch(() => null);
+    return stats?.get('.')?.kind === 'missing';
   }
 
   /**

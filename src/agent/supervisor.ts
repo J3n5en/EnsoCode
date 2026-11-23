@@ -1928,7 +1928,10 @@ export class SessionSupervisor {
     // abort 必须旁路串行门：它要打断的正是占着门的那一轮，排队等于永远等不到
     if (command.type === 'abort') {
       void this.execute(command).catch((error) => {
-        console.error('[abort] failed:', toErrorMessage(error));
+        const message = toErrorMessage(error);
+        // 会话已销毁或已换代：要停的东西已经不在了，重复 abort 是幂等终态
+        if (message.startsWith(STALE_SESSION_ERROR)) console.debug('[abort] skipped:', message);
+        else console.error('[abort] failed:', message);
       });
       return;
     }
