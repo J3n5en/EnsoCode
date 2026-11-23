@@ -11,7 +11,8 @@ export const PATROL_INTERVAL_MS = 15 * 60 * 1000;
 
 export interface PatrolFacts {
   conversationId: string;
-  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+  /** queued 是排队会话：还没开始，不算停住 */
+  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
   goalStatus?: string;
   /** 待用户回答的提问与审批条数：有待处理项就不是异常 */
   pending: number;
@@ -31,6 +32,8 @@ export interface PatrolFacts {
    * 只对发过消息的会话有值；等用户、等审批、有后台任务的上游已排除。
    */
   awaitingReplySince?: number;
+  /** 挂着没到点（或到点不足 2 分钟）的自定提醒：会话在等自己定的时间点，不是卡住 */
+  reminderPending?: boolean;
 }
 
 export interface PatrolAnomaly {
@@ -100,6 +103,7 @@ export function patrolAnomalies(facts: readonly PatrolFacts[], now: number): Pat
     }
     if (entry.state !== 'idle') continue;
     if (entry.pending > 0) continue;
+    if (entry.reminderPending) continue;
     // 秘书发过消息、之后没有任何可见回复：与 goal 空闲停住共用同一个空闲阈值
     if (
       entry.awaitingReplySince !== undefined &&

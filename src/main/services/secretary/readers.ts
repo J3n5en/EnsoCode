@@ -1,5 +1,7 @@
+import type { SessionReminder } from '@shared/reminders';
 import { formatGoalResultClaims, type GoalResultView } from '@shared/secretary/goalResult';
 import { parseProfile } from '@shared/secretary/parse';
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   chunkMessageText,
   projectReadableMessages,
@@ -48,7 +50,13 @@ const MAX_READ_LIMIT = 30;
 /** 秘书没有工作区的三种伪项目：没有可派活的目录，也不该出现在它的项目清单里 */
 const HIDDEN_PROJECT_KINDS: ReadonlySet<string> = new Set(['secretary', 'scratch', 'bot-home']);
 
-export type SecretarySessionState = 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+export type SecretarySessionState =
+  | 'running'
+  | 'idle'
+  | 'waiting'
+  | 'error'
+  | 'not-started'
+  | 'queued';
 
 export interface SecretarySessionStatus {
   state: 'running' | 'idle' | 'waiting' | 'error';
@@ -78,6 +86,8 @@ export interface SecretaryReadPorts {
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
+  /** 会话（含子代理）挂着的自定提醒；缺省表示没有 */
+  reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   /** 派发记录上的结构化结果；缺省表示没有 */
   goalResult?(conversationId: string): MaybePromise<GoalResultView | undefined>;
   /** 这条已归档的行是不是派出会话完成后被 Main 自动归档的；缺省表示都不是 */
@@ -104,6 +114,8 @@ interface ListedSession {
   sessionFile?: string;
   /** 会话行上的目标：与 session_create 挂的是同一种，巡检按它判定 */
   goal?: { text: string; status: string };
+  /** 排队会话：位次，或自动启动失败的原因 */
+  queue?: { position: number } | { failed: string };
 }
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
@@ -195,7 +207,9 @@ async function collect(
     (await ports.conversations()).map((conversation) => [conversation.conversationId, conversation])
   );
   const sessions: ListedSession[] = [];
-  for (const [conversationId, row] of Object.entries(await ports.rows())) {
+  const rows = await ports.rows();
+  const positions = queuePositions(rows);
+  for (const [conversationId, row] of Object.entries(rows)) {
     if (row.parentId !== undefined || row.btwParentId !== undefined) continue;
     if (
       row.archived === true &&
@@ -209,6 +223,8 @@ async function collect(
     if (authority.projectId !== projectId) continue;
     const sessionFile = typeof row.sessionFile === 'string' ? row.sessionFile : undefined;
     const goal = listedGoal(row.goal);
+    const queued = queuedStartOf(row);
+    const position = positions.get(conversationId);
     sessions.push({
       conversationId,
       projectId,
@@ -216,6 +232,11 @@ async function collect(
       lastActiveAt: timestamp(row.lastActiveAt) ?? timestamp(row.createdAt) ?? 0,
       ...(sessionFile ? { sessionFile } : {}),
       ...(goal ? { goal } : {}),
+      ...(queued?.failed
+        ? { queue: { failed: queued.failed.error } }
+        : queued && position !== undefined
+          ? { queue: { position } }
+          : {}),
     });
   }
   sessions.sort(
@@ -252,7 +273,15 @@ function sessionState(
   session: ListedSession,
   status: SecretarySessionStatus
 ): SecretarySessionState {
+  if (session.queue) return 'queued';
   return session.sessionFile ? status.state : 'not-started';
+}
+
+function queueFields(session: ListedSession): Record<string, unknown> {
+  if (!session.queue) return {};
+  return 'failed' in session.queue
+    ? { queueFailed: redactSecrets(session.queue.failed) }
+    : { queuePosition: session.queue.position };
 }
 
 /**
@@ -380,6 +409,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           projectId: session.projectId,
           title: session.title,
           state: sessionState(session, status),
+          ...queueFields(session),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           ...(session.goal ? { goal: session.goal } : {}),
@@ -443,6 +473,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ...(message.truncated ? { truncated: true } : {}),
       }));
       const nextBefore = page.ok ? (messages[0]?.index ?? page.baseIndex) : (before ?? 0);
+      const reminders = (await ports.reminders?.(conversationId)) ?? [];
       return {
         ok: true,
         result: {
@@ -450,12 +481,22 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           projectId: session.projectId,
           title: session.title,
           state: sessionState(session, status),
+          ...queueFields(session),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           messages,
           hasMore: readable.hasMore,
           ...(readable.hasMore ? { nextBefore } : {}),
           ...(page.ok ? {} : { historyError: page.code }),
+          // 挂着自定提醒：会话在等自己定的时间点，不是卡住
+          ...(reminders.length > 0
+            ? {
+                reminders: reminders.map((item) => ({
+                  dueAt: item.dueAt,
+                  ...(item.label ? { label: item.label } : {}),
+                })),
+              }
+            : {}),
           ...goal,
         },
       };
@@ -493,9 +534,25 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           ...(task.ownerSessionId ? { startedBySubagent: task.ownerSessionId } : {}),
         };
       });
+      const reminders = (await ports.reminders?.(conversationId)) ?? [];
       return {
         ok: true,
-        result: { conversationId, projectId: session.projectId, tasks },
+        result: {
+          conversationId,
+          projectId: session.projectId,
+          tasks,
+          ...(reminders.length > 0
+            ? {
+                reminders: reminders.map((item) => ({
+                  id: item.id,
+                  ...(item.label ? { label: item.label } : {}),
+                  dueAt: item.dueAt,
+                  inMs: item.dueAt - now,
+                  ...(item.sessionId === conversationId ? {} : { subagent: item.sessionId }),
+                })),
+              }
+            : {}),
+        },
       };
     },
 
@@ -610,6 +667,9 @@ export function readPortsFor(
     },
     async tasks(conversationId) {
       return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
+    },
+    async reminders(conversationId) {
+      return (await import('../sessionReminders')).readSessionReminders(conversationId);
     },
     goalResult(conversationId) {
       return new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId]?.goalResult;

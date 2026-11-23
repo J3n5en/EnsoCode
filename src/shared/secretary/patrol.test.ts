@@ -97,6 +97,19 @@ describe('goal 会话空闲停住', () => {
     expect(patrolAnomalies([facts({ goalStatus: undefined })], now)).toEqual([]);
   });
 
+  it('挂着自己定的提醒：在等时间点，3 分钟、20 分钟、发消息无回复都不报', () => {
+    const waiting = facts({ reminderPending: true });
+    expect(patrolAnomalies([waiting], PATROL_IDLE_GOAL_MS + 1)).toEqual([]);
+    expect(patrolAnomalies([waiting], PATROL_IDLE_MS + 1)).toEqual([]);
+    expect(
+      patrolAnomalies([{ ...waiting, awaitingReplySince: 0 }], PATROL_IDLE_GOAL_MS + 1)
+    ).toEqual([]);
+    // 运行卡住照报
+    expect(patrolAnomalies([{ ...waiting, state: 'running' }], PATROL_RUNNING_MS + 1)).toEqual([
+      { conversationId: 'c1', reason: 'running-stalled' },
+    ]);
+  });
+
   it('最后一条是完成汇报的不算停住', () => {
     const now = PATROL_IDLE_GOAL_MS + 1;
     expect(patrolAnomalies([facts({ lastText: '已完成：打包并安装 EnsoCode' })], now)).toEqual([]);
@@ -172,5 +185,17 @@ describe('patrolStallDetail', () => {
     expect(patrolStallDetail({ reason: 'running-stalled', idleMinutes: 30 })).toBe(
       '自动巡检：运行超过 30 分钟没有任何事件'
     );
+  });
+});
+
+describe('排队会话', () => {
+  it('排队再久也不是停住：既不报空闲卡住，也不报运行卡住', () => {
+    const now = PATROL_IDLE_MS + PATROL_RUNNING_MS + 1;
+    expect(
+      patrolAnomalies(
+        [facts({ state: 'queued' }), facts({ state: 'queued', goalStatus: undefined })],
+        now
+      )
+    ).toEqual([]);
   });
 });

@@ -1,36 +1,36 @@
 import type { ModelRef, ThinkingLevel } from '../types/agent';
-import { THINKING_LEVELS } from '../types/agent';
-import type {
-  CleanupDraft,
-  CleanupItem,
-  CleanupItemKind,
-  ClosedGoal,
-  DispatchDraft,
-  DispatchModelRef,
-  DispatchRecord,
-  PatrolReason,
-  PendingDispatch,
-  PendingProblem,
-  ProposalStatus,
-  RelayAskStatus,
-  SecretaryActivity,
-  SecretaryDispatchFile,
-  SecretaryProfile,
-  SecretaryProfileDraft,
-  SecretaryProposal,
-  SecretaryRelayAsk,
-  SecretaryResultKind,
-  SecretarySchedule,
-  SecretaryTakeoverScope,
-  SecretaryTodo,
-  SecretaryUpdate,
-  TakeoverDraft,
-} from '../types/secretary';
+import { THINKING_LEVELS } from '../types/agentConstants';
 import {
   CLEANUP_ITEM_KINDS,
+  type CleanupDraft,
+  type CleanupItem,
+  type CleanupItemKind,
+  type ClosedGoal,
+  type DispatchDraft,
+  type DispatchModelRef,
+  type DispatchRecord,
   PATROL_REASONS as PATROL_REASON_KINDS,
+  type PatrolReason,
+  type PendingDispatch,
+  type PendingProblem,
+  type ProposalStatus,
+  QUEUED_UPDATE_STATUSES,
+  type QueuedUpdateStatus,
   RELAY_ASK_STATUSES,
   REPLACEABLE_GOAL_STATUSES,
+  type RelayAskStatus,
+  type SecretaryActivity,
+  type SecretaryDispatchFile,
+  type SecretaryProfile,
+  type SecretaryProfileDraft,
+  type SecretaryProposal,
+  type SecretaryRelayAsk,
+  type SecretaryResultKind,
+  type SecretarySchedule,
+  type SecretaryTakeoverScope,
+  type SecretaryTodo,
+  type SecretaryUpdate,
+  type TakeoverDraft,
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
@@ -686,6 +686,18 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
     const conversationId = text(value.conversationId);
     if (!conversationId) return undefined;
     return { ...base, ...scope, kind: 'leftover', conversationId };
+  }
+  if (value.kind === 'queued') {
+    const conversationId = text(value.conversationId);
+    if (!conversationId) return undefined;
+    if (!QUEUED_UPDATE_STATUSES.includes(value.status as QueuedUpdateStatus)) return undefined;
+    return {
+      ...base,
+      ...scope,
+      kind: 'queued',
+      conversationId,
+      status: value.status as QueuedUpdateStatus,
+    };
   }
   if (value.kind === 'proposal') {
     const proposalId = text(value.proposalId);

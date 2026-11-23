@@ -2,8 +2,10 @@ import { toPairProjectEntry } from '@enso/pair';
 import { conversationCwd } from '@shared/conversationCwd';
 import { userAskCount } from '@shared/conversationDotTone';
 import { normalizeLocale, translate } from '@shared/i18n';
+import { catalogQueueOverride } from '@shared/pair/headlessCatalog';
 import { catalogSyncFingerprint, pairJsonFingerprint } from '@shared/pair/metaSync';
 import { projectDisplayName } from '@shared/projectName';
+import { queuePositions } from '@shared/secretary/queuedSession';
 import type { PairCatalogPayload } from '@shared/types';
 import { resolveContextUsage } from '@/components/chat/usageSegments';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
@@ -75,16 +77,18 @@ function buildPayload(): PairCatalogPayload {
   const slashCommands = settings.skills
     .filter((skill) => skill.enabled !== false)
     .map((skill) => ({ name: `/skill:${skill.name}`, description: skill.description }));
+  const positions = queuePositions(sessions.conversations as unknown as Record<string, unknown>);
   // 冷会话桌面不留消息正文：用量与占用都取 session-meta（worker 按完整记录算），不按 c.messages 算
   const toEntry = (c: Conversation) => {
+    const queue = catalogQueueOverride(c, positions.get(c.id));
     const context = resolveContextUsage(c.occupancy, c.contextWindow);
-    return {
+    const entry = {
       id: c.id,
       title: c.parentId ? c.coworkerName || c.title : c.title,
       projectName: projectName.get(c.projectId) ?? '',
       projectId: c.projectId,
       ...(toolCwd(c) ? { cwd: toolCwd(c) } : {}),
-      status: c.spawning ? 'running' : c.status,
+      status: queue?.status ?? (c.spawning ? 'running' : c.status),
       // 与桌面侧栏同一活跃时间：冷会话消息被剥离时回落到持久化的 lastActiveAt
       updatedAt: lastActiveAt(c),
       ...(c.parentId ? { parentId: c.parentId } : {}),
@@ -125,6 +129,10 @@ function buildPayload(): PairCatalogPayload {
       ...(context ? { context } : {}),
       ...(c.usageTotals ? { usageTotals: c.usageTotals } : {}),
     };
+    if (queue && 'queuePosition' in queue)
+      Object.assign(entry, { queuePosition: queue.queuePosition });
+    if (queue && 'queueFailed' in queue) Object.assign(entry, { queueFailed: queue.queueFailed });
+    return entry;
   };
 
   const topLevel = sessions.order

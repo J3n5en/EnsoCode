@@ -13,18 +13,19 @@ import { parseOauthAccountPool } from '@shared/oauthAccountPool';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import { STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
-import {
-  BUILTIN_AGENT_TYPES,
-  BUILTIN_TOOLS,
-  DEFAULT_PRESET_ID,
-  isEditMode,
-  MODEL_API_KINDS,
-  resolveEditMode,
-  THINKING_LEVELS,
-} from '@shared/types';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
+import { BUILTIN_AGENT_TYPES, DEFAULT_PRESET_ID } from '@shared/types/assets';
+import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
+import { isEditMode, resolveEditMode } from '@shared/types/editMode';
+import { MODEL_API_KINDS } from '@shared/types/llm';
 import { hasBase64Shape } from './assets';
-import type { ConfigSyncBundle, ConfigSyncMcpServer, ConfigSyncProvider } from './types';
-import { CONFIG_SYNC_MCP_OMISSIONS, CONFIG_SYNC_PROVIDER_OMISSIONS } from './types';
+import {
+  CONFIG_SYNC_MCP_OMISSIONS,
+  CONFIG_SYNC_PROVIDER_OMISSIONS,
+  type ConfigSyncBundle,
+  type ConfigSyncMcpServer,
+  type ConfigSyncProvider,
+} from './types';
 
 export const CONFIG_SYNC_DECRYPT_ERROR_CODE = 'config-sync-decrypt-failed';
 

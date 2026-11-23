@@ -6,7 +6,7 @@ import {
   parseSessionCleanRequest,
   type StorageScanProgress,
 } from '@shared/resources';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { remoteLeaderId } from '../services/remoteRenderer/senders';
 import {
   isMainRenderer,

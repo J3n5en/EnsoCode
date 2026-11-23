@@ -3,7 +3,7 @@ import path, { join } from 'node:path';
 import { app, ipcMain } from '@platform';
 import { isMediaPath } from '@shared/localImage';
 import type { PastedTextFileResult } from '@shared/pastedText';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { savePastedTextFile } from '../services/pastedTextFiles';
 import { isMainRenderer } from '../services/renderers';
 import { getSourceAuthorityRegistry } from './agent';

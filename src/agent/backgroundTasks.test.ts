@@ -23,6 +23,7 @@ import {
 } from './backgroundTasks';
 import { ForegroundDetachedError } from './foregroundCommand';
 import { createSessionCommandTool } from './sessionShell';
+import { sessionTempRoot } from './sessionTempDir';
 
 const makeManager = (limits?: Partial<ShellLimits>) => {
   const notified: string[] = [];
@@ -106,13 +107,16 @@ describe('withBackground promptSnippet 跟随工具名', () => {
         } as unknown as ToolDefinition,
         manager,
         's1',
-        '/tmp'
+        '/work/project'
       );
     const ps = tool('powershell');
     const psText = [ps.description, ps.promptSnippet, ...(ps.promptGuidelines ?? [])].join('\n');
     expect(ps.promptSnippet).toMatch(/PowerShell/);
     expect(ps.description).toMatch(/Select-Object -First/);
-    expect(ps.description).toMatch(/\$env:TEMP/);
+    // 临时文件指向会话专属目录，而不是全系统共用的 $env:TEMP 根
+    expect(ps.description).toContain(path.join(sessionTempRoot(), 's1'));
+    expect(ps.description).not.toMatch(/and \$env:TEMP,/);
+    expect(ps.description).toMatch(/never .*\$env:TEMP root/i);
     expect(ps.description).toMatch(/Get-Content/);
     expect(ps.promptGuidelines?.[2]).toMatch(/timeout only kills/i);
     expect(ps.promptGuidelines?.[2]).toMatch(/Start-Sleep/);
@@ -122,7 +126,30 @@ describe('withBackground promptSnippet 跟随工具名', () => {
     const bash = tool('bash');
     expect(bash.description).toMatch(/cat\/head\/tail\/sed\/nl/);
     expect(bash.description).not.toMatch(/Select-Object|Get-Content|\$env:/);
+    expect(bash.description).not.toContain(sessionTempRoot());
     expect(bash.promptGuidelines?.[0]).toMatch(/nohup/);
+  });
+
+  it('powershell 不同会话拿到不同临时目录；Temp 落在项目里时不给路径也不指向 Temp 根', () => {
+    const manager = makeManager().manager;
+    const ps = (sessionId: string, cwd: string) =>
+      withBackground(
+        {
+          name: 'powershell',
+          label: 'powershell',
+          description: '',
+          parameters: { type: 'object', properties: {} },
+          execute: async () => ({ content: [], details: undefined }),
+        } as unknown as ToolDefinition,
+        manager,
+        sessionId,
+        cwd
+      ).description;
+    expect(ps('s2', '/work/project')).toContain(path.join(sessionTempRoot(), 's2'));
+    expect(ps('s2', '/work/project')).not.toContain(path.join(sessionTempRoot(), 's1'));
+    const inProject = ps('s1', tmpdir());
+    expect(inProject).not.toContain(sessionTempRoot());
+    expect(inProject).toMatch(/never .*\$env:TEMP root/i);
   });
 
   it('提示词：snippet 讲让位语义，rules 追加后台/让位/timeout 三条且保留原工具的', () => {
@@ -139,13 +166,15 @@ describe('withBackground promptSnippet 跟随工具名', () => {
     expect(wrapped.promptSnippet).toMatch(/tracked jobs/);
     expect(wrapped.promptSnippet).toMatch(/background=true/);
     expect(wrapped.promptSnippet).toMatch(/timeout only kills/i);
-    expect(wrapped.promptGuidelines).toHaveLength(4);
+    expect(wrapped.promptGuidelines).toHaveLength(5);
     expect(wrapped.promptGuidelines?.[0]).toContain('PI_*');
     expect(wrapped.promptGuidelines?.[1]).toMatch(/nohup/);
     expect(wrapped.promptGuidelines?.[2]).toMatch(/do not rerun/i);
     expect(wrapped.promptGuidelines?.[3]).toMatch(/timeout only kills/i);
     expect(wrapped.promptGuidelines?.[3]).toMatch(/background: true/);
     expect(wrapped.promptGuidelines?.[3]).toMatch(/sleep, ps, pgrep/);
+    expect(wrapped.promptGuidelines?.[4]).toMatch(/remind_me/);
+    expect(wrapped.promptGuidelines?.[4]).toMatch(/--watch/);
     expect(wrapped.description).toMatch(/fresh shell/i);
     expect(wrapped.description).toMatch(/Do not poll/);
     expect(wrapped.description).toMatch(/background: true/);

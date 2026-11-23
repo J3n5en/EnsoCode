@@ -18,7 +18,7 @@ vi.mock('../services/elevation', () => ({
   elevationBroker: { answer: mocks.answer, list: mocks.list },
 }));
 
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { registerElevationHandlers } from './elevation';
 
 const call = (channel: string, senderId: number, ...args: unknown[]) =>

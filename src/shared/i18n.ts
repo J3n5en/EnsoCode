@@ -519,6 +519,8 @@ export const zhTranslations: Record<string, string> = {
   'Protected: secrets': '受保护：密钥',
   'Protected: destructive command': '受保护：破坏性命令',
   'dcg: {{reason}}': 'dcg：{{reason}}',
+  'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.':
+    '在系统共用的 Temp 根目录里删除，那里有其他程序的文件；只应在会话专属临时目录内删除。',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',
   'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.':
     '执行 bash 和 PowerShell 命令前先用 dcg 检查。命中 git reset --hard、递归删除等危险命令时，即使在完全放行模式下也必须由你确认。新会话生效。',
@@ -2069,6 +2071,9 @@ export const zhTranslations: Record<string, string> = {
   '{{name}} installed': '已安装 {{name}}',
   'Turn it on in the list below to use it.': '在下面的列表里打开开关即可使用。',
   'updating from {{version}}': '从 {{version}} 更新',
+  'This update asks for more than {{version}}. {{version}} keeps running until you allow the update in the plugin list.':
+    '这次更新申请的权限比 {{version}} 多。确认后 {{version}} 继续运行，在插件列表里点「允许」才会切到新版。',
+  'Awaiting approval': '待授权',
   'Keep current': '保持现状',
   'Stopped after crashes': '多次崩溃后已停止',
   'Plugin command failed': '插件命令执行失败',
@@ -3750,6 +3755,7 @@ export const zhTranslations: Record<string, string> = {
   'The session was deleted': '会话已删除',
   '{{n}} waiting': '{{n}} 件等你',
   '{{n}} running': '{{n}} 件在跑',
+  '{{n}} queued': '{{n}} 件排队',
   '{{n}} dispatched tasks running': '派出的 {{n}} 件活在跑',
   'Unknown source': '未知来源',
   'Nothing running': '没有在跑的活',
@@ -4092,6 +4098,16 @@ export const zhTranslations: Record<string, string> = {
   'Run in a worktree': '使用隔离工作区',
   'Run in the project checkout': '在项目目录里',
   'Created the session': '已创建',
+  'Queued · #{{n}}': '排队中 · 第 {{n}} 位',
+  'Queued · #{{n}}, starts automatically when a slot opens':
+    '排队中 · 第 {{n}} 位，有空位后自动开始',
+  'Queued at #{{n}}': '已排队 · 第 {{n}} 位',
+  'Start now': '立即开始',
+  'Cancel queue': '取消排队',
+  'Cancel this queued session? It has not run and will be deleted.':
+    '取消这个排队会话？它还没运行，会被删除。',
+  'Starting…': '正在开始…',
+  'Queued start is unavailable': '暂时不能开始排队会话',
   'Handed to {{name}}': '已转给 {{name}}',
   'No answer in time': '超时未答',
   '{{name}} answered: {{answer}}': '{{name}} 已回答：{{answer}}',
@@ -4101,6 +4117,9 @@ export const zhTranslations: Record<string, string> = {
   'Answering…': '回答中…',
   'Answered {{count}} questions': '回答了 {{count}} 个提问',
   'Background task wrap-up': '后台任务收尾',
+  'Remind me': '定提醒',
+  'Reminder list': '提醒列表',
+  'Cancel reminder': '取消提醒',
   'Stop {{stopped}} · Keep {{kept}}': '停 {{stopped}} · 留 {{kept}}',
   'Settling…': '收尾中…',
   'Not running': '未在运行',

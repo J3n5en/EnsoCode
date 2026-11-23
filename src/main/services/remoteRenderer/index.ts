@@ -10,7 +10,7 @@ import {
 } from '@enso/pair';
 import { app, type IpcEvent, type IpcInvokeEvent, ipcMain } from '@platform';
 import { RemoteReadCache, takeRemoteMarks, writeSeedOf } from '@shared/remoteDelta';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { readSettings } from '../../ipc/settings';
 import { handleLocalImageRequest } from '../localImageProtocol';
 import { isPairHeadless, setPairHeadless } from '../pairSessionHost';

@@ -159,7 +159,9 @@ export function ApprovalBar({
       )}
       {active.guard && (
         <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
-          {t('dcg: {{reason}}', { reason: active.guard.reason })}
+          {active.guard.ruleId.startsWith('enso.')
+            ? t(active.guard.reason)
+            : t('dcg: {{reason}}', { reason: active.guard.reason })}
         </p>
       )}
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}

@@ -1,6 +1,8 @@
 import { formatGoalResultChecks, formatGoalResultClaims } from '@shared/secretary/goalResult';
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import { wrapUntrusted } from '@shared/secretary/transcript';
-import { type ProjectAuthority, TURN_REPORT_MAX_CHARS, type TurnReport } from '@shared/types/agent';
+import type { ProjectAuthority, TurnReport } from '@shared/types/agent';
+import { TURN_REPORT_MAX_CHARS } from '@shared/types/agentConstants';
 import {
   type DispatchRecord,
   NEEDS_YOU_RESULTS,
@@ -116,7 +118,13 @@ function isResultUpdate(
 ): update is Extract<SecretaryUpdate, { kind: SecretaryResultKind }> {
   // 转交提问也带会话 id，但它不是这一轮的结果：不参与「同一会话只留最新结果」的替换
   // 遗留巡检同理：它说的是后台任务，不是这一轮的结论
-  return 'conversationId' in update && update.kind !== 'ask-relay' && update.kind !== 'leftover';
+  // 排队会话的启动失败与取消也不是一轮的结论
+  return (
+    'conversationId' in update &&
+    update.kind !== 'ask-relay' &&
+    update.kind !== 'leftover' &&
+    update.kind !== 'queued'
+  );
 }
 
 /** 同一件事只入队一次；同一会话只保留最新结果，旧状态已被新状态取代 */
@@ -355,13 +363,14 @@ export const SETTLED_RESULTS: ReadonlySet<SecretaryResultKind> = new Set([
   'interrupted',
 ]);
 
-export type SessionLiveState = 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+export type SessionLiveState = 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
 
-/** 没有会话文件的派发记录还没真正开始 */
+/** 行上有 queuedStart 的是排队会话；没有会话文件的派发记录还没真正开始 */
 export function sessionLiveState(
   row: Record<string, unknown> | undefined,
   status: SecretarySessionStatus | undefined
 ): SessionLiveState {
+  if (queuedStartOf(row)) return 'queued';
   if (!row?.sessionFile) return 'not-started';
   return status?.state ?? 'idle';
 }
@@ -418,6 +427,9 @@ export function countsAsRunning(
   row: Record<string, unknown> | undefined,
   status: SecretarySessionStatus | undefined
 ): boolean {
+  // 正在启动的排队会话已经占了名额：否则启动期间并发的派发会多建一个
+  const queued = queuedStartOf(row);
+  if (queued) return queued.startingAt !== undefined;
   const state = sessionStateOf(record, row, status);
   if (sessionNeedsUser(record, state)) return false;
   // 用户撤销手动标记：放回进行中，直到这一轮出现新结果
@@ -492,7 +504,9 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     }));
 
   const running: SecretaryCard[] = [];
+  const queuedCards: { card: SecretaryCard; at: number }[] = [];
   const done: SessionCard[] = [];
+  const positions = queuePositions(input.rows);
   for (const record of Object.values(file.dispatched)) {
     const row = input.rows[record.conversationId];
     if (!row) continue;
@@ -501,6 +515,8 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     const status = input.statuses[record.conversationId];
     const state = sessionStateOf(record, row, status);
     const going = countsAsRunning(record, row, status);
+    const queued = queuedStartOf(row);
+    const position = positions.get(record.conversationId);
     // 巡检报过停住、之后没有新活动：进行中列表标「已停住」，等它真的动起来才消失
     const stalled =
       going &&
@@ -536,7 +552,15 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.baseRef ? { baseRef: record.baseRef } : {}),
       ...(record.branch ? { branch: record.branch } : {}),
       ...(record.model ? { model: record.model } : {}),
+      ...(position !== undefined ? { queuePosition: position } : {}),
+      ...(queued?.failed ? { queueFailed: queued.failed.error } : {}),
     };
+    // 排队会话放在真正在跑的后面；自动启动失败的要用户立即开始或取消
+    if (queued) {
+      if (queued.failed) needsYou.push(card);
+      else queuedCards.push({ card, at: queued.queuedAt });
+      continue;
+    }
     const needsYouNow = sessionNeedsUser(record, state);
     if (needsYouNow) needsYou.push(card);
     else if (going) running.push(card);
@@ -555,6 +579,10 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
   running.sort(
     (left, right) => cardAt(right) - cardAt(left) || cardKey(left).localeCompare(cardKey(right))
   );
+  queuedCards.sort(
+    (left, right) => left.at - right.at || cardKey(left.card).localeCompare(cardKey(right.card))
+  );
+  running.push(...queuedCards.map((entry) => entry.card));
   done.sort(
     (left, right) =>
       (right.resultAt ?? right.stateSince) - (left.resultAt ?? left.stateSince) ||

@@ -164,7 +164,13 @@ describe('secretarySectionView', () => {
   });
 
   it('未完成初次设置时显示默认名「秘书」', () => {
-    expect(view()).toEqual({ name: '[Secretary]', needsYou: 0, running: 0, configured: false });
+    expect(view()).toEqual({
+      name: '[Secretary]',
+      needsYou: 0,
+      running: 0,
+      queued: 0,
+      configured: false,
+    });
   });
 
   it('已设置时用档案名与头像色，摘要取等你与在跑的条数', () => {
@@ -184,9 +190,27 @@ describe('secretarySectionView', () => {
       name: '小安',
       needsYou: 1,
       running: 1,
+      queued: 0,
       configured: true,
       color: '#8b7bff',
     });
+  });
+
+  it('排队的会话不算在跑，单独计数', () => {
+    const result = view({
+      profile,
+      board: {
+        needsYou: [],
+        running: [
+          sessionCard('c1'),
+          { ...sessionCard('c2'), state: 'queued', queuePosition: 1 },
+          { ...sessionCard('c3'), state: 'queued', queuePosition: 2 },
+        ],
+        done: [],
+        todos: [],
+      },
+    });
+    expect(result).toMatchObject({ running: 1, queued: 2 });
   });
 
   it('有图片时带上受控地址，配对页面走隧道前缀', () => {

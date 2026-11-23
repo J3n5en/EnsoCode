@@ -1,7 +1,9 @@
 import type { SettingsState } from '../renderer/stores/settings/types';
 import type { JsonSchema } from '../shared/capabilities/types';
 import type { ProductSurfaceId } from '../shared/productSurfaces';
-import { BUILTIN_AGENT_TYPES, BUILTIN_TOOLS, type IPC_CHANNELS } from '../shared/types';
+import type { IPC_CHANNELS } from '../shared/types';
+import { BUILTIN_AGENT_TYPES } from '../shared/types/assets';
+import { BUILTIN_TOOLS } from '../shared/types/builtinTools';
 
 export type CoverageDisposition =
   | { kind: 'surface'; surfaceIds: readonly [ProductSurfaceId, ...ProductSurfaceId[]] }
@@ -521,6 +523,8 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_MARK_RESULT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_STOP_TASKS: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_GOAL_ACTION: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_QUEUED_START: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_QUEUED_CANCEL: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SCHEDULES_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SCHEDULE_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_GET_PROFILE: excluded('Experimental secretary agent; not an Enso capability.'),
@@ -770,6 +774,7 @@ export const IPC_PRODUCT_COVERAGE = {
   WORKTREE_GET: surfaces('conversations.worktree.status'),
   WORKTREE_LIST: surfaces('conversations.worktree.status'),
   WORKTREE_STATUS: surfaces('conversations.worktree.status'),
+  WORKTREE_STATUSES: surfaces('conversations.worktree.status'),
   WORKTREE_REMOVE: surfaces('conversations.worktree.remove'),
   WORKTREE_REBUILD: surfaces('conversations.worktree.rebuild'),
   WORKTREE_REPO_CLEAN: surfaces('conversations.worktree.status'),

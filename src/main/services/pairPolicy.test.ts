@@ -1,8 +1,6 @@
 import { APPROVAL_DECISIONS, APPROVAL_MODES } from '@enso/pair';
-import {
-  APPROVAL_DECISIONS as LOCAL_APPROVAL_DECISIONS,
-  APPROVAL_MODES as LOCAL_APPROVAL_MODES,
-} from '@shared/types/agent';
+import { APPROVAL_DECISIONS as LOCAL_APPROVAL_DECISIONS } from '@shared/types/agent';
+import { APPROVAL_MODES as LOCAL_APPROVAL_MODES } from '@shared/types/agentConstants';
 import { describe, expect, it } from 'vitest';
 import {
   botCommandError,

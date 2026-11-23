@@ -1,5 +1,6 @@
 import type { DefaultModelRef } from '@shared/defaultModel';
-import { APPROVAL_MODES, THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
+import type { ThinkingLevel } from '@shared/types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   asModelRef,
   providersFromSettings,

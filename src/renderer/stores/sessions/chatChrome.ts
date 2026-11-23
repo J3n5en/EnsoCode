@@ -1,4 +1,5 @@
 import { conversationHasRunningChild } from '@shared/conversationDotTone';
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import type { Conversation } from './index';
 import { chatSurfaceBusy } from './messageCache';
 
@@ -46,6 +47,9 @@ export interface ChatChrome {
   childLockedProfileId?: string;
   displayedParentId?: string;
   busy: boolean;
+  queued?: boolean;
+  queuePosition?: number;
+  queueFailed?: string;
 }
 
 /**
@@ -81,6 +85,7 @@ export function selectChatChrome(state: SessionsSlice): ChatChrome | null {
   const displayed = parent.activeTabId
     ? (state.conversations[parent.activeTabId] ?? parent)
     : parent;
+  const queued = queuedStartOf(displayed);
   return {
     id: displayed.id,
     parentId: parent.id,
@@ -125,5 +130,9 @@ export function selectChatChrome(state: SessionsSlice): ChatChrome | null {
     childLockedProfileId: displayed.child?.lockedProfileId,
     displayedParentId: displayed.parentId,
     busy: chatSurfaceBusy(displayed),
+    queued: Boolean(queued && !queued.failed),
+    queuePosition:
+      queued && !queued.failed ? queuePositions(state.conversations).get(displayed.id) : undefined,
+    queueFailed: queued?.failed?.error,
   };
 }

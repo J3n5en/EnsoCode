@@ -1,6 +1,7 @@
 import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
 import { interruptReason } from '@shared/exitInterrupt';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
+import { hasPendingReminder, type SessionReminder } from '@shared/reminders';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import {
@@ -17,6 +18,7 @@ import {
   patrolStallDetail,
 } from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
+import { queuedStartOf } from '@shared/secretary/queuedSession';
 import {
   isPureSessionUpdate,
   messageText,
@@ -118,6 +120,8 @@ const DAILY_KINDS: ReadonlySet<SecretaryResultKind> = new Set([
 
 export interface SecretaryHostPorts extends DeliveryPorts {
   enabled(): boolean;
+  /** 派发记录的只读视图（不复制）：流式事件先据此判断要不要读整份；不得修改 */
+  peekFile?(): Readonly<SecretaryDispatchFile>;
   profile(): SecretaryProfile | null;
   todos(): SecretaryTodo[];
   saveTodos(todos: SecretaryTodo[]): void;
@@ -138,6 +142,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   tasksReported?(): boolean;
   /** 主会话名下还有没回来的子代理 Run；缺省表示没有 */
   subagentsRunning?(conversationId: string): boolean;
+  /** 会话（含子代理）挂着的自定提醒；缺省表示没有 */
+  reminders?(conversationId: string): readonly SessionReminder[];
   /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
   interruptDetail?(conversationId: string): string | undefined;
   /** 应用正在退出，这个会话写进了恢复清单、新实例接着跑：退出打断它不算结果 */
@@ -146,6 +152,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   coldResumed?(conversationId: string): boolean;
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
   startPending?(pendingIds: readonly string[], now: number): void;
+  /** 可能空出了名额：让排队会话的启动泵按先进先出补位；缺省表示没有排队会话 */
+  drainQueued?(): void;
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
@@ -193,6 +201,9 @@ function sessionIdOf(event: RendererAgentEvent): string | undefined {
   if (!('identity' in event) || !event.identity) return undefined;
   return 'sessionId' in event.identity ? event.identity.sessionId : undefined;
 }
+
+/** 高频的流式事件：没有状态变化时只和派出会话、在途投递的秘书会话有关 */
+const STREAM_EVENTS = new Set(['message-upsert', 'message-update', 'tool-output', 'session-meta']);
 
 /** 审计里列出的任务：id 与命令摘要，最多三个 */
 function taskList(tasks: readonly ObservedTask[]): string {
@@ -361,9 +372,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
    */
   function awaitsWake(conversationId: string, now: number): boolean {
     if (ports.subagentsRunning?.(conversationId)) return true;
+    if (reminderPending(conversationId, now)) return true;
     return (ports.tasks?.(conversationId) ?? []).some(
       (task) => task.status === 'running' && task.alive !== false && !taskIsPersistent(task, now)
     );
+  }
+
+  /** 在等自己定的提醒：到点超过宽限期还没被叫醒就不算 */
+  function reminderPending(conversationId: string, now: number): boolean {
+    return hasPendingReminder(ports.reminders?.(conversationId) ?? [], now);
   }
 
   /**
@@ -506,7 +523,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       if (ports.viewed?.(conversationId)) continue;
       const status = ports.status(conversationId);
-      if (!autoArchivable(record, row, status)) {
+      if (!autoArchivable(record, row, status, reminderPending(conversationId, now))) {
         archiveHolds.delete(conversationId);
         continue;
       }
@@ -907,6 +924,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         record.backgroundRunning !== true
           ? { awaitingReplySince: record.sentAt }
           : {}),
+        ...(reminderPending(record.conversationId, now) ? { reminderPending: true } : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {
@@ -1183,6 +1201,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (sessionId && ports.contact && ports.isSecretaryConversation?.(sessionId)) {
         forwardToContact(event, sessionId);
       }
+      if (sessionId && changes.length === 0 && STREAM_EVENTS.has(event.type) && ports.peekFile) {
+        const view = ports.peekFile();
+        if (
+          !view.dispatched[sessionId] &&
+          !view.dispatched[rootIdOf(event, sessionId)] &&
+          view.inflight?.secretaryConversationId !== sessionId
+        )
+          return;
+      }
       const now = ports.now();
       const touched = new Set<string>(changes.map((change) => change.sessionId));
       if (sessionId) touched.add(sessionId);
@@ -1277,10 +1304,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           if (resultEvent) kind = classify(record, resultEvent, status);
           // 会话没能启动（spawn 被拒）：没有任何轮次事件，在这里记一次失败。
           // STALE 是发给已不在 worker 的会话的命令被拒，不是会话本身出错
+          // 排队会话的启动失败由启动泵自己标记并回传，这里不再记一次
           if (
             !kind &&
             event.type === 'parent-rejected' &&
             !event.reason.startsWith(STALE_SESSION_ERROR) &&
+            !queuedStartOf(rows[conversationId]) &&
             awaitsOutcome(record)
           ) {
             kind = 'failed';
@@ -1420,6 +1449,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const reported = ports.reportPeerTodos?.() ?? false;
       if (changed || todosChanged || reported) ports.publish();
       flush(now);
+      // 派出会话一轮结束、报错或停下：可能空出了名额
+      const settled =
+        (sessionId !== undefined &&
+          (event.type === 'turn-completed' || event.type === 'turn-failed')) ||
+        changes.some((entry) => entry.previous === 'running' && entry.state !== 'running');
+      if (settled && [...touched].some((id) => file.dispatched[id] !== undefined))
+        ports.drainQueued?.();
     },
 
     tick(now = ports.now()) {
@@ -1496,6 +1532,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         .filter((pending) => pending.status === 'waiting')
         .map((pending) => pending.id);
       if (waiting.length > 0) ports.startPending?.(waiting, now);
+      // 每分钟兜底：名额的变化不一定都有事件（手动标完成、改上限、会话被删）
+      ports.drainQueued?.();
     },
 
     recordBackgroundStalls(stalls, now = ports.now()) {

@@ -1,5 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeSettingsState } from './migrate';
 
 const disk = vi.hoisted(() => ({ value: null as unknown }));
@@ -28,7 +27,6 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
 const normalizableRules = [
   { extension: ' MD ', target: 'internal' },
   { extension: '.TXT', target: 'system' },
@@ -43,10 +41,9 @@ const cleanRules = [
   { extension: '.txt', target: 'system' },
 ];
 
-beforeAll(async () => {
-  settings = await import('./index');
-  await settings.useSettingsStore.persist.rehydrate();
-});
+const settings = await import('./index');
+await settings.useSettingsStore.persist.rehydrate();
+
 beforeEach(() => {
   settings.useSettingsStore.setState({ fileOpenRules: [] });
   writeKey.mockClear();

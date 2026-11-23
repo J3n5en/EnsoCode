@@ -18,7 +18,12 @@ import { cn } from '@/lib/utils';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
 import { nextMarketLoadRequest, openMarketLoadRequest } from './marketLoad';
 import { httpHomepage, PluginReadmeBody } from './PluginReadmeDialog';
-import { filterMarketPlugins, type MarketSection, marketSections } from './pluginMarketFilter';
+import {
+  filterMarketPlugins,
+  type MarketSection,
+  marketInstallAction,
+  marketSections,
+} from './pluginMarketFilter';
 
 const SECTION_LABELS: Record<'all' | 'installed' | 'updates' | 'other', string> = {
   all: '全部',
@@ -182,19 +187,26 @@ function InstallAction({
   onInstall: (id: string) => void;
 }) {
   const { t } = useI18n();
-  if (plugin.installedVersion && !plugin.updateAvailable)
+  const action = marketInstallAction(plugin);
+  if (action === 'installed')
     return <span className="shrink-0 text-muted-foreground text-xs">{t('Installed')}</span>;
+  if (action === 'pending')
+    return (
+      <span className="shrink-0 text-amber-700 text-xs dark:text-amber-400">
+        {t('Awaiting approval')}
+      </span>
+    );
   return (
     <Button
       size="xs"
-      variant={plugin.updateAvailable ? 'default' : 'outline'}
+      variant={action === 'update' ? 'default' : 'outline'}
       disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
         onInstall(plugin.id);
       }}
     >
-      {plugin.updateAvailable ? t('Update') : t('Install')}
+      {action === 'update' ? t('Update') : t('Install')}
     </Button>
   );
 }

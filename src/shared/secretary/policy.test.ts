@@ -327,25 +327,37 @@ describe('validateDispatch', () => {
     );
   });
 
-  it('rejects an invisible project and a full dispatch queue', () => {
+  it('rejects an invisible project; a full dispatch limit queues instead of failing', () => {
     expect(validateDispatch(draft(), { ...ctx, visible: false })).toEqual({
       ok: false,
       error: 'project-not-visible',
     });
     expect(validateDispatch(draft(), { ...ctx, running: 3 })).toEqual({
-      ok: false,
-      error: 'dispatch-limit',
+      ok: true,
+      draft: draft(),
+      overLimit: 'dispatch-limit',
     });
     expect(validateDispatch(draft(), { ...ctx, runningTotal: 10, maxTotal: 10 })).toEqual({
-      ok: false,
-      error: 'dispatch-limit-total',
+      ok: true,
+      draft: draft(),
+      overLimit: 'dispatch-limit-total',
     });
     expect(
-      validateDispatch(draft(), { ...ctx, runningTotal: 10, maxTotal: 10, deferred: true }).ok
-    ).toBe(true);
-    expect(validateDispatch(draft(), { ...ctx, running: 3 })).toEqual({
-      ok: false,
-      error: 'dispatch-limit',
+      validateDispatch(draft(), { ...ctx, runningTotal: 10, maxTotal: 10, deferred: true })
+    ).toEqual({ ok: true, draft: draft() });
+  });
+
+  it('已有排队的派发时，新派发排在它们后面，不插队', () => {
+    expect(validateDispatch(draft(), { ...ctx, running: 2, queued: 1 })).toMatchObject({
+      ok: true,
+      overLimit: 'dispatch-limit',
+    });
+    expect(
+      validateDispatch(draft(), { ...ctx, runningTotal: 9, maxTotal: 10, queuedTotal: 1 })
+    ).toMatchObject({ ok: true, overLimit: 'dispatch-limit-total' });
+    expect(validateDispatch(draft(), { ...ctx, running: 1, queued: 1 })).toEqual({
+      ok: true,
+      draft: draft(),
     });
   });
 
@@ -365,7 +377,7 @@ describe('validateDispatch', () => {
     expect(deferred.ok).toBe(true);
     expect(
       validateDispatch(draft({ worktree: true, after: ['c1'] }), { ...ctx, running: 3 })
-    ).toEqual({ ok: false, error: 'dispatch-limit' });
+    ).toMatchObject({ ok: true, overLimit: 'dispatch-limit' });
   });
 
   it('基线只在真的建 worktree 时才有意义', () => {

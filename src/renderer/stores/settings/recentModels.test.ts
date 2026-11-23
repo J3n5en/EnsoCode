@@ -1,5 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { describe, expect, it, vi } from 'vitest';
 
 const writeKey = vi.hoisted(() => vi.fn(async (_name: string, _value: unknown) => true));
 
@@ -36,7 +35,8 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
+const settings = await import('./index');
+await vi.waitFor(() => expect(settings.useSettingsStore.persist.hasHydrated()).toBe(true));
 
 function lastPersistedState(): Record<string, unknown> {
   const call = writeKey.mock.calls.filter(([name]) => name === 'enso-settings').at(-1);
@@ -45,11 +45,6 @@ function lastPersistedState(): Record<string, unknown> {
 }
 
 describe('最近使用模型设置', () => {
-  beforeAll(async () => {
-    settings = await import('./index');
-    await vi.waitFor(() => expect(settings.useSettingsStore.persist.hasHydrated()).toBe(true));
-  });
-
   it('读入磁盘时丢弃脏条目', () => {
     expect(settings.useSettingsStore.getState().recentModels).toEqual([
       { providerId: 'a', modelId: 'x' },

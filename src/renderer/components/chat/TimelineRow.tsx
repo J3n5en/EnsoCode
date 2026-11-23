@@ -724,6 +724,7 @@ const UPDATE_ICON: Record<SecretaryUpdateLine['kind'], typeof Bot> = {
   pending: Hourglass,
   'ask-relay': MessageCircleQuestion,
   leftover: Hourglass,
+  queued: AlarmClock,
 };
 
 /** 秘书收到的派出会话回传与定时提醒：每条一行，点整行展开详情，右侧图标打开会话 */

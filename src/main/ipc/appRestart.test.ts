@@ -1,5 +1,4 @@
-import { IPC_CHANNELS } from '@shared/types';
-import type { RestartBlocker } from '@shared/types/ipc';
+import { IPC_CHANNELS, type RestartBlocker } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({

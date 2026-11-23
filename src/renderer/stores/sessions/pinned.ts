@@ -39,6 +39,9 @@ interface SidebarConversation {
   subagents?: readonly { status: string }[];
   backgroundTasks?: readonly { status: string }[];
   worktree?: { path?: string };
+  /** 排队尚未启动。失败启动看 queueFailed，语气是 failed */
+  queued?: boolean;
+  queueFailed?: string;
 }
 
 type Conversations = Record<string, SidebarConversation | undefined>;
@@ -152,10 +155,11 @@ function sidebarTone(
   conversations: Conversations
 ): ConversationDotTone {
   return conversationDotTone({
-    status: conversation.status ?? 'idle',
+    status: conversation.queueFailed ? 'failed' : (conversation.status ?? 'idle'),
     spawning: conversation.spawning,
     unread: conversation.unread,
     pendingAskCount: userAskCount(conversation.pendingAsks),
+    queued: conversation.queued === true && !conversation.queueFailed,
     hasRunningChild: conversationHasRunningChild(
       { ...conversation, status: conversation.status ?? 'idle' },
       conversations as Record<string, { status: string; spawning?: boolean } | undefined>
@@ -165,7 +169,9 @@ function sidebarTone(
 
 /** 不受留存窗口影响、始终留在「活跃中」:运行、待确认、未读、未读失败 */
 function staysActive(tone: ConversationDotTone, conversation: SidebarConversation): boolean {
-  if (tone === 'failed') return conversation.unread === true;
+  if (tone === 'queued') return true;
+  if (tone === 'failed')
+    return conversation.unread === true || conversation.queueFailed !== undefined;
   return tone === 'running' || tone === 'waiting' || tone === 'unread';
 }
 

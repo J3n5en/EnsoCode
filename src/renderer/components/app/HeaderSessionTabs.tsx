@@ -138,17 +138,26 @@ function SessionTab({
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const tone =
     (conversation.pendingApprovals?.length ?? 0) > 0
       ? 'attention'
       : conversationDotTone({
-          status: conversation.status,
+          status: conversation.queueFailed ? 'failed' : conversation.status,
           spawning: conversation.spawning,
           unread: conversation.unread,
           pendingAskCount: userAskCount(conversation.pendingAsks),
           hasRunningChild: conversation.hasRunningChild,
+          queued: conversation.queued === true && !conversation.queueFailed,
         });
   const title = conversation.title || untitled;
+  const toneTitle = conversation.queueFailed
+    ? conversation.queueFailed
+    : conversation.queued
+      ? t('Queued · #{{n}}, starts automatically when a slot opens', {
+          n: conversation.queuePosition ?? 1,
+        })
+      : undefined;
   // 会话按隐藏项目认所属秘书；多秘书时头像地址必须带 s=，Main 才不会拒掉
   const secretaryId = useSecretaryStore(
     (state) =>
@@ -210,7 +219,12 @@ function SessionTab({
           ) : tone === 'idle' ? (
             <MessageSquare className="size-3" />
           ) : (
-            <ConversationStatusIndicator tone={tone} size="sm" />
+            <ConversationStatusIndicator
+              tone={tone}
+              size="sm"
+              title={toneTitle}
+              conversationId={id}
+            />
           )}
         </span>
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>

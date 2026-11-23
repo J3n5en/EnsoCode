@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import {
-  isSecretarySkillName,
-  parseSecretarySkillDraft,
-  parseSecretarySkillFile,
-  renderSecretarySkillFile,
-} from './skills';
+import { parseSecretarySkillFile, renderSecretarySkillFile } from './skillFile';
+import { isSecretarySkillName, parseSecretarySkillDraft } from './skills';
 
 describe('isSecretarySkillName', () => {
   it('accepts lowercase slugs', () => {

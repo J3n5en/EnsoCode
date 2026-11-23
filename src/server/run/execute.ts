@@ -13,7 +13,7 @@ import type {
   SessionIdentity,
   ThinkingLevel,
 } from '@shared/types/agent';
-import { THINKING_LEVELS } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   abortSession,
   agentDataDir,
@@ -327,6 +327,7 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
           stop({ code: 1, status: 'error', reason: 'worker-exited' });
           return;
         }
+        if (event.type === 'worker-swapped') return;
         const who = relate(event);
         if (!who) return;
         if (event.type === 'message-upsert') {

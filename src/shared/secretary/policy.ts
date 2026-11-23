@@ -255,34 +255,45 @@ export interface DispatchContext {
   /** 全部秘书合计在跑的派发数与合计上限；缺省表示不查合计 */
   runningTotal?: number;
   maxTotal?: number;
+  /** 本秘书还在排队（未失败）的派发数：新派发排在它们后面，不插队 */
+  queued?: number;
+  /** 全部秘书合计在排队的派发数 */
+  queuedTotal?: number;
   /** 带 after 的派发先等依赖，不占运行名额；真正开始时再查一次上限 */
   deferred?: boolean;
 }
 
+export type DispatchLimit = 'dispatch-limit' | 'dispatch-limit-total';
+
+/** 超过上限不再报错：overLimit 告诉调用方这一条要建成排队会话 */
 export function validateDispatch(
   draft: DispatchDraft,
   ctx: DispatchContext
-): { ok: true; draft: DispatchDraft } | { ok: false; error: string } {
+): { ok: true; draft: DispatchDraft; overLimit?: DispatchLimit } | { ok: false; error: string } {
   const { project } = ctx;
   if (!project) return { ok: false, error: 'project-missing' };
   if (project.state !== 'active') return { ok: false, error: 'project-removed' };
   if ((project.kind ?? 'local') !== 'local') return { ok: false, error: 'project-not-local' };
   if (!ctx.visible) return { ok: false, error: 'project-not-visible' };
-  if (!ctx.deferred && ctx.running >= ctx.max) return { ok: false, error: 'dispatch-limit' };
-  if (
-    !ctx.deferred &&
-    ctx.runningTotal !== undefined &&
-    ctx.maxTotal !== undefined &&
-    ctx.runningTotal >= ctx.maxTotal
-  )
-    return { ok: false, error: 'dispatch-limit-total' };
 
   const { checkout, baseRef, branch } = draft;
   // 基线只在真的建独立 worktree 时才有意义：否则秘书会以为隔离生效了
   if (!draft.worktree && (checkout || baseRef || branch)) {
     return { ok: false, error: 'base-requires-worktree' };
   }
-  return { ok: true, draft };
+  const overLimit = ctx.deferred ? undefined : dispatchLimitOf(ctx);
+  return { ok: true, draft, ...(overLimit ? { overLimit } : {}) };
+}
+
+function dispatchLimitOf(ctx: DispatchContext): DispatchLimit | undefined {
+  if (ctx.running + (ctx.queued ?? 0) >= ctx.max) return 'dispatch-limit';
+  if (
+    ctx.runningTotal !== undefined &&
+    ctx.maxTotal !== undefined &&
+    ctx.runningTotal + (ctx.queuedTotal ?? 0) >= ctx.maxTotal
+  )
+    return 'dispatch-limit-total';
+  return undefined;
 }
 
 /** 派发基线校验用到的既成事实，由 Main 用 git 查出来 */

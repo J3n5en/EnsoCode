@@ -22,7 +22,7 @@ vi.mock('../services/resourceMonitor', () => ({
   scanStorage: mocks.scanStorage,
 }));
 
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { addRemoteSender, RemoteSender } from '../services/remoteRenderer/senders';
 import { registerResourceHandlers } from './resources';
 
