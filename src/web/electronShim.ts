@@ -44,15 +44,18 @@ const CACHED_READS: ReadonlySet<string> = new Set([
   IPC_CHANNELS.CONVERSATIONS_READ,
   // 插件脚本与样式每次启动都要取，单个可达数百 KB
   IPC_CHANNELS.EXTENSION_PLUGINS_ASSET,
+  // 每 30s 轮询与启动高频读取的大包：没变直接回 same，避免反复重传百 KB 级列表
+  IPC_CHANNELS.WORKTREE_LIST,
+  IPC_CHANNELS.WORKTREE_STATUSES,
+  IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
+  // 秘书面板状态可达数百 KB：冷启动与重载没变直接回 same，变了走增量
+  IPC_CHANNELS.SECRETARY_GET_STATE,
 ]);
 /** 只合并同时发出的相同请求（结果随会话变化或依赖发起方，不跨次缓存） */
 const SHARED_READS: ReadonlySet<string> = new Set([
   IPC_CHANNELS.OAUTH_CREDENTIAL_KEYS_LIST,
-  IPC_CHANNELS.WORKTREE_LIST,
-  IPC_CHANNELS.WORKTREE_STATUSES,
   IPC_CHANNELS.WORKTREE_BRANCHES,
   IPC_CHANNELS.PROJECTS_CODE_SOURCES,
-  IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
 ]);
 
 // 缓存放父页面（父 realm 的 Map，只存字符串）：iframe 重载、设置页 iframe 都能复用
