@@ -239,8 +239,6 @@ export interface SecretaryDispatchPorts {
   ): Promise<{ ok: boolean; error?: string }>;
   newId(): string;
   now(): number;
-  /** 项目当前分支；不是 git 仓库或读失败时返回 null */
-  branch(repoPath: string): MaybePromise<string | null>;
   /** 派发基线的既成事实：checkout 归属、同仓库、ref 与分支是否存在 */
   baseFacts(input: {
     projectPath: string;
@@ -772,6 +770,12 @@ function todoTitle(text: string): string | undefined {
     .split('\n')
     .map((line) => line.trim())
     .find(Boolean);
+}
+
+/** 待办派发未显式传 goal 时，用待办文本作为默认 goal，确保巡检与续跑生效 */
+function todoDefaultGoal(text: string): string | undefined {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, 4000) : undefined;
 }
 
 function draftFromParams(params: Record<string, unknown>): DispatchDraft | null {
@@ -2506,25 +2510,16 @@ export function createSecretaryDispatchHandlers(
         return auditFailure(ports, ctx, 'todo_item_dispatch', 'project-required', todoId);
       }
       const title = stringParam(params, 'title') ?? todoTitle(todo.text);
-      const project = (await ports.projects()).find(
-        (candidate) => candidate.projectId === projectId
-      );
       // 待办多半是改代码的活：秘书没说就开 worktree，只读调查时它会显式传 false
       const worktree = typeof params.worktree === 'boolean' ? params.worktree : true;
-      const branch = project ? await ports.branch(project.canonicalPath) : null;
       const base = baseFromParams(params);
+      const goal = stringParam(params, 'goal') ?? todoDefaultGoal(todo.text);
       const draft: DispatchDraft = {
         projectId,
-        prompt: todoDispatchPrompt(todo.text, stringParam(params, 'prompt'), {
-          projectPath: project?.canonicalPath ?? projectId,
-          branch,
-          worktree,
-          ...(base?.checkout ? { checkout: base.checkout } : {}),
-          ...(base?.baseRef ? { baseRef: base.baseRef } : {}),
-          ...(base?.branch ? { newBranch: base.branch } : {}),
-        }),
+        prompt: todoDispatchPrompt(todo.text, stringParam(params, 'prompt')),
         // 不给标题时会话按 prompt 开头起名，prompt 常以共同背景开头，几个会话会重名
         ...(title ? { title } : {}),
+        ...(goal ? { goal } : {}),
         worktree,
         todoId,
         ...(base ?? {}),
@@ -3214,14 +3209,6 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     },
     newId: () => randomUUID(),
     now: () => Date.now(),
-    branch: async (repoPath) => {
-      try {
-        const { currentBranch } = await import('../worktree/service');
-        return await currentBranch(repoPath);
-      } catch {
-        return null;
-      }
-    },
     baseFacts: async (input) => {
       const { probeDispatchBase } = await import('../worktree/service');
       return probeDispatchBase(input);
