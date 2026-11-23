@@ -234,6 +234,7 @@ export interface UnreadOutput {
 /** 可被插话 / 用户「转后台」解除的在跑工具调用：前台命令移交后台，阻塞等待提前返回 */
 interface DetachableCall {
   detach(reason: DetachReason): string | null;
+  blockingWait?: true;
 }
 
 export interface BlockingWait {
@@ -245,8 +246,11 @@ export interface BlockingWait {
 
 /** 阻塞等待被解除后给模型的说明：被等的对象继续跑，结束会自动通知 */
 export function detachedWaitNote(reason: DetachReason, subject: string): string {
+  if (reason === 'restart') {
+    return `Paused waiting because EnsoCode is restarting. The ${subject} keeps running across the restart and you will be notified automatically when it finishes (or you can wait for it again after restart).`;
+  }
   return reason === 'steer'
-    ? `Stopped waiting because the user sent a new message. The ${subject} keeps running and you will be notified automatically when it finishes — read and answer the user's message first.`
+    ? `Stopped waiting because the user sent a new message. The ${subject} keeps running in the background and you will be notified automatically when it finishes (or you can wait for it again later) — read and answer the user's message first.`
     : `The user chose to stop waiting. The ${subject} keeps running and you will be notified automatically when it finishes; do not wait for it again unless the user asks.`;
 }
 
@@ -438,6 +442,7 @@ export class BackgroundTaskManager {
     const controller = new AbortController();
     let detachedBy: DetachReason | undefined;
     const untrack = this.trackForeground(sessionId, toolCallId, {
+      blockingWait: true,
       detach: (reason) => {
         if (!controller.signal.aborted) {
           detachedBy = reason;
@@ -457,6 +462,15 @@ export class BackgroundTaskManager {
   backgroundAllForeground(sessionId: string, reason: DetachReason): string[] {
     const commands = [...(this.foreground.get(sessionId)?.values() ?? [])];
     return commands.flatMap((command) => command.detach(reason) ?? []);
+  }
+
+  /** 只解除阻塞等待（subagent wait / task_output 等待），不提前转后台普通前台命令 */
+  detachBlockingWaits(sessionId: string, reason: DetachReason): number {
+    const calls = [...(this.foreground.get(sessionId)?.values() ?? [])].filter(
+      (call) => call.blockingWait === true
+    );
+    for (const call of calls) call.detach(reason);
+    return calls.length;
   }
 
   private reserveId(sessionId: string): string {

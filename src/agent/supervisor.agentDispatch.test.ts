@@ -2339,9 +2339,15 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     });
 
     it('新 prompt 的 user 消息先于滞留的 steer；无 id 的投递占位不串号', async () => {
-      const { supervisor, userMessage, settled } = await spawned();
+      const { supervisor, piSession, userMessage, settled } = await spawned();
+      piSession.isStreaming = true;
+      piSession.emit({ type: 'agent_start' });
+      await settle();
       supervisor.handleCommand({ type: 'steer', identity: parent, text: 'late', deliveryId: 's1' });
       supervisor.handleCommand({ type: 'steer', identity: parent, text: 'phone' });
+      await settle();
+      piSession.isStreaming = false;
+      piSession.emit({ type: 'agent_end', messages: [] });
       await settle();
       supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'new', deliveryId: 'p1' });
       await settle();
@@ -2354,6 +2360,9 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
 
     it('pi 拒收的 steer 不占队列位', async () => {
       const { supervisor, piSession, userMessage, settled } = await spawned();
+      piSession.isStreaming = true;
+      piSession.emit({ type: 'agent_start' });
+      await settle();
       piSession.steer.mockRejectedValueOnce(new Error('boom'));
       supervisor.handleCommand({ type: 'steer', identity: parent, text: 'bad', deliveryId: 's1' });
       await settle();
@@ -2366,6 +2375,9 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
 
     it('用户插话后把本会话前台命令转后台；拒收的插话不转；tool-background 按调用 id 转', async () => {
       const { supervisor, piSession } = await spawned();
+      piSession.isStreaming = true;
+      piSession.emit({ type: 'agent_start' });
+      await settle();
       const bg = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
       const all = vi.spyOn(bg, 'backgroundAllForeground');
       const one = vi.spyOn(bg, 'backgroundForeground');
@@ -2386,6 +2398,9 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
 
     it('pi input hook 已处理的 steer 不占队列位', async () => {
       const { supervisor, piSession, userMessage, settled } = await spawned();
+      piSession.isStreaming = true;
+      piSession.emit({ type: 'agent_start' });
+      await settle();
       piSession.steer.mockResolvedValueOnce('handled');
       supervisor.handleCommand({
         type: 'steer',

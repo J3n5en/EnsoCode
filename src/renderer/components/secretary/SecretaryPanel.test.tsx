@@ -435,6 +435,39 @@ describe('SecretaryPanel', () => {
     expect(rows[0].textContent).toContain('打包安装');
   });
 
+  it('正在等子代理的会话在进行中列表显示等子代理徽标与子代理名称和耗时', async () => {
+    h.board = h.secretary.board = board({
+      running: [
+        sessionCard('c1', {
+          title: '门禁修复',
+          state: 'running',
+          subagents: [
+            {
+              agentId: 'a1',
+              runId: 'r1',
+              title: '实现子代理',
+              elapsedMs: 5 * 60_000,
+              activity: 'bash pnpm test',
+            },
+          ],
+        }),
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('[data-enso="secretary-running-badge"]')?.textContent).toBe(
+      '[Waiting on subagent]'
+    );
+    const subagentText =
+      rows[0].querySelector('[data-enso="secretary-running-subagents"]')?.textContent ?? '';
+    expect(subagentText).toContain('实现子代理');
+    expect(subagentText).toContain('5m');
+    expect(subagentText).toContain('bash pnpm test');
+  });
+
   it('已完成或出错的会话不进进行中列表', async () => {
     h.board = h.secretary.board = board({
       running: [sessionCard('c1', { title: '在跑的活' })],

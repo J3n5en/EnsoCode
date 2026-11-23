@@ -728,4 +728,48 @@ describe('排队会话', () => {
     h.driver.observe(turnCompleted(digest('补充也做完了')));
     expect(h.prompts[1].delivery.text).toContain('<goal-continuation>');
   });
+
+  it('父会话自身空闲但子代理在跑：排队消息立即可泵出，且不误发 goal-continuation', async () => {
+    const rows: Record<string, Record<string, unknown>> = {
+      [SID]: {
+        id: SID,
+        driver: 'main',
+        title: 'Dispatched',
+        queuedMessages: [{ id: 'q1', text: '跟进一下', origin: 'secretary' }],
+        goal: { text: 'ship it', status: 'active', autoTurns: 0, noProgressRuns: 0 },
+      },
+    };
+    const prompts: { conversationId: string; delivery: HeadlessDelivery; deliveryId: string }[] =
+      [];
+    let seq = 0;
+    const driver = createDispatchDriver({
+      row: (id) => rows[id],
+      saveRuntime: (id, runtime) => {
+        rows[id] = {
+          ...rows[id],
+          queuedMessages: runtime.queued,
+          ...(runtime.goal ? { goal: runtime.goal } : { goal: undefined }),
+        };
+      },
+      // 聚合状态因为子代理在跑而显示 running，但自身状态为 idle
+      status: () => ({ state: 'running', pendingAsks: 0, pendingApprovals: 0 }),
+      ownStatus: () => ({ state: 'idle', pendingAsks: 0, pendingApprovals: 0 }),
+      subagentsRunning: () => true,
+      alive: () => true,
+      prompt: (conversationId, delivery, deliveryId) => {
+        prompts.push({ conversationId, delivery, deliveryId });
+        return { ok: true };
+      },
+      newId: () => `id-${++seq}`,
+    });
+
+    driver.onConversationsMerged(mergedQueued('跟进一下'));
+    await Promise.resolve();
+    expect(prompts.map((item) => item.delivery.text)).toEqual(['跟进一下']);
+    expect(rows[SID].queuedMessages).toEqual([]);
+
+    // 本轮结束时子代理仍在跑：绝不误触发 goal-continuation
+    driver.observe(turnCompleted(digest('收到了，继续等子代理')));
+    expect(prompts).toHaveLength(1);
+  });
 });

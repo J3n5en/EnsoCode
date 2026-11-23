@@ -343,4 +343,15 @@ describe('会话徽标', () => {
     expect(badgeText('zh', 'stalled')).toBe('已停住');
     expect(badgeText('en', 'stalled')).toBe('Stalled, no activity');
   });
+
+  it('有在跑子代理的会话显示等子代理徽标', () => {
+    expect(
+      sessionBadge({
+        state: 'running',
+        subagents: [{ agentId: 'a1', runId: 'r1', title: 'worker', elapsedMs: 120_000 }],
+      })
+    ).toBe('subagent');
+    expect(badgeText('zh', 'subagent')).toBe('等子代理');
+    expect(badgeText('en', 'subagent')).toBe('Waiting on subagent');
+  });
 });

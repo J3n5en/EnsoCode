@@ -306,3 +306,75 @@ describe('SecretaryWorkbench 动态行：停止与跳转', () => {
     expect(expandButton()?.getAttribute('aria-expanded')).toBe('false');
   });
 });
+
+describe('SecretaryWorkbench 待办状态与会话状态一致', () => {
+  it('运行中的待办只在「进行中」出现、不进「出问题」、不显示红字「会话已停止」', async () => {
+    h.board = {
+      needsYou: [],
+      running: [
+        sessionCard({
+          conversationId: 'a61340f1',
+          title: '监听事件按对象认领 + 需求线程关联表',
+          state: 'running',
+        }),
+      ],
+      todos: [
+        {
+          id: 't1',
+          text: '监听事件按组认领 + 需求线程关联表',
+          createdAt: 1,
+          updatedAt: 2,
+          conversationId: 'a61340f1',
+          sessionTitle: '监听事件按对象认领 + 需求线程关联表',
+          sessionState: 'running',
+          phase: 'active',
+        },
+      ],
+      done: [],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    await act(async () => {});
+    expect(container.querySelector('[data-enso="secretary-problem"]')).toBeNull();
+    expect(container.querySelector('[data-enso="secretary-todo-problem"]')).toBeNull();
+    const activeRow = container.querySelector('[data-enso="secretary-todo"][data-phase="active"]');
+    expect(activeRow?.textContent).toContain('监听事件按组认领 + 需求线程关联表');
+    expect(activeRow?.textContent).toContain('[Running]');
+  });
+
+  it('真正续跑失败/清单外中断的待办进「出问题」显示「会话已停止」且会话状态为空闲', async () => {
+    h.board = {
+      needsYou: [],
+      running: [],
+      todos: [
+        {
+          id: 't2',
+          text: '未写入恢复清单的待办',
+          createdAt: 1,
+          updatedAt: 2,
+          conversationId: 'c2',
+          sessionTitle: '崩溃会话',
+          sessionState: 'idle',
+          problem: 'stopped',
+          phase: 'problem',
+        },
+      ],
+      done: [
+        sessionCard({
+          conversationId: 'c2',
+          title: '崩溃会话',
+          state: 'idle',
+          result: 'interrupted',
+        }),
+      ],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    await act(async () => {});
+    const problemGroup = container.querySelector('[data-enso="secretary-problem"]');
+    expect(problemGroup).not.toBeNull();
+    const problemText = problemGroup?.querySelector('[data-enso="secretary-todo-problem"]');
+    expect(problemText?.textContent).toBe('[The session was stopped]');
+    const sessionLine = problemGroup?.querySelector('[data-enso="secretary-todo-session"]');
+    expect(sessionLine?.textContent).toContain('[Idle]');
+    expect(sessionLine?.textContent).not.toContain('[Running]');
+  });
+});

@@ -407,4 +407,27 @@ describe('父会话就绪前被用户停止', () => {
     expect(notify).not.toHaveBeenCalled();
     expect(ledger.load()).toMatchObject([{ runId: spawned.value.runId, notified: true }]);
   });
+
+  it('启动与重启续跑后：台账磁盘状态落盘为 running（不滞留 queued），且 hasRestartPendingOwner 准确识别续跑中的父会话', async () => {
+    const ledger = fileLikeLedger();
+    const { service, children } = setup({ ledger });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    expect(ledger.load().find((entry) => entry.runId === spawned.value.runId)?.status).toBe(
+      'running'
+    );
+
+    service.noteRestartCheckpoint(checkpointOf(children[0]));
+    service.observe({ type: 'worker-exited' });
+
+    const after = setup({ ledger, restartCheckpoint: checkpointOf(children[0]) });
+    expect(after.service.hasRestartPendingOwner('chat-1')).toBe(true);
+    expect(after.service.hasRestartPendingOwner('other-chat')).toBe(false);
+    after.service.recoverOwner(context);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ledger.load().find((entry) => entry.runId === spawned.value.runId)?.status).toBe(
+      'running'
+    );
+    expect(after.service.hasRestartPendingOwner('chat-1')).toBe(true);
+  });
 });

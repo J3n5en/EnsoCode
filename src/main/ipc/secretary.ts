@@ -125,8 +125,10 @@ import { deleteUntouchedSessionBranch } from '../services/worktree/service';
 import {
   getSourceAuthorityRegistry,
   getUpstreamRecoveryService,
+  hasRestartResumingSubagent,
   isRootSessionAlive,
   observedBackgroundTasks,
+  observedOwnSessionStatus,
   observedSessionStatus,
   observedSubagentsRunning,
   promptRootFromMain,
@@ -329,6 +331,8 @@ const driverPorts: DispatchDriverPorts = {
     });
   },
   status: (conversationId) => observedSessionStatus(conversationId),
+  ownStatus: (conversationId) => observedOwnSessionStatus(conversationId),
+  subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
   alive: (conversationId) => isRootSessionAlive(conversationId),
   prompt: (conversationId, delivery, deliveryId) =>
     promptRootFromMain(
@@ -434,7 +438,8 @@ function hostPortsFor(
       interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),
     // 写进恢复清单的会话新实例接着跑：退出与冷启动恢复都不报失败、中断
     continuesAfterExit: (conversationId) => resumesAfterQuit(conversationId),
-    coldResumed: (conversationId) => coldResumedSessionIds().has(conversationId),
+    coldResumed: (conversationId) =>
+      coldResumedSessionIds().has(conversationId) || hasRestartResumingSubagent(conversationId),
     startPending: (pendingIds, now) => {
       void startPendingDispatches(dispatchPorts, pendingIds, now).catch((error: unknown) => {
         console.warn(

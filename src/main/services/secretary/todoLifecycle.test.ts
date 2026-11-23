@@ -68,6 +68,21 @@ describe('advanceTodo', () => {
     const failed = todo({ problem: 'failed' });
     expect(advanceTodo(failed, session({ state: 'running' }), NOW).problem).toBeUndefined();
   });
+
+  it('被标成 stopped 的待办：会话恢复运行（即使残留 interrupted）自动回到 active，完成后回到 done', () => {
+    const stopped = todo({ problem: 'stopped' });
+    const resumed = session({ state: 'running', result: 'interrupted' });
+    expect(todoStatus(stopped, resumed)).toBe('active');
+    const active = advanceTodo(stopped, resumed, NOW);
+    expect(active.problem).toBeUndefined();
+    expect(active.doneAt).toBeUndefined();
+
+    const completed = session({ state: 'idle', result: 'goal-complete' });
+    expect(todoStatus(stopped, completed)).toBe('done');
+    const done = advanceTodo(stopped, completed, NOW);
+    expect(done.doneAt).toBe(NOW);
+    expect(done.problem).toBeUndefined();
+  });
 });
 
 describe('待办写回', () => {

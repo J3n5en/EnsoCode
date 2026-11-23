@@ -602,6 +602,14 @@ export interface SecretaryAuditEntry {
   detail?: string;
 }
 
+export interface SecretarySubagentView {
+  agentId: string;
+  runId: string;
+  title?: string;
+  elapsedMs: number;
+  activity?: string;
+}
+
 export type SecretaryCard =
   | {
       kind: 'session';
@@ -630,6 +638,8 @@ export type SecretaryCard =
       backgroundRunning?: true;
       /** 会话空闲但还有常驻服务在跑：显示成「有常驻服务」，与「正在跑」区分 */
       backgroundPersistent?: true;
+      /** 会话正在等子代理运行：看板与侧栏显示子代理名称与已运行时间 */
+      subagents?: readonly SecretarySubagentView[];
       /** 巡检判定停住：进行中列表标「已停住」，会话有了新活动就消失 */
       stalled?: { reason: PatrolReason; at: number };
       /** 已收口但还有没结束的后台任务：完成列显示「已完成（有遗留任务）」 */

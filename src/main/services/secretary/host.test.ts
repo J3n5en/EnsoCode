@@ -13,6 +13,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { createSecretaryHost, type SecretaryHost, type SecretaryHostPorts } from './host';
+import { buildBoard } from './results';
 
 const MINUTE = 60_000;
 const idle = { state: 'idle' as const, pendingAsks: 0, pendingApprovals: 0 };
@@ -2643,18 +2644,233 @@ describe('优雅重启续跑的会话', () => {
     h.state.statuses.c1 = idle;
     h.host.recover();
     expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.dispatched.c1.lastState).toBe('running');
     expect(h.state.file.outbox).toEqual([]);
   });
 
-  it('续跑没接上：报 failed 并说明原因', () => {
+  it('启动恢复：清单内会话在超时前保持进行中，恢复活轮次后走正常完成路径', () => {
+    const h = harness({});
+    h.state.todos = [
+      { id: 't1', text: '监听事件按组认领', createdAt: 1, updatedAt: 1, conversationId: 'c1' },
+    ];
+    h.ports.coldResumed = (conversationId) => conversationId === 'c1';
+    h.state.statuses.c1 = idle;
+    h.state.now = 1_000;
+    h.host.recover();
+    expect(h.state.todos[0].problem).toBeUndefined();
+    // 启动早期收到 parent-ready / tick 仍空闲：超时前不翻成 idle，也不报中断
+    h.host.onAgentEvent(event('parent-ready'), []);
+    h.state.now = 1_000 + 60_000;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.lastState).toBe('running');
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.todos[0].problem).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+    const board = buildBoard(h.state.file, {
+      rows: { c1: { ...h.state.rows.c1, sessionFile: '/tmp/c1.jsonl' } },
+      statuses: h.state.statuses,
+      projects: [],
+      todos: h.state.todos,
+    });
+    expect(
+      board.running.map((card) => (card.kind === 'session' ? card.conversationId : card.kind))
+    ).toEqual(['c1']);
+    expect(board.done).toEqual([]);
+    expect(board.todos[0]).toMatchObject({ id: 't1', phase: 'active', sessionState: 'running' });
+    expect(board.todos[0].problem).toBeUndefined();
+    // 恢复成活的轮次后，正常完结照常走 goal-complete
+    h.state.statuses.c1 = running;
+    h.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'idle'));
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', summary: '搞定' }), []);
+    h.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: '全部完成' } }),
+      change('idle', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(h.state.file.outbox.map((u) => u.kind)).toEqual(['goal-complete']);
+    expect(h.state.todos[0].doneAt).toBeDefined();
+    expect(h.state.todos[0].problem).toBeUndefined();
+  });
+
+  it('启动恢复：清单内会话超过超时仍未恢复活轮次，推 interrupted 并说明原因', () => {
+    const h = harness({});
+    h.state.todos = [
+      { id: 't1', text: '超时待办', createdAt: 1, updatedAt: 1, conversationId: 'c1' },
+    ];
+    h.ports.coldResumed = (conversationId) => conversationId === 'c1';
+    h.state.statuses.c1 = idle;
+    h.state.now = 1_000;
+    h.host.recover();
+    expect(h.state.todos[0].problem).toBeUndefined();
+    h.state.now = 1_000 + 3 * 60_000;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(h.state.todos[0].problem).toBe('stopped');
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'interrupted' });
+    expect(h.state.file.outbox[0].text).toContain('超时');
+  });
+
+  it('启动恢复：不在恢复清单里（崩溃退出未写清单）立即推 interrupted 并说明原因', () => {
+    const h = harness({});
+    h.state.todos = [
+      { id: 't1', text: '清单外待办', createdAt: 1, updatedAt: 1, conversationId: 'c1' },
+    ];
+    h.ports.coldResumed = () => false;
+    h.state.statuses.c1 = idle;
+    h.host.recover();
+    expect(h.state.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(h.state.todos[0].problem).toBe('stopped');
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0].text).toContain('恢复清单');
+  });
+
+  it('已被误标成 problem/interrupted 的待办与会话：恢复运行后自动回到 active 与进行中，完成后回到 done', () => {
+    const h = harness({
+      file: emptyFile({
+        dispatched: {
+          c1: {
+            conversationId: 'c1',
+            projectId: 'p1',
+            secretaryConversationId: 'sec1',
+            createdAt: 0,
+            turn: 1,
+            lastState: 'idle',
+            lastEventAt: 500,
+            lastResult: { kind: 'interrupted', turn: 1, at: 500 },
+          },
+        },
+      }),
+    });
+    h.state.todos = [
+      {
+        id: 't1',
+        text: '被误标成出问题的待办',
+        createdAt: 1,
+        updatedAt: 500,
+        conversationId: 'c1',
+        problem: 'stopped',
+      },
+    ];
+    h.state.statuses.c1 = running;
+    h.state.now = 2_000;
+    h.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'idle'));
+    expect(h.state.file.dispatched.c1.lastState).toBe('running');
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.todos[0].problem).toBeUndefined();
+    const runningBoard = buildBoard(h.state.file, {
+      rows: { c1: { ...h.state.rows.c1, sessionFile: '/tmp/c1.jsonl' } },
+      statuses: h.state.statuses,
+      projects: [],
+      todos: h.state.todos,
+    });
+    expect(runningBoard.running).toHaveLength(1);
+    expect(runningBoard.done).toEqual([]);
+    expect(runningBoard.todos[0]).toMatchObject({
+      id: 't1',
+      phase: 'active',
+      sessionState: 'running',
+    });
+    expect(runningBoard.todos[0].problem).toBeUndefined();
+
+    // 之后完成目标 -> 自动回到 done
+    h.state.statuses.c1 = idle;
+    h.state.now = 3_000;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', summary: '完成' }), []);
+    h.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: '已完成' } }),
+      change('idle', 'running')
+    );
+    expect(h.state.todos[0].doneAt).toBe(3_000);
+    expect(h.state.todos[0].problem).toBeUndefined();
+  });
+
+  it('父会话空闲但在等运行中的子代理时，tick 自动清掉误标的 problem/interrupted', () => {
+    const h = harness({
+      file: emptyFile({
+        dispatched: {
+          c1: {
+            conversationId: 'c1',
+            projectId: 'p1',
+            secretaryConversationId: 'sec1',
+            createdAt: 0,
+            turn: 1,
+            lastState: 'idle',
+            lastEventAt: 500,
+            lastResult: { kind: 'interrupted', turn: 1, at: 500 },
+          },
+        },
+      }),
+    });
+    h.state.todos = [
+      {
+        id: 't1',
+        text: '监听事件按组认领 + 需求线程关联表',
+        createdAt: 1,
+        updatedAt: 500,
+        conversationId: 'c1',
+        problem: 'stopped',
+      },
+    ];
+    h.state.statuses.c1 = idle;
+    h.ports.subagentsRunning = (id) => id === 'c1';
+    h.state.now = 2_000;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.todos[0].problem).toBeUndefined();
+  });
+
+  it('自动巡检：父会话空闲但在等运行中的子代理时，不误判停滞', () => {
+    const h = harness({});
+    h.state.patrolEnabled = true;
+    h.state.statuses.c1 = idle;
+    h.state.subagents.c1 = true;
+    h.state.rows.c1 = {
+      ...h.state.rows.c1,
+      goal: { text: '完成任务', status: 'active', autoTurns: 0 },
+    };
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.state.file.dispatched.c1.lastEventAt = 1_000;
+    h.state.now = 1_000 + 25 * 60_000;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('续跑没接上：推 interrupted 并说明原因', () => {
     const h = harness({});
     h.state.statuses.c1 = idle;
     h.state.now = 7000;
     h.host.onRestartResumeFailed('c1', 'spawn rejected: no model');
     h.host.onRestartResumeFailed('ghost', 'x');
-    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', at: 7000 });
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted', at: 7000 });
     expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'interrupted' });
     expect(h.state.file.outbox[0].text).toContain('spawn rejected: no model');
+  });
+
+  it('清单内会话续跑时 spawn 被 worker 拒绝：报一次 interrupted 并说明原因，不重复推送', () => {
+    const h = harness({});
+    h.ports.coldResumed = (conversationId) => conversationId === 'c1';
+    h.state.statuses.c1 = idle;
+    h.host.recover();
+    h.host.onAgentEvent(
+      {
+        type: 'parent-rejected',
+        identity: { sessionId: 'c1', generation: 'g1' },
+        seq: 0,
+        reason: 'model unavailable',
+      } as RendererAgentEvent,
+      []
+    );
+    h.host.onRestartResumeFailed('c1', 'model unavailable');
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'interrupted' });
+    expect(h.state.file.outbox[0].text).toContain('model unavailable');
   });
 });
 

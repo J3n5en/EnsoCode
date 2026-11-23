@@ -552,13 +552,13 @@ export class AgentService implements AgentServiceContract {
       const runId = this.randomUuid();
       const run = this.createRun(agent.value, runId, request.message, request.schema, request.gate);
       this.runs.set(runId, run);
-      this.persistRuns();
       if (active && agent.value.state.status === 'active') {
         this.transition(agent.value, {
           ...agent.value.state,
           queue: [...agent.value.state.queue, runId],
         });
         this.pushProgress(request.context.owner.ownerId);
+        this.persistRuns();
         return {
           ok: true,
           value: {
@@ -571,6 +571,7 @@ export class AgentService implements AgentServiceContract {
       }
       const started = await this.startRun(agent.value, run, true);
       if (!started.ok) return started;
+      this.persistRuns();
       return {
         ok: true,
         value: {
@@ -831,9 +832,9 @@ export class AgentService implements AgentServiceContract {
       // 会话里最后一条回复已写完时续跑无回合可跑，结果就是中断前投影到的这段文本
       if (previous?.text !== undefined) run.text = previous.text;
       this.runs.set(run.runId, run);
-      this.persistRuns();
       const started = await this.startRun(agent, run, true);
       if (!started.ok) return started;
+      this.persistRuns();
       agent.resumes = (agent.resumes ?? 0) + 1;
       return {
         ok: true,
@@ -1199,6 +1200,28 @@ export class AgentService implements AgentServiceContract {
     return [...new Set(owners)];
   }
 
+  /** 父会话名下是否有按 #418 在重启安全点续跑（待重建、待重开或已续跑运行中）的子代理 Run */
+  hasRestartPendingOwner(ownerId: string): boolean {
+    for (const entry of this.previousRuns.values()) {
+      if (
+        entry.ownerId === ownerId &&
+        entry.notified === false &&
+        entry.restart &&
+        entry.restart.restartResumes < AGENT_TASK_MAX_RESUMES &&
+        this.atSafePoint(entry.restart.child)
+      ) {
+        return true;
+      }
+    }
+    for (const run of this.runs.values()) {
+      if (run.context.owner.ownerId !== ownerId) continue;
+      if (run.restartPending || (run.resumed && !TERMINAL_RUN_STATUSES.has(run.status))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * 这个子会话由重启续跑接管（自动续跑，或停放待 resume 的 task）：父会话恢复子会话时不要按父会话模型另开一份
    */
@@ -1334,7 +1357,8 @@ export class AgentService implements AgentServiceContract {
       return;
     }
     console.log(`[agent] restart resume ${run.runId} (${agent.mode}) continues`);
-    await this.startRun(agent, run);
+    const started = await this.startRun(agent, run);
+    if (started.ok) this.persistRuns();
   }
 
   /**
@@ -1579,7 +1603,9 @@ export class AgentService implements AgentServiceContract {
           ...(run.schema !== undefined ? { schema: run.schema } : {}),
           ...(run.gate !== undefined ? { gate: run.gate } : {}),
         });
-    if (prompted.ok) return { ok: true };
+    if (prompted.ok) {
+      return { ok: true };
+    }
     this.transition(agent, { status: 'ready', queue: queueOf(agent) });
     if (run.resumed) this.parkTask(agent);
     // spawn / send 当场启动失败由回执告知；排队后才启动的失败要另行通知

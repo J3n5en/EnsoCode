@@ -36,6 +36,8 @@ export interface PatrolFacts {
   reminderPending?: boolean;
   /** 会话因上游瞬态/配额故障在等待自动退避恢复：不是卡住 */
   upstreamWaiting?: boolean;
+  /** 名下有未结束的子代理 Run：结束时会自动通知唤醒父会话，不当成空闲停住 */
+  subagentsRunning?: boolean;
 }
 
 export interface PatrolAnomaly {
@@ -107,6 +109,7 @@ export function patrolAnomalies(facts: readonly PatrolFacts[], now: number): Pat
     if (entry.pending > 0) continue;
     if (entry.reminderPending) continue;
     if (entry.upstreamWaiting) continue;
+    if (entry.subagentsRunning) continue;
     // 秘书发过消息、之后没有任何可见回复：与 goal 空闲停住共用同一个空闲阈值
     if (
       entry.awaitingReplySince !== undefined &&

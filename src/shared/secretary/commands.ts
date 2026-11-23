@@ -161,6 +161,7 @@ export type ContactBadge =
   | 'waiting'
   | 'background'
   | 'persistent'
+  | 'subagent'
   | 'continuing'
   | 'interrupted'
   | 'stalled'
@@ -174,6 +175,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     waiting: '等你回答',
     background: '等后台任务',
     persistent: '有常驻服务',
+    subagent: '等子代理',
     continuing: '续跑中',
     interrupted: '已中断',
     stalled: '已停住',
@@ -185,6 +187,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     waiting: 'Waiting for you',
     background: 'Waiting on a background task',
     persistent: 'Service running',
+    subagent: 'Waiting on subagent',
     continuing: 'Continuing',
     interrupted: 'Interrupted',
     stalled: 'Stalled, no activity',
@@ -207,6 +210,7 @@ export function sessionBadge(card: {
   result?: string;
   backgroundRunning?: boolean;
   backgroundPersistent?: boolean;
+  subagents?: readonly { agentId: string; runId: string; title?: string; elapsedMs: number }[];
   continuing?: boolean;
   /** 巡检判定停住：会话还挂着但已经不动了，比「在跑」「续跑中」更该说 */
   stalled?: boolean;
@@ -215,6 +219,7 @@ export function sessionBadge(card: {
   if (card.state === 'error') return 'failed';
   if (card.state === 'waiting') return 'waiting';
   if (card.stalled) return 'stalled';
+  if (card.subagents && card.subagents.length > 0) return 'subagent';
   if (card.state === 'running') return 'running';
   if (card.backgroundRunning) return 'background';
   // 常驻服务不会自己结束，和「等后台任务」分开说，免得看起来像还在干活

@@ -26,6 +26,7 @@ const BADGE_STYLE: Record<ContactBadge, { label: string; className: string }> = 
   running: { label: 'Running', className: 'bg-success/15 text-success' },
   background: { label: 'Waiting on a background task', className: 'bg-warning/15 text-warning' },
   persistent: { label: 'Service running', className: 'bg-warning/15 text-warning' },
+  subagent: { label: 'Waiting on subagent', className: 'bg-warning/15 text-warning' },
   continuing: { label: 'Continuing', className: 'bg-success/15 text-success' },
   interrupted: { label: 'Interrupted', className: 'bg-warning/15 text-warning' },
   stalled: { label: 'Stalled, no activity', className: 'bg-destructive/15 text-destructive' },
@@ -124,6 +125,25 @@ function RunningRow({ card }: { card: SessionCard }) {
             className="mt-0.5 block truncate text-[11.5px] text-subtle-foreground"
           >
             {t('Model: {{model}}', { model })}
+          </span>
+        )}
+        {card.subagents && card.subagents.length > 0 && (
+          <span
+            data-enso="secretary-running-subagents"
+            className="mt-0.5 block space-y-0.5 text-[11.5px] text-muted-foreground"
+          >
+            {card.subagents.map((run) => {
+              const minutes = Math.floor(run.elapsedMs / 60_000);
+              const label = run.title || run.agentId.slice(0, 8);
+              return (
+                <span key={run.runId} className="block truncate">
+                  {minutes >= 1
+                    ? t('Waiting on subagent {{title}} ({{minutes}}m)', { title: label, minutes })
+                    : t('Waiting on subagent {{title}} (<1m)', { title: label })}
+                  {run.activity ? ` · ${run.activity}` : ''}
+                </span>
+              );
+            })}
           </span>
         )}
         {card.lastText && (

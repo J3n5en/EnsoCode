@@ -3304,6 +3304,14 @@ export const zhTranslations: Record<string, string> = {
   'Telegram messages are not end-to-end encrypted and stay on Telegram servers. /status, /board and /feed show titles and short summaries; /last and /sync send conversation text. Memory text and tool output never leave the app.':
     'Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。/status、/board、/feed 只显示标题与简短摘要；/last 与 /sync 会发会话正文。记忆正文与工具输出不会离开应用。',
   'Waiting on a background task': '等后台任务',
+  'Waiting on subagent': '等子代理',
+  'Waiting on subagent {{title}} ({{minutes}}m)':
+    '正在等子代理 {{title}}（已运行 {{minutes}} 分钟）',
+  'Waiting on subagent {{title}} (<1m)': '正在等子代理 {{title}}（不足 1 分钟）',
+  'Waiting on {{n}} subagents ({{title}} · {{minutes}}m)':
+    '正在等 {{n}} 个子代理（{{title}} · 已运行 {{minutes}} 分钟）',
+  'Waiting on {{n}} subagents ({{title}} · <1m)':
+    '正在等 {{n}} 个子代理（{{title}} · 不足 1 分钟）',
   'Service running': '有常驻服务',
   'Done ({{count}} leftover tasks)': '已完成（{{count}} 个遗留任务）',
   'Stop leftover tasks': '停止遗留任务',

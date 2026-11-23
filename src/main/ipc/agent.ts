@@ -23,6 +23,7 @@ import {
   type AgentControlContext,
   type AgentControlToolResponse,
   type AgentRemoteConfig,
+  type AgentRunProgress,
   type AgentSpawnRequest,
   type AgentWorkerEvent,
   type ApprovalMode,
@@ -373,6 +374,14 @@ export function observedSessionStatus(sessionId: string): PluginSessionStatus {
     : status;
 }
 
+/** 仅主会话自身状态（不含子代理运行态）：驱动者据此判断是否可泵出排队消息 */
+export function observedOwnSessionStatus(sessionId: string): PluginSessionStatus {
+  const status = pluginSessionStates.ownStatus(sessionId);
+  return status.state === 'idle' && agentSessionIndex.rootRunning(status.sessionId)
+    ? { ...status, state: 'running' }
+    : status;
+}
+
 /** 秘书 session_tasks 与自动归档的数据源：会话及其子代理起的后台任务（worker 在 Main 的最近一次投影） */
 export function observedBackgroundTasks(sessionId: string): ObservedTask[] {
   return backgroundTaskStates.tasksInTree(sessionId);
@@ -381,6 +390,16 @@ export function observedBackgroundTasks(sessionId: string): ObservedTask[] {
 /** 主会话名下还有没结束的子代理 Run：结束时 AgentService 会通知并叫醒主会话 */
 export function observedSubagentsRunning(sessionId: string): boolean {
   return (agentService?.progress(sessionId).length ?? 0) > 0;
+}
+
+/** 主会话名下正在运行的子代理进度快照（秘书查询、看板、侧栏同源） */
+export function observedSubagentProgress(sessionId: string): AgentRunProgress[] {
+  return agentService?.progress(sessionId) ?? [];
+}
+
+/** 冷启动时该父会话是否有停在安全点、正在按 #418 自动续跑的子代理 Run */
+export function hasRestartResumingSubagent(sessionId: string): boolean {
+  return agentService?.hasRestartPendingOwner(sessionId) ?? false;
 }
 
 /** Bot 会话宿主订阅 worker 事件（turn 结果、运行态） */
