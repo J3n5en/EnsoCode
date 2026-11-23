@@ -7,6 +7,7 @@ import type {
   ResolvedAgentTypeSpawnConfig,
 } from '@shared/types/agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { pickChildReasoningOverride, resolveChildReasoning } from '../../agent/childReasoning';
 import { ActiveConversationRegistry } from './activeConversationRegistry';
 import { AgentDispatchService, selectHiredAgentType } from './agentDispatchService';
 import { AgentSessionIndex } from './agentSessionIndex';
@@ -169,6 +170,7 @@ async function setup(
   const spawnChildCalls: Array<{
     identity: ChildSessionIdentity;
     cwd: string;
+    config: ResolvedAgentTypeSpawnConfig;
     resumeFile?: string;
   }> = [];
   const resumeCoworkerCalls: Array<{
@@ -238,8 +240,13 @@ async function setup(
         );
         return { ok: true };
       },
-      spawnChild: (identity, cwd, _config, resumeFile) => {
-        spawnChildCalls.push({ identity, cwd, ...(resumeFile ? { resumeFile } : {}) });
+      spawnChild: (identity, cwd, spawnConfig, resumeFile) => {
+        spawnChildCalls.push({
+          identity,
+          cwd,
+          config: spawnConfig,
+          ...(resumeFile ? { resumeFile } : {}),
+        });
         if (options.rejectChild) {
           const reason = options.rejectChild;
           queueMicrotask(() =>
@@ -809,6 +816,53 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     await ready(fixture, '11111111-1111-4111-8111-111111111111');
     expect(fixture.spawnChildCalls).toHaveLength(0);
     expect(fixture.resumeCoworkerCalls).toHaveLength(0);
+  });
+});
+
+describe('agent-tool 显式 thinking', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('调用方显式 thinking 压过父会话档位，resume 后不丢；off 不把模型能力改成关闭', async () => {
+    const fixture = await setup();
+    const parent = { sessionId: fixture.conversationId, generation: crypto.randomUUID() };
+    fixture.index.prepareParent(parent);
+    fixture.service.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: path.join(fixture.root, 'parent.jsonl'),
+      model: { providerId: 'provider', modelId: 'model' },
+    });
+    await settle();
+    const spawn = (name: string, thinking: 'low' | 'off') =>
+      fixture.service.spawnControlledAgent({
+        agentId: crypto.randomUUID(),
+        parentConversationId: fixture.conversationId,
+        name,
+        agentType: 'builtin:scout',
+        mode: 'task',
+        thinking,
+      });
+    // worker 侧同一套合并：父会话开着推理、当前 high
+    const childLevel = (config: ResolvedAgentTypeSpawnConfig) =>
+      resolveChildReasoning(
+        pickChildReasoningOverride(undefined, config),
+        true,
+        'high',
+        config.model
+      ).level;
+
+    const low = (await spawn('low', 'low')) as ChildSessionIdentity;
+    writeFileSync(path.join(fixture.root, 'child.jsonl'), '{}\n');
+    await spawn('off', 'off');
+    const [lowCall, offCall] = fixture.spawnChildCalls;
+    expect(childLevel(lowCall!.config)).toBe('low');
+    expect(childLevel(offCall!.config)).toBe('off');
+    expect(offCall!.config.model.reasoning).toBeUndefined();
+
+    fixture.service.observe({ type: 'child-ended', identity: low, seq: 2, reason: 'dismissed' });
+    await fixture.service.resumeControlledAgent(fixture.conversationId, low);
+    expect(childLevel(fixture.spawnChildCalls.at(-1)!.config)).toBe('low');
   });
 });
 

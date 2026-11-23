@@ -123,6 +123,7 @@ function session(options: Record<string, unknown>) {
   const labels: string[] = [];
   const value = {
     model: options.model,
+    thinkingLevel: options.thinkingLevel as string | undefined,
     resourceLoader: options.resourceLoader,
     sessionManager: options.sessionManager,
     messages: [],
@@ -162,7 +163,9 @@ function session(options: Record<string, unknown>) {
     abort: vi.fn(async () => undefined),
     waitForIdle: vi.fn(async () => undefined),
     dispose: vi.fn(),
-    setThinkingLevel: vi.fn(),
+    setThinkingLevel: vi.fn((level: string) => {
+      value.thinkingLevel = level;
+    }),
     activeTools: ((options.customTools as Array<{ name: string }> | undefined) ?? []).map(
       (tool) => tool.name
     ),
@@ -1423,6 +1426,93 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     };
     // 无预设 → 跟随父会话：父 spawn 未开推理 → reasoningEnabled=false → 档位恒 'off'
     expect(childOptions.thinkingLevel).toBe('off');
+  });
+
+  describe('父会话当前思考档优先于模型条目预设', () => {
+    const entryMax = { ...model, reasoning: 'on' as const, thinkingLevel: 'max' as const };
+    const spawnChild = async (
+      supervisor: SessionSupervisor,
+      childModel: typeof model & { reasoning?: 'on' | 'off'; thinkingLevel?: 'max' },
+      preset: { reasoning?: 'on' | 'off'; thinkingLevel?: 'medium' } = {}
+    ) => {
+      const before = mocks.createAgentSession.mock.calls.length;
+      supervisor.handleCommand({
+        type: 'spawn-child',
+        identity: {
+          sessionId: `parent::cw-${before}`,
+          generation: '44444444-4444-4444-8444-444444444444',
+          parent,
+          instanceId: '55555555-5555-4555-8555-555555555555',
+          instanceName: `Scout-${before}`,
+          typeKey: 'builtin:scout' as const,
+        },
+        cwd: '/workspace',
+        config: {
+          typeKey: 'builtin:scout',
+          displayName: 'Scout',
+          description: 'Read-only scout',
+          spawnSpecId: 'spawn-scout',
+          systemPrompt: 'scout role',
+          model: childModel,
+          tools: 'readonly',
+          skillPaths: [],
+          skillBindingIds: [],
+          mcpServers: [],
+          mcpBindingIds: [],
+          systemPromptHash: 'scout-hash',
+          ...preset,
+        },
+      });
+      await settleUntil(() => mocks.createAgentSession.mock.calls.length > before);
+      return (mocks.createAgentSession.mock.calls[before][0] as { thinkingLevel?: string })
+        .thinkingLevel;
+    };
+    const spawnParent = async (reasoning?: { thinkingLevel: 'high' | 'low' | 'xhigh' }) => {
+      const supervisor = new SessionSupervisor({
+        emit: vi.fn(),
+        agentDir: '/tmp/agent',
+        sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
+      });
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+        ...(reasoning ? { reasoningEnabled: true, thinkingLevel: reasoning.thinkingLevel } : {}),
+        editMode: 'apply_patch',
+      });
+      await settleUntil(() => mocks.sessions.length > 0);
+      return supervisor;
+    };
+
+    it('模型条目 max、父会话 high → 子代理 high', async () => {
+      const supervisor = await spawnParent({ thinkingLevel: 'high' });
+      expect(await spawnChild(supervisor, entryMax)).toBe('high');
+    });
+
+    it('父会话中途改档后子代理跟随当前档，而非 spawn 时的旧档', async () => {
+      const supervisor = await spawnParent({ thinkingLevel: 'low' });
+      supervisor.handleCommand({ type: 'set-thinking', identity: parent, level: 'high' });
+      await settle();
+      expect(await spawnChild(supervisor, entryMax)).toBe('high');
+    });
+
+    it('父会话未开推理 → 回落模型条目 max', async () => {
+      const supervisor = await spawnParent();
+      expect(await spawnChild(supervisor, entryMax)).toBe('max');
+    });
+
+    it('类型预设 medium 仍高于父会话 high', async () => {
+      const supervisor = await spawnParent({ thinkingLevel: 'high' });
+      expect(await spawnChild(supervisor, entryMax, { thinkingLevel: 'medium' })).toBe('medium');
+    });
+
+    it('父会话 xhigh、子模型不支持思考 → 降为 off，spawn 不失败', async () => {
+      const supervisor = await spawnParent({ thinkingLevel: 'xhigh' });
+      expect(
+        await spawnChild(supervisor, { ...model, modelId: 'plain', reasoning: 'off' as const })
+      ).toBe('off');
+    });
   });
 
   it('follow 类型档覆盖父会话思考档（spawn-child / 子代理）', async () => {
