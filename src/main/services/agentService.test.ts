@@ -495,6 +495,28 @@ describe('AgentService lifecycle', () => {
     expect(runtime.dismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('已 dismiss 的 coworker 遇到 worker 退出仍是 closed，不会被复活成 parked', async () => {
+    const { service, runtime } = setup();
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    await service.dismiss({ context, requestId: 'dismiss', agentId: spawned.value.agentId });
+    service.observe({ type: 'worker-exited' });
+    const listed = await service.list({ context, requestId: 'list', limit: 10 });
+    expect(listed).toMatchObject({
+      ok: true,
+      value: { agents: [{ agentId: spawned.value.agentId, status: 'closed' }] },
+    });
+    expect(
+      await service.send({
+        context,
+        requestId: 'send-after-dismiss',
+        agentId: spawned.value.agentId,
+        message: 'again',
+      })
+    ).toMatchObject({ ok: false, code: 'invalid-state' });
+    expect(runtime.prompt).toHaveBeenCalledTimes(1);
+  });
+
   it('stop 掉 task 唯一的 Run 后关闭实例并回收子会话，不留孤儿', async () => {
     const { service, runtime } = setup();
     const spawned = await service.spawn(spawnRequest());
@@ -1768,6 +1790,27 @@ describe('AgentService 找不到 Run / Agent 时说明原因', () => {
     expect(notify.mock.calls[0][1]).toContain(`resume with agentId ${spawned.value.agentId}`);
     service.recoverOwner(context);
     expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('worker 退出时 coworker 排队的 Run 随在跑的一起中断，父会话就绪时一并补通知', async () => {
+    const notify = vi.fn();
+    const { service } = setup({ notify });
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    const queued = await service.send({
+      context,
+      requestId: 'queued',
+      agentId: spawned.value.agentId,
+      message: 'after that',
+      delivery: 'next',
+    });
+    if (!queued.ok) throw new Error(queued.error);
+    service.observe({ type: 'worker-exited' });
+    expect(service.progress(owner.ownerId)).toEqual([]);
+    service.recoverOwner(context);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toContain(`runId ${spawned.value.runId}`);
+    expect(notify.mock.calls[0][1]).toContain(`runId ${queued.value.runId}`);
   });
 
   it('resume 换了新 runId 后，旧 runId 仍可 report / stop，不报 not-found', async () => {
