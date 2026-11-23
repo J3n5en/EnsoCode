@@ -6,6 +6,8 @@ import { AgentService, type AgentServiceRuntime } from './agentService';
 
 // 有界穷举子代理注册表：真实 AgentService 对接子会话 / worker 模型，父会话操作、子会话事件、
 // worker 退出与 Main 重启（新建 AgentService，从同一份台账恢复）按任意顺序交错。
+// 子会话模型照 supervisor 持有 Run：回合结束时还有自己的后台任务就带 awaitingTasks，
+// 任务完成时空闲则唤醒新一轮（continues 指回被持有的 Run），忙则搭下一条工具结果。
 
 const parent = { sessionId: 'chat-1', generation: '11111111-1111-4111-8111-111111111111' };
 const context: AgentControlContext = {
@@ -23,7 +25,7 @@ type Mode = 'task' | 'coworker';
 const OUTCOMES = { ok: 'succeeded', abort: 'interrupted', fail: 'failed' } as const;
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 /** 不由父会话发起的步骤：它们都走完、父会话也不再操作时，系统必须收敛 */
-const ENVIRONMENT = /^(return|ready|end|turn|restore|parent-ready)/;
+const ENVIRONMENT = /^(return|ready|end|turn|taskdone|restore|parent-ready)/;
 
 interface Budget {
   spawns: number;
@@ -33,6 +35,8 @@ interface Budget {
   resumes: number;
   faults: number;
   crashes: number;
+  /** 回合结束时留下自己的后台任务 */
+  holds: number;
 }
 
 interface Child {
@@ -42,11 +46,21 @@ interface Child {
   live: boolean;
   ready: boolean;
   turn?: string;
+  /** 子代理自己起的、在跑、没表态的后台任务数 */
+  tasks: number;
+  /** 被持有的 Run（supervisor 的 heldTurnId） */
+  held?: string;
+  /** 忙时完成、还没交给模型的任务通知 */
+  notices: boolean;
+  wakes: number;
   /** runtime.dismiss 回收、child-ended 还没发出的那一代子会话 */
   ending?: ChildSessionIdentity;
   dismissed: boolean;
   returnSpawn?: () => void;
 }
+
+/** 子会话随回收 / worker 退出一起没了：后台任务被杀，持有随之失效 */
+const kill = { live: false, turn: undefined, tasks: 0, held: undefined, notices: false };
 
 interface World {
   service: AgentService;
@@ -60,6 +74,7 @@ interface World {
   expected: Map<string, string>;
   endedByParent: Set<string>;
   terminal: Map<string, string>;
+  premature?: string;
   ids: number;
 }
 
@@ -94,6 +109,7 @@ function newService(w: World): AgentService {
     const c = child(id);
     if (!c.live) return { ok: false, error: 'child gone' };
     c.turn = runId;
+    c.held = undefined;
     return { ok: true };
   };
   const runtime: AgentServiceRuntime = {
@@ -105,6 +121,9 @@ function newService(w: World): AgentService {
         live: true,
         ready: false,
         dismissed: false,
+        tasks: 0,
+        notices: false,
+        wakes: 0,
       };
       w.children.push(c);
       await new Promise<void>((resolve) => {
@@ -126,15 +145,14 @@ function newService(w: World): AgentService {
     },
     steer: async () => ({ ok: true }),
     stop: async ({ identity: id }) => {
-      child(id).turn = undefined;
+      Object.assign(child(id), { turn: undefined, held: undefined });
       return { ok: true };
     },
     dismiss: async ({ identity: id }) => {
       const c = child(id);
       Object.assign(c, {
+        ...kill,
         ending: c.live ? c.identity : undefined,
-        live: false,
-        turn: undefined,
         dismissed: true,
       });
       return { ok: true };
@@ -229,16 +247,31 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
       ]);
     }
     const turn = c.turn;
-    for (const outcome of turn && c.live ? (['ok', 'abort', 'fail'] as const) : []) {
+    for (const outcome of turn && c.live ? (['ok', 'bg', 'abort', 'fail'] as const) : []) {
       if (outcome !== 'ok' && u.faults >= cfg.faults) continue;
+      if (outcome === 'bg' && u.holds >= cfg.holds) continue;
       out.push([
         `turn:${i}:${outcome}`,
         () => {
+          const runId = c.held ?? turn!;
+          const continues = c.held;
           c.turn = undefined;
-          if (outcome !== 'ok') u.faults++;
-          if (!TERMINAL.has(internals(w).runs.get(turn!)!.status))
-            w.expected.set(turn!, OUTCOMES[outcome]);
-          const base = { identity: c.identity, seq: 0, turnId: turn! };
+          if (outcome === 'bg') {
+            u.holds++;
+            c.tasks++;
+          } else if (outcome !== 'ok') u.faults++;
+          const ok = outcome === 'ok' || outcome === 'bg';
+          const awaiting = ok && (c.tasks > 0 || c.notices);
+          c.held = awaiting ? runId : undefined;
+          const run = internals(w).runs.get(runId);
+          if (!awaiting && run && !TERMINAL.has(run.status))
+            w.expected.set(runId, OUTCOMES[ok ? 'ok' : outcome]);
+          const base = {
+            identity: c.identity,
+            seq: 0,
+            turnId: turn!,
+            ...(continues ? { continues } : {}),
+          };
           w.service.observe(
             outcome === 'fail'
               ? { ...base, type: 'turn-failed', error: 'boom' }
@@ -246,8 +279,25 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
                   ...base,
                   type: 'turn-completed',
                   ...(outcome === 'abort' ? { aborted: true } : {}),
+                  ...(awaiting ? { awaitingTasks: true } : {}),
                 }
           );
+          if (awaiting && TERMINAL.has(internals(w).runs.get(runId)?.status ?? ''))
+            w.premature ??= runId;
+          if (awaiting && c.notices) {
+            c.notices = false;
+            c.turn = `${runId}~w${++c.wakes}`;
+          }
+        },
+      ]);
+    }
+    if (c.live && c.tasks > 0) {
+      out.push([
+        `taskdone:${i}`,
+        () => {
+          c.tasks--;
+          if (c.held && !c.turn) c.turn = `${c.held}~w${++c.wakes}`;
+          else c.notices = true;
         },
       ]);
     }
@@ -337,8 +387,7 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         () => {
           u.crashes++;
           w.parentUp = false;
-          for (const c of w.children)
-            Object.assign(c, { live: false, ready: false, turn: undefined, ending: undefined });
+          for (const c of w.children) Object.assign(c, { ...kill, ready: false, ending: undefined });
           if (kind === 'exit') w.service.observe({ type: 'worker-exited' });
           else w.service = newService(w);
         },
@@ -360,6 +409,7 @@ function key(w: World): string {
 }
 
 function safetyViolation(w: World): string | null {
+  if (w.premature) return `持有中的 Run ${w.premature} 被提前收口`;
   const sessions = [...internals(w).agents.values()].map((a) => a.identity.sessionId);
   if (new Set(sessions).size !== sessions.length) return '同一子会话对应多条 Agent 记录';
   for (const c of w.children) {
@@ -454,6 +504,7 @@ const none = {
   resumes: 0,
   faults: 1,
   crashes: FULL ? 2 : 1,
+  holds: 1,
 };
 
 const configs = [

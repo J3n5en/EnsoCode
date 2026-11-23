@@ -433,6 +433,20 @@ describe('标题总结命令与事件', () => {
       parseAgentWorkerEvent({ ...event, requestBudgetStop: true, requestBudgetError: '' })
     ).toBeNull();
   });
+
+  it('turn-completed / turn-failed 的 awaitingTasks 只接受 true，continues 必须是非空回合号', () => {
+    const completed = { type: 'turn-completed', identity: parent, seq: 1, turnId: 'turn-2' };
+    const failed = { ...completed, type: 'turn-failed', error: 'boom' };
+    const held = { ...completed, continues: 'turn-1', awaitingTasks: true };
+    expect(parseAgentWorkerEvent(held)).toEqual(held);
+    expect(parseAgentWorkerEvent({ ...failed, continues: 'turn-1' })).toEqual({
+      ...failed,
+      continues: 'turn-1',
+    });
+    expect(parseAgentWorkerEvent({ ...completed, awaitingTasks: false })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...completed, continues: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...failed, continues: 1 })).toBeNull();
+  });
 });
 
 describe('generation lifecycle/events', () => {

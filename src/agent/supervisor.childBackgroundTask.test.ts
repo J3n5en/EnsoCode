@@ -106,7 +106,11 @@ type Tool = {
   name: string;
   execute(id: string, params: unknown, signal?: AbortSignal): Promise<unknown>;
 };
-type FakeSession = { prompt: ReturnType<typeof vi.fn> };
+type FakeSession = {
+  prompt: ReturnType<typeof vi.fn>;
+  messages: unknown[];
+  emit(event: { type: string; [key: string]: unknown }): void;
+};
 
 function session(options: Record<string, unknown>) {
   const listeners = new Set<(event: { type: string; [key: string]: unknown }) => void>();
@@ -114,12 +118,16 @@ function session(options: Record<string, unknown>) {
     model: options.model,
     resourceLoader: options.resourceLoader,
     sessionManager: options.sessionManager,
-    messages: [],
+    messages: [] as unknown[],
+    agent: { state: { messages: [] } },
     sessionFile: `/tmp/session-${mocks.sessions.length}.jsonl`,
     subscribe: vi.fn((listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     }),
+    emit(event: { type: string; [key: string]: unknown }) {
+      for (const listener of listeners) listener(event);
+    },
     prompt: vi.fn(async () => undefined),
     steer: vi.fn(async () => 'queued'),
     abort: vi.fn(async () => undefined),
@@ -160,6 +168,26 @@ async function until(check: () => boolean, ms = 5000): Promise<void> {
 
 const promptTexts = (target: FakeSession) =>
   target.prompt.mock.calls.map((call) => String(call[0] ?? ''));
+
+/** 模拟子代理的一整轮：开始、给出结论、收口 */
+function round(target: FakeSession, text: string, during?: () => Promise<unknown>) {
+  target.emit({ type: 'agent_start' });
+  return (async () => {
+    await during?.();
+    const message = { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop' };
+    target.messages.push(message);
+    target.emit({ type: 'message_start', message });
+    target.emit({ type: 'message_end', message });
+    target.emit({ type: 'agent_end', willRetry: false });
+    target.emit({ type: 'agent_settled' });
+  })();
+}
+
+const turnsCompleted = (events: AgentWorkerEvent[]) =>
+  events.filter(
+    (event): event is Extract<AgentWorkerEvent, { type: 'turn-completed' }> =>
+      event.type === 'turn-completed'
+  );
 
 describe('子代理起的后台任务归属子代理', () => {
   beforeEach(() => {
@@ -241,7 +269,7 @@ describe('子代理起的后台任务归属子代理', () => {
     };
   }
 
-  it('任务记在子会话名下；完成通知交给子代理，不唤醒父会话也不唤醒子代理', async () => {
+  it('任务记在子会话名下；没在等任务的子代理只在下一条工具结果里收到通知，不唤醒父会话也不唤醒子代理', async () => {
     const ctx = await setup();
     await ctx.childBash.execute('call-1', {
       command: 'echo child-bg-out',
@@ -264,6 +292,37 @@ describe('子代理起的后台任务归属子代理', () => {
     expect(childNotice).toContain('<background-task-update>');
     expect(childNotice).toContain('child-bg-out');
     expect(ctx.childToolResult()).not.toContain('<background-task-update>');
+    await ctx.supervisor.shutdown();
+  });
+
+  it('回合结束时还有自己的后台任务：先持有 Run，任务完成时唤醒空闲的子代理，收尾那一轮接上被持有的 Run', async () => {
+    const ctx = await setup();
+    ctx.supervisor.handleCommand({
+      type: 'prompt-child',
+      identity: child,
+      requestId: 'run-1',
+      task: { text: 'start the server', images: [], fileMentions: [] },
+    });
+    await round(ctx.childSession, '服务已起，等它跑完', () =>
+      ctx.childBash.execute('call-1', {
+        command: 'sleep 0.3; echo child-bg-out',
+        background: true,
+      })
+    );
+    expect(turnsCompleted(ctx.events).at(-1)).toMatchObject({
+      turnId: 'run-1',
+      awaitingTasks: true,
+    });
+
+    await until(() => promptTexts(ctx.childSession).some((text) => text.includes('child-bg-out')));
+    await round(ctx.childSession, '服务跑完了，结论是 X');
+    const last = turnsCompleted(ctx.events).at(-1);
+    expect(last).toMatchObject({ continues: 'run-1' });
+    expect(last?.turnId).not.toBe('run-1');
+    expect(last).not.toHaveProperty('awaitingTasks');
+    expect(promptTexts(ctx.parentSession).some((text) => text.includes('child-bg-out'))).toBe(
+      false
+    );
     await ctx.supervisor.shutdown();
   });
 
