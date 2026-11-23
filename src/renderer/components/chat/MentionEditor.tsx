@@ -4,9 +4,16 @@ import type {
   UiElementMentionCandidate,
 } from '@shared/types/mentions';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { extractTriggerQuery } from '../../plugins/triggers';
-import { extractMentionQuery, fileMentionBasename, type MentionSegment } from './mentionComposer';
+import {
+  extractMentionQuery,
+  fileMentionBasename,
+  type MentionSegment,
+  type QuoteSegment,
+} from './mentionComposer';
+import { quoteLineCount, quotePreview } from './quoteSelection';
 import { extractSkillQuery } from './skillCompletion';
 
 /**
@@ -47,6 +54,8 @@ export interface MentionEditorHandle {
   insertFileChip(path: string, label?: string): void;
   /** 在光标处插入纯文本 */
   insertText(text: string): void;
+  /** 在末尾追加选中文本引用块（默认折叠），光标落到其后 */
+  insertQuote(quote: QuoteSegment): void;
   /** 活动 @ token 首字符的视口矩形，给 mention 弹窗锚点用 */
   getMentionAnchorRect(): DOMRect | null;
 }
@@ -83,7 +92,83 @@ const CHIP_CLASS: Record<'file' | 'chat' | 'ui-element', string> = {
   'ui-element': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
 };
 
-function buildChip(segment: Exclude<MentionSegment, { type: 'text' }>): HTMLSpanElement {
+const QUOTE_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></svg>';
+
+interface QuoteLabels {
+  title: (lines: number) => string;
+  truncated: (lines: number) => string;
+  expand: string;
+  remove: string;
+}
+
+/** 引用块卡片的正文：折叠只显示前几行，展开显示全文并在限高内滚动；发送一律取 data-text 全文 */
+function renderQuoteBody(chip: HTMLElement, labels: QuoteLabels): void {
+  const text = chip.dataset.text ?? '';
+  const expanded = chip.dataset.expanded === 'true';
+  const { preview, clipped } = quotePreview(text);
+  const body = chip.querySelector<HTMLElement>('[data-quote-body]');
+  if (body) {
+    body.textContent = expanded ? text : clipped ? `${preview}\n…` : preview;
+    body.className = cn(
+      'mt-0.5 block whitespace-pre-wrap break-words text-foreground/80',
+      expanded ? 'max-h-32 overflow-y-auto overscroll-contain' : 'max-h-16 overflow-hidden'
+    );
+  }
+  chip.querySelector('[data-quote-toggle]')?.remove();
+  if (!expanded && clipped) {
+    const toggle = document.createElement('span');
+    toggle.dataset.quoteToggle = '';
+    toggle.className = 'shrink-0 text-muted-foreground/80';
+    toggle.textContent = labels.expand;
+    chip.querySelector('[data-quote-remove]')?.before(toggle);
+  }
+}
+
+function buildQuoteChip(segment: QuoteSegment, labels: QuoteLabels): HTMLSpanElement {
+  const chip = document.createElement('span');
+  chip.contentEditable = 'false';
+  chip.dataset.mentionKind = 'quote';
+  chip.dataset.text = segment.text;
+  if (segment.originalLines) chip.dataset.originalLines = String(segment.originalLines);
+  chip.className =
+    'my-1 block cursor-pointer rounded-md border-l-2 border-brand/50 bg-muted/60 px-2 py-1 text-xs select-none';
+  const head = document.createElement('span');
+  head.className = 'flex items-center gap-1.5 text-muted-foreground';
+  const icon = document.createElement('span');
+  icon.className = 'shrink-0 inline-flex';
+  icon.innerHTML = QUOTE_SVG;
+  const title = document.createElement('span');
+  title.className = 'min-w-0 flex-1 truncate';
+  title.textContent = labels.title(quoteLineCount(segment.text));
+  head.append(icon, title);
+  if (segment.originalLines) {
+    const badge = document.createElement('span');
+    badge.dataset.quoteTruncated = '';
+    badge.className =
+      'shrink-0 rounded bg-warning/20 px-1 text-warning-foreground dark:text-warning';
+    badge.textContent = labels.truncated(segment.originalLines);
+    head.appendChild(badge);
+  }
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.dataset.quoteRemove = '';
+  remove.setAttribute('aria-label', labels.remove);
+  remove.className = 'shrink-0 rounded-sm px-1 opacity-70 hover:opacity-100';
+  remove.textContent = '×';
+  head.appendChild(remove);
+  const body = document.createElement('span');
+  body.dataset.quoteBody = '';
+  chip.append(head, body);
+  renderQuoteBody(chip, labels);
+  return chip;
+}
+
+function buildChip(
+  segment: Exclude<MentionSegment, { type: 'text' }>,
+  labels: QuoteLabels
+): HTMLSpanElement {
+  if (segment.type === 'quote') return buildQuoteChip(segment, labels);
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
   chip.dataset.mentionKind = segment.type;
@@ -122,6 +207,14 @@ function buildChip(segment: Exclude<MentionSegment, { type: 'text' }>): HTMLSpan
 }
 
 function segmentFromChip(chip: HTMLElement): MentionSegment | null {
+  if (chip.dataset.mentionKind === 'quote' && chip.dataset.text) {
+    const originalLines = Number(chip.dataset.originalLines);
+    return {
+      type: 'quote',
+      text: chip.dataset.text,
+      ...(originalLines > 0 ? { originalLines } : {}),
+    };
+  }
   if (chip.dataset.mentionKind === 'file' && chip.dataset.path) {
     return {
       type: 'file',
@@ -312,9 +405,34 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
     },
     ref
   ) {
+    const { t } = useI18n();
     const rootRef = useRef<HTMLDivElement>(null);
+    const labels: QuoteLabels = {
+      title: (count) => t('Quote · {{count}} lines', { count }),
+      truncated: (count) => t('Truncated · original {{count}} lines', { count }),
+      expand: t('Click to expand'),
+      remove: t('Remove quote'),
+    };
+    const labelsRef = useRef(labels);
+    labelsRef.current = labels;
     /** 最近一次落在编辑器内文本节点上的光标，选区被 IME 推出去时用它拉回 */
     const lastCaretRef = useRef<{ node: Text; offset: number } | null>(null);
+
+    // 展开的引用块：点它以外的任何地方就缩回
+    useEffect(() => {
+      const handler = (event: Event) => {
+        const target = event.target as Node | null;
+        for (const chip of rootRef.current?.querySelectorAll<HTMLElement>(
+          '[data-mention-kind="quote"][data-expanded]'
+        ) ?? []) {
+          if (target && chip.contains(target)) continue;
+          delete chip.dataset.expanded;
+          renderQuoteBody(chip, labelsRef.current);
+        }
+      };
+      document.addEventListener('pointerdown', handler);
+      return () => document.removeEventListener('pointerdown', handler);
+    }, []);
 
     // 修复 iOS IME 光标键的两种越界形态（见 normalizedCaretRange 注释）。
     // 用户点击编辑器外会先转移焦点，activeElement 守卫保证不干扰正常交互。
@@ -465,7 +583,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
             if (segment.type === 'text') {
               root.appendChild(document.createTextNode(segment.text));
             } else {
-              root.appendChild(buildChip(segment));
+              root.appendChild(buildChip(segment, labelsRef.current));
             }
           }
           emitState();
@@ -495,7 +613,10 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                     text: candidate.text,
                     imageId: candidate.imageId,
                   };
-          insertNodeAtCaret(() => buildChip(segment), candidate.kind !== 'ui-element');
+          insertNodeAtCaret(
+            () => buildChip(segment, labelsRef.current),
+            candidate.kind !== 'ui-element'
+          );
         },
         consumeToken: (prefix) => {
           const token = activeTokenRange(prefix);
@@ -508,12 +629,23 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         },
         insertFileChip: (path, label) => {
           insertNodeAtCaret(
-            () => buildChip({ type: 'file', path, ...(label ? { label } : {}) }),
+            () => buildChip({ type: 'file', path, ...(label ? { label } : {}) }, labelsRef.current),
             false
           );
         },
         insertText: (text) => {
           insertNodeAtCaret(() => document.createTextNode(text), false);
+        },
+        insertQuote: (quote) => {
+          const root = rootRef.current;
+          if (!root) return;
+          // 焦点已在时间线上，原光标不可靠：统一追加到末尾，接着就能写追问
+          const space = document.createTextNode('\u00a0');
+          root.append(buildChip(quote, labelsRef.current), space);
+          root.focus();
+          window.getSelection()?.collapse(space, space.length);
+          root.scrollTop = root.scrollHeight;
+          emitState();
         },
         getMentionAnchorRect: () => {
           const token = activeTokenRange('@');
@@ -558,11 +690,21 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           onKeyDown(event);
         }}
         onClick={(event) => {
-          if (!onChipActivate) return;
           const target = event.target;
           if (!(target instanceof Element)) return;
           const chip = target.closest('[data-mention-kind]');
           if (!(chip instanceof HTMLElement) || !rootRef.current?.contains(chip)) return;
+          if (chip.dataset.mentionKind === 'quote') {
+            if (target.closest('[data-quote-remove]')) {
+              removeMentionChip(chip, rootRef.current);
+              emitState();
+            } else if (chip.dataset.expanded !== 'true') {
+              chip.dataset.expanded = 'true';
+              renderQuoteBody(chip, labelsRef.current);
+            }
+            return;
+          }
+          if (!onChipActivate) return;
           const segment = segmentFromChip(chip);
           if (segment) onChipActivate(segment);
         }}

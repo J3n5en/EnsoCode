@@ -251,6 +251,7 @@ const initialState = {
   expandLiveEdits: true,
   expandLiveReasoning: true,
   autoCollapseTurns: false,
+  quoteSelectionButton: true,
   collapseCompletedActivity: true,
   collapseLiveActivity: false,
   liveActivityFoldDelaySec: 5,
@@ -478,6 +479,7 @@ export const useSettingsStore = create<SettingsState>()(
       setExpandLiveEdits: (expandLiveEdits) => set({ expandLiveEdits }),
       setExpandLiveReasoning: (expandLiveReasoning) => set({ expandLiveReasoning }),
       setAutoCollapseTurns: (autoCollapseTurns) => set({ autoCollapseTurns }),
+      setQuoteSelectionButton: (quoteSelectionButton) => set({ quoteSelectionButton }),
       setCollapseCompletedActivity: (collapseCompletedActivity) =>
         set({ collapseCompletedActivity }),
       setCollapseLiveActivity: (collapseLiveActivity) => set({ collapseLiveActivity }),

@@ -245,6 +245,28 @@ describe('重启打断的子代理自动续跑', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it('等安全点超时：断点在 worker 收尾时才落、Main 退出前没记下，断点里有子会话就照样续跑，不报 restart-lost', async () => {
+    const ledger = fileLikeLedger();
+    const before = setup({ ledger });
+    const spawned = await before.service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    const child = before.children[0];
+    before.service.observe({ type: 'worker-exited' });
+    const notify = vi.fn();
+    const after = setup({ ledger, notify, restartCheckpoint: checkpointOf(child, 'await-user') });
+    expect(after.service.claimsRestartChild(child.sessionId)).toBe(true);
+    after.service.recoverOwner(context);
+    await vi.waitFor(() => expect(after.runtime.retry).toHaveBeenCalledTimes(1));
+    expect(after.runtime.retry).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: spawned.value.runId, agentId: spawned.value.agentId })
+    );
+    expect(notify).not.toHaveBeenCalled();
+    const list = await after.service.list({ context, requestId: 'l' });
+    expect(list.ok && list.value.agents.map((agent) => agent.agentId)).toEqual([
+      spawned.value.agentId,
+    ]);
+  });
+
   it('重启时子会话没到安全点（断点里没有它）：照旧按中断通知，不自动续跑', async () => {
     const ledger = fileLikeLedger();
     const before = setup({ ledger });
@@ -314,5 +336,31 @@ describe('重启打断的子代理自动续跑', () => {
     await vi.waitFor(() => expect(runtime.retry).toHaveBeenCalledTimes(1));
     expect(runtime.retry).toHaveBeenCalledWith(expect.objectContaining({ runId: spawned.runId }));
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('等续跑期间用户停止父会话：不再自动续跑，task 停放可手动 resume，台账不留续跑记录', async () => {
+    const ledger = fileLikeLedger();
+    const notify = vi.fn();
+    const { service, runtime, children } = setup({ ledger, notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.noteRestartCheckpoint(checkpointOf(children[0]));
+    service.observe({ type: 'worker-exited' });
+
+    await service.cancelOwner('chat-1');
+    service.recoverOwner(context);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(runtime.retry).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    expect(service.progress('chat-1')).toEqual([]);
+    expect(ledger.load().find((entry) => entry.runId === spawned.value.runId)).toMatchObject({
+      status: 'interrupted',
+      notified: true,
+    });
+    expect(ledger.load()[0]?.restart).toBeUndefined();
+    await expect(
+      service.resume({ context, requestId: 'r', agentId: spawned.value.agentId })
+    ).resolves.toMatchObject({ ok: true });
   });
 });

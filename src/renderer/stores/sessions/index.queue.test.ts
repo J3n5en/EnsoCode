@@ -512,6 +512,18 @@ describe('typed Agent child projection', () => {
     ]);
   });
 
+  it('用户点停止：连同名下在跑的子代理一起停（插话立即发送只断当前轮，见上）', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, started: true, status: 'running' as const },
+      },
+    }));
+    agentAbort.mockClear();
+    await sessionsModule.useSessionsStore.getState().abort('parent');
+    expect(agentAbort).toHaveBeenCalledWith('parent', { stopSubagents: true });
+  });
+
   it('运行中压缩时用户中断：压缩放弃收口不吞中断标记，被中断轮收束时也不泵队列', async () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

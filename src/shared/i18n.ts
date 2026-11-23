@@ -610,6 +610,15 @@ export const zhTranslations: Record<string, string> = {
   'Automatically unfold diffs or written content from file modification tools while the agent is still running':
     'agent 运行中，文件修改工具的 diff 或写入内容自动展开',
   'Expand reasoning while streaming': '流式推理时自动展开',
+  'Quote button on text selection': '选中文字时显示「引用」按钮',
+  'Show a floating Quote button when you select text in the conversation; click it to put the selection into the input box as a quote':
+    '在会话里选中文字时浮出「引用」按钮，点击把选中内容作为引用块放进输入框',
+  Quote: '引用',
+  'Quote into the input box': '引用到输入框继续对话',
+  'Quote · {{count}} lines': '引用 · {{count}} 行',
+  'Truncated · original {{count}} lines': '已截断，原文 {{count}} 行',
+  'Click to expand': '点击展开',
+  'Remove quote': '移除引用',
   'Automatically unfold the thinking block while the model is still reasoning. It collapses again when reasoning ends.':
     '模型思考时自动展开推理内容；思考结束后仍自动收起',
   'Context compaction strategy': '上下文压缩策略',

@@ -971,6 +971,8 @@ export class SessionSupervisor {
     /** 重启会把能脱离的转后台命令交给下一代：安全点不等它们 */
     keepBackground?: boolean;
   };
+  /** 进程收尾中：此后中止的子代理回合不是 Run 的结局 */
+  private exiting = false;
   /** 上一代 worker 的断点，按 sessionId 等对应的 spawn-parent 认领 */
   private readonly restartResume = new Map<string, RestartCheckpointEntry>();
   private readonly gate = new OperationGate();
@@ -5112,8 +5114,17 @@ export class SessionSupervisor {
     }
   }
 
+  /**
+   * 收尾中止的是子代理 Run 的回合：照常收口（断点要它空闲），但不发回合结局，
+   * 否则 Main 把被打断的 Run 记成已完成。Run 留在 running，Main 按 worker 退出记成被打断，重启后接着跑。
+   */
+  private exitingRun(managed: ManagedSession): boolean {
+    return this.exiting && managed.agentRun !== undefined;
+  }
+
   /** 本轮成功收口。budget：子代理因请求预算被强制停止，带上标记（及补报告的错误）交回已有输出。 */
   private completeTurn(managed: ManagedSession, budget?: { error?: string }): void {
+    const quiet = this.exitingRun(managed);
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
     const run = managed.agentRun;
@@ -5145,20 +5156,21 @@ export class SessionSupervisor {
     managed.turnStartIndex = managed.messages.length;
     this.workspaceClaims.release(managed.identity.sessionId);
     if (!aborted && !budget) this.nudgeTaskWrapUp(managed);
-    this.options.emit({
-      type: 'turn-completed',
-      identity: managed.identity,
-      seq: ++managed.seq,
-      turnId,
-      ...(digest ? { digest } : {}),
-      ...(report ? { report } : {}),
-      ...(silent ? { silent: true as const } : {}),
-      ...(aborted ? { aborted: true as const } : {}),
-      ...(budget ? { requestBudgetStop: true } : {}),
-      ...(budget?.error ? { requestBudgetError: budget.error } : {}),
-      ...(continues ? { continues } : {}),
-      ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
-    });
+    if (!quiet)
+      this.options.emit({
+        type: 'turn-completed',
+        identity: managed.identity,
+        seq: ++managed.seq,
+        turnId,
+        ...(digest ? { digest } : {}),
+        ...(report ? { report } : {}),
+        ...(silent ? { silent: true as const } : {}),
+        ...(aborted ? { aborted: true as const } : {}),
+        ...(budget ? { requestBudgetStop: true } : {}),
+        ...(budget?.error ? { requestBudgetError: budget.error } : {}),
+        ...(continues ? { continues } : {}),
+        ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
+      });
     if (awaitingTasks) {
       // 常驻任务没有完成事件：第一次因这批任务持有时唤醒一次
       const fresh = this.takeUnnudged(managed);
@@ -5770,6 +5782,7 @@ export class SessionSupervisor {
   }
 
   private failTurn(managed: ManagedSession, error: string, retryExhausted = false): void {
+    const quiet = this.exitingRun(managed);
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
     const run = managed.agentRun;
@@ -5801,16 +5814,17 @@ export class SessionSupervisor {
     }
     this.emitStatus(managed, error);
     this.workspaceClaims.release(managed.identity.sessionId);
-    this.options.emit({
-      type: 'turn-failed',
-      identity: managed.identity,
-      seq: ++managed.seq,
-      turnId,
-      error,
-      ...(retryExhausted ? { retryExhausted: true } : {}),
-      ...(aborted ? { aborted: true as const } : {}),
-      ...(continues ? { continues } : {}),
-    });
+    if (!quiet)
+      this.options.emit({
+        type: 'turn-failed',
+        identity: managed.identity,
+        seq: ++managed.seq,
+        turnId,
+        error,
+        ...(retryExhausted ? { retryExhausted: true } : {}),
+        ...(aborted ? { aborted: true as const } : {}),
+        ...(continues ? { continues } : {}),
+      });
     this.flushPendingReminders(managed);
   }
 
@@ -6379,6 +6393,7 @@ export class SessionSupervisor {
     // 中止后断点记成同一轮的模型请求，冷启动续跑，而不是只留一句 This operation was aborted
     if (restartPending)
       for (const managed of this.sessions.values()) this.markRestartAbort(managed);
+    this.exiting = true;
     const aborts: Promise<unknown>[] = [];
     for (const managed of this.sessions.values()) {
       cancelContinuousMemory(managed.session.sessionManager);
