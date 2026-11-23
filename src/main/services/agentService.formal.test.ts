@@ -3,6 +3,7 @@ import type { AgentControlContext } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import type { AgentRunLedgerEntry } from './agentRunLedger';
 import { AgentService, type AgentServiceRuntime } from './agentService';
+import { UpstreamHealthGate, type UpstreamRecoveryService } from './upstreamRecovery';
 
 // 有界穷举子代理注册表：真实 AgentService 对接子会话 / worker 模型，父会话操作、子会话事件、
 // worker 退出与 Main 重启（新建 AgentService，从同一份台账恢复）按任意顺序交错。
@@ -26,7 +27,8 @@ type Mode = 'task' | 'coworker';
 const OUTCOMES = { ok: 'succeeded', abort: 'interrupted', fail: 'failed' } as const;
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 /** 不由父会话发起的步骤：它们都走完、父会话也不再操作时，系统必须收敛 */
-const ENVIRONMENT = /^(return|ready|end|turn|expire|restore|parent-ready|released|removed)/;
+const ENVIRONMENT =
+  /^(return|ready|end|turn|expire|restore|parent-ready|released|removed|upstream-recover)/;
 
 interface Budget {
   spawns: number;
@@ -40,6 +42,8 @@ interface Budget {
   holds: number;
   /** 用户删除父会话 */
   deletes: number;
+  /** 上游瞬态 503 故障次数 */
+  upstreamFails: number;
 }
 
 interface Child {
@@ -81,6 +85,8 @@ const release = (c: Child) =>
 
 interface World {
   service: AgentService;
+  gate: UpstreamHealthGate;
+  clock: number;
   saved: AgentRunLedgerEntry[];
   children: Child[];
   parentUp: boolean;
@@ -99,13 +105,18 @@ interface World {
   stopped: Set<string>;
   /** 已停掉却又被自动续跑的 Run */
   resurrected?: string;
+  /** 上游自动恢复错误地消耗了手动 resume 额度 */
+  quotaConsumed?: string;
   /** 父会话已删除：parent-ended（released）与删行（removed）还没到的那一步 */
   deleted?: { released: boolean; removed: boolean };
   ids: number;
 }
 
 interface Internals {
-  agents: Map<string, { identity: ChildSessionIdentity; state: { status: string } }>;
+  agents: Map<
+    string,
+    { identity: ChildSessionIdentity; state: { status: string }; resumes?: number }
+  >;
   runs: Map<string, { runId: string; status: string; delivered: boolean }>;
 }
 const internals = (w: World) => w.service as unknown as Internals;
@@ -189,9 +200,19 @@ function newService(w: World, restartCheckpoint: Checkpoint = []): AgentService 
       return { ok: true };
     },
   };
+  const upstreamRecovery: UpstreamRecoveryService = {
+    reportFailure: (input) => w.gate.reportFailure(input, w.clock),
+    reportSuccess: (provider, waiterId) => w.gate.reportSuccess(provider, waiterId, w.clock),
+    retryNow: (waiterId) => w.gate.retryNow(waiterId, w.clock),
+    cancel: (waiterId) => w.gate.cancel(waiterId),
+    getWaiter: (waiterId) => w.gate.getWaiter(waiterId),
+    snapshots: () => w.gate.snapshots(),
+    dispose: () => {},
+  };
   return new AgentService({
     runtime,
     restartCheckpoint,
+    upstreamRecovery,
     ledger: {
       load: () => w.saved.map((entry) => ({ ...entry })),
       save: (entries) => {
@@ -212,6 +233,8 @@ function newService(w: World, restartCheckpoint: Checkpoint = []): AgentService 
 
 function boot(): World {
   const w = {
+    gate: new UpstreamHealthGate({ wakeBaseJitterMs: 0, wakeStaggerMs: 0, random: () => 0 }),
+    clock: 1_000,
     saved: [],
     children: [],
     parentUp: true,
@@ -225,6 +248,7 @@ function boot(): World {
       crashes: 0,
       holds: 0,
       deletes: 0,
+      upstreamFails: 0,
     },
     runIds: [],
     notified: new Map(),
@@ -369,6 +393,31 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
             if (c.expiry === 'due') c.expiry = 'told';
             c.turn = `${runId}~w${++c.wakes}`;
           }
+        },
+      ]);
+    }
+    if (turn && c.live && u.upstreamFails < cfg.upstreamFails) {
+      out.push([
+        `turn:${i}:upstream-503`,
+        () => {
+          const runId = c.held ?? turn;
+          const continues = c.held;
+          c.turn = undefined;
+          u.upstreamFails++;
+          w.clock += 1_000;
+          const beforeResumes = c.agentId ? (internals(w).agents.get(c.agentId)?.resumes ?? 0) : 0;
+          w.service.observe({
+            type: 'turn-failed',
+            identity: c.identity,
+            seq: 0,
+            turnId: turn,
+            ...(continues ? { continues } : {}),
+            error: '503 Service Unavailable: No available accounts',
+            retryExhausted: true,
+            provider: 'p1',
+          });
+          const afterResumes = c.agentId ? (internals(w).agents.get(c.agentId)?.resumes ?? 0) : 0;
+          if (afterResumes !== beforeResumes) w.quotaConsumed ??= runId;
         },
       ]);
     }
@@ -520,6 +569,22 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
       },
     ]);
   }
+  if (w.parentUp && w.gate.allWaiters().length > 0) {
+    out.push([
+      'upstream-recover',
+      async () => {
+        w.clock += 60_000;
+        w.gate.reportSuccess('p1', 'ext', w.clock);
+        const due = w.gate.takeDue(w.clock);
+        for (const ev of due) {
+          const beforeResumes = internals(w).agents.get(ev.waiter.id)?.resumes ?? 0;
+          await w.service.wakeUpstream(ev.waiter.id);
+          const afterResumes = internals(w).agents.get(ev.waiter.id)?.resumes ?? 0;
+          if (afterResumes !== beforeResumes) w.quotaConsumed ??= ev.waiter.id;
+        }
+      },
+    ]);
+  }
   for (const runId of u.stops < cfg.stops ? inProgress(w) : []) {
     out.push([
       `stop:${runId}`,
@@ -561,8 +626,16 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
             }));
           for (const c of w.children)
             Object.assign(c, { ...kill, ready: false, ending: undefined });
-          if (kind === 'exit') w.service.observe({ type: 'worker-exited' });
-          else w.service = newService(w, kind === 'update' ? checkpoint : []);
+          if (kind === 'exit') {
+            w.service.observe({ type: 'worker-exited' });
+          } else {
+            w.gate = new UpstreamHealthGate({
+              wakeBaseJitterMs: 0,
+              wakeStaggerMs: 0,
+              random: () => 0,
+            });
+            w.service = newService(w, kind === 'update' ? checkpoint : []);
+          }
         },
       ]);
     }
@@ -578,7 +651,11 @@ function key(w: World): string {
     w.saved.map((e) => [e.runId, e.status, e.notified]),
     w.children.map(({ returnSpawn, identity: id, ...c }) => [c, id.generation, !!returnSpawn]),
     [w.parentUp, w.used, w.runIds, [...w.notified], [...w.notifiedStatus], [...w.endedByParent]],
-    [w.deleted, [...w.stopped]],
+    [
+      w.deleted,
+      [...w.stopped],
+      w.gate.allWaiters().map((x) => [x.id, x.attempt, !!x.probing, !!x.recovering]),
+    ],
   ]);
 }
 
@@ -587,6 +664,7 @@ function safetyViolation(w: World): string | null {
   if (w.revived) return `父会话已被用户停止，初始化中的 spawn 仍起了 Run ${w.revived}`;
   if (w.resurrected) return `用户停止 / 删除父会话后，Run ${w.resurrected} 又被自动续跑`;
   if (w.survived) return `用户停止父会话后，Run ${w.survived} 仍在跑或仍待续跑`;
+  if (w.quotaConsumed) return `上游自动恢复消耗了手动 resume 额度：${w.quotaConsumed}`;
   const sessions = [...internals(w).agents.values()].map((a) => a.identity.sessionId);
   if (new Set(sessions).size !== sessions.length) return '同一子会话对应多条 Agent 记录';
   for (const c of w.children) {
@@ -687,6 +765,7 @@ const none = {
   holds: 1,
   // 删除父会话只在默认档的 coworker 与两档的 task 穷举；FULL 的 coworker 叠加它状态数爆炸
   deletes: FULL ? 0 : 1,
+  upstreamFails: 0,
 };
 
 const configs = [
@@ -699,6 +778,23 @@ const configs = [
     name: 'task：stop、停放与 resume、worker 退出与重启',
     cfg: { ...none, modes: ['task'] as Mode[], resumes: 1, deletes: 1 },
     min: 300,
+  },
+  {
+    name: '上游 503 故障与恢复：自动续跑不占 resume 额度、stop / dismiss / 用户停止后不复活',
+    cfg: {
+      ...none,
+      modes: ['task', 'coworker'] as Mode[],
+      spawns: 1,
+      stops: 1,
+      dismisses: 1,
+      resumes: 0,
+      faults: 0,
+      crashes: 0,
+      holds: 0,
+      deletes: 0,
+      upstreamFails: 2,
+    },
+    min: 40,
   },
   ...(FULL
     ? [

@@ -309,6 +309,12 @@ export const IPC_CHANNELS = {
   AGENT_ABORT: 'agent:abort',
   AGENT_ABORT_RETRY: 'agent:abort-retry',
   AGENT_RETRY: 'agent:retry',
+  AGENT_UPSTREAM_REPORT_FAILURE: 'agent:upstream-report-failure',
+  AGENT_UPSTREAM_RETRY_NOW: 'agent:upstream-retry-now',
+  AGENT_UPSTREAM_CANCEL: 'agent:upstream-cancel',
+  AGENT_UPSTREAM_HEALTH_LIST: 'agent:upstream-health-list',
+  AGENT_UPSTREAM_HEALTH_EVENT: 'agent:upstream-health',
+  AGENT_UPSTREAM_WAKE_EVENT: 'agent:upstream-wake',
   AGENT_EVENT: 'agent:event',
   AGENT_SNAPSHOT: 'agent:snapshot',
   /** 取走上次应用退出时被打断的回合（取一次即清空） */

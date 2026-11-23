@@ -693,6 +693,14 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_ABORT: surfaces('conversations.abort'),
   AGENT_ABORT_RETRY: surfaces('conversations.abort'),
   AGENT_RETRY: surfaces('conversations.retry-turn'),
+  AGENT_UPSTREAM_REPORT_FAILURE: excluded(
+    'Internal upstream health gate failure report from renderer.'
+  ),
+  AGENT_UPSTREAM_RETRY_NOW: surfaces('conversations.retry-turn'),
+  AGENT_UPSTREAM_CANCEL: surfaces('conversations.abort'),
+  AGENT_UPSTREAM_HEALTH_LIST: excluded('Read-only upstream provider health snapshot query.'),
+  AGENT_UPSTREAM_HEALTH_EVENT: excluded('Main-to-renderer upstream provider health push stream.'),
+  AGENT_UPSTREAM_WAKE_EVENT: excluded('Main-to-renderer upstream recovery wake signal.'),
   AGENT_EVENT: excluded('Worker-to-renderer event stream transport.'),
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
   AGENT_TAKE_INTERRUPTED_TURNS: excluded(
