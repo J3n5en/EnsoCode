@@ -60,6 +60,9 @@ describe('classifyCommand', () => {
     ['vite --version', 'default'],
     ['tail -n 50 app.log', 'default'],
     ['grep -r "tsc --watch" docs', 'default'],
+    // 等 CI 的 watcher 会自己结束，不是常驻服务（0daaae8b / 1251bcab 被误判常驻，秘书巡检报停住）
+    ['gh pr checks 404 --watch --interval 30 | tail -2', 'default'],
+    ['gh run watch 123 --exit-status', 'default'],
   ];
 
   it.each(cases)('%s → %s', (command, expected) => {

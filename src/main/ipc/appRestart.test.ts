@@ -1,4 +1,5 @@
 import { IPC_CHANNELS } from '@shared/types';
+import type { RestartBlocker } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -172,5 +173,26 @@ describe('app restart IPC', () => {
     expect(mocks.present).not.toHaveBeenCalled();
     expect(pushed()).toContainEqual({ phase: 'waiting', reason: 'tool', exit: 'update' });
     mocks.focused = true;
+  });
+
+  it('等的会话变了再推一次，内容相同不重复推，也不再抢焦点', async () => {
+    const prepared = Promise.withResolvers<string>();
+    let report: ((reason: 'tool', blockers?: RestartBlocker[]) => void) | undefined;
+    const waited = waitWithExitDialog('quit', (onWaitingForTools) => {
+      report = onWaitingForTools;
+      return prepared.promise;
+    });
+    const first: RestartBlocker[] = [{ sessionId: 's1', kind: 'tool', tools: ['bash'] }];
+    const next: RestartBlocker[] = [{ sessionId: 's1', kind: 'reply' }];
+    report?.('tool', first);
+    report?.('tool', first);
+    report?.('tool', next);
+    expect(pushed()).toEqual([
+      { phase: 'waiting', reason: 'tool', exit: 'quit', blockers: first },
+      { phase: 'waiting', reason: 'tool', exit: 'quit', blockers: next },
+    ]);
+    expect(mocks.present).toHaveBeenCalledOnce();
+    prepared.resolve('done');
+    await waited;
   });
 });
