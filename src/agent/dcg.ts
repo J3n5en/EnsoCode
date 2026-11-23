@@ -33,6 +33,19 @@ export function parseDcgVerdict(exitCode: number | null, stdout: string): Comman
 
 const MAX_OUTPUT = 64 * 1024;
 
+/** 用户按规则记忆的豁免：命中豁免规则视同未命中，交回原审批逻辑 */
+export function withDcgExemptions(
+  guard: CommandGuard,
+  exemptRules: readonly string[]
+): CommandGuard {
+  if (exemptRules.length === 0) return guard;
+  const exempt = new Set(exemptRules);
+  return async (tool, command, signal) => {
+    const hit = await guard(tool, command, signal);
+    return hit && exempt.has(hit.ruleId) ? null : hit;
+  };
+}
+
 export function createDcgGuard(binaryPath: string, timeoutMs = 1500): CommandGuard {
   return (tool, command, signal) => {
     const dialect = dcgDialect(tool);

@@ -221,7 +221,7 @@ import {
   previewModelDirectoryPush,
   registerCustomProviderModels,
 } from './customProviderRegistry';
-import { createDcgGuard } from './dcg';
+import { createDcgGuard, withDcgExemptions } from './dcg';
 import {
   appendInterruptedTasks,
   DETACHED_TASKS_FILE,
@@ -2063,7 +2063,8 @@ export class SessionSupervisor {
           command.instanceId,
           command.workflowPresetFiles,
           command.secretaryTools,
-          command.askRelay
+          command.askRelay,
+          command.dcgExemptRules
         );
         return;
       case 'spawn-child':
@@ -2755,7 +2756,8 @@ export class SessionSupervisor {
     instanceId?: string,
     workflowPresetFiles: readonly string[] = [],
     secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = [],
-    askRelay?: { name: string }
+    askRelay?: { name: string },
+    dcgExemptRules: readonly string[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2922,7 +2924,9 @@ export class SessionSupervisor {
         protectedFloor: botMode || protectedActions,
         autoReject: autoRejectApprovals,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
-        ...(dcgPath ? { commandGuard: createDcgGuard(dcgPath) } : {}),
+        ...(dcgPath
+          ? { commandGuard: withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) }
+          : {}),
       }
     );
     const checkpoints = new CheckpointManager(

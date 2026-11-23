@@ -1,7 +1,21 @@
 import { ipcMain } from '@platform';
-import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
+import { isDcgRuleId } from '@shared/dcgRuleMemory';
+import type { DcgActionResult, DcgRuleState, DcgStatus } from '@shared/types/dcg';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { DCG_VERSION, dcgRoot, dcgStatus, installDcg, uninstallDcg } from '../services/dcgBinary';
+import {
+  checkDcgUpdate,
+  DCG_VERSION,
+  dcgRoot,
+  dcgStatus,
+  installDcg,
+  uninstallDcg,
+} from '../services/dcgBinary';
+import {
+  clearDcgRuleMemory,
+  exemptDcgRule,
+  readDcgRuleState,
+  recordDcgAllow,
+} from '../services/dcgRuleMemory';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -12,10 +26,41 @@ const isTrusted = (id: number) => isMainRenderer(id) || isSettingsRenderer(id);
 
 let installing: Promise<DcgActionResult> | null = null;
 
+const ruleHandler =
+  (action: typeof readDcgRuleState) =>
+  (event: { sender: { id: number } }, ruleId: unknown): DcgRuleState | null => {
+    if (!isTrusted(event.sender.id) || !isDcgRuleId(ruleId)) return null;
+    try {
+      return action(dcgRoot(), ruleId, DCG_VERSION);
+    } catch {
+      return null;
+    }
+  };
+
 export function registerDcgHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.DCG_STATUS, (event) =>
     isTrusted(event.sender.id) ? dcgStatus(dcgRoot()) : UNTRUSTED
   );
+
+  // 只在用户点击「检查更新」时调用，不在启动或页面加载时自动请求
+  ipcMain.handle(IPC_CHANNELS.DCG_CHECK_UPDATE, (event) =>
+    isTrusted(event.sender.id)
+      ? checkDcgUpdate()
+      : { status: 'failed', current: DCG_VERSION, reason: 'network' }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.DCG_RULE_STATE, ruleHandler(readDcgRuleState));
+  ipcMain.handle(IPC_CHANNELS.DCG_RULE_ALLOWED, ruleHandler(recordDcgAllow));
+  ipcMain.handle(IPC_CHANNELS.DCG_RULE_EXEMPT, ruleHandler(exemptDcgRule));
+  ipcMain.handle(IPC_CHANNELS.DCG_EXEMPTIONS_CLEAR, async (event) => {
+    if (!isTrusted(event.sender.id)) return false;
+    try {
+      await clearDcgRuleMemory(dcgRoot());
+      return true;
+    } catch {
+      return false;
+    }
+  });
 
   ipcMain.handle(IPC_CHANNELS.DCG_INSTALL, (event): Promise<DcgActionResult> => {
     if (!isTrusted(event.sender.id)) return Promise.resolve({ ok: false, status: UNTRUSTED });

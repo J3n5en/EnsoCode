@@ -230,7 +230,7 @@ import type {
   DesignTopLeftRect,
   DesignXyRect,
 } from '@shared/types/browser';
-import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
+import type { DcgActionResult, DcgRuleState, DcgStatus, DcgUpdateCheck } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import { IPC_CHANNELS, type RestartBlocker, type RestartOverlayState } from '@shared/types/ipc';
 import type {
@@ -900,6 +900,14 @@ const electronAPI = {
     status: (): Promise<DcgStatus> => ipcRenderer.invoke(IPC_CHANNELS.DCG_STATUS),
     install: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_INSTALL),
     uninstall: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_UNINSTALL),
+    checkUpdate: (): Promise<DcgUpdateCheck> => ipcRenderer.invoke(IPC_CHANNELS.DCG_CHECK_UPDATE),
+    ruleState: (ruleId: string): Promise<DcgRuleState | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_STATE, ruleId),
+    ruleAllowed: (ruleId: string): Promise<DcgRuleState | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_ALLOWED, ruleId),
+    ruleExempt: (ruleId: string): Promise<DcgRuleState | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_EXEMPT, ruleId),
+    clearExemptions: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_CLEAR),
   },
 
   providers: {

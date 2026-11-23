@@ -4,7 +4,7 @@ import type { EditMode } from '@shared/types';
 import type { AgentMode } from '@shared/types/agent';
 import type { BrowserClearKind } from '@shared/types/browser';
 import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
-import type { DcgStatus } from '@shared/types/dcg';
+import type { DcgStatus, DcgUpdateCheck } from '@shared/types/dcg';
 import { EDIT_MODES, isEditMode } from '@shared/types/editMode';
 import {
   WEB_SEARCH_CHAIN_MAX,
@@ -612,6 +612,8 @@ function DcgGuardRow() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [update, setUpdate] = useState<DcgUpdateCheck | 'checking' | null>(null);
+  const [cleared, setCleared] = useState<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
     void window.electronAPI.dcg.status().then((next) => {
@@ -632,6 +634,29 @@ function DcgGuardRow() {
     setBusy(false);
   };
   const installed = status?.installed === true;
+  // 只在用户点击时请求 GitHub，不在加载时自动检查
+  const checkUpdate = async () => {
+    setUpdate('checking');
+    setUpdate(await window.electronAPI.dcg.checkUpdate());
+  };
+  const clearExemptions = async () => {
+    setCleared(await window.electronAPI.dcg.clearExemptions());
+  };
+  const updateText =
+    !update || update === 'checking'
+      ? null
+      : update.status === 'latest'
+        ? t('Up to date (latest v{{latest}})', { latest: update.latest })
+        : update.status === 'available'
+          ? t(
+              'dcg v{{latest}} is available (built-in v{{current}}). It can be installed after an EnsoCode update ships its checksum.',
+              { latest: update.latest, current: update.current }
+            )
+          : update.reason === 'rate-limited'
+            ? t('GitHub rate limit reached. Try again in an hour.')
+            : update.reason === 'invalid'
+              ? t('Could not read the latest dcg release.')
+              : t('Could not reach GitHub. Check your network.');
 
   return (
     <ToolRow
@@ -646,7 +671,7 @@ function DcgGuardRow() {
         <Switch checked={enabled && installed} disabled={!installed} onCheckedChange={setEnabled} />
       }
     >
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-muted-foreground">
           {!status
             ? t('Loading…')
@@ -676,7 +701,28 @@ function DcgGuardRow() {
               {busy ? t('Installing…') : t('Install')}
             </Button>
           ))}
+        {status?.supported && (
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={update === 'checking'}
+            onClick={() => void checkUpdate()}
+          >
+            {update === 'checking' ? t('Checking for updates…') : t('Check for updates')}
+          </Button>
+        )}
+        {updateText && <span className="text-muted-foreground">{updateText}</span>}
+        {installed && (
+          <Button variant="outline" size="xs" onClick={() => void clearExemptions()}>
+            {t('Clear rule exemptions')}
+          </Button>
+        )}
       </div>
+      {cleared !== null && (
+        <p className="text-muted-foreground text-xs">
+          {cleared ? t('Rule exemptions cleared.') : t('Operation failed')}
+        </p>
+      )}
       {error && <p className="text-destructive text-xs">{error}</p>}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md" zIndexLevel="nested">

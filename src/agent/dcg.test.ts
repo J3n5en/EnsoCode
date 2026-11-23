@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { createDcgGuard, dcgDialect, parseDcgVerdict } from './dcg';
+import { createDcgGuard, dcgDialect, parseDcgVerdict, withDcgExemptions } from './dcg';
 
 const DENY = JSON.stringify({
   decision: 'deny',
@@ -16,6 +16,25 @@ describe('dcgDialect', () => {
     expect(dcgDialect('bash')).toBe('posix');
     expect(dcgDialect('powershell')).toBe('ps');
     expect(dcgDialect('edit')).toBeNull();
+  });
+});
+
+describe('withDcgExemptions', () => {
+  const hit = (ruleId: string) => async () => ({ ruleId, reason: 'r' });
+
+  it('只放过豁免表里的具体规则，其它命中照常返回', async () => {
+    const exempted = withDcgExemptions(hit('core.git:reset-hard'), ['core.git:reset-hard']);
+    expect(await exempted('bash', 'git reset --hard')).toBeNull();
+    const other = withDcgExemptions(hit('core.git:clean-force'), ['core.git:reset-hard']);
+    expect(await other('bash', 'git clean -fd')).toEqual({
+      ruleId: 'core.git:clean-force',
+      reason: 'r',
+    });
+  });
+
+  it('空豁免表原样返回守卫', () => {
+    const guard = hit('core.git:reset-hard');
+    expect(withDcgExemptions(guard, [])).toBe(guard);
   });
 });
 
