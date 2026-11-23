@@ -5391,6 +5391,13 @@ export class SessionSupervisor {
     const restoreTurn = () => {
       if (!state.dispatched || state.queued) managed.currentTurnId = previousTurnId;
     };
+    // 拒收回执必须最后发：消费者收到回执就让出会话，之后才到的失败终态会被记到下一条投递头上。
+    // 活轮还在时这条本该排在它后面，被拒只回执，不能把活轮打成失败
+    const reject = (error: string) => {
+      if (previousTurnId === undefined && !managed.session.isStreaming) this.failTurn(managed, error);
+      else restoreTurn();
+      if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+    };
     void submit()
       .then(restoreTurn)
       .catch(async (error: unknown) => {
@@ -5421,14 +5428,11 @@ export class SessionSupervisor {
             restoreTurn();
             return;
           } catch (retryError) {
-            this.failTurn(managed, toErrorMessage(retryError));
-            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+            reject(toErrorMessage(retryError));
             return;
           }
         }
-        // 拒收回执必须最后发：消费者收到回执就让出会话，之后才到的失败终态会被记到下一条投递头上
-        this.failTurn(managed, message);
-        if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+        reject(message);
       });
   }
 

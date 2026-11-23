@@ -10,7 +10,7 @@ description: >
 
 # worker 轮次相位的形式化验证
 
-属性：pi 的每一次运行（一个用户轮次）恰好收到一个 `turn-completed` 或 `turn-failed`，终态之后 pi 不再为这一轮发出 `agent_start` 或 `auto_retry_start`，用户中断的轮次终态带 `aborted`；每条发给 worker 的 prompt 恰好进入 pi 一次，否则收到一次带它 deliveryId 的 `delivery-rejected`，且只在它发出后有过叫停（中断、取消重试、新 prompt 打断重试、僵尸时限到点）时才收；全部静止后 worker 不停在 running。
+属性：pi 的每一次运行（一个用户轮次）恰好收到一个 `turn-completed` 或 `turn-failed`，终态之后 pi 不再为这一轮发出 `agent_start` 或 `auto_retry_start`，用户中断的轮次终态带 `aborted`；每条发给 worker 的 prompt 恰好进入 pi 一次，否则收到一次带它 deliveryId 的 `delivery-rejected`，且只在它发出后有过叫停（中断、取消重试、新 prompt 打断重试、僵尸时限到点）时才收；被 pi 预检拒收（没有 key、input hook 抛错）的 prompt 也收一次回执，没有活轮时先收一个失败终态、回执排在它之后，有活轮时只收回执；全部静止后 worker 不停在 running。
 
 终态按消费者的视角数：bots、headless、Main 和 renderer 都按会话、不按 turnId 把任何 `turn-*` 当作本轮结束，所以观察者把 worker 发出的每个 `turn-*` 都记到 pi 当前这一轮。未送达回执不是终态，不能借用 `turn-*`。
 
@@ -86,10 +86,12 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 | `case 'prompt'` 僵尸超时分支的 `emitDeliveryRejected(...)` 换成 `this.failTurn(managed, 'zombie')` | 已知发现 3 修复之前（当时还带 `undelivered`） | 中断后工具 5 秒内没停、期间发 p2：`第 1 轮收到 2 个终态：turn-failed(aborted)、turn-completed` |
 | `case 'abort'` 删掉 `withdrawQueuedPrompts` 那一行 | 已知发现 1 修复之前 | 随时发送时 p2 排进活轮后中断：`p2 没进 pi，未送达回执 0 次` |
 | `cancelRetry` 删掉 `withdrawQueuedPrompts` 那一行 | 已知发现 2 修复之前 | p2 排进活轮、p1 遇 503 后取消重试：`终态 turn-failed 之后 pi 仍为第 1 轮发出 agent_start` |
+| `promptFresh` 的 `reject` 里把 `emitDeliveryRejected` 挪到 `failTurn` 前面 | #392 review 前 | 空闲时发预检拒收的 p1：`p1 的拒收回执先于它的失败终态` |
+| `promptFresh` 的 `reject` 无条件 `failTurn`（`ENSO_FORMAL_FULL=1`） | #392 review 前 | p1 在跑时 p2 排队、p3 被预检拒收，p1 遇 503 后取消重试：`第 1 轮没有终态` |
 
 ## 范围
 
-验证范围：一个父会话；最多 3 条 prompt、1 次中断、1 次取消重试；pi 的意外各有上限（503 最多 2 次、上下文溢出 1 次、记忆压缩 1 次、`agent_before_settle` 续跑 1 次），`maxRetries = 1`。四组核心配置：桌面发送（running 时不发）、随时发送（bots、定时任务、`enso-server run`、跨窗口竞态）、僵尸时限可先到点、中断落在压缩与续跑上。
+验证范围：一个父会话；最多 3 条 prompt、1 次中断、1 次取消重试；pi 的意外各有上限（503 最多 2 次、上下文溢出 1 次、记忆压缩 1 次、`agent_before_settle` 续跑 1 次），`maxRetries = 1`。五组核心配置：桌面发送（running 时不发）、随时发送（bots、定时任务、`enso-server run`、跨窗口竞态）、僵尸时限可先到点、中断落在压缩与续跑上、预检拒收（客户端可发 1 条会被 pi 拒收的 prompt，随时发送且僵尸时限可先到点）。
 
 建模假设：
 

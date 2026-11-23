@@ -2211,6 +2211,28 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       await supervisor.shutdown();
     });
 
+    it('活轮中预检拒收：这条本该排在活轮之后，只回执，不把活轮打成失败', async () => {
+      const { events, supervisor, piSession } = await spawned();
+      piSession.isStreaming = true;
+      piSession.emit({ type: 'agent_start' });
+      await settle();
+      piSession.prompt.mockImplementationOnce(async () => {
+        throw new Error('No API key');
+      });
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
+      await settle();
+      expect(
+        events.flatMap((event) =>
+          event.type === 'delivery-rejected' || event.type === 'turn-failed'
+            ? [event.type]
+            : event.type === 'status'
+              ? [event.status]
+              : []
+        )
+      ).toEqual(['idle', 'running', 'delivery-rejected']);
+      await supervisor.shutdown();
+    });
+
     it('prompt 的 user 消息上屏后回执 deliveryId，且排在该 upsert 之后', async () => {
       const { events, supervisor, userMessage } = await spawned();
       supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
