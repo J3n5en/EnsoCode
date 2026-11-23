@@ -1281,6 +1281,7 @@ export const zhTranslations: Record<string, string> = {
   'Ask the agent…': '想让 agent 做什么…',
   'Thinking…': '思考中…',
   'Thought process': '思考过程',
+  'Collapse thinking': '收起思考过程',
   'Thought for {{duration}}': '思考了 {{duration}}',
   'Working…': '生成中…',
   'Map the project': '梳理项目结构',
