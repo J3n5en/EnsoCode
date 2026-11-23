@@ -1,4 +1,4 @@
-import type { RestartWaitReason } from '@shared/types/ipc';
+import type { RestartBlocker, RestartWaitReason } from '@shared/types/ipc';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type AppRestartState, createAppRestart, restartOverlayFor } from './appRestart';
@@ -7,21 +7,27 @@ function setup(overrides: { relaunch?: () => void } = {}) {
   const order: string[] = [];
   const states: AppRestartState[] = [];
   const prepared = Promise.withResolvers<unknown>();
-  let onWaitingForTools: ((reason?: 'tool' | 'background-not-detachable') => void) | undefined;
+  let onWaitingForTools:
+    | ((reason?: RestartWaitReason, blockers?: RestartBlocker[]) => void)
+    | undefined;
   const reasons: Array<string | undefined> = [];
   const host = {
     allowQuit: vi.fn(() => order.push('allowQuit')),
     relaunch: vi.fn(overrides.relaunch ?? (() => order.push('relaunch'))),
     quit: vi.fn(() => order.push('quit')),
-    prepareQuit: vi.fn((waiting: (reason?: 'tool' | 'background-not-detachable') => void) => {
-      order.push('prepareQuit');
-      onWaitingForTools = waiting;
-      return prepared.promise;
-    }),
-    stateChanged: vi.fn((state: AppRestartState, reason?: RestartWaitReason) => {
-      states.push(state);
-      reasons.push(reason);
-    }),
+    prepareQuit: vi.fn(
+      (waiting: (reason?: RestartWaitReason, blockers?: RestartBlocker[]) => void) => {
+        order.push('prepareQuit');
+        onWaitingForTools = waiting;
+        return prepared.promise;
+      }
+    ),
+    stateChanged: vi.fn(
+      (state: AppRestartState, reason?: RestartWaitReason, _blockers?: RestartBlocker[]) => {
+        states.push(state);
+        reasons.push(reason);
+      }
+    ),
     abandonPrepare: vi.fn(() => order.push('abandonPrepare')),
   };
   return {
@@ -30,7 +36,8 @@ function setup(overrides: { relaunch?: () => void } = {}) {
     states,
     reasons,
     prepared,
-    waitingForTools: (reason?: 'tool' | 'background-not-detachable') => onWaitingForTools?.(reason),
+    waitingForTools: (reason?: RestartWaitReason, blockers?: RestartBlocker[]) =>
+      onWaitingForTools?.(reason, blockers),
     restart: createAppRestart(host),
   };
 }
@@ -167,5 +174,24 @@ describe('createAppRestart', () => {
       reason: 'tool',
       exit: 'restart',
     });
+  });
+
+  it('挡住的会话变了：原因没变也再通知，并写进弹层', () => {
+    const first = [{ sessionId: 's1', kind: 'tool' as const, tools: ['bash'] }];
+    const next = [{ sessionId: 's1', kind: 'tool' as const, tools: ['ask_user'] }];
+    const { host, restart, waitingForTools } = setup();
+    restart.restart();
+    waitingForTools('tool', first);
+    waitingForTools('tool', first);
+    waitingForTools('tool', next);
+    expect(
+      host.stateChanged.mock.calls.map(([state, reason, blockers]) =>
+        restartOverlayFor(state, reason, blockers)
+      )
+    ).toEqual([
+      { phase: 'restarting' },
+      { phase: 'waiting', reason: 'tool', exit: 'restart', blockers: first },
+      { phase: 'waiting', reason: 'tool', exit: 'restart', blockers: next },
+    ]);
   });
 });

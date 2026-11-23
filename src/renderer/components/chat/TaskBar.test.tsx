@@ -2,7 +2,29 @@ import type { BackgroundTaskInfo, SubagentActivity, SubagentInfo } from '@shared
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { TaskStatusBadge } from './backgroundTaskUi';
 import { AgentActivityView, TailView, TaskBar } from './TaskBar';
+
+describe('TaskStatusBadge', () => {
+  it('上一代收尾时被停掉的任务标「因重启中断」，不当成普通失败一样不显示', () => {
+    const task: BackgroundTaskInfo = {
+      taskId: 'task-58-x',
+      command: 'gh pr checks 404 --watch',
+      status: 'failed',
+      tail: '',
+      startedAt: 1,
+      interrupted: 'restart',
+    };
+    expect(renderToStaticMarkup(createElement(TaskStatusBadge, { task, now: 2 }))).toContain(
+      'Interrupted by restart'
+    );
+    expect(
+      renderToStaticMarkup(
+        createElement(TaskStatusBadge, { task: { ...task, interrupted: undefined }, now: 2 })
+      )
+    ).toBe('');
+  });
+});
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),

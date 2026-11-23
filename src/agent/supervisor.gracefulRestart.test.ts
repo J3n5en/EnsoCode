@@ -12,6 +12,7 @@ import type { BackgroundTaskManager } from './backgroundTasks';
 import {
   DETACHED_TASKS_FILE,
   type DetachedTaskRecord,
+  INTERRUPTED_TASKS_FILE,
   writeDetachedTasksManifest,
 } from './detachedTasksManifest';
 import { runFiles } from './shell/detachedRun';
@@ -40,9 +41,9 @@ function fakeSessionShape() {
     sessionFile: string;
     agent: {
       state: { messages: unknown[] };
-      prepareNextTurnWithContext: (turn: unknown, signal?: AbortSignal) => Promise<unknown>;
+      prepareRequest: (turn: unknown, signal?: AbortSignal) => Promise<unknown>;
     };
-    nextTurnPrepared: ReturnType<typeof vi.fn>;
+    requestPrepared: ReturnType<typeof vi.fn>;
     prompt: ReturnType<typeof vi.fn>;
     abort: ReturnType<typeof vi.fn>;
     emit(event: { type: string; [key: string]: unknown }): void;
@@ -137,15 +138,15 @@ const SESSION_FILE = '/tmp/enso-graceful-restart-session.jsonl';
 function fakeSession(options: Record<string, unknown>) {
   const listeners = new Set<(event: { type: string; [key: string]: unknown }) => void>();
   const messages = mocks.prefill.shift() ?? [];
-  const nextTurnPrepared = vi.fn(async () => undefined);
+  const requestPrepared = vi.fn(async () => undefined);
   const value = {
     model: options.model,
     resourceLoader: options.resourceLoader,
     sessionManager: options.sessionManager,
     messages,
     sessionFile: SESSION_FILE,
-    agent: { state: { messages }, prepareNextTurnWithContext: nextTurnPrepared },
-    nextTurnPrepared,
+    agent: { state: { messages }, prepareRequest: requestPrepared },
+    requestPrepared,
     pendingMessageCount: 0,
     getFollowUpMessages: () => [],
     subscribe: vi.fn((listener) => {
@@ -319,7 +320,12 @@ describe('SessionSupervisor graceful restart', () => {
     first.supervisor.handleCommand({ type: 'graceful-restart' });
     await settle();
     expect(ofType(first.events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
-      { identity: parent, reason: 'tool-in-flight', toolsInFlight: ['call-1'] },
+      {
+        identity: parent,
+        reason: 'tool-in-flight',
+        toolsInFlight: ['call-1'],
+        toolNames: ['bash'],
+      },
     ]);
     expect(ofType(first.events, 'graceful-restart-ready')).toEqual([]);
     expect(existsSync(path.join(dataDir, RESTART_CHECKPOINT_FILE))).toBe(false);
@@ -333,7 +339,7 @@ describe('SessionSupervisor graceful restart', () => {
 
     // 第 3 条：pi 进入下一次模型请求前的 prepareNextTurn，就地挂起并落断点
     let proceeded = false;
-    void session.agent.prepareNextTurnWithContext({}, undefined).then(() => {
+    void session.agent.prepareRequest({}, undefined).then(() => {
       proceeded = true;
     });
     await settle();
@@ -354,7 +360,7 @@ describe('SessionSupervisor graceful restart', () => {
     ) as RestartCheckpoint;
     expect(onDisk).toEqual(ready?.checkpoint);
     expect(proceeded).toBe(false);
-    expect(session.nextTurnPrepared).not.toHaveBeenCalled();
+    expect(session.requestPrepared).not.toHaveBeenCalled();
     expect(ofType(first.events, 'turn-completed')).toEqual([]);
     await first.supervisor.shutdown();
     expect(session.abort).not.toHaveBeenCalled();
@@ -584,23 +590,174 @@ describe('SessionSupervisor graceful restart', () => {
     ]);
   });
 
-  it('别的会话有工具在跑时，不在边界上挂起（防止互相等待）', async () => {
-    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-two-'));
+  it('父会话有工具在跑时子会话不挂起（subagent wait 正等它）；父会话开新工具时放开已挂起的子会话', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-child-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    const child = {
+      sessionId: 'parent::cw-worker',
+      generation: '22222222-2222-4222-8222-222222222222',
+      parent,
+      instanceId: '33333333-3333-4333-8333-333333333333',
+      instanceName: 'worker-1',
+      typeKey: 'builtin:worker' as const,
+    };
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity: child,
+      cwd: '/workspace',
+      config: {
+        typeKey: child.typeKey,
+        displayName: 'Worker',
+        description: 'worker',
+        spawnSpecId: 'spawn-worker',
+        systemPrompt: 'worker role',
+        model,
+        tools: 'all',
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'worker-hash',
+      },
+    });
+    await waitFor(events, 'child-ready');
+    const [owner, worker] = mocks.sessions;
+    owner.emit({ type: 'agent_start' });
+    worker.emit({ type: 'agent_start' });
+    owner.emit({ type: 'tool_execution_start', toolCallId: 'wait-1', toolName: 'subagent' });
+    supervisor.handleCommand({ type: 'graceful-restart' });
+
+    await worker.agent.prepareRequest({}, undefined);
+    expect(worker.requestPrepared).toHaveBeenCalledTimes(1);
+
+    // 父会话的工具结束、停在边界：子会话下一次模型请求前挂起
+    owner.emit({ type: 'tool_execution_end', toolCallId: 'wait-1', toolName: 'subagent' });
+    let ownerProceeded = false;
+    void owner.agent.prepareRequest({}, undefined).then(() => {
+      ownerProceeded = true;
+    });
+    let workerProceeded = false;
+    void worker.agent.prepareRequest({}, undefined).then(() => {
+      workerProceeded = true;
+    });
+    await settle();
+    expect(ownerProceeded).toBe(false);
+    expect(workerProceeded).toBe(false);
+    await waitFor(events, 'graceful-restart-ready');
+    expect(worker.requestPrepared).toHaveBeenCalledTimes(1);
+    await supervisor.shutdown();
+  });
+
+  it('等安全点期间空闲会话收到新消息：消息先落盘、模型请求挂起，断点记成同一轮续跑', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-fresh-'));
     const { events, supervisor } = await startSupervisor(dataDir);
     const other = { sessionId: 'other', generation: '22222222-2222-4222-8222-222222222222' };
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
     supervisor.handleCommand({ type: 'spawn-parent', identity: other, cwd: '/workspace', model });
-    await waitFor(events, 'parent-ready');
     for (let i = 0; i < 40 && ofType(events, 'parent-ready').length < 2; i++) await settle();
-    const [first, second] = mocks.sessions;
-    first.emit({ type: 'agent_start' });
-    second.emit({ type: 'agent_start' });
-    second.emit({ type: 'tool_execution_start', toolCallId: 'delegate-1', toolName: 'delegate' });
+    const [idle, busy] = mocks.sessions;
+    busy.emit({ type: 'agent_start' });
+    busy.emit({ type: 'tool_execution_start', toolCallId: 'call-b', toolName: 'bash' });
     supervisor.handleCommand({ type: 'graceful-restart' });
 
-    await first.agent.prepareNextTurnWithContext({}, undefined);
-    expect(first.nextTurnPrepared).toHaveBeenCalledTimes(1);
+    // goal 续跑 / 投递：pi 先写入 user 消息再在首个模型请求前进 prepareRequest
+    supervisor.handleCommand({
+      type: 'prompt',
+      identity: parent,
+      text: 'continue the goal',
+      deliveryId: 'delivery-goal',
+    });
+    await settle();
+    idle.messages.push(user);
+    idle.emit({ type: 'agent_start' });
+    let proceeded = false;
+    void idle.agent.prepareRequest({}, undefined).then(() => {
+      proceeded = true;
+    });
+    await settle();
+    expect(proceeded).toBe(false);
+
+    busy.messages.push(user, assistantCall, toolResult);
+    busy.emit({ type: 'tool_execution_end', toolCallId: 'call-b', toolName: 'bash' });
+    void busy.agent.prepareRequest({}, undefined);
+    await waitFor(events, 'graceful-restart-ready');
+    expect(proceeded).toBe(false);
+    expect(idle.requestPrepared).not.toHaveBeenCalled();
+    expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'parent', nextStep: 'model-request' }),
+      expect.objectContaining({ sessionId: 'other', nextStep: 'model-request' }),
+    ]);
+    await supervisor.shutdown();
+  });
+
+  it('只剩等人回答的提问挡着：取消提问（说明是重启打断），会话停到下一次模型请求前落断点', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-ask-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    const managed = (
+      supervisor as unknown as {
+        sessions: Map<string, { asks: { ask(question: string): Promise<string> } }>;
+      }
+    ).sessions.get('parent');
+    session.messages.push(user, assistantCall);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'ask_user' });
+    const answer = managed?.asks.ask('which one?');
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    await expect(answer).rejects.toThrow('The app restarted before the user answered');
+
+    session.messages.push(toolResult);
+    session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'ask_user' });
+    void session.agent.prepareRequest({}, undefined);
+    await waitFor(events, 'graceful-restart-ready');
+    expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'parent', nextStep: 'model-request' }),
+    ]);
+    await supervisor.shutdown();
+  });
+
+  it('两个会话交替跑工具：各自停在下一次模型请求前，不因对方有工具在跑就放行（活锁到 5 分钟上限）', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-leapfrog-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    const other = { sessionId: 'other', generation: '22222222-2222-4222-8222-222222222222' };
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: other, cwd: '/workspace', model });
+    for (let i = 0; i < 40 && ofType(events, 'parent-ready').length < 2; i++) await settle();
+    const [first, second] = mocks.sessions;
+    first.messages.push(user, assistantCall, toolResult);
+    second.messages.push(user, assistantCall);
+    first.emit({ type: 'agent_start' });
+    second.emit({ type: 'agent_start' });
+    second.emit({ type: 'tool_execution_start', toolCallId: 'call-b', toolName: 'bash' });
+    supervisor.handleCommand({ type: 'graceful-restart' });
+
+    // 第一个会话的工具批跑完：哪怕另一个会话还有工具在跑，也停在这里，不再发下一次模型请求
+    first.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+    let firstProceeded = false;
+    void first.agent.prepareRequest({}, undefined).then(() => {
+      firstProceeded = true;
+    });
+    await settle();
+    expect(firstProceeded).toBe(false);
     expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+
+    // 另一个会话的工具结束、到边界：两个都停住，立即落断点，都按同一轮续跑
+    second.messages.push(toolResult);
+    second.emit({ type: 'tool_execution_end', toolCallId: 'call-b', toolName: 'bash' });
+    second.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+    void second.agent.prepareRequest({}, undefined);
+    await waitFor(events, 'graceful-restart-ready');
+    expect(firstProceeded).toBe(false);
+    expect(first.requestPrepared).not.toHaveBeenCalled();
+    expect(second.requestPrepared).not.toHaveBeenCalled();
+    expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'parent', nextStep: 'model-request' }),
+      expect.objectContaining({ sessionId: 'other', nextStep: 'model-request' }),
+    ]);
     await supervisor.shutdown();
   });
 
@@ -619,7 +776,7 @@ describe('SessionSupervisor graceful restart', () => {
     session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
     supervisor.handleCommand({ type: 'graceful-restart' });
     let proceeded = false;
-    void session.agent.prepareNextTurnWithContext({}, undefined).then(() => {
+    void session.agent.prepareRequest({}, undefined).then(() => {
       proceeded = true;
     });
     await settle();
@@ -634,7 +791,7 @@ describe('SessionSupervisor graceful restart', () => {
     busy.emit({ type: 'agent_settled' });
     await settle();
     expect(proceeded).toBe(true);
-    expect(session.nextTurnPrepared).toHaveBeenCalledTimes(1);
+    expect(session.requestPrepared).toHaveBeenCalledTimes(1);
     expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
     expect(existsSync(path.join(dataDir, RESTART_CHECKPOINT_FILE))).toBe(false);
 
@@ -687,7 +844,7 @@ describe('SessionSupervisor graceful restart', () => {
     session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
 
     supervisor.handleCommand({ type: 'graceful-restart' });
-    void session.agent.prepareNextTurnWithContext({}, undefined);
+    void session.agent.prepareRequest({}, undefined);
     await settle();
     expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
       { identity: parent, reason: 'tool-in-flight', toolsInFlight: [taskId] },
@@ -734,7 +891,7 @@ describe('SessionSupervisor graceful restart', () => {
     session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'bash' });
     session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
     supervisor.handleCommand({ type: 'graceful-restart' });
-    void session.agent.prepareNextTurnWithContext({}, undefined);
+    void session.agent.prepareRequest({}, undefined);
     await settle();
     expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
 
@@ -843,7 +1000,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
 
     supervisor.handleCommand({ type: 'graceful-restart', keepBackgroundTasks: true });
-    void session.agent.prepareNextTurnWithContext({}, undefined);
+    void session.agent.prepareRequest({}, undefined);
     await settle();
     expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
       {
@@ -916,7 +1073,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
 
     supervisor.handleCommand({ type: 'graceful-restart', keepBackgroundTasks: true });
     let proceeded = false;
-    void session.agent.prepareNextTurnWithContext({}, undefined).then(() => {
+    void session.agent.prepareRequest({}, undefined).then(() => {
       proceeded = true;
     });
     await settle();
@@ -1343,5 +1500,71 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
     expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain('task-9-x finished');
     await supervisor.shutdown();
+  });
+
+  it('空闲会话只剩后台任务时重启：任务被停但记进台账，新一代任务表标因重启中断、通知一次并叫醒，再换代不重复', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-interrupted-'));
+    const checkpointFile = path.join(dataDir, RESTART_CHECKPOINT_FILE);
+    const first = await startSupervisor(dataDir);
+    first.supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await waitFor(first.events, 'parent-ready');
+    // 会话说完「后台跑完再合并」就空闲了：直接后台起的命令不挡安全点
+    const taskId = bgTasksOf(first.supervisor).start('parent', 'echo started; sleep 30', dataDir);
+    await sleep(200);
+    first.supervisor.handleCommand({ type: 'graceful-restart' });
+    await waitFor(first.events, 'graceful-restart-ready');
+    expect(ofType(first.events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'parent', nextStep: 'await-user' }),
+    ]);
+    await first.supervisor.shutdown();
+    await sleep(300);
+    const pendingFile = path.join(dataDir, 'sessions', 'pending-notifications', 'parent.json');
+    expect(existsSync(pendingFile)).toBe(false);
+    expect(existsSync(path.join(dataDir, INTERRUPTED_TASKS_FILE))).toBe(true);
+
+    mocks.sessions.length = 0;
+    const second = await startSupervisor(dataDir, checkpointFile);
+    expect(existsSync(path.join(dataDir, INTERRUPTED_TASKS_FILE))).toBe(false);
+    expect(ofType(second.events, 'unopened-background-tasks').at(-1)).toEqual({
+      type: 'unopened-background-tasks',
+      sessionId: 'parent',
+      tasks: [expect.objectContaining({ taskId, status: 'failed', interrupted: 'restart' })],
+    });
+    expect(ofType(second.events, 'session-wake-requested')).toEqual([
+      { type: 'session-wake-requested', sessionId: 'parent' },
+    ]);
+    const notices = JSON.parse(readFileSync(pendingFile, 'utf8')) as string[];
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(
+      `Background task ${taskId} was terminated because the app restarted`
+    );
+    expect(notices[0]).toContain('interrupted-by-restart');
+    expect(notices[0]).toContain('started');
+
+    second.supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      resumeFile: SESSION_FILE,
+    });
+    await waitFor(second.events, 'parent-ready');
+    await sleep(400);
+    expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
+    expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain(taskId);
+    expect(bgTasksOf(second.supervisor).snapshot('parent')).toEqual([
+      expect.objectContaining({ taskId, status: 'failed', interrupted: 'restart' }),
+    ]);
+    await second.supervisor.shutdown();
+
+    const third = await startSupervisor(dataDir);
+    expect(ofType(third.events, 'session-wake-requested')).toEqual([]);
+    expect(bgTasksOf(third.supervisor).snapshot('parent')).toEqual([]);
+    await third.supervisor.shutdown();
   });
 });

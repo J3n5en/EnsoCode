@@ -1,3 +1,4 @@
+import { translate } from '@shared/i18n';
 import type { RestartOverlayState } from '@shared/types/ipc';
 import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, createElement, type ReactNode } from 'react';
@@ -5,7 +6,19 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RestartWaitDialog, RestartWaitStrip, useRestartOverlayStore } from './RestartWaitDialog';
 
-vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+const sessions = vi.hoisted(() => ({
+  conversations: {} as Record<string, { title: string }>,
+}));
+
+const translateKey = (key: string, params?: Record<string, string | number>) =>
+  params ? key.replace(/\{\{(\w+)\}\}/g, (_, token: string) => String(params[token] ?? '')) : key;
+
+vi.mock('@/i18n', () => ({ useI18n: () => ({ t: translateKey }) }));
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: (
+    selector: (state: { conversations: typeof sessions.conversations }) => unknown
+  ) => selector({ conversations: sessions.conversations }),
+}));
 vi.mock('@/components/ui/alert-dialog', () => {
   const Wrap = ({ children }: { children?: ReactNode }) => createElement('div', null, children);
   return {
@@ -83,6 +96,7 @@ beforeEach(() => {
   push = undefined;
   initial = null;
   remote = undefined;
+  sessions.conversations = {};
   useRestartOverlayStore.setState({
     state: null,
     shown: { phase: 'restarting' },
@@ -252,5 +266,63 @@ describe('RestartWaitDialog', () => {
     await act(async () => buttonOf(strip(), 'Force quit')?.click());
     expect(forceRestart).toHaveBeenCalledTimes(1);
     expect(buttonOf(strip(), 'Force quit')?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('列出挡住退出的会话：标题和原因，没有标题时用 id 前 8 位，子会话注明子代理', async () => {
+    sessions.conversations = {
+      'parent-1': { title: '修登录' },
+      '779e1533-aaaa-bbbb-cccc-dddddddddddd': { title: '写文档' },
+    };
+    await mount();
+    const blockers = [
+      {
+        sessionId: '779e1533-aaaa-bbbb-cccc-dddddddddddd',
+        kind: 'tool' as const,
+        tools: ['bash', 'ask_user'],
+      },
+      { sessionId: 'parent-1::child-99', kind: 'tool' as const, tools: ['bash'] },
+      { sessionId: 'missing1-extra', kind: 'starting' as const },
+      { sessionId: 'parent-1', kind: 'reply' as const },
+      { sessionId: 'parent-1::bg', kind: 'background' as const },
+      { sessionId: 'unknown2', kind: 'turn' as const },
+    ];
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'quit', blockers }));
+    const content = dialog()?.textContent ?? '';
+    expect(content).toContain('写文档 — Running bash, ask_user');
+    expect(content).toContain('修登录 — A subagent is running bash');
+    expect(content).toContain('missing1 — Opening the session');
+    expect(content).toContain('修登录 — Writing a reply');
+    expect(content).toContain('修登录 — A subagent still has a background command running');
+    expect(content).not.toContain('unknown2 — Finishing the turn');
+    expect(content).toContain('1 more sessions');
+    expect(translate('zh', 'Running {{tool}}', { tool: 'bash' })).toBe('正在执行 bash');
+    expect(translate('zh', 'A subagent is running {{tool}}', { tool: 'bash' })).toBe(
+      '子代理正在执行 bash'
+    );
+    expect(translate('zh', 'Opening the session')).toBe('正在打开会话');
+    expect(translate('zh', 'Writing a reply')).toBe('正在写回复');
+    expect(translate('zh', 'A background command is still running')).toBe('转到后台的命令还在跑');
+    expect(translate('zh', '{{count}} more sessions', { count: 1 })).toBe('还有 1 个会话');
+  });
+
+  it('最小化小条附上在等的会话数', async () => {
+    await mount();
+    await act(async () =>
+      push?.({
+        phase: 'waiting',
+        reason: 'tool',
+        exit: 'restart',
+        blockers: [
+          { sessionId: 'aaaaaaaa', kind: 'reply' },
+          { sessionId: 'bbbbbbbb', kind: 'starting' },
+        ],
+      })
+    );
+    await act(async () => buttonOf(dialog(), 'Minimize')?.click());
+    expect(strip()?.textContent).toContain('Restarting once the current command finishes');
+    expect(strip()?.textContent).toContain(' · waiting for 2 sessions');
+    expect(translate('zh', ' · waiting for {{count}} sessions', { count: 2 })).toBe(
+      ' · 等 2 个会话'
+    );
   });
 });

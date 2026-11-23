@@ -196,6 +196,9 @@ describe('应用退出走优雅重启', () => {
     await stopAgentWorkerForQuit(100);
     fork.children[index].emit('exit', 0);
     expect(fork.children).toHaveLength(index + 1);
+    // 退出收尾期间还有命令进来（渲染层 / 秘书）：不再拉起新 worker 去认回刚交出的后台命令
+    sendAgentCommand({ type: 'set-thinking', identity, level: 'low' });
+    expect(fork.children).toHaveLength(index + 1);
 
     const raw = readFileSync(manifestFile(), 'utf8');
     expect(findSecretLikeStrings(raw, [API_KEY, OAUTH_TOKEN])).toEqual([]);
@@ -272,6 +275,9 @@ describe('应用退出走优雅重启', () => {
       expect.stringContaining(`停止出 token 超过 ${QUIT_REPLY_IDLE_MS}ms`)
     );
     expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain('照常退出');
+    expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain(
+      'worker 没报告推迟（可能卡在会话打开或 worker 无响应）'
+    );
     expect(graceful(index)).toHaveLength(1);
     // 超时后再触发退出：拿同一个结果，不再发第二次请求
     await expect(
@@ -306,6 +312,9 @@ describe('应用退出走优雅重启', () => {
       })
     ).toBe(pending);
     expect(joined).toHaveBeenCalledTimes(1);
+    expect(joined).toHaveBeenLastCalledWith('tool', [
+      { sessionId: identity.sessionId, kind: 'background' },
+    ]);
 
     await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS * 3);
     expect(done).toBe(false);
@@ -338,7 +347,9 @@ describe('应用退出走优雅重启', () => {
     }).then(() => {
       done = true;
     });
-    expect(waiting).toHaveBeenCalledExactlyOnceWith('tool');
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('tool', [
+      { sessionId: identity.sessionId, kind: 'background' },
+    ]);
     await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS * 3);
     expect(done).toBe(false);
   });
@@ -370,7 +381,9 @@ describe('应用退出走优雅重启', () => {
       done = true;
     });
     fork.children[index].emit('message', deferred([], 'turn-in-progress'));
-    expect(waiting).toHaveBeenCalledExactlyOnceWith('reply');
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('reply', [
+      { sessionId: identity.sessionId, kind: 'turn' },
+    ]);
     // 以前 10 秒就中止正在写的回复；现在要等它写完
     await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS - 1_000);
     expect(done).toBe(false);
@@ -398,12 +411,120 @@ describe('应用退出走优雅重启', () => {
     await stopAgentWorkerForQuit(100);
     const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
     expect(log).toContain(`停止出 token 超过 ${QUIT_REPLY_IDLE_MS}ms`);
-    expect(log).toContain('会话状态：session-=回复在写');
+    expect(log).toContain('会话状态：session-=回合收尾中');
     expect(log).toContain('session-=model-request（冷启动续跑）');
     expect(loadColdRestartPlan(dataDir())?.resume.map((entry) => entry.sessionId)).toEqual([
       identity.sessionId,
     ]);
     warn.mockRestore();
+  });
+
+  it('挡住的会话变了再回调；超时日志写清工具名、子会话和打开中的会话', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const waiting = vi.fn();
+    const pending = prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+    });
+    const childId = `${identity.sessionId}::child-99`;
+    const bash = {
+      type: 'graceful-restart-deferred',
+      sessions: [
+        {
+          identity,
+          reason: 'tool-in-flight',
+          toolsInFlight: ['call-1'],
+          toolNames: ['bash', 'bash'],
+        },
+      ],
+    };
+    fork.children[index].emit('message', bash);
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('tool', [
+      { sessionId: identity.sessionId, kind: 'tool', tools: ['bash'] },
+    ]);
+    fork.children[index].emit('message', bash);
+    expect(waiting).toHaveBeenCalledTimes(1);
+    fork.children[index].emit('message', {
+      type: 'graceful-restart-deferred',
+      sessions: [
+        {
+          identity,
+          reason: 'tool-in-flight',
+          toolsInFlight: ['call-1'],
+          toolNames: ['bash'],
+        },
+        {
+          identity: { ...identity, sessionId: childId },
+          reason: 'tool-in-flight',
+          toolsInFlight: ['call-2'],
+          toolNames: ['bash'],
+        },
+        {
+          identity: { ...identity, sessionId: 'opening-1' },
+          reason: 'session-starting',
+          toolsInFlight: [],
+        },
+        {
+          identity: { ...identity, sessionId: 'replying' },
+          reason: 'turn-in-progress',
+          toolsInFlight: [],
+          reply: { requestStartMs: 1 },
+        },
+        {
+          identity: { ...identity, sessionId: 'backing1' },
+          reason: 'tool-in-flight',
+          toolsInFlight: ['task-9'],
+        },
+        {
+          identity: { ...identity, sessionId: 'turning1' },
+          reason: 'turn-in-progress',
+          toolsInFlight: [],
+        },
+      ],
+    });
+    expect(waiting).toHaveBeenLastCalledWith('tool', [
+      { sessionId: identity.sessionId, kind: 'tool', tools: ['bash'] },
+      { sessionId: childId, kind: 'tool', tools: ['bash'] },
+      { sessionId: 'opening-1', kind: 'starting' },
+      { sessionId: 'replying', kind: 'reply' },
+      { sessionId: 'backing1', kind: 'background' },
+      { sessionId: 'turning1', kind: 'turn' },
+    ]);
+    expect(waiting).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS);
+    await expect(pending).resolves.toBe('timeout');
+    const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    expect(log).toContain('session-=工具在跑(bash)');
+    expect(log).toContain('child-99(子会话)=工具在跑(bash)');
+    expect(log).toContain('opening-=正在打开会话');
+    expect(log).toContain('replying=回复在写');
+    expect(log).toContain('backing1=转后台命令在跑(task-9)');
+    expect(log).toContain('turning1=回合收尾中');
+    warn.mockRestore();
+  });
+
+  it('只有正在打开的会话：告诉弹层在等命令，不当成在等回复', () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const waiting = vi.fn();
+    const pending = prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+    });
+    fork.children[index].emit('message', {
+      type: 'graceful-restart-deferred',
+      sessions: [{ identity, reason: 'session-starting', toolsInFlight: [] }],
+    });
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('tool', [
+      { sessionId: identity.sessionId, kind: 'starting' },
+    ]);
+    expect(forceAgentWorkerQuit()).toBe(true);
+    return pending.finally(() => warn.mockRestore());
   });
 
   /** 起一次退出，worker 报告回复在写；返回推进时间并按需报告新 token 的工具 */
@@ -744,7 +865,9 @@ describe('退出重启保留转后台命令', () => {
       { type: 'graceful-restart', keepBackgroundTasks: true },
     ]);
     fork.children[index].emit('message', deferred(['call-1']));
-    expect(waiting).toHaveBeenLastCalledWith('tool');
+    expect(waiting).toHaveBeenLastCalledWith('tool', [
+      { sessionId: identity.sessionId, kind: 'background' },
+    ]);
     fork.children[index].emit('message', {
       type: 'graceful-restart-deferred',
       sessions: [
@@ -756,7 +879,9 @@ describe('退出重启保留转后台命令', () => {
         },
       ],
     });
-    expect(waiting).toHaveBeenLastCalledWith('background-not-detachable');
+    expect(waiting).toHaveBeenLastCalledWith('background-not-detachable', [
+      { sessionId: identity.sessionId, kind: 'background' },
+    ]);
     expect(waiting).toHaveBeenCalledTimes(2);
     fork.children[index].emit('message', { type: 'graceful-restart-ready', checkpoint });
     await expect(pending).resolves.toBe('checkpointed');

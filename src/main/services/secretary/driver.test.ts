@@ -533,6 +533,32 @@ describe('派出会话的后台任务看门狗', () => {
     ]);
   });
 
+  it('上一轮之前就结束、通知已送达的任务不算没唤醒；压缩中不判（5bd950ff 误报）', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ taskId: 'task-28' }, 1_000));
+    h.driver.observe(started({ taskId: 'task-29' }, 2_000));
+    h.driver.observe(turnCompleted(digest('等两个')));
+    // task-29 先结束，完成通知开了一轮；轮末 task-28 还在跑，接着等
+    h.driver.observe(ended('done', 200_000));
+    h.driver.observe(
+      level([task('task-28', 'running', 1_000), task('task-29', 'done', 2_000)], 200_000)
+    );
+    clock.now = 230_000;
+    h.driver.observe(turnCompleted(digest('还在等 task-28')));
+    // task-28 在压缩期间结束：worker 压完才投通知
+    h.driver.observe({
+      type: 'compaction',
+      identity,
+      seq: 4,
+      state: 'start',
+    } as RendererAgentEvent);
+    h.driver.observe(
+      level([task('task-28', 'done', 1_000), task('task-29', 'done', 2_000)], 263_000)
+    );
+    expect(h.driver.watch(263_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
   it('任务结束后仍空闲，过了宽限才当没唤醒；期间会话跑起来就不报', () => {
     const h = harnessAt({}, clock);
     h.driver.observe(started({}, 1_000));

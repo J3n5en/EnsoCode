@@ -233,7 +233,7 @@ import type {
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
-import type { RestartOverlayState } from '@shared/types/ipc';
+import type { RestartBlocker, RestartOverlayState } from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -298,14 +298,51 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 
 function parseRestartOverlay(value: unknown): RestartOverlayState | null {
   if (!value || typeof value !== 'object') return null;
-  const { phase, reason, exit } = value as { phase?: unknown; reason?: unknown; exit?: unknown };
+  const { phase, reason, exit, blockers } = value as {
+    phase?: unknown;
+    reason?: unknown;
+    exit?: unknown;
+    blockers?: unknown;
+  };
   if (phase === 'restarting' || phase === 'resuming') return { phase };
   if (phase !== 'waiting') return null;
+  const parsed = parseRestartBlockers(blockers);
   return {
     phase,
     reason: reason === 'background-not-detachable' || reason === 'reply' ? reason : 'tool',
     exit: exit === 'update' || exit === 'quit' ? exit : 'restart',
+    ...(parsed ? { blockers: parsed } : {}),
   };
+}
+
+function isBlockerKind(value: unknown): value is RestartBlocker['kind'] {
+  return (
+    value === 'tool' ||
+    value === 'background' ||
+    value === 'reply' ||
+    value === 'starting' ||
+    value === 'turn'
+  );
+}
+
+function parseRestartBlockers(value: unknown): RestartBlocker[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const blockers: RestartBlocker[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { sessionId?: unknown; kind?: unknown; tools?: unknown };
+    if (typeof row.sessionId !== 'string' || row.sessionId.length === 0) continue;
+    if (!isBlockerKind(row.kind)) continue;
+    const blocker: RestartBlocker = { sessionId: row.sessionId, kind: row.kind };
+    if (row.kind === 'tool' && Array.isArray(row.tools)) {
+      const tools = row.tools.filter(
+        (name): name is string => typeof name === 'string' && name.length > 0
+      );
+      if (tools.length > 0) blocker.tools = tools;
+    }
+    blockers.push(blocker);
+  }
+  return blockers.length > 0 ? blockers : undefined;
 }
 
 const electronAPI = {

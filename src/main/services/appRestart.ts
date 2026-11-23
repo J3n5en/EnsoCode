@@ -1,16 +1,27 @@
-import type { RestartOverlayState, RestartWaitReason } from '@shared/types/ipc';
+import type { RestartBlocker, RestartOverlayState, RestartWaitReason } from '@shared/types/ipc';
 
 export type AppRestartState = 'idle' | 'restarting' | 'waiting-for-tools';
 
 /** 主窗口弹层：点下去立刻是「正在重启」，有命令在跑改成等命令，等到了切回「正在重启」 */
 export function restartOverlayFor(
   state: AppRestartState,
-  waitReason?: RestartWaitReason
+  waitReason?: RestartWaitReason,
+  blockers?: RestartBlocker[]
 ): RestartOverlayState | null {
   if (state === 'restarting') return { phase: 'restarting' };
-  if (state === 'waiting-for-tools')
-    return { phase: 'waiting', reason: waitReason ?? 'tool', exit: 'restart' };
+  if (state === 'waiting-for-tools') {
+    return {
+      phase: 'waiting',
+      reason: waitReason ?? 'tool',
+      exit: 'restart',
+      ...(blockers?.length ? { blockers } : {}),
+    };
+  }
   return null;
+}
+
+function sameBlockers(left?: RestartBlocker[], right?: RestartBlocker[]): boolean {
+  return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
 }
 
 export interface AppRestartHost {
@@ -20,9 +31,15 @@ export interface AppRestartHost {
   allowQuit(): void;
   quit(): void;
   /** 退出前先等 worker 到安全点、落恢复清单；worker 报告有工具在跑时回调 onWaitingForTools */
-  prepareQuit(onWaitingForTools: (reason?: RestartWaitReason) => void): Promise<unknown>;
-  /** 状态变了：刷新菜单项、开关等待弹层（等待中带上在等哪种命令） */
-  stateChanged(state: AppRestartState, waitReason?: RestartWaitReason): void;
+  prepareQuit(
+    onWaitingForTools: (reason?: RestartWaitReason, blockers?: RestartBlocker[]) => void
+  ): Promise<unknown>;
+  /** 状态变了：刷新菜单项、开关等待弹层（等待中带上在等哪种命令，以及每个会话挡住的原因） */
+  stateChanged(
+    state: AppRestartState,
+    waitReason?: RestartWaitReason,
+    blockers?: RestartBlocker[]
+  ): void;
   /** 用户强制退出：不再等安全点（按超时收尾，退出时尽量落断点与清单） */
   abandonPrepare(): void;
 }
@@ -40,12 +57,13 @@ export function createAppRestart(host: AppRestartHost): {
 } {
   let state: AppRestartState = 'idle';
   let waitReason: RestartWaitReason = 'tool';
+  let blockers: RestartBlocker[] | undefined;
   /** 本次重启还没退出时可调：放行并退出，只生效一次 */
   let proceed: (() => boolean) | undefined;
   const setState = (next: AppRestartState) => {
     if (state === next) return;
     state = next;
-    if (next === 'waiting-for-tools') host.stateChanged(next, waitReason);
+    if (next === 'waiting-for-tools') host.stateChanged(next, waitReason, blockers);
     else host.stateChanged(next);
   };
   return {
@@ -66,12 +84,13 @@ export function createAppRestart(host: AppRestartHost): {
         host.quit();
         return true;
       };
-      const waiting = (reason: RestartWaitReason = 'tool') => {
+      const waiting = (reason: RestartWaitReason = 'tool', next?: RestartBlocker[]) => {
         if (quitting) return;
-        const changed = reason !== waitReason;
+        const changed = reason !== waitReason || !sameBlockers(blockers, next);
         waitReason = reason;
+        blockers = next;
         if (state === 'waiting-for-tools') {
-          if (changed) host.stateChanged(state, reason);
+          if (changed) host.stateChanged(state, reason, next);
         } else setState('waiting-for-tools');
       };
       let prepared: Promise<unknown>;

@@ -8,8 +8,11 @@ import { SHELL_LIMITS } from '@shared/shellLimits';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BackgroundTaskManager, type TaskEvents, withBackground } from './backgroundTasks';
 import {
+  appendInterruptedTasks,
   type DetachedTaskRecord,
+  INTERRUPTED_TASKS_FILE,
   takeDetachedTasksManifest,
+  takeInterruptedTasks,
   writeDetachedTasksManifest,
 } from './detachedTasksManifest';
 import { createSessionCommandTool } from './sessionShell';
@@ -376,5 +379,60 @@ describe.runIf(posix)('重启时转后台命令脱离 worker、下一代认回',
       expect.objectContaining({ taskId, status: 'running' }),
     ]);
     manager.stopAll();
+  });
+});
+
+describe.runIf(posix)('worker 收尾停掉的后台任务记台账、下一代通知一次', () => {
+  it('子代理的任务记到根会话；常驻服务标 resident 只落盘不叫醒；台账读后即删、路径对不上的整条丢掉', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-bg-interrupted-'));
+    const logDir = path.join(dir, 'task-logs');
+    const ledger = path.join(dir, INTERRUPTED_TASKS_FILE);
+    const first = makeManager(logDir);
+    const build = first.manager.start('root::cw-worker', 'echo building; sleep 30', dir);
+    const server = first.manager.start('root', 'tail -f /dev/null', dir);
+    await until(() => readFileSync(path.join(logDir, `${build}.log`), 'utf8').includes('building'));
+    const records = first.manager.interruptedOnShutdown();
+    expect(records).toEqual([
+      expect.objectContaining({ taskId: build, sessionId: 'root', resident: false }),
+      expect.objectContaining({ taskId: server, sessionId: 'root', resident: true }),
+    ]);
+    appendInterruptedTasks(ledger, records);
+    first.manager.handOverNotices(records.map((record) => record.taskId));
+    first.manager.stopAll();
+    await until(() => first.ended.length === 2);
+    expect(first.notified).toEqual([]);
+    // 上一代还没认领时又写一次：合并，不覆盖
+    appendInterruptedTasks(ledger, [
+      { ...records[0], taskId: 'task-99-zz', logPath: '/etc/passwd' },
+    ]);
+
+    const notified: Array<{ sessionId: string; text: string; quiet: boolean }> = [];
+    const second = new BackgroundTaskManager(
+      {
+        onStarted: () => {},
+        onOutput: () => {},
+        onEnded: () => {},
+        onCompletionNotify: (sessionId, text, options) =>
+          notified.push({ sessionId, text, quiet: options?.quiet === true }),
+      },
+      logDir,
+      limits
+    );
+    const taken = takeInterruptedTasks(ledger, logDir);
+    expect(taken.map((record) => record.taskId)).toEqual([build, server]);
+    expect(existsSync(ledger)).toBe(false);
+    second.recoverInterrupted(taken);
+    second.recoverInterrupted(taken);
+    expect(notified.map(({ sessionId, quiet }) => ({ sessionId, quiet }))).toEqual([
+      { sessionId: 'root', quiet: false },
+      { sessionId: 'root', quiet: true },
+    ]);
+    expect(notified[0]?.text).toContain('building');
+    expect(notified[0]?.text).toContain('run the command again');
+    expect(notified[1]?.text).toContain('was not restarted automatically');
+    expect(second.snapshot('root')).toEqual([
+      expect.objectContaining({ taskId: build, status: 'failed', interrupted: 'restart' }),
+      expect.objectContaining({ taskId: server, status: 'failed', interrupted: 'restart' }),
+    ]);
   });
 });

@@ -1,5 +1,5 @@
 import { QUIT_REPLY_IDLE_MS, QUIT_REPLY_WAIT_CAP_MS } from '@shared/quitLimits';
-import type { AppExitReason, RestartOverlayState } from '@shared/types/ipc';
+import type { AppExitReason, RestartBlocker, RestartOverlayState } from '@shared/types/ipc';
 import { Maximize2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { create } from 'zustand';
@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/i18n';
+import { useSessionsStore } from '@/stores/sessions';
 import { BannerBar } from './BannerBar';
 
 const EXIT_NOTES: Record<AppExitReason, string> = {
@@ -61,6 +62,63 @@ function forceQuit(): void {
 
 const setMinimized = (minimized: boolean) => useRestartOverlayStore.setState({ minimized });
 
+const BLOCKER_LIMIT = 5;
+
+function blockerTitle(
+  conversations: Record<string, { title: string } | undefined>,
+  sessionId: string
+): { title: string; child: boolean } {
+  const split = sessionId.indexOf('::');
+  const child = split !== -1;
+  const id = child ? sessionId.slice(0, split) : sessionId;
+  const title = conversations[id]?.title.trim();
+  return { title: title || sessionId.slice(0, 8), child };
+}
+
+function blockerReason(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  blocker: RestartBlocker,
+  child: boolean
+): string {
+  if (blocker.kind === 'tool') {
+    const tool = blocker.tools?.join(', ') ?? '';
+    return child ? t('A subagent is running {{tool}}', { tool }) : t('Running {{tool}}', { tool });
+  }
+  if (blocker.kind === 'background') {
+    return child
+      ? t('A subagent still has a background command running')
+      : t('A background command is still running');
+  }
+  if (blocker.kind === 'reply') {
+    return child ? t('A subagent is writing a reply') : t('Writing a reply');
+  }
+  if (blocker.kind === 'starting') {
+    return child ? t('A subagent is opening the session') : t('Opening the session');
+  }
+  return child ? t('A subagent is finishing the turn') : t('Finishing the turn');
+}
+
+function BlockerList({ blockers }: { blockers?: RestartBlocker[] }) {
+  const { t } = useI18n();
+  const conversations = useSessionsStore((state) => state.conversations);
+  if (!blockers?.length) return null;
+  const shown = blockers.slice(0, BLOCKER_LIMIT);
+  const rest = blockers.length - shown.length;
+  return (
+    <ul className="mt-2 space-y-0.5 text-left text-xs text-muted-foreground">
+      {shown.map((blocker) => {
+        const { title, child } = blockerTitle(conversations, blocker.sessionId);
+        return (
+          <li key={blocker.sessionId}>
+            {title} — {blockerReason(t, blocker, child)}
+          </li>
+        );
+      })}
+      {rest > 0 ? <li>{t('{{count}} more sessions', { count: rest })}</li> : null}
+    </ul>
+  );
+}
+
 /**
  * 重启 / 安装更新 / 退出的弹层，Main 推送状态：点「重启」立刻是「正在重启」；有命令在跑改成等命令，
  * 按等完要做什么（exit）换说明，命令自然结束时 Main 先关弹层（重启切回「正在重启」）再往下走。
@@ -103,22 +161,25 @@ export function RestartWaitDialog() {
                 : t('Restarting EnsoCode…')}
           </AlertDialogTitle>
           {waiting && (
-            <AlertDialogDescription>
-              {reply
-                ? t(
-                    'A session is still writing its reply. EnsoCode waits up to {{minutes}} minutes; if it stops producing output for more than {{idle}} seconds, it is stopped first and continues automatically after the restart.',
-                    { minutes: QUIT_REPLY_WAIT_CAP_MS / 60_000, idle: QUIT_REPLY_IDLE_MS / 1000 }
-                  )
-                : t(EXIT_NOTES[shown.exit])}
-              {shown.reason === 'background-not-detachable' && (
-                <>
-                  {' '}
-                  {t(
-                    'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so EnsoCode waits for it.'
-                  )}
-                </>
-              )}
-            </AlertDialogDescription>
+            <>
+              <AlertDialogDescription>
+                {reply
+                  ? t(
+                      'A session is still writing its reply. EnsoCode waits up to {{minutes}} minutes; if it stops producing output for more than {{idle}} seconds, it is stopped first and continues automatically after the restart.',
+                      { minutes: QUIT_REPLY_WAIT_CAP_MS / 60_000, idle: QUIT_REPLY_IDLE_MS / 1000 }
+                    )
+                  : t(EXIT_NOTES[shown.exit])}
+                {shown.reason === 'background-not-detachable' && (
+                  <>
+                    {' '}
+                    {t(
+                      'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so EnsoCode waits for it.'
+                    )}
+                  </>
+                )}
+              </AlertDialogDescription>
+              <BlockerList blockers={shown.blockers} />
+            </>
           )}
         </AlertDialogHeader>
         {waiting && (
@@ -150,6 +211,9 @@ export function RestartWaitStrip() {
         className="min-w-0 flex-1 truncate text-left"
       >
         {t(EXIT_STRIPS[state.exit])}
+        {state.blockers?.length
+          ? t(' · waiting for {{count}} sessions', { count: state.blockers.length })
+          : ''}
       </button>
       <button
         type="button"

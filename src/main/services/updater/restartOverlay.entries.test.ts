@@ -109,7 +109,8 @@ describe('有工具在跑时三个重启入口都显示同一个等待蒙版', (
           hasRunningSessions: () => true,
           onWaitingForTools,
         }),
-      stateChanged: (state, reason) => setRestartOverlay(restartOverlayFor(state, reason)),
+      stateChanged: (state, reason, blockers) =>
+        setRestartOverlay(restartOverlayFor(state, reason, blockers)),
       abandonPrepare: vi.fn(),
     });
     restart.restart();

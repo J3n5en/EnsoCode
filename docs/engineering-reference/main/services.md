@@ -185,10 +185,17 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 `supervisor.agentDispatch.test.ts` 和 Bot 宿主/群联测验证消费回执与重新准入。
 
 第四处：优雅重启在 `supervisor.installRestartBoundary()` 包住
-`session.agent.prepareNextTurnWithContext`。pi 1.5.1 的 loop 在工具批全部返回、toolResult 已写进
-会话 jsonl、`turn_end` 之后，下一次 `turn_start` 之前调它（AgentSession 构造时装的压缩/提示词刷新
-也挂在这里，调用时现读属性，所以构造后再包仍生效）。有重启请求、全局没有工具在跑、没有排队插话时
-父会话停在这里，`checkRestart()` 把断点写到 `dataDir/restart-checkpoint.json`
+`session.agent.prepareRequest`。pi 1.5.1 的 loop 在每次模型请求前调它：新一轮的首个请求（prompt 的
+user 消息已经 message_end 写进 jsonl），或工具批全部返回、toolResult 与插话都已写入、`prepareNextTurn`
+（压缩/提示词刷新）跑完之后（Agent 每次起 loop 时现读属性，所以构造后再包仍生效）。有重启请求、没有排队插话时
+会话停在这里，不论别的会话有没有工具在跑——旧实现只在全局没有工具在跑时才停，并在任何工具开跑时放开全部挂起，
+多个会话交替跑工具时互相放行，真实日志里 5 分钟内各会话又发了 20~40 次模型请求直到上限强退。
+等安全点期间新开的一轮（用户消息、goal 续跑、插件投递、完成通知）也停在首个请求前：消息已落盘，断点记
+`model-request`，新进程从 user 尾巴续跑。子会话同样停，只在父会话有工具在跑时不停，父会话开新工具时放开
+它自己的子会话（subagent / send wait 可能正等它）。只剩等人回答的 ask_user / 审批挡着时取消它们（提问
+带「重启打断」说明），会话随即停到下一次模型请求前；还在 spawn 的会话按 `session-starting` 报推迟。
+推迟报告带 `toolNames`，Main 据此在等待弹层和超时日志里写清在等哪个会话的哪个工具。
+`checkRestart()` 把断点写到 `dataDir/restart-checkpoint.json`
 （格式与判定在 `src/shared/gracefulRestart.ts`，`scripts/graceful-restart-sim.mjs` 直接复用）。
 前台命令到让位时刻转后台（`ForegroundCommand` → `BackgroundTaskManager.adopt`，任务带 `yieldedAt`）时
 工具已回执、`toolStartAt` 已清，但进程还在跑：`bgTasks.runningYielded()` 把这些 status=running 的任务 id
@@ -277,9 +284,18 @@ runId、startedAt、进程启动时刻 runStartedAt、yieldedAt、deadlineAt、�
 同一会话树再起同一命令（同 cwd）由 `withBackground` 直接回「已在跑」，不重复启动。worker 没走交接就退出
 （崩溃、被强杀）时文件直写的进程不会随 SIGPIPE 退出：下一代启动时 `sweepOrphanRuns` 按 `run-*.json`
 登记，只杀「登记它的 worker 已不在、仍认得出是本次进程」的进程组，不扫进程表。
+收尾停掉的任务不再凭空消失：`supervisor.shutdown` 在 `stopAll` 前把所有会话（含空闲会话）还在跑的任务
+（`interruptedOnShutdown`：脱离不了的、不保留后台时的、认回后又被收尾的）追加进
+`dataDir/restart-interrupted-tasks.json`（taskId、根会话 id——子代理的任务记到根会话、命令摘要、起止时刻、日志路径、
+是否常驻服务），写成功后本代不再发完成通知。新 worker 构造时读后即删（日志路径只认 logDir 下按 taskId 推出的），
+`recoverInterrupted` 按原 taskId 登记成 `failed` + `interrupted: 'restart'`（任务表显示「因重启中断」，秘书
+`session_tasks` 的 status / state 为 `interrupted-by-restart`），并投一次说明（taskId、命令、日志路径与输出尾部、
+需要就重跑）：落 `pending-notifications` 并请求叫醒；常驻服务只落盘不叫醒，说明里写明没有自动重启。
+Main 在 `stopAgentWorkerForQuit` 之后不再因后续命令重拉 worker（`quitStopped`）：2026-11-23 的现场里旧应用在
+worker 交出任务后又拉起一个 worker，它认回并用掉交接清单，8 秒后随应用退出把任务停掉，新版本里任务、通知都没了。
 已知限制：shell 进程本身被直接信号杀掉时 EXIT trap 记的是最后一条命令的 `$?`；用户命令自设 EXIT trap 或
 `exec` 换掉 shell 时取不到退出码（进程仍能认回、可停止，结束时按退出码不可得说明）。
-子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
+子会话/coworker 不随换代恢复：停在边界时 Run 随 worker 退出记 interrupted，父会话就绪后补通知。
 
 **升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult
 已落盘。`gracefulRestart.pi.test.ts` 用真实 SDK 验证时机与「新会话从文件续跑不重跑工具」；
