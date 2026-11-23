@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { ExtensionPluginNotice } from '@shared/extensionPlugins/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runPluginHost } from '../../../pluginHost/host';
+import { captureConsole, runPluginHost } from '../../../pluginHost/host';
 import { setNativeAgentTypeSource, withPluginAgentTypes } from '../pluginRuntime';
 import { readRegistry } from './registry';
 import {
@@ -92,8 +92,10 @@ const mainJs = `export function activate(enso) { enso.tools.register('lookup', a
 
 let root: string;
 let service: ExtensionPluginService;
+let pluginLogging = false;
 
 beforeEach(() => {
+  pluginLogging = false;
   root = temp('plugins-root-');
   service = create({
     root,
@@ -101,6 +103,7 @@ beforeEach(() => {
     hostPath: '/unused',
     env: {},
     fork: () => new InProcessChild() as never,
+    pluginLoggingEnabled: () => pluginLogging,
     gate: {
       fetch: vi.fn(),
       notify: () => true,
@@ -629,6 +632,7 @@ describe('ExtensionPluginService', () => {
       manifest({ permissions: [], contributes: { commands: [{ id: 'bad', title: 'Bad' }] } });
 
     it('处理器异常进日志，最近错误出现在列表里', async () => {
+      pluginLogging = true;
       await install({ 'enso-plugin.json': withCommand(), 'main.mjs': noisy });
       await service.setEnabled('example.demo', true);
       const call = { pluginId: 'example.demo', sessionId: null, projectRoot: null } as const;
@@ -653,6 +657,7 @@ describe('ExtensionPluginService', () => {
     });
 
     it('日志只返回末尾，卸载时删除', async () => {
+      pluginLogging = true;
       await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
       for (let i = 0; i < 80; i++)
         service.appendLog('example.demo', 'info', `line-${i}-${'x'.repeat(80)}`);
@@ -662,6 +667,185 @@ describe('ExtensionPluginService', () => {
       expect(tail).not.toContain('line-0-');
       await service.uninstall('example.demo');
       expect(await service.logs('example.demo')).toBe('');
+    });
+
+    it('默认关闭时不记录插件日志（不进缓冲也不写盘），但宿主错误状态与崩溃记录仍然可见', async () => {
+      await install({ 'enso-plugin.json': withCommand(), 'main.mjs': noisy });
+      await service.setEnabled('example.demo', true);
+      service.appendLog('example.demo', 'info', 'ordinary-log-when-off');
+      const call = { pluginId: 'example.demo', sessionId: null, projectRoot: null } as const;
+      await expect(
+        service.callUi({ ...call, method: 'command.run', payload: { id: 'bad' } })
+      ).rejects.toThrow('kaput');
+      expect(await service.logs('example.demo')).toBe('');
+      expect(existsSync(join(root, 'logs', 'example.demo.log'))).toBe(false);
+      expect(service.list()[0]?.lastError?.message).toContain('kaput');
+      for (let i = 0; i < 3; i++) service.recordCrash('example.demo');
+      expect(service.list()[0]?.state).toBe('crashed');
+      expect(readRegistry(root).plugins[0]?.lastError?.message).toContain('kaput');
+    });
+
+    it('动态开启日志开关立即生效且无需重启插件，再次关闭后保留已有日志文件', async () => {
+      let loggingEnabled = false;
+      const dynamicRoot = temp('plugins-log-toggle-');
+      const toggled = create({
+        root: dynamicRoot,
+        hostVersion: '0.2.12',
+        hostPath: '/unused',
+        env: {},
+        fork: () => new InProcessChild() as never,
+        pluginLoggingEnabled: () => loggingEnabled,
+        gate: {
+          fetch: vi.fn(),
+          notify: () => true,
+          composer: async () => null,
+          mcpTools: async () => [],
+          mcpCall: async () => ({ content: '', isError: false }),
+          now: () => Date.now(),
+        },
+      });
+      const preview = await toggled.stage({
+        kind: 'dir',
+        path: writePlugin({ 'enso-plugin.json': withCommand(), 'main.mjs': noisy }),
+      });
+      if (!preview.ok) throw new Error(preview.error);
+      await toggled.commit(preview.preview.token);
+      await toggled.setEnabled('example.demo', true);
+
+      toggled.appendLog('example.demo', 'info', 'before-enable');
+      expect(await toggled.logs('example.demo')).toBe('');
+      expect(existsSync(join(dynamicRoot, 'logs', 'example.demo.log'))).toBe(false);
+
+      loggingEnabled = true;
+      toggled.setLoggingEnabled(true);
+      toggled.appendLog('example.demo', 'info', 'after-enable');
+      expect(await toggled.logs('example.demo')).toContain('after-enable');
+      expect(existsSync(join(dynamicRoot, 'logs', 'example.demo.log'))).toBe(true);
+
+      loggingEnabled = false;
+      toggled.setLoggingEnabled(false);
+      toggled.appendLog('example.demo', 'info', 'after-disable');
+      const content = await toggled.logs('example.demo');
+      expect(content).toContain('after-enable');
+      expect(content).not.toContain('after-disable');
+      expect(existsSync(join(dynamicRoot, 'logs', 'example.demo.log'))).toBe(true);
+    });
+
+    it('同一运行中进程的 console.log 随开关热切换，关闭后保留已有日志文件', async () => {
+      const saved = {
+        log: console.log,
+        info: console.info,
+        warn: console.warn,
+        error: console.error,
+        debug: console.debug,
+      };
+      let loggingEnabled = false;
+      class LoggingChild extends EventEmitter {
+        pid = 1;
+        private handler: (message: unknown) => void = () => {};
+        constructor() {
+          super();
+          let enabled = false;
+          const send = (message: unknown) => queueMicrotask(() => this.emit('message', message));
+          captureConsole(console, send, () => enabled);
+          runPluginHost(
+            {
+              send,
+              onMessage: (handler) => {
+                this.handler = handler;
+              },
+            },
+            {
+              onLoggingChange: (next) => {
+                enabled = next;
+              },
+            }
+          );
+          queueMicrotask(() => this.emit('spawn'));
+        }
+        postMessage(message: unknown) {
+          queueMicrotask(() => {
+            this.handler(message);
+            if (
+              typeof message === 'object' &&
+              message !== null &&
+              (message as { t?: string }).t === 'shutdown'
+            )
+              this.emit('exit', 0);
+          });
+        }
+        kill() {
+          queueMicrotask(() => this.emit('exit', 0));
+          return true;
+        }
+      }
+      try {
+        const dynamicRoot = temp('plugins-console-log-');
+        const toggled = create({
+          root: dynamicRoot,
+          hostVersion: '0.2.12',
+          hostPath: '/unused',
+          env: {},
+          fork: () => new LoggingChild() as never,
+          pluginLoggingEnabled: () => loggingEnabled,
+          gate: {
+            fetch: vi.fn(),
+            notify: () => true,
+            composer: async () => null,
+            mcpTools: async () => [],
+            mcpCall: async () => ({ content: '', isError: false }),
+            now: () => Date.now(),
+          },
+        });
+        const say = `export function activate(enso) {
+          let n = 0;
+          enso.commands.register('say', async () => {
+            n += 1;
+            console.log('tick-' + n);
+            return 'ok';
+          });
+        }`;
+        const preview = await toggled.stage({
+          kind: 'dir',
+          path: writePlugin({
+            'enso-plugin.json': manifest({
+              permissions: [],
+              contributes: { commands: [{ id: 'say', title: 'Say' }] },
+            }),
+            'main.mjs': say,
+          }),
+        });
+        if (!preview.ok) throw new Error(preview.error);
+        await toggled.commit(preview.preview.token);
+        await toggled.setEnabled('example.demo', true);
+        const call = { pluginId: 'example.demo', sessionId: null, projectRoot: null } as const;
+        const sayOnce = () =>
+          toggled.callUi({ ...call, method: 'command.run', payload: { id: 'say' } });
+        await expect(sayOnce()).resolves.toBeNull();
+        expect(await toggled.logs('example.demo')).toBe('');
+        expect(existsSync(join(dynamicRoot, 'logs', 'example.demo.log'))).toBe(false);
+
+        loggingEnabled = true;
+        toggled.setLoggingEnabled(true);
+        await sayOnce();
+        const enabledLog = await toggled.logs('example.demo');
+        expect(enabledLog).toContain('tick-2');
+        expect(enabledLog).not.toContain('tick-1');
+
+        loggingEnabled = false;
+        toggled.setLoggingEnabled(false);
+        await sayOnce();
+        const disabledLog = await toggled.logs('example.demo');
+        expect(disabledLog).toContain('tick-2');
+        expect(disabledLog).not.toContain('tick-3');
+        expect(existsSync(join(dynamicRoot, 'logs', 'example.demo.log'))).toBe(true);
+      } finally {
+        console.log = saved.log;
+        console.info = saved.info;
+        console.warn = saved.warn;
+        console.error = saved.error;
+        console.debug = saved.debug;
+      }
     });
   });
 
@@ -849,6 +1033,7 @@ describe('ExtensionPluginService', () => {
     });
 
     it('正文读不出的类型跳过并记日志；被重名丢弃的类型记一次日志', async () => {
+      pluginLogging = true;
       await install(files());
       await service.setEnabled('example.demo', true);
       const pkg = service.agentTypesForSpawn()[0]?.skillPaths[0]?.replace(/skills\/review$/, '');
@@ -1930,13 +2115,14 @@ describe('uiCallTimeout', () => {
 });
 
 describe('丢弃的登记记录', () => {
-  const boot = (root: string) =>
+  const boot = (root: string, logging = false) =>
     create({
       root,
       hostVersion: '0.2.12',
       hostPath: '/unused',
       env: {},
       fork: (() => new InProcessChild()) as never,
+      ...(logging ? { pluginLoggingEnabled: () => true } : {}),
       gate: {
         fetch: vi.fn(),
         notify: () => true,
@@ -1972,7 +2158,7 @@ describe('丢弃的登记记录', () => {
       join(root, 'registry.json'),
       JSON.stringify({ version: 1, plugins: [{ id: 'old.one', dir: 'd1' }] })
     );
-    const service = boot(root);
+    const service = boot(root, true);
     expect(service.registryNotice()).toEqual({ discarded: ['old.one'] });
     expect(has(root, 'old.one')).toEqual(none);
     expect(has(root, 'stray.dir')).toEqual(all);
@@ -2008,7 +2194,7 @@ describe('丢弃的登记记录', () => {
     const root = temp('plugins-root-');
     seed(root, ['a.demo']);
     writeFileSync(join(root, 'registry.json'), raw);
-    const service = boot(root);
+    const service = boot(root, true);
     expect(has(root, 'a.demo')).toEqual(all);
     expect(readFileSync(join(root, 'registry.json'), 'utf8')).toBe(raw);
     expect(readFileSync(join(root, 'registry.json.unreadable'), 'utf8')).toBe(raw);

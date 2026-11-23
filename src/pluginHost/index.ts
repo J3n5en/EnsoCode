@@ -4,9 +4,13 @@ import { captureConsole, createProcessTransport, runPluginHost } from './host';
 const transport = createProcessTransport(process);
 const send = transport.send;
 
-captureConsole(console, send);
-
-runPluginHost(transport);
+let loggingEnabled = false;
+captureConsole(console, send, () => loggingEnabled);
+runPluginHost(transport, {
+  onLoggingChange: (enabled) => {
+    loggingEnabled = enabled;
+  },
+});
 
 process.on('uncaughtException', (error) => {
   failHostProcess(

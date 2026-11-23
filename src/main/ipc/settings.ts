@@ -98,6 +98,7 @@ export const SETTINGS_STATE_FIELDS = [
   'autoRestartForUpdate',
   'updateChannel',
   'pluginAutoUpdate',
+  'pluginLoggingEnabled',
   'proxyMode',
   'customProxyUrl',
   'customCaCertPath',
@@ -233,6 +234,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'updateChannel',
   'longCacheRetention',
   'pluginAutoUpdate',
+  'pluginLoggingEnabled',
   'proxyMode',
   'customProxyUrl',
   'customCaCertPath',
@@ -519,6 +521,14 @@ function scheduleWrite(
       (settingsStateOf(data).botDiscussModeEnabled === true)
     ) {
       void import('./bots').then(({ syncBotDiscussMode }) => syncBotDiscussMode()).catch(() => {});
+    }
+    const nextPluginLogging = settingsStateOf(data).pluginLoggingEnabled === true;
+    if ((settingsStateOf(previous).pluginLoggingEnabled === true) !== nextPluginLogging) {
+      void import('../services/extensionPlugins')
+        .then(({ peekExtensionPlugins }) =>
+          peekExtensionPlugins()?.setLoggingEnabled(nextPluginLogging)
+        )
+        .catch(() => {});
     }
 
     // 普通 store 写排除 sender；Gateway 写显式选择 all-renderers。
@@ -842,7 +852,13 @@ export function reloadSettingsFromDisk(): boolean {
   isDirty = false;
   cachedSettings = null;
   const data = readSettings();
-  if (data !== null) return scheduleWrite(data, undefined, 'all-renderers');
+  if (data !== null) {
+    const ok = scheduleWrite(data, undefined, 'all-renderers');
+    void import('../services/extensionPlugins')
+      .then(({ peekExtensionPlugins }) => peekExtensionPlugins()?.syncLoggingEnabled())
+      .catch(() => {});
+    return ok;
+  }
   providerModelRefresh?.sync();
   return false;
 }

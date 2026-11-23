@@ -168,6 +168,12 @@ export function getExtensionPlugins(): ExtensionPluginService {
         | undefined;
       return persisted?.state?.pluginAutoUpdate !== false;
     },
+    pluginLoggingEnabled: () => {
+      const persisted = readSettings()?.['enso-settings'] as
+        | { state?: { pluginLoggingEnabled?: unknown } }
+        | undefined;
+      return persisted?.state?.pluginLoggingEnabled === true;
+    },
     market: new PluginMarket({
       root: join(app.getPath('userData'), 'extension-plugins'),
       fetch: (url, init) => fetch(url, init),

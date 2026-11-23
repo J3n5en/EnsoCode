@@ -453,4 +453,74 @@ describe('captureConsole', () => {
       message: expect.stringContaining('Error: e'),
     });
   });
+
+  it('日志开关关闭时不采集 console 输出，打开后立即恢复采集', () => {
+    const sent: PluginHostToMain[] = [];
+    const noop = (..._args: unknown[]) => {};
+    const target = { log: noop, info: noop, warn: noop, error: noop, debug: noop };
+    let enabled = false;
+    captureConsole(
+      target,
+      (m) => sent.push(m),
+      () => enabled
+    );
+    target.log('muted-info');
+    target.warn('muted-warn');
+    target.error('muted-error');
+    expect(sent).toHaveLength(0);
+    enabled = true;
+    target.log('live-info');
+    expect(sent).toEqual([{ t: 'log', level: 'info', message: 'live-info' }]);
+  });
+
+  it('init 与 set-logging 热切换采集，无需重启宿主', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'plugin-host-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'main.mjs'), 'export function activate() {}');
+    const sent: PluginHostToMain[] = [];
+    const changes: boolean[] = [];
+    let enabled = true;
+    const noop = (..._args: unknown[]) => {};
+    const target = { log: noop, info: noop, warn: noop, error: noop, debug: noop };
+    captureConsole(
+      target,
+      (m) => sent.push(m),
+      () => enabled
+    );
+    let handler: (msg: unknown) => void = () => {};
+    runPluginHost(
+      {
+        send: (m) => sent.push(m),
+        onMessage: (h) => {
+          handler = h;
+        },
+      },
+      {
+        onLoggingChange: (next) => {
+          enabled = next;
+          changes.push(next);
+        },
+      }
+    );
+    handler({
+      t: 'init',
+      pluginId: 'a.b',
+      pluginRoot: dir,
+      main: 'main.mjs',
+      dataDir: dir,
+      loggingEnabled: false,
+    });
+    expect(changes).toEqual([false]);
+    target.log('muted');
+    handler({ t: 'set-logging', enabled: true });
+    target.log('live');
+    handler({ t: 'set-logging', enabled: false });
+    target.warn('muted-again');
+    handler({ t: 'set-logging', enabled: 'yes' });
+    expect(enabled).toBe(false);
+    expect(changes).toEqual([false, true, false]);
+    expect(sent.filter((m) => m.t === 'log')).toEqual([
+      { t: 'log', level: 'info', message: 'live' },
+    ]);
+  });
 });

@@ -16,6 +16,8 @@ const harness = vi.hoisted(() => ({
   discard: vi.fn(),
   setEnabled: vi.fn(async () => ({ ok: true })),
   addToast: vi.fn(),
+  pluginLoggingEnabled: true,
+  setPluginLoggingEnabled: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -25,6 +27,8 @@ vi.mock('@/stores/settings', () => ({
     select({
       pluginAutoUpdate: true,
       setPluginAutoUpdate: vi.fn(),
+      pluginLoggingEnabled: harness.pluginLoggingEnabled,
+      setPluginLoggingEnabled: harness.setPluginLoggingEnabled,
     }),
 }));
 vi.mock('@/components/ui/button', () => ({
@@ -334,6 +338,21 @@ describe('ExtensionPluginsSection', () => {
     expect(dialog?.querySelector('input')?.getAttribute('type')).toBe('text');
     expect(dialog?.querySelector('textarea')?.getAttribute('data-value')).toBe('line1\nline2');
   });
+
+  it('插件日志开关默认关闭，点击后开启', async () => {
+    harness.pluginLoggingEnabled = false;
+    harness.setPluginLoggingEnabled.mockClear();
+    await render();
+    const row = [...container.querySelectorAll('label')].find((label) =>
+      label.textContent?.includes('Record plugin logs')
+    );
+    expect(row).toBeDefined();
+    const toggle = row?.querySelector('button');
+    expect(toggle?.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => (toggle as HTMLButtonElement).click());
+    expect(harness.setPluginLoggingEnabled).toHaveBeenCalledWith(true);
+    harness.pluginLoggingEnabled = true;
+  });
 });
 
 describe('ExtensionPluginLogs', () => {
@@ -396,6 +415,28 @@ describe('ExtensionPluginLogs', () => {
     expect(lines()).toHaveLength(0);
     expect(container.textContent).toContain('Log too large, showing plain text');
     expect(container.querySelector('pre')?.textContent).toBe(big);
+  });
+
+  it('开关关闭时日志面板显示未开启提示并提供开启入口', async () => {
+    harness.pluginLoggingEnabled = false;
+    harness.setPluginLoggingEnabled.mockClear();
+    await openLogs('');
+    expect(container.textContent).toContain('Plugin logging is off');
+    const enableBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Enable plugin logging')
+    );
+    expect(enableBtn).toBeDefined();
+    await act(async () => (enableBtn as HTMLButtonElement).click());
+    expect(harness.setPluginLoggingEnabled).toHaveBeenCalledWith(true);
+    harness.pluginLoggingEnabled = true;
+  });
+
+  it('开关关闭但已有历史日志时同时保留未开启提示与历史日志查看', async () => {
+    harness.pluginLoggingEnabled = false;
+    await openLogs(LOG);
+    expect(container.textContent).toContain('Plugin logging is off');
+    expect(lines()).toHaveLength(4);
+    harness.pluginLoggingEnabled = true;
   });
 });
 

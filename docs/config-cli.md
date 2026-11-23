@@ -98,6 +98,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `quoteSelectionButton`（布尔，默认 `true`）控制会话里选中文字时是否浮出「引用」按钮，只接受布尔值，热生效，无需重启。
 
+`pluginLoggingEnabled`（布尔，缺省 `false`）控制是否记录插件控制台输出与运行日志。关闭时不采集、不进缓冲、不写盘，启动失败和崩溃等错误状态仍然显示。只接受布尔值，热生效，无需重启插件或应用，不参与配置同步。
+
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
 - `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`

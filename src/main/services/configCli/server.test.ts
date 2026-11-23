@@ -368,6 +368,16 @@ describe('config CLI socket', () => {
     expect((await state()).quoteSelectionButton).toBe(false);
   });
 
+  it('插件日志开关热生效可写，只接受布尔值', async () => {
+    expect(
+      await config({ action: 'set', key: 'pluginLoggingEnabled', value: 'true' })
+    ).toMatchObject({ ok: false });
+    expect(await config({ action: 'set', key: 'pluginLoggingEnabled', value: true })).toEqual({
+      ok: true,
+    });
+    expect((await state()).pluginLoggingEnabled).toBe(true);
+  });
+
   it('最近使用模型可写，只接受去重且不超过 10 条的 providerId/modelId 列表', async () => {
     const refs = [
       { providerId: 'p1', modelId: 'm1' },

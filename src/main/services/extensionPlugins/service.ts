@@ -225,6 +225,8 @@ export interface ExtensionPluginServiceOptions {
   prepareTimeoutMs?: number;
   /** 缺省开启。返回 false 时市场更新只提示，不安装 */
   autoUpdatePlugins?: () => boolean;
+  /** 缺省关闭。返回 true 时才把插件日志放进缓冲并写盘 */
+  pluginLoggingEnabled?: () => boolean;
   /** 开发模式的目录监听；缺省 fs.watch 递归监听，测试可替换 */
   devWatch?: (dir: string, onChange: () => void) => { close(): void };
   /** 开发模式里改动停下多久才重装，缺省 400ms */
@@ -1766,8 +1768,21 @@ export class ExtensionPluginService {
 
   /** 插件进程的输出与异常，落在 Main 私有目录；超过 1MB 轮转一次 */
   appendLog(id: string, level: PluginLogLevel, message: string): void {
-    this.logger.append(id, level, message);
     if (level === 'error') this.recordError(id, message);
+    if (!this.isPluginLoggingEnabled()) return;
+    this.logger.append(id, level, message);
+  }
+
+  isPluginLoggingEnabled(): boolean {
+    return this.options.pluginLoggingEnabled?.() === true;
+  }
+
+  setLoggingEnabled(enabled: boolean): void {
+    for (const proc of this.processes.values()) proc.setLoggingEnabled(enabled);
+  }
+
+  syncLoggingEnabled(): void {
+    this.setLoggingEnabled(this.isPluginLoggingEnabled());
   }
 
   recordError(id: string, message: string): void {
@@ -2053,6 +2068,7 @@ export class ExtensionPluginService {
           onExit(unexpected);
         },
         onLog: (level, message) => this.appendLog(manifest.id, level, message),
+        loggingEnabled: () => this.isPluginLoggingEnabled(),
       },
       (pending) => {
         this.lastSpawn.set(proc, pending);
@@ -2189,7 +2205,7 @@ export class ExtensionPluginService {
       source,
     });
     if (trust.ignored)
-      this.logger.append(pluginId, 'warn', 'trusted 已忽略：清单没有声明 agent.injectTrusted');
+      this.appendLog(pluginId, 'warn', 'trusted 已忽略：清单没有声明 agent.injectTrusted');
     const message = {
       pluginId,
       pluginName: manifest.name,
@@ -2206,7 +2222,7 @@ export class ExtensionPluginService {
     if (!input.claimKey) {
       const result = bridge.inject(input.sessionId, message);
       if (result.ok && result.trustedOverriddenByExternal)
-        this.logger.append(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
+        this.appendLog(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
       return result;
     }
     const store = getEventClaimStore();
@@ -2226,7 +2242,7 @@ export class ExtensionPluginService {
     if (!sent.ok && acquired.status === 'claimed') store.release(input.claimKey, input.sessionId);
     if (!sent.ok) return sent;
     if (sent.trustedOverriddenByExternal)
-      this.logger.append(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
+      this.appendLog(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
     return { ok: true, claimStatus: acquired.status, ownerSessionId: input.sessionId };
   }
 
