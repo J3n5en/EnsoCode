@@ -14,6 +14,7 @@ const m = vi.hoisted(() => ({
   watchdog: { begin: vi.fn(), step: vi.fn(), cancel: vi.fn() },
   leaveServerMode: vi.fn(),
   showMessageBox: vi.fn(async () => ({ response: 0 })),
+  flush: vi.fn(async () => {}),
 }));
 vi.mock('node:fs', async (importActual) => {
   const fs = await importActual<typeof import('node:fs')>();
@@ -71,7 +72,7 @@ vi.mock('../../ipc/appRestart', () => ({
   },
 }));
 vi.mock('../appServerMode', () => ({
-  flushRendererPersist: async () => {},
+  flushRendererPersist: () => m.flush(),
   isServerMode: () => false,
   leaveServerMode: m.leaveServerMode,
 }));
@@ -244,6 +245,96 @@ describe('下载完成后的自动重启模式', () => {
 });
 
 describe('安装更新途中失败', () => {
+  async function downloaded() {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
+    m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
+    m.prepare.mockReset().mockResolvedValue('checkpointed');
+    return service;
+  }
+
+  it('渲染层落盘一直不回：超时记日志后照常安装，不卡住', async () => {
+    const service = await downloaded();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    m.flush.mockImplementationOnce(() => new Promise<void>(() => {}));
+    vi.useFakeTimers();
+    try {
+      const pending = service.requestRestart();
+      await vi.advanceTimersByTimeAsync(2_900);
+      expect(m.quitAndInstall).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(m.quitAndInstall).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[updater]'));
+      await expect(pending).resolves.toEqual({ ok: true });
+    } finally {
+      vi.useRealTimers();
+      warn.mockRestore();
+    }
+  });
+
+  it('落盘正常回来：不额外等待，也不记超时日志', async () => {
+    const service = await downloaded();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const started = Date.now();
+      await expect(service.requestRestart()).resolves.toEqual({ ok: true });
+      expect(Date.now() - started).toBeLessThan(1_000);
+      expect(m.quitAndInstall).toHaveBeenCalledOnce();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('没有已下载的更新：返回失败原因，而不是静默忽略', async () => {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
+    await expect(service.requestRestart()).resolves.toEqual({
+      ok: false,
+      reason: 'not-downloaded',
+    });
+    expect(m.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('安装前出错：返回错误信息；重复点击在途时返回 busy', async () => {
+    const service = await downloaded();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let fail!: (error: Error) => void;
+    m.prepare.mockReset().mockImplementation(() => new Promise((_, reject) => (fail = reject)));
+    try {
+      const pending = service.requestRestart();
+      await vi.waitFor(() => expect(m.prepare).toHaveBeenCalledOnce());
+      await expect(service.requestRestart()).resolves.toEqual({ ok: false, reason: 'busy' });
+      fail(new Error('worker gone'));
+      await expect(pending).resolves.toEqual({ ok: false, reason: 'error', error: 'worker gone' });
+      expect(m.quitAndInstall).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('交给 electron-updater 时同步抛错：返回错误，撤掉退出状态，再点能重新安装而不是一直 busy', async () => {
+    const service = await downloaded();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    m.quitAndInstall.mockImplementationOnce(() => {
+      throw new Error('installer missing');
+    });
+    try {
+      await expect(service.requestRestart()).resolves.toEqual({
+        ok: false,
+        reason: 'error',
+        error: 'installer missing',
+      });
+      expect(service.isQuittingForUpdate()).toBe(false);
+      await expect(service.requestRestart()).resolves.toEqual({ ok: true });
+      expect(m.quitAndInstall).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('看门狗跟住整个安装；Squirrel 报错（窗口可能已被关掉）时撤掉退出、恢复主窗口并说明原因', async () => {
     vi.resetModules();
     const { autoUpdaterService: service } = await import('./AutoUpdater');

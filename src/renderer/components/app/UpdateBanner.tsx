@@ -5,6 +5,7 @@ import { useI18n } from '@/i18n';
 import { BannerBar } from './BannerBar';
 import { ManualInstallActions } from './ManualInstallActions';
 import { ReleaseNotesDialog } from './ReleaseNotesDialog';
+import { restartToUpdate } from './restartToUpdate';
 
 /** 主窗口顶部更新横幅:发现新版(桌面)可看日志再下载,下载完成后提示重启(可关闭) */
 export function UpdateBanner() {
@@ -99,7 +100,7 @@ export function UpdateBanner() {
         {isDownloaded && (
           <button
             type="button"
-            onClick={() => void window.electronAPI.updater.quitAndInstall()}
+            onClick={() => void restartToUpdate(t)}
             className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-primary-foreground transition-colors hover:bg-primary/90"
           >
             {t('Restart to update')}
