@@ -2,6 +2,7 @@ import type { PendingReminderView } from '../reminders';
 import type { GoalResultView } from '../secretary/goalResult';
 import type { GoalUpstreamRetry } from '../upstreamRecovery';
 import type { ModelRef, ThinkingLevel } from './agent';
+import type { DemandMilestoneKind, DemandThreadStatus } from './demandThreads';
 
 /**
  * 秘书可以接管的会话范围：逐个授权（确认卡）、勾选的项目、所有可见项目。
@@ -672,6 +673,28 @@ export interface SecretaryBoard {
   done: SecretaryCard[];
   activity?: SecretaryActivity[];
   claims?: SecretaryClaimView[];
+  threads?: SecretaryDemandThreadView[];
+}
+
+/** 一条需求从群消息到负责会话和 PR 的关联 */
+export interface SecretaryDemandThreadView {
+  id: string;
+  channel: string;
+  chatId: string;
+  messageId: string;
+  topicId?: string;
+  senderName?: string;
+  summary?: string;
+  requesterIsOwner: boolean;
+  sessionId: string;
+  sessionTitle: string;
+  subagentId?: string;
+  pr?: { repo: string; number: number; url?: string; title?: string };
+  status: DemandThreadStatus;
+  milestones: DemandMilestoneKind[];
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
 }
 
 /** 一个外部对象当前被哪个会话认领 */
@@ -1045,4 +1068,24 @@ export interface SecretaryContactChannelView {
   detail?: string;
   caps: SecretaryContactCaps;
   prefs: SecretaryContactChannelPrefs;
+  /** 出站发送连续失败的情况；最近一次发送成功就没有 */
+  outbound?: SecretaryContactOutboundHealth;
+}
+
+/** 插件渠道出站失败：degraded 还在照常发，paused 已暂停推送，冷却到期、入站或手动重试后再发 */
+export interface SecretaryContactOutboundHealth {
+  state: 'degraded' | 'paused';
+  consecutiveFailures: number;
+  lastErrorAt: number;
+  lastErrorCode: string;
+  /** 插件给的原因，已脱敏截断 */
+  detail?: string;
+  /** 插件抛错时带的 code */
+  pluginCode?: string;
+  /** 插件给用户看的提示，原样展示 */
+  userMessage?: string;
+  /** 暂停到什么时候；到点后下一条推送试一次 */
+  pausedUntil?: number;
+  /** 暂停期间没发出去的推送条数 */
+  suppressedCount: number;
 }

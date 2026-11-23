@@ -19,6 +19,7 @@ import {
   type SecretaryBoard,
   type SecretaryCard,
   type SecretaryClaimView,
+  type SecretaryDemandThreadView,
   type SecretaryDispatchFile,
   type SecretaryProposal,
   type SecretaryResultKind,
@@ -526,6 +527,7 @@ export interface BoardInput {
   todos: readonly SecretaryTodo[];
   aliases?: Readonly<Record<string, string>>;
   claims?: readonly SecretaryClaimView[];
+  threads?: readonly SecretaryDemandThreadView[];
 }
 
 function boardSubagents(
@@ -724,6 +726,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     }),
     ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
     ...(input.claims && input.claims.length > 0 ? { claims: [...input.claims] } : {}),
+    ...(input.threads && input.threads.length > 0 ? { threads: [...input.threads] } : {}),
   };
 }
 

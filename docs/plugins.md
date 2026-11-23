@@ -405,6 +405,8 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `enso.contact.inbound(channelId, { peerId, text, senderId?, chatType?, chatTitle?, name?, at? })`：对方发来一句话。`peerId` 是会话 id（私聊或群，回复发回这里）；`senderId` 是发送者的稳定 id，协议里有就必须带；`chatType` 只能是 `private` 或 `group`，不知道就别填；`chatTitle` 是群名，`name` 是发送者名字。插件自己负责只放行绑定的那个人；宿主再按总开关与渠道开关过滤，正文包成 `[来自 <渠道名> 私聊|群「群名」 chatId=… senderId=… @名字 · 时间]` 加不可信内容（`source="<渠道 id> chatId=… senderId=…"`）交给秘书；没给 `senderId` 时写「发送者未知」，不拿名字凑。只读命令（`/status` 等）不进秘书会话。10 秒最多 20 条。
 - 图片：`contact.inbound` 可带 `images`（最多 4 项），每项 `{ data: base64 }`，或插件没下载的附件写 `{ rejected: 'too-large' | 'not-image' }`；只发图片时 `text` 给空串。宿主按文件头只收 png / jpeg / webp / gif、单张不超过 10MB，存到 `userData/bot-chats/secretary-images/<秘书会话 id>/<sha256>.<ext>`（同图只存一份），把路径行追加在交给秘书的消息后面，秘书用 `session_send` 的 `attachments` 原图转发；收不下的给对方回一句。图片按会话清理：删会话即删，启动时删掉不再被消息引用且超过 7 天的，单会话超过 200MB 时从最旧的未引用文件删起。
 - `enso.contact.setStatus(channelId, { status, detail?, peers? })`：`status` 是 `unconfigured`、`pending`、`connected`、`error`；`peers` 是主动推送的对象（最多 8 个）。换了人或断开时，发往旧联系人的待收尾记录作废。
+- 发送失败：`sendText` / `sendImage` / `sendFile` 抛错就算失败。宿主把错误的 `message`（脱敏、截到 200 字）连同渠道 id 写进日志，并在渠道卡片上显示最近一次失败的时间与原因。错误对象可以多带两个可选字段：`code`（如 `SESSION_EXPIRED`，显示在原因前面）和 `userMessage`（给用户看的下一步，原样显示在卡片上，例如「微信会话已过期，请在微信里给机器人发任意一条消息」）。只抛普通 `Error` 也可以。
+- 连续失败：同一渠道连续失败 3 次后暂停推送，依次暂停 1、5、15 分钟，之后每小时试一次；到点后下一条推送就是试探，成功即恢复。暂停期间的推送不发出，卡片显示「已暂停推送」和没发出去的条数，日志每轮暂停只记一条。这个渠道收到任何入站消息、用户点「立即重试」（发一条测试消息）、或插件重新上报 `connected`，都会立即恢复。其他渠道不受影响。
 
 `peerId` 一律是字符串。回复、正在输入、任务结果只回发消息的那个人；里程碑、提问、确认卡与审批发给所有启用、已连接且打开主动推送的渠道，谁先答算谁的。插件停用或卸载时卡片消失，这个渠道的关注项与待收尾记录一起清掉。
 

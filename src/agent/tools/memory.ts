@@ -31,12 +31,15 @@ export interface MemoryInvokeResult {
 interface Pending {
   resolve(result: unknown): void;
   reject(error: Error): void;
+  cancel(error: Error): void;
 }
 
 // 检索在服务侧有界（向量冷加载不等、LLM 辅助有预算），15s 只兜进程级故障；
 // 写入要等 embedding 模型算向量做去重，冷加载（新版本首次编译 Metal 管线）可能超过 15s
 const SEARCH_TIMEOUT_MS = 15_000;
 const WRITE_TIMEOUT_MS = 30_000;
+/** 记住最近被取消的请求，迟到的回包据此降级日志；有上限，不随会话无限增长 */
+const CANCELLED_MEMORY = 256;
 
 /**
  * worker ↔ Main 的记忆库挂起调用表（同 BrowserInvoker 范式）。请求经 `memory-invoke` 事件上抛，
@@ -44,6 +47,7 @@ const WRITE_TIMEOUT_MS = 30_000;
  */
 export class MemoryInvoker<Op extends string = MemoryOp> {
   private readonly pending = new Map<string, Pending>();
+  private readonly cancelled = new Set<string>();
 
   constructor(
     private readonly identity: SessionIdentity | ChildSessionIdentity,
@@ -61,18 +65,23 @@ export class MemoryInvoker<Op extends string = MemoryOp> {
       this.options.timeoutMs ??
       (op === 'search' ? SEARCH_TIMEOUT_MS : WRITE_TIMEOUT_MS);
     const timer = setTimeout(
-      () => settle(new Error(`Memory action ${op} timed out after ${waitMs}ms`)),
+      () => settle(new Error(`Memory action ${op} timed out after ${waitMs}ms`), true),
       waitMs
     );
-    const onAbort = () => settle(new Error('Memory action aborted'));
-    const settle = (outcome: unknown) => {
+    const onAbort = () => settle(new Error('Memory action aborted'), true);
+    const settle = (outcome: unknown, cancelled = false) => {
       if (!this.pending.delete(requestId)) return;
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
+      if (cancelled) this.markCancelled(requestId);
       if (outcome instanceof Error) reject(outcome);
       else resolve(outcome);
     };
-    this.pending.set(requestId, { resolve: settle, reject: settle });
+    this.pending.set(requestId, {
+      resolve: settle,
+      reject: settle,
+      cancel: (error) => settle(error, true),
+    });
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       this.emit({ identity: this.identity, requestId, op, params });
@@ -91,8 +100,20 @@ export class MemoryInvoker<Op extends string = MemoryOp> {
     return true;
   }
 
+  /** 回落时找不到挂起项：是否因为本端已超时 / 中止 / 取消（迟到的回包，不是协议错误） */
+  wasCancelled(requestId: string): boolean {
+    return this.cancelled.delete(requestId);
+  }
+
+  private markCancelled(requestId: string): void {
+    this.cancelled.add(requestId);
+    if (this.cancelled.size > CANCELLED_MEMORY) {
+      this.cancelled.delete(this.cancelled.values().next().value as string);
+    }
+  }
+
   cancelAll(reason = 'Memory action cancelled'): void {
-    for (const entry of [...this.pending.values()]) entry.reject(new Error(reason));
+    for (const entry of [...this.pending.values()]) entry.cancel(new Error(reason));
   }
 
   get pendingCount(): number {

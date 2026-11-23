@@ -38,6 +38,7 @@ import {
   formatMilestoneMessage,
   formatNeedsAppConfirmLine,
   formatSilentTurnLine,
+  formatTestMessage,
   parseAskCallbackData,
   parseCardCallbackData,
   parseFeedCallback,
@@ -76,6 +77,7 @@ import {
   type ChannelButton,
   type ChannelCaps,
   type ChannelEntry,
+  type ChannelFailure,
   type ChannelInbound,
   type ChannelMessage,
   type ChannelMeta,
@@ -91,6 +93,7 @@ import {
 import type { TelegramApi } from './client';
 import type { ContactCommands } from './commands';
 import type { TelegramHub } from './hub';
+import { OutboundHealth } from './outboundHealth';
 import {
   type ContactStore,
   channelPrefs,
@@ -117,7 +120,8 @@ export type ContactError =
   | 'invalid-chat-id'
   | 'invalid-topic'
   | 'route-conflict'
-  | 'channel-owned';
+  | 'channel-owned'
+  | 'channel-paused';
 
 export type ContactResult = { ok: true } | { ok: false; error: ContactError };
 
@@ -241,8 +245,8 @@ export interface ContactServicePorts {
   ): Promise<{ ok: boolean; error?: string }>;
   /** 手机上点「在应用里打开」：聚焦窗口并定位到这张卡（或这个会话） */
   openInApp(target: { conversationId?: string; proposalId?: string }): void;
-  /** 出站失败只提示，不打断秘书 */
-  onError?(code: ContactError, detail?: string): void;
+  /** 出站失败只提示，不打断秘书；channelId 是失败的渠道，detail 是渠道给的原因 */
+  onError?(code: ContactError, detail?: string, channelId?: string): void;
   /** 只读命令：由 Main 查面板同一份数据，不进秘书会话 */
   commands?: ContactCommands;
   /** 手机关注的任务：派发与定时写、这里读与取消 */
@@ -373,6 +377,8 @@ function uniquePeers(peers: Iterable<Peer>): Peer[] {
  */
 export class ContactService implements SecretaryContactPort {
   readonly registry = new ContactChannelRegistry();
+  /** 插件渠道的出站熔断：连续失败就暂停推送，界面上能看到原因 */
+  private readonly outbound = new OutboundHealth();
   private readonly telegram: TelegramChannel;
   private readonly asks: PendingAsk[] = [];
   /** 已经收尾的提问槽位：旧按钮再点一次只回「已经回答过了」 */
@@ -424,7 +430,7 @@ export class ContactService implements SecretaryContactPort {
       now: ports.now,
       random: ports.random,
       lang: ports.lang,
-      onError: (code, detail) => this.ports.onError?.(code, detail),
+      onError: (code, detail) => this.ports.onError?.(code, detail, TELEGRAM_CHANNEL_ID),
       inbound: (message) => this.inbound(message),
       menuCommands: () => this.menuCommands(TELEGRAM_CHANNEL_ID),
       ...(ports.api ? { api: ports.api } : {}),
@@ -466,6 +472,7 @@ export class ContactService implements SecretaryContactPort {
   private channelView(entry: ChannelEntry): SecretaryContactChannelView {
     const { status, detail } = this.statusOf(entry);
     const meta = entry.meta;
+    const outbound = this.outbound.view(meta.id);
     return {
       id: meta.id,
       title: meta.title,
@@ -483,6 +490,7 @@ export class ContactService implements SecretaryContactPort {
         files: false,
       },
       prefs: channelPrefs(this.store.file(), meta.id),
+      ...(outbound ? { outbound } : {}),
     };
   }
 
@@ -656,6 +664,26 @@ export class ContactService implements SecretaryContactPort {
       { force: true }
     );
     this.audit('contact_test', sent.ok, sent.ok ? undefined : sent.error);
+    return sent.ok ? { ok: true } : { ok: false, error: sent.error };
+  }
+
+  /**
+   * 插件渠道的「立即重试」：解除暂停，给推送对象发一条测试消息。
+   * 发失败就重新开始计数，界面上看到这次的原因。
+   */
+  async retryChannel(channelId: string): Promise<ContactResult> {
+    const entry = this.registry.get(channelId);
+    if (!entry || entry.meta.builtin) return { ok: false, error: 'not-found' };
+    if (this.outbound.reset(channelId)) {
+      this.audit('contact_outbound_resume', true, `retry ${channelId}`);
+      this.ports.publish();
+    }
+    const peer = this.active(channelId) ? this.connectedPeers(entry)[0] : undefined;
+    if (!peer) return { ok: false, error: 'not-bound' };
+    const sent = await this.post(peer, 'sendText', {
+      text: formatTestMessage(this.ports.lang(), this.ports.secretaryName()),
+    });
+    this.audit('contact_test', sent.ok, sent.ok ? channelId : `${channelId} ${sent.error}`);
     return sent.ok ? { ok: true } : { ok: false, error: sent.error };
   }
 
@@ -889,6 +917,13 @@ export class ContactService implements SecretaryContactPort {
     if (!entry || entry.meta.builtin) return false;
     const before = entry.peers;
     const peers = input.peers ? [...new Set(input.peers.map(String))] : entry.peers;
+    // 重新连上或换了人：插件那边的会话已经换新，之前的出站失败不再作数
+    const reconnected =
+      input.status === 'connected' &&
+      (entry.status !== 'connected' || peers.some((peerId) => !before.includes(peerId)));
+    if ((reconnected || input.status === 'unconfigured') && this.outbound.reset(channelId)) {
+      this.audit('contact_outbound_resume', true, `status ${channelId}`);
+    }
     this.registry.upsert(entry.meta, {
       status: input.status,
       peers,
@@ -912,6 +947,7 @@ export class ContactService implements SecretaryContactPort {
     const entry = this.registry.get(channelId);
     if (!entry || entry.meta.builtin) return;
     this.registry.remove(channelId);
+    this.outbound.reset(channelId);
     this.dropChannelState(channelId, 'contact_channel_removed');
     this.audit('contact_channel', true, `remove ${channelId}`);
     this.ports.publish();
@@ -991,6 +1027,8 @@ export class ContactService implements SecretaryContactPort {
       ? (this.registry.get(peer.channelId)?.channel ?? null)
       : this.active(peer.channelId);
     if (!channel) return { ok: false, error: 'token-required' };
+    const paused = this.pausedSend(peer.channelId);
+    if (paused) return paused;
     const caps = channel.caps();
     let sent: ChannelSend;
     if (caps.buttons) {
@@ -1000,17 +1038,67 @@ export class ContactService implements SecretaryContactPort {
       const extra = plainButtonsText(message.buttons);
       const text = extra ? `${base}\n${extra}` : base;
       sent = { ok: true };
-      for (const chunk of splitPlain(text, caps.maxChars)) {
-        sent = await channel[kind](peer.peerId, { text: chunk }, peer.topicId);
+      for (const [index, chunk] of splitPlain(text, caps.maxChars).entries()) {
+        sent = await channel[kind](
+          peer.peerId,
+          {
+            text: chunk,
+            ...(index === 0 && message.replyToMessageId
+              ? { replyToMessageId: message.replyToMessageId }
+              : {}),
+          },
+          peer.topicId
+        );
         if (!sent.ok) break;
       }
     }
     if (sent.ok) this.audit('contact_outbound', true, describe(message.text));
     else {
-      this.audit('contact_outbound', false, sent.error);
-      this.ports.onError?.(sent.error);
+      this.audit(
+        'contact_outbound',
+        false,
+        sent.detail ? `${sent.error} ${sent.detail}` : sent.error
+      );
+      this.ports.onError?.(sent.error, sent.detail, peer.channelId);
     }
+    this.settleOutbound(peer.channelId, sent);
     return sent;
+  }
+
+  /** 受熔断管的渠道：插件渠道。Telegram 有自己的轮询退避，不在这里管 */
+  private breaker(channelId: string): boolean {
+    const entry = this.registry.get(channelId);
+    return entry !== undefined && !entry.meta.builtin;
+  }
+
+  /** 暂停中：不真的发，记审计；这一轮暂停的第一条记一条 warn，界面上的拦截计数跟着刷新 */
+  private pausedSend(channelId: string): ChannelFailure | null {
+    if (!this.breaker(channelId)) return null;
+    const gate = this.outbound.gate(channelId, this.ports.now());
+    if (gate === 'open') return null;
+    this.audit('contact_outbound', false, `channel-paused ${channelId}`);
+    if (gate === 'paused-first') {
+      const until = this.outbound.view(channelId)?.pausedUntil;
+      this.ports.onError?.(
+        'channel-paused',
+        until ? `pushes paused until ${new Date(until).toISOString()}` : undefined,
+        channelId
+      );
+    }
+    this.ports.publish();
+    return { ok: false, error: 'channel-paused' };
+  }
+
+  /** 一次真实发送的结果记进熔断：成功清零，失败累计并可能开始暂停 */
+  private settleOutbound(channelId: string, sent: ChannelSend): void {
+    if (!this.breaker(channelId) || (!sent.ok && sent.error === 'channel-paused')) return;
+    if (sent.ok) {
+      if (!this.outbound.reset(channelId)) return;
+      this.audit('contact_outbound_resume', true, `sent ${channelId}`);
+    } else {
+      this.outbound.fail(channelId, sent, this.ports.now());
+    }
+    this.ports.publish();
   }
 
   /**
@@ -1038,6 +1126,41 @@ export class ContactService implements SecretaryContactPort {
     return { ok: true, outcomes };
   }
 
+  canReplyToOrigin(channelId: string, peerId: string): boolean {
+    if (channelId === TELEGRAM_CHANNEL_ID) {
+      return this.active(channelId) !== null && this.telegram.canReplyTo(peerId);
+    }
+    const entry = this.registry.get(channelId);
+    if (!entry || !this.active(channelId)) return false;
+    return this.connectedPeers(entry).some((peer) => peer.peerId === peerId);
+  }
+
+  async replyToOrigin(input: {
+    channelId: string;
+    peerId: string;
+    topicId?: string;
+    replyToMessageId?: string;
+    text: string;
+  }): Promise<{ ok: true; messageId?: string } | { ok: false; error: string }> {
+    if (!this.canReplyToOrigin(input.channelId, input.peerId)) {
+      return { ok: false, error: '渠道未启用或未绑定这个会话' };
+    }
+    const sent = await this.post(
+      {
+        channelId: input.channelId,
+        peerId: input.peerId,
+        ...(input.topicId ? { topicId: input.topicId } : {}),
+      },
+      'sendText',
+      {
+        text: input.text,
+        ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+      }
+    );
+    if (!sent.ok) return { ok: false, error: sent.error };
+    return { ok: true, ...(sent.messageId ? { messageId: sent.messageId } : {}) };
+  }
+
   private async sendMediaTo(
     peer: Peer,
     media: ContactMediaInput,
@@ -1060,6 +1183,7 @@ export class ContactService implements SecretaryContactPort {
       media.kind === 'image' ? channel.sendImage?.bind(channel) : channel.sendFile?.bind(channel);
     const detail = `${media.kind} ${media.buffer.length}B`;
     const cid = conversationId ?? undefined;
+    if (this.pausedSend(channelId)) return { channelId, status: 'failed', error: 'channel-paused' };
     if (supported && method) {
       let sent: ChannelSend;
       try {
@@ -1067,12 +1191,13 @@ export class ContactService implements SecretaryContactPort {
       } catch {
         sent = { ok: false, error: 'api' };
       }
+      this.settleOutbound(channelId, sent);
       if (sent.ok) {
         this.audit('contact_media', true, detail, cid);
         return { channelId, status: 'sent' };
       }
       this.audit('contact_media', false, `${detail} ${sent.error}`, cid);
-      this.ports.onError?.(sent.error);
+      this.ports.onError?.(sent.error, sent.detail, channelId);
       await this.post(peer, 'sendText', {
         text: mediaFailedText(lang, media, sent.error),
       });
@@ -1533,7 +1658,7 @@ export class ContactService implements SecretaryContactPort {
         continue;
       }
       this.audit('contact_card_settled', false, result.error);
-      this.ports.onError?.(result.error);
+      this.ports.onError?.(result.error, undefined, send.peer.channelId);
       if (result.ok) {
         send.done = true;
         this.audit('contact_card_settled', true, 'markup-only');
@@ -1549,6 +1674,11 @@ export class ContactService implements SecretaryContactPort {
     if (!this.active(message.peer.channelId)) {
       this.audit('contact_inbound_rejected', false, `disabled ${message.peer.channelId}`);
       return;
+    }
+    // 对方发来消息说明渠道又通了（微信这类会话过期的渠道，收到消息就续上）：立即恢复推送
+    if (this.outbound.reset(message.peer.channelId)) {
+      this.audit('contact_outbound_resume', true, `inbound ${message.peer.channelId}`);
+      this.ports.publish();
     }
     if (message.kind === 'action') {
       await this.handleAction(message);

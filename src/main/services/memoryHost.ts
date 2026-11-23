@@ -180,6 +180,10 @@ export function awaitMemoryDistill(): Promise<void> {
   return memoryServiceOp('await-distill').then(() => undefined);
 }
 
+export function awaitSessionDistill(sessionId: string): Promise<void> {
+  return memoryServiceOp('await-session-distill', { sessionId }).then(() => undefined);
+}
+
 export function awaitMemoryKg(): Promise<void> {
   return memoryServiceOp('await-kg').then(() => undefined);
 }

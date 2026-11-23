@@ -82,6 +82,8 @@ const QUEUED_ONLY = process.argv.includes('--queued-only');
 const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contact-only');
 // 只跑 setup + 结构化完成结果段：goal_complete 带 result → 宿主核验 → 回传、看板与结果弹窗
 const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
+// 只跑插件联系渠道连续发送失败：错误原因上卡片、连续失败后暂停推送，截图存到 /tmp/contact-channel-error-*.png
+const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -222,9 +224,11 @@ function signalOwned(signal) {
   }
 }
 
-function packPluginZip() {
-  const source = path.join(REPO, 'scripts/fixtures/secretary-test-plugin');
-  const target = path.join(ART, 'secretary-test-plugin.zip');
+const PLUGIN_FIXTURES = ['secretary-test-plugin', 'contact-fail-plugin'];
+
+function packPluginZip(name) {
+  const source = path.join(REPO, 'scripts/fixtures', name);
+  const target = path.join(ART, `${name}.zip`);
   return new Promise((resolve, reject) => {
     const child = spawn('zip', ['-qr', target, '.'], { cwd: source, stdio: 'ignore' });
     child.on('exit', (code) =>
@@ -234,9 +238,12 @@ function packPluginZip() {
 }
 
 async function servePluginZip() {
-  const zip = readFileSync(await packPluginZip());
+  const zips = new Map();
+  for (const name of PLUGIN_FIXTURES)
+    zips.set(`/${name}.zip`, readFileSync(await packPluginZip(name)));
   const server = createHttpServer((request, response) => {
-    if (!request.url?.endsWith('.zip')) {
+    const zip = zips.get(request.url ?? '');
+    if (!zip) {
       response.writeHead(404).end();
       return;
     }
@@ -746,6 +753,14 @@ async function run(cdp, pluginZipUrl) {
   }
   if (GOAL_RESULT_ONLY) {
     await verifyGoalResult(cdp, setup);
+    return;
+  }
+  if (CONTACT_CHANNEL_ERROR_ONLY) {
+    await verifyContactChannelError(
+      cdp,
+      setup,
+      pluginZipUrl.replace('secretary-test-plugin', 'contact-fail-plugin')
+    );
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -3192,6 +3207,172 @@ async function shotTelegramCard(cdp, message, file) {
  * 新秘书还没开过会话：不打开它，直接从假 Telegram 发第一条消息，要能自动建会话并回复。
  * 两个新秘书各用一个 bot，同一时刻一起收到消息（其中一个连收两条），各自只建一条会话。
  */
+/**
+ * 插件联系渠道一直发不出去（Clawbot 会话过期）：秘书会话每一轮的镜像都失败。
+ * 卡片上要看到最近一次失败的时间与原因、插件给的提示；连续 3 次后暂停推送，第 4 条不再调插件。
+ */
+async function verifyContactChannelError(cdp, setup, zipUrl) {
+  const page = cdp.json.bind(cdp);
+  const CHANNEL = 'enso.contactfail:wechat';
+  log('== 联系渠道：插件渠道连续发送失败');
+  const installed = await page(`
+    const staged = await window.electronAPI.extensionPlugins.stageFromUrl(${JSON.stringify(zipUrl)});
+    if (!staged.ok) return JSON.stringify({ ok: false, error: staged.error });
+    const committed = await window.electronAPI.extensionPlugins.commit(staged.preview.token);
+    if (!committed.ok) return JSON.stringify({ ok: false, error: committed.error });
+    const enabled = await window.electronAPI.extensionPlugins.setEnabled('enso.contactfail', true);
+    if (!enabled.ok) return JSON.stringify({ ok: false, error: enabled.error });
+    const api = window.electronAPI.secretary;
+    const card = async () =>
+      (await api.contactState()).channels.find((item) => item.id === ${JSON.stringify(CHANNEL)});
+    const connected = await (async () => {
+      const end = Date.now() + 20000;
+      while (Date.now() < end) {
+        const item = await card();
+        if (item?.status === 'connected') return item;
+        await sleep(300);
+      }
+      return null;
+    })();
+    if (!connected) return JSON.stringify({ ok: false, error: 'channel not connected', card: await card() });
+    await api.contactSettings({ enabled: true });
+    const prefs = await api.contactSettings({
+      channelId: ${JSON.stringify(CHANNEL)},
+      prefs: { enabled: true, push: true, syncMirror: true },
+    });
+    return JSON.stringify({ ok: prefs.ok, error: prefs.error, card: await card() });
+  `);
+  assert(installed.ok, '联系渠道: 失败插件装好、已连接、打开镜像', installed);
+
+  const target = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    await sleep(300);
+    const toggles = [...document.querySelectorAll('button')].filter(
+      (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+    );
+    toggles.at(-1)?.click();
+    const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+    item?.click();
+    await sleep(800);
+    [...document.querySelectorAll('button')]
+      .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+      ?.click();
+    await sleep(1200);
+    const panel = visiblePanel();
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=contact]')?.click();
+    await sleep(400);
+    return JSON.stringify({ id, panel: Boolean(panel) });
+  `);
+  assert(target.panel, '联系渠道: 秘书面板打开到联系方式页', target);
+
+  const turn = async (n) => {
+    const before = await page(`
+      const row = S().conversations[${JSON.stringify(target.id)}];
+      return JSON.stringify((row?.messages ?? []).filter((m) => m.role === 'assistant').length);
+    `);
+    await page(`
+      const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+      await S().send(
+        ${JSON.stringify(`[[reply:镜像验证 ${n}]]`)},
+        { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+        undefined,
+        ${JSON.stringify(target.id)}
+      );
+      return JSON.stringify(true);
+    `);
+    await waitFor(
+      async () =>
+        (await page(`
+          const row = S().conversations[${JSON.stringify(target.id)}];
+          return JSON.stringify((row?.messages ?? []).filter((m) => m.role === 'assistant').length);
+        `)) > before,
+      `secretary turn ${n}`,
+      60_000,
+      500
+    );
+    await sleep(1200);
+  };
+  const cardView = () =>
+    page(`
+      const item = (await window.electronAPI.secretary.contactState()).channels.find(
+        (entry) => entry.id === ${JSON.stringify(CHANNEL)}
+      );
+      const node = visiblePanel()?.querySelector('[data-enso=secretary-contact-channel][data-channel="${CHANNEL}"]');
+      if (node?.querySelector('[data-enso=secretary-contact-channel-toggle]')?.getAttribute('aria-expanded') === 'false')
+        node.querySelector('[data-enso=secretary-contact-channel-toggle]').click();
+      await sleep(300);
+      node?.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      const rect = node?.getBoundingClientRect();
+      return JSON.stringify({
+        outbound: item?.outbound ?? null,
+        badge: node?.querySelector('[data-enso=secretary-contact-channel-outbound]')?.innerText ?? null,
+        notice: node?.querySelector('[data-enso=secretary-contact-outbound]')?.innerText ?? null,
+        rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: Math.min(rect.height, 520) } : null,
+      });
+    `);
+  const shoot = async (name, view) => {
+    const file = `/tmp/contact-channel-error-${name}.png`;
+    await cdp.shot(file);
+    if (view.rect) await cdp.shotClip(`/tmp/contact-channel-error-${name}-card.png`, view.rect);
+  };
+
+  await turn(1);
+  const degraded = await cardView();
+  assert(
+    degraded.outbound?.state === 'degraded' &&
+      degraded.outbound.consecutiveFailures === 1 &&
+      degraded.outbound.detail === '[SESSION_EXPIRED] sendmessage ret=-2 prepare failed' &&
+      degraded.outbound.userMessage === '微信会话已过期，请在微信里给机器人发任意一条消息',
+    '联系渠道: 第一次失败带原因与插件提示',
+    degraded
+  );
+  assert(
+    degraded.badge === '发送失败' && degraded.notice?.includes('微信会话已过期'),
+    '联系渠道: 卡片标出发送失败并原样展示插件提示',
+    degraded
+  );
+  await shoot('degraded', degraded);
+
+  await turn(2);
+  await turn(3);
+  await turn(4);
+  const paused = await cardView();
+  assert(
+    paused.outbound?.state === 'paused' &&
+      paused.outbound.consecutiveFailures === 3 &&
+      paused.outbound.suppressedCount === 1 &&
+      paused.outbound.pausedUntil > paused.outbound.lastErrorAt,
+    '联系渠道: 连续 3 次失败后暂停，第 4 条没再调插件',
+    paused
+  );
+  assert(
+    paused.badge === '已暂停推送' && paused.notice?.includes('已有 1 条推送没发出去'),
+    '联系渠道: 卡片显示暂停推送与被拦下的条数',
+    paused
+  );
+  await shoot('paused', paused);
+
+  const devLog = children.find((entry) => entry.name === 'dev')?.chunks.join('') ?? '';
+  const failures = devLog
+    .split('\n')
+    .filter((line) => line.includes(`[secretary-contact] ${CHANNEL} api:`));
+  const pausedWarns = devLog
+    .split('\n')
+    .filter((line) => line.includes(`[secretary-contact] ${CHANNEL} channel-paused`));
+  assert(
+    failures.length === 3 &&
+      failures.every((line) =>
+        line.includes('[SESSION_EXPIRED] sendmessage ret=-2 prepare failed')
+      ) &&
+      pausedWarns.length === 1,
+    '联系渠道: 日志带渠道与原因，三次失败、暂停只记一条',
+    { failures, pausedWarns }
+  );
+}
+
 async function verifyNewSecretaryFirstContact(cdp) {
   const page = cdp.json.bind(cdp);
   const tg = telegram.state;

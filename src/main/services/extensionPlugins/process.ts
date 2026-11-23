@@ -11,9 +11,9 @@ import { PLUGIN_HOST_APIS } from '@shared/extensionPlugins/protocol';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
 
 export type { PluginLogLevel };
-export type PluginError = Error & { code: string; expected?: true };
-export const pluginError = (code: string, message: string): PluginError =>
-  Object.assign(new Error(message), { code });
+export type PluginError = Error & { code: string; userMessage?: string; expected?: true };
+export const pluginError = (code: string, message: string, userMessage?: string): PluginError =>
+  Object.assign(new Error(message), { code }, userMessage ? { userMessage } : {});
 
 export interface PluginProcessDeps {
   fork(modulePath: string, args: string[], options: WorkerForkOptions): WorkerProcess;
@@ -301,7 +301,8 @@ export class PluginProcess {
         const error = isRecord(message.error) ? message.error : {};
         const failure: PluginError = pluginError(
           typeof error.code === 'string' ? error.code : 'PLUGIN_ERROR',
-          typeof error.message === 'string' ? error.message : '插件调用失败'
+          typeof error.message === 'string' ? error.message : '插件调用失败',
+          typeof error.userMessage === 'string' ? error.userMessage : undefined
         );
         if (error.expected === true) failure.expected = true;
         entry.reject(failure);

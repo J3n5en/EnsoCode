@@ -1997,6 +1997,29 @@ describe('压缩完成触发记忆整理', () => {
     );
   });
 
+  it('调度失败（服务超时 / 退出）只记一条结构化 warn，不留未处理的 rejection', async () => {
+    conversation();
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.scheduleMemoryDistill.mockRejectedValueOnce(
+      new Error('memory service exited; in-flight ops rejected')
+    );
+    try {
+      emit({ type: 'parent-ended' });
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith('[memory] schedule distill failed', {
+        sessionId: 'conv-1',
+        error: 'memory service exited; in-flight ops rejected',
+      });
+    } finally {
+      process.off('unhandledRejection', unhandled);
+      warn.mockRestore();
+    }
+  });
+
   it('Bot 群聊会话：压缩后走 Bot 记忆整理并标记下次补群状态', () => {
     conversation({ botId: 'bot-a', chatId: 'chat-1' });
     emit({ type: 'compaction', state: 'end' });

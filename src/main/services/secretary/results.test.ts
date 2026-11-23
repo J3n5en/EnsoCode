@@ -447,6 +447,7 @@ describe('工作台投影', () => {
     expect(board.needsYou.map((card) => card.kind)).toEqual(['proposal', 'session']);
     expect(board.needsYou[1]).toMatchObject({ conversationId: 'waiting', state: 'waiting' });
     expect(board.claims).toBeUndefined();
+    expect(board.threads).toBeUndefined();
     const claimed = buildBoard(file, {
       rows: {
         waiting: { id: 'waiting', title: '等审批', sessionFile: '/tmp/w.jsonl' },
@@ -470,6 +471,30 @@ describe('工作台投影', () => {
     });
     expect(claimed.claims).toEqual([
       expect.objectContaining({ key: 'tg:-1:1', sessionTitle: '在跑' }),
+    ]);
+    const threaded = buildBoard(file, {
+      rows: { running: { id: 'running', title: '在跑', sessionFile: '/tmp/r.jsonl' } },
+      statuses: { running },
+      projects,
+      todos: [],
+      threads: [
+        {
+          id: 'dt-1',
+          channel: 'telegram',
+          chatId: '-1',
+          messageId: '9',
+          requesterIsOwner: false,
+          sessionId: 'running',
+          sessionTitle: '在跑',
+          status: 'open',
+          milestones: [],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    });
+    expect(threaded.threads).toEqual([
+      expect.objectContaining({ id: 'dt-1', sessionTitle: '在跑' }),
     ]);
     expect(
       board.running.map((card) => (card.kind === 'session' ? card.conversationId : ''))

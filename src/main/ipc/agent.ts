@@ -156,8 +156,21 @@ import {
 } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
+import { getDemandThreadRouter } from '../services/demandThreadRouter';
+import {
+  demandRequesterIsOwner,
+  getDemandThreadStore,
+  peekDemandThreadStore,
+  releaseReassignedDemandClaims,
+  setDemandOwnerResolver,
+  setDemandSessionReassignedHook,
+} from '../services/demandThreads';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
-import { peekEventClaimStore, setClaimSessionProtectedCheck } from '../services/eventClaims';
+import {
+  peekEventClaimStore,
+  setClaimSessionProtectedCheck,
+  setPreferredClaimOwnerResolver,
+} from '../services/eventClaims';
 import { takeInterruptedTurns } from '../services/exitInterruptHost';
 import { exitInterruptionOf } from '../services/exitWindow';
 import {
@@ -433,6 +446,7 @@ function markExitInterrupted<T extends AgentWorkerEvent | WorkerExitedEvent>(eve
 }
 
 function noteClaimLiveness(event: AgentWorkerEvent | WorkerExitedEvent): void {
+  noteDemandThreadSignal(event);
   const store = peekEventClaimStore();
   if (!store) return;
   if (event.type === 'worker-exited') {
@@ -463,6 +477,20 @@ function noteClaimLiveness(event: AgentWorkerEvent | WorkerExitedEvent): void {
     return;
   }
   store.heartbeat(root);
+}
+
+function noteDemandThreadSignal(event: AgentWorkerEvent | WorkerExitedEvent): void {
+  if (event.type !== 'goal-signal') return;
+  const root = rootSessionId(event.identity);
+  if (event.identity.sessionId !== root) return;
+  const summary = event.note.trim();
+  if (event.kind === 'complete') {
+    void getDemandThreadRouter().onSessionGoalCompleted(root, summary ? { summary } : undefined);
+    return;
+  }
+  if (event.kind === 'blocked') {
+    void getDemandThreadRouter().onSessionNeedsHuman(root, summary, summary);
+  }
 }
 
 function broadcastAgentEvent(event: RendererAgentEvent): void {
@@ -1534,13 +1562,18 @@ function distillSessionMemory(identity: SessionIdentity) {
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
     if (conversation?.bot) void getBotServices()?.memory.distill({ ...conversation, sessionFile });
     else
-      void scheduleMemoryDistill(
+      scheduleMemoryDistill(
         {
           sessionId: identity.sessionId,
           sessionFile,
           projectId: project?.state === 'active' ? project.projectId : null,
         },
         { continueFromLastJob: true }
+      ).catch((error: unknown) =>
+        console.warn('[memory] schedule distill failed', {
+          sessionId: identity.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
       );
   }
   return conversation?.bot;
@@ -1894,6 +1927,12 @@ async function runAgentControl(
 }
 
 export function registerAgentHandlers(): void {
+  setDemandOwnerResolver((source) => demandRequesterIsOwner(source, pluginOwnerBindings()));
+  setDemandSessionReassignedHook(releaseReassignedDemandClaims);
+  getDemandThreadStore();
+  setPreferredClaimOwnerResolver(
+    (key) => peekDemandThreadStore()?.resolveOwnerForClaimKey(key) ?? null
+  );
   registerPluginSessionBridge(
     (sessionId) => {
       const identity = agentSessionIndex.currentIdentity(sessionId);

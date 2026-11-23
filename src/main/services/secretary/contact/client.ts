@@ -155,6 +155,7 @@ export interface TelegramApi {
     parseMode?: 'HTML';
     /** 发进论坛话题；缺省进群的 General */
     messageThreadId?: number;
+    replyToMessageId?: number;
   }): Promise<number>;
   /** 翻页时原地换掉这一条，不刷屏 */
   editMessageText(params: {
@@ -329,13 +330,26 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         ...(messageThreadId === undefined ? {} : { message_thread_id: messageThreadId }),
       });
     },
-    sendMessage: async ({ chatId, text, replyMarkup, parseMode, messageThreadId }) => {
+    sendMessage: async ({
+      chatId,
+      text,
+      replyMarkup,
+      parseMode,
+      messageThreadId,
+      replyToMessageId,
+    }) => {
       const sent = await request<TelegramMessage>(base, token, 'sendMessage', {
         chat_id: chatId,
         text,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         ...(parseMode ? { parse_mode: parseMode } : {}),
         ...(messageThreadId === undefined ? {} : { message_thread_id: messageThreadId }),
+        ...(replyToMessageId === undefined
+          ? {}
+          : {
+              reply_to_message_id: replyToMessageId,
+              allow_sending_without_reply: true,
+            }),
       });
       return sent.message_id;
     },

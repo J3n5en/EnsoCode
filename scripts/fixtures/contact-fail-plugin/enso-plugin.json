@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "enso.contactfail",
+  "name": "Contact Fail",
+  "version": "1.0.0",
+  "description": "联系渠道验收用：一个已连接但每次发送都失败的插件渠道，模拟微信会话过期。",
+  "main": "main.mjs",
+  "resident": true,
+  "permissions": ["secretary.contact", "process.background"],
+  "contributes": {
+    "contactChannels": [{ "id": "wechat", "title": "微信（验收）" }]
+  }
+}

@@ -200,6 +200,12 @@ function threadOf(topicId: string | undefined): { messageThreadId?: number } {
   return thread !== undefined ? { messageThreadId: thread } : {};
 }
 
+function replyMessageId(raw: string | undefined): number | undefined {
+  if (!raw || !/^[1-9]\d*$/.test(raw)) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
 type AdmitVerdict =
   | 'ok'
   | 'foreign-chat'
@@ -282,6 +288,14 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
       }
     }
     return peers;
+  }
+
+  canReplyTo(peerId: string): boolean {
+    if (!this.store.token()) return false;
+    if (this.pushPeers().some((peer) => peer.peerId === peerId)) return true;
+    const chatId = Number(peerId);
+    if (!Number.isSafeInteger(chatId)) return false;
+    return telegramGroupAllowed(this.store.file(), chatId);
   }
 
   // ---------- hub 订阅 ----------
@@ -949,7 +963,14 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     let messageId: number | undefined;
     for (const [index, chunk] of chunks.entries()) {
       const markup = index === chunks.length - 1 ? replyMarkup : undefined;
-      const sent = await this.sendChunk(Number(peerId), token, chunk, markup, topicId);
+      const sent = await this.sendChunk(
+        Number(peerId),
+        token,
+        chunk,
+        markup,
+        topicId,
+        index === 0 ? replyMessageId(message.replyToMessageId) : undefined
+      );
       if (!sent.ok) return sent;
       messageId = sent.messageId;
     }
@@ -962,7 +983,8 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     token: string,
     chunk: { html: string; plain: string },
     replyMarkup?: TelegramInlineKeyboard,
-    topicId?: string
+    topicId?: string,
+    replyToMessageId?: number
   ): Promise<{ ok: true; messageId: number } | { ok: false; error: ChannelErrorCode }> {
     const api = this.apiFor(token);
     try {
@@ -972,6 +994,7 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
         parseMode: 'HTML',
         ...(replyMarkup ? { replyMarkup } : {}),
         ...threadOf(topicId),
+        ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
       });
       return { ok: true, messageId };
     } catch (error) {
@@ -985,6 +1008,7 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
           text: chunk.plain,
           ...(replyMarkup ? { replyMarkup } : {}),
           ...threadOf(topicId),
+          ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
         });
         this.audit('contact_format', true, 'plain-fallback');
         return { ok: true, messageId };

@@ -18,6 +18,15 @@ function makePort() {
 }
 
 describe('memoryService bridge', () => {
+  it('ping 在消息循环里直接回 pong，不经过 op 分发', () => {
+    const { port, posted, emit } = makePort();
+    const dispatch = vi.fn();
+    createMemoryServiceBridge(port, dispatch);
+    emit({ type: 'ping', requestId: 7 });
+    expect(posted).toEqual([{ type: 'pong', requestId: 7 }]);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('requestTranscript 收到 transcript-result 后立即返回消息列表，不再等到超时回空', async () => {
     const { port, posted, emit } = makePort();
     const bridge = createMemoryServiceBridge(port, vi.fn(), { transcriptTimeoutMs: 200 });

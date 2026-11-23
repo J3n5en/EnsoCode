@@ -6,8 +6,8 @@
  * 一次 memory_search 能把事件循环卡到秒级。全部搬到一个 utilityProcess 后，
  * Main 只转发 op 并代发远程 LLM 补全。
  *
- * 崩溃 / 超时：op 超时或进程退出即丢弃该代，在途 op 全部拒绝；
- * 下一个 op 重新 fork（后台 LLM 任务有持久化 job 表，重启续跑）。
+ * 超时：单个 op 超时只拒绝它自己，再用 ping 探活；ping 也超时（事件循环卡死）或一直等不到 ready 才杀这一代。
+ * 崩溃：进程退出即丢弃该代，在途 op 全部拒绝；下一个 op 重新 fork（后台 LLM 任务有持久化 job 表，重启续跑）。
  * 退出：shutdown() 先让服务 graceful 关库关模型，超时 SIGKILL，配合退出看门狗。
  */
 
@@ -29,7 +29,7 @@ export interface MemoryServiceClientOptions {
   fork?: () => MemoryServiceTransport;
   memoryRoot: () => string;
   sessionDir: () => string;
-  /** op 超时；超时杀进程、拒绝全部在途 op，下个 op 自动重起 */
+  /** 普通 op 超时；超时只拒绝该 op 并触发探活 */
   opTimeoutMs?: number;
   /** 'changed' 通知防抖（批量写入合并） */
   onChanged?: () => void;
@@ -44,6 +44,21 @@ export interface MemoryServiceClientOptions {
 }
 
 const DEFAULT_OP_TIMEOUT_MS = 120_000;
+/** 等后台 LLM 任务收尾 / 手动提炼与复核这类 op 天然要等串行链跑完，只防真正挂死 */
+const LONG_OP_TIMEOUT_MS = 30 * 60_000;
+const LONG_OPS = new Set([
+  'distill',
+  'await-distill',
+  'await-session-distill',
+  'await-kg',
+  'await-reconcile',
+  'await-reembed',
+  'reconcile-run',
+  'insight',
+  'crystallize',
+  'remove-space',
+]);
+const PING_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 8_000;
 const CHANGE_DEBOUNCE_MS = 150;
 
@@ -70,6 +85,7 @@ export class MemoryServiceClient {
   private llmControllers = new Map<number, AbortController>();
   /** shutdown() 发起的退出是预期的 */
   private stopping = false;
+  private probe: { requestId: number; timer: NodeJS.Timeout } | null = null;
 
   constructor(private readonly opts: MemoryServiceClientOptions) {}
 
@@ -115,6 +131,8 @@ export class MemoryServiceClient {
     this.stopping = false;
     this.child = null;
     this.ready = false;
+    if (this.probe) clearTimeout(this.probe.timer);
+    this.probe = null;
     const error = new Error(
       `memory service exited${wasReady ? '' : ' before ready'}; in-flight ops rejected`
     );
@@ -146,6 +164,13 @@ export class MemoryServiceClient {
         clearTimeout(pending.timer);
         if (message.error !== undefined) pending.reject(new Error(String(message.error)));
         else pending.resolve(message.result);
+        return;
+      }
+      case 'pong': {
+        const probe = this.probe;
+        if (!probe || probe.requestId !== message.requestId) return;
+        clearTimeout(probe.timer);
+        this.probe = null;
         return;
       }
       case 'changed':
@@ -256,12 +281,14 @@ export class MemoryServiceClient {
   async invoke<T = unknown>(op: string, args?: unknown): Promise<T> {
     this.ensureStarted();
     const requestId = ++this.seq;
+    const timeoutMs = LONG_OPS.has(op) ? LONG_OP_TIMEOUT_MS : this.timeoutMs();
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingOps.delete(requestId);
-        reject(new Error(`memory op '${op}' timed out after ${this.timeoutMs()}ms`));
-        this.killChild(`op '${op}' timed out`);
-      }, this.timeoutMs());
+        reject(new Error(`memory op '${op}' timed out after ${timeoutMs}ms`));
+        if (this.ready) this.probeAlive(`op '${op}' timed out`);
+        else this.killChild(`op '${op}' timed out before ready`);
+      }, timeoutMs);
       timer.unref?.();
       this.pendingOps.set(requestId, {
         resolve: resolve as (value: unknown) => void,
@@ -286,6 +313,26 @@ export class MemoryServiceClient {
 
   protected timeoutMs(): number {
     return this.opts.opTimeoutMs ?? DEFAULT_OP_TIMEOUT_MS;
+  }
+
+  /** 慢 op 不等于服务挂了：ping 在服务消息循环里直接回，回不来才说明进程无响应 */
+  private probeAlive(reason: string): void {
+    const child = this.child;
+    if (!child || this.probe) return;
+    const requestId = ++this.seq;
+    const timer = setTimeout(() => {
+      this.probe = null;
+      if (this.child === child) this.killChild(`${reason}; ping timed out`);
+    }, PING_TIMEOUT_MS);
+    timer.unref?.();
+    this.probe = { requestId, timer };
+    try {
+      child.postMessage({ type: 'ping', requestId });
+    } catch {
+      clearTimeout(timer);
+      this.probe = null;
+      this.killChild(`${reason}; ping failed`);
+    }
   }
 
   private killChild(reason: string): void {

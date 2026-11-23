@@ -69,6 +69,8 @@ import type {
 } from '@shared/extensionPlugins/types';
 import type { McpServerSpawnConfig, SpawnModelConfig } from '@shared/types/agent';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
+import { getDemandThreadRouter } from '../demandThreadRouter';
+import { getDemandThreadStore } from '../demandThreads';
 import { getEventClaimStore, peekEventClaimStore } from '../eventClaims';
 import type {
   NativeAgentTypeSource,
@@ -374,6 +376,17 @@ export class ExtensionPluginService {
         release: (key, sessionId) => getEventClaimStore().release(key, sessionId),
         list: (filter) => getEventClaimStore().list(filter),
         releaseSession: (sessionId) => getEventClaimStore().releaseSession(sessionId),
+      },
+      threads: {
+        open: (input) => getDemandThreadStore().open(input),
+        bindPr: (target, pr) => getDemandThreadStore().bindPr(target, pr),
+        routePrEvent: (pluginId, event) => getDemandThreadRouter().routePrEvent(pluginId, event),
+        list: (filter) => getDemandThreadStore().list(filter),
+        findById: (id) => getDemandThreadStore().findById(id),
+        findBySource: (channel, chatId, messageId) =>
+          getDemandThreadStore().findBySource(channel, chatId, messageId),
+        findByPr: (repo, number) => getDemandThreadStore().findByPr(repo, number),
+        findActiveBySession: (sessionId) => getDemandThreadStore().findActiveBySession(sessionId),
       },
       agentRun: (pluginId, input) => this.startAgentRun(pluginId, input),
       agentModel: (pluginId) => this.agentModel(pluginId),
@@ -2176,6 +2189,34 @@ export class ExtensionPluginService {
   }
 
   private inject(
+    pluginId: string,
+    input: Parameters<NonNullable<GateDeps['inject']>>[1]
+  ): SessionAttempt {
+    return this.injectMessage(pluginId, input);
+  }
+
+  injectOwned(input: {
+    pluginId: string;
+    sessionId: string;
+    text: string;
+    claimKey: string;
+    claimLabel?: string;
+    sender?: PluginInjectSender;
+  }): SessionAttempt {
+    return this.injectMessage(input.pluginId, {
+      sessionId: input.sessionId,
+      text: input.text,
+      images: [],
+      deliverAs: 'followUp',
+      triggerTurn: true,
+      trusted: false,
+      claimKey: input.claimKey,
+      ...(input.claimLabel ? { claimLabel: input.claimLabel } : {}),
+      ...(input.sender ? { sender: input.sender } : {}),
+    });
+  }
+
+  private injectMessage(
     pluginId: string,
     input: Parameters<NonNullable<GateDeps['inject']>>[1]
   ): SessionAttempt {

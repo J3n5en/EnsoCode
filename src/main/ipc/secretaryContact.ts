@@ -7,6 +7,7 @@ import {
   findRouteConflict,
 } from '@shared/secretary/contact';
 import { projectReadableMessages } from '@shared/secretary/transcript';
+import type { DemandThreadSource } from '@shared/types/demandThreads';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import type {
   SecretaryContactChannelPrefs,
@@ -63,6 +64,23 @@ import {
   resumeRootFromMain,
 } from './agent';
 import { readSettingsState } from './settings';
+
+let replyOrigin:
+  | ((
+      source: DemandThreadSource,
+      text: string,
+      secretaryId?: string
+    ) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>)
+  | null = null;
+
+export function replyToDemandThreadSource(
+  source: DemandThreadSource,
+  text: string,
+  secretaryId?: string
+): Promise<{ ok: true; messageId?: string } | { ok: false; error: string }> {
+  if (!replyOrigin) return Promise.resolve({ ok: false, error: '秘书联系方式还没就绪' });
+  return replyOrigin(source, text, secretaryId);
+}
 
 /**
  * 联系方式的 Main 侧装配：每个秘书一份联系方式服务（自己的 contact.json、token、路由、关注），
@@ -264,6 +282,24 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
     },
   });
   const services = new Map<string, ContactService>();
+  replyOrigin = async (source, text, secretaryId) => {
+    const channelId =
+      source.channel === 'tg' || source.channel === 'telegram'
+        ? TELEGRAM_CHANNEL_ID
+        : source.channel;
+    const named = secretaryId ? services.get(secretaryId) : undefined;
+    const service = named?.canReplyToOrigin(channelId, source.chatId)
+      ? named
+      : [...services.values()].find((item) => item.canReplyToOrigin(channelId, source.chatId));
+    if (!service) return { ok: false, error: '没有可回复的渠道' };
+    return service.replyToOrigin({
+      channelId,
+      peerId: source.chatId,
+      ...(source.topicId ? { topicId: source.topicId } : {}),
+      replyToMessageId: source.messageId,
+      text,
+    });
+  };
 
   function publishOwnerBindings(): void {
     setPluginOwnerBindingsProbe(() => {
@@ -361,8 +397,10 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       openInApp: (target) => deps.openInApp(target),
       // 手机关注的任务：派发与定时写、这里读与取消，重启后还在
       following: new FollowingStore(ctx.dir),
-      onError: (code, detail) => {
-        console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
+      onError: (code, detail, channelId) => {
+        console.warn(
+          `[secretary-contact] ${channelId ? `${channelId} ` : ''}${code}${detail ? `: ${detail}` : ''}`
+        );
       },
       hub,
       secretaryId: ctx.id,
@@ -468,6 +506,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
     },
 
     async stop() {
+      replyOrigin = null;
       setPluginContactBridge(null);
       setPluginOwnerBindingsProbe(null);
       plugins?.dispose();
@@ -525,12 +564,22 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
         }
       );
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_TEST, async (event, secretaryId: unknown) => {
-        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        const service = target(secretaryId);
-        if (!service) return { ok: false, error: 'secretary-required' };
-        return service.sendTest();
-      });
+      // 不带渠道是 Telegram 的测试消息；带插件渠道 id 是「立即重试」：解除暂停并发一条测试消息
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_TEST,
+        async (event, secretaryId: unknown, request: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          const channelId =
+            request && typeof request === 'object' && !Array.isArray(request)
+              ? (request as Record<string, unknown>).channelId
+              : undefined;
+          if (typeof channelId === 'string' && channelId && channelId !== TELEGRAM_CHANNEL_ID)
+            return service.retryChannel(channelId);
+          return service.sendTest();
+        }
+      );
 
       ipcMain.handle(
         IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS,
