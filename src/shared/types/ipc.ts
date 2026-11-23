@@ -752,6 +752,17 @@ export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 /** 重启在等什么：在跑的工具、没法脱离应用只能等它结束的转后台命令，或正在写的回复 */
 export type RestartWaitReason = 'tool' | 'background-not-detachable' | 'reply';
 
+/**
+ * 重启正在等的一个会话：子会话的 sessionId 形如 `父会话::子会话`。
+ * tool=工具在跑（tools 为工具名）；background=转后台的命令还在跑；reply=回复在写；
+ * starting=会话正在打开；turn=回合在收尾（压缩、重试等）
+ */
+export interface RestartBlocker {
+  sessionId: string;
+  kind: 'tool' | 'background' | 'reply' | 'starting' | 'turn';
+  tools?: string[];
+}
+
 /** 等待弹层等完命令要做什么：菜单重启、安装更新、退出（Cmd+Q / 关窗 / 菜单退出） */
 export type AppExitReason = 'restart' | 'update' | 'quit';
 
@@ -760,6 +771,12 @@ export type AppExitReason = 'restart' | 'update' | 'quit';
  * 新实例在恢复会话
  */
 export type RestartOverlayState =
-  | { phase: 'waiting'; reason: RestartWaitReason; exit: AppExitReason }
+  | {
+      phase: 'waiting';
+      reason: RestartWaitReason;
+      exit: AppExitReason;
+      /** 还没到安全点的会话与在等什么；worker 还没报告时缺省 */
+      blockers?: RestartBlocker[];
+    }
   | { phase: 'restarting' }
   | { phase: 'resuming' };

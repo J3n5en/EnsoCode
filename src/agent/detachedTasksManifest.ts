@@ -6,6 +6,20 @@ import { isRunId } from './shell/detachedRun';
 
 /** 重启前从 worker 脱离、留给下一代认回的后台任务清单（dataDir 下，和 restart-checkpoint.json 同目录） */
 export const DETACHED_TASKS_FILE = 'restart-background-tasks.json';
+/** worker 收尾时停掉的在跑后台任务：下一代据此在任务表留一条「因重启中断」并通知所属会话一次 */
+export const INTERRUPTED_TASKS_FILE = 'restart-interrupted-tasks.json';
+
+export interface InterruptedTaskRecord {
+  taskId: string;
+  sessionId: string;
+  /** 命令摘要：截断并抹掉疑似密钥 */
+  command: string;
+  startedAt: number;
+  stoppedAt: number;
+  logPath: string;
+  /** 常驻服务（dev server 等）：只通知，不建议自动重跑 */
+  resident: boolean;
+}
 
 export interface DetachedTaskRecord {
   taskId: string;
@@ -124,6 +138,54 @@ export function takeDetachedTasksManifest(file: string, logDir: string): Detache
       same(t.exitCodeFile, path.join(logDir, `run-${t.runId}.exit`)) &&
       isStr(t.logPath) &&
       same(t.logPath, path.join(logDir, `${t.taskId}.log`))
+    );
+  });
+}
+
+/** 追加（同一 taskId 以新的为准）：上一代还没认领的记录不能被本代覆盖掉 */
+export function appendInterruptedTasks(
+  file: string,
+  records: readonly InterruptedTaskRecord[]
+): void {
+  if (records.length === 0) return;
+  const merged = new Map<string, InterruptedTaskRecord>();
+  for (const record of [...readInterrupted(file, null), ...records])
+    merged.set(record.taskId, record);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ version: 1, tasks: [...merged.values()] }, null, 2));
+  renameSync(tmp, file);
+}
+
+/** 读后即删（只通知一次）；日志路径必须就是 logDir 下按 taskId 推出的那个文件 */
+export function takeInterruptedTasks(file: string, logDir: string): InterruptedTaskRecord[] {
+  const records = readInterrupted(file, logDir);
+  rmSync(file, { force: true });
+  return records;
+}
+
+function readInterrupted(file: string, logDir: string | null): InterruptedTaskRecord[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return [];
+  }
+  const tasks = (parsed as { version?: unknown; tasks?: unknown } | null)?.tasks;
+  if ((parsed as { version?: unknown }).version !== 1 || !Array.isArray(tasks)) return [];
+  return tasks.filter((task): task is InterruptedTaskRecord => {
+    const t = task as Partial<InterruptedTaskRecord> | null;
+    return (
+      !!t &&
+      isStr(t.taskId) &&
+      TASK_ID.test(t.taskId) &&
+      isStr(t.sessionId) &&
+      typeof t.command === 'string' &&
+      isNum(t.startedAt) &&
+      isNum(t.stoppedAt) &&
+      typeof t.resident === 'boolean' &&
+      isStr(t.logPath) &&
+      (logDir === null || path.resolve(t.logPath) === path.resolve(logDir, `${t.taskId}.log`))
     );
   });
 }

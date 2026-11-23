@@ -133,10 +133,10 @@ export class AskManager {
   }
 
   /** abort/dismiss 时取消全部挂起提问(fail-closed) */
-  cancelAll(): void {
+  cancelAll(reason = 'question cancelled'): void {
     for (const [requestId, entry] of this.pending) {
       this.onResolved(requestId);
-      entry.reject(new Error('question cancelled'));
+      entry.reject(new Error(reason));
     }
     this.pending.clear();
   }

@@ -81,6 +81,8 @@ export function TaskStatusBadge({ task, now }: { task: BackgroundTaskInfo; now: 
   if (view === 'idle') return <TaskBadge tone="pending">{idleLabel(task, now, t)}</TaskBadge>;
   if (view === 'kept') return <TaskBadge tone="neutral">{t('Kept')}</TaskBadge>;
   if (view === 'running') return <TaskBadge tone="ok">{t('Running')}</TaskBadge>;
+  if (task.interrupted === 'restart')
+    return <TaskBadge tone="pending">{t('Interrupted by restart')}</TaskBadge>;
   return null;
 }
 

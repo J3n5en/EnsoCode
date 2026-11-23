@@ -1,6 +1,7 @@
 // 断点的纯类型：shared/types 会被插件类型声明带进没有 node 类型的环境，这里不能 import node 模块
 export type RestartNextStep = 'model-request' | 'await-user';
-export type RestartDeferReason = 'tool-in-flight' | 'turn-in-progress';
+/** session-starting：会话还在打开（spawn 没落定），落断点要等它，否则新进程里没有它 */
+export type RestartDeferReason = 'tool-in-flight' | 'turn-in-progress' | 'session-starting';
 
 export interface RestartCheckpointEntry {
   sessionId: string;

@@ -192,6 +192,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   const tasksBySession = new Map<string, Map<string, TrackedTask>>();
   /** 这一轮结束时还有后台任务：会话空闲是在等通知，不是做完了 */
   const awaiting = new Set<string>();
+  /** 开始这次等待的轮末时刻：在它之前结束的任务，通知已随那一轮送到，不再算「没唤醒」 */
+  const awaitingSince = new Map<string, number>();
   const pending = new Map<string, PendingStall>();
   /** 超时或进程已死之后，完成通知已经把会话跑完一轮：还要报停滞，但不要再 prompt */
   const consumedWaits = new Set<string>();
@@ -438,11 +440,15 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
     const decision = backgroundWaitStall(
       {
         awaiting: awaiting.has(conversationId),
-        idle: status.state === 'idle',
+        // 压缩中 worker 先不投完成通知，压完才投：不当成没唤醒
+        idle: status.state === 'idle' && compacting.get(conversationId) !== true,
         pendingUser: status.pendingAsks + status.pendingApprovals > 0,
         consumed:
           pending.get(conversationId)?.consumed === true || consumedWaits.has(conversationId),
-        tasks: [...taskMap(conversationId).values()],
+        tasks: [...taskMap(conversationId).values()].filter(
+          (task) =>
+            task.endedAt === undefined || task.endedAt >= (awaitingSince.get(conversationId) ?? 0)
+        ),
       },
       now
     );
@@ -563,6 +569,7 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         // 上一轮失败已经叫醒并跑完，这次又开始等：允许再报一次
         if (item?.consumed) pending.delete(conversationId);
         awaiting.add(conversationId);
+        awaitingSince.set(conversationId, clock());
         armWatch(conversationId);
       } else {
         const item = pending.get(conversationId);

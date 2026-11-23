@@ -84,10 +84,12 @@ function normalizeSegment(segment: string): string {
 
 /** --help / --version 一秒内结束，不按 server 处理 */
 const INFO_FLAG = /(?:^|\s)(?:--help|-h|--version|-V)(?:\s|$)/;
+/** 带 --watch 但等到远端结束就退出的命令（等 CI）：不是常驻服务 */
+const FINITE_WATCH = /^gh\s+(?:pr\s+checks|run\s+watch)\b/;
 
 function segmentClass(segment: string): CommandClass {
   const program = normalizeSegment(segment);
-  if (!program || INFO_FLAG.test(program)) return 'default';
+  if (!program || INFO_FLAG.test(program) || FINITE_WATCH.test(program)) return 'default';
   if (SERVER_PATTERNS.some((pattern) => pattern.test(program))) return 'server';
   if (BUILD_PATTERNS.some((pattern) => pattern.test(program))) return 'build';
   return 'default';

@@ -142,8 +142,9 @@ function timestamp(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-/** 后台任务在秘书眼里的三态：在跑、正常退出、被杀（没有退出码 = 信号终止） */
-function taskState(task: ObservedTask): 'running' | 'exited' | 'killed' {
+/** 后台任务在秘书眼里的状态：在跑、正常退出、被杀（没有退出码 = 信号终止）、因应用重启被停 */
+function taskState(task: ObservedTask): 'running' | 'exited' | 'killed' | 'interrupted-by-restart' {
+  if (task.interrupted === 'restart') return 'interrupted-by-restart';
   if (task.status === 'running') return 'running';
   if (task.status === 'done') return 'exited';
   return task.exitCode === undefined ? 'killed' : 'exited';
@@ -441,7 +442,8 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           command: wrapUntrusted(source, redactSecrets(task.command)),
           startedAt: task.startedAt,
           ranMs: Math.max(0, now - task.startedAt),
-          status: task.status,
+          status:
+            task.interrupted === 'restart' ? ('interrupted-by-restart' as const) : task.status,
           state: taskState(task),
           ...(task.exitCode === undefined ? {} : { exitCode: task.exitCode }),
           // null：worker 看门狗还没探测过，不能当成"活着"

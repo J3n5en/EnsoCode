@@ -368,6 +368,8 @@ export interface BackgroundTaskInfo {
   idle?: { since: number; ports: number[] };
   /** 留下运行：agent 收尾表态或用户手动保留；at 起 1 小时内不参与闲置判定，之后重新检查 */
   keep?: BackgroundTaskKeep;
+  /** 上一代 worker 收尾时被停掉（应用重启 / 退出）：status 是 failed，任务表标「因重启中断」 */
+  interrupted?: 'restart';
 }
 
 /** 手动保留理由上限 */
@@ -2441,6 +2443,8 @@ export type AgentWorkerEvent =
         identity: SessionIdentity;
         reason: RestartDeferReason;
         toolsInFlight: string[];
+        /** 在跑的工具调用名（不含转后台的命令），供弹层与超时日志说清在等什么 */
+        toolNames?: string[];
         /** 要求保留后台命令时仍要等的转后台命令（没法脱离 worker，如走管道的远程命令） */
         undetachableTasks?: string[];
         /** 回复在写（没有工具在跑）：Main 按出 token 的时刻决定还等不等 */
@@ -4724,6 +4728,7 @@ const DEFERRED_SESSION_KEYS = new Set([
   'identity',
   'reason',
   'toolsInFlight',
+  'toolNames',
   'undetachableTasks',
   'reply',
 ]);
@@ -4912,9 +4917,13 @@ const agentWorkerEventParsers = {
           (entry.undetachableTasks === undefined ||
             (Array.isArray(entry.undetachableTasks) &&
               entry.undetachableTasks.every(isNonEmptyString))) &&
+          (entry.toolNames === undefined ||
+            (Array.isArray(entry.toolNames) && entry.toolNames.every(isNonEmptyString))) &&
           (entry.reply === undefined || isRestartReplyProgress(entry.reply)) &&
           parseSessionIdentity(entry.identity) &&
-          (entry.reason === 'tool-in-flight' || entry.reason === 'turn-in-progress') &&
+          (entry.reason === 'tool-in-flight' ||
+            entry.reason === 'turn-in-progress' ||
+            entry.reason === 'session-starting') &&
           Array.isArray(entry.toolsInFlight) &&
           entry.toolsInFlight.every(isNonEmptyString)
       )

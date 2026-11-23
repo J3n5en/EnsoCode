@@ -222,8 +222,11 @@ import {
 } from './customProviderRegistry';
 import { createDcgGuard } from './dcg';
 import {
+  appendInterruptedTasks,
   DETACHED_TASKS_FILE,
+  INTERRUPTED_TASKS_FILE,
   takeDetachedTasksManifest,
+  takeInterruptedTasks,
   writeDetachedTasksManifest,
 } from './detachedTasksManifest';
 import { omitNamedTools } from './disallowedTools';
@@ -527,8 +530,10 @@ interface ManagedSession {
   /** 当前模型请求的发出 / 首 token / 最近出 token 时刻；回复写完（message_end）清掉。重启等安全点时报给 Main */
   replyProgress?: RestartReplyProgress;
   toolStartAt: Map<string, number>;
+  /** 在跑的工具调用名：重启等安全点时告诉 Main 在等哪个工具 */
+  toolNames: Map<string, string>;
   toolDurations: Map<string, number>;
-  /** 优雅重启：loop 停在工具批结束、下一次模型请求之前；调用即放行 */
+  /** 优雅重启：loop 停在下一次模型请求之前（新一轮的首个请求或工具批之后），消息已落盘；调用即放行 */
   restartHold?: () => void;
   /** 优雅重启等不到安全点、收尾时中止了正在写的回复：断点记成同一轮的模型请求，新进程续跑 */
   restartAbortedTurnId?: string;
@@ -971,6 +976,8 @@ export class SessionSupervisor {
   private readonly gate = new OperationGate();
   private readonly workspaceSwitch = new WorkspaceSwitchGate(this.sessions);
   private readonly pendingCommands = new Map<string, number>();
+  /** 正在 spawn、还没注册的父会话：重启等它落定时要报出来，不能悄悄等 */
+  private readonly spawning = new Map<string, SessionIdentity>();
   private readonly mcp = new McpManager({
     emit: (event) => this.options.emit(event),
     refreshOAuth: (serverId, rejected) => this.requestMcpOAuthRefresh(serverId, rejected),
@@ -1326,7 +1333,7 @@ export class SessionSupervisor {
           }
           if (notifyOptions?.durable && !this.sessions.has(sessionId)) {
             this.persistUnopenedNotification(sessionId, text);
-            this.requestWake(sessionId);
+            if (!notifyOptions.quiet) this.requestWake(sessionId);
             return;
           }
           this.notifier.notify(sessionId, text);
@@ -1342,6 +1349,13 @@ export class SessionSupervisor {
       )
     );
     sweepOrphanRuns(this.bgTasks.outputDir, handled);
+    // 上一代收尾时停掉的在跑任务（含空闲会话的）：任务表留「因重启中断」，通知所属会话一次并叫醒
+    this.bgTasks.recoverInterrupted(
+      takeInterruptedTasks(
+        path.join(this.restartDataDir(), INTERRUPTED_TASKS_FILE),
+        this.bgTasks.outputDir
+      )
+    );
     // 断点里空闲的会话带着待投递通知：重启收尾期间结束的命令只存了盘，这一代叫醒它
     for (const entry of this.restartResume.values()) {
       if (
@@ -1819,12 +1833,16 @@ export class SessionSupervisor {
       return;
     }
     this.pendingCommands.set(scopeId, (this.pendingCommands.get(scopeId) ?? 0) + 1);
+    const spawning = command.type === 'spawn-parent' ? command.identity : undefined;
+    if (spawning) this.spawning.set(spawning.sessionId, spawning);
     void this.gate
       .run(identity.sessionId, () => this.execute(command))
       .finally(() => {
         const count = (this.pendingCommands.get(scopeId) ?? 1) - 1;
         if (count) this.pendingCommands.set(scopeId, count);
         else this.pendingCommands.delete(scopeId);
+        if (spawning && this.spawning.get(spawning.sessionId) === spawning)
+          this.spawning.delete(spawning.sessionId);
         this.scheduleRestartCheck();
       })
       .catch((error) => {
@@ -3817,6 +3835,7 @@ export class SessionSupervisor {
       ...(opts.requestBudget ? { requestBudget: opts.requestBudget } : {}),
       timings: [],
       toolStartAt: new Map(),
+      toolNames: new Map(),
       toolDurations: new Map(),
       gate,
       asks: opts.asks ?? this.createAskManager(identity, gate.humanTimeoutMs),
@@ -4885,8 +4904,10 @@ export class SessionSupervisor {
       case 'tool_execution_start': {
         // codemode 嵌套调用只进脚本，不上时间线
         if (event.parentToolCallId) return;
-        // 有工具开跑就不能停在边界上等：被挂起的会话可能正是这个工具在等的对象
-        if (this.restart && !this.restart.committed) this.releaseRestartHolds();
+        // 父会话的工具（subagent / send 等结果）可能正等着自己的子会话：放开它们的挂起
+        if (this.restart && !this.restart.committed && !this.parentOf(managed))
+          this.releaseChildHolds(managed.identity.sessionId);
+        managed.toolNames.set(event.toolCallId, event.toolName);
         // 耗时只从真正开始执行算：同轮后发工具不能把前面 bash 的排队算进去
         if (!managed.toolStartAt.has(event.toolCallId)) {
           const startedAt = Date.now();
@@ -4937,6 +4958,7 @@ export class SessionSupervisor {
         if (event.parentToolCallId) return;
         const start = managed.toolStartAt.get(event.toolCallId);
         managed.toolStartAt.delete(event.toolCallId);
+        managed.toolNames.delete(event.toolCallId);
         managed.lastCompletedToolCallId = event.toolCallId;
         if (start !== undefined) {
           managed.toolDurations.set(event.toolCallId, Date.now() - start);
@@ -6124,6 +6146,7 @@ export class SessionSupervisor {
           identity: managed.identity,
           reason: gate.reason,
           toolsInFlight,
+          ...(managed.toolNames.size > 0 ? { toolNames: [...managed.toolNames.values()] } : {}),
           ...(keep && blockingTasks.length > 0 ? { undetachableTasks: blockingTasks } : {}),
           ...(toolsInFlight.length === 0 && managed.replyProgress
             ? { reply: { ...managed.replyProgress } }
@@ -6158,6 +6181,14 @@ export class SessionSupervisor {
           `[graceful-restart] ${managed.identity.sessionId.slice(0, 8)} 回复写到一半被重启中止，断点记成 model-request，新进程续跑`
         );
     }
+    // 还没注册的会话正在 spawn：等它落定，否则新进程里没有它；报出来，超时日志与弹层才知道在等谁
+    for (const identity of this.spawning.values()) {
+      if (!this.sessions.has(identity.sessionId))
+        deferred.push({ identity, reason: 'session-starting', toolsInFlight: [] });
+    }
+    // 只剩等人回答的提问 / 审批挡着：取消它们，会话停到下一次模型请求前，重启后模型看到结果再问
+    if (deferred.length > 0 && deferred.every((entry) => this.waitsOnlyForHuman(entry.identity)))
+      for (const entry of deferred) this.cancelHumanWaits(entry.identity);
     if (deferred.length > 0) {
       // 回复在写时每个 token 都会触发检查：出 token 时刻按秒去抖，Main 据此顺延等待
       const key = JSON.stringify(deferred, (field, value) =>
@@ -6169,7 +6200,6 @@ export class SessionSupervisor {
       }
       return;
     }
-    // 还没注册的会话正在 spawn：等它落定，否则新进程里没有它
     if ([...this.pendingCommands.keys()].some((id) => !this.sessions.has(id))) return;
     const checkpoint = {
       version: 1 as const,
@@ -6214,34 +6244,58 @@ export class SessionSupervisor {
     });
   }
 
-  private releaseRestartHolds(): void {
-    for (const managed of this.sessions.values()) managed.restartHold?.();
+  private parentOf(managed: ManagedSession): string | undefined {
+    return managed.parentId ?? managed.childIdentity?.parent.sessionId;
+  }
+
+  private releaseChildHolds(parentId: string): void {
+    for (const managed of this.sessions.values())
+      if (this.parentOf(managed) === parentId) managed.restartHold?.();
+  }
+
+  /** 会话在跑的工具都在等人（ask_user 提问、审批），没有转后台的命令 */
+  private waitsOnlyForHuman(identity: SessionIdentity): boolean {
+    const managed = this.sessions.get(identity.sessionId);
+    if (!managed || managed.toolStartAt.size === 0) return false;
+    const waiting = managed.asks.snapshot().length + managed.gate.snapshot().length;
+    return (
+      waiting >= managed.toolStartAt.size &&
+      this.bgTasks.runningYielded(identity.sessionId, {
+        exceptDetachable: this.restart?.keepBackground === true,
+      }).length === 0
+    );
+  }
+
+  private cancelHumanWaits(identity: SessionIdentity): void {
+    const managed = this.sessions.get(identity.sessionId);
+    managed?.asks.cancelAll(RESTART_ASK_CANCELLED);
+    managed?.gate.cancelAll();
   }
 
   /**
-   * pi 在工具批全部返回、turn_end 之后，下一次模型请求（turn_start）之前调 prepareNextTurnWithContext。
-   * 有重启请求时父会话停在这里；只在全局没有工具在跑时才停，避免停住的会话正被别的工具等着。
+   * pi 在每次模型请求前调 prepareRequest：新一轮的首个请求（用户消息已写进 jsonl），或工具批全部返回、
+   * 插话也已写入之后。有重启请求时会话停在这里，新消息、通知、goal 续跑都只落盘不出请求，新进程接着发。
+   * 子会话在父会话有工具在跑时不停（父会话的 subagent / send 可能正等它）。
    */
   private installRestartBoundary(managed: ManagedSession): void {
     const agent = managed.session.agent as AgentSession['agent'] | undefined;
-    const next = agent?.prepareNextTurnWithContext;
-    if (!agent || typeof next !== 'function') return;
-    agent.prepareNextTurnWithContext = async (turn, signal) => {
+    if (!agent) return;
+    const next = agent.prepareRequest;
+    agent.prepareRequest = async (request, signal) => {
       await this.holdForRestart(managed);
-      return next.call(agent, turn, signal);
+      return (await next?.call(agent, request, signal)) ?? undefined;
     };
   }
 
   private holdForRestart(managed: ManagedSession): Promise<void> {
     const restart = this.restart;
+    const parentId = this.parentOf(managed);
     if (
       !restart ||
       restart.committed ||
-      managed.childIdentity ||
-      managed.parentId ||
       managed.session.pendingMessageCount > 0 ||
       this.sessions.get(managed.identity.sessionId) !== managed ||
-      [...this.sessions.values()].some((session) => session.toolStartAt.size > 0)
+      (parentId !== undefined && (this.sessions.get(parentId)?.toolStartAt.size ?? 0) > 0)
     )
       return Promise.resolve();
     const { promise, resolve } = Promise.withResolvers<void>();
@@ -6264,9 +6318,9 @@ export class SessionSupervisor {
       endsWithAbortedReply(managed.session.agent.state.messages) &&
       editUnfinishedAssistantForResume(managed.session);
     const tail = managed.session.agent.state.messages.at(-1)?.role;
-    if (tail !== 'toolResult' && !(abortedReply && tail === 'user')) {
+    if (tail === undefined || tail === 'assistant') {
       console.warn(
-        `[graceful-restart] ${entry.sessionId.slice(0, 8)} 会话文件不在工具结果上，不续跑，等用户下一条`
+        `[graceful-restart] ${entry.sessionId.slice(0, 8)} 会话文件停在回复上，不续跑，等用户下一条`
       );
       return;
     }
@@ -6304,6 +6358,7 @@ export class SessionSupervisor {
   async shutdown(): Promise<void> {
     clearInterval(this.evictionTimer);
     this.workspaceSwitch.clear();
+    this.recordInterruptedTasks();
     this.bgTasks.stopAll();
     // 还在等安全点（等转后台的命令时被强制退出 / 超时）：给刚停掉的命令一点时间收口，
     // 完成通知进持久化队列、停在边界的会话落下断点，Main 据此补写恢复清单
@@ -6339,6 +6394,26 @@ export class SessionSupervisor {
       this.checkRestart();
     }
     return this.mcp.closeAll();
+  }
+
+  /**
+   * 收尾会停掉所有还在跑的后台任务（空闲会话的也是）：先记进台账，新一代通知所属会话一次。
+   * 写不下就退回本代照常发完成通知（多半丢在退出路上，但不会重复）
+   */
+  private recordInterruptedTasks(): void {
+    const records = this.bgTasks.interruptedOnShutdown();
+    if (records.length === 0) return;
+    try {
+      appendInterruptedTasks(path.join(this.restartDataDir(), INTERRUPTED_TASKS_FILE), records);
+      this.bgTasks.handOverNotices(records.map((record) => record.taskId));
+      console.log(
+        `[graceful-restart] 收尾停掉 ${records.length} 个后台任务，记入台账待新进程通知：${records
+          .map((record) => `${record.sessionId.slice(0, 8)}/${record.taskId}`)
+          .join(' ')}`
+      );
+    } catch (error) {
+      console.warn('[graceful-restart] failed to record interrupted background tasks:', error);
+    }
   }
 
   private markRestartAbort(managed: ManagedSession): void {
@@ -6844,6 +6919,9 @@ export const AGENT_RUN_HOLD_LIMIT_MS = 10 * 60_000;
 const STREAM_UPSERT_WINDOW_MS = 50;
 /** 重启等安全点时回复在写：出 token 时刻按这个粒度重报给 Main（空闲阈值 20s，误差可忽略） */
 const RESTART_PROGRESS_REPORT_MS = 1_000;
+/** 重启时取消只剩等人回答的提问：告诉模型是重启打断的，不是用户拒绝 */
+const RESTART_ASK_CANCELLED =
+  'The app restarted before the user answered this question. Ask again if you still need the answer.';
 /** 重启收尾中止回复后等它落进会话文件的上限：加上等转后台命令的 1s 仍在 Main 终止 worker 的 3s 内 */
 const RESTART_ABORT_SETTLE_MS = 1_500;
 

@@ -19,6 +19,8 @@ export interface ObservedTask {
   suspectedIdle?: true;
   /** agent 或用户留下运行 */
   kept?: true;
+  /** 上一代 worker 收尾时被停掉（应用重启） */
+  interrupted?: 'restart';
   /** 子代理起的任务：所属子会话 id（只在 tasksInTree 里给出） */
   ownerSessionId?: string;
 }
@@ -33,6 +35,7 @@ const toObserved = (task: BackgroundTaskInfo): ObservedTask => ({
   ...(task.alive === undefined ? {} : { alive: task.alive }),
   ...(task.idle ? { suspectedIdle: true as const } : {}),
   ...(task.keep ? { kept: true as const } : {}),
+  ...(task.interrupted ? { interrupted: task.interrupted } : {}),
 });
 
 export class BackgroundTaskTracker {

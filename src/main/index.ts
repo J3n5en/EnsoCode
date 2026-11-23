@@ -187,9 +187,9 @@ const appRestart = createAppRestart({
       // 应用马上重新打开：能脱离的转后台命令（dev server 等）交给新实例认回，不等也不停
       keepBackgroundTasks: true,
     }),
-  stateChanged: (state, waitReason) => {
+  stateChanged: (state, waitReason, blockers) => {
     installAppMenu(readLocale());
-    const overlay = restartOverlayFor(state, waitReason);
+    const overlay = restartOverlayFor(state, waitReason, blockers);
     if (overlay) setRestartOverlay(overlay);
     else clearRestartOverlay('restart');
   },

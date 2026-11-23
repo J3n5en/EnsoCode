@@ -1,6 +1,11 @@
 import { ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types';
-import type { AppExitReason, RestartOverlayState, RestartWaitReason } from '@shared/types/ipc';
+import type {
+  AppExitReason,
+  RestartBlocker,
+  RestartOverlayState,
+  RestartWaitReason,
+} from '@shared/types/ipc';
 import { switchNode } from '../services/nodeRemote';
 import { anyRendererFocused, isMainRenderer, localMainContents } from '../services/renderers';
 import { sendToWindow } from '../windows/createAppWindow';
@@ -11,6 +16,10 @@ import { presentWindow } from '../windows/verifyLaunch';
 export type RestartOverlayOwner = AppExitReason | 'resuming';
 
 let current: RestartOverlayState | null = null;
+
+function sameOverlay(left: RestartOverlayState | null, right: RestartOverlayState | null): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 function ownerOf(state: RestartOverlayState): RestartOverlayOwner {
   if (state.phase === 'waiting') return state.exit;
@@ -23,6 +32,7 @@ function ownerOf(state: RestartOverlayState): RestartOverlayOwner {
  * 把主窗口唤到前台让弹层看得见；后台自动重启不抢别的应用的焦点
  */
 export function setRestartOverlay(next: RestartOverlayState | null): void {
+  if (sameOverlay(current, next)) return;
   const startsWaiting = next?.phase === 'waiting' && current?.phase !== 'waiting';
   current = next;
   const win = getMainWindow();
@@ -40,12 +50,21 @@ export function clearRestartOverlay(owner: RestartOverlayOwner): void {
 /** 安装更新 / 退出等安全点期间 worker 报告有命令在跑就开弹层，等完（含出错）先关弹层再返回 */
 export async function waitWithExitDialog<T>(
   exit: AppExitReason,
-  prepare: (onWaitingForTools: (reason: RestartWaitReason) => void) => Promise<T>
+  prepare: (
+    onWaitingForTools: (reason: RestartWaitReason, blockers?: RestartBlocker[]) => void
+  ) => Promise<T>
 ): Promise<T> {
   let done = false;
   try {
-    return await prepare((reason) => {
-      if (!done) setRestartOverlay({ phase: 'waiting', reason, exit });
+    return await prepare((reason, blockers) => {
+      if (!done) {
+        setRestartOverlay({
+          phase: 'waiting',
+          reason,
+          exit,
+          ...(blockers?.length ? { blockers } : {}),
+        });
+      }
     });
   } finally {
     done = true;

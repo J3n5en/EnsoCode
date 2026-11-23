@@ -101,7 +101,7 @@ import {
   type SkillEntry,
 } from '@shared/types/assets';
 import { persistedSettingsState } from '@shared/types/builtinTools';
-import type { RestartWaitReason } from '@shared/types/ipc';
+import type { RestartBlocker, RestartWaitReason } from '@shared/types/ipc';
 import {
   MODEL_REASONING_OVERRIDES,
   MODEL_THINKING_LEVEL_OVERRIDES,
@@ -316,6 +316,11 @@ let snapshotPending: false | true | string = false;
 let commandsPending: AgentCommand[] = [];
 /** worker 曾启动后退出：spawn 时可按需重建（首次启动前不行，要等 env/PATH 探测） */
 let workerExited = false;
+/**
+ * 应用退出已停掉 worker：之后到达的命令不再拉起新 worker。否则新 worker 会认回刚交出的后台命令，
+ * 随应用退出又停掉，交接清单就此用掉，新版本里任务凭空消失（2026-11-23 更新重启现场）
+ */
+let quitStopped = false;
 const gracefulRestart = new GracefulWorkerRestart<WorkerProcess>();
 /** 不可闲置回收的会话，按来源（桌面查看 / 手机订阅）分桶；worker 重启后需重发并集 */
 const pinnedBySource = new Map<string, readonly string[]>();
@@ -352,7 +357,7 @@ export function customWorkflowPresetDir(): string {
 }
 
 export function startAgentWorker(options: { restartCheckpointFile?: string } = {}): void {
-  if (worker) return;
+  if (worker || quitStopped) return;
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: AGENT_WORKER_SERVICE_NAME,
@@ -614,6 +619,7 @@ export function recordAgentWorkerGone(details: {
 export function stopAgentWorker(): void {
   gracefulRestart.reset();
   keepBackgroundOnQuit = false;
+  quitStopped = false;
   workspaceLocks.failAll('agent worker stopped');
   pluginMcp.failAll('agent worker stopped');
   pluginAgents.failAll('agent worker stopped');
@@ -660,6 +666,7 @@ export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
  * 等安全点超时的话，worker 收尾（中止命令）时可能才落断点：退出后据此补写恢复清单。
  */
 export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
+  quitStopped = true;
   const child = worker;
   const pending = quitCheckpoint;
   // 清会话前留一份设置：补写清单时要配上（worker 退出时写，没等到退出就在这里补写）
@@ -754,11 +761,13 @@ interface QuitCheckpoint {
   toolsRunning: boolean;
   /** 已告诉弹层在等什么（工具 / 脱离不了的转后台命令 / 回复）；还没报过推迟时为 null */
   waitReason: RestartWaitReason | null;
+  /** 最近一次告诉弹层的会话级原因；和 waitReason 一起按内容去重 */
+  blockers: RestartBlocker[];
   /** worker 最近一次报告的推迟：超时时据此记下每个会话在干什么 */
   lastDeferred: DeferredSessions | null;
   /** 等安全点期间见过的每次模型请求（会话 + 请求发出时刻），结束时逐个记进退出日志 */
   replies: Map<string, ReplyTrack>;
-  waitingForTools: Array<(reason: RestartWaitReason) => void>;
+  waitingForTools: Array<(reason: RestartWaitReason, blockers: RestartBlocker[]) => void>;
   observe(sessions: DeferredSessions): void;
   settle(result: QuitCheckpointResult): void;
   /** 用户不等了：按超时收尾；已经有结果返回 false */
@@ -774,13 +783,13 @@ let lastDeferredLog = '';
  * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
  * 冷启动据此续跑。没有正在跑的会话、也没有在跑的后台命令时直接放行；同一次退出只发一次请求，再调用拿同一个结果。
  * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时等这一轮回复写完：保底 QUIT_REPLY_WAIT_FLOOR_MS，
- * 之后还在出 token 就顺延、停止超过 QUIT_REPLY_IDLE_MS 或到 QUIT_REPLY_WAIT_CAP_MS 为止（到点 worker 收尾中止回复并记成续跑点）；onWaitingForTools 在 worker 报告推迟时回调在等什么（已在等则立即回调）。
+ * 之后还在出 token 就顺延、停止超过 QUIT_REPLY_IDLE_MS 或到 QUIT_REPLY_WAIT_CAP_MS 为止（到点 worker 收尾中止回复并记成续跑点）；onWaitingForTools 在 worker 报告推迟时回调在等什么，以及每个会话挡住的原因，原因或挡住的会话变了再回调（已在等则立即回调）。
  */
 export function prepareAgentWorkerForQuit(options: {
   reason: RestartExitReason;
   /** 有根回合在跑，或回合已结束但还有后台命令在跑（ipc/sessionIndex.needsQuitCheckpoint） */
   hasRunningSessions: () => boolean;
-  onWaitingForTools?: (reason: RestartWaitReason) => void;
+  onWaitingForTools?: (reason: RestartWaitReason, blockers: RestartBlocker[]) => void;
   /** 应用会重新打开：能脱离的转后台命令留给下一代认回，不等它们结束 */
   keepBackgroundTasks?: boolean;
 }): Promise<QuitCheckpointResult> {
@@ -788,7 +797,8 @@ export function prepareAgentWorkerForQuit(options: {
   if (quitCheckpoint) {
     if (options.onWaitingForTools) {
       quitCheckpoint.waitingForTools.push(options.onWaitingForTools);
-      if (quitCheckpoint.waitReason) options.onWaitingForTools(quitCheckpoint.waitReason);
+      if (quitCheckpoint.waitReason)
+        options.onWaitingForTools(quitCheckpoint.waitReason, quitCheckpoint.blockers);
     }
     return quitCheckpoint.promise;
   }
@@ -855,6 +865,7 @@ export function prepareAgentWorkerForQuit(options: {
     resumable: new Set(),
     toolsRunning: false,
     waitReason: null,
+    blockers: [],
     lastDeferred: null,
     replies: new Map(),
     waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
@@ -868,11 +879,18 @@ export function prepareAgentWorkerForQuit(options: {
           ? 'background-not-detachable'
           : 'tool'
         : sessions.length > 0
-          ? 'reply'
+          ? sessions.every((session) => session.reason === 'session-starting')
+            ? 'tool'
+            : 'reply'
           : null;
-      if (waitReason && waitReason !== state.waitReason) {
+      const blockers = sessions.map(deferKind);
+      if (
+        waitReason &&
+        (waitReason !== state.waitReason || !sameBlockers(blockers, state.blockers))
+      ) {
         state.waitReason = waitReason;
-        for (const notify of state.waitingForTools) notify(waitReason);
+        state.blockers = blockers;
+        for (const notify of state.waitingForTools) notify(waitReason, blockers);
       }
       if (running !== state.toolsRunning) {
         state.toolsRunning = running;
@@ -1024,18 +1042,44 @@ function logReplyOutcomes(state: QuitCheckpoint, outcome: ReplyOutcome): void {
   }
 }
 
+function deferKind(session: DeferredSessions[number]): RestartBlocker {
+  const sessionId = session.identity.sessionId;
+  if (session.reason === 'session-starting') return { sessionId, kind: 'starting' };
+  const tools = [...new Set(session.toolNames ?? [])];
+  if (tools.length > 0) return { sessionId, kind: 'tool', tools };
+  if (session.toolsInFlight.length > 0) return { sessionId, kind: 'background' };
+  if (session.reply) return { sessionId, kind: 'reply' };
+  return { sessionId, kind: 'turn' };
+}
+
+function sameBlockers(left: readonly RestartBlocker[], right: readonly RestartBlocker[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function deferredSessionLabel(sessionId: string): string {
+  const splitAt = sessionId.indexOf('::');
+  if (splitAt === -1) return sessionId.slice(0, 8);
+  return `${sessionId.slice(splitAt + 2, splitAt + 10)}(子会话)`;
+}
+
 /** 退出时每个没到安全点的会话在干什么（worker 最近一次推迟报告） */
 function describeDeferred(sessions: DeferredSessions | null): string {
-  if (!sessions?.length) return 'worker 没报告推迟';
+  if (!sessions?.length) return 'worker 没报告推迟（可能卡在会话打开或 worker 无响应）';
   return sessions
-    .map(
-      (session) =>
-        `${session.identity.sessionId.slice(0, 8)}=${
-          session.toolsInFlight.length > 0
-            ? `工具在跑(${session.toolsInFlight.join(',')})`
-            : '回复在写'
-        }`
-    )
+    .map((session) => {
+      const blocker = deferKind(session);
+      const what =
+        blocker.kind === 'starting'
+          ? '正在打开会话'
+          : blocker.kind === 'tool'
+            ? `工具在跑(${blocker.tools?.join(',')})`
+            : blocker.kind === 'background'
+              ? `转后台命令在跑(${session.toolsInFlight.join(',')})`
+              : blocker.kind === 'reply'
+                ? '回复在写'
+                : '回合收尾中';
+      return `${deferredSessionLabel(session.identity.sessionId)}=${what}`;
+    })
     .join(' ');
 }
 
