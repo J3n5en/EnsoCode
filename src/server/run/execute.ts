@@ -13,7 +13,7 @@ import type {
   SessionIdentity,
   ThinkingLevel,
 } from '@shared/types/agent';
-import { THINKING_LEVELS } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   abortSession,
   agentDataDir,

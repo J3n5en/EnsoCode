@@ -60,39 +60,34 @@ import {
 import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
-  projectDisabledBuiltinTools,
-  projectTrustedCode,
-  resolveDisabledBuiltinTools,
-  resolveEditMode,
-} from '@shared/types';
-import type {
-  AgentCommand,
-  AgentRemoteConfig,
-  AgentSessionCustomEntry,
-  AgentSpawnRequest,
-  AgentTypeSpawnConfig,
-  AgentWorkerEvent,
-  ApprovalDecision,
-  ApprovalMode,
-  AttachedImage,
-  McpOAuthRefreshResult,
-  McpServerSpawnConfig,
-  ModelRef,
-  ResolvedAgentTypeSpawnConfig,
-  RestartReplyProgress,
-  SessionReloadResult,
-  SpawnModelConfig,
-  SubagentModelOption,
-  ThinkingLevel,
-  TitleSummaryInput,
-  VirtualClassifierCredentials,
-  VirtualSpawnClassifier,
-  WorkerCustomProvider,
-  WorkerExitedEvent,
-  WorkerSwappedEvent,
+  type AgentCommand,
+  type AgentRemoteConfig,
+  type AgentSessionCustomEntry,
+  type AgentSpawnRequest,
+  type AgentTypeSpawnConfig,
+  type AgentWorkerEvent,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type AttachedImage,
+  type McpOAuthRefreshResult,
+  type McpServerSpawnConfig,
+  type ModelRef,
+  parseAgentCommand,
+  parseAgentWorkerEvent,
+  type ResolvedAgentTypeSpawnConfig,
+  type RestartReplyProgress,
+  type SessionReloadResult,
+  type SpawnModelConfig,
+  type SubagentModelOption,
+  type ThinkingLevel,
+  type TitleSummaryInput,
+  type VirtualClassifierCredentials,
+  type VirtualSpawnClassifier,
+  type WorkerCustomProvider,
+  type WorkerExitedEvent,
+  type WorkerSwappedEvent,
 } from '@shared/types/agent';
-import { parseAgentCommand, parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
-import type { SubagentModelEntry } from '@shared/types/assets';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   type AgentTypeEntry,
   BUILTIN_AGENT_TYPES,
@@ -100,8 +95,14 @@ import {
   type McpServerEntry,
   type Preset,
   type SkillEntry,
+  type SubagentModelEntry,
 } from '@shared/types/assets';
-import { persistedSettingsState } from '@shared/types/builtinTools';
+import {
+  persistedSettingsState,
+  projectDisabledBuiltinTools,
+  resolveDisabledBuiltinTools,
+} from '@shared/types/builtinTools';
+import { resolveEditMode } from '@shared/types/editMode';
 import type { RestartBlocker, RestartWaitReason } from '@shared/types/ipc';
 import {
   MODEL_REASONING_OVERRIDES,
@@ -112,6 +113,7 @@ import {
   type ModelThinkingLevelOverride,
 } from '@shared/types/llm';
 import type { AgentDispatchTask } from '@shared/types/mentions';
+import { projectTrustedCode } from '@shared/types/project';
 import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { parseDisabledWorkflowPresets } from '@shared/types/workflow';
 import {

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { app, ipcMain, shell } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { broadcastToRenderers } from '../services/renderers';
 import { ensureUserCss, readUserCss, USER_CSS_FILE, watchUserCss } from '../services/userCss';
 

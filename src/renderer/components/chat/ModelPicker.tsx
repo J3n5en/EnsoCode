@@ -9,7 +9,8 @@ import type {
   ModelRef,
   OauthProviderInfo,
 } from '@shared/types';
-import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
+import type { ThinkingLevel } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   findVirtualModel,
   selectableVirtualModels,

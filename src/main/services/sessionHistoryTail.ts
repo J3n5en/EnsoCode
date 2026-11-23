@@ -1,8 +1,9 @@
 import path from 'node:path';
-import { type SessionEntry, sessionEntryToContextMessages } from '@earendil-works/pi-coding-agent';
+import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import { takeSnapshotTail } from '@shared/snapshotTail';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { projectMessage } from '../../agent/projection';
+import { sessionEntryToContextMessages } from '../../agent/sessionEntryMessages';
 import { withPrivacyMask, withUserEntryIds } from '../../agent/transcript';
 
 export interface HistoryProjectionOptions {

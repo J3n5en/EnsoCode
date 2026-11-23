@@ -1,16 +1,18 @@
 import { stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { ipcMain } from '@platform';
-import type { DragWatchState, DropShelfDelivery, DropShelfLayout } from '@shared/dropShelf';
 import {
   DROP_SHELF_MAX_PATHS,
+  type DragWatchState,
+  type DropShelfDelivery,
+  type DropShelfLayout,
   dropShelfBounds,
   dropShelfLayout,
   parseDropShelfDrop,
   stepDragWatch,
 } from '@shared/dropShelf';
 import { translate } from '@shared/i18n';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, BrowserWindow, screen, systemPreferences } from 'electron';
 import { readLocale } from '../../ipc/settings';
 import { isServerMode, leaveServerMode } from '../../services/appServerMode';

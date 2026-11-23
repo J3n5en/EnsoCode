@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   readCompactReserveTokens,
   writeCompactReserveTokens,

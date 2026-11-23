@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { HostToPhone } from '@enso/pair';
 import { botBrowserKey } from '@shared/bots/browser';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PairBotPort } from '../services/pairHost';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';

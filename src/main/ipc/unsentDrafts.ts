@@ -1,5 +1,5 @@
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 
 /** 报了「有未发送草稿」的 renderer；窗口 / 远端页面关掉即撤 */
 const withDraft = new Set<number>();

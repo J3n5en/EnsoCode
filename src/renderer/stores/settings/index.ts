@@ -21,8 +21,7 @@ import {
   normalizeContextMenuOpen,
   normalizeFileOpenRules,
 } from '@shared/fileOpening';
-import type { Locale } from '@shared/i18n';
-import { normalizeLocale } from '@shared/i18n';
+import { type Locale, normalizeLocale } from '@shared/i18n';
 import { liveActivityFoldDelaySec as normalizeLiveActivityFoldDelaySec } from '@shared/liveActivityFoldDelay';
 import {
   DEFAULT_MAX_ACTIVE_COWORKERS,
@@ -60,8 +59,8 @@ import {
 import { parseTerminalShell } from '@shared/terminalShell';
 import { DEFAULT_THEME_KEY } from '@shared/theme/builtinThemes';
 import type { ThemeKey } from '@shared/theme/types';
-import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
 import type { AgentMode, ModelRef, SourceAuthorityProjection } from '@shared/types/agent';
+import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { DEFAULT_UPDATE_CHANNEL } from '@shared/updater/channel';
 import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import { parseUsageModelPricing } from '@shared/usage/pricing';
