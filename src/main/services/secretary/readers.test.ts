@@ -1197,3 +1197,46 @@ describe('repo_status', () => {
     });
   });
 });
+
+describe('排队会话的读取', () => {
+  const queued = (queuedAt: number, extra: Record<string, unknown> = {}) =>
+    row({
+      sessionFile: undefined,
+      secretaryOrigin: { secretaryConversationId: 'sec-1', secretaryId: 's1' },
+      queuedStart: { queuedAt, text: '修构建', ...extra },
+    });
+  const handlers = () =>
+    createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({
+          q2: queued(20),
+          q1: queued(10),
+          bad: queued(5, { failed: { at: 6, error: `spawn failed ${SECRET}` } }),
+        }),
+        conversations: () => [
+          conversation('q1', 'p1'),
+          conversation('q2', 'p1'),
+          conversation('bad', 'p1'),
+        ],
+      })
+    );
+
+  it('session_list 显示 queued 与位次，启动失败的显示脱敏后的原因', async () => {
+    const result = await run(handlers().session_list);
+    const byId = Object.fromEntries(
+      (result.sessions as { conversationId: string }[]).map((s) => [s.conversationId, s])
+    );
+    expect(byId.q1).toMatchObject({ state: 'queued', queuePosition: 1 });
+    expect(byId.q2).toMatchObject({ state: 'queued', queuePosition: 2 });
+    expect(byId.bad).toMatchObject({ state: 'queued' });
+    expect(byId.bad).not.toHaveProperty('queuePosition');
+    expect(String((byId.bad as { queueFailed?: string }).queueFailed)).toContain('spawn failed');
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('session_read 同样显示 queued 与位次', async () => {
+    const result = await run(handlers().session_read, { conversationId: 'q2' });
+    expect(result).toMatchObject({ state: 'queued', queuePosition: 2 });
+  });
+});

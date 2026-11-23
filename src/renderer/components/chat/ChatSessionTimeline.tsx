@@ -26,6 +26,7 @@ import { timelineSearchHits } from './chatSearch';
 import { markFileLinksStale } from './fileLinkResolver';
 import { MarkdownLinkContext } from './Markdown';
 import { MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
+import { QueuedSessionCard } from './QueuedSessionCard';
 
 const EMPTY_MESSAGES: ProjectedMessage[] = [];
 const EMPTY_CUSTOM: AgentSessionCustomEntry[] = [];
@@ -137,6 +138,7 @@ export function ChatSessionTimeline({
   const syncStalled = useSessionsStore(
     (state) => state.conversations[conversationId]?.syncStalled === true
   );
+  const queuedStart = useSessionsStore((state) => state.conversations[conversationId]?.queuedStart);
   /** 应用退出打断的一轮：正文里被吞掉的模型错误不再渲染，底部钉系统提示 */
   const interrupted = useSessionsStore((state) => state.conversations[conversationId]?.interrupted);
 
@@ -318,39 +320,43 @@ export function ChatSessionTimeline({
           }}
         />
       )}
-      <MessageTimeline
-        key={conversationId}
-        virtualize={!REMOTE}
-        ref={timelineRef}
-        items={timeline}
-        busy={timelineActivity !== null}
-        loading={timelineActivity === 'loading'}
-        running={running}
-        runStartedAt={runStartedAt}
-        lastOutputAt={lastOutputAt}
-        error={terminalErrorText(messages, error)}
-        emptyTitle={emptyTitle}
-        onSuggestion={onSuggestion}
-        onRetryResume={
-          !readOnly && !started && sessionFile && status === 'failed'
-            ? () => void useSessionsStore.getState().resumeConversation(conversationId)
-            : undefined
-        }
-        onRetrySync={
-          !readOnly && syncStalled && !running
-            ? () => useSessionsStore.getState().retrySessionSync(conversationId)
-            : undefined
-        }
-        historyLoading={historyLoading}
-        hasOlder={historyBaseIndex > 0}
-        olderCursor={historyBaseIndex}
-        onStartReached={historyBaseIndex > 0 ? loadOlder : undefined}
-        searchQuery={findOpen ? findQuery : ''}
-        quotable={quotable}
-        activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
-        secretarySession={secretarySession}
-        {...(secretaryFace ? { secretaryFace } : {})}
-      />
+      {queuedStart ? (
+        <QueuedSessionCard conversationId={conversationId} />
+      ) : (
+        <MessageTimeline
+          key={conversationId}
+          virtualize={!REMOTE}
+          ref={timelineRef}
+          items={timeline}
+          busy={timelineActivity !== null}
+          loading={timelineActivity === 'loading'}
+          running={running}
+          runStartedAt={runStartedAt}
+          lastOutputAt={lastOutputAt}
+          error={terminalErrorText(messages, error)}
+          emptyTitle={emptyTitle}
+          onSuggestion={onSuggestion}
+          onRetryResume={
+            !readOnly && !started && sessionFile && status === 'failed'
+              ? () => void useSessionsStore.getState().resumeConversation(conversationId)
+              : undefined
+          }
+          onRetrySync={
+            !readOnly && syncStalled && !running
+              ? () => useSessionsStore.getState().retrySessionSync(conversationId)
+              : undefined
+          }
+          historyLoading={historyLoading}
+          hasOlder={historyBaseIndex > 0}
+          olderCursor={historyBaseIndex}
+          onStartReached={historyBaseIndex > 0 ? loadOlder : undefined}
+          searchQuery={findOpen ? findQuery : ''}
+          quotable={quotable}
+          activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
+          secretarySession={secretarySession}
+          {...(secretaryFace ? { secretaryFace } : {})}
+        />
+      )}
     </MarkdownLinkContext.Provider>
   );
 }

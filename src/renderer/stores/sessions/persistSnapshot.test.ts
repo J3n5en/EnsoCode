@@ -40,6 +40,28 @@ describe('cachedPartializeSessions', () => {
     });
   });
 
+  it('同一会话对象删掉 queuedStart 后，持久化不再带旧值', () => {
+    const conversation: ReturnType<typeof conv> & {
+      queuedStart?: { queuedAt: number; text: string };
+    } = {
+      ...conv('q'),
+      queuedStart: { queuedAt: 1, text: 'first' },
+    };
+    const slice = {
+      conversations: { q: conversation },
+      order: ['q'],
+      activeId: 'q',
+    };
+    expect(cachedPartializeSessions(slice).conversations.q.queuedStart).toEqual({
+      queuedAt: 1,
+      text: 'first',
+    });
+    delete conversation.queuedStart;
+    const next = cachedPartializeSessions(slice);
+    expect(next.conversations.q.queuedStart).toBeUndefined();
+    expect('queuedStart' in next.conversations.q).toBe(false);
+  });
+
   it('preserves empty worktree drafts and their names across serialization', () => {
     const worktree = {
       conversationId: 'a',

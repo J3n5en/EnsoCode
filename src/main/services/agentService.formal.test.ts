@@ -26,7 +26,7 @@ type Mode = 'task' | 'coworker';
 const OUTCOMES = { ok: 'succeeded', abort: 'interrupted', fail: 'failed' } as const;
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 /** 不由父会话发起的步骤：它们都走完、父会话也不再操作时，系统必须收敛 */
-const ENVIRONMENT = /^(return|ready|end|turn|expire|restore|parent-ready)/;
+const ENVIRONMENT = /^(return|ready|end|turn|expire|restore|parent-ready|released|removed)/;
 
 interface Budget {
   spawns: number;
@@ -38,6 +38,8 @@ interface Budget {
   crashes: number;
   /** 回合结束时留下自己的后台任务 */
   holds: number;
+  /** 用户删除父会话 */
+  deletes: number;
 }
 
 interface Child {
@@ -91,6 +93,14 @@ interface World {
   terminal: Map<string, string>;
   premature?: string;
   revived?: string;
+  /** 用户停止后仍在跑 / 仍待续跑的 Run */
+  survived?: string;
+  /** 用户停止 / 父会话删除时收口的 Run：之后不得被自动续跑 */
+  stopped: Set<string>;
+  /** 已停掉却又被自动续跑的 Run */
+  resurrected?: string;
+  /** 父会话已删除：parent-ended（released）与删行（removed）还没到的那一步 */
+  deleted?: { released: boolean; removed: boolean };
   ids: number;
 }
 
@@ -112,7 +122,9 @@ function identity(w: World, i: number): ChildSessionIdentity {
   };
 }
 
-function newService(w: World): AgentService {
+type Checkpoint = { sessionId: string; generation: string; nextStep: 'model-request' }[];
+
+function newService(w: World, restartCheckpoint: Checkpoint = []): AgentService {
   const child = (id: ChildSessionIdentity) =>
     w.children.find((c) => c.identity.sessionId === id.sessionId)!;
   const start = async ({
@@ -149,7 +161,10 @@ function newService(w: World): AgentService {
       return c.identity;
     },
     prompt: start,
-    retry: start,
+    retry: async (input) => {
+      if (w.stopped.has(input.runId)) w.resurrected ??= input.runId;
+      return start(input);
+    },
     resume: async ({ identity: id }) => {
       const c = child(id);
       Object.assign(c, {
@@ -176,6 +191,7 @@ function newService(w: World): AgentService {
   };
   return new AgentService({
     runtime,
+    restartCheckpoint,
     ledger: {
       load: () => w.saved.map((entry) => ({ ...entry })),
       save: (entries) => {
@@ -208,12 +224,14 @@ function boot(): World {
       faults: 0,
       crashes: 0,
       holds: 0,
+      deletes: 0,
     },
     runIds: [],
     notified: new Map(),
     notifiedStatus: new Map(),
     expected: new Map(),
     endedByParent: new Set(),
+    stopped: new Set(),
     terminal: new Map(),
     ids: 0,
   } as Omit<World, 'service'> as World;
@@ -243,6 +261,42 @@ function byParent(w: World, call: () => Promise<unknown>): () => Promise<void> {
     const after = inProgress(w);
     for (const runId of before) if (!after.has(runId)) w.endedByParent.add(runId);
   };
+}
+
+/** 台账里父会话还没得知结局的 Run（重启后等续跑 / 等补通知） */
+const unnotified = (w: World) =>
+  new Set(w.saved.filter((entry) => entry.notified === false).map((entry) => entry.runId));
+
+/**
+ * 用户停止父会话 / 删除父会话：在跑的与台账里待告知的 Run 一并收口，视同父会话知情；
+ * 之后它们不得被自动续跑
+ */
+function endedByUser(w: World, call: () => unknown, strict = false): () => Promise<void> {
+  return async () => {
+    const before = new Set([...inProgress(w), ...unnotified(w)]);
+    await call();
+    const after = new Set([...inProgress(w), ...unnotified(w)]);
+    for (const runId of before) {
+      if (after.has(runId)) {
+        if (strict) w.survived ??= runId;
+        continue;
+      }
+      w.endedByParent.add(runId);
+      w.stopped.add(runId);
+    }
+  };
+}
+
+function userStop(w: World): () => Promise<void> {
+  return endedByUser(
+    w,
+    () => {
+      w.used.stops++;
+      for (const c of w.children) if (c.returnSpawn) c.cut = true;
+      return w.service.cancelOwner('chat-1');
+    },
+    true
+  );
 }
 
 function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unknown][] {
@@ -404,6 +458,37 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
       ]);
     }
   });
+  if (w.deleted) {
+    const pending = w.deleted;
+    if (!pending.released) {
+      out.push([
+        'released',
+        endedByUser(w, () => {
+          pending.released = true;
+          for (const c of w.children) {
+            Object.assign(c, { ...kill, ready: false, ending: undefined });
+            if (c.returnSpawn) c.cut = true;
+          }
+          w.service.observe({
+            type: 'parent-ended',
+            identity: parent,
+            seq: 0,
+            reason: 'released',
+          } as never);
+        }),
+      ]);
+    }
+    if (!pending.removed) {
+      out.push([
+        'removed',
+        endedByUser(w, () => {
+          pending.removed = true;
+          w.service.abandonOwner('chat-1');
+        }),
+      ]);
+    }
+    return out;
+  }
   if (!w.parentUp) {
     out.push([
       'parent-ready',
@@ -412,6 +497,9 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         w.service.recoverOwner(context);
       },
     ]);
+    // 父会话还在加载（重启后等续跑 / 等补通知）时用户就点了停止
+    if (u.stops < cfg.stops && (inProgress(w).size > 0 || unnotified(w).size > 0))
+      out.push(['user-stop', userStop(w)]);
     return out;
   }
   const mode = cfg.modes[u.spawns];
@@ -442,28 +530,39 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
     ]);
   }
   // 用户停止父会话：名下所有未结束的 Run 一并收口，初始化中的 spawn 也不再起 Run
-  if (u.stops < cfg.stops && (inProgress(w).size > 0 || w.children.some((c) => c.returnSpawn))) {
+  if (u.stops < cfg.stops && (inProgress(w).size > 0 || w.children.some((c) => c.returnSpawn)))
+    out.push(['user-stop', userStop(w)]);
+  // 用户删除父会话：worker 拆子会话树后发 parent-ended，renderer 同时让 Main 删行，两者先后不定
+  if (u.deletes < cfg.deletes && w.runIds.length > 0) {
     out.push([
-      'user-stop',
-      byParent(w, () => {
-        u.stops++;
-        for (const c of w.children) if (c.returnSpawn) c.cut = true;
-        return w.service.cancelOwner('chat-1');
-      }),
+      'delete',
+      () => {
+        u.deletes++;
+        w.parentUp = false;
+        w.deleted = { released: false, removed: false };
+      },
     ]);
   }
   // 崩溃不打断进行中的 spawn：那条路径上 runtime.spawn 直接失败，不进注册表
   if (u.crashes < cfg.crashes && !w.children.some((c) => c.returnSpawn)) {
-    for (const kind of ['exit', 'restart'] as const) {
+    // update：更新重启，子会话停在安全点、落下断点，新 Main 在父会话就绪后自动续跑
+    for (const kind of ['exit', 'restart', 'update'] as const) {
       out.push([
         kind,
         () => {
           u.crashes++;
           w.parentUp = false;
+          const checkpoint: Checkpoint = w.children
+            .filter((c) => c.live)
+            .map((c) => ({
+              sessionId: c.identity.sessionId,
+              generation: c.identity.generation,
+              nextStep: 'model-request',
+            }));
           for (const c of w.children)
             Object.assign(c, { ...kill, ready: false, ending: undefined });
           if (kind === 'exit') w.service.observe({ type: 'worker-exited' });
-          else w.service = newService(w);
+          else w.service = newService(w, kind === 'update' ? checkpoint : []);
         },
       ]);
     }
@@ -479,12 +578,15 @@ function key(w: World): string {
     w.saved.map((e) => [e.runId, e.status, e.notified]),
     w.children.map(({ returnSpawn, identity: id, ...c }) => [c, id.generation, !!returnSpawn]),
     [w.parentUp, w.used, w.runIds, [...w.notified], [...w.notifiedStatus], [...w.endedByParent]],
+    [w.deleted, [...w.stopped]],
   ]);
 }
 
 function safetyViolation(w: World): string | null {
   if (w.premature) return `持有中的 Run ${w.premature} 被提前收口`;
   if (w.revived) return `父会话已被用户停止，初始化中的 spawn 仍起了 Run ${w.revived}`;
+  if (w.resurrected) return `用户停止 / 删除父会话后，Run ${w.resurrected} 又被自动续跑`;
+  if (w.survived) return `用户停止父会话后，Run ${w.survived} 仍在跑或仍待续跑`;
   const sessions = [...internals(w).agents.values()].map((a) => a.identity.sessionId);
   if (new Set(sessions).size !== sessions.length) return '同一子会话对应多条 Agent 记录';
   for (const c of w.children) {
@@ -508,11 +610,14 @@ function safetyViolation(w: World): string | null {
 
 async function settledViolation(w: World): Promise<string | null> {
   if (inProgress(w).size > 0) return 'Run 停在未终结状态，无人推进';
+  if (w.deleted && unnotified(w).size > 0) return '父会话已删除，台账仍留着待补通知 / 待续跑的 Run';
   for (const runId of w.runIds) {
     const told = (w.notified.get(runId) ?? 0) + (w.endedByParent.has(runId) ? 1 : 0);
     if (told !== 1) return `Run 结局告知父会话 ${told} 次`;
   }
   if (w.children.some((c) => c.mode === 'task' && c.live)) return 'task 结束后子会话未回收';
+  // 父会话已删除：没有谁再拿着这些 agentId
+  if (w.deleted) return null;
   const listed = await w.service.list({ context, requestId: 'l', limit: 100 });
   const ids = new Set(listed.ok ? listed.value.agents.map((a) => a.agentId) : []);
   if (
@@ -580,6 +685,8 @@ const none = {
   faults: 1,
   crashes: FULL ? 2 : 1,
   holds: 1,
+  // 删除父会话只在默认档的 coworker 与两档的 task 穷举；FULL 的 coworker 叠加它状态数爆炸
+  deletes: FULL ? 0 : 1,
 };
 
 const configs = [
@@ -590,7 +697,7 @@ const configs = [
   },
   {
     name: 'task：stop、停放与 resume、worker 退出与重启',
-    cfg: { ...none, modes: ['task'] as Mode[], resumes: 1 },
+    cfg: { ...none, modes: ['task'] as Mode[], resumes: 1, deletes: 1 },
     min: 300,
   },
   ...(FULL

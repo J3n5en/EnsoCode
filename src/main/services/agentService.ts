@@ -235,6 +235,8 @@ const USER_STOPPED_TEXT =
   '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
 const PARENT_STOPPED_TEXT =
   '用户停止了父会话，这个子代理随之停止：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
+const PARENT_RELEASED_TEXT =
+  'The parent conversation was closed (deleted, archived, or moved to a worktree), which ended this subagent session.';
 
 const LIST_HINT = 'Use subagent list to see the subagents this conversation has now.';
 
@@ -330,6 +332,8 @@ export class AgentService implements AgentServiceContract {
   private readonly queues = new Map<string, Promise<void>>();
   /** 每个父会话被用户停止的次数：spawn 初始化期间计数变了就撤回，不起 Run */
   private readonly ownerStops = new Map<string, number>();
+  /** 已删除的父会话：之后才到的 parent-ended 不再留待补通知 */
+  private readonly goneOwners = new Set<string>();
   /** 上次 Main 运行留下的 Run 台账：只用于认出重启前的 id */
   private readonly previousRuns = new Map<string, AgentRunLedgerEntry>();
   /** 最近一次重启断点里的子会话：child sessionId → 断点条目 */
@@ -618,6 +622,8 @@ export class AgentService implements AgentServiceContract {
    */
   cancelOwner(ownerId: string): Promise<void> {
     this.ownerStops.set(ownerId, (this.ownerStops.get(ownerId) ?? 0) + 1);
+    // 父会话可能还没就绪：等续跑 / 等补通知的也一并清掉，就绪后不再续跑或唤醒它
+    if (this.settleUnaware(ownerId)) this.persistRuns();
     return this.serial(ownerId, async () => {
       const open = [...this.runs.values()].filter(
         (run) => run.context.owner.ownerId === ownerId && !TERMINAL_RUN_STATUSES.has(run.status)
@@ -638,6 +644,7 @@ export class AgentService implements AgentServiceContract {
           const agent = this.agents.get(run.agentId);
           if (agent && run.restartPending) {
             run.restartPending = false;
+            this.restartClaimed.delete(agent.identity.sessionId);
             this.finishRun(run, 'interrupted', PARENT_STOPPED_TEXT);
             return;
           }
@@ -918,7 +925,11 @@ export class AgentService implements AgentServiceContract {
       this.persistRuns();
       return;
     }
-    if (!('identity' in event) || !('parent' in event.identity)) return;
+    if (!('identity' in event)) return;
+    if (!('parent' in event.identity)) {
+      if (event.type === 'parent-ended') this.releaseOwner(event.identity.sessionId);
+      return;
+    }
     let agent = [...this.agents.values()].find((candidate) =>
       isSameChildSessionIdentity(candidate.identity, event.identity)
     );
@@ -1132,8 +1143,16 @@ export class AgentService implements AgentServiceContract {
     return this.restartClaimed.has(sessionId);
   }
 
-  /** 父会话已删除 / 归档：它名下等补通知、等续跑的 Run 直接结束，不再等它 */
+  /** 父会话已删除 / 归档：它名下等补通知、等续跑的 Run 直接结束，不再等它；之后才到的 parent-ended 同样处理 */
   abandonOwner(ownerId: string): void {
+    this.goneOwners.add(ownerId);
+    if (!this.settleUnaware(ownerId)) return;
+    console.log(`[agent] owner ${ownerId.slice(0, 8)} is gone: its interrupted subagent Runs end`);
+    this.persistRuns();
+  }
+
+  /** 这个父会话等补通知、等续跑的 Run（台账里的与内存里的）记为已告知：不再续跑，也不再唤醒它 */
+  private settleUnaware(ownerId: string): boolean {
     let changed = false;
     for (const entry of this.previousRuns.values()) {
       if (entry.ownerId !== ownerId || entry.notified !== false) continue;
@@ -1141,9 +1160,44 @@ export class AgentService implements AgentServiceContract {
       delete entry.restart;
       changed = true;
     }
-    if (!changed) return;
-    console.log(`[agent] owner ${ownerId.slice(0, 8)} is gone: its interrupted subagent Runs end`);
-    this.persistRuns();
+    for (const run of this.runs.values()) {
+      if (run.context.owner.ownerId !== ownerId || !run.parentUnaware) continue;
+      run.parentUnaware = false;
+      changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * 父会话被释放（删除、worktree 归档、移入 worktree、重启会话）：worker 已拆掉整棵子会话树，
+   * Main 侧 Run 按 worker 退出收口——不发通知、wait 返回；父会话回来时由 recoverOwner 补告一次，已删除的不告。
+   */
+  private releaseOwner(ownerId: string): void {
+    this.ownerStops.set(ownerId, (this.ownerStops.get(ownerId) ?? 0) + 1);
+    let changed = false;
+    for (const agent of this.agents.values()) {
+      if (agent.context.owner.ownerId !== ownerId || agent.state.status === 'closed') continue;
+      const runs = [...this.runs.values()].filter(
+        (run) => run.agentId === agent.agentId && !TERMINAL_RUN_STATUSES.has(run.status)
+      );
+      const park = runs.length > 0 && this.mayPark(agent);
+      for (const run of runs) {
+        run.delivered = true;
+        run.parentUnaware = !this.goneOwners.has(ownerId);
+        run.restartPending = false;
+        run.restartCandidate = false;
+        this.finishRun(run, 'interrupted', PARENT_RELEASED_TEXT);
+      }
+      this.restartClaimed.delete(agent.identity.sessionId);
+      this.transition(agent, {
+        status:
+          agent.mode === 'coworker' || park || agent.state.status === 'parked'
+            ? 'parked'
+            : 'closed',
+      });
+      changed = true;
+    }
+    if (changed) this.persistRuns();
   }
 
   /** 台账里重启时停在断点的 Run：按原样重建 Agent 与 Run（同一 agentId / runId / 子会话 / 派发参数） */

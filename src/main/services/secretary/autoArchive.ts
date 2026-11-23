@@ -1,3 +1,4 @@
+import { queuedStartOf } from '@shared/secretary/queuedSession';
 import type { DispatchRecord } from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import type { SecretarySessionStatus } from './readers';
@@ -14,6 +15,8 @@ export function autoArchivable(
   reminderPending = false
 ): boolean {
   if (!row || row.archived === true) return false;
+  // 排队会话还没开始，谈不上收口
+  if (queuedStartOf(row)) return false;
   if (row.secretaryOrigin === undefined || record.takeover) return false;
   const result = record.lastResult;
   if (result?.kind !== 'goal-complete' || result.manual) return false;

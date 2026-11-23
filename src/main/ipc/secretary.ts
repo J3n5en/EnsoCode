@@ -29,6 +29,7 @@ import {
   dispatchPortsFor,
   listTakeovers,
   listUntracked,
+  loadPendingAttachments,
   markResult,
   mutateTodo,
   pageSecretaryFeed,
@@ -69,12 +70,21 @@ import { openSecretaryTarget } from '../services/secretary/links';
 import { reportPeerTodos, setPeerDeliveryListener } from '../services/secretary/peers';
 import { secretaryProfileFor } from '../services/secretary/profile';
 import { projectAliasesFromSettings } from '../services/secretary/projectLabel';
+import {
+  cancelQueuedSession,
+  createQueuedSessions,
+  type QueuedSessionPorts,
+  requestQueuedDrain,
+  setQueuedSessions,
+  startQueuedSession,
+} from '../services/secretary/queuedSessions';
 import { getSecretaryReportStore } from '../services/secretary/reportImages';
 import {
   parseAvatarRequest,
   parseDismissPendingRequest,
   parseDismissRequest,
   parseMarkResultRequest,
+  parseQueuedStartRequest,
   parseReferenceRequest,
   parseResolveProposalRequest,
   parseTodoMutateRequest,
@@ -110,6 +120,7 @@ import {
 import { createStatePublisher } from '../services/secretary/statePublisher';
 import { SecretaryStore } from '../services/secretary/store';
 import { readSessionReminders } from '../services/sessionReminders';
+import { deleteUntouchedSessionBranch } from '../services/worktree/service';
 import {
   getSourceAuthorityRegistry,
   isRootSessionAlive,
@@ -136,7 +147,8 @@ import { createConversationWorktree, removeRegisteredWorktree } from './worktree
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
-function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactoryPorts {
+/** 建会话与启动排队会话共用：除了默认模型都一样 */
+function conversationPorts(): Omit<SessionFactoryPorts, 'defaults'> {
   const authority = getSourceAuthorityRegistry();
   return {
     project: (id) => authority?.project(id),
@@ -157,7 +169,6 @@ function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactor
         version: conversation.version,
       });
     },
-    defaults: (projectId) => mainSessionDefaultsFor(projectId, credentialKeys),
     createWorktree: async (conversationId, projectId, base) => {
       const created = await createConversationWorktree(conversationId, projectId, base);
       if (!created.ok) throw new Error(created.error);
@@ -183,6 +194,54 @@ function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactor
     imageInput: (id) => rootImageInput(id),
     newId: () => randomUUID(),
     now: () => Date.now(),
+  };
+}
+
+function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactoryPorts {
+  return {
+    ...conversationPorts(),
+    defaults: (projectId) => mainSessionDefaultsFor(projectId, credentialKeys),
+  };
+}
+
+function queuedOwner(ctx: SecretaryContext) {
+  return { id: ctx.id, dispatch: dispatchPortsFor(ctx) };
+}
+
+function queuedSessionPorts(): QueuedSessionPorts {
+  const conversations = conversationPorts();
+  return {
+    launch: conversations,
+    rows: () => readPersistedConversations(),
+    updateRow: (id, update) => {
+      const written: { row: Record<string, unknown> | null } = { row: null };
+      patchConversationsState((state) => {
+        const row = state.conversations[id];
+        const next = row ? update(row) : null;
+        if (!next) return;
+        state.conversations[id] = next;
+        written.row = next;
+      });
+      return written.row;
+    },
+    // 取消排队：没跑过的会话，分支还停在基线上就一起删掉，同名分支能马上重新派发
+    removeWorktree: async (record) => {
+      await conversations.removeWorktree(record);
+      await deleteUntouchedSessionBranch(record);
+    },
+    removeRow: conversations.removeRow,
+    removeConversation: conversations.removeConversation,
+    owner: (secretaryId) => {
+      const ctx = secretaryContext(secretaryId);
+      return ctx ? queuedOwner(ctx) : null;
+    },
+    owners: () => secretaryContexts().map(queuedOwner),
+    maxTotal: () => secretaryRegistry().maxRunningTotal(),
+    loadAttachments: (paths) => loadPendingAttachments(paths),
+    flush: (secretaryId) => hosts.get(secretaryId)?.flushNow(),
+    agentStarted: (id) => Boolean(getSourceAuthorityRegistry()?.conversation(id)?.sessionFile),
+    now: () => Date.now(),
+    newId: () => randomUUID(),
   };
 }
 
@@ -381,6 +440,7 @@ function hostPortsFor(
         );
       });
     },
+    drainQueued: () => requestQueuedDrain(),
     reportPeerTodos: () => reportPeerTodos(ctx),
     archive: (conversationId, at) => {
       patchConversationsState((state) => {
@@ -643,6 +703,8 @@ export function registerSecretaryHandlers(): void {
   // 同事发来的消息：让收件秘书的宿主立刻试投
   setPeerDeliveryListener((secretaryId) => hosts.get(secretaryId)?.flushNow());
   driver = createDispatchDriver(driverPorts);
+  const queued = createQueuedSessions(queuedSessionPorts());
+  setQueuedSessions(queued);
   // 用户点确认后立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick
   setProposalAcceptedListener(() => {
     for (const instance of hosts.values()) instance.flushNow();
@@ -667,10 +729,17 @@ export function registerSecretaryHandlers(): void {
       if (sessionId && ctx) void secretaryProfileFor(ctx).onTurnEnded(sessionId);
     }
   });
-  onConversationsMerged((patch) => driver?.onConversationsMerged(patch));
+  onConversationsMerged((patch) => {
+    driver?.onConversationsMerged(patch);
+    // 会话被删：排队位次变了，也可能删的是占着名额的会话
+    if (patch.removes.length > 0) requestQueuedDrain();
+  });
   // 上次已经绑过就接着轮询；没绑过什么也不做
   void contacts.start().then(async () => {
+    // 先收尾上次认领中的排队会话，再起宿主：已起来的按运行中记，宿主恢复时照常报中断
+    queued.recover();
     for (const ctx of secretaryContexts()) await startSecretary(ctx);
+    requestQueuedDrain();
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_LIST, async (event) => {
@@ -1119,5 +1188,20 @@ export function registerSecretaryHandlers(): void {
     if (!parsed) return { ok: false, error: 'invalid request' };
     if (!driver) return { ok: false, error: 'driver unavailable' };
     return driver.goalAction(parsed.conversationId, parsed.action, parsed.text);
+  });
+
+  // 排队会话「立即开始」与取消：同样只查发起方，归属与状态由启动泵按盘上的行判
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_QUEUED_START, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const parsed = parseQueuedStartRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return startQueuedSession(parsed.conversationId, parsed.followUp);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_QUEUED_CANCEL, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const parsed = parseDismissRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return cancelQueuedSession(parsed.conversationId, null);
   });
 }
