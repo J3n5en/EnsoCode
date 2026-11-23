@@ -1432,7 +1432,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const entryMax = { ...model, reasoning: 'on' as const, thinkingLevel: 'max' as const };
     const spawnChild = async (
       supervisor: SessionSupervisor,
-      childModel: typeof model,
+      childModel: typeof model & { reasoning?: 'on' | 'off'; thinkingLevel?: 'max' },
       preset: { reasoning?: 'on' | 'off'; thinkingLevel?: 'medium' } = {}
     ) => {
       const before = mocks.createAgentSession.mock.calls.length;
