@@ -2,6 +2,11 @@ import type {
   EnsoClaimAcquireResult,
   EnsoClaimCandidate,
   EnsoClaimView,
+  EnsoDemandPrEventInput,
+  EnsoDemandPrRouteResult,
+  EnsoDemandThreadPr,
+  EnsoDemandThreadSource,
+  EnsoDemandThreadView,
   EnsoEventData,
   EnsoHostApi,
   EnsoMcpTool,
@@ -12,6 +17,13 @@ import type {
 } from '../../../types/enso-plugin';
 import type { McpToolInfo, PluginSessionInfo } from '../../main/services/extensionPlugins/gate';
 import type { PluginSlotName } from '../../renderer/plugins/registry';
+import type {
+  DemandPrEventInput,
+  DemandPrRouteResult,
+  DemandThreadPr,
+  DemandThreadSource,
+  DemandThreadView,
+} from '../types/demandThreads';
 import type {
   EventClaimAcquireResult,
   EventClaimCandidate,
@@ -39,6 +51,11 @@ const checks = [
   true as Assert<Equals<EnsoClaimView, EventClaimView>>,
   true as Assert<Equals<EnsoClaimCandidate, EventClaimCandidate>>,
   true as Assert<Equals<EnsoClaimAcquireResult, EventClaimAcquireResult>>,
+  true as Assert<Equals<EnsoDemandThreadView, DemandThreadView>>,
+  true as Assert<Equals<EnsoDemandThreadSource, DemandThreadSource>>,
+  true as Assert<Equals<EnsoDemandThreadPr, DemandThreadPr>>,
+  true as Assert<Equals<EnsoDemandPrEventInput, DemandPrEventInput>>,
+  true as Assert<Equals<EnsoDemandPrRouteResult, DemandPrRouteResult>>,
   true as Assert<Equals<EnsoMcpTool, McpToolInfo>>,
   true as Assert<Equals<EnsoEventData['tool_call'], ToolCallPayload>>,
   true as Assert<Equals<EnsoEventData['tool_result'], ToolResultPayload>>,

@@ -57,6 +57,7 @@ import {
   type SecretaryBoard,
   type SecretaryClaimView,
   type SecretaryDailyRecord,
+  type SecretaryDemandThreadView,
   type SecretaryDispatchFile,
   type SecretaryProfile,
   type SecretaryProfileDraft,
@@ -191,6 +192,7 @@ export interface SecretaryDispatchPorts {
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   claims?(): MaybePromise<readonly SecretaryClaimView[]>;
+  threads?(): MaybePromise<readonly SecretaryDemandThreadView[]>;
   createSession(request: MainSessionRequest): Promise<MainSessionResult>;
   prompt(
     conversationId: string,
@@ -3043,6 +3045,7 @@ export interface SecretaryStatePorts {
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   claims?(): MaybePromise<readonly SecretaryClaimView[]>;
+  threads?(): MaybePromise<readonly SecretaryDemandThreadView[]>;
 }
 
 export async function buildSecretaryState(
@@ -3112,6 +3115,7 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
       aliases,
       todos: await ports.todos(),
       claims: (await ports.claims?.()) ?? [],
+      threads: (await ports.threads?.()) ?? [],
     }),
   };
 }
@@ -3182,6 +3186,10 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
           active: claim.active,
         };
       });
+    },
+    async threads() {
+      const rows = await (await import('../../ipc/settings')).readPersistedConversations();
+      return (await import('../demandThreads')).secretaryDemandThreadViews(rows);
     },
     createSession: async (request) =>
       (await import('../../ipc/secretary')).createSessionViaMain(request),

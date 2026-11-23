@@ -47,6 +47,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
   },
   session_list: { keys: ['projectId', 'limit'], numbers: ['limit'] },
   claims_list: { keys: ['prefix', 'sessionId', 'pluginId'] },
+  threads_list: {
+    keys: ['status', 'sessionId', 'repo', 'activeOnly'],
+    booleans: ['activeOnly'],
+  },
   session_read: {
     keys: ['conversationId', 'limit', 'before', 'index', 'entryId', 'offset'],
     numbers: ['limit', 'before', 'index', 'offset'],
@@ -453,6 +457,28 @@ const SCHEMAS: Record<
       },
       sessionId: id('Only claims held by this session'),
       pluginId: id('Only claims created by this plugin'),
+    }),
+  },
+  threads_list: {
+    description:
+      'List demand threads that tie a source message to the session responsible for it and, once known, its pull request. Read-only. Optional filters are status, sessionId, repo and activeOnly.',
+    parameters: object({
+      status: {
+        type: 'string',
+        enum: ['open', 'in_progress', 'pr_opened', 'ci_failed', 'needs_human', 'merged', 'closed'],
+        description: 'Only threads in this status',
+      },
+      sessionId: id('Only threads owned by this session'),
+      repo: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 200,
+        description: 'Only threads bound to this owner/repo',
+      },
+      activeOnly: {
+        type: 'boolean',
+        description: 'Omit merged and closed threads',
+      },
     }),
   },
   session_read: {

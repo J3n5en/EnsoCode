@@ -516,6 +516,16 @@ export function runPluginHost(transport: HostTransport): void {
           hostCall('claims.release', sessionId !== undefined ? { key, sessionId } : { key }),
         list: (filter?: unknown) => hostCall('claims.list', filter ?? {}),
       },
+      threads: {
+        open: (input: unknown) => hostCall('threads.open', input ?? {}),
+        bindPr: (target: unknown, pr: unknown) =>
+          hostCall('threads.bindPr', {
+            ...(typeof target === 'object' && target !== null ? target : {}),
+            pr,
+          }),
+        routePrEvent: (event: unknown) => hostCall('threads.routePrEvent', event ?? {}),
+        list: (filter?: unknown) => hostCall('threads.list', filter ?? {}),
+      },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
       contact: {
         register: async (channelId: unknown, impl: unknown) => {
