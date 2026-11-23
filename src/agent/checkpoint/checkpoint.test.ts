@@ -15,6 +15,7 @@ import {
   type CheckpointHost,
   createCheckpoint,
   loadAllCheckpoints,
+  localCheckpointHost,
   MAX_UNTRACKED_FILE_SIZE,
   pruneStaleCheckpoints,
   restoreCheckpoint,
@@ -364,6 +365,75 @@ describe('CheckpointManager', () => {
       expect(await manager.restoreForEntry('e1', 1000)).toBe(false);
     } finally {
       rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  // 真实场景:用户 merge 出冲突后让 agent 帮忙解,冲突期间每轮快照都失败,
+  // 3 轮后整个会话永久停用快照,冲突解完也回不来
+  it('有未解决冲突时跳过本轮快照且不累计失败,冲突解完照常快照', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      runGit(root, 'checkout', '-q', '-b', 'side');
+      writeFileSync(join(root, 'a.txt'), 'side\n');
+      runGit(root, 'commit', '-q', '-am', 'side');
+      runGit(root, 'checkout', '-q', 'main');
+      writeFileSync(join(root, 'a.txt'), 'main\n');
+      runGit(root, 'commit', '-q', '-am', 'main');
+      expect(() => runGit(root, 'merge', '-q', 'side')).toThrow();
+      const manager = new CheckpointManager(root, 's1', () => ({}));
+      for (let i = 0; i < 4; i++) {
+        manager.resetTurn();
+        await manager.ensureTurnCheckpoint('write');
+      }
+      expect(await loadAllCheckpoints(root, 's1')).toHaveLength(0);
+      expect(warn).not.toHaveBeenCalled();
+
+      writeFileSync(join(root, 'a.txt'), 'resolved\n');
+      runGit(root, 'add', 'a.txt');
+      manager.resetTurn();
+      await manager.ensureTurnCheckpoint('write');
+      expect(await loadAllCheckpoints(root, 's1')).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('index.lock 冲突时短暂重试一次', async () => {
+    let locked = true;
+    const host: CheckpointHost = {
+      ...localCheckpointHost,
+      git: async (cmd, cwd, opts) => {
+        if (cmd === 'write-tree' && !opts?.env && locked) {
+          locked = false;
+          throw new Error(
+            `fatal: Unable to create '${root}/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository`
+          );
+        }
+        return localCheckpointHost.git(cmd, cwd, opts);
+      },
+    };
+    const manager = new CheckpointManager(root, 's1', () => ({}), host);
+    await manager.ensureTurnCheckpoint('write');
+    expect(await loadAllCheckpoints(root, 's1')).toHaveLength(1);
+  });
+
+  // 真实场景:会话所在的 worktree 刚被删掉,之后每轮都报 spawn git ENOENT
+  it('工作目录已被删除时静默跳过,不刷 warn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const gone = mkdtempSync(join(tmpdir(), 'enso-cp-gone-'));
+    try {
+      cpSync(root, gone, { recursive: true });
+      const manager = new CheckpointManager(gone, 's1', () => ({}));
+      await manager.ensureTurnCheckpoint('write');
+      rmSync(gone, { recursive: true, force: true });
+      for (let i = 0; i < 3; i++) {
+        manager.resetTurn();
+        await manager.ensureTurnCheckpoint('write');
+      }
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      rmSync(gone, { recursive: true, force: true });
     }
   });
 });

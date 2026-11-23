@@ -332,6 +332,24 @@ export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 export interface PluginErrorShape {
   code: string;
   message: string;
+  /** 插件标记的预期业务错误（未登录、404、限流等）：照常回传，宿主只记 info、不进错误汇总 */
+  expected?: true;
+}
+
+export type PluginLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * 插件调用失败落日志的级别。取消与宿主主动停进程打断的调用是预期收尾，记 debug；
+ * 插件给错误标了 `expected: true` 的是给用户看的业务错误，记 info；其余未知失败照旧记 error。
+ */
+export function pluginFailureLogLevel(
+  error: unknown,
+  context: { aborted?: boolean; stopped?: boolean } = {}
+): Extract<PluginLogLevel, 'debug' | 'info' | 'error'> {
+  const { code, expected } = (error ?? {}) as { code?: unknown; expected?: unknown };
+  if (context.aborted || code === 'ABORTED') return 'debug';
+  if (context.stopped && code === 'PLUGIN_EXITED') return 'debug';
+  return expected === true ? 'info' : 'error';
 }
 
 export interface PluginRegistrations {
@@ -375,7 +393,7 @@ export type PluginHostToMain =
   | { t: 'ready'; registered: PluginRegistrations }
   | { t: 'init-error'; message: string }
   | { t: 'call'; id: string; api: PluginHostApi; args: unknown; invocationId?: string }
-  | { t: 'log'; level: 'info' | 'warn' | 'error'; message: string }
+  | { t: 'log'; level: PluginLogLevel; message: string }
   | PluginResponse;
 
 /** 工具结果：插件可返回字符串或 { content, details } */

@@ -245,9 +245,11 @@ function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plai
 /** 超过这个行数就退回纯文本，避免几千个节点卡住面板 */
 const MAX_LOG_LINES = 5000;
 /** 与 Main 的 PluginLogger 写入格式一致：`<ISO> [level] message`；无前缀的是上一条的续行 */
-const LOG_HEAD = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (\[(info|warn|error)\] .*)$/;
+const LOG_HEAD =
+  /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (\[(debug|info|warn|error)\] .*)$/;
 /** 状态色本身是给底色用的，直接当字色在亮色（warn）和暗色（error）下都太淡；向前景色混一点，两种主题都清楚 */
 const LOG_LEVEL_CLASS = {
+  debug: 'text-muted-foreground/70',
   info: 'text-muted-foreground',
   warn: 'text-[color-mix(in_oklab,var(--color-warning)_60%,var(--color-foreground))]',
   error: 'text-[color-mix(in_oklab,var(--color-destructive)_55%,var(--color-foreground))]',

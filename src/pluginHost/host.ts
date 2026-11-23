@@ -15,6 +15,7 @@ import type {
   PluginHostToMain,
   PluginToolResult,
 } from '@shared/extensionPlugins/protocol';
+import { pluginFailureLogLevel } from '@shared/extensionPlugins/protocol';
 import { pluginToolName } from '@shared/extensionPlugins/toolName';
 import { beginChildTracking, installChildProcessHooks, killTrackedChildren } from './children';
 
@@ -133,10 +134,11 @@ export function captureConsole(
 }
 
 function toErrorShape(error: unknown): PluginErrorShape {
-  const code = (error as { code?: unknown })?.code;
+  const { code, expected } = (error ?? {}) as { code?: unknown; expected?: unknown };
   return {
     code: typeof code === 'string' ? code : 'PLUGIN_ERROR',
     message: error instanceof Error ? error.message : String(error),
+    ...(expected === true ? { expected: true as const } : {}),
   };
 }
 
@@ -681,7 +683,8 @@ export function runPluginHost(transport: HostTransport): void {
       );
       transport.send({ t: 'res', id: message.id, ok: true, value });
     } catch (error) {
-      transport.send(logMessage('error', [`${message.method} 失败：`, error]));
+      const level = pluginFailureLogLevel(error, { aborted: invocation.controller.signal.aborted });
+      transport.send(logMessage(level, [`${message.method} 失败：`, error]));
       transport.send({ t: 'res', id: message.id, ok: false, error: toErrorShape(error) });
     } finally {
       invocations.delete(invocation.id);

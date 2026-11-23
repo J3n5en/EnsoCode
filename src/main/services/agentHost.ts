@@ -549,14 +549,26 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
     }
     const dataDir = agentDataDir();
     const crash = takeAgentWorkerCrash(dataDir, childPid);
-    const detail = `${describeAgentWorkerExit(code, crash)}${swap.swap ? ' (graceful restart)' : ''}`;
-    console.error(`[agent] worker exited pid=${childPid ?? '?'} ${detail}`);
+    // 换代、主动停掉（已不是当前 worker）、退出应用 / 安装更新时终止，都是预期退出；崩溃一律算异常
+    const expectedStop = swap.swap || !current || quitStopped;
+    const normal = !crash && (code === 0 || expectedStop);
+    const reason = swap.swap
+      ? ' (graceful restart)'
+      : expectedStop && code !== 0
+        ? ' (expected stop)'
+        : '';
+    const detail = `${describeAgentWorkerExit(code, crash)}${reason}`;
+    (normal ? console.info : console.error)(
+      `[agent] worker exited pid=${childPid ?? '?'} ${detail}`
+    );
     appendAgentWorkerExitLog(
       dataDir,
       `exit pid=${childPid ?? '?'} ${detail}${crash?.stack ? `\n${crash.stack}` : ''}`
     );
     void output.settled().then((tail) => {
-      if (tail) appendAgentWorkerExitLog(dataDir, `output tail pid=${childPid ?? '?'}\n${tail}`);
+      if (!tail) return;
+      const mark = normal ? ' (normal exit)' : '';
+      appendAgentWorkerExitLog(dataDir, `output tail pid=${childPid ?? '?'}${mark}\n${tail}`);
     });
     pendingReloads.failAll('agent worker exited');
     workspaceLocks.failAll('agent worker exited');

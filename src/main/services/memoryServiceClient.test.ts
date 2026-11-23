@@ -53,7 +53,7 @@ function transport(child: FakeChild): MemoryServiceTransport {
 describe('memory service client', () => {
   let forks: FakeChild[] = [];
   let client: MemoryServiceClient;
-  let logs: string[] = [];
+  let logs: { level: 'info' | 'warn'; message: string }[] = [];
   let optsRef: {
     onMemoryChanged?: () => void;
     llmResolver?: () => Promise<import('./memory/distill').Complete | null>;
@@ -70,7 +70,7 @@ describe('memory service client', () => {
         forks.push(child);
         return transport(child);
       },
-      log: (m) => logs.push(m),
+      log: (level, message) => logs.push({ level, message }),
       onChanged: () => optsRef.onMemoryChanged?.(),
       llmResolver: () =>
         (optsRef.llmResolver?.() ?? Promise.resolve(null)) as ReturnType<
@@ -226,5 +226,31 @@ describe('memory service client', () => {
     child.becomeReady();
     await vi.advanceTimersByTimeAsync(0);
     expect(child.posted.filter((m) => (m as { op?: string }).op === 'invoke')).toHaveLength(0);
+  });
+
+  it('日志分级：spawned 与主动关停记 info，kill 与异常退出记 warn', async () => {
+    const first = client.invoke('ping').catch((e) => e);
+    forks[0].emit('spawn');
+    await vi.advanceTimersByTimeAsync(0);
+    forks[0].emit('exit');
+    await first;
+    expect(logs.find((l) => l.message.includes('spawned'))?.level).toBe('info');
+    expect(logs.find((l) => l.message.includes('exited'))?.level).toBe('warn');
+
+    logs = [];
+    const hang = client.invoke('ping').catch((e) => e);
+    await vi.advanceTimersByTimeAsync(30_001);
+    await hang;
+    expect(logs.find((l) => l.message.includes('kill'))?.level).toBe('warn');
+
+    logs = [];
+    void client.invoke('ping').catch(() => {});
+    const child = forks.at(-1)!;
+    await vi.advanceTimersByTimeAsync(0);
+    child.becomeReady();
+    const stopped = client.shutdown();
+    child.emit('exit');
+    await stopped;
+    expect(logs.filter((l) => l.message.includes('exited')).map((l) => l.level)).toEqual(['info']);
   });
 });

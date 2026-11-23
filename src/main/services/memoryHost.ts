@@ -92,7 +92,7 @@ const client = new MemoryServiceClient({
   onDownloadProgress: (progress) => downloadProgressSink?.(progress),
   llmResolver: async () => (await llmResolver?.()) ?? null,
   transcriptReader: readTranscriptMain,
-  log: (message) => console.warn(message),
+  log: (level, message) => console[level](message),
 });
 
 /** 测试 / 诊断用：当前服务进程是否活着 */

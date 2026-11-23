@@ -53,6 +53,7 @@ import {
   type PluginInjectImage,
   type PluginInjectSender,
   type PluginToolResult,
+  pluginFailureLogLevel,
 } from '@shared/extensionPlugins/protocol';
 import { mergeStatusItems, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/toolName';
@@ -2418,7 +2419,9 @@ export class ExtensionPluginService {
     const state = this.scheduleRuns.get(key);
     if (this.isDisposed || !state || state.running || !this.enabledManifest(pluginId)) return;
     state.running = true;
+    let proc: PluginProcess | undefined;
     try {
+      proc = this.processFor(pluginId);
       await this.invoke(
         pluginId,
         'schedule.run',
@@ -2434,9 +2437,16 @@ export class ExtensionPluginService {
       state.lastRunAt = Date.now();
       delete state.lastError;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const level = pluginFailureLogLevel(error, { stopped: proc?.stopped === true });
+      // 停用、卸载、换版或退出时进程被停掉：任务只是被打断，不算这次运行失败
+      if (level === 'debug') {
+        this.appendLog(pluginId, 'debug', `定时任务 ${schedule.id} 中断：${message}`);
+        return;
+      }
       state.lastRunAt = Date.now();
-      state.lastError = error instanceof Error ? error.message : String(error);
-      this.appendLog(pluginId, 'error', `定时任务 ${schedule.id} 失败：${state.lastError}`);
+      state.lastError = message;
+      this.appendLog(pluginId, level, `定时任务 ${schedule.id} 失败：${message}`);
     } finally {
       if (this.scheduleRuns.get(key) === state) state.running = false;
       this.touch();

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifyWorkerExitLevel,
   formatAppLogLine,
   inferLogSource,
   parseAppLogLines,
@@ -255,5 +256,39 @@ describe('summarizeErrors', () => {
     expect(
       summarizeErrors(entries, { minLevel: 'warn', limit: 100 }).some((e) => e.level === 'info')
     ).toBe(false);
+  });
+
+  it('debug 行能读回（导出可见），但不进汇总', () => {
+    const debug = [
+      formatAppLogLine({ time: 1, level: 'debug', source: 'agent', text: '[abort] stale' }),
+    ].join('');
+    const plugin = '2025-01-01T00:00:09.000Z [debug] renderer.call 失败： 调用已取消';
+    const parsed = [...parseAppLogLines(debug), ...parsePluginLogLines(plugin, 'demo.x')];
+    expect(parsed.map((e) => e.level)).toEqual(['debug', 'debug']);
+    expect(summarizeErrors(parsed, { minLevel: 'warn', limit: 10 })).toEqual([]);
+  });
+});
+
+describe('classifyWorkerExitLevel', () => {
+  it('退出行：code=0、优雅重启记 info，非 0 与崩溃记 error', () => {
+    expect(classifyWorkerExitLevel('exit pid=1 code=0')).toBe('info');
+    expect(classifyWorkerExitLevel('exit pid=1 code=15 (graceful restart)')).toBe('info');
+    expect(classifyWorkerExitLevel('exit pid=1 code=15 (expected stop)')).toBe('info');
+    expect(classifyWorkerExitLevel('exit pid=1 code=1')).toBe('error');
+    expect(
+      classifyWorkerExitLevel('exit pid=1 uncaughtException: boom (code=1) (expected stop)')
+    ).toBe('error');
+  });
+
+  it('正常退出的输出尾部记 info；尾部带错误行或非正常退出记 warn', () => {
+    expect(classifyWorkerExitLevel('output tail pid=1 (normal exit)\n[agent] ready\nbye')).toBe(
+      'info'
+    );
+    expect(
+      classifyWorkerExitLevel(
+        'output tail pid=1 (normal exit)\n[agent] ready\nError: ENOSPC no space left'
+      )
+    ).toBe('warn');
+    expect(classifyWorkerExitLevel('output tail pid=1\n[agent] ready')).toBe('warn');
   });
 });

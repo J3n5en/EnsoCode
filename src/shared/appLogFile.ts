@@ -59,7 +59,11 @@ export class RotatingLogFile {
   }
 }
 
-const CONSOLE_LEVELS: [keyof Console & ('log' | 'info' | 'warn' | 'error'), AppLogLevel][] = [
+const CONSOLE_LEVELS: [
+  keyof Console & ('debug' | 'log' | 'info' | 'warn' | 'error'),
+  AppLogLevel,
+][] = [
+  ['debug', 'debug'],
   ['log', 'info'],
   ['info', 'info'],
   ['warn', 'warn'],

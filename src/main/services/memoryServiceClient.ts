@@ -39,7 +39,8 @@ export interface MemoryServiceClientOptions {
   llmResolver?: MemoryServiceLlmResolver;
   /** 会话转录代读：服务蒸馏要读 jsonl，走 Main 侧 SessionManager */
   transcriptReader?: (sessionFile: string) => Promise<unknown>;
-  log?: (message: string) => void;
+  /** 生命周期日志：只有 kill 与异常退出是 warn，其余（spawned、主动关停）是 info */
+  log?: (level: 'info' | 'warn', message: string) => void;
 }
 
 const DEFAULT_OP_TIMEOUT_MS = 120_000;
@@ -67,12 +68,14 @@ export class MemoryServiceClient {
   private configMessage: Record<string, unknown> = {};
   private changeTimer: NodeJS.Timeout | null = null;
   private llmControllers = new Map<number, AbortController>();
+  /** shutdown() 发起的退出是预期的 */
+  private stopping = false;
 
   constructor(private readonly opts: MemoryServiceClientOptions) {}
 
-  private log(message: string): void {
+  private log(level: 'info' | 'warn', message: string): void {
     try {
-      this.opts.log?.(`[memory-service] ${message}`);
+      this.opts.log?.(level, `[memory-service] ${message}`);
     } catch {}
   }
 
@@ -98,7 +101,7 @@ export class MemoryServiceClient {
     this.child = child;
     this.ready = false;
     child.once('spawn', () => {
-      this.log(`spawned pid=${child.pid ?? '?'}`);
+      this.log('info', `spawned pid=${child.pid ?? '?'}`);
     });
     child.once('exit', () => {
       this.onExit();
@@ -108,12 +111,14 @@ export class MemoryServiceClient {
 
   private onExit(): void {
     const wasReady = this.ready;
+    const expected = this.stopping;
+    this.stopping = false;
     this.child = null;
     this.ready = false;
     const error = new Error(
       `memory service exited${wasReady ? '' : ' before ready'}; in-flight ops rejected`
     );
-    this.log(error.message);
+    this.log(expected ? 'info' : 'warn', error.message);
     for (const [, pending] of this.pendingOps) {
       clearTimeout(pending.timer);
       pending.reject(error);
@@ -286,7 +291,7 @@ export class MemoryServiceClient {
   private killChild(reason: string): void {
     const child = this.child;
     if (!child) return;
-    this.log(`kill: ${reason}`);
+    this.log('warn', `kill: ${reason}`);
     try {
       child.kill();
     } catch {}
@@ -305,6 +310,7 @@ export class MemoryServiceClient {
   async shutdown(): Promise<void> {
     const child = this.child;
     if (!child) return;
+    this.stopping = true;
     try {
       await Promise.race([
         this.invoke('shutdown').catch(() => {}),

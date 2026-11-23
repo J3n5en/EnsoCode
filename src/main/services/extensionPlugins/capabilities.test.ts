@@ -1021,6 +1021,11 @@ describe('插件能力', () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(readFileSync(ticks, 'utf8')).toBe('x');
     expect(service.list()[0]?.schedules?.[0]?.lastRunAt).toBeUndefined();
+    // 停用时进程退出打断了在跑的任务：是预期的收尾，只留 debug，不记错误
+    const log = await service.logs('example.demo');
+    expect(log).toMatch(/\[debug\] 定时任务 tick 中断/);
+    expect(log).not.toContain('[error]');
+    expect(service.list()[0]?.lastError).toBeUndefined();
   });
 
   // 真实场景：市场自动更新（权限不变）换版时会停掉旧进程，之前没有人再把常驻插件拉起来

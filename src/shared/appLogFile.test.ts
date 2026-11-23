@@ -33,11 +33,12 @@ describe('RotatingLogFile', () => {
 describe('installConsoleLog', () => {
   it('console 输出写成脱敏的结构化行，并按前缀区分来源', () => {
     const file = path.join(temp(), 'agent.log');
-    const sink = { log() {}, info() {}, warn() {}, error() {} } as unknown as Console;
+    const sink = { log() {}, info() {}, warn() {}, error() {}, debug() {} } as unknown as Console;
     const uninstall = installConsoleLog(file, 'agent', { console: sink });
     sink.error('[mcp] connect failed', new Error('Bearer abcdefghijk'));
     sink.warn('slow');
     sink.log('hello');
+    sink.debug('stale abort');
     uninstall();
     sink.error('after uninstall');
     const entries = parseAppLogLines(readFileSync(file, 'utf8'));
@@ -45,6 +46,7 @@ describe('installConsoleLog', () => {
       ['error', 'mcp'],
       ['warn', 'agent'],
       ['info', 'agent'],
+      ['debug', 'agent'],
     ]);
     expect(entries[0].detail).toContain('Error: Bearer ***');
     expect(entries[0].detail).not.toContain('abcdefghijk');
