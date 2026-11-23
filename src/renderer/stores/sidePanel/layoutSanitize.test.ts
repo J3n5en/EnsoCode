@@ -57,8 +57,8 @@ describe('sanitizeSidePanelLayout', () => {
         ?.grid.root
     ).toMatchObject({ data: { views: ['files', 't1', 'b1'], activeView: 't1' } });
     expect(
-      removeLayoutPanel(layout(['plugin:g:w', 'files', 't1'], 'plugin:g:w'), 'plugin:g:w')
-        ?.grid.root
+      removeLayoutPanel(layout(['plugin:g:w', 'files', 't1'], 'plugin:g:w'), 'plugin:g:w')?.grid
+        .root
     ).toMatchObject({ data: { views: ['files', 't1'], activeView: 'files' } });
   });
 

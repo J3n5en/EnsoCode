@@ -270,7 +270,7 @@ function summary(id: string, state: 'enabled' | 'disabled' | 'crashed', views: s
   return {
     id,
     state,
-    views: views.map((view) => ({ id: view, title: view, entry: `${view}.html`, scope: 'global' })),
+    views: views.map((view) => ({ id: view, title: view, entry: `${view}.html` })),
   };
 }
 
