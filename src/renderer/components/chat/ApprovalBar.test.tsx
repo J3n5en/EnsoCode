@@ -31,6 +31,19 @@ describe('ApprovalBar 托管判定退回人工', () => {
   });
 });
 
+describe('ApprovalBar 命令守卫', () => {
+  it('内置守卫规则直接显示原因，dcg 规则保留 dcg 前缀', () => {
+    const reason = 'Deletes in the shared system Temp folder root.';
+    const enso = render([
+      { ...request, guard: { ruleId: 'enso.windows:temp-root-delete', reason } },
+    ]);
+    expect(enso).toContain(reason);
+    expect(enso).not.toContain('dcg: {{reason}}');
+    const dcg = render([{ ...request, guard: { ruleId: 'core.git:reset-hard', reason: 'x' } }]);
+    expect(dcg).toContain('dcg: {{reason}}');
+  });
+});
+
 describe('ApprovalBar 复制详情', () => {
   it('有命令详情时右上角提供复制按钮', () => {
     expect(render([request])).toContain('title="Copy"');
