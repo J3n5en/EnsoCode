@@ -1541,6 +1541,47 @@ describe('AgentService 子代理起的后台任务', () => {
     });
     expect(notify.mock.calls[0][1]).not.toContain('Background tasks');
   });
+
+  it('回合带 awaitingTasks 结束时 Run 不收口；接上它的那一轮结束才收口，结果是后一轮的文本', async () => {
+    const notify = vi.fn();
+    const { service, children } = setup({ notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    const runId = spawned.value.runId;
+    const say = (index: number, text: string) =>
+      service.observe({
+        type: 'message-upsert',
+        identity: children[0],
+        seq: index,
+        index,
+        message: { role: 'assistant', content: [{ type: 'text', text }] },
+      });
+    say(1, '服务已起，等它跑完');
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: runId,
+      awaitingTasks: true,
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(service.progress('chat-1').map((run) => run.runId)).toEqual([runId]);
+
+    say(3, '服务跑完了，结论是 X');
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 4,
+      turnId: 'woken-turn',
+      continues: runId,
+    });
+    expect(notify).toHaveBeenCalledTimes(1);
+    const text = notify.mock.calls[0][1] as string;
+    expect(text).toContain('succeeded');
+    expect(text).toContain('结论是 X');
+    expect(text).not.toContain('等它跑完');
+    expect(service.progress('chat-1')).toEqual([]);
+  });
 });
 
 describe('AgentService 用户在子代理 tab 里停止', () => {

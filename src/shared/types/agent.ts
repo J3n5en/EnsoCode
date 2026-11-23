@@ -2184,6 +2184,10 @@ export type AgentWorkerEvent =
       requestBudgetError?: string;
       /** 秘书对本轮系统回传调用了 silence_turn（或旧静默标记）：不弹通知 */
       silent?: true;
+      /** 子代理被后台任务唤醒的这一轮接续的 Run（被持有的那一轮的 turnId） */
+      continues?: string;
+      /** 子代理还有自己起的、在跑、没表态的后台任务：Run 继续持有，等任务完成唤醒它 */
+      awaitingTasks?: true;
     }
   | {
       type: 'turn-failed';
@@ -2197,6 +2201,8 @@ export type AgentWorkerEvent =
       interrupted?: { at: number; kind: ExitKind };
       /** 本轮被 abort 命令中断（如重试倒计时中停止） */
       aborted?: true;
+      /** 同 turn-completed：失败也结束被持有的 Run */
+      continues?: string;
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -5237,7 +5243,9 @@ const agentWorkerEventParsers = {
         (value.silent === undefined || value.silent === true) &&
         (value.requestBudgetStop === undefined || value.requestBudgetStop === true) &&
         (value.requestBudgetError === undefined ||
-          (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError)))
+          (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError))) &&
+        (value.continues === undefined || isNonEmptyString(value.continues)) &&
+        (value.awaitingTasks === undefined || value.awaitingTasks === true)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }
@@ -5248,7 +5256,8 @@ const agentWorkerEventParsers = {
       return isNonEmptyString(value.turnId) &&
         isNonEmptyString(value.error) &&
         (value.retryExhausted === undefined || value.retryExhausted === true) &&
-        (value.aborted === undefined || value.aborted === true)
+        (value.aborted === undefined || value.aborted === true) &&
+        (value.continues === undefined || isNonEmptyString(value.continues))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }

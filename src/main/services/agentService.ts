@@ -834,7 +834,7 @@ export class AgentService implements AgentServiceContract {
     if (
       (event.type === 'turn-completed' || event.type === 'turn-failed') &&
       active &&
-      event.turnId === active.runId
+      (event.turnId === active.runId || event.continues === active.runId)
     ) {
       // 用户在子代理 tab 里停止：可恢复的中断，task 停放待 resume；模型自己 stop 的交给 stop 收口
       if (event.aborted) {
@@ -842,6 +842,8 @@ export class AgentService implements AgentServiceContract {
           this.settleRun(agent, active, 'interrupted', USER_STOPPED_TEXT, true);
         return;
       }
+      // 子代理在等自己起的后台任务：Run 不收口，任务完成会唤醒它接着这次 Run 跑
+      if (event.type === 'turn-completed' && event.awaitingTasks) return;
       if (event.type === 'turn-completed' && event.requestBudgetStop) {
         active.requestBudgetStop = true;
         if (event.requestBudgetError) {
