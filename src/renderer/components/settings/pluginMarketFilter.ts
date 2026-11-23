@@ -52,3 +52,17 @@ export function filterMarketPlugins<T extends MarketFilterItem>(
       a.tier !== b.tier ? (a.tier === 'official' ? -1 : 1) : a.name.localeCompare(b.name)
     );
 }
+
+export type MarketInstallAction = 'install' | 'installed' | 'update' | 'pending';
+
+/** 市场条目上的安装按钮状态；最新版已在等授权时不再给更新入口 */
+export function marketInstallAction(plugin: {
+  latest: string;
+  installedVersion?: string;
+  pendingVersion?: string;
+  updateAvailable: boolean;
+}): MarketInstallAction {
+  if (plugin.installedVersion === undefined) return 'install';
+  if (plugin.pendingVersion === plugin.latest) return 'pending';
+  return plugin.updateAvailable ? 'update' : 'installed';
+}
