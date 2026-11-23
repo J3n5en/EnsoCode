@@ -34,6 +34,7 @@ import {
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
+import { parseGoalResultView } from './goalResult';
 import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
@@ -541,6 +542,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (goal) record.goal = goal;
   const lastText = text(value.lastText);
   if (lastText) record.lastText = lastText;
+  const goalResult = parseGoalResultView(value.goalResult);
+  if (goalResult) record.goalResult = goalResult;
   const checkout = text(value.checkout);
   if (checkout) record.checkout = checkout;
   const baseRef = text(value.baseRef);
@@ -646,7 +649,14 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
   const at = time(value.at);
   if (!key || at === undefined || typeof value.text !== 'string') return undefined;
   const deliverAt = time(value.deliverAt);
-  const base = { key, at, text: value.text, ...(deliverAt !== undefined ? { deliverAt } : {}) };
+  const goalResult = parseGoalResultView(value.goalResult);
+  const base = {
+    key,
+    at,
+    text: value.text,
+    ...(deliverAt !== undefined ? { deliverAt } : {}),
+    ...(goalResult ? { goalResult } : {}),
+  };
   const lastText = text(value.lastText);
   const secretaryConversationId = text(value.secretaryConversationId);
   const scope = {

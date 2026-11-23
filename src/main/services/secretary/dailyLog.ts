@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DAILY_RETENTION_DAYS, dayKey } from '@shared/secretary/daily';
+import { parseGoalResultView } from '@shared/secretary/goalResult';
 import type { SecretaryDailyRecord, SecretaryResultKind } from '@shared/types/secretary';
 
 /** 单文件上限：超过就按保留天数重写一次，平时只追加 */
@@ -48,6 +49,8 @@ function parseRecord(value: unknown): SecretaryDailyRecord | null {
   const commit = text(raw.commit);
   if (commit) record.commit = commit;
   if (raw.merged === true) record.merged = true;
+  const goalResult = parseGoalResultView(raw.goalResult);
+  if (goalResult) record.goalResult = goalResult;
   return record;
 }
 

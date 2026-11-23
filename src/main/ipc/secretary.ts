@@ -49,6 +49,7 @@ import {
   type GoalAction,
 } from '../services/secretary/driver';
 import { secretaryEnabled } from '../services/secretary/enabled';
+import { verifyDispatchedGoalResult } from '../services/secretary/goalResultVerify';
 import {
   ensureHomeConversation,
   type HomeConversationResult,
@@ -397,8 +398,10 @@ function hostPortsFor(
     newId: () => randomUUID(),
     audit: (entry) => appendAudit(ctx.dir, entry),
     recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
-    archiveReport: (conversationId, at, text) =>
-      void getSecretaryReportStore()?.archive(conversationId, at, text),
+    archiveReport: (conversationId, at, text, extra) =>
+      void getSecretaryReportStore()?.archive(conversationId, at, text, extra),
+    verifyGoalResult: (conversationId, result) =>
+      verifyDispatchedGoalResult(conversationId, result),
   };
 }
 

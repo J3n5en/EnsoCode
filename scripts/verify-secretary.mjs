@@ -78,6 +78,8 @@ const MEMORY_ONLY = process.argv.includes('--memory-only');
 const FORWARD_IMAGES_ONLY = process.argv.includes('--forward-images-only');
 // 只跑「新秘书没开过会话，第一条联系消息」这一段
 const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contact-only');
+// 只跑 setup + 结构化完成结果段：goal_complete 带 result → 宿主核验 → 回传、看板与结果弹窗
+const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -734,6 +736,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (NEW_SECRETARY_CONTACT_ONLY) {
     await verifyNewSecretaryFirstContact(cdp);
+    return;
+  }
+  if (GOAL_RESULT_ONLY) {
+    await verifyGoalResult(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -6482,6 +6488,169 @@ async function verifyImageViewAndCleanup(cdp, setup) {
  * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
  * session_send attachments 交过去，目标会话时间线上出现图片引用。
  */
+async function verifyGoalResult(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 结构化完成结果：goal_complete result → 宿主核验 → 回传、看板、结果弹窗');
+  const shot = path.join('/tmp', `sec-verify-goal-${process.pid}-${Date.now()}.png`);
+  writePngFixture(shot, 320, 200);
+  const missing = path.join('/tmp', `sec-verify-goal-missing-${process.pid}.png`);
+  const result = {
+    summary: '结构化结果验收',
+    prs: [
+      {
+        repo: 'J3n5en/EnsoCode',
+        number: 349,
+        state: 'merged',
+        squashSha: '0000000',
+        remoteBranchDeleted: true,
+      },
+    ],
+    commits: ['b7bc4a8b6'],
+    checks: { typecheck: 'pass', lint: 'pass', tests: { passed: 42, failed: 0 } },
+    screenshots: [
+      { path: shot, caption: '首页' },
+      { path: missing, caption: '不存在' },
+    ],
+    followUps: ['补文档'],
+    deploy: { needed: false },
+  };
+  const dispatch = directDispatcher(page, setup);
+  const created = await dispatch('session_create', {
+    projectId: setup.projectId,
+    prompt: '做完就收尾',
+    title: '结构化结果',
+    goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了', result })}]]`,
+  });
+  assert(created.ok, '结构化结果: 会调用 goal_complete 的会话建成', created);
+  const id = created.conversationId;
+  const record = await waitFor(
+    () => {
+      const found = readJson(dispatchFile).dispatched[id];
+      return found?.lastResult?.kind === 'goal-complete' && found.goalResult ? found : null;
+    },
+    'goal-complete with goalResult',
+    60_000,
+    300
+  ).catch(() => readJson(dispatchFile).dispatched[id]);
+  const checks = record?.goalResult?.checks ?? [];
+  const statusOf = (kind, ref) => checks.find((c) => c.kind === kind && c.ref === ref)?.status;
+  assert(
+    record?.goalResult?.result?.summary === result.summary,
+    '结构化结果: 派发记录带上 goalResult',
+    record
+  );
+  assert(
+    statusOf('screenshot', shot) === 'verified' && statusOf('screenshot', missing) === 'mismatch',
+    '结构化结果: 截图存在记已核验，不存在记不一致',
+    checks
+  );
+  assert(
+    statusOf('commit', 'b7bc4a8b6') === 'unverifiable',
+    '结构化结果: 项目不是 git 仓库时 sha 记未能核验',
+    checks
+  );
+  log(`  checks ${JSON.stringify(checks)}`);
+
+  const seen = await waitFor(
+    () =>
+      page(`
+    return JSON.stringify(texts(${JSON.stringify(created.secretaryId)}).find((text) =>
+      text.includes(${JSON.stringify(`[goal-complete session:${id}]`)})) ?? null);
+  `),
+    'secretary saw goal-complete',
+    30_000,
+    300
+  ).catch(() => null);
+  assert(
+    typeof seen === 'string' && seen.includes('核验：') && seen.includes('截图'),
+    '结构化结果: 秘书收到的 goal-complete 行带宿主核验摘要',
+    seen
+  );
+  const claimsInside = /<untrusted[^>]*>[\s\S]*结构化结果验收[\s\S]*<\/untrusted/.test(seen);
+  assert(claimsInside, '结构化结果: 会话自述在 untrusted 包裹内', seen);
+
+  const read = await secretaryTool(cdp, setup, 'session_read', { conversationId: id }, '看看结果');
+  assert(
+    String(read.text).includes('goalResult') && String(read.text).includes('"checks"'),
+    '结构化结果: session_read 带出 goalResult 与 checks',
+    read.text?.slice(0, 400)
+  );
+
+  const opened = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    const toggles = [...document.querySelectorAll('button')].filter(
+      (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+    );
+    toggles.at(-1)?.click();
+    const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+    if (!item) return JSON.stringify({ ok: false, step: 'panel-open' });
+    item.click();
+    await sleep(800);
+    [...document.querySelectorAll('button')]
+      .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+      ?.click();
+    await sleep(1200);
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=daily]')?.click();
+    const card = await until(
+      () =>
+        visible('[data-enso=secretary-daily-card]').find((node) =>
+          node.querySelector('[data-enso=secretary-goal-result]')
+        ) ?? null,
+      15000
+    );
+    card?.scrollIntoView({ block: 'center' });
+    await sleep(400);
+    const rect = card?.getBoundingClientRect();
+    return JSON.stringify({
+      ok: Boolean(card),
+      text: card?.innerText ?? null,
+      statuses: card
+        ? [...card.querySelectorAll('[data-enso=secretary-goal-check]')].map((n) => n.dataset.status)
+        : [],
+      rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+    });
+  `);
+  assert(
+    opened.ok &&
+      opened.statuses.includes('verified') &&
+      opened.statuses.includes('mismatch') &&
+      opened.statuses.includes('unverifiable'),
+    '结构化结果: 看板卡片显示 PR、sha 与三种核验状态',
+    opened
+  );
+  await cdp.shot(path.join(ART, 'structured-result-board.png'));
+  copyFileSync(path.join(ART, 'structured-result-board.png'), '/tmp/structured-result-board.png');
+  if (opened.rect) {
+    const pad = 12;
+    await cdp.shotClip('/tmp/structured-result-card.png', {
+      x: Math.max(0, opened.rect.x - pad),
+      y: Math.max(0, opened.rect.y - pad),
+      width: opened.rect.width + pad * 2,
+      height: opened.rect.height + pad * 2,
+    });
+  }
+
+  const dialog = await page(`
+    const card = visible('[data-enso=secretary-daily-card]').find((node) =>
+      node.querySelector('[data-enso=secretary-goal-result]')
+    );
+    card?.querySelector('[data-enso=secretary-daily-open]')?.click();
+    const view = await until(() => visible('[data-enso=session-peek-result]')[0] ?? null, 15000);
+    await until(() => view?.querySelector('[data-enso=secretary-goal-result]'), 10000);
+    await sleep(800);
+    return JSON.stringify({
+      ok: Boolean(view?.querySelector('[data-enso=secretary-goal-result]')),
+      images: view?.querySelectorAll('[data-enso=done-report-images] img').length ?? 0,
+      text: view?.innerText?.slice(0, 600) ?? null,
+    });
+  `);
+  assert(dialog.ok, '结构化结果: 结果弹窗显示结构化区块', dialog);
+  assert(dialog.images >= 1, '结构化结果: 结构化截图进了报告存档并显示缩略图', dialog);
+  await cdp.shot('/tmp/structured-result-dialog.png');
+  log('  shots /tmp/structured-result-{board,card,dialog}.png');
+}
+
 async function verifyForwardImages(cdp, setup) {
   const page = cdp.json.bind(cdp);
   log('== 转发图片：编码会话看图 + session_send attachments');
