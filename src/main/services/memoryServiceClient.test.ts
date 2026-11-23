@@ -1,6 +1,6 @@
 /**
  * 记忆服务客户端生命周期：fork 懒启动、崩溃后下个调用重拉、
- * 变更事件防抖合批、op 超时杀服务（下次调用自动重拉）。
+ * 变更事件防抖合批、op 超时只拒绝该 op（ping 也无响应才杀服务）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -43,6 +43,12 @@ class FakeChild {
   /** 回 op 结果 */
   reply(requestId: number, result: unknown): void {
     this.emit('message', { type: 'op-result', requestId, result });
+  }
+  sent(type: string): { requestId: number; op?: string }[] {
+    return this.posted.filter((m) => (m as { type?: string }).type === type) as {
+      requestId: number;
+      op?: string;
+    }[];
   }
 }
 
@@ -122,15 +128,42 @@ describe('memory service client', () => {
     await expect(second).resolves.toBe('ok');
   });
 
-  it('op 超时杀掉服务，下次调用重新拉起', async () => {
+  it('单个 op 超时只拒绝它自己：服务回 pong 就不杀进程，其余在途 op 与后续 op 照常', async () => {
+    const slow = client.invoke('schedule-distill', {}).catch((e) => e);
+    const other = client.invoke('stats');
+    const child = forks[0];
+    await vi.advanceTimersByTimeAsync(0);
+    child.becomeReady();
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(String(await slow)).toContain("memory op 'schedule-distill' timed out");
+    expect(child.killed).toBe(false);
+    const [ping] = child.sent('ping');
+    expect(ping).toBeTruthy();
+    child.emit('message', { type: 'pong', requestId: ping.requestId });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(child.killed).toBe(false);
+
+    const [slowMsg, otherMsg] = child.sent('op').filter((m) => m.op !== 'config');
+    child.reply(slowMsg.requestId, 'late');
+    child.reply(otherMsg.requestId, 'stats');
+    await expect(other).resolves.toBe('stats');
+    const next = client.invoke('kg-failed');
+    expect(forks).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(0);
+    child.reply(child.sent('op').at(-1)!.requestId, 0);
+    await expect(next).resolves.toBe(0);
+  });
+
+  it('op 超时后 ping 也无响应才杀掉服务，下次调用重新拉起', async () => {
     const op = client.invoke('search', { query: 'hang' }).catch((e) => e);
     const child = forks[0];
     await vi.advanceTimersByTimeAsync(0);
     child.becomeReady();
-    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(30_001);
-    expect(child.killed).toBe(true);
     await expect(op).resolves.toBeInstanceOf(Error);
+    expect(child.killed).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(child.killed).toBe(true);
 
     const ping = client.invoke('ping');
     expect(forks).toHaveLength(2);
@@ -142,6 +175,21 @@ describe('memory service client', () => {
     };
     forks[1].reply(pingMsg.requestId, 'pong');
     await expect(ping).resolves.toBe('pong');
+  });
+
+  it('等待后台任务收尾的长 op 不受普通 op 超时限制', async () => {
+    let settled = false;
+    const wait = client.invoke('await-distill').finally(() => {
+      settled = true;
+    });
+    const child = forks[0];
+    await vi.advanceTimersByTimeAsync(0);
+    child.becomeReady();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(settled).toBe(false);
+    expect(child.killed).toBe(false);
+    child.reply(child.sent('op')[0].requestId, true);
+    await expect(wait).resolves.toBe(true);
   });
 
   it('服务 changed 事件防抖合并成一次回调', async () => {

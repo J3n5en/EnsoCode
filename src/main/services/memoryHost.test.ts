@@ -2214,3 +2214,79 @@ describe('memoryHost 矛盾复核接线', () => {
     expect(await runMemoryReconcileNow()).toBeNull();
   });
 });
+
+describe('schedule-distill 不排在慢 LLM 任务后面', () => {
+  const within = <T>(promise: Promise<T>, ms = 2_000) =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`still pending after ${ms}ms`)), ms)
+      ),
+    ]);
+
+  it.each([0, 5])(
+    '窗口 %i 分钟：队头 LLM 卡住时仍立即落库并返回水位，放行后照常提炼',
+    async (windowMinutes) => {
+      closeMemoryDb();
+      configureMemoryEmbedding({ modelId: 'none' });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let headStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        headStarted = resolve;
+      });
+      const complete = vi.fn(async (_system: string, _user: string) => {
+        headStarted();
+        await gate;
+        return JSON.stringify({ memories: [] });
+      });
+      syncMemoryDistillFromSettings({
+        memoryDistillEnabled: true,
+        memoryDistillWindowMinutes: windowMinutes,
+        disabledBuiltinTools: [],
+      });
+      configureMemoryDistill({
+        readTranscript: async (file) => {
+          const id = path.basename(file, '.jsonl');
+          return [{ role: 'user' as const, text: `${id} picked redis`, entryId: `${id}-e1` }];
+        },
+        complete: () => complete,
+        now: Date.now,
+      });
+      const head = distillSessionNow({
+        sessionId: `slow-head-${windowMinutes}`,
+        sessionFile: `/fake/slow-head-${windowMinutes}.jsonl`,
+        projectId: null,
+      });
+      await started;
+      const id = `behind-slow-${windowMinutes}`;
+      try {
+        await expect(
+          within(
+            scheduleMemoryDistill(
+              { sessionId: id, sessionFile: `/fake/${id}.jsonl`, projectId: 'proj-slow' },
+              { continueFromLastJob: true }
+            )
+          )
+        ).resolves.toBe(`${id}-e1`);
+        // 返回前任务已落库：此刻进程被杀，重启后能按库里的任务续跑
+        expect(
+          memoryDatabase()
+            .prepare(
+              `SELECT COUNT(*) AS n FROM memory_jobs WHERE kind IN ('distill', 'distill-queue') AND target LIKE ?`
+            )
+            .get(`${id}#%`)
+        ).toEqual({ n: 1 });
+      } finally {
+        release();
+        await head;
+        await awaitMemoryDistill();
+      }
+      const ranQueued = complete.mock.calls.some(([, user]) => user.includes(`${id} picked`));
+      expect(ranQueued).toBe(windowMinutes === 0);
+      configureMemoryDistill({ enabled: false });
+    }
+  );
+});

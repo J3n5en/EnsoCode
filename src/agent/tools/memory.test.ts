@@ -52,6 +52,27 @@ describe('MemoryInvoker', () => {
     vi.useRealTimers();
   });
 
+  it('超时 / 中止后迟到的回包被识别为「已取消」，与真正未知的请求区分', async () => {
+    vi.useFakeTimers();
+    const emit = vi.fn();
+    const invoker = new MemoryInvoker(identity, emit, { timeoutMs: 1000 });
+    const timed = invoker.invoke('capture', {}).catch((e: Error) => e);
+    const timedId = emit.mock.calls[0]?.[0]?.requestId as string;
+    vi.advanceTimersByTime(1001);
+    await timed;
+    const controller = new AbortController();
+    const aborted = invoker.invoke('search', {}, controller.signal).catch((e: Error) => e);
+    const abortedId = emit.mock.calls[1]?.[0]?.requestId as string;
+    controller.abort();
+    await aborted;
+
+    expect(invoker.resolve({ requestId: timedId, ok: true })).toBe(false);
+    expect(invoker.wasCancelled(timedId)).toBe(true);
+    expect(invoker.wasCancelled(abortedId)).toBe(true);
+    expect(invoker.wasCancelled('never-sent')).toBe(false);
+    vi.useRealTimers();
+  });
+
   it('缺省超时按操作区分：检索 15s；写入要等 embedding 模型（冷加载）放宽到 30s', async () => {
     vi.useFakeTimers();
     const invoker = new MemoryInvoker(identity, () => {});
