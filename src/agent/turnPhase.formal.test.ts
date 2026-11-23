@@ -225,6 +225,8 @@ interface Budget {
 
 /** settingsManager.getRetrySettings().maxRetries */
 const MAX_RETRIES = 1;
+/** pi 预检拒收（没有 key、input hook 抛错）的错误文案：prompt 抛错且从未回调 preflightResult */
+const PREFLIGHT_ERROR = 'No API key';
 
 class Pi {
   phase: Phase = 'idle';
@@ -249,6 +251,9 @@ class Pi {
   runDone?: () => void;
   idleWaiters: (() => void)[] = [];
   delivered: string[] = [];
+  /** 这些 prompt 会被预检拒收；rejected 是真的走到预检被拒的，按发生顺序 */
+  rejects = new Set<string>();
+  rejected: string[] = [];
   messages: Record<string, unknown>[] = [];
   events = 0;
   listeners = new Set<(event: PiEvent) => void>();
@@ -301,6 +306,10 @@ class Pi {
     text: string,
     options?: { streamingBehavior?: string; preflightResult?: (disposition: string) => void }
   ): Promise<void> => {
+    if (this.rejects.has(text)) {
+      this.rejected.push(text);
+      throw new Error(PREFLIGHT_ERROR);
+    }
     if (this.phase === 'settling') {
       this.deferred.push(() => void this.prompt(text, options).catch(() => {}));
       return;
@@ -597,6 +606,7 @@ class Pi {
       this.deferred.length,
       this.runDone !== undefined,
       this.delivered,
+      this.rejected,
       this.messages.map((m) => `${m.role}:${m.stopReason ?? ''}`),
       this.budget,
     ];
@@ -614,6 +624,8 @@ interface Config {
   sendWhileRunning: boolean;
   /** 僵尸时限可先于 pi 的下一步到点（工具不响应中断）；false 时 pi 总在 5 秒内推进 */
   zombie: boolean;
+  /** 客户端可发几条会被 pi 预检拒收的 prompt */
+  rejects?: number;
 }
 
 interface Run {
@@ -626,8 +638,12 @@ interface World {
   pi: Pi;
   client: { sent: number; aborts: number; abortRetries: number; status: string; retry: boolean };
   runs: Run[];
-  undelivered: number;
-  rejected: number;
+  /** delivery-rejected 的 deliveryId，按到达顺序 */
+  receipts: string[];
+  /** 预检拒收的 prompt 序号，按发出顺序；failed 是已收到失败终态的 */
+  preflight: { sent: number[]; failed: number[] };
+  /** p1..p<stoppable> 发出之后有过叫停（中断、取消重试、新 prompt 打断重试、僵尸时限到点），可以收未送达回执 */
+  stoppable: number;
   broken: string | null;
   ready: boolean;
 }
@@ -647,9 +663,16 @@ function piSession(pi: Pi): unknown {
   return Object.defineProperties(
     {
       sessionFile: path.join(tempRoot, 'turn.jsonl'),
-      agent: { state: { messages: pi.messages }, continue: async () => {}, abort: () => {} },
+      agent: {
+        state: { messages: pi.messages },
+        continue: async () => {},
+        abort: () => {},
+        clearFollowUpQueue: () => void pi.followUps.splice(0),
+      },
       subscribe: pi.subscribe,
       prompt: pi.prompt,
+      getFollowUpMessages: () => pi.followUps,
+      _emitQueueUpdate: () => {},
       steer: async () => {},
       abort: pi.abort,
       abortRetry: pi.abortRetry,
@@ -685,8 +708,9 @@ async function boot(cfg: Config): Promise<World> {
     pi,
     client: { sent: 0, aborts: 0, abortRetries: 0, status: 'idle', retry: false },
     runs: [],
-    undelivered: 0,
-    rejected: 0,
+    receipts: [],
+    preflight: { sent: [], failed: [] },
+    stoppable: 0,
     broken: null,
     ready: false,
   };
@@ -717,13 +741,33 @@ function observeWorker(w: World, event: AgentWorkerEvent): void {
   if (event.type === 'parent-ready') w.ready = true;
   if (event.type === 'status') w.client.status = event.status;
   if (event.type === 'turn-retry') w.client.retry = true;
-  if (event.type === 'delivery-rejected') w.rejected++;
-  if (event.type !== 'turn-completed' && event.type !== 'turn-failed') return;
-  w.client.retry = false;
-  if (event.type === 'turn-failed' && event.undelivered) {
-    w.undelivered++;
+  if (event.type === 'delivery-rejected') {
+    w.receipts.push(event.deliveryId);
+    const n = Number(event.deliveryId.slice(1));
+    if (!(n >= 1 && n <= w.client.sent)) {
+      w.broken ??= `未知投递 ${event.deliveryId} 收到 delivery-rejected`;
+    } else if (n > w.stoppable && !w.preflight.sent.includes(n)) {
+      w.broken ??= `p${n} 没被叫停却收到 delivery-rejected`;
+    } else if (w.receipts.filter((id) => id === event.deliveryId).length > 1) {
+      w.broken ??= `p${n} 收到 2 次 delivery-rejected`;
+    }
     return;
   }
+  // 消费者（bots、headless、Main、renderer）按会话把任何 turn-* 当作本轮终态，不看 turnId
+  if (event.type !== 'turn-completed' && event.type !== 'turn-failed') return;
+  if (event.type === 'turn-failed' && event.error === PREFLIGHT_ERROR) {
+    const n = w.pi.rejected
+      .map((text) => Number(text.slice(1)))
+      .find((i) => !w.preflight.failed.includes(i));
+    if (n === undefined) {
+      w.broken ??= '没有预检拒收的 prompt 却收到预检失败终态';
+    } else if (w.receipts.includes(`d${n}`)) {
+      w.broken ??= `p${n} 的拒收回执先于它的失败终态：收到回执就让出会话的消费者会把这个失败记到下一条投递头上`;
+    }
+    if (n !== undefined) w.preflight.failed.push(n);
+    return;
+  }
+  w.client.retry = false;
   const label = `${event.type}${event.aborted ? '(aborted)' : ''}`;
   const run = currentRun(w);
   if (!run) {
@@ -738,11 +782,33 @@ function observeWorker(w: World, event: AgentWorkerEvent): void {
 
 function actions(w: World, cfg: Config): [string, () => void][] {
   const out: [string, () => void][] = [];
-  if (w.client.sent < cfg.prompts && (cfg.sendWhileRunning || w.client.status !== 'running')) {
+  const canSend =
+    w.client.sent < cfg.prompts && (cfg.sendWhileRunning || w.client.status !== 'running');
+  if (canSend && w.preflight.sent.length < (cfg.rejects ?? 0)) {
+    const n = w.client.sent + 1;
+    out.push([
+      `客户端 prompt p${n}（预检拒收）`,
+      () => {
+        if (w.pi.isRetrying) w.stoppable = n - 1;
+        w.client.sent = n;
+        w.preflight.sent.push(n);
+        w.pi.rejects.add(`p${n}`);
+        w.sup.handleCommand({
+          type: 'prompt',
+          identity: parent,
+          text: `p${n}`,
+          deliveryId: `d${n}`,
+        });
+      },
+    ]);
+  }
+  if (canSend) {
     const n = w.client.sent + 1;
     out.push([
       `客户端 prompt p${n}`,
       () => {
+        // 新 prompt 经 interruptRetryIfAny 打断重试，等同叫停此前的 prompt
+        if (w.pi.isRetrying) w.stoppable = n - 1;
         w.client.sent = n;
         w.sup.handleCommand({
           type: 'prompt',
@@ -758,6 +824,7 @@ function actions(w: World, cfg: Config): [string, () => void][] {
       '客户端 abort',
       () => {
         w.client.aborts++;
+        w.stoppable = w.client.sent;
         const run = currentRun(w);
         if (run && w.pi.isStreaming) run.aborted = true;
         w.sup.handleCommand({ type: 'abort', identity: parent });
@@ -769,6 +836,7 @@ function actions(w: World, cfg: Config): [string, () => void][] {
       '客户端取消重试',
       () => {
         w.client.abortRetries++;
+        w.stoppable = w.client.sent;
         w.sup.handleCommand({ type: 'abort-retry', identity: parent });
       },
     ]);
@@ -777,7 +845,13 @@ function actions(w: World, cfg: Config): [string, () => void][] {
   out.push(...piActions);
   const timer = clock.next();
   if (timer && (cfg.zombie || timer.label !== '僵尸时限' || piActions.length === 0)) {
-    out.push([`计时器到点：${timer.label}`, () => clock.fire()]);
+    out.push([
+      `计时器到点：${timer.label}`,
+      () => {
+        if (timer.label === '僵尸时限') w.stoppable = w.client.sent;
+        clock.fire();
+      },
+    ]);
   }
   return out;
 }
@@ -795,8 +869,9 @@ function key(w: World): string {
     clock.view(),
     w.client,
     w.runs,
-    w.undelivered,
-    w.rejected,
+    w.receipts,
+    w.preflight,
+    w.stoppable,
     m.status,
     m.settlePending,
     m.turnAborted,
@@ -815,6 +890,7 @@ function safetyViolation(w: World): string | null {
   const seen = new Set<string>();
   for (const text of w.pi.delivered) {
     if (seen.has(text)) return `${text} 进入 pi 两次`;
+    if (w.receipts.includes(`d${text.slice(1)}`)) return `${text} 进了 pi 又收到 delivery-rejected`;
     seen.add(text);
   }
   return null;
@@ -829,12 +905,10 @@ function quiescentViolation(w: World): string | null {
     }
   }
   if (w.client.status === 'running') return 'worker 停在 running';
-  if (w.rejected > 0) return `${w.rejected} 条 prompt 被 delivery-rejected`;
-  const missing = Array.from({ length: w.client.sent }, (_, i) => `p${i + 1}`).filter(
-    (text) => !w.pi.delivered.includes(text)
-  );
-  if (missing.length !== w.undelivered) {
-    return `${missing.join('、') || '无'} 没进 pi，未送达回执 ${w.undelivered} 次`;
+  for (let i = 1; i <= w.client.sent; i++) {
+    if (w.pi.delivered.includes(`p${i}`)) continue;
+    const receipts = w.receipts.filter((id) => id === `d${i}`).length;
+    if (receipts !== 1) return `p${i} 没进 pi，未送达回执 ${receipts} 次`;
   }
   return null;
 }
@@ -933,21 +1007,10 @@ function report(result: Result): string {
   return [...result.counterexamples.values()].join('\n\n');
 }
 
-/** 已知发现只允许恰好这一类反例：修好了会变红，混进新类别也会变红 */
-function expectOnlyKnown(result: Result, kind: string): void {
-  expect(
-    [...result.counterexamples.keys()],
-    `已知发现的反例集合变了。修好了就把触发条件并入 core 并删掉本测试；多出新类别先按 SKILL 判断真 bug 还是模型错。\n${report(result)}`
-  ).toEqual([kind]);
-}
-
 const FULL = process.env.ENSO_FORMAL_FULL === '1';
-const none: Budget = { errors: 0, overflows: 0, memCompactions: 0, beforeSettle: 0 };
-
 /**
  * 桌面 renderer 只在非 running 时发 prompt（running 时进本地队列）；其他发送方（bots、定时任务、
  * enso-server run、跨窗口竞态）随时可能发。僵尸时限先到点即 abort 后工具 5 秒内没停下。
- * 已知发现的触发条件（见文件末）各自从核心配置里拿掉：随时发送 + 中断、随时发送 + 打断重试、僵尸 + 中断。
  */
 const core: { name: string; cfg: Config; min: number }[] = [
   {
@@ -979,11 +1042,11 @@ const core: { name: string; cfg: Config; min: number }[] = [
       ]
     : []),
   {
-    name: '随时发送：排队消息遇上重试、溢出压缩续跑与 agent_before_settle 续跑',
+    name: '随时发送：排队消息遇上中断、重试与取消重试、溢出压缩续跑与 agent_before_settle 续跑',
     cfg: {
       prompts: 2,
-      aborts: 0,
-      abortRetries: 0,
+      aborts: 1,
+      abortRetries: 1,
       budget: { errors: FULL ? 2 : 1, overflows: 1, memCompactions: 1, beforeSettle: 1 },
       sendWhileRunning: true,
       zombie: false,
@@ -991,10 +1054,10 @@ const core: { name: string; cfg: Config; min: number }[] = [
     min: FULL ? 600 : 450,
   },
   {
-    name: '僵尸时限：工具不响应时排队 prompt 限时失败、活轮不误判',
+    name: '僵尸时限：工具不响应中断时排队 prompt 限时回执、活轮不误判',
     cfg: {
       prompts: FULL ? 3 : 2,
-      aborts: 0,
+      aborts: 1,
       abortRetries: 1,
       budget: {
         errors: 1,
@@ -1006,6 +1069,19 @@ const core: { name: string; cfg: Config; min: number }[] = [
       zombie: true,
     },
     min: FULL ? 3_000 : 150,
+  },
+  {
+    name: '预检拒收：失败终态先于拒收回执，与中断、重试、僵尸时限交错',
+    cfg: {
+      prompts: FULL ? 3 : 2,
+      aborts: 1,
+      abortRetries: FULL ? 1 : 0,
+      budget: { errors: 1, overflows: 0, memCompactions: 0, beforeSettle: 0 },
+      sendWhileRunning: true,
+      zombie: true,
+      rejects: 1,
+    },
+    min: FULL ? 1_000 : 250,
   },
 ];
 
@@ -1019,40 +1095,4 @@ describe('worker 轮次相位（有界穷举，驱动真实 SessionSupervisor）
     },
     FULL ? 900_000 : 120_000
   );
-
-  it('已知发现：排队进活轮的 prompt 遇上中断，既不送达也没有未送达回执', async () => {
-    const result = await explore({
-      prompts: 2,
-      aborts: 1,
-      abortRetries: 0,
-      budget: none,
-      sendWhileRunning: true,
-      zombie: false,
-    });
-    expectOnlyKnown(result, '# 没进 pi，未送达回执 # 次');
-  }, 60_000);
-
-  it('已知发现：取消重试后 pi 带着排队 prompt 续跑，已发出的 turn-failed 之后同一轮又开跑', async () => {
-    const result = await explore({
-      prompts: 2,
-      aborts: 0,
-      abortRetries: 1,
-      budget: { ...none, errors: 1 },
-      sendWhileRunning: true,
-      zombie: false,
-    });
-    expectOnlyKnown(result, '终态 turn-failed 之后 pi 仍为第 # 轮发出 agent_start');
-  }, 60_000);
-
-  it('已知发现：中断后僵尸时限内发的 prompt 失败，清掉了中断标记，原轮收口成不带 aborted 的 turn-completed', async () => {
-    const result = await explore({
-      prompts: 2,
-      aborts: 1,
-      abortRetries: 0,
-      budget: none,
-      sendWhileRunning: false,
-      zombie: true,
-    });
-    expectOnlyKnown(result, '第 # 轮被中断，终态却是 turn-completed');
-  }, 60_000);
 });

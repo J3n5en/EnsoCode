@@ -147,6 +147,7 @@ function fakeSession(options: Record<string, unknown>) {
     agent: { state: { messages }, prepareNextTurnWithContext: nextTurnPrepared },
     nextTurnPrepared,
     pendingMessageCount: 0,
+    getFollowUpMessages: () => [],
     subscribe: vi.fn((listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -1229,7 +1230,12 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       { kind: 'task-wrap-up-nudge', count: 1, at: expect.any(Number) },
     ]);
     expect(session.prompt).not.toHaveBeenCalled();
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text: '继续' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-1232',
+      identity: parent,
+      text: '继续',
+    });
     for (let i = 0; i < 20 && session.prompt.mock.calls.length === 0; i++) await settle();
     const sent = String(session.prompt.mock.calls[0]?.[0]);
     expect(sent.startsWith('<background-tasks-wrap-up>')).toBe(true);

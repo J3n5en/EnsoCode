@@ -9,7 +9,7 @@ import {
 } from './reducer';
 
 type Outcome = 'accepted' | 'rejected' | 'timeout' | 'handled' | 'queued';
-type Fate = 'pending' | 'delivered' | 'rejected' | 'undelivered' | 'handled' | 'withdrawn';
+type Fate = 'pending' | 'delivered' | 'rejected' | 'handled' | 'withdrawn';
 type Line = { role: string; text: string };
 
 interface Config {
@@ -71,12 +71,12 @@ function emit(s: World, ...events: (Record<string, unknown> & { type: string })[
   }
 }
 
-function fail(s: World, undelivered: boolean): void {
+function fail(s: World): void {
   s.w.running = false;
   emit(
     s,
     { type: 'status', status: 'failed', error: 'x' },
-    { type: 'turn-failed', turnId: 't', error: 'x', ...(undelivered ? { undelivered: true } : {}) }
+    { type: 'turn-failed', turnId: 't', error: 'x' }
   );
 }
 
@@ -185,10 +185,11 @@ function successors(s: World, cfg: Config): [string, World][] {
         } else if (outcome === 'rejected') {
           sent.fate = 'rejected';
           emit(n, { type: 'delivery-rejected', deliveryId: d });
-          fail(n, false);
+          fail(n);
         } else if (outcome === 'timeout') {
-          sent.fate = 'undelivered';
-          fail(n, true);
+          // 僵尸等待超时：只按 deliveryId 回执，不发 turn-*、不动 status
+          sent.fate = 'rejected';
+          emit(n, { type: 'delivery-rejected', deliveryId: d });
         } else if (outcome === 'handled') {
           sent.fate = 'handled';
         } else {

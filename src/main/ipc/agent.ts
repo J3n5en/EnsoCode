@@ -1441,7 +1441,7 @@ function wirePairAgentBridge(): void {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
-      if (identity) promptSession(identity, text, images);
+      if (identity) promptSession(identity, text, images, randomUUID());
     },
     steer: (sessionId, text, images) => {
       const rejected = botControlError(sessionId);
@@ -1545,7 +1545,7 @@ function wirePairSessionHost(): void {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
-      if (identity) promptSession(identity, text, images);
+      if (identity) promptSession(identity, text, images, randomUUID());
     },
     steer: (sessionId, text, images) => {
       const rejected = botControlError(sessionId);
@@ -2826,11 +2826,7 @@ export function registerAgentHandlers(): void {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
-      if (
-        !identity ||
-        !isValidMessageInput(sessionId, text, images) ||
-        (deliveryId !== undefined && !isDeliveryId(deliveryId))
-      ) {
+      if (!identity || !isValidMessageInput(sessionId, text, images) || !isDeliveryId(deliveryId)) {
         return { ok: false, error: 'invalid prompt or stale session generation' };
       }
       if (agentSessionIndex.isDetached(identity))

@@ -1473,13 +1473,10 @@ export type AgentCommand =
       agentType?: string;
       resumeFile: string;
     }
-  | {
-      type: 'prompt' | 'steer';
+  | ({
       identity: SessionIdentity;
       text: string;
       images?: AttachedImage[];
-      /** renderer 乐观回显的投递标识；worker 在对应 user 消息上屏后以 delivery-settled 回执 */
-      deliveryId?: string;
       /** Bot 插话仅允许进入活轮；不再忙时交回 Main 重新准入。 */
       activeOnly?: true;
       /**
@@ -1494,7 +1491,18 @@ export type AgentCommand =
        * Main 据此认出拒绝属于哪个实例。
        */
       instanceId?: string;
-    }
+    } & (
+      | {
+          type: 'prompt';
+          /** 投递标识：worker 在对应 user 消息上屏后以 delivery-settled 回执，没进 pi 时以 delivery-rejected 回执 */
+          deliveryId: string;
+        }
+      | {
+          type: 'steer';
+          /** renderer 乐观回显的投递标识；worker 在对应 user 消息上屏后以 delivery-settled 回执 */
+          deliveryId?: string;
+        }
+    ))
   | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
   | { type: 'set-thinking'; identity: SessionIdentity; level: ThinkingLevel }
   /** 仅带人设 spawn 的父会话（秘书）：就地换系统提示词，下一轮生效 */
@@ -2134,7 +2142,14 @@ export type AgentWorkerEvent =
       requestId: string;
     }
   | { type: 'delivery-settled'; identity: SessionIdentity; seq: number; deliveryId: string }
-  | { type: 'delivery-rejected'; identity: SessionIdentity; seq: number; deliveryId: string }
+  | {
+      type: 'delivery-rejected';
+      identity: SessionIdentity;
+      seq: number;
+      deliveryId: string;
+      /** 上一轮停不下来，限时内等不到空闲：重发多半还会撞上，要重开会话 */
+      reason?: 'turn-stuck';
+    }
   | { type: 'delivery-deferred'; identity: SessionIdentity; seq: number; deliveryId: string }
   | {
       type: 'status';
@@ -2176,8 +2191,6 @@ export type AgentWorkerEvent =
       seq: number;
       turnId: string;
       error: string;
-      /** 消息从未提交给 pi（僵尸轮超时等）：renderer 应收回乐观回显并把文本退回输入框 */
-      undelivered?: true;
       /** pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx） */
       retryExhausted?: true;
       /** 应用退出窗口内的断流/断连：不是会话失败，按 interrupted 收口（Main 判定） */
@@ -3898,7 +3911,8 @@ const parsePromptOrSteer = (value: Record<string, unknown>): AgentCommand | null
     (value.activeOnly === undefined ||
       (value.type === 'steer' && value.activeOnly === true && isDeliveryId(value.deliveryId))) &&
     (value.resume === undefined || (value.type === 'prompt' && value.resume === true)) &&
-    (value.deliveryId === undefined || isDeliveryId(value.deliveryId)) &&
+    ((value.type === 'steer' && value.deliveryId === undefined) ||
+      isDeliveryId(value.deliveryId)) &&
     (value.instanceId === undefined ||
       (isUuid(value.instanceId) && parseSessionIdentity(value.identity) !== null))
     ? (value as unknown as AgentCommand)
@@ -5190,7 +5204,12 @@ const agentWorkerEventParsers = {
     }
   ),
   'delivery-settled': parseDeliveryOutcome,
-  'delivery-rejected': parseDeliveryOutcome,
+  'delivery-rejected': (value) => {
+    const { reason, ...rest } = value;
+    return (reason === undefined || reason === 'turn-stuck') && parseDeliveryOutcome(rest)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  },
   'delivery-deferred': parseDeliveryOutcome,
   status: requireEventIdentity('any', (value: Record<string, unknown>): AgentWorkerEvent | null => {
     return (value.status === 'idle' || value.status === 'running' || value.status === 'failed') &&
@@ -5228,7 +5247,6 @@ const agentWorkerEventParsers = {
     (value: Record<string, unknown>): AgentWorkerEvent | null => {
       return isNonEmptyString(value.turnId) &&
         isNonEmptyString(value.error) &&
-        (value.undelivered === undefined || value.undelivered === true) &&
         (value.retryExhausted === undefined || value.retryExhausted === true) &&
         (value.aborted === undefined || value.aborted === true)
         ? (value as unknown as AgentWorkerEvent)

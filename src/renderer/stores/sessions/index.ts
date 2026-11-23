@@ -548,6 +548,8 @@ interface SessionsState {
   enqueueMessage(conversationId: string, text: string, images?: AttachedImage[]): void;
   removeQueuedMessage(conversationId: string, messageId: string): void;
   withdrawMessage(conversationId: string, target: { kind: 'queue' | 'delivery'; id: string }): void;
+  /** 拒收的气泡原样重发：收回旧气泡，按「立即发送」以新投递号发出 */
+  resendMessage(conversationId: string, deliveryId: string): void;
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
   sendQueuedNow(conversationId: string, messageId: string): void;
@@ -1915,21 +1917,6 @@ export const useSessionsStore = create<SessionsState>()(
                       !next.messages.includes(message)
                   )
                 )
-              : {}),
-            // 未提交的消息被 reducer 收回乐观回显（最早一条）：连同图片回到队首，
-            // 多条连续失败也不互相覆盖；队列区可编辑/删除/立即发送
-            ...(event.type === 'turn-failed' &&
-            event.undelivered &&
-            next.messages.length < conversation.messages.length
-              ? {
-                  // 追加到队尾：连续多条失败按 FIFO 回流，保持原发送顺序（A,B → [A,B]）
-                  queuedMessages: [
-                    ...(conversation.queuedMessages ?? []),
-                    toQueuedMessage(
-                      conversation.messages.find((m) => m.optimistic && !m.deliveryRejected)!
-                    ),
-                  ],
-                }
               : {}),
             ...(event.type === 'parent-ready'
               ? {
@@ -4295,6 +4282,31 @@ export const useSessionsStore = create<SessionsState>()(
               ...appendDraft(conversation, draft),
             });
           });
+        },
+
+        resendMessage(conversationId, deliveryId) {
+          const conversation = get().conversations[conversationId];
+          const message = conversation?.messages.find((item) => item.deliveryId === deliveryId);
+          if (
+            !conversation ||
+            !message ||
+            withdrawBlocked(conversation) ||
+            !canWithdrawMessage(message)
+          )
+            return;
+          const queued = toQueuedMessage(message);
+          set((state) =>
+            patch(state, conversationId, {
+              messages: state.conversations[conversationId].messages.filter(
+                (item) => item !== message
+              ),
+              queuedMessages: [
+                ...(state.conversations[conversationId].queuedMessages ?? []),
+                queued,
+              ],
+            })
+          );
+          get().sendQueuedNow(conversationId, queued.id);
         },
 
         sendQueuedNow(conversationId, messageId) {

@@ -180,7 +180,6 @@ describe('agent control tool protocol', () => {
   it.each(['prompt', 'steer'])('%s 命令可带有界的 deliveryId', (type) => {
     const command = { type, identity: parent, text: 'hi', deliveryId: 'delivery-1' };
     expect(parseAgentCommand(command)).toEqual(command);
-    expect(parseAgentCommand({ type, identity: parent, text: 'hi' })).not.toBeNull();
     for (const deliveryId of ['', 42, 'x'.repeat(129)]) {
       expect(parseAgentCommand({ ...command, deliveryId })).toBeNull();
     }
@@ -208,10 +207,18 @@ describe('agent control tool protocol', () => {
     const command = { type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd', resume: true };
     expect(parseAgentCommand(command)).toEqual(command);
     expect(
-      parseAgentCommand({ type: 'prompt', identity: parent, text: 'hi', resume: true })
+      parseAgentCommand({ type: 'steer', identity: parent, text: 'hi', deliveryId: 'd' })
     ).not.toBeNull();
     for (const patch of [{ type: 'steer' }, { resume: false }, { resume: 'true' }, { resume: 1 }])
       expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
+  });
+
+  it('prompt 必须带 deliveryId：未送达时 worker 只能按它回执；steer 仍可不带', () => {
+    const steer = { type: 'steer', identity: parent, text: 'hi' };
+    expect(parseAgentCommand(steer)).toEqual(steer);
+    expect(parseAgentCommand({ ...steer, type: 'prompt' })).toBeNull();
+    expect(parseAgentCommand({ ...steer, type: 'prompt', deliveryId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...steer, type: 'prompt', deliveryId: 'd' })).not.toBeNull();
   });
 
   it('subagent resume 只接受非空 agentId，不带其他字段', () => {
@@ -279,6 +286,19 @@ describe('agent control tool protocol', () => {
       }
     }
   );
+
+  it('delivery-rejected 只认 turn-stuck 这一种原因', () => {
+    const event = {
+      type: 'delivery-rejected',
+      identity: parent,
+      seq: 3,
+      deliveryId: 'delivery-1',
+      reason: 'turn-stuck',
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, reason: 'other' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, deliveryId: '' })).toBeNull();
+  });
 
   it('formats branch background as quoted data, not a new task', () => {
     const note = workspaceBranchChangedNote('feature/branch');

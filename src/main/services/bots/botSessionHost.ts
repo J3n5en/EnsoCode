@@ -94,8 +94,8 @@ export interface BotRuntimePort {
   prompt(
     conversationId: string,
     text: string,
-    images?: AttachedImage[],
-    deliveryId?: string,
+    images: AttachedImage[] | undefined,
+    deliveryId: string,
     /** 带新消息的断点续跑（见 BotDeliverOptions.resume） */
     resume?: true
   ): ActionResult;
@@ -223,6 +223,32 @@ interface Delivery extends BotDeliverOptions {
   text: string;
 }
 
+/** 开这一格的 prompt：worker 按 id 回执拒收；retried 表示已经重发过一次 */
+interface SentPrompt {
+  id: string;
+  text: string;
+  images?: AttachedImage[];
+  resume?: true;
+  retried?: true;
+}
+
+/**
+ * prompt 被拒后 held 存着待重发的那条：占着会话等卡住的上一轮收口（吞掉它的终态）或到点再重发
+ */
+interface Slot {
+  sawRunning: boolean;
+  retry?: true;
+  instance?: string;
+  prompt?: SentPrompt;
+  held?: SentPrompt;
+}
+
+function promptRejectedError(reason?: 'turn-stuck'): string {
+  return reason === 'turn-stuck'
+    ? '消息没送达：上一轮卡住停不下来，已自动重试 1 次仍不行。请开新对话后再发'
+    : '消息没送达，已自动重试 1 次仍不行，请稍后重发';
+}
+
 interface LastAssistant {
   index: number;
   text: string;
@@ -242,10 +268,7 @@ export class BotSessionHost {
    * retry 标记这一格等的是 retry 命令开轮，只有它认 worker 的 retry-skipped 回执；
    * instance 是这一轮的 prompt / retry 发往的 worker 实例（见 instances），发出前缺省
    */
-  private readonly slots = new Map<
-    string,
-    { sawRunning: boolean; retry?: true; instance?: string }
-  >();
+  private readonly slots = new Map<string, Slot>();
   /**
    * 会话当前的 worker 实例号（spawn 成功时登记 spec.instanceId）。只有回显这个号的 parent-ended /
    * parent-rejected 才算当前实例结束：旧实例命令的拒绝回显旧号，缺号的不是本宿主的实例，都与当前实例无关。
@@ -1222,7 +1245,12 @@ export class BotSessionHost {
         const delivery = [...this.pendingSteers.keys()].find(
           (item) => item.conversationId === id && item.deliveryId === event.deliveryId
         );
-        if (!delivery) return;
+        if (!delivery) {
+          const slot = this.slots.get(id);
+          if (event.type === 'delivery-rejected' && slot?.prompt?.id === event.deliveryId)
+            this.rejectPrompt(id, slot, slot.prompt, event.reason);
+          return;
+        }
         const seen = this.pendingSteers.get(delivery);
         if (event.type === 'delivery-settled' && seen !== undefined) this.notesSeen.set(id, seen);
         if (this.settleRedirect(delivery, event.type === 'delivery-settled')) {
@@ -1254,6 +1282,7 @@ export class BotSessionHost {
       case 'status': {
         const slot = this.slots.get(id);
         this.retrying.delete(id);
+        if (slot?.held) return;
         if (event.status === 'running') {
           this.cancelSettle(id);
           if (!this.running.has(id) && !slot?.sawRunning) this.lastAssistant.delete(id);
@@ -1332,7 +1361,7 @@ export class BotSessionHost {
         return;
       }
       case 'turn-completed': {
-        if (!this.turnActive(id)) return;
+        if (!this.turnActive(id) || this.resendHeld(id)) return;
         this.deliveryStarted(id);
         const last = this.lastAssistant.get(id);
         const failed = last?.stopReason === 'error' || last?.stopReason === 'aborted';
@@ -1351,7 +1380,7 @@ export class BotSessionHost {
         return;
       }
       case 'turn-failed':
-        if (!this.turnActive(id)) return;
+        if (!this.turnActive(id) || this.resendHeld(id)) return;
         this.running.delete(id);
         this.finish(
           id,
@@ -1420,7 +1449,8 @@ export class BotSessionHost {
   }
 
   private awaitingTurnEnd(conversationId: string): boolean {
-    return Boolean(this.slots.get(conversationId)?.sawRunning) && !this.running.has(conversationId);
+    const slot = this.slots.get(conversationId);
+    return Boolean(slot?.held) || (Boolean(slot?.sawRunning) && !this.running.has(conversationId));
   }
 
   private turnActive(conversationId: string): boolean {
@@ -1690,15 +1720,14 @@ export class BotSessionHost {
     }
     if (!this.dispatchTo(conversationId)) return fail('session-unavailable');
     stage.failure = 'prompt-failed';
-    const sent = delivery.resume
-      ? this.deps.runtime.prompt(
-          conversationId,
-          notes.text,
-          delivery.images,
-          delivery.deliveryId,
-          true
-        )
-      : this.deps.runtime.prompt(conversationId, notes.text, delivery.images, delivery.deliveryId);
+    // worker 只按号回执拒收：投递自己没号时现生成一个，只用于和 worker 对账
+    const prompt: SentPrompt = {
+      id: delivery.deliveryId ?? randomUUID(),
+      text: notes.text,
+      ...(delivery.images ? { images: delivery.images } : {}),
+      ...(delivery.resume ? { resume: true as const } : {}),
+    };
+    const sent = this.sendPrompt(conversationId, prompt);
     if (!sent.ok) return fail(sent.error ?? 'prompt-failed');
     stage.sent = true;
     // 发出后先做必做记账（续跑任务、笔记已读版本、去重登记与 sent 通知——排队投递靠 sent 推进群游标），
@@ -1932,6 +1961,58 @@ export class BotSessionHost {
     const records = this.deliveries.get(conversationId) ?? new Map();
     if (records.get(deliveryId) !== 'started') records.set(deliveryId, state);
     this.deliveries.set(conversationId, records);
+  }
+
+  private sendPrompt(conversationId: string, prompt: SentPrompt): ActionResult {
+    this.slots.get(conversationId)!.prompt = prompt;
+    return prompt.resume
+      ? this.deps.runtime.prompt(conversationId, prompt.text, prompt.images, prompt.id, true)
+      : this.deps.runtime.prompt(conversationId, prompt.text, prompt.images, prompt.id);
+  }
+
+  /**
+   * worker 拒收了开这一格的 prompt（上一轮卡着停不下来，或撞上叫停）。拒收时上一轮多半还没收口：
+   * 第一次不让出会话，等它的终态（吞掉，不记到这条头上）或到点后重发一次；重发仍被拒才报错收尾。
+   */
+  private rejectPrompt(
+    conversationId: string,
+    slot: Slot,
+    prompt: SentPrompt,
+    reason?: 'turn-stuck'
+  ): void {
+    slot.prompt = undefined;
+    this.running.delete(conversationId);
+    this.lastAssistant.delete(conversationId);
+    if (!prompt.retried) {
+      slot.held = { ...prompt, retried: true };
+      this.cancelSettle(conversationId);
+      const timer = setTimeout(() => {
+        this.settleTimers.delete(conversationId);
+        this.resendHeld(conversationId);
+      }, this.settleGraceMs);
+      timer.unref?.();
+      this.settleTimers.set(conversationId, timer);
+      return;
+    }
+    this.finish(conversationId, undefined, false, promptRejectedError(reason));
+    this.release(conversationId);
+  }
+
+  /** 有待重发的 prompt 就现在发出并返回 true；发不出去按失败收尾 */
+  private resendHeld(conversationId: string): boolean {
+    const slot = this.slots.get(conversationId);
+    const prompt = slot?.held;
+    if (!slot || !prompt) return false;
+    this.cancelSettle(conversationId);
+    slot.held = undefined;
+    this.lastAssistant.delete(conversationId);
+    if (this.disposed || this.stopping.has(conversationId)) return true;
+    const sent = this.sendPrompt(conversationId, prompt);
+    if (!sent.ok) {
+      this.finish(conversationId, undefined, false, sent.error ?? 'prompt-failed');
+      this.release(conversationId);
+    }
+    return true;
   }
 
   private deliveryStarted(conversationId: string): void {

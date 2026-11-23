@@ -1189,8 +1189,8 @@ const electronAPI = {
     prompt: (
       sessionId: string,
       text: string,
-      images?: AttachedImage[],
-      deliveryId?: string
+      images: AttachedImage[] | undefined,
+      deliveryId: string
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_PROMPT, sessionId, text, images, deliveryId),
     steer: (

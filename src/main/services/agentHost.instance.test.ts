@@ -66,11 +66,11 @@ const sessionCommands = () =>
 
 it('阶段13：prompt / steer / retry 自动带上该父会话最近一次 spawn 登记的实例号；子会话、未登记、改绑为空与 worker 退出后不带', () => {
   rememberParentInstance(parent.sessionId, first);
-  promptSession(parent, 'hi');
+  promptSession(parent, 'hi', undefined, 'd-69');
   steerSession(parent, 'more', undefined, 'd-1', true);
   retrySession(parent);
-  promptSession(child as unknown as typeof parent, 'tab');
-  promptSession(other, 'hi');
+  promptSession(child as unknown as typeof parent, 'tab', undefined, 'd-72');
+  promptSession(other, 'hi', undefined, 'd-73');
   startAgentWorker();
   fork.children[0].emit('spawn');
   expect(sessionCommands()).toEqual([
@@ -81,16 +81,16 @@ it('阶段13：prompt / steer / retry 自动带上该父会话最近一次 spawn
     { type: 'prompt', sessionId: 'other', instanceId: undefined },
   ]);
   rememberParentInstance(parent.sessionId, second);
-  promptSession(parent, 'again');
+  promptSession(parent, 'again', undefined, 'd-84');
   rememberParentInstance(parent.sessionId, undefined);
-  promptSession(parent, 'desktop');
+  promptSession(parent, 'desktop', undefined, 'd-86');
   expect(sessionCommands()).toEqual([
     { type: 'prompt', sessionId: 'parent', instanceId: second },
     { type: 'prompt', sessionId: 'parent', instanceId: undefined },
   ]);
   rememberParentInstance(parent.sessionId, second);
   fork.children[0].emit('exit');
-  promptSession(parent, 'after exit');
+  promptSession(parent, 'after exit', undefined, 'd-93');
   fork.children[1].emit('spawn');
   expect(sessionCommands()).toEqual([
     { type: 'prompt', sessionId: 'parent', instanceId: undefined },

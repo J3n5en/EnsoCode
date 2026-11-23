@@ -28,6 +28,7 @@ import {
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
+  withdrawFollowUps,
 } from './sessionAdapter';
 import { POST_TOOL_EMPTY_NUDGE, SILENT_TURN_NUDGE } from './silentTurn';
 
@@ -379,6 +380,44 @@ describe('Pi session adapter integration', () => {
     expect(current.requests.some((context) => contextText(context).includes('withdrawn'))).toBe(
       false
     );
+  });
+
+  it('pi 的 abort 不清排进活轮的 followUp；withdrawFollowUps 撤出它、发 queue_update，插话不动', async () => {
+    const current = await harness([
+      'wait-for-abort',
+      { content: [{ type: 'text', text: 'ok' }] },
+      { content: [{ type: 'text', text: 'ok' }] },
+    ]);
+    const original = current.session.prompt('original');
+    await current.streamStarted;
+    let disposition: string | undefined;
+    await current.session.prompt('queued', {
+      streamingBehavior: 'followUp',
+      preflightResult: (value) => {
+        disposition = value;
+      },
+    });
+    await current.session.steer('ordinary');
+    expect(disposition).toBe('queued');
+    await current.session.abort();
+    await original;
+    expect(current.session.getFollowUpMessages()).toEqual(['queued']);
+
+    const updates: unknown[] = [];
+    const unsubscribe = current.session.subscribe((event) => {
+      if (event.type === 'queue_update') updates.push(event.followUp);
+    });
+    expect(withdrawFollowUps(current.session)).toEqual(['queued']);
+    unsubscribe();
+    expect(updates).toEqual([[]]);
+    expect(current.session.getFollowUpMessages()).toEqual([]);
+    expect(current.session.getSteeringMessages()).toEqual(['ordinary']);
+    expect(withdrawFollowUps(current.session)).toEqual([]);
+
+    await current.session.prompt('next');
+    const sent = current.requests.slice(1).map(contextText).join('\n');
+    expect(sent).not.toContain('queued');
+    expect(sent).toContain('ordinary');
   });
 
   it('批量插话：同一边界内排队的多条插话一次送达同一请求', async () => {

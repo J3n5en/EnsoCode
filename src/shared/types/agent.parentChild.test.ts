@@ -107,7 +107,7 @@ describe('parent/child commands', () => {
     const instanceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const commands = [
       { type: 'spawn-parent', identity: parent, cwd: '/repo', model },
-      { type: 'prompt', identity: parent, text: 'hi' },
+      { type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd' },
       { type: 'steer', identity: parent, text: 'hi' },
       { type: 'retry', identity: parent },
     ];
@@ -118,7 +118,9 @@ describe('parent/child commands', () => {
         expect(parseAgentCommand({ ...command, instanceId: bad })).toBeNull();
     }
     for (const type of ['prompt', 'steer'])
-      expect(parseAgentCommand({ type, identity: child, text: 'hi', instanceId })).toBeNull();
+      expect(
+        parseAgentCommand({ type, identity: child, text: 'hi', deliveryId: 'd', instanceId })
+      ).toBeNull();
     expect(parseAgentCommand({ type: 'retry', identity: child, instanceId })).toBeNull();
     expect(parseAgentCommand({ type: 'retry', identity: parent, instanceId, extra: 1 })).toBeNull();
     // 不在归属范围内的命令不接受实例号

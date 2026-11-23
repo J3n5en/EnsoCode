@@ -29,8 +29,10 @@ export type TimelineMessage = ProjectedMessage & {
   optimistic?: boolean;
   /** 本地投递标识：投递失败时按它精确收回，不误删并发的另一条乐观消息 */
   deliveryId?: string;
-  /** worker 明确拒收；只有这种乐观回显可以本地撤回。 */
+  /** worker 明确拒收；只有这种乐观回显可以本地撤回或重发。 */
   deliveryRejected?: boolean;
+  /** 拒收原因：上一轮卡住停不下来，重发前要先重开会话 */
+  rejectedReason?: 'turn-stuck';
   /** 用户已请求撤回未读插话：worker 撤回成功回执 delivery-rejected 时直接移除 */
   withdrawRequested?: true;
 };
@@ -55,11 +57,6 @@ export function canRequestWithdraw(message: TimelineMessage | undefined): boolea
       message.deliveryId &&
       !message.entryId
   );
-}
-
-function dropOldestOptimistic(messages: readonly TimelineMessage[]): TimelineMessage[] {
-  const index = messages.findIndex((message) => message.optimistic && !message.deliveryRejected);
-  return index < 0 ? [...messages] : messages.filter((_, position) => position !== index);
 }
 
 function textOf(message: ProjectedMessage): string {
@@ -522,7 +519,13 @@ export function applyAgentEvent(
           message.deliveryId === event.deliveryId
             ? message.withdrawRequested
               ? []
-              : [{ ...message, deliveryRejected: true }]
+              : [
+                  {
+                    ...message,
+                    deliveryRejected: true,
+                    ...(event.reason ? { rejectedReason: event.reason } : {}),
+                  },
+                ]
             : [message]
         ),
         lastSeq: event.seq,
@@ -807,9 +810,6 @@ export function applyAgentEvent(
       return {
         ...settleTiming(current, now),
         pendingAsks: current.pendingAsks.filter((ask) => !ask.answered),
-        // 从未提交给 pi 的消息：乐观回显不会被任何 upsert 确认，留着就是“看起来发出去了”的假象。
-        // worker 按会话串行处理 prompt，失败回流与发送同序：收回最早一条未确认消息，而非尾部
-        ...(event.undelivered ? { messages: dropOldestOptimistic(current.messages) } : {}),
         status: 'failed',
         error: event.error,
         retry: undefined,

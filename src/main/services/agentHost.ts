@@ -2242,8 +2242,9 @@ export function setSessionReasoning(
 export function promptSession(
   identity: SessionIdentity,
   text: string,
-  images?: AttachedImage[],
-  deliveryId?: string,
+  images: AttachedImage[] | undefined,
+  /** 未送达时 worker 按它回执 delivery-rejected；调用方没有自己的号就现生成一个 */
+  deliveryId: string,
   /** 带新消息的断点续跑：worker 先移出未完成的最后一条 assistant 再 prompt */
   resume?: true
 ): { ok: boolean; error?: string } {
@@ -2252,7 +2253,7 @@ export function promptSession(
     identity,
     text,
     ...(images?.length ? { images } : {}),
-    ...(deliveryId ? { deliveryId } : {}),
+    deliveryId,
     ...(resume ? { resume } : {}),
     ...instanceField(identity),
   });

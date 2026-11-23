@@ -1554,6 +1554,10 @@ export const zhTranslations: Record<string, string> = {
   Queued: '排队',
   'Withdraw message': '撤回',
   'Not sent': '未发送',
+  'Not sent: the previous turn is stuck and could not be interrupted. Restart the conversation, then resend.':
+    '未发送：上一轮卡住了，停不下来。请先重启会话再重发',
+  'Restart conversation': '重启会话',
+  Resend: '重发',
   'Delivery unconfirmed': '送达待确认',
   attachments: '个附件',
   Edit: '编辑',

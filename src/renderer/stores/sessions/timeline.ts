@@ -39,7 +39,7 @@ export type TimelineItem =
       images: { data: string; mimeType: string }[];
       timestamp?: number;
       turnDurationMs?: number;
-      deliveryState?: 'pending' | 'rejected';
+      deliveryState?: 'pending' | 'rejected' | 'stuck';
       collapsed?: boolean;
       canCollapse?: boolean;
       /** 本轮首个 assistant 回复的模型与时间，供回复身份头显示 */
@@ -1023,7 +1023,11 @@ function buildMessageTimeline(
         images: message.content.filter((part) => part.type === 'image'),
         timestamp: message.timestamp,
         canCollapse: false,
-        deliveryState: message.deliveryRejected ? 'rejected' : 'pending',
+        deliveryState: message.deliveryRejected
+          ? message.rejectedReason === 'turn-stuck'
+            ? 'stuck'
+            : 'rejected'
+          : 'pending',
       });
       return;
     }

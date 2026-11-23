@@ -1202,6 +1202,82 @@ describe('BotSessionHost turn results', () => {
     host.observe(ev({ type: 'turn-completed', turnId: 'x' }, crypto.randomUUID()));
     expect(finished).toHaveLength(2);
   });
+
+  it('预检拒收（失败终态在前、拒收回执在后）：真实错误记在这条头上，回执不误伤已泵出的下一条', async () => {
+    const alice = bot('Alice');
+    const chat = direct(alice.id);
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const first = await host.deliver(chat.id, alice.id, 'hi', { deliveryId: 'd1' });
+    if (!first.ok) throw new Error(first.error);
+    const id = first.conversationId;
+    await host.deliver(chat.id, alice.id, 'next', { deliveryId: 'd2', queueIfBusy: true });
+    host.observe(ev({ type: 'status', status: 'failed', error: 'No API key' }, id));
+    host.observe(ev({ type: 'turn-failed', turnId: 't1', error: 'No API key' }, id));
+    host.observe(ev({ type: 'delivery-rejected', deliveryId: 'd1' }, id));
+    await flush();
+    expect(finished).toEqual([
+      expect.objectContaining({ deliveryId: 'd1', ok: false, error: 'No API key' }),
+    ]);
+    expect(runtime.prompts.map((prompt) => prompt.text)).toEqual(['hi', 'next']);
+  });
+});
+
+describe('BotSessionHost 拒收重排', () => {
+  const start = async () => {
+    host = new BotSessionHost({
+      bots,
+      chats,
+      authority: registry,
+      runtime,
+      emit: () => {},
+      settleGraceMs: 5,
+    });
+    const alice = bot('Alice');
+    const chat = direct(alice.id);
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const result = await host.deliver(chat.id, alice.id, 'hi', { deliveryId: 'd1' });
+    if (!result.ok) throw new Error(result.error);
+    return { id: result.conversationId, finished, alice, chat };
+  };
+  const texts = () => runtime.prompts.map((prompt) => prompt.text);
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('被拒后占着会话等卡住的上一轮收口：它迟到的终态不记到这条头上，收口后重发一次并正常完成', async () => {
+    const { id, finished } = await start();
+    host.observe(ev({ type: 'delivery-rejected', deliveryId: 'd1', reason: 'turn-stuck' }, id));
+    host.observe(ev({ type: 'status', status: 'idle' }, id));
+    host.observe(ev({ type: 'turn-completed', turnId: 'earlier', aborted: true }, id));
+    await flush();
+    expect(finished).toEqual([]);
+    expect(texts()).toEqual(['hi', 'hi']);
+    host.observe(ev({ type: 'status', status: 'running' }, id));
+    host.observe(ev({ type: 'turn-completed', turnId: 't2' }, id));
+    expect(finished).toEqual([expect.objectContaining({ deliveryId: 'd1', ok: true })]);
+  });
+
+  it('上一轮一直不收口：到点也重发一次', async () => {
+    const { id, finished } = await start();
+    host.observe(ev({ type: 'delivery-rejected', deliveryId: 'd1', reason: 'turn-stuck' }, id));
+    await wait();
+    expect(texts()).toEqual(['hi', 'hi']);
+    expect(finished).toEqual([]);
+  });
+
+  it('重发仍被拒：报错收尾并说明下一步，让出会话给排队的下一条', async () => {
+    const { id, finished, alice, chat } = await start();
+    await host.deliver(chat.id, alice.id, 'next', { deliveryId: 'd2', queueIfBusy: true });
+    host.observe(ev({ type: 'delivery-rejected', deliveryId: 'd1', reason: 'turn-stuck' }, id));
+    await wait();
+    host.observe(ev({ type: 'delivery-rejected', deliveryId: 'd1', reason: 'turn-stuck' }, id));
+    await flush();
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toMatchObject({ deliveryId: 'd1', ok: false });
+    expect(finished[0]!.error).toContain('重试');
+    expect(finished[0]!.error).toContain('新对话');
+    expect(texts()).toEqual(['hi', 'hi', 'next']);
+  });
 });
 
 describe('BotSessionHost cleanup', () => {

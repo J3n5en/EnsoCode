@@ -130,6 +130,7 @@ function session(options: Record<string, unknown>) {
     },
     prompt: vi.fn(async () => undefined),
     steer: vi.fn(async () => undefined),
+    getFollowUpMessages: () => [],
     abort: vi.fn(async () => undefined),
     dispose: vi.fn(),
     setThinkingLevel: vi.fn(),
@@ -441,7 +442,12 @@ describe('SessionSupervisor 子代理请求预算', () => {
     await settle();
     expect(completed(events)).toHaveLength(1);
 
-    supervisor.handleCommand({ type: 'prompt', identity: child, text: 'keep going' });
+    supervisor.handleCommand({
+      type: 'prompt',
+      deliveryId: 'd-444',
+      identity: child,
+      text: 'keep going',
+    });
     await settle();
     for (let n = 2; n <= 10; n++) request(worker, toolCall(n));
     expect(worker.abort).not.toHaveBeenCalled();

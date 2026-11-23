@@ -18,7 +18,9 @@ describe('rejectUnparsableCommand', () => {
     const event = rejectUnparsableCommand({ type: 'spawn-parent', identity: parent, instanceId });
     expect(event).toMatchObject({ type: 'parent-rejected', identity: parent, seq: 0, instanceId });
     expect(event && 'reason' in event && event.reason).toContain('spawn-parent');
-    expect(event && 'reason' in event && event.reason.startsWith(STALE_SESSION_ERROR)).toBe(false);
+    expect(event?.type === 'parent-rejected' && event.reason.startsWith(STALE_SESSION_ERROR)).toBe(
+      false
+    );
     expect(rejectUnparsableCommand({ type: 'prompt', identity: parent })).toMatchObject({
       type: 'parent-rejected',
       identity: parent,

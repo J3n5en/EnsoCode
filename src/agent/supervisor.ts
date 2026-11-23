@@ -303,6 +303,7 @@ import {
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
+  withdrawFollowUps,
 } from './sessionAdapter';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
@@ -499,6 +500,8 @@ interface ManagedSession {
   abortedTurnId?: string;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
   settlePending?: boolean;
+  /** 排进 pi followUp 队列的用户 prompt：text 是 pi 队列里的那条文本，叫停撤回时据此对上 deliveryId */
+  queuedPrompts?: { text: string; deliveryId?: string }[];
   /** 当前用户轮已做过一次空回复自动续跑 */
   silentTurnNudgeUsed: boolean;
   /** 推脱补发正文；缺省不重试 */
@@ -2037,7 +2040,8 @@ export class SessionSupervisor {
         // 投影已 idle 但 pi 仍忙：压缩中（pi 拒收 prompt）不限时等压完；仍 streaming 要么
         // agent_end 尚未回流，要么是 abort 后工具不响应信号的僵尸轮——steer 进僵尸轮永远
         // 无人投递，故限时等空闲后走新轮。仍在产出或投影已回到 running 的不是僵尸，继续等。
-        // 超时按失败收口，绝不静默。
+        // 超时按 deliveryId 回执这条 prompt，绝不静默。它没开出新轮，不发 turn-*、不动 status：
+        // 消费者按会话把 turn-* 当本轮终态，仍在收束的那一轮由它自己的 agent_settled 收口。
         let activityAt = managed.activityNonce;
         if (
           !(await waitPromptable(managed.session, ZOMBIE_TURN_WAIT_MS, () => {
@@ -2049,17 +2053,7 @@ export class SessionSupervisor {
             return false;
           }))
         ) {
-          const settlePending = managed.settlePending === true;
-          this.failTurn(
-            managed,
-            'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.',
-            true
-          );
-          // 终态 agent_end 已经记下、轮次却还在流：不能让这次误判吃掉随后的 agent_settled，
-          // 否则失败横幅会一直盖住仍在正常收束的轮次。
-          if (settlePending && (managed.session.isStreaming || managed.session.isCompacting)) {
-            managed.settlePending = true;
-          }
+          this.emitDeliveryRejected(managed, command.deliveryId, 'turn-stuck');
           return;
         }
         this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
@@ -2085,7 +2079,7 @@ export class SessionSupervisor {
         return;
       }
       case 'abort-retry':
-        this.must(command.identity).session.abortRetry();
+        this.cancelRetry(this.must(command.identity));
         return;
       case 'withdraw-steer': {
         const managed = this.must(command.identity);
@@ -2493,6 +2487,7 @@ export class SessionSupervisor {
         // 重试倒计时中 pi 只发 auto_retry_end、不再有 agent_end：须按取消重试同口径收口，
         // 否则 renderer 的中断标记吞掉下一轮收束（队列不再泵），排队压缩永远停在 queued
         const retrying = managed.session.isRetrying;
+        if (managed.status === 'running') this.withdrawQueuedPrompts(managed);
         managed.gate.cancelAll();
         managed.asks.cancelAll();
         cancelContinuousMemory(managed.session.sessionManager);
@@ -5013,7 +5008,7 @@ export class SessionSupervisor {
               stopReason: 'error',
               errorMessage: lastAssistant.errorMessage,
             } as AssistantMessage);
-          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.', false, exhausted);
+          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.', exhausted);
           return;
         }
         if (this.tryRefusalRetry(managed, lastAssistant)) return;
@@ -5349,9 +5344,19 @@ export class SessionSupervisor {
 
   /** 重试倒计时中则打断并等待本轮收尾；返回是否发生了打断（用户输入接管重试） */
   private async interruptRetryIfAny(managed: ManagedSession): Promise<boolean> {
-    if (!managed.session.isRetrying) return false;
-    managed.session.abortRetry();
+    if (!this.cancelRetry(managed)) return false;
     await managed.session.waitForIdle();
+    return true;
+  }
+
+  /**
+   * 取消重试即放弃这一轮，auto_retry_end(false) 按失败收口。pi 取消重试后见到排队消息会在同一轮
+   * 续跑，所以先撤回排进来的 prompt。返回是否真的取消了重试。
+   */
+  private cancelRetry(managed: ManagedSession): boolean {
+    if (!managed.session.isRetrying) return false;
+    this.withdrawQueuedPrompts(managed);
+    managed.session.abortRetry();
     return true;
   }
 
@@ -5373,12 +5378,26 @@ export class SessionSupervisor {
     managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
     const body = consumeRole(managed, text);
-    const options = { ...(images ? { images } : {}), streamingBehavior: 'followUp' as const };
+    const options = {
+      ...(images ? { images } : {}),
+      streamingBehavior: 'followUp' as const,
+      preflightResult: (disposition: PromptDisposition) => {
+        if (disposition === 'queued') this.noteQueuedPrompt(managed, deliveryId);
+      },
+    };
     const state: PromptDeliveryState = { dispatched: false, queued: false };
     const submit = () => this.promptTracked(managed, body, options, deliveryId, state);
     // 没开出新轮（被拒收或排进活轮）就把轮次号还给正在跑的那一轮
     const restoreTurn = () => {
       if (!state.dispatched || state.queued) managed.currentTurnId = previousTurnId;
+    };
+    // 拒收回执必须最后发：消费者收到回执就让出会话，之后才到的失败终态会被记到下一条投递头上。
+    // 活轮还在时这条本该排在它后面，被拒只回执，不能把活轮打成失败
+    const reject = (error: string) => {
+      if (previousTurnId === undefined && !managed.session.isStreaming)
+        this.failTurn(managed, error);
+      else restoreTurn();
+      if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
     };
     void submit()
       .then(restoreTurn)
@@ -5410,13 +5429,11 @@ export class SessionSupervisor {
             restoreTurn();
             return;
           } catch (retryError) {
-            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
-            this.failTurn(managed, toErrorMessage(retryError));
+            reject(toErrorMessage(retryError));
             return;
           }
         }
-        if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
-        this.failTurn(managed, message);
+        reject(message);
       });
   }
 
@@ -5457,14 +5474,40 @@ export class SessionSupervisor {
   }
 
   /** 投递被拒收：交回执让上游重排，不把会话标成失败 */
-  private emitDeliveryRejected(managed: ManagedSession, deliveryId?: string): void {
+  private emitDeliveryRejected(
+    managed: ManagedSession,
+    deliveryId?: string,
+    reason?: 'turn-stuck'
+  ): void {
     if (!deliveryId) return;
     this.options.emit({
       type: 'delivery-rejected',
       identity: managed.identity,
       seq: ++managed.seq,
       deliveryId,
+      ...(reason ? { reason } : {}),
     });
+  }
+
+  /** pi 刚把这条 prompt 排进 followUp 队列，队尾就是它；已被 pi 取走的记录顺手丢掉 */
+  private noteQueuedPrompt(managed: ManagedSession, deliveryId?: string): void {
+    const labels = managed.session.getFollowUpMessages();
+    const text = labels.at(-1);
+    if (text === undefined) return;
+    managed.queuedPrompts = [
+      ...stillQueued(managed.queuedPrompts ?? [], labels.slice(0, -1)),
+      { text, ...(deliveryId ? { deliveryId } : {}) },
+    ];
+  }
+
+  /**
+   * 用户叫停时排进活轮的 prompt 不会再跑：pi 的 abort 不清 followUp 队列，留着就夹在下一次 prompt
+   * 后面送达。撤出队列，按 deliveryId 回执；回执不是终态，原轮照常由 agent_settled 收口。
+   */
+  private withdrawQueuedPrompts(managed: ManagedSession): void {
+    const withdrawn = stillQueued(managed.queuedPrompts ?? [], withdrawFollowUps(managed.session));
+    managed.queuedPrompts = undefined;
+    for (const { deliveryId } of withdrawn) this.emitDeliveryRejected(managed, deliveryId);
   }
 
   private async steerActive(
@@ -5562,12 +5605,7 @@ export class SessionSupervisor {
     });
   }
 
-  private failTurn(
-    managed: ManagedSession,
-    error: string,
-    undelivered = false,
-    retryExhausted = false
-  ): void {
+  private failTurn(managed: ManagedSession, error: string, retryExhausted = false): void {
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
     managed.currentTurnId = undefined;
@@ -5602,7 +5640,6 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       error,
-      ...(undelivered ? { undelivered: true } : {}),
       ...(retryExhausted ? { retryExhausted: true } : {}),
       ...(aborted ? { aborted: true as const } : {}),
     });
@@ -6792,6 +6829,22 @@ interface PromptDeliveryState {
 /** pi 在活轮里拒收不带 streamingBehavior 的 prompt：会话仍在跑，不是失败 */
 function isAlreadyProcessing(message: string): boolean {
   return message.includes('Agent is already processing');
+}
+
+/** 记录里仍在 pi 队列中的那些。pi 从队首取，同文本从队尾往前对账 */
+function stillQueued<T extends { text: string }>(
+  entries: readonly T[],
+  labels: readonly string[]
+): T[] {
+  const left = [...labels];
+  const kept: T[] = [];
+  for (const entry of [...entries].reverse()) {
+    const index = left.lastIndexOf(entry.text);
+    if (index < 0) continue;
+    left.splice(index, 1);
+    kept.unshift(entry);
+  }
+  return kept;
 }
 
 /** 回复里的可见正文，不含 thinking 与工具调用 */

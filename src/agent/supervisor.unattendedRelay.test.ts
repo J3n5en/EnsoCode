@@ -187,7 +187,7 @@ async function spawnParent(extra: Partial<Extract<AgentCommand, { type: 'spawn-p
   /** 发一条用户消息，返回实际进模型的文本（带上待发的一次性提示） */
   const promptText = async (text: string): Promise<string> => {
     const before = session.prompt.mock.calls.length;
-    supervisor.handleCommand({ type: 'prompt', identity: parent, text });
+    supervisor.handleCommand({ type: 'prompt', deliveryId: 'd-190', identity: parent, text });
     await settleUntil(() => session.prompt.mock.calls.length > before);
     const sent = session.prompt.mock.calls[before]?.[0] as string;
     // mock 不发 agent_end，手动回到 idle 以便下一条照常走 prompt

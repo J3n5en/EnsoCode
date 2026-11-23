@@ -802,7 +802,12 @@ describe('agent IPC Main identity boundary', () => {
     it('裸 sessionId 被解析成 exact identity 后才下发', () => {
       mocks.currentIdentity.mockReturnValue(parent);
       bridge().prompt('conv-1', 'hello');
-      expect(mocks.promptSession).toHaveBeenCalledWith(parent, 'hello', undefined);
+      expect(mocks.promptSession).toHaveBeenCalledWith(
+        parent,
+        'hello',
+        undefined,
+        expect.any(String)
+      );
     });
 
     it('解析不出身份时丢弃命令，不降级成按 sessionId 盲发', () => {
@@ -823,8 +828,18 @@ describe('agent IPC Main identity boundary', () => {
       headless().prompt('conv-1::cw-1', 'tray');
       expect(mocks.respondApproval).toHaveBeenCalledWith(child, 'r-1', 'allow');
       expect(mocks.respondAsk).toHaveBeenCalledWith(child, 'r-2', 'yes');
-      expect(mocks.promptSession).toHaveBeenCalledWith(child, 'hello', undefined);
-      expect(mocks.promptSession).toHaveBeenCalledWith(child, 'tray', undefined);
+      expect(mocks.promptSession).toHaveBeenCalledWith(
+        child,
+        'hello',
+        undefined,
+        expect.any(String)
+      );
+      expect(mocks.promptSession).toHaveBeenCalledWith(
+        child,
+        'tray',
+        undefined,
+        expect.any(String)
+      );
       expect(mocks.abortSession).toHaveBeenCalledWith(child);
     });
 
@@ -906,8 +921,8 @@ describe('agent IPC Main identity boundary', () => {
         secretary(undefined);
         mocks.currentIdentity.mockReturnValue(identity);
         send.mockReturnValue({ ok: true });
-        await mocks.handlers.get(channel)?.(event, conversationId, 'hi', images);
-        expect(send).toHaveBeenLastCalledWith(identity, 'hi', images, undefined);
+        await mocks.handlers.get(channel)?.(event, conversationId, 'hi', images, 'd-1');
+        expect(send).toHaveBeenLastCalledWith(identity, 'hi', images, 'd-1');
         expect(readdirSync(userData)).not.toContain('bot-chats');
       } finally {
         vi.mocked(app.getPath).mockReturnValue('/tmp');
@@ -923,13 +938,18 @@ describe('agent IPC Main identity boundary', () => {
     const parent = { sessionId: 'conv-1', generation: 'gen-1' };
     const invoke = (...args: unknown[]) => mocks.handlers.get(channel)?.(event, ...args);
 
-    it('合法 deliveryId 原样下发，缺省时不带', async () => {
+    it('合法 deliveryId 原样下发；缺省时 prompt 拒绝（未送达只能按号回执），steer 照常不带', async () => {
       mocks.currentIdentity.mockReturnValue(parent);
       send.mockReturnValue({ ok: true });
       await invoke('conv-1', 'hi', undefined, 'd-1');
       expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, 'd-1');
-      await invoke('conv-1', 'hi');
-      expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, undefined);
+      const missing = await invoke('conv-1', 'hi');
+      if (channel === IPC_CHANNELS.AGENT_PROMPT) {
+        expect(missing).toMatchObject({ ok: false });
+        expect(send).toHaveBeenCalledTimes(1);
+      } else {
+        expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, undefined);
+      }
     });
 
     it.each(['', 7, 'x'.repeat(129)])('非法 deliveryId %# 拒绝且不下发', async (deliveryId) => {
