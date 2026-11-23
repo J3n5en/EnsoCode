@@ -30,6 +30,11 @@ import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
 import { conversationThemeState } from '@shared/theme/themeState';
 import type { Project } from '@shared/types';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
+import {
+  formatRetryClock,
+  type GoalUpstreamRetry,
+  isUpstreamWaitingGoal,
+} from '@shared/upstreamRecovery';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Archive,
@@ -2792,6 +2797,8 @@ interface ConversationRowProps {
     reloading?: boolean;
     /** 由秘书派出；只用于显示标记，权限判断不读它 */
     secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
+    /** 会话目标：侧栏用于标识等待上游恢复 */
+    goal?: { status: string; retry?: GoalUpstreamRetry };
   };
   active: boolean;
   locale: Parameters<typeof formatRelativeTime>[1];
@@ -2981,6 +2988,40 @@ function ConversationRow({
         <SessionTabCounts conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />
         <SecretaryDispatchBadge count={dispatchRunning} />
+        {!renaming && isUpstreamWaitingGoal(conversation.goal) && (
+          <span
+            data-enso="sidebar-upstream-waiting"
+            className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/15 px-1 py-px text-[10px] text-amber-600 dark:text-amber-400"
+            title={
+              conversation.goal.retry.kind === 'quota'
+                ? t('Quota exhausted · next {{time}}', {
+                    time: formatRetryClock(conversation.goal.retry.at),
+                  })
+                : t('Waiting for upstream recovery · next {{time}}', {
+                    time: formatRetryClock(conversation.goal.retry.at),
+                  })
+            }
+          >
+            <span>
+              {conversation.goal.retry.kind === 'quota'
+                ? t('Quota exhausted')
+                : t('Waiting for upstream recovery')}
+            </span>
+            <button
+              type="button"
+              data-enso="upstream-retry-now"
+              title={t('Retry now')}
+              aria-label={t('Retry now')}
+              onClick={(e) => {
+                e.stopPropagation();
+                void useSessionsStore.getState().retryUpstreamNow(id);
+              }}
+              className="rounded p-0.5 transition-colors hover:bg-amber-500/20"
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        )}
         {!renaming && (
           <TitleSummaryBadge
             pending={conversation.titleSummaryPending}
@@ -3414,9 +3455,13 @@ function ConversationDot({
     queued?: boolean;
     queuePosition?: number;
     queueFailed?: string;
+    goal?: { status: string; retry?: GoalUpstreamRetry };
   };
 }) {
   const { t } = useI18n();
+  const upstreamRetry = isUpstreamWaitingGoal(conversation.goal)
+    ? conversation.goal.retry
+    : undefined;
   // 待审批与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
   const tone =
     (conversation.pendingApprovals?.length ?? 0) > 0
@@ -3427,15 +3472,23 @@ function ConversationDot({
           unread: conversation.unread,
           pendingAskCount: userAskCount(conversation.pendingAsks),
           hasRunningChild: conversation.hasRunningChild,
-          queued: conversation.queued === true && !conversation.queueFailed,
+          queued:
+            (conversation.queued === true && !conversation.queueFailed) ||
+            upstreamRetry !== undefined,
         });
   const title = conversation.queueFailed
     ? conversation.queueFailed
-    : conversation.queued
-      ? t('Queued · #{{n}}, starts automatically when a slot opens', {
-          n: conversation.queuePosition ?? 1,
-        })
-      : undefined;
+    : upstreamRetry
+      ? upstreamRetry.kind === 'quota'
+        ? t('Quota exhausted · next {{time}}', { time: formatRetryClock(upstreamRetry.at) })
+        : t('Waiting for upstream recovery · next {{time}}', {
+            time: formatRetryClock(upstreamRetry.at),
+          })
+      : conversation.queued
+        ? t('Queued · #{{n}}, starts automatically when a slot opens', {
+            n: conversation.queuePosition ?? 1,
+          })
+        : undefined;
   // 锁进与项目行同宽的图标列:圆点/图标两种形态切换时标题不再左右跳动。
   // 空闲不画点:满列空心圈没有信息量,只有运行/待回答/失败/未读才需要被看见
   return (

@@ -65,6 +65,7 @@ import {
   type SecretaryUntrackedView,
   type TakeoverVia,
 } from '@shared/types/secretary';
+import { classifyUpstreamError, nextPendingRetryDelayMs } from '@shared/upstreamRecovery';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
@@ -1283,6 +1284,7 @@ export async function startPendingDispatches(
     const file = ports.dispatchFile();
     const pending = file.pending?.[pendingId];
     if (pending?.status !== 'waiting') continue;
+    if (pending.nextRetryAt !== undefined && now < pending.nextRetryAt) continue;
     const outcome = pendingOutcome(await dependencyFacts(ports, file, pending.after));
     if (outcome.kind === 'wait') continue;
     if (outcome.kind === 'failed') {
@@ -1297,6 +1299,40 @@ export async function startPendingDispatches(
     if (Object.keys(claimed.pending).length === 0) delete claimed.pending;
     ports.saveDispatch(claimed);
 
+    const retryOrFailPending = async (error: string): Promise<void> => {
+      const classified = classifyUpstreamError({ error }, now);
+      if (classified.kind !== 'permanent') {
+        const nextAttempt = (pending.retryCount ?? 0) + 1;
+        const delay = nextPendingRetryDelayMs(nextAttempt);
+        if (delay !== null) {
+          const latest = ports.dispatchFile();
+          latest.pending = {
+            ...(latest.pending ?? {}),
+            [pending.id]: {
+              ...pending,
+              status: 'waiting',
+              updatedAt: now,
+              retryCount: nextAttempt,
+              nextRetryAt: now + delay,
+              lastError: error,
+            },
+          };
+          ports.saveDispatch(latest);
+          ports.audit({
+            at: now,
+            secretaryConversationId: pending.secretaryConversationId,
+            op: 'dispatch_pending',
+            targetId: pending.id,
+            ok: false,
+            detail: `transient-retry ${nextAttempt} ${error}`,
+          });
+          notifySecretaryChanged();
+          return;
+        }
+      }
+      await failPending(ports, pending, 'dispatch-failed', undefined, error);
+    };
+
     const profile = await profileOf(ports);
     const validated = validateDispatch(
       pending.draft,
@@ -1308,7 +1344,7 @@ export async function startPendingDispatches(
     }
     const base = await checkBase(ports, validated.draft);
     if (!base.ok) {
-      await failPending(ports, pending, 'dispatch-failed', undefined, base.error);
+      await retryOrFailPending(base.error);
       continue;
     }
     const { attachments: paths, ...draft } = validated.draft;
@@ -1331,7 +1367,7 @@ export async function startPendingDispatches(
           paths?.length ? await loadPendingAttachments(paths) : undefined
         );
     if (created.kind === 'failed') {
-      await failPending(ports, pending, 'dispatch-failed', undefined, created.error);
+      await retryOrFailPending(created.error);
       continue;
     }
     if (created.kind === 'pending') continue;

@@ -1,4 +1,5 @@
 import type { GoalResultView } from '../secretary/goalResult';
+import type { GoalUpstreamRetry } from '../upstreamRecovery';
 import type { ModelRef, ThinkingLevel } from './agent';
 
 /**
@@ -118,6 +119,12 @@ export interface PendingDispatch {
   problem?: PendingProblem;
   /** 触发失败的依赖会话；dispatch-failed 时缺省 */
   failedDependency?: string;
+  /** 启动遇瞬态错误时的自动重试次数（上限 5 次） */
+  retryCount?: number;
+  /** 下次允许自动重试的时间戳（epoch ms） */
+  nextRetryAt?: number;
+  /** 最近一次瞬态启动错误 */
+  lastError?: string;
 }
 
 /**
@@ -617,6 +624,8 @@ export type SecretaryCard =
       resultAt?: number;
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
+      /** 目标因上游瞬态/配额故障等待自动恢复 */
+      upstreamRetry?: GoalUpstreamRetry;
       /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
       backgroundRunning?: true;
       /** 会话空闲但还有常驻服务在跑：显示成「有常驻服务」，与「正在跑」区分 */

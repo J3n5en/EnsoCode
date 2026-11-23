@@ -38,6 +38,7 @@ import type {
   SecretaryTodo,
   SecretaryUpdate,
 } from '@shared/types/secretary';
+import { formatRetryClock, type GoalUpstreamRetry } from '@shared/upstreamRecovery';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import { autoArchivable, autoArchived, liveTasks } from './autoArchive';
@@ -79,6 +80,7 @@ import {
   stalled,
   UPDATE_WINDOW_MS,
   updateKey,
+  upstreamRetryOf,
 } from './results';
 import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
@@ -267,6 +269,8 @@ function resultEventOf(
       // 应用退出窗口内的断流：Main 已改判成中断，不能报成失败
       if (event.interrupted)
         return { type: 'turn-interrupted', at: event.interrupted.at, kind: event.interrupted.kind };
+      // 上游瞬态/配额故障已进入自动退避等待：不按失败推送，避免向秘书和用户误报 failed
+      if (upstreamRetryOf(row)) return null;
       return { type: 'turn-failed', error: event.error };
     case 'goal-signal':
       return { type: 'goal-signal', kind: event.kind };
@@ -285,6 +289,13 @@ function deliveryOutcome(event: RendererAgentEvent): 'done' | 'failed' | null {
   if (event.type === 'turn-completed') return event.aborted ? 'failed' : 'done';
   if (event.type === 'turn-failed' || event.type === 'worker-exited') return 'failed';
   return null;
+}
+
+function upstreamWaitingSummary(retry: GoalUpstreamRetry): string {
+  const clock = formatRetryClock(retry.at);
+  return retry.kind === 'quota'
+    ? `额度用完，自动重试中（下次 ${clock}）`
+    : `上游不可用，自动重试中（下次 ${clock}）`;
 }
 
 function failureDetail(error: string | undefined): string | undefined {
@@ -925,6 +936,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           ? { awaitingReplySince: record.sentAt }
           : {}),
         ...(reminderPending(record.conversationId, now) ? { reminderPending: true } : {}),
+        ...(upstreamRetryOf(rows[record.conversationId]) ? { upstreamWaiting: true } : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {
@@ -1084,6 +1096,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       changed = true;
       if (ports.status(record.conversationId).state !== 'error') continue;
       if (ports.continuesAfterExit?.(record.conversationId)) continue;
+      if (upstreamRetryOf(ports.rows()[record.conversationId])) continue;
       record.turn += 1;
       delete record.reopenedAt;
       recordResult(file, record, 'failed', now, pending.detail);
@@ -1230,9 +1243,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (!record) continue;
         const status = ports.status(conversationId);
         const own = sessionId === conversationId;
+        const upstreamRetry = upstreamRetryOf(rows[conversationId]);
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed')) {
           record.turn += 1;
           delete record.failurePending;
+        }
+        if (own && event.type === 'turn-failed' && upstreamRetry) {
+          record.lastText = upstreamWaitingSummary(upstreamRetry);
+          record.lastState = 'idle';
+          changed = true;
         }
         if (own && event.type === 'goal-signal' && event.kind === 'complete') {
           pendingComplete.add(conversationId);
@@ -1340,7 +1359,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         // status=failed 通常和随后的 turn-failed 成对出现，这里不记，避免同一次失败推两遍；
         // 等不到 turn-failed 的到点补记（failurePending）。worker 退出没有 turn-failed，仍靠状态变化记失败。
-        if (!kind && change && event.type !== 'status') {
+        if (!kind && !upstreamRetry && change && event.type !== 'status') {
           // worker 是所有会话共用的，它退出时空闲会话也会跳到 error；没在干活就不算失败
           if (
             change.state === 'error' &&

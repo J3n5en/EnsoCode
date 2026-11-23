@@ -1006,7 +1006,12 @@ describe('PluginHostGate', () => {
   });
 
   it('注入参数不合法或目标未授权时不消耗频率配额', async () => {
-    const inject = vi.fn(() => ({ ok: true as const }));
+    const inject = vi.fn(
+      (_pluginId: string, input: { sender?: { channel: string; userId?: string } }) => ({
+        ok: true as const,
+        sender: input.sender,
+      })
+    );
     deps.inject = inject;
     deps.manifest = () => manifest({ permissions: ['agent.inject'] });
     gate = new PluginHostGate(deps);
@@ -1041,6 +1046,31 @@ describe('PluginHostGate', () => {
     await gate.handle('a.b', 'session.inject', { text: 'hi', trusted: true }, agentCall());
     await gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall());
     expect(inject.mock.calls.map(([, input]) => input.trusted)).toEqual([true, false]);
+  });
+
+  it('sender 非法拒绝，合法字段原样交给注入并丢掉自报的 owner', async () => {
+    const inject = vi.fn((_pluginId: string, input: { sender?: { userId?: string } }) => ({
+      ok: true as const,
+      echoed: input,
+    }));
+    deps.inject = inject;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sender: { channel: '' } }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sender: [] }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await gate.handle(
+      'a.b',
+      'session.inject',
+      { text: 'hi', sender: { channel: 'telegram', userId: 7, isOwner: true, role: 'owner' } },
+      agentCall()
+    );
+    expect(inject.mock.calls.map(([, input]) => input.sender)).toEqual([
+      { channel: 'telegram', userId: '7' },
+    ]);
   });
 
   it('拒绝跨会话注入时带上插件 id，同一会话或已授权不通知', async () => {

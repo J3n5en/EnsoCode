@@ -17,6 +17,7 @@ import {
   type SecretaryUntrackedView,
   type SecretaryUpdate,
 } from '@shared/types/secretary';
+import { type GoalUpstreamRetry, parseGoalUpstreamRetry } from '@shared/upstreamRecovery';
 import { redactSecrets } from '../memory/distill';
 import { secretaryProjectName } from './projectLabel';
 import type { SecretarySessionStatus } from './readers';
@@ -421,6 +422,16 @@ export function sessionStillGoing(input: {
   return input.goalStatus === 'active';
 }
 
+export function upstreamRetryOf(
+  row: Record<string, unknown> | undefined
+): GoalUpstreamRetry | undefined {
+  const goal = row?.goal;
+  if (!goal || typeof goal !== 'object') return undefined;
+  const record = goal as Record<string, unknown>;
+  if (record.status !== 'waiting') return undefined;
+  return parseGoalUpstreamRetry(record.retry);
+}
+
 /** 一条派发记录此刻算不算在跑；三处计数都走这里 */
 export function countsAsRunning(
   record: DispatchRecord,
@@ -432,6 +443,7 @@ export function countsAsRunning(
   if (queued) return queued.startingAt !== undefined;
   const state = sessionStateOf(record, row, status);
   if (sessionNeedsUser(record, state)) return false;
+  if (upstreamRetryOf(row)) return true;
   // 用户撤销手动标记：放回进行中，直到这一轮出现新结果
   if (record.manualUndoneAt !== undefined && record.lastResult === undefined) return true;
   return sessionStillGoing({
@@ -516,6 +528,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     const state = sessionStateOf(record, row, status);
     const going = countsAsRunning(record, row, status);
     const queued = queuedStartOf(row);
+    const upstreamRetry = upstreamRetryOf(row);
     const position = positions.get(record.conversationId);
     // 巡检报过停住、之后没有新活动：进行中列表标「已停住」，等它真的动起来才消失
     const stalled =
@@ -541,6 +554,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
         : {}),
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
+      ...(upstreamRetry ? { upstreamRetry } : {}),
       ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
       ...(going && record.backgroundPersistent ? { backgroundPersistent: true as const } : {}),
       ...(stalled ? { stalled } : {}),

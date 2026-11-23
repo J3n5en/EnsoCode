@@ -17,7 +17,12 @@ import {
   type PluginEventName,
   type PluginInterceptEvent,
 } from '@shared/extensionPlugins/events';
-import { PLUGIN_MESSAGE_TYPE, type PluginInjectImage } from '@shared/extensionPlugins/protocol';
+import {
+  PLUGIN_MESSAGE_TYPE,
+  type PluginInjectImage,
+  type PluginInjectOrigin,
+  type PluginInjectSender,
+} from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import type { ContextOccupancy, PluginInterceptRequest, TokenUsage } from '@shared/types/agent';
 
@@ -45,6 +50,8 @@ export interface PluginInjectMessage {
   images?: PluginInjectImage[];
   deliverAs: 'steer' | 'followUp' | 'nextTurn';
   triggerTurn: boolean;
+  origin?: PluginInjectOrigin;
+  sender?: PluginInjectSender;
 }
 
 type SendPluginMessage = ExtensionAPI['sendMessage'];
@@ -198,7 +205,12 @@ export class PluginEventInvoker {
               ]
             : message.text,
           display: true,
-          details: { pluginId: message.pluginId, pluginName: message.pluginName },
+          details: {
+            pluginId: message.pluginId,
+            pluginName: message.pluginName,
+            ...(message.origin ? { origin: message.origin } : {}),
+            ...(message.sender ? { sender: message.sender } : {}),
+          },
         },
         { deliverAs: message.deliverAs, triggerTurn: message.triggerTurn }
       );
