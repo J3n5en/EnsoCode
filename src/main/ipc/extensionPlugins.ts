@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import { getDraftBroker, getExtensionPlugins } from '../services/extensionPlugins';
 import { parseReadmeRequest } from '../services/extensionPlugins/readme';
 import { setPluginAssetResolver } from '../services/localImageProtocol';
+import { redactSecrets } from '../services/memory/distill';
 import { remoteSenderById } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers } from '../services/renderers';
 import { pluginProjectRoot } from './agent';
@@ -206,6 +207,7 @@ const HOST_LOG_ID = 'extension-plugins';
 /**
  * 日志文件名直接由 id 拼出（<root>/logs/<id>.log），不经登记表查找，
  * 所以 id 必须是插件 id 形态（不含 `/`、`..`），只有宿主日志单独放行。
+ * 插件可能把 token 打进日志：打码后才出 Main，面板显示和复制都拿不到原文。
  */
 export async function readPluginLogs(
   plugins: { logs(id: string): Promise<string> },
@@ -213,7 +215,7 @@ export async function readPluginLogs(
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const logId = id === HOST_LOG_ID ? HOST_LOG_ID : parsePluginId(id);
   if (!logId) return { ok: false, error: '参数不合法' };
-  return { ok: true, text: await plugins.logs(logId) };
+  return { ok: true, text: redactSecrets(await plugins.logs(logId)) };
 }
 
 export async function savePluginArtifact(
