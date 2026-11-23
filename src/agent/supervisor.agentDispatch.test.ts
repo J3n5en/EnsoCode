@@ -1825,7 +1825,11 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
             (event.type === 'status' && event.status === 'failed')
         )
       ).toEqual([
-        expect.objectContaining({ type: 'delivery-rejected', deliveryId: 'zombie-follow-up' }),
+        expect.objectContaining({
+          type: 'delivery-rejected',
+          deliveryId: 'zombie-follow-up',
+          reason: 'turn-stuck',
+        }),
       ]);
     } finally {
       vi.useRealTimers();

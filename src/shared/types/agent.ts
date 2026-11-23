@@ -2142,7 +2142,14 @@ export type AgentWorkerEvent =
       requestId: string;
     }
   | { type: 'delivery-settled'; identity: SessionIdentity; seq: number; deliveryId: string }
-  | { type: 'delivery-rejected'; identity: SessionIdentity; seq: number; deliveryId: string }
+  | {
+      type: 'delivery-rejected';
+      identity: SessionIdentity;
+      seq: number;
+      deliveryId: string;
+      /** 上一轮停不下来，限时内等不到空闲：重发多半还会撞上，要重开会话 */
+      reason?: 'turn-stuck';
+    }
   | { type: 'delivery-deferred'; identity: SessionIdentity; seq: number; deliveryId: string }
   | {
       type: 'status';
@@ -5197,7 +5204,12 @@ const agentWorkerEventParsers = {
     }
   ),
   'delivery-settled': parseDeliveryOutcome,
-  'delivery-rejected': parseDeliveryOutcome,
+  'delivery-rejected': (value) => {
+    const { reason, ...rest } = value;
+    return (reason === undefined || reason === 'turn-stuck') && parseDeliveryOutcome(rest)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  },
   'delivery-deferred': parseDeliveryOutcome,
   status: requireEventIdentity('any', (value: Record<string, unknown>): AgentWorkerEvent | null => {
     return (value.status === 'idle' || value.status === 'running' || value.status === 'failed') &&

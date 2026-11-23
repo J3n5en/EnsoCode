@@ -287,6 +287,19 @@ describe('agent control tool protocol', () => {
     }
   );
 
+  it('delivery-rejected 只认 turn-stuck 这一种原因', () => {
+    const event = {
+      type: 'delivery-rejected',
+      identity: parent,
+      seq: 3,
+      deliveryId: 'delivery-1',
+      reason: 'turn-stuck',
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, reason: 'other' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, deliveryId: '' })).toBeNull();
+  });
+
   it('formats branch background as quoted data, not a new task', () => {
     const note = workspaceBranchChangedNote('feature/branch');
     expect(note).toContain('<workspace-branch-changed>');

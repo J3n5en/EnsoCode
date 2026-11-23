@@ -2053,7 +2053,7 @@ export class SessionSupervisor {
             return false;
           }))
         ) {
-          this.emitDeliveryRejected(managed, command.deliveryId);
+          this.emitDeliveryRejected(managed, command.deliveryId, 'turn-stuck');
           return;
         }
         this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
@@ -5421,13 +5421,14 @@ export class SessionSupervisor {
             restoreTurn();
             return;
           } catch (retryError) {
-            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
             this.failTurn(managed, toErrorMessage(retryError));
+            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
             return;
           }
         }
-        if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+        // 拒收回执必须最后发：消费者收到回执就让出会话，之后才到的失败终态会被记到下一条投递头上
         this.failTurn(managed, message);
+        if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
       });
   }
 
@@ -5468,13 +5469,18 @@ export class SessionSupervisor {
   }
 
   /** 投递被拒收：交回执让上游重排，不把会话标成失败 */
-  private emitDeliveryRejected(managed: ManagedSession, deliveryId?: string): void {
+  private emitDeliveryRejected(
+    managed: ManagedSession,
+    deliveryId?: string,
+    reason?: 'turn-stuck'
+  ): void {
     if (!deliveryId) return;
     this.options.emit({
       type: 'delivery-rejected',
       identity: managed.identity,
       seq: ++managed.seq,
       deliveryId,
+      ...(reason ? { reason } : {}),
     });
   }
 
