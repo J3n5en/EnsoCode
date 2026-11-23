@@ -228,16 +228,32 @@ export async function ensureProviderModelsRefreshed(
     else onlineCatalogRefreshes.delete(providerId);
   });
   void entry.promise.finally(() => {
-    refreshModelDirectoryInBackground();
+    notifyOauthCatalogChanged();
   });
   await entry.promise;
 }
 
-/** 动态 import：oauthProviders 被 modelDirectory 经 settings 静态引用，不能反向静态依赖。 */
-function refreshModelDirectoryInBackground(): void {
-  void import('./modelDirectory')
-    .then(({ refreshModelDirectory }) => refreshModelDirectory())
-    .catch(() => {});
+const catalogListeners = new Set<() => void>();
+
+/**
+ * OAuth 模型清单（catalog 刷新、登录成功）变化后通知订阅者。
+ * 目录由 ipc/modelDirectory 订阅重算：oauthProviders 被 modelDirectory 经 settings 静态引用，不反向依赖它。
+ */
+export function onOauthCatalogChanged(listener: () => void): () => void {
+  catalogListeners.add(listener);
+  return () => {
+    catalogListeners.delete(listener);
+  };
+}
+
+function notifyOauthCatalogChanged(): void {
+  for (const listener of catalogListeners) {
+    try {
+      listener();
+    } catch {
+      // 订阅者异常不影响登录与 catalog 刷新
+    }
+  }
 }
 
 // ---- 账号身份缓存 ----
@@ -696,7 +712,7 @@ async function runOauthLogin(
       providerId,
       account: { key: accountKey, providerId, ...accountIdentity },
     });
-    refreshModelDirectoryInBackground();
+    notifyOauthCatalogChanged();
     broadcastOauthCredentialsChanged(sender);
   } catch (error) {
     const raw = error instanceof Error ? error.message : String(error);
