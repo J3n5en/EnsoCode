@@ -146,7 +146,7 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const stop = () => {
     setStopping(true);
     void window.electronAPI.agent
-      .abort(card.conversationId, { cancelReminders: true })
+      .abort(card.conversationId, { stopSubagents: true, cancelReminders: true })
       .finally(() => setStopping(false));
   };
   // 实时审批与提问由会话状态决定，清结果不会让它消失，所以只在原因是结果时给「知道了」
@@ -411,7 +411,7 @@ function FeedEntry({ event }: { event: FeedEvent }) {
     ? () => {
         setStopping(true);
         void window.electronAPI.agent
-          .abort(conversationId, { cancelReminders: true })
+          .abort(conversationId, { stopSubagents: true, cancelReminders: true })
           .finally(() => setStopping(false));
       }
     : undefined;

@@ -202,8 +202,8 @@ beforeEach(() => {
       delete: async () => ({ ok: true }),
     },
     agent: {
-      abort: async (id: string) => {
-        h.calls.push({ name: 'abort', args: id });
+      abort: async (id: string, options?: unknown) => {
+        h.calls.push({ name: 'abort', args: [id, options] });
       },
       respondApproval: async () => ({ ok: true }),
       respondAsk: async () => ({ ok: true }),
@@ -281,7 +281,10 @@ describe('SecretaryPanel', () => {
     expect(feed?.textContent).toContain('[Started]');
     click('[data-enso="secretary-feed-event"] button[aria-label="[Stop]"]');
     await flush();
-    expect(h.calls).toContainEqual({ name: 'abort', args: 'c1' });
+    expect(h.calls).toContainEqual({
+      name: 'abort',
+      args: ['c1', { stopSubagents: true, cancelReminders: true }],
+    });
   });
 
   it('动态行点主体只展开，右侧图标才打开会话', async () => {

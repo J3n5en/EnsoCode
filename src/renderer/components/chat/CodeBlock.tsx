@@ -54,7 +54,7 @@ export function CodeBlock({
 
   if (html == null) {
     return (
-      <div data-enso="code-block" className="group/code relative">
+      <div data-enso="code-block" data-language={language} className="group/code relative">
         <pre className={`${CODE_SURFACE} p-3 font-mono`}>
           <code>{code}</code>
         </pre>
@@ -63,7 +63,7 @@ export function CodeBlock({
     );
   }
   return (
-    <div data-enso="code-block" className="group/code relative">
+    <div data-enso="code-block" data-language={language} className="group/code relative">
       <div
         className={`${CODE_SURFACE} [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:bg-transparent! [&_pre]:p-3 [&_pre]:font-mono [&_pre]:[--shiki-dark-bg:transparent]!`}
         // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）

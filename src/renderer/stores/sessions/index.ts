@@ -3902,7 +3902,7 @@ export const useSessionsStore = create<SessionsState>()(
           if (!id) return;
           const conversation = get().conversations[id];
           if (!conversation?.started) return;
-          // 停止 = 用户接管：本轮收束不再自动续跑，活动目标一并暂停（可手动恢复）
+          // 停止 = 用户接管：本轮收束不再自动续跑，活动目标一并暂停（可手动恢复），在跑的子代理一并停掉
           // 只有在跑的轮次会回流收束来消费中断标记；空闲压缩中停止不置，否则标记残留吞掉下一轮
           const goal = conversation.goal;
           set((state) =>
@@ -3913,8 +3913,8 @@ export const useSessionsStore = create<SessionsState>()(
                 : {}),
             })
           );
-          // 用户停止：会话自己定的提醒一并取消
-          await window.electronAPI.agent.abort(id, { cancelReminders: true });
+          // 用户停止：一并停子代理、取消会话自己定的提醒
+          await window.electronAPI.agent.abort(id, { stopSubagents: true, cancelReminders: true });
         },
 
         setGoal(conversationId, text) {

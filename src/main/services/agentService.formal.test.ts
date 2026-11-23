@@ -60,6 +60,8 @@ interface Child {
   ending?: ChildSessionIdentity;
   dismissed: boolean;
   returnSpawn?: () => void;
+  /** 用户停止父会话时还在初始化：spawn 不应再起 Run */
+  cut?: boolean;
 }
 
 /** 子会话随回收 / worker 退出一起没了：后台任务被杀，持有随之失效 */
@@ -88,6 +90,7 @@ interface World {
   endedByParent: Set<string>;
   terminal: Map<string, string>;
   premature?: string;
+  revived?: string;
   ids: number;
 }
 
@@ -422,6 +425,7 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
           .spawn({ context, requestId: `p${i}`, description: `d${i}`, prompt: `p${i}`, mode })
           .then((spawned) => {
             if (!spawned.ok) return;
+            if (w.children[i]!.cut) w.revived ??= spawned.value.runId;
             w.children[i]!.agentId = spawned.value.agentId;
             w.runIds.push(spawned.value.runId);
           });
@@ -434,6 +438,17 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
       byParent(w, () => {
         u.stops++;
         return w.service.stop({ context, requestId: 'x', runId });
+      }),
+    ]);
+  }
+  // 用户停止父会话：名下所有未结束的 Run 一并收口，初始化中的 spawn 也不再起 Run
+  if (u.stops < cfg.stops && (inProgress(w).size > 0 || w.children.some((c) => c.returnSpawn))) {
+    out.push([
+      'user-stop',
+      byParent(w, () => {
+        u.stops++;
+        for (const c of w.children) if (c.returnSpawn) c.cut = true;
+        return w.service.cancelOwner('chat-1');
       }),
     ]);
   }
@@ -469,6 +484,7 @@ function key(w: World): string {
 
 function safetyViolation(w: World): string | null {
   if (w.premature) return `持有中的 Run ${w.premature} 被提前收口`;
+  if (w.revived) return `父会话已被用户停止，初始化中的 spawn 仍起了 Run ${w.revived}`;
   const sessions = [...internals(w).agents.values()].map((a) => a.identity.sessionId);
   if (new Set(sessions).size !== sessions.length) return '同一子会话对应多条 Agent 记录';
   for (const c of w.children) {

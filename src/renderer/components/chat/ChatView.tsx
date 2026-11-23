@@ -383,6 +383,7 @@ export function ChatView() {
         emptyTitle={project ? projectDisplayName(project) : 'EnsoCode'}
         onSuggestion={project ? pickSuggestion : undefined}
         timelineRef={timelineRef}
+        quotable
       />
 
       {/* 输入框常驻：时间线留底后，空间不够只压卡片摞，卡片摞内部滚动 */}

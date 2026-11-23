@@ -51,6 +51,7 @@ import {
   registerComposerInsert,
   registerComposerInsertImage,
   registerComposerInsertPaths,
+  registerComposerInsertQuote,
   registerComposerInsertText,
   registerComposerInsertUiElement,
   registerComposerSubmitPayload,
@@ -193,6 +194,9 @@ export function Composer({
       editorRef.current?.insertMention(candidate)
     );
     const unsubText = registerComposerInsertText((text) => editorRef.current?.insertText(text));
+    const unsubQuote = registerComposerInsertQuote((quote) =>
+      editorRef.current?.insertQuote(quote)
+    );
     const unsubFocus = registerComposerFocus(() => editorRef.current?.focus());
     const unsubUi = registerComposerInsertUiElement((candidate, image) => {
       if (image) {
@@ -225,6 +229,7 @@ export function Composer({
     return () => {
       unsubInsert();
       unsubText();
+      unsubQuote();
       unsubFocus();
       unsubUi();
       unsubImage();

@@ -163,6 +163,11 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Auto-collapse previous turns',
   },
   {
+    id: 'appearance.quoteSelectionButton',
+    category: 'appearance',
+    title: 'Quote button on text selection',
+  },
+  {
     id: 'appearance.collapseCompletedActivity',
     category: 'appearance',
     title: 'Collapse activity after reply',

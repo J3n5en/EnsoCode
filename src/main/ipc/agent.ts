@@ -897,7 +897,14 @@ export function abortRootFromMain(sessionId: string): void {
   // 秘书 session_stop 是叫停：会话自己定的提醒一并取消
   clearSessionReminders(sessionId);
   const identity = exactIdentity(sessionId);
-  if (identity) abortSession(identity);
+  if (identity) stopWithSubagents(identity);
+}
+
+/** 用户（或替用户的秘书）停止：根会话名下在跑的子代理一并停掉；插话立即发送 / 卡死重试只断当前轮 */
+function stopWithSubagents(identity: SessionIdentity): AgentActionResult {
+  const result = abortSession(identity);
+  if (!('parent' in identity)) void agentService?.cancelOwner(identity.sessionId);
+  return result;
 }
 
 /** 根会话的自定提醒到点：会话不在了就清掉，活着就触发，冷会话先打开，就绪后 worker 自己补发 */
@@ -1515,7 +1522,7 @@ function wirePairAgentBridge(): void {
       // 手机端停止：会话自己定的提醒一并取消
       clearSessionReminders(sessionId);
       const identity = exactIdentity(sessionId);
-      if (identity) abortSession(identity);
+      if (identity) stopWithSubagents(identity);
     },
     respondApproval: (sessionId, requestId, decision) => {
       const identity = exactIdentity(sessionId);
@@ -2967,21 +2974,15 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ABORT,
-    (_event, sessionId: unknown, options?: unknown): AgentActionResult => {
-      // 用户停止才带 cancelReminders；卡死重试、插话立即发送不带，提醒照留
-      if (
-        typeof options === 'object' &&
-        options !== null &&
-        'cancelReminders' in options &&
-        options.cancelReminders === true &&
-        typeof sessionId === 'string' &&
-        sessionId
-      )
-        clearSessionReminders(sessionId);
+    (_event, sessionId: unknown, options: unknown): AgentActionResult => {
       const identity = exactIdentity(sessionId);
-      return identity
-        ? abortSession(identity)
-        : { ok: false, error: 'invalid abort or stale session generation' };
+      if (!identity) return { ok: false, error: 'invalid abort or stale session generation' };
+      const flag = (key: 'stopSubagents' | 'cancelReminders') =>
+        typeof options === 'object' && options !== null && Reflect.get(options, key) === true;
+      // 用户停止才带 cancelReminders；卡死重试、插话立即发送不带，提醒照留
+      if (flag('cancelReminders')) clearSessionReminders(identity.sessionId);
+      const stopSubagents = flag('stopSubagents');
+      return stopSubagents ? stopWithSubagents(identity) : abortSession(identity);
     }
   );
 

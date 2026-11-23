@@ -110,8 +110,8 @@ const SECRET_PATTERNS: RegExp[] = [
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
   // Authorization: Bearer <token>
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
-  // URL 里的 user:pass@
-  /(\w+:\/\/[^\s/:@]+:)[^\s/@]+@/g,
+  // URL 里的 user:pass@；\b 锚住协议名开头，否则长串单词字符会逐位起跑回溯成 O(n²)
+  /\b(\w+:\/\/[^\s/:@]+:)[^\s/@]+@/g,
 ];
 // 引号值按完整字符串（含转义）打码；裸值至少 6 字符且不吞 JSON 边界，保留 null / false。
 const KV_PATTERN =

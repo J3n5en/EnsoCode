@@ -1,3 +1,5 @@
+import type { ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +16,19 @@ import {
   searchWorkspaceFiles,
   toRelativePosix,
 } from './workspaceFileSearch';
+
+// 原样转发 spawn，只记下最近一个子进程，供用例等它的输出真正到达
+const spawned = vi.hoisted(() => ({ last: null as ChildProcess | null }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: ((...args: Parameters<typeof actual.spawn>) => {
+      spawned.last = actual.spawn(...args);
+      return spawned.last;
+    }) as typeof actual.spawn,
+  };
+});
 
 describe('toRelativePosix', () => {
   it('只接受 cwd 内路径并转 posix', () => {
@@ -217,13 +232,23 @@ describe('runRipgrep 候选回退', () => {
   });
 
   it('超时杀进程并标记 timeout，保留已收到的输出', async () => {
-    const result = await runRipgrep(
-      [node],
-      ['-e', 'process.stdout.write("partial"); setTimeout(() => {}, 5000)'],
-      process.cwd(),
-      200
-    );
-    expect(result).toEqual({ code: 2, stdout: 'partial', failure: 'timeout' });
+    // 计时器从 spawn 起算，子进程冷启动可能比超时还慢；冻结计时器，等输出到了再让它到点
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const pending = runRipgrep(
+        [node],
+        ['-e', 'process.stdout.write("partial"); setInterval(() => {}, 1000)'],
+        process.cwd(),
+        200
+      );
+      const child = spawned.last as ChildProcess;
+      await once(child.stdout as NodeJS.ReadableStream, 'data');
+      vi.advanceTimersByTime(200);
+      expect(await pending).toEqual({ code: 2, stdout: 'partial', failure: 'timeout' });
+      expect(child.killed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('回退只 spawn PATH 上解析出的绝对路径，不执行工作目录里的 rg', async () => {

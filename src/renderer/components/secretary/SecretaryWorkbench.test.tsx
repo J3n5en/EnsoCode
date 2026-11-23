@@ -120,8 +120,8 @@ beforeEach(() => {
       onStateChanged: () => () => {},
     },
     agent: {
-      abort: async (conversationId: string) => {
-        h.calls.push({ name: 'abort', args: conversationId });
+      abort: async (conversationId: string, options?: unknown) => {
+        h.calls.push({ name: 'abort', args: [conversationId, options] });
       },
     },
   };
@@ -270,7 +270,10 @@ describe('SecretaryWorkbench 动态行：停止与跳转', () => {
   it('点停止只停止：不跳转，也不展开这一行', async () => {
     act(() => stopButton()?.click());
     await act(async () => {});
-    expect(h.calls).toContainEqual({ name: 'abort', args: 'c1' });
+    expect(h.calls).toContainEqual({
+      name: 'abort',
+      args: ['c1', { stopSubagents: true, cancelReminders: true }],
+    });
     expect(h.calls.some((call) => call.name === 'selectConversation')).toBe(false);
     expect(expandButton()?.getAttribute('aria-expanded')).toBe('false');
   });

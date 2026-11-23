@@ -1,5 +1,6 @@
 import { formatUiElementRefLine, parseUiElementRefLine } from '@shared/browser/designMode';
 import { splitPastedTextRefs } from '@shared/pastedText';
+import { formatQuoteBlock, INLINE_QUOTE_REF, quoteFromMatch } from '@shared/quoteBlock';
 import {
   cleanTitleSummarySource,
   extractRepresentativeTitle,
@@ -129,19 +130,31 @@ export interface SentMentionRefs {
 
 export type InlineSegment = { type: 'text'; text: string } | { type: 'file'; path: string };
 
-/** 编辑器段模型：文本 / 文件卡片 / 会话卡片 / Design Mode 选区 */
+/** 选中文本引用：originalLines 有值表示已截断 */
+export type QuoteSegment = { type: 'quote'; text: string; originalLines?: number };
+
+/** 编辑器段模型：文本 / 文件卡片 / 会话卡片 / Design Mode 选区 / 选中文本引用 */
 export type MentionSegment =
   | { type: 'text'; text: string }
   | { type: 'file'; path: string; label?: string }
   /** conversationId 只在编辑器里有（wire 文本不携带）：秘书点名授权按它走 */
   | { type: 'chat'; label: string; sessionFile: string; conversationId?: string }
-  | { type: 'ui-element'; id: string; label: string; path: string; text: string; imageId: string };
+  | { type: 'ui-element'; id: string; label: string; path: string; text: string; imageId: string }
+  | QuoteSegment;
 
-/** 编辑器段 → wire text：文件原位 @path（含空白时 @"path"），会话/选区原位内联引用块 */
+/** 编辑器段 → wire text：文件原位 @path（含空白时 @"path"），会话/选区原位内联引用块，
+ * 文本引用独占行（卡片后的占位空格不进 wire） */
 export function serializeSegments(segments: readonly MentionSegment[]): string {
-  return segments
-    .map((segment) => {
-      if (segment.type === 'text') return segment.text;
+  let out = '';
+  segments.forEach((segment, index) => {
+    const previous = segments[index - 1];
+    out += (() => {
+      if (segment.type === 'text') {
+        return previous?.type === 'quote' ? segment.text.replace(/^[\u00a0 ]/, '') : segment.text;
+      }
+      if (segment.type === 'quote') {
+        return `${out && !out.endsWith('\n') ? '\n' : ''}${formatQuoteBlock(segment)}\n`;
+      }
       if (segment.type === 'file') {
         return /\s/.test(segment.path) && !segment.path.includes('"')
           ? `@"${segment.path}"`
@@ -149,8 +162,9 @@ export function serializeSegments(segments: readonly MentionSegment[]): string {
       }
       if (segment.type === 'chat') return chatRefLine(segment.label, segment.sessionFile);
       return formatUiElementRefLine(segment);
-    })
-    .join('');
+    })();
+  });
+  return out;
 }
 
 /**
@@ -162,8 +176,10 @@ type InlineRefHit = { index: number; length: number; segment: MentionSegment };
 function nextInlineRef(text: string, from: number): InlineRefHit | null {
   INLINE_CHAT_REF.lastIndex = from;
   INLINE_UI_REF.lastIndex = from;
+  INLINE_QUOTE_REF.lastIndex = from;
   const chat = INLINE_CHAT_REF.exec(text);
   const ui = INLINE_UI_REF.exec(text);
+  const quote = INLINE_QUOTE_REF.exec(text);
   const chatHit: InlineRefHit | null = chat
     ? {
         index: chat.index,
@@ -180,8 +196,43 @@ function nextInlineRef(text: string, from: number): InlineRefHit | null {
           segment: { type: 'ui-element', id: '', ...parsedUi, imageId: '' },
         }
       : null;
-  if (chatHit && uiHit) return chatHit.index <= uiHit.index ? chatHit : uiHit;
-  return chatHit ?? uiHit;
+  let quoteHit: InlineRefHit | null = null;
+  if (quote) {
+    // 引用块独占行：连同前后各一个换行一起吃掉，避免气泡里多出空行
+    const lead = quote.index > from && text[quote.index - 1] === '\n' ? 1 : 0;
+    const tail = text[quote.index + quote[0].length] === '\n' ? 1 : 0;
+    quoteHit = {
+      index: quote.index - lead,
+      length: quote[0].length + lead + tail,
+      segment: { type: 'quote', ...quoteFromMatch(quote) },
+    };
+  }
+  return (
+    [quoteHit, chatHit, uiHit]
+      .filter((hit): hit is InlineRefHit => hit !== null)
+      .sort((a, b) => a.index - b.index)[0] ?? null
+  );
+}
+
+/**
+ * wire 文本回填输入框（回退 / 撤回）：只把引用块还原成引用卡片，其余原样当文本。
+ * 引用在末尾时补一个占位空格，光标才能落到卡片之后（serializeSegments 会丢掉它）。
+ */
+export function splitQuoteBlocks(text: string): MentionSegment[] {
+  const segments: MentionSegment[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(INLINE_QUOTE_REF)) {
+    const index = match.index ?? 0;
+    const lead = index > cursor && text[index - 1] === '\n' ? 1 : 0;
+    if (index - lead > cursor)
+      segments.push({ type: 'text', text: text.slice(cursor, index - lead) });
+    segments.push({ type: 'quote', ...quoteFromMatch(match) });
+    cursor = index + match[0].length;
+    if (text[cursor] === '\n') cursor += 1;
+  }
+  if (cursor < text.length) segments.push({ type: 'text', text: text.slice(cursor) });
+  else if (segments.at(-1)?.type === 'quote') segments.push({ type: 'text', text: '\u00a0' });
+  return segments;
 }
 
 export function splitInlineMentions(text: string): MentionSegment[] {
@@ -319,7 +370,10 @@ export function createEditorPayload(input: {
 }): ComposerPayload {
   const content = serializeSegments(input.segments).trim();
   const mentions: MentionCandidate[] = input.segments
-    .filter((segment) => segment.type !== 'text')
+    .filter(
+      (segment): segment is Exclude<MentionSegment, { type: 'text' | 'quote' }> =>
+        segment.type !== 'text' && segment.type !== 'quote'
+    )
     .map((segment) => {
       if (segment.type === 'file') {
         return {

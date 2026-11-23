@@ -7,6 +7,7 @@ import { interruptNotice } from '@shared/exitInterrupt';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { quotesAsMarkdown } from '@shared/quoteBlock';
 import { parseInboundMessage } from '@shared/secretary/inbound';
 import { splitInboundImageBlock } from '@shared/secretary/inboundImages';
 import {
@@ -81,6 +82,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -156,6 +158,7 @@ import { mentionChipClass } from './MentionChip';
 import { parseMemoryCapture, parseMemorySearchHits } from './memorySearchHits';
 import { fileMentionBasename, splitInlineMentions, splitMentionRefs } from './mentionComposer';
 import { PrivacyMaskBadge } from './PrivacyMaskBadge';
+import { splitQuoteFences } from './quoteSelection';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
 import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
@@ -829,7 +832,9 @@ function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
     <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-1">{chip}</div>
       {extra ? (
-        <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">{extra}</div>
+        <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">
+          <InlineMentionText text={extra} />
+        </div>
       ) : null}
     </div>
   );
@@ -972,6 +977,74 @@ function ChatRefCard({ label, sessionFile }: { label: string; sessionFile: strin
   );
 }
 
+const QUOTE_BLOCK_MAX_HEIGHT = 240;
+
+/** 选中文本引用块：左边框引用样式，代码围栏渲染为代码块，截断时标注原文行数；超高时底部渐隐，可展开 / 收起 */
+export function QuoteBlock({ text, originalLines }: { text: string; originalLines?: number }) {
+  const { t } = useI18n();
+  const bodyRef = useRef<HTMLSpanElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    // scrollHeight 是内容全高，不受 max-height 影响，折叠/展开下判定一致
+    const measure = () => setOverflowing(body.scrollHeight > QUOTE_BLOCK_MAX_HEIGHT + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
+  const clipped = overflowing && !expanded;
+  return (
+    <span
+      data-enso="quote-block"
+      className="mt-1 mb-2.5 block border-l-2 border-brand/40 pl-2.5 text-muted-foreground"
+    >
+      {originalLines ? (
+        <span data-quote-truncated="" className="mb-0.5 block text-[11px] text-warning">
+          {t('Truncated · original {{count}} lines', { count: originalLines })}
+        </span>
+      ) : null}
+      <span
+        ref={bodyRef}
+        data-quote-body=""
+        data-clipped={clipped ? '' : undefined}
+        style={clipped ? { maxHeight: QUOTE_BLOCK_MAX_HEIGHT } : undefined}
+        className={cn('block', clipped && 'overflow-hidden mask-b-from-60%')}
+      >
+        {splitQuoteFences(text).map((part, index) =>
+          part.type === 'code' ? (
+            <span
+              // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+              key={index}
+              data-quote-code=""
+              className="my-1 block overflow-x-auto whitespace-pre rounded-md bg-background/60 px-2 py-1 font-mono text-xs"
+            >
+              {part.code}
+            </span>
+          ) : (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            <span key={index}>{part.text}</span>
+          )
+        )}
+      </span>
+      {overflowing ? (
+        <button
+          type="button"
+          data-quote-toggle=""
+          data-quote-skip=""
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-0.5 text-[11px] text-muted-foreground/80 select-none hover:text-foreground"
+        >
+          {expanded ? t('Show less') : t('Show more')}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
 /** 正文里的 @path / chat 引用块原位渲染成卡片，其余文本原样 */
 function InlineMentionText({
   text,
@@ -1010,6 +1083,13 @@ function InlineMentionText({
             kind="ui-element"
             label={segment.label}
             title={`${segment.path}${segment.text ? ` · ${segment.text}` : ''}`}
+          />
+        ) : segment.type === 'quote' ? (
+          <QuoteBlock
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            key={index}
+            text={segment.text}
+            originalLines={segment.originalLines}
           />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
@@ -1332,7 +1412,10 @@ export function ReplyHeader({
   const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');
   if (!speaker && !meta && !privacyMask) return null;
   return (
-    <div className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none">
+    <div
+      data-quote-skip=""
+      className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none"
+    >
       {speaker &&
         (speaker.image ? (
           <img
@@ -2143,7 +2226,10 @@ function CollapsedTurnBar({
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 select-none">
+    <div
+      data-quote-skip=""
+      className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 select-none"
+    >
       <button
         type="button"
         onClick={() => onToggle?.(turnKey, false)}
@@ -2168,7 +2254,7 @@ function UserPromptCopy({ text }: { text: string }) {
   return (
     <span data-enso="copy-user-prompt" className="inline-flex">
       <CopyButton
-        text={text}
+        text={quotesAsMarkdown(text)}
         className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-visible:opacity-100"
       />
     </span>
@@ -2195,7 +2281,10 @@ function UserMeta({
   const { t } = useI18n();
   const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
   return (
-    <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
+    <div
+      data-quote-skip=""
+      className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none"
+    >
       <RewindButton messageIndex={messageIndex} />
       <ResendButton messageIndex={messageIndex} />
       <WithdrawButton messageIndex={messageIndex} />
@@ -2262,7 +2351,10 @@ function TextRow({
       />
       {item.turnEnd && !item.streaming && host?.turnFooter?.(Number(item.key.split('-')[0]))}
       {!item.streaming && (
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+        <div
+          data-quote-skip=""
+          className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+        >
           <PluginMessageActions position="left" {...pluginActionProps} />
           <CopyButton text={item.text} />
           <PluginMessageActions position="right" {...pluginActionProps} />
