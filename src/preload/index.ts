@@ -700,8 +700,16 @@ const electronAPI = {
       secretaryId?: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT, secretaryId),
-    contactTest: (secretaryId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST, secretaryId),
+    /** 不带 channelId 发 Telegram 测试消息；带插件渠道 id 是「立即重试」 */
+    contactTest: (
+      secretaryId?: string,
+      channelId?: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.SECRETARY_CONTACT_TEST,
+        secretaryId,
+        channelId ? { channelId } : undefined
+      ),
     /** 总开关 enabled、Telegram 老开关，或某个渠道卡片上的通用开关 */
     contactSettings: (
       patch:

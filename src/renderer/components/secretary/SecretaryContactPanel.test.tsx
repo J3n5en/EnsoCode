@@ -547,3 +547,92 @@ describe('群和话题入口', () => {
     ).toHaveLength(1);
   });
 });
+
+describe('插件渠道出站失败', () => {
+  function withWechat(
+    outbound?: SecretaryContactState['channels'][number]['outbound']
+  ): SecretaryContactState {
+    const base = contactState([]);
+    const telegram = base.channels[0];
+    if (!telegram) throw new Error('missing telegram');
+    return {
+      ...base,
+      channels: [
+        telegram,
+        {
+          ...telegram,
+          id: 'enso.clawbot:wechat',
+          title: '微信',
+          builtin: false,
+          pluginId: 'enso.clawbot',
+          ...(outbound ? { outbound } : {}),
+        },
+      ],
+    };
+  }
+  const wechatCard = () =>
+    container.querySelector(
+      '[data-enso="secretary-contact-channel"][data-channel="enso.clawbot:wechat"]'
+    );
+
+  it('暂停中：标出暂停推送，插件提示原样展示，带原因、最近失败时间与被拦下的条数', async () => {
+    state = withWechat({
+      state: 'paused',
+      consecutiveFailures: 3,
+      lastErrorAt: Date.now() - 60_000,
+      lastErrorCode: 'api',
+      detail: '[SESSION_EXPIRED] sendmessage ret=-2 prepare failed',
+      pluginCode: 'SESSION_EXPIRED',
+      userMessage: '微信会话已过期，请在微信里给机器人发任意一条消息',
+      pausedUntil: Date.now() + 5 * 60_000,
+      suppressedCount: 4,
+    });
+    await render('sec-a');
+    const card = wechatCard();
+    expect(
+      card?.querySelector('[data-enso="secretary-contact-channel-outbound"]')?.textContent
+    ).toBe('Pushes paused');
+    const notice = card?.querySelector('[data-enso="secretary-contact-outbound"]');
+    expect(notice?.getAttribute('data-state')).toBe('paused');
+    expect(notice?.textContent).toContain('Pushes paused: 3 sends failed in a row');
+    expect(
+      notice?.querySelector('[data-enso="secretary-contact-outbound-hint"]')?.textContent
+    ).toBe('微信会话已过期，请在微信里给机器人发任意一条消息');
+    expect(
+      notice?.querySelector('[data-enso="secretary-contact-outbound-detail"]')?.textContent
+    ).toBe('[SESSION_EXPIRED] sendmessage ret=-2 prepare failed');
+    expect(notice?.textContent).toContain('Last failure:');
+    expect(notice?.textContent).toContain('4 pushes held back.');
+    // Telegram 卡片不受影响
+    expect(
+      container.querySelector('[data-channel="telegram"] [data-enso="secretary-contact-outbound"]')
+    ).toBeNull();
+  });
+
+  it('立即重试：按渠道 id 调测试接口；发送失败的原因留在卡片上，不在顶部报 Telegram 错误', async () => {
+    state = withWechat({
+      state: 'degraded',
+      consecutiveFailures: 1,
+      lastErrorAt: Date.now(),
+      lastErrorCode: 'api',
+      detail: 'sendmessage ret=-2 prepare failed',
+      suppressedCount: 0,
+    });
+    contactTest.mockResolvedValueOnce({ ok: false, error: 'api' });
+    await render('sec-a');
+    const retry = container.querySelector(
+      '[data-channel="enso.clawbot:wechat"] [data-enso="secretary-contact-outbound-retry"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      retry.click();
+    });
+    expect(contactTest).toHaveBeenCalledWith('sec-a', 'enso.clawbot:wechat');
+    expect(errorBanner()).toBeNull();
+  });
+
+  it('发送正常时不显示失败块', async () => {
+    state = withWechat();
+    await render('sec-a');
+    expect(wechatCard()?.querySelector('[data-enso="secretary-contact-outbound"]')).toBeNull();
+  });
+});

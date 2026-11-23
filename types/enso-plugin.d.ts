@@ -224,13 +224,24 @@ export interface EnsoContactMedia {
   caption?: string;
 }
 
-/** 渠道实现：peerId 一律字符串；sendImage / sendFile 只在 caps 声明后调用，抛错算发送失败 */
+/**
+ * 渠道实现：peerId 一律字符串；sendImage / sendFile 只在 caps 声明后调用，抛错算发送失败。
+ * 抛的错误可以带 `EnsoContactSendError` 的可选字段，宿主据此在渠道卡片上提示用户。
+ */
 export interface EnsoContactChannel {
   caps: EnsoContactCaps;
   sendText(peerId: string, message: { text: string }): Promise<{ messageId?: string } | undefined>;
   typing?(peerId: string, state: { on: boolean }): Promise<unknown>;
   sendImage?(peerId: string, media: EnsoContactMedia): Promise<{ messageId?: string } | undefined>;
   sendFile?(peerId: string, media: EnsoContactMedia): Promise<{ messageId?: string } | undefined>;
+}
+
+/** 发送失败时可以抛的错误：普通 Error 也行，多带的字段都可选 */
+export interface EnsoContactSendError extends Error {
+  /** 稳定的错误码，如 `SESSION_EXPIRED` */
+  code?: string;
+  /** 给用户看的下一步，原样显示在渠道卡片上 */
+  userMessage?: string;
 }
 
 export interface EnsoContactInbound {

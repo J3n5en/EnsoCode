@@ -134,9 +134,11 @@ export function captureConsole(
 
 function toErrorShape(error: unknown): PluginErrorShape {
   const code = (error as { code?: unknown })?.code;
+  const userMessage = (error as { userMessage?: unknown })?.userMessage;
   return {
     code: typeof code === 'string' ? code : 'PLUGIN_ERROR',
     message: error instanceof Error ? error.message : String(error),
+    ...(typeof userMessage === 'string' && userMessage ? { userMessage } : {}),
   };
 }
 

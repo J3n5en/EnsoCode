@@ -1,6 +1,8 @@
 import type { PluginContactRequest } from '@shared/extensionPlugins/protocol';
+import { redactSecrets } from '@shared/redactSecrets';
 import type {
   ChannelCaps,
+  ChannelFailure,
   ChannelFile,
   ChannelImage,
   ChannelMessage,
@@ -21,9 +23,35 @@ function messageIdOf(value: unknown): string | undefined {
     : undefined;
 }
 
-function callError(error: unknown): ChannelSend {
-  const code = (error as { code?: unknown })?.code;
-  return { ok: false, error: code === 'TIMEOUT' ? 'network' : 'api' };
+/** 日志与界面里插件原因的上限：够看懂，又不会把整段响应刷进日志 */
+const DETAIL_MAX = 200;
+
+function clip(text: string): string {
+  const clean = redactSecrets(text.replace(/\s+/gu, ' ').trim());
+  return clean.length > DETAIL_MAX ? `${clean.slice(0, DETAIL_MAX)}…` : clean;
+}
+
+/** 插件抛的错：保留原因、插件 code 与给用户看的提示；旧插件只抛 Error 也照样有原因 */
+function callError(error: unknown): ChannelFailure {
+  const record = (error && typeof error === 'object' ? error : {}) as {
+    code?: unknown;
+    userMessage?: unknown;
+  };
+  const code = typeof record.code === 'string' ? record.code : undefined;
+  const message = clip(error instanceof Error ? error.message : String(error ?? ''));
+  const pluginCode = code && code !== 'PLUGIN_ERROR' ? code : undefined;
+  const detail = pluginCode ? `[${pluginCode}] ${message}` : message;
+  const userMessage =
+    typeof record.userMessage === 'string' && record.userMessage.trim()
+      ? clip(record.userMessage)
+      : undefined;
+  return {
+    ok: false,
+    error: code === 'TIMEOUT' ? 'network' : 'api',
+    ...(detail ? { detail } : {}),
+    ...(pluginCode ? { pluginCode } : {}),
+    ...(userMessage ? { userMessage } : {}),
+  };
 }
 
 /**
