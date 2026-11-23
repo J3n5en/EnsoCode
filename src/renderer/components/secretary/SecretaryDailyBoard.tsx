@@ -47,6 +47,7 @@ const COLUMNS: {
   stamp?: string;
 }[] = [
   { key: 'running', title: 'In progress', dot: '#3b82f6' },
+  { key: 'withSecretary', title: 'With secretary', dot: '#8b5cf6', stamp: 'With secretary' },
   { key: 'stopped', title: 'Stopped', dot: '#64748b', stamp: 'Stopped' },
   { key: 'needsYou', title: 'Needed you', dot: '#f59e0b', stamp: 'Needed you' },
   { key: 'done', title: 'What got done', dot: '#10b981', stamp: 'Completed' },
@@ -157,9 +158,15 @@ function DailyCard({
     column.stamp ? `${t(column.stamp)} ${stampOf(item.at, day, locale)}` : '',
   ].filter(Boolean);
   // 手动收口只对派发或接管跟踪的会话开放，普通会话不显示。
-  // 已停止的会话同时给「标记完成」和「移出」：一个收口成完成，一个只从看板上拿掉。
+  // 非完成态的跟踪会话统一给「标记完成」和「移出」：一个收口成完成，一个只从看板上拿掉。
   const mark = !item.tracked ? null : item.manual && column.key === 'done' ? 'undo' : null;
-  const settle = item.tracked && (column.key === 'running' || column.key === 'stopped');
+  const settle =
+    item.tracked &&
+    (column.key === 'running' ||
+      column.key === 'withSecretary' ||
+      column.key === 'stopped' ||
+      column.key === 'needsYou' ||
+      column.key === 'failed');
   // 已完成的会话卡不再行内展开：点开就是弹窗，先看结果
   const peekResult =
     column.key === 'done' && item.conversationId

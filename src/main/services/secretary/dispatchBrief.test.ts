@@ -1,41 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { hasDispatchBrief, todoDispatchPrompt } from './dispatchBrief';
-
-const facts = {
-  projectPath: '/repo/alpha',
-  branch: 'feat/secretary-agent',
-  worktree: true,
-};
+import { todoDispatchPrompt } from './dispatchBrief';
 
 describe('todoDispatchPrompt', () => {
-  it('只有标题时补上项目、当前分支、worktree、不推送和验收隔离', () => {
-    const prompt = todoDispatchPrompt('修看板发送', undefined, facts);
-    expect(prompt).toContain('项目：/repo/alpha');
-    expect(prompt).toContain('基于 feat/secretary-agent 新建分支');
-    expect(prompt).toContain('独立 worktree');
-    expect(prompt).toContain('不推送，也不合并。');
-    expect(prompt).toContain('独立目录和空闲端口');
-    expect(prompt.endsWith('修看板发送')).toBe(true);
-    expect(prompt).not.toBe('修看板发送');
+  it('不传 prompt 时直接使用待办原文，不注入推送、合并或验收约束', () => {
+    const prompt = todoDispatchPrompt('修看板发送');
+    expect(prompt).toBe('修看板发送');
+    expect(prompt).not.toMatch(/不推送|不合并|独立目录和空闲端口|不要改主检出/);
   });
 
-  it('秘书已经写了完整说明时原样使用，不重复套模板', () => {
+  it('传入 prompt 时以 prompt 为准，末尾附带待办原文（背景），不注入默认禁令', () => {
     const brief =
-      '基于 feat/secretary-agent 新建分支，在独立 worktree 里工作，不推送不合并。\n修通知';
-    expect(hasDispatchBrief(brief)).toBe(true);
-    expect(todoDispatchPrompt('修通知', brief, facts)).toBe(brief);
+      '修复上游错误恢复并补测试，开 PR，CI 绿后执行 gh pr merge --squash --delete-branch。';
+    const prompt = todoDispatchPrompt('上游错误恢复：429 自动退避', brief);
+    expect(prompt).toBe(`${brief}\n\n待办原文（背景）：\n上游错误恢复：429 自动退避`);
+    expect(prompt.startsWith(brief)).toBe(true);
+    expect(prompt).not.toMatch(/不推送|不合并|独立目录和空闲端口|不要改主检出|项目：/);
   });
 
-  it('没有分支名时不编一个分支', () => {
-    const prompt = todoDispatchPrompt('修看板发送', undefined, { ...facts, branch: null });
-    expect(prompt).toContain('基于当前检出新建分支');
-    expect(prompt).not.toContain('feat/secretary-agent');
+  it('传入的 prompt 已包含待办原文时不重复附带背景', () => {
+    const brief = '上游错误恢复：429 自动退避。\n开 PR 并在 CI 绿后 squash 合并。';
+    expect(todoDispatchPrompt('上游错误恢复：429 自动退避', brief)).toBe(brief);
   });
 
-  it('这次不建 worktree 时不说已经隔离', () => {
-    const prompt = todoDispatchPrompt('修看板发送', undefined, { ...facts, worktree: false });
-    expect(prompt).not.toContain('已建好的独立 worktree');
-    expect(prompt).toContain('当前分支是 feat/secretary-agent');
-    expect(prompt).toContain('不推送，也不合并。');
+  it('传入空白 prompt 时退回待办原文', () => {
+    expect(todoDispatchPrompt('  修看板发送  ', '   ')).toBe('修看板发送');
   });
 });

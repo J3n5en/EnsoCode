@@ -11,7 +11,6 @@ import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { appendInboundImageLines } from '@shared/secretary/inboundImages';
-import { wrapPluginDelivery } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   cleanToolBatchLabel,
@@ -163,8 +162,10 @@ import { exitInterruptionOf } from '../services/exitWindow';
 import {
   getExtensionPlugins,
   peekExtensionPlugins,
+  pluginOwnerBindings,
   setPluginSessionDirectory,
 } from '../services/extensionPlugins';
+import { resolvePluginInjectDelivery } from '../services/extensionPlugins/injectTrust';
 import { SessionStateTracker, turnEndSessionId } from '../services/extensionPlugins/sessionState';
 import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
 import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/externalFileReveal';
@@ -1879,13 +1880,15 @@ export function registerAgentHandlers(): void {
         return undefined;
       return identity;
     },
-    // 插件消息一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导。
-    // 声明了 agent.injectTrusted 的插件可以给普通会话发不包的任务；秘书会话不认，照包
-    (sessionId, pluginId, text, trusted) => {
+    (sessionId, input) => {
       const conversation = sourceAuthority?.conversation(sessionId);
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-      if (isSecretaryProject(project)) return wrapPluginDelivery(pluginId, redactSecrets(text));
-      return trusted ? text : wrapPluginDelivery(pluginId, text);
+      return resolvePluginInjectDelivery({
+        ...input,
+        isSecretarySession: isSecretaryProject(project),
+        ownerBindings: pluginOwnerBindings(),
+        redact: redactSecrets,
+      });
     }
   );
   const sessionSource = () => ({

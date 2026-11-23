@@ -70,6 +70,7 @@ describe('secretary tools', () => {
       expect(schema.properties.checkout).toMatchObject({ type: 'string' });
       expect(schema.properties.baseRef).toMatchObject({ type: 'string' });
       expect(schema.properties.branch).toMatchObject({ type: 'string' });
+      expect(schema.properties.goal).toMatchObject({ type: 'string', maxLength: 4000 });
       expect(schema.properties.after).toMatchObject({ type: 'array' });
       expect(schema.properties.after.items).toMatchObject({ type: 'string' });
       expect(schema.properties.attachments).toMatchObject({
@@ -78,6 +79,9 @@ describe('secretary tools', () => {
         items: { type: 'string' },
       });
     }
+    expect(
+      normalizeSecretaryParams('todo_item_dispatch', { todoId: 't1', goal: '修好并合进 main' })
+    ).toEqual({ todoId: 't1', goal: '修好并合进 main' });
     for (const name of ['session_create', 'todo_item_dispatch'] as const)
       expect(
         normalizeSecretaryParams(name, { projectId: 'p1', prompt: 'x', images: ' /tmp/a.png ' })

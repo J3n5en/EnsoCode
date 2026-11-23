@@ -534,6 +534,18 @@ export const zhTranslations: Record<string, string> = {
   'dcg required confirmation without details.': 'dcg 要求人工确认（未提供规则详情）。',
   'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.':
     '在系统共用的 Temp 根目录里删除，那里有其他程序的文件；只应在会话专属临时目录内删除。',
+  'Safety floor rule — still requires confirmation in full-access mode. Click Adjust to target a specific subdirectory or session temp folder, or Allow once.':
+    '属于安全底线规则，即使在完全放行模式下也会拦截。可点「调整」改用具体子目录或会话专属临时目录，或确认无误后单次放行。',
+  'Blocked by built-in guard — still requires confirmation in full-access mode. Review the command, click Adjust, or Allow once.':
+    '由内置守卫拦截，即使在完全放行模式下也会确认。请核对命令内容，可点「调整」或确认无误后单次放行。',
+  'Command guard could not finish rechecking the remaining command; confirm before running.':
+    '命令守卫未能完成其余语句的复检，执行前请人工确认。',
+  'High-risk safety floor (cannot be exempted) — still requires confirmation in full-access mode. Click Adjust for a safer command or path, or Allow once.':
+    '属于高危安全底线（不可豁免），即使在完全放行模式下也会拦截。可点「调整」更换更安全的命令或路径，或确认无误后单次放行。',
+  'Guard rule requires confirmation each time — still prompts in full-access mode. Click Adjust for a safer command, or Allow once.':
+    '该守卫规则要求每次确认，即使在完全放行模式下也会拦截。可点「调整」换用更安全的命令，或确认无误后单次放行。',
+  'Triggered by command guard — still prompts in full-access mode. Click Adjust to change the command or path, or manage exemptions in Settings (auto-suggested after 5 allows).':
+    '由命令守卫拦截，即使在完全放行模式下也会确认。可点「调整」更换命令或路径，或在设置中管理豁免（单次放行 5 次后也可在此直接豁免）。',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',
   'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.':
     '执行 bash 和 PowerShell 命令前先用 dcg 检查。命中 git reset --hard、递归删除等危险命令时，即使在完全放行模式下也必须由你确认。新会话生效。',
@@ -1281,6 +1293,7 @@ export const zhTranslations: Record<string, string> = {
   'Ask the agent…': '想让 agent 做什么…',
   'Thinking…': '思考中…',
   'Thought process': '思考过程',
+  'Collapse thinking': '收起思考过程',
   'Thought for {{duration}}': '思考了 {{duration}}',
   'Working…': '生成中…',
   'Map the project': '梳理项目结构',
@@ -1856,6 +1869,19 @@ export const zhTranslations: Record<string, string> = {
   'job:distill': '提炼',
   'job:entities': '实体',
   'job:vectors': '向量',
+  queued: '排队中',
+  'retry {{count}}': '第 {{count}} 次重试',
+  superseded: '已替代',
+  '{{count}} stored': '已存 {{count}} 条',
+  extracting: '抽取中',
+  'memory changed': '记忆已变更',
+  '{{entities}} entities · {{links}} links': '{{entities}} 个实体 · {{links}} 条关系',
+  '{{done}} vectorized': '已向量化 {{done}} 条',
+  '{{done}} vectorized · {{failed}} failed': '已向量化 {{done}} 条 · {{failed}} 条失败',
+  'importance too low': '重要度过低',
+  'similar memory already exists': '已有相似记忆',
+  'identical to an existing memory': '与已有记忆完全一致',
+  rejected: '已拒绝',
   'Show less': '收起',
   'Show full text': '展开全文',
   'Dispatch instructions': '派发指令',
@@ -2316,6 +2342,13 @@ export const zhTranslations: Record<string, string> = {
   'Pause goal': '暂停目标',
   'Resume goal': '继续目标',
   'Clear goal': '清除目标',
+  'Waiting for upstream recovery': '等待上游恢复',
+  'Waiting for upstream recovery · next {{time}}': '等待上游恢复 · 下次 {{time}}',
+  'Quota exhausted': '额度用完',
+  'Quota exhausted · next {{time}}': '额度用完 · 下次 {{time}}',
+  'Stop auto-retry': '停止自动重试',
+  'Upstream unavailable ({{provider}}), retrying automatically':
+    '上游不可用（{{provider}}），自动重试中',
   Plan: '计划',
   'Plan mode is on: read-only research, then a plan for your approval':
     'Plan 模式已开启：只读调研，产出计划交你审批',
@@ -3872,6 +3905,7 @@ export const zhTranslations: Record<string, string> = {
   'Previous day': '前一天',
   'Next day': '后一天',
   Dispatched: '派出',
+  'With secretary': '秘书处理中',
   'Needed you': '需要你',
   'To-dos done': '待办完成',
   Merged: '合并',

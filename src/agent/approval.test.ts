@@ -8,7 +8,7 @@ import {
   withProtectedFloor,
 } from './approval';
 import { takeApprovalReview } from './approvalReviewRecords';
-import type { CommandGuardHit } from './dcg';
+import type { CommandGuard, CommandGuardHit } from './dcg';
 
 // 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
 // options.review?: (info: ApprovalRequestInfo, signal: AbortSignal | undefined) =>
@@ -1068,6 +1068,198 @@ describe('dcg 命令守卫', () => {
     await vi.waitFor(() => expect(childInfos).toHaveLength(1));
     child.respond(childInfos[0].requestId, 'deny');
     await expect(pending).rejects.toThrow(/denied/);
+  });
+});
+
+describe('完全放行与临时目录守卫边界', () => {
+  const runWith = async (opts: {
+    mode: GateMode;
+    command: string;
+    tool?: string;
+    autoReject?: boolean;
+    sessionTempDir?: string;
+    innerGuard?: CommandGuard;
+  }) => {
+    const { withTempRootGuard } = await import('./dcg');
+    const infos: ApprovalRequestInfo[] = [];
+    const execute = vi.fn().mockResolvedValue({ content: [], details: {} });
+    const gate = new ApprovalGate(
+      opts.mode,
+      (info) => infos.push(info),
+      () => undefined,
+      {
+        autoReject: opts.autoReject,
+        sessionTempDir: opts.sessionTempDir,
+        commandGuard: withTempRootGuard(opts.innerGuard),
+      }
+    );
+    const toolName = opts.tool ?? 'bash';
+    const wrapped = withApproval(gate, 'command', {
+      name: toolName,
+      label: toolName,
+      description: '',
+      parameters: {} as never,
+      execute,
+    });
+    const promise = wrapped.execute(
+      'c-tmp',
+      { command: opts.command } as never,
+      undefined,
+      undefined,
+      undefined as never
+    );
+    return { gate, infos, execute, promise };
+  };
+
+  it('完全放行下，删除 /tmp/<具体子目录>、$TMPDIR/<具体子目录> 与会话专属临时目录不弹审批', async () => {
+    const dcgRmGeneral: CommandGuard = async (_tool, cmd) =>
+      /\brm\b/.test(cmd)
+        ? { ruleId: 'core.filesystem:rm-rf-general', reason: 'rm -rf is destructive' }
+        : null;
+    const dcgRootHomeForMacTmp: CommandGuard = async (_tool, cmd) =>
+      /\brm\b/.test(cmd)
+        ? { ruleId: 'core.filesystem:rm-rf-root-home', reason: 'rm -rf on root path' }
+        : null;
+
+    for (const command of [
+      'rm -rf /tmp/enso-verify-123',
+      'rm -rf /tmp/ohg-old && mkdir -p /tmp/ohg-old/dist\ncd /tmp && node probe-old.mjs',
+    ]) {
+      const { infos, execute, promise } = await runWith({
+        mode: 'full',
+        command,
+        innerGuard: dcgRmGeneral,
+      });
+      await promise;
+      expect(infos, command).toHaveLength(0);
+      expect(execute, command).toHaveBeenCalledOnce();
+    }
+
+    // 当运行环境设置了合法 TMPDIR 时，$TMPDIR/<具体子目录> 与 ${TMPDIR}/<具体子目录> 放行
+    vi.stubEnv('TMPDIR', '/var/folders/aa/bb/T');
+    try {
+      for (const command of [
+        'rm -rf "$TMPDIR/enso-verify-123"',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 写法
+        'rm -rf "${TMPDIR}/sub/dir"',
+      ]) {
+        const { infos, execute, promise } = await runWith({
+          mode: 'full',
+          command,
+          innerGuard: dcgRmGeneral,
+        });
+        await promise;
+        expect(infos, command).toHaveLength(0);
+        expect(execute, command).toHaveBeenCalledOnce();
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    const sessionDir = '/var/folders/aa/bb/T/enso-session-temp-501/sess-1';
+    const owned = await runWith({
+      mode: 'full',
+      command: `rm -rf "${sessionDir}/work"`,
+      sessionTempDir: sessionDir,
+      innerGuard: dcgRootHomeForMacTmp,
+    });
+    await owned.promise;
+    expect(owned.infos).toHaveLength(0);
+    expect(owned.execute).toHaveBeenCalledOnce();
+
+    // root-home 规则绝不对普通 /tmp/foo 或 ~ 放行（只认会话专属临时目录）
+    for (const cmd of ['rm -rf ~', 'rm -rf /tmp/foo']) {
+      const blocked = await runWith({
+        mode: 'full',
+        command: cmd,
+        sessionTempDir: sessionDir,
+        innerGuard: dcgRootHomeForMacTmp,
+      });
+      expect(blocked.infos, cmd).toHaveLength(1);
+      blocked.gate.cancelAll();
+      await expect(blocked.promise).rejects.toThrow();
+    }
+
+    // 复检剩余语句异常时 fail-closed 保留原命中
+    let calls = 0;
+    const throwingRecheck = await runWith({
+      mode: 'full',
+      command: 'rm -rf /tmp/foo && echo hi',
+      innerGuard: async () => {
+        calls++;
+        if (calls === 1) return { ruleId: 'core.filesystem:rm-rf-general', reason: 'general rm' };
+        throw new Error('guard boom');
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(throwingRecheck.infos).toHaveLength(1);
+    expect(throwingRecheck.infos[0]?.guard?.ruleId).toBe('core.filesystem:rm-rf-general');
+    throwingRecheck.gate.cancelAll();
+    await expect(throwingRecheck.promise).rejects.toThrow();
+  });
+
+  it('完全放行下，rm -rf /tmp/*、rm -rf /、含变量逃逸或混入危险命令照样拦', async () => {
+    const dcgGuard: CommandGuard = async (_tool, cmd) => {
+      if (/git\s+reset\s+--hard/.test(cmd)) {
+        return { ruleId: 'core.git:reset-hard', reason: 'destroys uncommitted changes' };
+      }
+      if (/\brm\b/.test(cmd)) {
+        return { ruleId: 'core.filesystem:rm-rf-root-home', reason: 'extremely dangerous' };
+      }
+      return null;
+    };
+
+    for (const command of [
+      'rm -rf /tmp/*',
+      'rm -rf /',
+      'rm -rf ~',
+      'rm -rf "$TMPDIR/$SUB"',
+      'rm -rf /tmp/foo/..',
+      'rm -rf "$TMPDIR/foo" && git reset --hard',
+      'rm -rf "$TMPDIR/foo" && rm -rf /',
+    ]) {
+      const { gate, infos, execute, promise } = await runWith({
+        mode: 'full',
+        command,
+        innerGuard: dcgGuard,
+      });
+      await vi.waitFor(() => expect(infos, command).toHaveLength(1));
+      gate.respond(infos[0].requestId, 'deny');
+      await expect(promise, command).rejects.toThrow(/denied/);
+      expect(execute, command).not.toHaveBeenCalled();
+    }
+  });
+
+  it('无人值守派出会话碰到守卫：不弹给用户，会话收到含规则与原因的拒绝消息', async () => {
+    const { infos, execute, promise } = await runWith({
+      mode: 'full',
+      autoReject: true,
+      command: 'rm -rf /tmp/*',
+    });
+    const error = await promise.catch((e: Error) => e);
+    expect(infos).toHaveLength(0);
+    expect(execute).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('enso.windows:temp-root-delete');
+    expect((error as Error).message).toMatch(/no user available to approve/i);
+  });
+
+  it('普通（非完全放行）模式：删除 /tmp/<具体子目录> 与 $TMPDIR/<具体子目录> 行为不变，仍走审批', async () => {
+    const dcgRmGeneral: CommandGuard = async () => ({
+      ruleId: 'core.filesystem:rm-rf-general',
+      reason: 'rm -rf is destructive',
+    });
+    const { gate, infos, execute, promise } = await runWith({
+      mode: 'supervised',
+      command: 'rm -rf "$TMPDIR/enso-verify-123"',
+      innerGuard: dcgRmGeneral,
+    });
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(infos[0].guard?.ruleId).toBe('core.filesystem:rm-rf-general');
+    expect(infos[0].protected).toBe('destructive');
+    gate.respond(infos[0].requestId, 'allow');
+    await promise;
+    expect(execute).toHaveBeenCalledOnce();
   });
 });
 

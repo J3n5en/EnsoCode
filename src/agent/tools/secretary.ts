@@ -197,6 +197,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'projectId',
       'prompt',
       'title',
+      'goal',
       'model',
       'worktree',
       'checkout',
@@ -792,17 +793,30 @@ const SCHEMAS: Record<
   },
   todo_item_dispatch: {
     description:
-      'Turn a todo item into a dispatched session. It runs right away like session_create, with the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions, plus the same optional model. Over the dispatch limit it is queued the same way as session_create (status "queued" with a position).',
+      'Turn a todo item into a dispatched session. It runs right away like session_create, with the same optional goal (defaults to the todo text), checkout / baseRef / branch to pin the base, after to wait for other sessions, and model. The first message uses the prompt you pass verbatim (with the todo text appended as background if not already included) and never injects default push or merge restrictions. Over the dispatch limit it is queued the same way as session_create (status "queued" with a position).',
     parameters: object(
       {
         todoId: id('Todo id'),
         projectId: id('Target project id'),
-        prompt: { type: 'string', minLength: 1, maxLength: 8000 },
+        prompt: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 8000,
+          description:
+            'Optional first message; defaults to the todo text. When passed, it is used as-is with the todo text appended as background.',
+        },
         title: {
           type: 'string',
           minLength: 1,
           maxLength: 200,
           description: 'Optional title; defaults to the todo text',
+        },
+        goal: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4000,
+          description:
+            'Optional goal; defaults to the todo text. The session keeps running until it is done or blocked.',
         },
         model: MODEL_SCHEMA,
         worktree: {

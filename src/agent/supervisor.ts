@@ -268,6 +268,7 @@ import {
   resolveOauthPoolModel,
 } from './oauthAccountPool';
 import { outputLimitRecoveryExtension } from './outputLimitRecovery';
+import { applyOwnerAskResolution, OwnerGate, withOwnerGate } from './ownerGate';
 import { withPathHints } from './pathHints';
 import { PendingNotificationStore } from './pendingNotifications';
 import { type PersonaHolder, personaExtension } from './personaExtension';
@@ -318,6 +319,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { sessionTempDir } from './sessionTempDir';
 import { killRunGroup, sweepOrphanRuns } from './shell/detachedRun';
 import { prepareElevation, withElevation } from './shell/elevation';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
@@ -498,6 +500,7 @@ interface ManagedSession {
   computer?: ComputerInvoker;
   pluginTools?: PluginToolInvoker;
   pluginEvents?: PluginEventInvoker;
+  ownerGate?: OwnerGate;
   /** 最近一次 auto_retry_start 携带的原始错误（取消重试时的终态错误文案） */
   lastRetryError?: string;
   /** 无人值守开关翻转后待告知模型的一条提示（只追加，不重开会话） */
@@ -2465,6 +2468,8 @@ export class SessionSupervisor {
           ...(command.images?.length ? { images: command.images } : {}),
           deliverAs: command.deliverAs,
           triggerTurn: command.triggerTurn,
+          ...(command.origin ? { origin: command.origin } : {}),
+          ...(command.sender ? { sender: command.sender } : {}),
         });
         if (!delivered?.ok) {
           console.warn('[plugin-inject]', delivered?.error ?? '会话未接受注入');
@@ -2928,6 +2933,7 @@ export class SessionSupervisor {
         commandGuard: withTempRootGuard(
           dcgPath ? withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) : undefined
         ),
+        sessionTempDir: remote ? null : sessionTempDir(sessionId, { cwd }),
       }
     );
     const checkpoints = new CheckpointManager(
@@ -3713,13 +3719,17 @@ export class SessionSupervisor {
     const readonlyAgentTypes = new Set(
       agentTypes.filter((type) => type.tools === 'readonly').map((type) => type.name)
     );
+    const ownerGate = new OwnerGate();
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) =>
-        withPlanGate(tool, {
-          host: planHost,
-          readonlyAgentTypes,
-          agentTypeOf: (agentId) => spawnedAgentTypes.get(agentId),
-        })
+        withOwnerGate(
+          withPlanGate(tool, {
+            host: planHost,
+            readonlyAgentTypes,
+            agentTypeOf: (agentId) => spawnedAgentTypes.get(agentId),
+          }),
+          ownerGate
+        )
       );
     // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具、插件工具与自造工具都不在其中。
     // 插件工具与自造工具的名字只认 Main 本次下发的描述符，不按前缀放行
@@ -3758,6 +3768,7 @@ export class SessionSupervisor {
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
     });
+    ownerGate.syncFromMessages(session.messages);
     installLongCacheRetention(session.agent, this.isLongCacheRetention);
     const codemodeTools = codemodeHost.activeToolNames();
     const cursorBridge = isCursorModel(piModel)
@@ -3781,6 +3792,7 @@ export class SessionSupervisor {
       checkpoints,
       runawayGuard: runaway,
     });
+    managedRef.ownerGate = ownerGate;
     // 秘书不订阅 MCP 热插拔：之后连上的 MCP 工具不走装配时的允许列表
     this.rememberMcpHotplug(
       sessionId,
@@ -3887,6 +3899,7 @@ export class SessionSupervisor {
       (requestId, resolution) => {
         const managed = this.sessions.get(identity.sessionId);
         if (managed && isSameGeneration(managed.identity, identity)) {
+          applyOwnerAskResolution(managed.ownerGate, resolution);
           this.options.emit({
             type: 'ask-resolved',
             identity: managed.identity,
@@ -4943,6 +4956,7 @@ export class SessionSupervisor {
         return;
       }
       case 'message_start': {
+        managed.ownerGate?.observeMessage(event.message);
         const index = managed.messages.length;
         const message = projectMessage(event.message);
         if (message?.role === 'assistant') {

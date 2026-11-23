@@ -37,6 +37,62 @@ export function parsePluginInjectImages(value: unknown): PluginInjectImage[] | n
   }
   return images;
 }
+
+/** 插件投递里的外部发送者。只保留这四个字段，插件自报的 owner / role 一律丢掉 */
+export interface PluginInjectSender {
+  channel: string;
+  chatId?: string;
+  userId?: string;
+  displayName?: string;
+}
+
+export type PluginInjectOrigin = 'owner' | 'external';
+
+const SENDER_CHANNEL = /^[a-zA-Z0-9._:-]{1,64}$/;
+
+function isSenderRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 缺省表示没填；空串、超长和非安全数字都是非法 */
+function parseSenderId(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) return null;
+    return String(value);
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length < 1 || trimmed.length > 128) return null;
+  return trimmed;
+}
+
+/**
+ * 边界解析插件自报的发送者。undefined 是没传；null 是传了但不合法。
+ * 只抄 channel / chatId / userId / displayName。
+ */
+export function parsePluginInjectSender(value: unknown): PluginInjectSender | null | undefined {
+  if (value === undefined) return undefined;
+  if (!isSenderRecord(value)) return null;
+  if (typeof value.channel !== 'string' || !SENDER_CHANNEL.test(value.channel.trim())) return null;
+  const userId = parseSenderId(value.userId);
+  if (userId === null) return null;
+  const chatId = parseSenderId(value.chatId);
+  if (chatId === null) return null;
+  if (value.displayName !== undefined && typeof value.displayName !== 'string') return null;
+  const displayName =
+    typeof value.displayName === 'string' ? value.displayName.trim().slice(0, 128) : '';
+  return {
+    channel: value.channel.trim(),
+    ...(userId ? { userId } : {}),
+    ...(chatId ? { chatId } : {}),
+    ...(displayName ? { displayName } : {}),
+  };
+}
+
+export function parsePluginInjectOrigin(value: unknown): PluginInjectOrigin | undefined {
+  return value === 'owner' || value === 'external' ? value : undefined;
+}
 /** 插件注入消息在会话里的 customType */
 export const PLUGIN_MESSAGE_TYPE = 'enso-plugin-message';
 

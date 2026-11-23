@@ -37,6 +37,8 @@ export type DcgSeverity = (typeof DCG_SEVERITIES)[number];
 
 export const DCG_EXPLANATION_MAX = 4000;
 export const DCG_MATCHED_MAX = 500;
+/** 内置系统 Temp 根删除守卫规则 ID（与 dcg 规则共存，跨层共享避免重复硬编码） */
+export const TEMP_ROOT_RULE_ID = 'enso.windows:temp-root-delete';
 
 /** dcg 命中；decision 缺省按 deny 处理 */
 export interface DcgGuardHit {

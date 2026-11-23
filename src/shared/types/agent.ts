@@ -56,10 +56,14 @@ import {
   type PluginAgentSource,
   type PluginArtifactInfo,
   type PluginInjectImage,
+  type PluginInjectOrigin,
+  type PluginInjectSender,
   type PluginMessageSource,
   parsePluginAgentRunEvent,
   parsePluginAgentSource,
   parsePluginInjectImages,
+  parsePluginInjectOrigin,
+  parsePluginInjectSender,
   parsePluginMessageSource,
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
@@ -1668,6 +1672,8 @@ export type AgentCommand =
       images?: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
+      origin?: PluginInjectOrigin;
+      sender?: PluginInjectSender;
     }
   | {
       type: 'rewind';
@@ -4520,22 +4526,35 @@ const agentCommandParsers = {
       : null;
   },
   'plugin-inject': (value: Record<string, unknown>): AgentCommand | null => {
-    return hasOnlyKeys(value, [...PLUGIN_INJECT_KEYS, 'images']) &&
-      PLUGIN_INJECT_KEYS.every((key) => key in value) &&
-      parsePluginInjectImages(value.images) !== null &&
-      parseSessionIdentity(value.identity) &&
-      isNonEmptyString(value.pluginId) &&
-      value.pluginId.length <= 128 &&
-      isNonEmptyString(value.pluginName) &&
-      value.pluginName.length <= 256 &&
-      isNonEmptyString(value.text) &&
-      isBoundedText(value.text, PLUGIN_INJECT_WIRE_MAX_CHARS) &&
-      (value.deliverAs === 'steer' ||
-        value.deliverAs === 'followUp' ||
-        value.deliverAs === 'nextTurn') &&
-      typeof value.triggerTurn === 'boolean'
-      ? (value as unknown as AgentCommand)
-      : null;
+    const sender = value.sender === undefined ? undefined : parsePluginInjectSender(value.sender);
+    if (value.sender !== undefined && !sender) return null;
+    const origin = value.origin === undefined ? undefined : parsePluginInjectOrigin(value.origin);
+    if (value.origin !== undefined && !origin) return null;
+    if (
+      !(
+        hasOnlyKeys(value, [...PLUGIN_INJECT_KEYS, 'images', 'origin', 'sender']) &&
+        PLUGIN_INJECT_KEYS.every((key) => key in value) &&
+        parsePluginInjectImages(value.images) !== null &&
+        parseSessionIdentity(value.identity) &&
+        isNonEmptyString(value.pluginId) &&
+        value.pluginId.length <= 128 &&
+        isNonEmptyString(value.pluginName) &&
+        value.pluginName.length <= 256 &&
+        isNonEmptyString(value.text) &&
+        isBoundedText(value.text, PLUGIN_INJECT_WIRE_MAX_CHARS) &&
+        (value.deliverAs === 'steer' ||
+          value.deliverAs === 'followUp' ||
+          value.deliverAs === 'nextTurn') &&
+        typeof value.triggerTurn === 'boolean'
+      )
+    )
+      return null;
+    if (!sender && !origin) return value as unknown as AgentCommand;
+    return {
+      ...(value as unknown as AgentCommand),
+      ...(origin ? { origin } : {}),
+      ...(sender ? { sender } : {}),
+    };
   },
   'workflow-stop': (value: Record<string, unknown>): AgentCommand | null => {
     return hasExactKeys(value, ['type', 'identity', 'runId']) &&

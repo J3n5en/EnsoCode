@@ -7,6 +7,7 @@ import {
   type UnavailableImage,
 } from '@shared/secretary/attachments';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
+import { hasNeedsUser } from '@shared/secretary/goalResult';
 import { probeImageView, readImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
@@ -53,6 +54,7 @@ import {
   type SecretaryAuditEntry,
   type SecretaryBoard,
   type SecretaryClaimView,
+  type SecretaryDailyRecord,
   type SecretaryDispatchFile,
   type SecretaryProfile,
   type SecretaryProfileDraft,
@@ -66,11 +68,13 @@ import {
   type SecretaryUntrackedView,
   type TakeoverVia,
 } from '@shared/types/secretary';
+import { classifyUpstreamError, nextPendingRetryDelayMs } from '@shared/upstreamRecovery';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { peekEventClaimStore } from '../eventClaims';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
+import { appendDailyRecord } from './dailyLog';
 import { todoDispatchPrompt } from './dispatchBrief';
 import {
   followDepsFor,
@@ -172,6 +176,8 @@ export interface SecretaryDispatchPorts {
   todos(): MaybePromise<SecretaryTodo[]>;
   saveTodos(todos: SecretaryTodo[]): void;
   audit(entry: SecretaryAuditEntry): void;
+  /** 追加按天回看的结果记录（如手动标记完成）；缺省表示不落 daily.jsonl */
+  recordDaily?(entry: SecretaryDailyRecord): void;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   /** projectId → 用户起的别名；缺省按无别名 */
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
@@ -241,8 +247,6 @@ export interface SecretaryDispatchPorts {
   ): Promise<{ ok: boolean; error?: string }>;
   newId(): string;
   now(): number;
-  /** 项目当前分支；不是 git 仓库或读失败时返回 null */
-  branch(repoPath: string): MaybePromise<string | null>;
   /** 派发基线的既成事实：checkout 归属、同仓库、ref 与分支是否存在 */
   baseFacts(input: {
     projectPath: string;
@@ -716,12 +720,20 @@ async function sessionLabelOf(
 
 async function noteDispatchResumed(
   ports: SecretaryDispatchPorts,
-  conversationId: string
+  conversationId: string,
+  options?: { newGoal?: boolean }
 ): Promise<void> {
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
   if (!record) return;
   const now = ports.now();
+  // 手动标记完成的会话，只有发了新 goal 才解除完成锁定；普通追问/回复不拉回进行中
+  if (record.lastResult?.manual === true && !options?.newGoal) {
+    record.lastEventAt = now;
+    record.sentAt = now;
+    ports.saveDispatch(file);
+    return;
+  }
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
@@ -774,6 +786,12 @@ function todoTitle(text: string): string | undefined {
     .split('\n')
     .map((line) => line.trim())
     .find(Boolean);
+}
+
+/** 待办派发未显式传 goal 时，用待办文本作为默认 goal，确保巡检与续跑生效 */
+function todoDefaultGoal(text: string): string | undefined {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, 4000) : undefined;
 }
 
 function draftFromParams(params: Record<string, unknown>): DispatchDraft | null {
@@ -1282,6 +1300,7 @@ export async function startPendingDispatches(
     const file = ports.dispatchFile();
     const pending = file.pending?.[pendingId];
     if (pending?.status !== 'waiting') continue;
+    if (pending.nextRetryAt !== undefined && now < pending.nextRetryAt) continue;
     const outcome = pendingOutcome(await dependencyFacts(ports, file, pending.after));
     if (outcome.kind === 'wait') continue;
     if (outcome.kind === 'failed') {
@@ -1296,6 +1315,40 @@ export async function startPendingDispatches(
     if (Object.keys(claimed.pending).length === 0) delete claimed.pending;
     ports.saveDispatch(claimed);
 
+    const retryOrFailPending = async (error: string): Promise<void> => {
+      const classified = classifyUpstreamError({ error }, now);
+      if (classified.kind !== 'permanent') {
+        const nextAttempt = (pending.retryCount ?? 0) + 1;
+        const delay = nextPendingRetryDelayMs(nextAttempt);
+        if (delay !== null) {
+          const latest = ports.dispatchFile();
+          latest.pending = {
+            ...(latest.pending ?? {}),
+            [pending.id]: {
+              ...pending,
+              status: 'waiting',
+              updatedAt: now,
+              retryCount: nextAttempt,
+              nextRetryAt: now + delay,
+              lastError: error,
+            },
+          };
+          ports.saveDispatch(latest);
+          ports.audit({
+            at: now,
+            secretaryConversationId: pending.secretaryConversationId,
+            op: 'dispatch_pending',
+            targetId: pending.id,
+            ok: false,
+            detail: `transient-retry ${nextAttempt} ${error}`,
+          });
+          notifySecretaryChanged();
+          return;
+        }
+      }
+      await failPending(ports, pending, 'dispatch-failed', undefined, error);
+    };
+
     const profile = await profileOf(ports);
     const validated = validateDispatch(
       pending.draft,
@@ -1307,7 +1360,7 @@ export async function startPendingDispatches(
     }
     const base = await checkBase(ports, validated.draft);
     if (!base.ok) {
-      await failPending(ports, pending, 'dispatch-failed', undefined, base.error);
+      await retryOrFailPending(base.error);
       continue;
     }
     const { attachments: paths, ...draft } = validated.draft;
@@ -1330,7 +1383,7 @@ export async function startPendingDispatches(
           paths?.length ? await loadPendingAttachments(paths) : undefined
         );
     if (created.kind === 'failed') {
-      await failPending(ports, pending, 'dispatch-failed', undefined, created.error);
+      await retryOrFailPending(created.error);
       continue;
     }
     if (created.kind === 'pending') continue;
@@ -1847,7 +1900,7 @@ export function createSecretaryDispatchHandlers(
             );
           }
           await track();
-          await noteDispatchResumed(ports, conversationId);
+          await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
           ports.audit({
             at: ports.now(),
             secretaryConversationId: ctx.secretaryConversationId,
@@ -1872,7 +1925,7 @@ export function createSecretaryDispatchHandlers(
           return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
         await track();
-        await noteDispatchResumed(ports, conversationId);
+        await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
         ports.audit({
           at: ports.now(),
           secretaryConversationId: ctx.secretaryConversationId,
@@ -1916,7 +1969,7 @@ export function createSecretaryDispatchHandlers(
         ok: true,
         detail: `sent (${source})${imageNote}`,
       });
-      await noteDispatchResumed(ports, conversationId);
+      await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
       notifySecretaryChanged();
       return { ok: true, result: { status: 'sent' } };
     },
@@ -2023,10 +2076,14 @@ export function createSecretaryDispatchHandlers(
         if (record.lastState !== 'idle') record.stateSince = now;
         record.lastState = 'idle';
         record.stoppedAt = now;
+        // 停之前已经交过完成结果保留；其余历史失败/受阻随主动停止清掉
+        if (record.lastResult && record.lastResult.kind !== 'goal-complete')
+          delete record.lastResult;
         delete record.backgroundRunning;
         delete record.reopenedAt;
         delete record.stalledTurn;
         delete record.patrol;
+        delete record.failurePending;
         ports.saveDispatch(file);
       }
       const stopped = markTodoProblem(await ports.todos(), conversationId, 'stopped', ports.now());
@@ -2473,25 +2530,16 @@ export function createSecretaryDispatchHandlers(
         return auditFailure(ports, ctx, 'todo_item_dispatch', 'project-required', todoId);
       }
       const title = stringParam(params, 'title') ?? todoTitle(todo.text);
-      const project = (await ports.projects()).find(
-        (candidate) => candidate.projectId === projectId
-      );
       // 待办多半是改代码的活：秘书没说就开 worktree，只读调查时它会显式传 false
       const worktree = typeof params.worktree === 'boolean' ? params.worktree : true;
-      const branch = project ? await ports.branch(project.canonicalPath) : null;
       const base = baseFromParams(params);
+      const goal = stringParam(params, 'goal') ?? todoDefaultGoal(todo.text);
       const draft: DispatchDraft = {
         projectId,
-        prompt: todoDispatchPrompt(todo.text, stringParam(params, 'prompt'), {
-          projectPath: project?.canonicalPath ?? projectId,
-          branch,
-          worktree,
-          ...(base?.checkout ? { checkout: base.checkout } : {}),
-          ...(base?.baseRef ? { baseRef: base.baseRef } : {}),
-          ...(base?.branch ? { newBranch: base.branch } : {}),
-        }),
+        prompt: todoDispatchPrompt(todo.text, stringParam(params, 'prompt')),
         // 不给标题时会话按 prompt 开头起名，prompt 常以共同背景开头，几个会话会重名
         ...(title ? { title } : {}),
+        ...(goal ? { goal } : {}),
         worktree,
         todoId,
         ...(base ?? {}),
@@ -2752,6 +2800,8 @@ export async function markResult(
     record.lastResult = { kind: 'goal-complete', turn: record.turn, at: now, manual: true };
     if (record.lastState !== 'idle') record.stateSince = now;
     record.lastState = 'idle';
+    delete record.stoppedAt;
+    delete record.failurePending;
     delete record.backgroundRunning;
     delete record.backgroundPersistent;
     delete record.leftoverTasks;
@@ -2760,6 +2810,17 @@ export async function markResult(
     delete record.dismissedFromBoard;
     if (closedGoal) record.closedGoal = closedGoal;
     else delete record.closedGoal;
+    if (ports.recordDaily) {
+      const row = (await ports.rows())[conversationId];
+      const title = typeof row?.title === 'string' && row.title.trim() ? row.title.trim() : '';
+      ports.recordDaily({
+        at: now,
+        conversationId,
+        kind: 'goal-complete',
+        ...(record.projectId ? { projectId: record.projectId } : {}),
+        ...(title ? { title: redactSecrets(title) } : {}),
+      });
+    }
   } else if (action === 'dismiss') {
     // 移出只动看板记录：不标完成，不碰会话与历史
     if (record.lastState !== 'idle') record.stateSince = now;
@@ -2801,8 +2862,13 @@ export function dismissResult(
   const record = file.dispatched[conversationId];
   if (!record) return { ok: false, error: 'not-found' };
   const result = record.lastResult;
-  if (!result || !NEEDS_YOU_RESULTS.has(result.kind))
-    return { ok: false, error: 'not-dismissible' };
+  const needsUser =
+    result !== undefined &&
+    (NEEDS_YOU_RESULTS.has(result.kind) ||
+      ((result.kind === 'goal-complete' || result.kind === 'goal-blocked') &&
+        !result.manual &&
+        hasNeedsUser(record.goalResult)));
+  if (!result || !needsUser) return { ok: false, error: 'not-dismissible' };
   record.lastResult = { ...result, dismissed: true };
   ports.saveDispatch(file);
   ports.audit({
@@ -3060,6 +3126,7 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
       store().saveTodos(todos);
     },
     audit: (entry) => appendAudit(ctx.dir, entry),
+    recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
     cleanup: realCleanupPorts(ctx),
     projects: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
@@ -3208,14 +3275,6 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     },
     newId: () => randomUUID(),
     now: () => Date.now(),
-    branch: async (repoPath) => {
-      try {
-        const { currentBranch } = await import('../worktree/service');
-        return await currentBranch(repoPath);
-      } catch {
-        return null;
-      }
-    },
     baseFacts: async (input) => {
       const { probeDispatchBase } = await import('../worktree/service');
       return probeDispatchBase(input);

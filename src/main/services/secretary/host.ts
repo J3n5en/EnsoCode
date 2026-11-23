@@ -38,6 +38,7 @@ import type {
   SecretaryTodo,
   SecretaryUpdate,
 } from '@shared/types/secretary';
+import { formatRetryClock, type GoalUpstreamRetry } from '@shared/upstreamRecovery';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import { autoArchivable, autoArchived, liveTasks } from './autoArchive';
@@ -79,6 +80,7 @@ import {
   stalled,
   UPDATE_WINDOW_MS,
   updateKey,
+  upstreamRetryOf,
 } from './results';
 import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
@@ -267,6 +269,8 @@ function resultEventOf(
       // 应用退出窗口内的断流：Main 已改判成中断，不能报成失败
       if (event.interrupted)
         return { type: 'turn-interrupted', at: event.interrupted.at, kind: event.interrupted.kind };
+      // 上游瞬态/配额故障已进入自动退避等待：不按失败推送，避免向秘书和用户误报 failed
+      if (upstreamRetryOf(row)) return null;
       return { type: 'turn-failed', error: event.error };
     case 'goal-signal':
       return { type: 'goal-signal', kind: event.kind };
@@ -285,6 +289,13 @@ function deliveryOutcome(event: RendererAgentEvent): 'done' | 'failed' | null {
   if (event.type === 'turn-completed') return event.aborted ? 'failed' : 'done';
   if (event.type === 'turn-failed' || event.type === 'worker-exited') return 'failed';
   return null;
+}
+
+function upstreamWaitingSummary(retry: GoalUpstreamRetry): string {
+  const clock = formatRetryClock(retry.at);
+  return retry.kind === 'quota'
+    ? `额度用完，自动重试中（下次 ${clock}）`
+    : `上游不可用，自动重试中（下次 ${clock}）`;
 }
 
 function failureDetail(error: string | undefined): string | undefined {
@@ -733,6 +744,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     turnReport?: TurnReport,
     goalResult?: GoalResultView
   ): void {
+    // 手动标记完成的会话不再被后续迟到的受阻、轮次结束、停滞、失败拉回；
+    // 只有撤销标记或秘书发来新 goal 才会清掉 manual 标记重新跟踪
+    if (record.lastResult?.manual === true && kind !== 'goal-complete') return;
+    // 主动停止且未重新打开的会话：忽略停后迟到的报错/受阻/停滞噪声
+    if (
+      record.stoppedAt !== undefined &&
+      record.reopenedAt === undefined &&
+      kind !== 'goal-complete'
+    )
+      return;
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
     // 有了新结果，用户撤销标记的「放回进行中」到此为止
@@ -925,6 +946,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           ? { awaitingReplySince: record.sentAt }
           : {}),
         ...(reminderPending(record.conversationId, now) ? { reminderPending: true } : {}),
+        ...(upstreamRetryOf(rows[record.conversationId]) ? { upstreamWaiting: true } : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {
@@ -1084,6 +1106,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       changed = true;
       if (ports.status(record.conversationId).state !== 'error') continue;
       if (ports.continuesAfterExit?.(record.conversationId)) continue;
+      if (upstreamRetryOf(ports.rows()[record.conversationId])) continue;
       record.turn += 1;
       delete record.reopenedAt;
       recordResult(file, record, 'failed', now, pending.detail);
@@ -1230,9 +1253,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (!record) continue;
         const status = ports.status(conversationId);
         const own = sessionId === conversationId;
+        const upstreamRetry = upstreamRetryOf(rows[conversationId]);
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed')) {
           record.turn += 1;
           delete record.failurePending;
+        }
+        if (own && event.type === 'turn-failed' && upstreamRetry) {
+          record.lastText = upstreamWaitingSummary(upstreamRetry);
+          record.lastState = 'idle';
+          changed = true;
         }
         if (own && event.type === 'goal-signal' && event.kind === 'complete') {
           pendingComplete.add(conversationId);
@@ -1270,6 +1299,29 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
         if (change && change.state !== 'error') delete record.failurePending;
+        // 用户或重试让会话重新进入运行态：清掉历史非完成终态与停止标记，状态以本次为准
+        if (
+          change?.state === 'running' &&
+          change.previous !== 'running' &&
+          record.lastResult?.manual !== true
+        ) {
+          delete record.stoppedAt;
+          delete record.failurePending;
+          if (record.lastResult && record.lastResult.kind !== 'goal-complete')
+            delete record.lastResult;
+        }
+        // 用户在会话界面主动中止：停之前没交过完成结果的按「已停止」收口，不算失败
+        if (own && event.type === 'turn-completed' && event.aborted) {
+          delete record.failurePending;
+          if (record.lastResult?.kind !== 'goal-complete') {
+            record.stoppedAt = now;
+            delete record.backgroundRunning;
+            delete record.reopenedAt;
+            delete record.stalledTurn;
+            delete record.patrol;
+            if (record.lastResult) delete record.lastResult;
+          }
+        }
         // 空闲时命令直接抛错只有 status=failed、不会再有 turn-failed：先挂起等配对，到点补记。
         // 正在跑或等人时的 status=failed 不终止这一轮，之后照常有终态，不挂。
         if (
@@ -1278,7 +1330,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           event.status === 'failed' &&
           change?.state === 'error' &&
           change.previous === 'idle' &&
-          awaitsOutcome(record)
+          awaitsOutcome(record) &&
+          record.lastResult?.manual !== true &&
+          !(record.stoppedAt !== undefined && record.reopenedAt === undefined)
         ) {
           const failure = failureDetail(event.error);
           record.failurePending = { at: now, ...(failure ? { detail: failure } : {}) };
@@ -1340,7 +1394,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         // status=failed 通常和随后的 turn-failed 成对出现，这里不记，避免同一次失败推两遍；
         // 等不到 turn-failed 的到点补记（failurePending）。worker 退出没有 turn-failed，仍靠状态变化记失败。
-        if (!kind && change && event.type !== 'status') {
+        if (!kind && !upstreamRetry && change && event.type !== 'status') {
           // worker 是所有会话共用的，它退出时空闲会话也会跳到 error；没在干活就不算失败
           if (
             change.state === 'error' &&

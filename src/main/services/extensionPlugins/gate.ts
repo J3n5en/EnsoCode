@@ -20,7 +20,9 @@ import {
   type PluginHostApi,
   type PluginHostCapabilities,
   type PluginInjectImage,
+  type PluginInjectSender,
   parsePluginInjectImages,
+  parsePluginInjectSender,
 } from '@shared/extensionPlugins/protocol';
 import { parseStatusPatch, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import type { SpawnModelConfig } from '@shared/types/agent';
@@ -234,6 +236,7 @@ export interface GateDeps {
       claimGroup?: string;
       claimSubscribedAt?: number;
       claimCandidates?: EventClaimCandidate[];
+      sender?: PluginInjectSender;
     }
   ): SessionAttempt;
   /** 让发起窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
@@ -785,6 +788,8 @@ export class PluginHostGate {
         if (a.trusted !== undefined && typeof a.trusted !== 'boolean')
           throw pluginError('INVALID_ARGS', 'trusted 不合法');
         const claim = this.readClaimRequest(a);
+        const sender = parsePluginInjectSender(a.sender);
+        if (sender === null) throw pluginError('INVALID_ARGS', 'sender 不合法');
         const bridge = this.deps.inject;
         if (!bridge) throw pluginError('UNSUPPORTED', '当前环境不能注入消息');
         this.admitInject(pluginId);
@@ -796,6 +801,7 @@ export class PluginHostGate {
           triggerTurn: a.triggerTurn === true,
           trusted: a.trusted === true,
           ...claim,
+          ...(sender ? { sender } : {}),
         };
         const result = await this.untilRunning(
           () => bridge(pluginId, input),
