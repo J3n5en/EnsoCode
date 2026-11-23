@@ -1,4 +1,4 @@
-import type { PluginInjectSender } from '@shared/extensionPlugins/protocol';
+import type { PluginInjectSender } from '../extensionPlugins/protocol';
 
 export const DEMAND_THREAD_STATUSES = [
   'open',
