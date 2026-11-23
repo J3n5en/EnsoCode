@@ -6,7 +6,7 @@ import type {
   ModelReasoningOverride,
   ModelThinkingLevelOverride,
 } from '@shared/types';
-import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
+import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types/llm';
 import { ChevronDown, Trash2 } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';

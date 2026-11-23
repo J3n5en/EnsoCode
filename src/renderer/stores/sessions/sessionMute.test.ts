@@ -1,5 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SessionsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cachedPartializeSessions } from './persistSnapshot';
 
 const setSessionMuted = vi.fn();
@@ -54,11 +53,7 @@ vi.stubGlobal('window', {
   },
 });
 
-let sessions: typeof SessionsModule;
-
-beforeAll(async () => {
-  sessions = await import('./index');
-});
+const sessions = await import('./index');
 
 const conv = (id: string, extra: Record<string, unknown> = {}) => ({
   id,

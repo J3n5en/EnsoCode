@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { WebContents } from 'electron';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -596,7 +596,10 @@ describe('settings广播策略', () => {
     expect(disk()?.state.conversations).toEqual({ a: { id: 'a', title: 'a' } });
     expect(mocks.sends[0]).toHaveBeenCalledWith(IPC_CHANNELS.CONVERSATIONS_RESYNC);
 
+    const removed = vi.fn();
+    settings.onConversationsRemoved(removed);
     expect(await remove(sender, ['a'])).toBe(true);
+    expect(removed).toHaveBeenCalledWith(['a']);
     await write(sender, 'enso-conversations', empty, seq);
     expect(disk()?.state).toMatchObject({ conversations: {}, order: [] });
 

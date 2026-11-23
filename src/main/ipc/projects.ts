@@ -3,13 +3,13 @@ import path from 'node:path';
 import { app, ipcMain, shell } from '@platform';
 import { conversationCwd } from '@shared/conversationCwd';
 import { resolveSshTarget } from '@shared/ssh';
-import { IPC_CHANNELS } from '@shared/types';
 import {
   parseCreateProjectAuthorityRequest,
   parseRemoveProjectAuthorityRequest,
   parseSelectProjectAuthorityRequest,
 } from '@shared/types/agent';
-import { listProjectCodeSources } from '../../agent/projectCode';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { listProjectCodeSources } from '../../agent/projectCodeSources';
 import { createHostDir, listHostDirs } from '../services/hostDirs';
 import { openInApps } from '../services/openInApps';
 import { getRecentProjects } from '../services/recentProjects';

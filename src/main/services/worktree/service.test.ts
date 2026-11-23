@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSessionWorktree,
+  deleteUntouchedSessionBranch,
   probeDispatchBase,
   rebuildSessionWorktree,
   removeSessionWorktree,
@@ -322,6 +323,35 @@ describe('removeSessionWorktree', () => {
     rmSync(record.path, { recursive: true, force: true });
     await expect(removeSessionWorktree(record)).resolves.toBeUndefined();
     expect(runGit(repo, 'worktree', 'list')).not.toContain(record.path);
+  });
+});
+
+describe('deleteUntouchedSessionBranch', () => {
+  it('worktree 删掉后，还停在基线上的分支一并删除', async () => {
+    const record = await createSessionWorktree({
+      repoPath: repo,
+      conversationId: 'c-untouched',
+      projectId: 'p1',
+      root,
+    });
+    await removeSessionWorktree(record, root);
+    await deleteUntouchedSessionBranch(record);
+    expect(runGit(repo, 'branch', '--list', record.branch)).toBe('');
+  });
+
+  it('分支上有新提交就保留', async () => {
+    const record = await createSessionWorktree({
+      repoPath: repo,
+      conversationId: 'c-touched',
+      projectId: 'p1',
+      root,
+    });
+    writeFileSync(join(record.path, 'b.txt'), 'b\n');
+    runGit(record.path, 'add', '.');
+    runGit(record.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'b');
+    await removeSessionWorktree(record, root);
+    await deleteUntouchedSessionBranch(record);
+    expect(runGit(repo, 'branch', '--list', record.branch)).toContain(record.branch);
   });
 });
 

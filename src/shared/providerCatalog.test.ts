@@ -6,7 +6,7 @@ import {
   resolvePiProviderBaseUrl,
   STATIC_PROVIDER_DEFINITIONS,
 } from './providerCatalog';
-import { MODEL_API_KINDS } from './types';
+import { MODEL_API_KINDS } from './types/llm';
 
 describe('provider catalog', () => {
   it('每种 ModelApiKind 都有唯一共享默认地址', () => {

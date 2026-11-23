@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   catalogEntryFromPairSession,
   catalogQueued,
+  catalogQueueOverride,
   patchCatalogEntry,
   upsertCatalogEntry,
 } from './headlessCatalog';
@@ -45,5 +46,29 @@ describe('headless catalog', () => {
     expect(
       catalogQueued([{ id: 'q1', text: 'hi', images: [{ data: 'x', mimeType: 'image/png' }] }])
     ).toEqual([{ id: 'q1', text: 'hi', hasImages: true }]);
+  });
+
+  it('queuedStart 行是 queued，失败不占位次', () => {
+    expect(
+      catalogQueueOverride(
+        {
+          id: 'a',
+          secretaryOrigin: { secretaryConversationId: 'sec' },
+          queuedStart: { queuedAt: 2, text: 'go' },
+        },
+        1
+      )
+    ).toEqual({ status: 'queued', queuePosition: 1 });
+    expect(
+      catalogQueueOverride(
+        {
+          id: 'b',
+          secretaryOrigin: { secretaryConversationId: 'sec' },
+          queuedStart: { queuedAt: 1, text: 'go', failed: { at: 3, error: 'full' } },
+        },
+        undefined
+      )
+    ).toEqual({ status: 'queued', queueFailed: 'full' });
+    expect(catalogQueueOverride({ id: 'c' }, 1)).toBeUndefined();
   });
 });

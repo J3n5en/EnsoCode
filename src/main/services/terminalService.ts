@@ -3,9 +3,8 @@ import os from 'node:os';
 import type { RendererContents } from '@platform';
 import { resolveTerminalShellFile, type TerminalShell } from '@shared/terminalShell';
 import type { TerminalCreateRequest, TerminalCreateResult } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
-import type { IPty } from 'node-pty';
-import { spawn } from 'node-pty';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { type IPty, spawn } from 'node-pty';
 
 interface TerminalEntry {
   pty: IPty;

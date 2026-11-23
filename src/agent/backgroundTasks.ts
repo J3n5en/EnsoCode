@@ -1518,6 +1518,7 @@ export function withBackground(
       `Never background a command with ${terms.detach} — set background: true on ${name}, which tracks the job and wakes you when it ends.`,
       `A ${name} yield receipt means the command is still running as a background job, not that it failed: do not rerun it and do not poll it (task_output loops, sleep) — continue other work or end your turn; its completion wakes you automatically.`,
       `timeout only kills — it does not extend the foreground wait. If a command may outlast the yield (~${yieldSec(limits.yieldDefaultMs)}s; ~${yieldSec(limits.yieldBuildMs)}s for builds), set background: true from the start and end your turn. Never poll with ${terms.poll}, or task_output loops.`,
+      'To wait for CI, a deploy or another external result, set a reminder with remind_me (when available) and end your turn; do not keep a sleep or --watch command running just to wait.',
     ],
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };

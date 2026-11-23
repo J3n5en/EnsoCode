@@ -19,6 +19,7 @@ import {
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
 import {
+  AlarmClock,
   Archive,
   Bell,
   BellOff,
@@ -785,7 +786,13 @@ function SessionRow({
         active ? 'bg-brand/10 dark:bg-brand/15' : 'hover:bg-muted/60'
       )}
     >
-      <StatusDot status={session.status} unread={session.unread} />
+      <StatusDot
+        status={session.status}
+        unread={session.unread}
+        conversationId={session.id}
+        queuePosition={session.queuePosition}
+        queueFailed={session.queueFailed}
+      />
       {session.pinned && <Pin className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
       {session.muted && (
         <BellOff className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="静音" />
@@ -914,12 +921,41 @@ function ProjectGroup({
 }
 
 /** 与桌面 ConversationDot 同款 */
-function StatusDot({ status, unread }: { status: string; unread?: boolean }) {
+function StatusDot({
+  status,
+  unread,
+  conversationId,
+  queuePosition,
+  queueFailed,
+}: {
+  status: string;
+  unread?: boolean;
+  conversationId?: string;
+  queuePosition?: number;
+  queueFailed?: string;
+}) {
+  const { t } = useI18n();
+  if (status === 'queued' && !queueFailed) {
+    const title = t('Queued · #{{n}}, starts automatically when a slot opens', {
+      n: queuePosition ?? 1,
+    });
+    return (
+      <AlarmClock
+        className="h-3.5 w-3.5 shrink-0 text-orange-500"
+        aria-label={title}
+        title={title}
+        data-enso="conversation-queued"
+        data-conversation-id={conversationId}
+        data-tone="queued"
+      />
+    );
+  }
   const running = status === 'running';
-  const failed = !running && status === 'failed';
+  const failed = !running && (status === 'failed' || (status === 'queued' && Boolean(queueFailed)));
   const showUnread = !running && !failed && unread === true;
   return (
     <span
+      title={queueFailed}
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
         running && 'animate-pulse bg-brand',

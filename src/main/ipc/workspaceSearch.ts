@@ -1,7 +1,6 @@
 import path from 'node:path';
-import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { app, ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { parseWorkspaceSearchQueryRequest } from '@shared/workspaceSearchQuery';
 import { isMainRenderer } from '../services/renderers';
 import { queryWorkspaceSearchIndex } from '../services/workspaceSearchIndex';
@@ -38,6 +37,7 @@ export function registerWorkspaceSearchHandlers(): void {
           ];
         }),
       listSessions: async (dir) => {
+        const { SessionManager } = await import('@earendil-works/pi-coding-agent');
         const listed = await SessionManager.listAll(dir);
         return listed.map((info) => ({
           path: info.path,

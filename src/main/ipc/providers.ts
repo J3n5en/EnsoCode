@@ -6,7 +6,7 @@ import {
 } from '@shared/oauthFlow';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { listClassifierModels } from '../services/classifierModels';
 import { queryModelMeta } from '../services/modelMeta';
 import { refreshModelCatalogNow } from '../services/modelsDevCatalog';

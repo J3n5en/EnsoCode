@@ -1,5 +1,5 @@
 import { app, ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { isAutoRestartMode, resolveAutoRestartMode } from '@shared/updater/idleRestart';
 import { readSettings } from '../../main/ipc/settings';
 import { allowRemoteHostControl } from '../../main/services/remoteRenderer';

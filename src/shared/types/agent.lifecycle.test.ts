@@ -4,9 +4,9 @@ import {
   parseAgentWorkerEvent,
   parseResolvedChildProfileProof,
   parseTitleSummaryInput,
-  TURN_REPORT_MAX_CHARS,
 } from './agent';
 import { child, model, parent, proof, RECEIPT_ID } from './agent.testUtils';
+import { TURN_REPORT_MAX_CHARS } from './agentConstants';
 
 describe('removed project memory protocol', () => {
   it('拒绝旧记忆管线命令与进度事件', () => {
@@ -447,6 +447,15 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentWorkerEvent({ ...completed, continues: '' })).toBeNull();
     expect(parseAgentWorkerEvent({ ...failed, continues: 1 })).toBeNull();
   });
+
+  it('turn-completed 的 awaitingReminder 只接受 true', () => {
+    const completed = { type: 'turn-completed', identity: parent, seq: 1, turnId: 'turn-2' };
+    expect(parseAgentWorkerEvent({ ...completed, awaitingReminder: true })).toEqual({
+      ...completed,
+      awaitingReminder: true,
+    });
+    expect(parseAgentWorkerEvent({ ...completed, awaitingReminder: false })).toBeNull();
+  });
 });
 
 describe('generation lifecycle/events', () => {
@@ -762,6 +771,14 @@ describe('重启保留后台命令的协议', () => {
     expect(parseAgentWorkerEvent({ type: 'session-wake-requested', sessionId: '' })).toBeNull();
     expect(
       parseAgentWorkerEvent({ type: 'session-wake-requested', sessionId: 'a', extra: 1 })
+    ).toBeNull();
+    expect(parseAgentWorkerEvent({ type: 'session-reminder-due', sessionId: 'conv-1' })).toEqual({
+      type: 'session-reminder-due',
+      sessionId: 'conv-1',
+    });
+    expect(parseAgentWorkerEvent({ type: 'session-reminder-due', sessionId: '' })).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ type: 'session-reminder-due', sessionId: 'a', extra: 1 })
     ).toBeNull();
     const unopened = {
       type: 'unopened-background-tasks',

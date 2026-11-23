@@ -2,9 +2,8 @@ import path from 'node:path';
 import { ipcMain } from '@platform';
 import { fetchPresetImport } from '@shared/presetImport';
 import type { InstructionEntry, McpServerEntry, SkillEntry } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { projectTrustedCode } from '@shared/types/project';
-import { snapshotBuiltinOccupancyTools } from '../../agent/builtinOccupancy';
 import {
   deleteCustomWorkflowPreset,
   listBuiltinWorkflowPresets,
@@ -31,7 +30,6 @@ import {
   parseOccupancyIds,
 } from '../services/assetOccupancy';
 import { collectAssetImport, scanLocalAssets } from '../services/assetScan';
-import { listProjectSkills, listSkillsAt } from '../services/assetScan/skills';
 import { resolveLocalCwdForBrowser } from '../services/browserFileRoot';
 import {
   deleteInstruction,
@@ -102,7 +100,8 @@ export function registerAssetHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS,
-    (_event, cwd: unknown, presetId: unknown) => {
+    async (_event, cwd: unknown, presetId: unknown) => {
+      const { listProjectSkills, listSkillsAt } = await import('../services/assetScan/menuSkills');
       const agentDir = path.join(agentDataDir(), 'pi-agent');
       // 插件 skill 只在 spawn 时进会话命令；新对话发送前按所选预设预览，与 spawn 同口径
       const plugin = listSkillsAt(
@@ -188,9 +187,10 @@ export function registerAssetHandlers(): void {
     return occupancyForMcp(parseOccupancyIds(ids), servers, listMcpOccupancyTools);
   });
 
-  ipcMain.handle(IPC_CHANNELS.ASSETS_BUILTIN_TOOL_OCCUPANCY, () =>
-    occupancyForBuiltinTools(snapshotBuiltinOccupancyTools())
-  );
+  ipcMain.handle(IPC_CHANNELS.ASSETS_BUILTIN_TOOL_OCCUPANCY, async () => {
+    const { snapshotBuiltinOccupancyTools } = await import('../../agent/builtinOccupancy');
+    return occupancyForBuiltinTools(snapshotBuiltinOccupancyTools());
+  });
 
   // 只收 id：读取位置由 Main 按登记条目推导，旧调用方多传的 local / sourcePath 不再采信
   ipcMain.handle(IPC_CHANNELS.INSTRUCTIONS_READ, (_event, id: unknown) => {

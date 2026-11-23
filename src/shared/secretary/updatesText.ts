@@ -5,7 +5,12 @@ import { unescapeUntrusted } from './transcript';
 export type SecretaryUpdateLine =
   | { kind: SecretaryResultKind; text: string; conversationId?: string; detail?: string }
   | { kind: 'proposal' | 'schedule' | 'pending'; text: string; detail?: string }
-  | { kind: 'ask-relay' | 'leftover'; text: string; conversationId?: string; detail?: string };
+  | {
+      kind: 'ask-relay' | 'leftover' | 'queued';
+      text: string;
+      conversationId?: string;
+      detail?: string;
+    };
 
 const BLOCK = /^<(session-updates|secretary-schedule)>\n([\s\S]*?)\n<\/\1>(?:\n|$)/;
 const HEAD = /^- \[([a-z-]+)(?: (?:session|pending):([^\]\s]+))?\] ([^\n]*)(?:\n|$)/;
@@ -31,6 +36,8 @@ function lineOf(
   if (kind === 'ask-relay') return conversationId ? { kind, text, conversationId } : null;
   // 遗留巡检也要点名会话：秘书据此用 session_task_stop 停掉
   if (kind === 'leftover') return conversationId ? { kind, text, conversationId } : null;
+  // 排队会话启动失败或被取消：点名会话，秘书据此决定重派或告诉用户
+  if (kind === 'queued') return conversationId ? { kind, text, conversationId } : null;
   if (!isResultKind(kind)) return null;
   return conversationId ? { kind, text, conversationId } : { kind, text };
 }

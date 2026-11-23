@@ -1,7 +1,6 @@
 import { statSync } from 'node:fs';
 import { ipcMain } from '@platform';
 import type { GitDiffResult } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
 import type {
   GitCommitDiffRequest,
   GitCommitRequest,
@@ -12,6 +11,7 @@ import type {
   GitPathsRequest,
   GitRequest,
 } from '@shared/types/git';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { diffHead, localGitDiffHost } from '../services/gitDiff';
 import {
   GitOperationError,

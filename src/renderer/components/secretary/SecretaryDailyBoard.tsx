@@ -32,6 +32,7 @@ import { formatClock } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
+import { GoalResultFacts } from './GoalResultFacts';
 
 /**
  * 列的顺序与配色照 EnsoCode 的 kanban 插件：色值取自插件 PALETTE，
@@ -346,6 +347,7 @@ function DailyCard({
             <span className="truncate">{t('Session')}</span>
           </button>
         )}
+        {item.goalResult && <GoalResultFacts view={item.goalResult} />}
         <span data-enso="secretary-daily-times" className="tabular-nums">
           {times.length > 0 ? times.join(' · ') : stampOf(item.at, day, locale)}
         </span>

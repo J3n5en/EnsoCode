@@ -1,4 +1,4 @@
-export type ConversationDotTone = 'running' | 'failed' | 'waiting' | 'unread' | 'idle';
+export type ConversationDotTone = 'running' | 'failed' | 'waiting' | 'unread' | 'queued' | 'idle';
 
 export interface PendingAskMark {
   requestId: string;
@@ -47,8 +47,11 @@ export function conversationDotTone(input: {
   unread?: boolean;
   pendingAskCount?: number;
   hasRunningChild?: boolean;
+  /** 排队尚未启动。启动失败不要传它，把 status 标成 failed */
+  queued?: boolean;
 }): ConversationDotTone {
   if (input.status === 'failed' && !input.spawning) return 'failed';
+  if (input.queued) return 'queued';
   if ((input.pendingAskCount ?? 0) > 0) return 'waiting';
   if (input.status === 'running' || input.spawning || input.hasRunningChild) return 'running';
   if (input.unread) return 'unread';

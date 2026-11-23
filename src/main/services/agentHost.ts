@@ -60,38 +60,34 @@ import {
 import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
-  projectDisabledBuiltinTools,
-  projectTrustedCode,
-  resolveDisabledBuiltinTools,
-  resolveEditMode,
-} from '@shared/types';
-import type {
-  AgentCommand,
-  AgentRemoteConfig,
-  AgentSessionCustomEntry,
-  AgentSpawnRequest,
-  AgentTypeSpawnConfig,
-  AgentWorkerEvent,
-  ApprovalDecision,
-  ApprovalMode,
-  AttachedImage,
-  McpOAuthRefreshResult,
-  McpServerSpawnConfig,
-  ModelRef,
-  ResolvedAgentTypeSpawnConfig,
-  RestartReplyProgress,
-  SessionReloadResult,
-  SpawnModelConfig,
-  SubagentModelOption,
-  ThinkingLevel,
-  TitleSummaryInput,
-  VirtualClassifierCredentials,
-  VirtualSpawnClassifier,
-  WorkerCustomProvider,
-  WorkerExitedEvent,
+  type AgentCommand,
+  type AgentRemoteConfig,
+  type AgentSessionCustomEntry,
+  type AgentSpawnRequest,
+  type AgentTypeSpawnConfig,
+  type AgentWorkerEvent,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type AttachedImage,
+  type McpOAuthRefreshResult,
+  type McpServerSpawnConfig,
+  type ModelRef,
+  parseAgentCommand,
+  parseAgentWorkerEvent,
+  type ResolvedAgentTypeSpawnConfig,
+  type RestartReplyProgress,
+  type SessionReloadResult,
+  type SpawnModelConfig,
+  type SubagentModelOption,
+  type ThinkingLevel,
+  type TitleSummaryInput,
+  type VirtualClassifierCredentials,
+  type VirtualSpawnClassifier,
+  type WorkerCustomProvider,
+  type WorkerExitedEvent,
+  type WorkerSwappedEvent,
 } from '@shared/types/agent';
-import { parseAgentCommand, parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
-import type { SubagentModelEntry } from '@shared/types/assets';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   type AgentTypeEntry,
   BUILTIN_AGENT_TYPES,
@@ -99,8 +95,14 @@ import {
   type McpServerEntry,
   type Preset,
   type SkillEntry,
+  type SubagentModelEntry,
 } from '@shared/types/assets';
-import { persistedSettingsState } from '@shared/types/builtinTools';
+import {
+  persistedSettingsState,
+  projectDisabledBuiltinTools,
+  resolveDisabledBuiltinTools,
+} from '@shared/types/builtinTools';
+import { resolveEditMode } from '@shared/types/editMode';
 import type { RestartBlocker, RestartWaitReason } from '@shared/types/ipc';
 import {
   MODEL_REASONING_OVERRIDES,
@@ -111,6 +113,7 @@ import {
   type ModelThinkingLevelOverride,
 } from '@shared/types/llm';
 import type { AgentDispatchTask } from '@shared/types/mentions';
+import { projectTrustedCode } from '@shared/types/project';
 import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { parseDisabledWorkflowPresets } from '@shared/types/workflow';
 import {
@@ -309,7 +312,8 @@ export async function selectOauthPoolAccount(
 }
 /** worker 已过 'spawn'：在此之前 postMessage 不保证送达（含已 fork 未 spawn 的窗口） */
 let workerReady = false;
-let onEvent: ((event: AgentWorkerEvent | WorkerExitedEvent) => void) | null = null;
+let onEvent: ((event: AgentWorkerEvent | WorkerExitedEvent | WorkerSwappedEvent) => void) | null =
+  null;
 /** worker 就绪前到达的快照请求，spawn 后补发。true = 全量，string = 单会话。 */
 let snapshotPending: false | true | string = false;
 /** worker 已 fork 未 spawn 窗口内到达的命令：postMessage 不保证送达，spawn 后按序补发 */
@@ -342,7 +346,7 @@ export function setPinnedSessions(source: 'viewed' | 'pair', sessionIds: readonl
 }
 
 export function setAgentEventListener(
-  listener: (event: AgentWorkerEvent | WorkerExitedEvent) => void
+  listener: (event: AgentWorkerEvent | WorkerExitedEvent | WorkerSwappedEvent) => void
 ): void {
   onEvent = listener;
 }
@@ -479,6 +483,8 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         // 退出 / 安装更新时不换代，写好恢复清单后放行退出
         if (worker === child && gracefulRestart.ready(child, event.checkpoint)) {
           workerReady = false;
+          // 子代理 Run 按断点续跑：Main 要知道哪些子会话停在了安全点
+          onEvent?.(event);
           if (gracefulRestart.quitting && quitCheckpoint) {
             const checkpoint = parseRestartCheckpoint(event.checkpoint);
             if (checkpoint) {
@@ -565,6 +571,8 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
       // 优雅重启：会话不算失败，下一代按断点重建并接着跑；先重发 spawn，再发换代期间排队的命令
       commandsPending = [...swap.replay, ...commandsPending];
       startAgentWorker({ restartCheckpointFile: path.join(dataDir, RESTART_CHECKPOINT_FILE) });
+      // 子会话不随 spawn 重发：由 Main 的子代理服务按断点在父会话就绪后重开续跑
+      onEvent?.({ type: 'worker-swapped' });
       return;
     }
     // 超时退出时 worker 收尾落的断点先写成清单：订阅者收到退出事件时就知道哪些会话重启后接着跑
@@ -2699,6 +2707,16 @@ export function keepBackgroundTask(
   reason: string | null
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'task-keep', sessionId, taskId, reason });
+}
+
+/** 清掉根会话及其子会话的自定提醒（用户停止、删除、会话已不可用） */
+export function clearSessionReminders(sessionId: string): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'reminders-clear', sessionId });
+}
+
+/** 把已到点的自定提醒交给会话（会话已在 worker 里） */
+export function fireSessionReminders(sessionId: string): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'reminders-fire', sessionId });
 }
 
 export function backgroundForegroundTool(

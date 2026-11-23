@@ -13,7 +13,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages';
 import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from '@shared/modelThinking';
-import { type OauthUsageWindow, sanitizeOauthLabel } from '@shared/types';
+import type { OauthUsageWindow } from '@shared/types';
+import { sanitizeOauthLabel } from '@shared/types/oauthProviders';
 import { startOauthCallbackServer } from './callbackServer';
 import {
   createEventStream,

@@ -135,6 +135,19 @@ describe('conversationDotTone', () => {
       'running'
     );
   });
+
+  it('排队优先于 running 和未读', () => {
+    expect(conversationDotTone({ status: 'running', queued: true })).toBe('queued');
+    expect(conversationDotTone({ status: 'idle', unread: true, queued: true })).toBe('queued');
+    expect(conversationDotTone({ status: 'idle', hasRunningChild: true, queued: true })).toBe(
+      'queued'
+    );
+  });
+
+  it('启动失败仍是 failed，不显示排队', () => {
+    expect(conversationDotTone({ status: 'failed', queued: true })).toBe('failed');
+    expect(conversationDotTone({ status: 'failed', queued: false })).toBe('failed');
+  });
 });
 
 describe('coworkerTabTone', () => {

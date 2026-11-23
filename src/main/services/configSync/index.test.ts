@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { decodeBundle, encodeBundle, validateBundle } from './codec';
 import { CONFIG_SYNC_FIELD_POLICY, SYNC_FIELDS } from './index';
 import type { ConfigSyncBundle } from './types';
@@ -24,8 +24,6 @@ vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() },
 }));
 
-let service: typeof import('./index');
-let settings: typeof import('../../ipc/settings');
 const emptySecretsBundle = (): ConfigSyncBundle => ({
   format: 'enso-config',
   version: 1,
@@ -42,31 +40,27 @@ const emptySecretsBundle = (): ConfigSyncBundle => ({
   resources: { skills: [], instructions: [] },
   secretsIncluded: true,
 });
-let emptyEncrypted: Buffer;
-
-beforeAll(async () => {
-  emptyEncrypted = await encodeBundle(emptySecretsBundle(), 'correct horse');
-  writeFileSync(
-    join(userData, 'settings.json'),
-    JSON.stringify({
-      'enso-settings': {
-        version: 1,
-        state: {
-          theme: 'dark',
-          providers: [],
-          skills: [],
-          mcpServers: [],
-          instructions: [],
-          presets: [],
-          agentTypes: [],
-          subagentModels: [],
-        },
+const emptyEncrypted = await encodeBundle(emptySecretsBundle(), 'correct horse');
+writeFileSync(
+  join(userData, 'settings.json'),
+  JSON.stringify({
+    'enso-settings': {
+      version: 1,
+      state: {
+        theme: 'dark',
+        providers: [],
+        skills: [],
+        mcpServers: [],
+        instructions: [],
+        presets: [],
+        agentTypes: [],
+        subagentModels: [],
       },
-    })
-  );
-  service = await import('./index');
-  settings = await import('../../ipc/settings');
-});
+    },
+  })
+);
+const service = await import('./index');
+const settings = await import('../../ipc/settings');
 
 afterAll(() => {
   service.clearConfigSyncTokens();

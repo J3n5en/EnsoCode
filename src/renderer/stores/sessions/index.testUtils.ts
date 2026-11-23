@@ -181,6 +181,13 @@ export const agentSetApprovalMode = vi.fn(
     ({ ok: true }) as { ok: boolean; error?: string }
 );
 export const secretaryGoalAction = vi.fn(async (_request: unknown) => ({ ok: true }));
+export const secretaryStartQueued = vi.fn(
+  async (
+    _id: string,
+    _followUp?: { text: string }
+  ): Promise<{ ok: true } | { ok: false; error: string }> => ({ ok: true })
+);
+export const secretaryCancelQueued = vi.fn(async (_id: string) => ({ ok: true as const }));
 
 export function installSessionGlobals(options?: { captureAsks?: boolean }) {
   const onDispatch = options?.captureAsks
@@ -247,6 +254,8 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
       },
       secretary: {
         goalAction: secretaryGoalAction,
+        startQueued: secretaryStartQueued,
+        cancelQueued: secretaryCancelQueued,
       },
       agentDispatch: {
         bindSource,
@@ -295,6 +304,10 @@ export async function seedParent() {
 export async function resetSessionHarness() {
   agentPrompt.mockClear();
   secretaryGoalAction.mockClear();
+  secretaryStartQueued.mockReset();
+  secretaryStartQueued.mockResolvedValue({ ok: true });
+  secretaryCancelQueued.mockReset();
+  secretaryCancelQueued.mockResolvedValue({ ok: true });
   dispatch.mockReset();
   registerModelSelection.mockClear();
   bindSource.mockClear();

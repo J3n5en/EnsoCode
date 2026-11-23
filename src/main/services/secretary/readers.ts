@@ -1,4 +1,7 @@
+import type { SessionReminder } from '@shared/reminders';
+import { formatGoalResultClaims, type GoalResultView } from '@shared/secretary/goalResult';
 import { parseProfile } from '@shared/secretary/parse';
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   chunkMessageText,
   projectReadableMessages,
@@ -20,6 +23,7 @@ import {
   type SessionToolActivity,
 } from '../sessionActivity';
 import { currentBranch, repoIsClean } from '../worktree/service';
+import { autoArchived } from './autoArchive';
 import { leftoverReason, taskIsPersistent } from './leftover';
 import { projectAliasesFromSettings, secretaryProjectNames } from './projectLabel';
 import {
@@ -46,7 +50,13 @@ const MAX_READ_LIMIT = 30;
 /** 秘书没有工作区的三种伪项目：没有可派活的目录，也不该出现在它的项目清单里 */
 const HIDDEN_PROJECT_KINDS: ReadonlySet<string> = new Set(['secretary', 'scratch', 'bot-home']);
 
-export type SecretarySessionState = 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+export type SecretarySessionState =
+  | 'running'
+  | 'idle'
+  | 'waiting'
+  | 'error'
+  | 'not-started'
+  | 'queued';
 
 export interface SecretarySessionStatus {
   state: 'running' | 'idle' | 'waiting' | 'error';
@@ -76,6 +86,12 @@ export interface SecretaryReadPorts {
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
+  /** 会话（含子代理）挂着的自定提醒；缺省表示没有 */
+  reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
+  /** 派发记录上的结构化结果；缺省表示没有 */
+  goalResult?(conversationId: string): MaybePromise<GoalResultView | undefined>;
+  /** 这条已归档的行是不是派出会话完成后被 Main 自动归档的；缺省表示都不是 */
+  autoArchived?(conversationId: string, row: Record<string, unknown>): MaybePromise<boolean>;
   /** 只读 git；路径越界校验与采集都在 repoStatus 里 */
   repo: RepoStatusDeps;
 }
@@ -98,6 +114,8 @@ interface ListedSession {
   sessionFile?: string;
   /** 会话行上的目标：与 session_create 挂的是同一种，巡检按它判定 */
   goal?: { text: string; status: string };
+  /** 排队会话：位次，或自动启动失败的原因 */
+  queue?: { position: number } | { failed: string };
 }
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
@@ -174,7 +192,11 @@ export function visibleProjects(
  * 秘书可见的会话：可见项目里的根会话，排除 child、bot、已归档与没有权威记录的残留行。
  * 排序在调用方按需截断，保证 session_list 与 project_info 的最近活跃口径一致。
  */
-async function collect(ports: SecretaryReadPorts): Promise<{
+async function collect(
+  ports: SecretaryReadPorts,
+  /** session_read 读完成结果：放行 Main 自动归档的派出会话，用户手动归档的仍不可见 */
+  withAutoArchived = false
+): Promise<{
   projects: ProjectAuthority[];
   sessions: ListedSession[];
 }> {
@@ -185,9 +207,15 @@ async function collect(ports: SecretaryReadPorts): Promise<{
     (await ports.conversations()).map((conversation) => [conversation.conversationId, conversation])
   );
   const sessions: ListedSession[] = [];
-  for (const [conversationId, row] of Object.entries(await ports.rows())) {
+  const rows = await ports.rows();
+  const positions = queuePositions(rows);
+  for (const [conversationId, row] of Object.entries(rows)) {
     if (row.parentId !== undefined || row.btwParentId !== undefined) continue;
-    if (row.archived === true) continue;
+    if (
+      row.archived === true &&
+      !(withAutoArchived && (await ports.autoArchived?.(conversationId, row)) === true)
+    )
+      continue;
     const projectId = typeof row.projectId === 'string' ? row.projectId : undefined;
     if (!projectId || !visibleIds.has(projectId)) continue;
     const authority = authorities.get(conversationId);
@@ -195,6 +223,8 @@ async function collect(ports: SecretaryReadPorts): Promise<{
     if (authority.projectId !== projectId) continue;
     const sessionFile = typeof row.sessionFile === 'string' ? row.sessionFile : undefined;
     const goal = listedGoal(row.goal);
+    const queued = queuedStartOf(row);
+    const position = positions.get(conversationId);
     sessions.push({
       conversationId,
       projectId,
@@ -202,6 +232,11 @@ async function collect(ports: SecretaryReadPorts): Promise<{
       lastActiveAt: timestamp(row.lastActiveAt) ?? timestamp(row.createdAt) ?? 0,
       ...(sessionFile ? { sessionFile } : {}),
       ...(goal ? { goal } : {}),
+      ...(queued?.failed
+        ? { queue: { failed: queued.failed.error } }
+        : queued && position !== undefined
+          ? { queue: { position } }
+          : {}),
     });
   }
   sessions.sort(
@@ -238,7 +273,15 @@ function sessionState(
   session: ListedSession,
   status: SecretarySessionStatus
 ): SecretarySessionState {
+  if (session.queue) return 'queued';
   return session.sessionFile ? status.state : 'not-started';
+}
+
+function queueFields(session: ListedSession): Record<string, unknown> {
+  if (!session.queue) return {};
+  return 'failed' in session.queue
+    ? { queueFailed: redactSecrets(session.queue.failed) }
+    : { queuePosition: session.queue.position };
 }
 
 /**
@@ -281,6 +324,24 @@ function presentRepoStatus(
 }
 
 export function createSecretaryReadHandlers(ports: SecretaryReadPorts): SecretaryReadHandlers {
+  async function goalResultOf(
+    source: string,
+    conversationId: string
+  ): Promise<
+    | { goalResult: { at: number; result: string; checks?: GoalResultView['checks'] } }
+    | Record<string, never>
+  > {
+    const view = await ports.goalResult?.(conversationId);
+    if (!view) return {};
+    return {
+      goalResult: {
+        at: view.at,
+        ...(view.checks ? { checks: view.checks } : {}),
+        result: wrapUntrusted(source, redactSecrets(formatGoalResultClaims(view.result))),
+      },
+    };
+  }
+
   return {
     async project_list() {
       const { projects, sessions } = await collect(ports);
@@ -348,6 +409,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           projectId: session.projectId,
           title: session.title,
           state: sessionState(session, status),
+          ...queueFields(session),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           ...(session.goal ? { goal: session.goal } : {}),
@@ -365,7 +427,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const entryId = stringParam(params, 'entryId');
       const target =
         entryId !== undefined ? { entryId } : index !== undefined ? { index } : undefined;
-      const { sessions } = await collect(ports);
+      const { sessions } = await collect(ports, true);
       const session = sessions.find((candidate) => candidate.conversationId === conversationId);
       if (!session) return notFound;
       // 全文模式：按 entryId（优先）或 index 读单条消息，按 offset 分页；只放行 user / assistant，工具输出不外泄
@@ -402,6 +464,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ? projectReadableMessages(page.messages, { limit, baseIndex: page.baseIndex })
         : { messages: [], hasMore: false };
       const source = `session:${conversationId}`;
+      const goal = await goalResultOf(source, conversationId);
       const messages = readable.messages.map((message) => ({
         index: message.index,
         ...(message.entryId ? { entryId: message.entryId } : {}),
@@ -410,6 +473,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ...(message.truncated ? { truncated: true } : {}),
       }));
       const nextBefore = page.ok ? (messages[0]?.index ?? page.baseIndex) : (before ?? 0);
+      const reminders = (await ports.reminders?.(conversationId)) ?? [];
       return {
         ok: true,
         result: {
@@ -417,12 +481,23 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           projectId: session.projectId,
           title: session.title,
           state: sessionState(session, status),
+          ...queueFields(session),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           messages,
           hasMore: readable.hasMore,
           ...(readable.hasMore ? { nextBefore } : {}),
           ...(page.ok ? {} : { historyError: page.code }),
+          // 挂着自定提醒：会话在等自己定的时间点，不是卡住
+          ...(reminders.length > 0
+            ? {
+                reminders: reminders.map((item) => ({
+                  dueAt: item.dueAt,
+                  ...(item.label ? { label: item.label } : {}),
+                })),
+              }
+            : {}),
+          ...goal,
         },
       };
     },
@@ -459,9 +534,25 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           ...(task.ownerSessionId ? { startedBySubagent: task.ownerSessionId } : {}),
         };
       });
+      const reminders = (await ports.reminders?.(conversationId)) ?? [];
       return {
         ok: true,
-        result: { conversationId, projectId: session.projectId, tasks },
+        result: {
+          conversationId,
+          projectId: session.projectId,
+          tasks,
+          ...(reminders.length > 0
+            ? {
+                reminders: reminders.map((item) => ({
+                  id: item.id,
+                  ...(item.label ? { label: item.label } : {}),
+                  dueAt: item.dueAt,
+                  inMs: item.dueAt - now,
+                  ...(item.sessionId === conversationId ? {} : { subagent: item.sessionId }),
+                })),
+              }
+            : {}),
+        },
       };
     },
 
@@ -576,6 +667,16 @@ export function readPortsFor(
     },
     async tasks(conversationId) {
       return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
+    },
+    async reminders(conversationId) {
+      return (await import('../sessionReminders')).readSessionReminders(conversationId);
+    },
+    goalResult(conversationId) {
+      return new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId]?.goalResult;
+    },
+    autoArchived(conversationId, row) {
+      const record = new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId];
+      return record ? autoArchived(record, row) : false;
     },
     repo: realRepoDeps,
   };

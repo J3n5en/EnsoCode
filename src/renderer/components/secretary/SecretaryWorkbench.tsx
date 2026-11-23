@@ -1,3 +1,4 @@
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
@@ -20,6 +21,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
+import { QueuedSessionButtons } from '@/components/chat/QueuedSessionCard';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
@@ -68,7 +70,24 @@ const SESSION_STATE_LABEL = {
   error: 'Failed',
   'not-started': 'Not started',
   gone: 'The session was deleted',
+  queued: 'Queued',
 } as const;
+
+function todoStateText(
+  todo: SecretaryBoardTodo,
+  conversations: Record<string, unknown>,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  if (!todo.sessionState) return '';
+  if (todo.sessionState !== 'queued') return t(SESSION_STATE_LABEL[todo.sessionState]);
+  const row = todo.conversationId ? conversations[todo.conversationId] : undefined;
+  const failed = queuedStartOf(row)?.failed?.error;
+  if (failed) return `${t('Queued')} · ${failed}`;
+  const position = todo.conversationId
+    ? queuePositions(conversations).get(todo.conversationId)
+    : undefined;
+  return position ? t('Queued · #{{n}}', { n: position }) : t('Queued');
+}
 
 const PROBLEM_LABEL: Record<TodoProblemCode, string> = {
   failed: 'The session failed',
@@ -146,7 +165,7 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const stop = () => {
     setStopping(true);
     void window.electronAPI.agent
-      .abort(card.conversationId, { stopSubagents: true })
+      .abort(card.conversationId, { stopSubagents: true, cancelReminders: true })
       .finally(() => setStopping(false));
   };
   // 实时审批与提问由会话状态决定，清结果不会让它消失，所以只在原因是结果时给「知道了」
@@ -181,6 +200,21 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
         <span className="shrink-0 rounded bg-muted px-1.5 text-[11px]">{card.projectName}</span>
         {card.lastText && <span className="line-clamp-1">{card.lastText}</span>}
       </div>
+      {(card.state === 'queued' || card.queueFailed) && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <p data-enso="secretary-queued-card" className="text-[12.5px] text-orange-600">
+            {card.queueFailed
+              ? `${t('Queued')} · ${card.queueFailed}`
+              : card.queuePosition
+                ? t('Queued · #{{n}}', { n: card.queuePosition })
+                : t('Queued')}
+          </p>
+          <QueuedSessionButtons
+            conversationId={card.conversationId}
+            failed={Boolean(card.queueFailed)}
+          />
+        </div>
+      )}
       {approvals && approvals.length > 0 && (
         <div className="mt-2">
           <ApprovalBar
@@ -242,6 +276,7 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
 
 function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?: string }) {
   const { t, locale } = useI18n();
+  const conversations = useSessionsStore((state) => state.conversations);
   const [draft, setDraft] = useState<string | null>(null);
   const phase = todo.phase ?? 'todo';
   // 会话已删也打开弹窗：由弹窗说明原因，而不是一个点不动的按钮
@@ -298,7 +333,7 @@ function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?
             className="mt-0.5 block max-w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground disabled:cursor-default"
           >
             {todo.sessionTitle || t('Open session')}
-            {todo.sessionState ? ` · ${t(SESSION_STATE_LABEL[todo.sessionState])}` : ''}
+            {todo.sessionState ? ` · ${todoStateText(todo, conversations, t)}` : ''}
           </button>
         )}
         {phase === 'problem' && todo.problem && (
@@ -411,7 +446,7 @@ function FeedEntry({ event }: { event: FeedEvent }) {
     ? () => {
         setStopping(true);
         void window.electronAPI.agent
-          .abort(conversationId, { stopSubagents: true })
+          .abort(conversationId, { stopSubagents: true, cancelReminders: true })
           .finally(() => setStopping(false));
       }
     : undefined;

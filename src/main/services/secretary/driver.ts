@@ -15,6 +15,7 @@ import {
   type HeadlessSessionRuntime,
   onHeadlessIdle,
 } from '@shared/pair/headlessQueue';
+import { queuedStartOf } from '@shared/secretary/queuedSession';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type { SecretaryAuditEntry } from '@shared/types/secretary';
 
@@ -185,6 +186,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   const compacting = new Map<string, boolean>();
   /** 这一轮空闲已经投过 goal 续跑：压缩结束不能再投一次，否则第二次 prompt 会把会话打成 error */
   const continued = new Set<string>();
+  /** 上一轮收束时还挂着自定提醒：提醒会叫醒会话，goal 先不续跑 */
+  const awaitingReminder = new Set<string>();
   /**
    * 后台任务。等它们时不续跑，完成通知会自己唤醒会话。
    * 通知没到、进程没了或到了截止时间，由 watch 补一次唤醒并交给秘书报停滞。
@@ -301,7 +304,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
 
   function runtimeOf(conversationId: string): HeadlessSessionRuntime | null {
     const row = ports.row(conversationId);
-    if (row?.driver !== 'main') return null;
+    // 排队会话还没开始：不泵队列、不续目标，启动泵撤掉 queuedStart 后才归驱动者管
+    if (row?.driver !== 'main' || queuedStartOf(row)) return null;
     seedTasks(conversationId, row);
     const status = ports.status(conversationId);
     return {
@@ -425,7 +429,11 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   ): void {
     const applied = onHeadlessIdle(runtime);
     const continuation = isContinuation(applied.deliver);
-    if (continuation && (!allowContinue || runningCount(conversationId) > 0)) return;
+    if (
+      continuation &&
+      (!allowContinue || runningCount(conversationId) > 0 || awaitingReminder.has(conversationId))
+    )
+      return;
     if (continuation) continued.add(conversationId);
     commit(conversationId, runtime, applied);
   }
@@ -557,6 +565,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       }
       if (event.type !== 'turn-completed') return;
       forgetDeliveries(conversationId);
+      if (event.awaitingReminder) awaitingReminder.add(conversationId);
+      else awaitingReminder.delete(conversationId);
       // 中断的轮不续跑、不泵队列；压缩中的收束等压缩结束事件再收
       if (event.aborted || compacting.get(conversationId)) {
         // 本轮还没投过：压缩结束时允许补投一次
@@ -664,6 +674,7 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       consumedWaits.delete(conversationId);
       continued.delete(conversationId);
       tasksBySession.delete(conversationId);
+      awaitingReminder.delete(conversationId);
       const timer = watchTimers.get(conversationId);
       if (timer) {
         clearTimeout(timer);

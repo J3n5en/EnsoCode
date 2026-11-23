@@ -88,6 +88,7 @@ import {
   qoderProviderConfig,
 } from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
+import { REMINDER_MAX_DELAY_MS, REMINDERS_FILE } from '@shared/reminders';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
 import { turnCalledSilenceTurn, turnRequestedSilence } from '@shared/secretary/silence';
 import { isSecretaryToolAllowed, type SecretaryInvokeOp } from '@shared/secretary/tools';
@@ -288,6 +289,7 @@ import { promptCatalogExtension } from './promptCatalog';
 import { applyWorkerProxyEnv } from './proxyEnv';
 import { withReadTruncationMeta } from './readTruncation';
 import { enqueueReminder, REMINDER_QUEUE_LIMIT } from './reminderQueue';
+import { createReminderTools, REMINDER_RETRY_MS, ReminderStore, reminderNotice } from './reminders';
 import { withRequestBodyBudget } from './requestBodyBudget';
 import { runWithRequestBodyObserver } from './requestBodyTelemetry';
 import { budgetWrapUpPrompt, RequestBudget } from './requestBudget';
@@ -1109,6 +1111,9 @@ export class SessionSupervisor {
     this.deliverNotification(sessionId, text);
   });
   private readonly pendingNotifications: PendingNotificationStore;
+  private readonly reminders: ReminderStore;
+  /** 已请 Main 叫醒的根会话：同一会话在途只发一次，收到 fire/clear 或隔 60 秒才重发 */
+  private readonly reminderDueSent = new Map<string, number>();
   /** 已请 Main 打开、打开后要把待投递通知交给新一轮的会话 */
   private readonly wakeOnOpen = new Set<string>();
   /** spawn 尚未注册完就到达的内置工具开关，注册后补用 */
@@ -1231,9 +1236,81 @@ export class SessionSupervisor {
 
   /** 打开的会话没在续跑上一轮：攒下的完成通知立即开一轮；在续跑的由轮末补投 */
   private wakeAfterOpen(managed: ManagedSession): void {
+    this.fireDueReminders(managed);
     if (!this.wakeOnOpen.delete(managed.identity.sessionId) || managed.currentTurnId !== undefined)
       return;
     this.flushPendingReminders(managed);
+  }
+
+  /** 提醒定时器到点：子会话直接处理；根会话请 Main 判定后回 reminders-fire（冷会话先打开） */
+  private onRemindersDue(): void {
+    const now = Date.now();
+    const due = this.reminders.due(now);
+    for (const owner of new Set(due.map((item) => item.sessionId))) {
+      if (owner.includes('::')) {
+        const child = this.sessions.get(owner);
+        if (child) this.fireDueReminders(child);
+        continue;
+      }
+      // 换代中不叫醒，下一代启动时补
+      if (this.restart) continue;
+      const managed = this.sessions.get(owner);
+      // 正在跑且到点的都等空闲：轮末直接触发
+      if (
+        managed &&
+        this.reminderBusy(managed) &&
+        due.every((item) => item.sessionId !== owner || item.ifIdle)
+      )
+        continue;
+      // 正在打开：就绪时补发
+      if (!managed && this.spawning.has(owner)) continue;
+      const sent = this.reminderDueSent.get(owner);
+      if (sent !== undefined && now - sent < REMINDER_RETRY_MS) continue;
+      this.reminderDueSent.set(owner, now);
+      this.options.emit({ type: 'session-reminder-due', sessionId: owner });
+    }
+  }
+
+  private reminderBusy(managed: ManagedSession): boolean {
+    return (
+      managed.status === 'running' ||
+      managed.roundPending === true ||
+      managed.currentTurnId !== undefined
+    );
+  }
+
+  /**
+   * 把该会话已到点的提醒交给它：先从存储删再投递，保证只发一次。
+   * 正在跑且 ifIdle 的留到轮末；子代理不在 Run 里就丢弃（没人等它的结果）
+   */
+  private fireDueReminders(managed: ManagedSession): void {
+    const id = managed.identity.sessionId;
+    if (this.restart || this.sessions.get(id) !== managed) return;
+    const child = id.includes('::');
+    const busy = this.reminderBusy(managed);
+    const texts: string[] = [];
+    let chain = 0;
+    for (const item of this.reminders.due(Date.now())) {
+      if (item.sessionId !== id) continue;
+      if (child && !managed.agentRun) {
+        this.reminders.take(item.id);
+        continue;
+      }
+      if (busy && item.ifIdle) continue;
+      if (!this.reminders.take(item.id)) continue;
+      texts.push(reminderNotice(item));
+      chain = Math.max(chain, item.chain);
+    }
+    if (texts.length === 0) return;
+    this.reminders.setChain(id, chain);
+    this.reminderDueSent.delete(id);
+    const text = texts.join('\n\n---\n\n');
+    if (child && busy) {
+      managed.childTaskNotices ??= [];
+      enqueueReminder(managed.childTaskNotices, text);
+      return;
+    }
+    this.deliverNotification(id, text);
   }
 
   private restartDataDir(): string {
@@ -1265,6 +1342,9 @@ export class SessionSupervisor {
     }
     this.pendingNotifications = new PendingNotificationStore(
       path.join(options.sessionDir, 'pending-notifications')
+    );
+    this.reminders = new ReminderStore(path.join(options.sessionDir, REMINDERS_FILE), () =>
+      this.onRemindersDue()
     );
     this.bgTasks = new BackgroundTaskManager(
       {
@@ -1795,6 +1875,17 @@ export class SessionSupervisor {
         );
       return;
     }
+    if (command.type === 'reminders-fire') {
+      this.reminderDueSent.delete(command.sessionId);
+      const managed = this.sessions.get(command.sessionId);
+      if (managed) this.fireDueReminders(managed);
+      return;
+    }
+    if (command.type === 'reminders-clear') {
+      this.reminderDueSent.delete(command.sessionId);
+      this.reminders.clear(command.sessionId);
+      return;
+    }
     const identity =
       command.type === 'browser-result' ||
       command.type === 'memory-result' ||
@@ -2049,6 +2140,7 @@ export class SessionSupervisor {
         managed.currentTurnId = command.requestId;
         this.releaseRun(managed);
         if (command.requestBudget) managed.agentRun = { id: command.requestId };
+        this.reminders.resetChain(managed.identity.sessionId);
         managed.turnAborted = false;
         // 只有子代理 Run（Main 带 requestBudget 标记）计数；Bot 成员等不 arm，不计数
         if (command.requestBudget) managed.requestBudget?.arm();
@@ -2067,6 +2159,8 @@ export class SessionSupervisor {
       case 'prompt': {
         const managed = this.must(command.identity);
         managed.plan?.supersede();
+        // 非提醒来源的输入：提醒连续链从头算
+        this.reminders.resetChain(managed.identity.sessionId);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
         if (await this.interruptRetryIfAny(managed)) {
           this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
@@ -2163,6 +2257,7 @@ export class SessionSupervisor {
             managed.requestBudget?.arm(command.requestsUsed);
             this.holdRun(managed, run);
             this.flushPendingReminders(managed);
+            this.fireDueReminders(managed);
             return;
           }
           this.emitRetrySkipped(managed, 'nothing-to-retry');
@@ -3212,7 +3307,19 @@ export class SessionSupervisor {
             : [
                 ...buildBaseTools(childGate, undefined, agentType?.writeScope, taskOwnerId),
                 // 子代理要能读、停、表态自己起的任务，否则常驻任务会让持有中的 Run 收不了口
-                ...(taskOwnerId ? createTaskTools(this.bgTasks, taskOwnerId) : []),
+                ...(taskOwnerId
+                  ? [
+                      ...createTaskTools(this.bgTasks, taskOwnerId),
+                      // 子代理的提醒只叫醒它自己，最长不超过 Run 持有上限
+                      ...createReminderTools(this.reminders, taskOwnerId, {
+                        maxDelayMs: AGENT_RUN_HOLD_LIMIT_MS,
+                        unavailable: () =>
+                          this.sessions.get(taskOwnerId)?.agentRun
+                            ? undefined
+                            : 'Reminders only work while you run a subagent Run for your parent.',
+                      }),
+                    ]
+                  : []),
               ]),
           ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
           ...childPluginTools,
@@ -3566,10 +3673,13 @@ export class SessionSupervisor {
       ]),
       ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
       ...builtin('turn_discard', createTurnDiscardTools(turnDiscard)),
-      ...builtin('background_tasks', createTaskTools(this.bgTasks, sessionId)),
+      ...builtin('background_tasks', [
+        ...createTaskTools(this.bgTasks, sessionId),
+        ...createReminderTools(this.reminders, sessionId, { maxDelayMs: REMINDER_MAX_DELAY_MS }),
+      ]),
       ...(toolEnabled('goal')
         ? createGoalTools(
-            (kind, note) => {
+            (kind, note, result) => {
               const managed = managedRef ?? this.sessions.get(sessionId);
               if (!managed) return;
               this.options.emit({
@@ -3578,6 +3688,7 @@ export class SessionSupervisor {
                 seq: ++managed.seq,
                 kind,
                 note,
+                ...(result ? { result } : {}),
               });
             },
             async (summary, signal) => {
@@ -4494,6 +4605,7 @@ export class SessionSupervisor {
     if (managed) {
       if (managed.agentRun?.holdTimer) this.stopAwaitedTasks(managed);
       this.releaseRun(managed);
+      this.reminders.cancelAll(coworkerId);
       this.closeChildPlugins(managed, 'dismissed');
       managed.gate.cancelAll();
       managed.asks.cancelAll();
@@ -5123,6 +5235,7 @@ export class SessionSupervisor {
 
   /** 本轮成功收口。budget：子代理因请求预算被强制停止，带上标记（及补报告的错误）交回已有输出。 */
   private completeTurn(managed: ManagedSession, budget?: { error?: string }): void {
+    const sessionId = managed.identity.sessionId;
     const quiet = this.exitingRun(managed);
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
@@ -5136,6 +5249,9 @@ export class SessionSupervisor {
       this.awaitsOwnTasks(managed);
     if (awaitingTasks) this.holdRun(managed, run);
     else this.releaseRun(managed);
+    // 子代理 Run 真正收口：它的提醒没人再等；退出收尾打断的 Run 重启后接着跑，提醒留着
+    if (!awaitingTasks && !quiet && sessionId.includes('::')) this.reminders.cancelAll(sessionId);
+    const awaitingReminder = !sessionId.includes('::') && this.reminders.list(sessionId).length > 0;
     managed.currentTurnId = undefined;
     managed.abortedTurnId = undefined;
     managed.turnAborted = false;
@@ -5169,6 +5285,7 @@ export class SessionSupervisor {
         ...(budget?.error ? { requestBudgetError: budget.error } : {}),
         ...(continues ? { continues } : {}),
         ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
+        ...(awaitingReminder ? { awaitingReminder: true as const } : {}),
       });
     if (awaitingTasks) {
       // 常驻任务没有完成事件：第一次因这批任务持有时唤醒一次
@@ -5187,6 +5304,7 @@ export class SessionSupervisor {
       void this.runCompaction(managed, queued.instructions);
     }
     this.flushPendingReminders(managed);
+    this.fireDueReminders(managed);
   }
 
   /** 子代理还有自己起的、在跑、没表态的后台任务，或还有没交给它的完成通知 */
@@ -5194,7 +5312,8 @@ export class SessionSupervisor {
     return (
       this.bgTasks.undeclared(managed.identity.sessionId).length > 0 ||
       (managed.childTaskNotices?.length ?? 0) > 0 ||
-      managed.pendingTaskReminders.length > 0
+      managed.pendingTaskReminders.length > 0 ||
+      this.reminders.list(managed.identity.sessionId).length > 0
     );
   }
 
@@ -5231,6 +5350,7 @@ export class SessionSupervisor {
   private stopAwaitedTasks(managed: ManagedSession): void {
     for (const task of this.bgTasks.undeclared(managed.identity.sessionId))
       this.bgTasks.stop(task.taskId, true);
+    this.reminders.cancelAll(managed.identity.sessionId);
   }
 
   /** 没表态的任务里有没提醒过的：整批记为已提醒并返回，同一批任务只提醒一次 */
@@ -5787,6 +5907,8 @@ export class SessionSupervisor {
     const run = managed.agentRun;
     const continues = run && run.id !== turnId ? run.id : undefined;
     this.releaseRun(managed);
+    if (!quiet && managed.identity.sessionId.includes('::'))
+      this.reminders.cancelAll(managed.identity.sessionId);
     managed.currentTurnId = undefined;
     managed.abortedTurnId = undefined;
     managed.turnRetried = false;
@@ -5825,6 +5947,7 @@ export class SessionSupervisor {
         ...(continues ? { continues } : {}),
       });
     this.flushPendingReminders(managed);
+    this.fireDueReminders(managed);
   }
 
   private emitStatus(managed: ManagedSession, error?: string): void {
@@ -6381,6 +6504,7 @@ export class SessionSupervisor {
 
   async shutdown(): Promise<void> {
     clearInterval(this.evictionTimer);
+    this.reminders.dispose();
     this.workspaceSwitch.clear();
     this.recordInterruptedTasks();
     this.bgTasks.stopAll();

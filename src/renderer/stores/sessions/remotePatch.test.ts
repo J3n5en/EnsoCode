@@ -155,6 +155,21 @@ describe('applyConversationsPatchToState', () => {
     setPairViewedSession(null);
     expect(next.conversations.b.unread).toBe(false);
   });
+
+  it('加上和删掉 queuedStart 都进 store', () => {
+    const queued = { queuedAt: 1, text: 'first' };
+    const added = applyConversationsPatchToState(state({ a: row('a') }, ['a'], 'a'), {
+      upserts: { a: { set: { queuedStart: queued }, unset: [] } },
+      removes: [],
+    });
+    expect(added.conversations.a.queuedStart).toEqual(queued);
+    const removed = applyConversationsPatchToState(added, {
+      upserts: { a: { set: {}, unset: ['queuedStart'] } },
+      removes: [],
+    });
+    expect(removed.conversations.a.queuedStart).toBeUndefined();
+    expect('queuedStart' in removed.conversations.a).toBe(false);
+  });
 });
 
 describe('会话补丁确认号与水合缓存', () => {

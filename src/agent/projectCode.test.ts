@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createProjectSettingsManager, listProjectCodeSources } from './projectCode';
+import { createProjectSettingsManager } from './projectCode';
+import { listProjectCodeSources } from './projectCodeSources';
 
 const dirs: string[] = [];
 function tmp(): string {
