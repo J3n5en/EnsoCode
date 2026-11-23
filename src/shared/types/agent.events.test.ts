@@ -676,10 +676,37 @@ describe('受保护动作底线协议', () => {
     for (const guard of [{ ruleId: '', reason: 'x' }, { ruleId: 'r' }, 'x']) {
       expect(parseAgentWorkerEvent({ ...event, request: { ...event.request, guard } })).toBeNull();
     }
+    const graded = {
+      ...event,
+      request: {
+        ...event.request,
+        guard: {
+          ruleId: 'core.git:stash-drop',
+          reason: 'drops a stash',
+          decision: 'warn',
+          severity: 'medium',
+          explanation: 'long text',
+          matched: 'git stash drop',
+        },
+      },
+    };
+    expect(parseAgentWorkerEvent(graded)).toEqual(graded);
+    for (const extra of [{ decision: 'allow' }, { severity: 'huge' }, { matched: 1 }, { x: 1 }])
+      expect(
+        parseAgentWorkerEvent({
+          ...graded,
+          request: { ...graded.request, guard: { ...graded.request.guard, ...extra } },
+        })
+      ).toBeNull();
     const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     expect(parseAgentCommand({ ...base, dcgPath: '/data/dcg/dcg' })).not.toBeNull();
     expect(parseAgentCommand({ ...base, dcgPath: '' })).toBeNull();
     expect(parseAgentCommand({ ...base, dcgPath: 1 })).toBeNull();
+    expect(
+      parseAgentCommand({ ...base, dcgPath: '/d', dcgExemptRules: ['core.git:reset-hard'] })
+    ).not.toBeNull();
+    for (const dcgExemptRules of ['core.git:reset-hard', [''], ['no-colon'], [1]])
+      expect(parseAgentCommand({ ...base, dcgExemptRules })).toBeNull();
   });
 
   it('spawn-parent 携真尾 / boost / 拒答正文：非空字符串通过,脏值拒绝', () => {

@@ -92,6 +92,7 @@ const EVERY_SETTINGS_CATEGORY = {
   ssh: true,
   usage: true,
   resources: true,
+  logs: true,
   experimental: true,
   bots: true,
   botTemplates: true,

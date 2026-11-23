@@ -1,3 +1,4 @@
+import type { AppLogEntry, LogExportResult, LogSummaryLevel } from '@shared/appLog';
 import type { BotTemplateLibrary } from '@shared/bots/templateLibrary';
 import type {
   BtwAbortRequest,
@@ -230,7 +231,13 @@ import type {
   DesignTopLeftRect,
   DesignXyRect,
 } from '@shared/types/browser';
-import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
+import type {
+  DcgActionResult,
+  DcgRuleExemption,
+  DcgRuleState,
+  DcgStatus,
+  DcgUpdateCheck,
+} from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import {
   IPC_CHANNELS,
@@ -809,6 +816,14 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.RESOURCES_SESSIONS_CLEAN_DONE, requestId, removed),
   },
 
+  logs: {
+    errors: (minLevel: LogSummaryLevel): Promise<AppLogEntry[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.LOGS_ERRORS, minLevel),
+    export: (hours: number): Promise<LogExportResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.LOGS_EXPORT, hours),
+    revealExport: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.LOGS_REVEAL_EXPORT),
+  },
+
   memory: {
     list: (query: MemoryListQuery): Promise<MemoryListResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_LIST, query),
@@ -906,6 +921,18 @@ const electronAPI = {
     status: (): Promise<DcgStatus> => ipcRenderer.invoke(IPC_CHANNELS.DCG_STATUS),
     install: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_INSTALL),
     uninstall: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_UNINSTALL),
+    checkUpdate: (): Promise<DcgUpdateCheck> => ipcRenderer.invoke(IPC_CHANNELS.DCG_CHECK_UPDATE),
+    ruleState: (ruleId: string): Promise<DcgRuleState | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_STATE, ruleId),
+    ruleAllowed: (ruleId: string): Promise<DcgRuleState | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_ALLOWED, ruleId),
+    ruleExempt: (ruleId: string): Promise<DcgRuleState | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_EXEMPT, ruleId),
+    ruleRevoke: (ruleId: string): Promise<DcgRuleExemption[] | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_REVOKE, ruleId),
+    listExemptions: (): Promise<DcgRuleExemption[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_LIST),
+    clearExemptions: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_CLEAR),
   },
 
   providers: {
