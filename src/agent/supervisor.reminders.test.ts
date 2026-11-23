@@ -288,9 +288,11 @@ describe('会话自定提醒', () => {
       let handler: ((event: unknown) => { content: Array<{ text?: string }> } | undefined) | null =
         null;
       extension?.factory({ on: (_event: string, fn: typeof handler) => (handler = fn) });
-      return (handler?.({ content: [{ type: 'text', text: 'ok' }] })?.content ?? [])
-        .map((part) => part.text ?? '')
-        .join('\n');
+      const read = () =>
+        (handler?.({ content: [{ type: 'text', text: 'ok' }] })?.content ?? [])
+          .map((part) => part.text ?? '')
+          .join('\n');
+      return read();
     };
     return {
       cwd,
@@ -307,11 +309,13 @@ describe('会话自定提醒', () => {
     };
   }
 
-  const fakeClock = () =>
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], now: NOW });
+  const fakeClock = () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(NOW);
+  };
 
   it('根会话、子代理都挂上 remind_me / reminder_list / reminder_cancel', async () => {
-    const ctx = await setup(true);
+    await setup(true);
     for (const call of [0, 1])
       for (const name of ['remind_me', 'reminder_list', 'reminder_cancel'])
         expect(toolOf(call, name)).toBeDefined();
@@ -444,6 +448,7 @@ describe('会话自定提醒', () => {
       requestBudget: true,
       task: { text: 'wait for deploy', images: [], fileMentions: [] },
     });
+    await until(() => ctx.childSession.prompt.mock.calls.length > 0);
     await round(ctx.childSession, '子代理定好了', () =>
       ctx.childRemind.execute('c2', { in: '5m', prompt: 'CHILD-PING' })
     );
@@ -470,6 +475,7 @@ describe('会话自定提醒', () => {
       requestBudget: true,
       task: { text: 'wait for deploy', images: [], fileMentions: [] },
     });
+    await until(() => ctx.childSession.prompt.mock.calls.length > 0);
     await round(ctx.childSession, '部署中，5 分钟后看', () =>
       ctx.childRemind.execute('c2', { in: '5m', prompt: 'CHILD-PING: check deploy' })
     );
@@ -497,6 +503,7 @@ describe('会话自定提醒', () => {
       requestBudget: true,
       task: { text: 'wait for deploy', images: [], fileMentions: [] },
     });
+    await until(() => ctx.childSession.prompt.mock.calls.length > 0);
     await round(ctx.childSession, '部署中', () =>
       ctx.childRemind.execute('c2', { in: '5m', prompt: 'CHILD-PING' })
     );
@@ -511,9 +518,9 @@ describe('会话自定提醒', () => {
 
   it('不在 Run 里的子代理不能定提醒', async () => {
     const ctx = await setup(true);
-    await expect(
-      ctx.childRemind.execute('c2', { in: '5m', prompt: 'NO-RUN' })
-    ).rejects.toThrow(/Run/);
+    await expect(ctx.childRemind.execute('c2', { in: '5m', prompt: 'NO-RUN' })).rejects.toThrow(
+      /Run/
+    );
     expect(ctx.disk().reminders).toEqual([]);
   });
 });

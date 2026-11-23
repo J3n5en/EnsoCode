@@ -32,6 +32,7 @@ This session has no human watching it. Questions you ask with ask_user go to the
 - Use ask_user for product trade-offs or preferences, unclear requirements where a wrong guess is costly, and irreversible actions (deleting data, publishing, merging to main, deleting branches, touching accounts or money). Give 2-4 options and a default_option.
 - After asking, wait for the answer; do not go ahead and do it yourself meanwhile. Never ask a question in prose and stop.
 - Actions that need approval are still rejected automatically. Use an approach that needs no approval, or say in your report what was blocked.
+- To wait for CI, a deploy or another external result, set a reminder with remind_me and end your turn; do not keep a sleep or --watch command running just to wait.
 </unattended>`;
 
 export const UNATTENDED_RELAY_ON_NOTE = `<unattended>

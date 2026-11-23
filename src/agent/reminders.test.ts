@@ -24,7 +24,10 @@ function setup(owner = 'root', maxDelayMs = REMINDER_MAX_DELAY_MS) {
   const onTick = vi.fn();
   const store = new ReminderStore(file, onTick);
   let now = NOW;
-  const tools = createReminderTools(store, owner, { maxDelayMs, now: () => now }) as Tool[];
+  const tools = createReminderTools(store, owner, {
+    maxDelayMs,
+    now: () => now,
+  }) as unknown as Tool[];
   const tool = (name: string) => tools.find((item) => item.name === name) as Tool;
   const call = async (name: string, args: unknown) => {
     const prepared = tool(name).prepareArguments?.(args) ?? args;
@@ -118,13 +121,11 @@ describe('remind_me', () => {
     const ctx = setup();
     for (let i = 0; i < REMINDER_MAX_PER_OWNER; i++)
       await ctx.call('remind_me', { in: `${i + 1}m`, prompt: `p${i}` });
-    await expect(ctx.call('remind_me', { in: '9m', prompt: 'more' })).rejects.toThrow(
-      /at most 5/
-    );
+    await expect(ctx.call('remind_me', { in: '9m', prompt: 'more' })).rejects.toThrow(/at most 5/);
     const other = createReminderTools(ctx.store, 'root::cw-a', {
       maxDelayMs: 600_000,
       now: () => NOW,
-    }) as Tool[];
+    }) as unknown as Tool[];
     await other[0].execute('c', { in: '1m', prompt: 'mine' });
     expect(ctx.store.list('root::cw-a')).toHaveLength(1);
     ctx.store.dispose();
@@ -160,7 +161,7 @@ describe('reminder_list / reminder_cancel', () => {
     const child = createReminderTools(ctx.store, 'root::cw-a', {
       maxDelayMs: 600_000,
       now: () => NOW,
-    }) as Tool[];
+    }) as unknown as Tool[];
     await child[0].execute('c', { in: '1m', prompt: 'child' });
     const [first, second] = ctx.store.list('root');
     const listed = await ctx.call('reminder_list', {});
@@ -191,7 +192,7 @@ describe('ReminderStore', () => {
     const child = createReminderTools(ctx.store, 'root::cw-a', {
       maxDelayMs: 600_000,
       now: () => NOW,
-    }) as Tool[];
+    }) as unknown as Tool[];
     await child[0].execute('c', { in: '1m', prompt: 'child' });
     ctx.store.setChain('root', 3);
     const id = ctx.store.list('root')[0].id;
@@ -216,8 +217,8 @@ describe('ReminderStore', () => {
     const onTick = vi.fn();
     const store = new ReminderStore(path.join(dir, REMINDERS_FILE), onTick);
     const tools = createReminderTools(store, 'root', { maxDelayMs: REMINDER_MAX_DELAY_MS });
-    await (tools[0] as Tool).execute('c', { in: '2m', prompt: 'later' });
-    await (tools[0] as Tool).execute('c', { in: '1m', prompt: 'sooner' });
+    await (tools[0] as unknown as Tool).execute('c', { in: '2m', prompt: 'later' });
+    await (tools[0] as unknown as Tool).execute('c', { in: '1m', prompt: 'sooner' });
     vi.advanceTimersByTime(60_000 - 1);
     expect(onTick).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
