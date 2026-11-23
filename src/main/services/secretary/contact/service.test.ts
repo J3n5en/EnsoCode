@@ -264,6 +264,11 @@ function harness() {
     memoryAllowed: false,
     commandCalls: [] as string[],
     conversationId: 'sec-1' as string | null,
+    /** 还没有会话时自动建：结果与调用次数 */
+    startResult: { ok: true, conversationId: 'sec-new' } as
+      | { ok: true; conversationId: string }
+      | { ok: false; error: string },
+    starts: 0,
     delivered: [] as string[],
     answers: [] as { requestId: string; answer: string }[],
     answerOk: true,
@@ -287,6 +292,11 @@ function harness() {
     notifyMode: () => world.mode,
     secretaryName: () => world.name,
     secretaryConversationId: () => world.conversationId,
+    startConversation: async () => {
+      world.starts += 1;
+      if (world.startResult.ok) world.conversationId = world.startResult.conversationId;
+      return world.startResult;
+    },
     recentTurns: async (rounds) => {
       world.recapCalls.push(rounds);
       return world.recap;
@@ -2671,14 +2681,34 @@ describe('秘书会话被回收后的入站', () => {
     });
   });
 
-  it('没有可用的秘书会话：也回一句说明', async () => {
+  it('秘书还没有会话：自动建一条并把这句话送进去，不回失败', async () => {
     const h = harness();
     h.world.conversationId = null;
     await bound(h);
     h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.world.starts).toBe(1);
+    expect(h.world.delivered[0]).toContain('在吗');
+    expect(h.audits.find((entry) => entry.op === 'contact_inbound')).toMatchObject({
+      ok: true,
+      secretaryConversationId: 'sec-new',
+    });
+    expect(h.api.sent.some((message) => message.text.includes('没送到'))).toBe(false);
+  });
+
+  it('建会话失败：回明确的原因和下一步，不只说没能启动', async () => {
+    const h = harness();
+    h.world.conversationId = null;
+    h.world.startResult = { ok: false, error: 'no usable model' };
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
     await waitFor(() => h.api.sent.length > 0, 'failure notice');
     expect(h.world.delivered).toEqual([]);
-    expect(h.api.sent.at(-1)?.text).toContain('没送到');
+    expect(h.api.sent.at(-1)?.text).toContain('还没配置可用的模型');
+    expect(h.audits.find((entry) => entry.op === 'contact_inbound')).toMatchObject({
+      ok: false,
+      detail: 'no usable model',
+    });
   });
 
   it.each(['/status', '/board', '/feed', '/todo', '/schedules', '/memory', '/help'])(
@@ -3222,6 +3252,7 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
         notifyMode: () => 'with-done',
         secretaryName: () => id,
         secretaryConversationId: () => `${id}-chat`,
+        startConversation: async () => ({ ok: true, conversationId: `${id}-chat` }),
         deliver: async (_conversationId, text) => {
           delivered.push(text);
           return { ok: true };

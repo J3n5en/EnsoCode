@@ -5,7 +5,7 @@ import { app, ipcMain } from '@platform';
 import { buildSshPtyArgs, resolveSshTarget } from '@shared/ssh';
 import { parseTerminalShell } from '@shared/terminalShell';
 import type { TerminalCreateRequest, TerminalCreateResult } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { resolveSshControlPath, sshPasswordEnv } from '../../agent/ssh/executor';
 import { readSettingsState } from '../services/agentHost';
 import { getSshConnectionStore } from '../services/sshConnectionStore';

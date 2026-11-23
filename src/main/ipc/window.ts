@@ -1,7 +1,7 @@
 import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
 import { openFolderPathsFromArgv } from '@shared/openFolder';
 import { parseShellIntegration } from '@shared/shellIntegration';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { parseTitleBarAppearance, windowSurfaceColor } from '@shared/windowControls';
 import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';

@@ -1,7 +1,7 @@
 import { normalizeContext } from '@earendil-works/pi-ai';
 import { MCP_SCHEMA_ZOO } from '@shared/tools/mcpSchema.fixture';
 import { geminiSchemaIssues } from '@shared/tools/portableSchema';
-import { OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
+import { OAUTH_LABEL_MAX_LENGTH } from '@shared/types/oauthProviders';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ANTIGRAVITY_FALLBACK_MODELS,

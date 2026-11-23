@@ -1,6 +1,6 @@
 import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from '@shared/modelThinking';
 import type { ThinkingLevel } from '@shared/types/agent';
-import { THINKING_LEVELS } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import type { ModelReasoningOverride, ModelThinkingLevelOverride } from '@shared/types/llm';
 
 export interface ChildReasoningOverride {

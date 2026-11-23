@@ -5,15 +5,17 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from '@platform';
-import type {
-  DirectoryModel,
-  DirectoryProvider,
-  ModelDirectorySnapshot,
+import {
+  type DirectoryModel,
+  type DirectoryProvider,
+  type ModelDirectorySnapshot,
+  parseModelDirectorySnapshot,
 } from '@shared/modelDirectory';
-import { parseModelDirectorySnapshot } from '@shared/modelDirectory';
 import { withModelsDevOauthModels } from '@shared/modelsDevCatalog';
 import { expandOauthCatalog } from '@shared/oauthCatalog';
-import { IPC_CHANNELS, type ModelProvider, persistedSettingsState } from '@shared/types';
+import type { ModelProvider } from '@shared/types';
+import { persistedSettingsState } from '@shared/types/builtinTools';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { readSettings } from '../ipc/settings';
 import { getModelsDevModels } from './modelsDevCatalog';
 import { localUi } from './uiHost';

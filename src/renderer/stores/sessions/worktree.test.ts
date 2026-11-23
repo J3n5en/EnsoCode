@@ -9,9 +9,7 @@ import type {
   WorkspaceBranchSwitchResult,
   WorktreeStatus,
 } from '@shared/types/worktree';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from '../settings';
-import type * as SessionsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as worktree from './worktree';
 import {
   DIRTY_MAIN_TREE,
@@ -61,6 +59,7 @@ const wtStatus = vi.fn(
   })
 );
 const wtRemove = vi.fn(async () => ({ ok: true as const, value: null }));
+const wtStatuses = vi.fn(async (): Promise<Record<string, WorktreeStatus>> => ({}));
 const wtRebuild = vi.fn(async (conversationId: string) => ({
   ok: true as const,
   value: { ...record(conversationId), path: `/managed/rebuilt-${conversationId}` },
@@ -165,6 +164,7 @@ vi.stubGlobal('window', {
       get: wtGet,
       list: wtList,
       status: wtStatus,
+      statuses: wtStatuses,
       remove: wtRemove,
       rebuild: wtRebuild,
       repoClean: wtRepoClean,
@@ -172,13 +172,8 @@ vi.stubGlobal('window', {
   },
 });
 
-let sessions: typeof SessionsModule;
-let settings: typeof SettingsModule;
-
-beforeAll(async () => {
-  settings = await import('../settings');
-  sessions = await import('./index');
-});
+const settings = await import('../settings');
+const sessions = await import('./index');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -927,15 +922,17 @@ describe('refreshWorktreeStatuses', () => {
     );
   });
 
-  it('拉取所有隔离会话状态进 worktreeStatuses', async () => {
+  it('一次批量拉取所有隔离会话状态进 worktreeStatuses，不逐个请求', async () => {
     const id = await seedIsolatedConversation();
-    wtStatus.mockResolvedValueOnce({ ok: true, value: { exists: true, dirty: true, ahead: 3 } });
+    wtStatus.mockClear();
+    wtStatuses.mockResolvedValueOnce({ [id]: { exists: true, dirty: true, ahead: 3 } });
     await sessions.useSessionsStore.getState().refreshWorktreeStatuses();
     expect(sessions.useSessionsStore.getState().worktreeStatuses[id]).toEqual({
       exists: true,
       dirty: true,
       ahead: 3,
     });
+    expect(wtStatus).not.toHaveBeenCalled();
   });
 
   it('刷新状态不自动清理已合并 worktree', async () => {

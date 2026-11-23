@@ -1,6 +1,6 @@
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { DCG_VERSION, dcgRoot, dcgStatus, installDcg, uninstallDcg } from '../services/dcgBinary';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
 

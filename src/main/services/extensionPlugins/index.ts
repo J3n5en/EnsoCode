@@ -10,7 +10,7 @@ import {
 } from '@platform';
 import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { isHeadlessRun } from '@shared/headlessRun';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { readSettings } from '../../ipc/settings';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { remoteLeaderId } from '../remoteRenderer/senders';

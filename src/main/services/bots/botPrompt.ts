@@ -1,6 +1,7 @@
 import { WORKSPACE_WRITE_TOOL_ID } from '../../../shared/childProfileTools';
 import type { DefaultModelRef } from '../../../shared/defaultModel';
-import { THINKING_LEVELS, type ThinkingLevel } from '../../../shared/types/agent';
+import type { ThinkingLevel } from '../../../shared/types/agent';
+import { THINKING_LEVELS } from '../../../shared/types/agentConstants';
 import type { BotChat, BotEngine, BotProfile } from '../../../shared/types/bot';
 
 type BotIdentity = Pick<BotProfile, 'id' | 'name' | 'title' | 'scope'>;

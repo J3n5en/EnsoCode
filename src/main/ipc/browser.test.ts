@@ -40,7 +40,7 @@ vi.mock('../services/browserHost', () => ({ browserHost: mocks.host }));
 vi.mock('../windows/createAppWindow', () => ({ sendToAllWindows: () => {} }));
 vi.mock('../windows/MainWindow', () => ({ isMainWebContents: (id: number) => id === 1 }));
 
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { registerBrowserHandlers } from './browser';
 
 const sender = (id: number) => {

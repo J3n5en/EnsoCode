@@ -7,7 +7,7 @@ import {
   parseNodeSettingsUrl,
 } from '@shared/nodeSettings';
 import { parseSettingsDeepLink, type SettingsDeepLink } from '@shared/settingsDeepLink';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { NodeActionResult } from '@shared/types/nodes';
 import { BrowserWindow, protocol, type WebContents, WebContentsView } from 'electron';
 import { attachNavigationGuard, openExternalWebUrl } from '../../windows/appNavigation';

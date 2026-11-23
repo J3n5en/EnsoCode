@@ -58,6 +58,7 @@ function setup() {
     notifyMode: () => 'with-done',
     secretaryName: () => '爱酱',
     secretaryConversationId: () => 'sec-1',
+    startConversation: async () => ({ ok: true, conversationId: 'sec-1' }),
     deliver: async (_id, text) => {
       delivered.push(text);
       return { ok: true };

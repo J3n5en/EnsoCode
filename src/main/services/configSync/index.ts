@@ -22,8 +22,8 @@ import type {
   ConfigSyncPreviewResult,
   ConfigSyncSummary,
 } from '@shared/types';
-import { resolveEditMode } from '@shared/types';
 import { persistedSettingsState } from '@shared/types/builtinTools';
+import { resolveEditMode } from '@shared/types/editMode';
 import {
   commitSettingsTransaction,
   readSettings,

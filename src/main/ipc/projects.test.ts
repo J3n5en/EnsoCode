@@ -51,7 +51,7 @@ vi.mock('./agent', () => ({
   }),
 }));
 vi.mock('./worktree', () => ({ sessionWorktree: mocks.sessionWorktree }));
-vi.mock('../../agent/projectCode', () => ({
+vi.mock('../../agent/projectCodeSources', () => ({
   listProjectCodeSources: mocks.listProjectCodeSources,
 }));
 vi.mock('../services/recentProjects', () => ({ getRecentProjects: () => [] }));
@@ -59,7 +59,7 @@ vi.mock('../services/openInApps', () => ({
   openInApps: { list: mocks.listApps, open: mocks.openInApp },
 }));
 
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { registerProjectHandlers } from './projects';
 
 const event = (id: number) => ({ sender: { id } });

@@ -6,12 +6,13 @@ import { extractModelOverrides, referencedModelIds } from '@shared/modelDirector
 import { STATUS_LINE_PRESETS, STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import { DEFAULT_THEME_KEY } from '@shared/theme/builtinThemes';
 import { parseThemeKey } from '@shared/theme/themeKey';
-import { type EditMode, type ModelEntry, resolveEditMode } from '@shared/types';
+import type { EditMode, ModelEntry } from '@shared/types';
 import {
   addComputerDefaultOff,
   COMPUTER_DEFAULT_OFF_SETTINGS_VERSION,
   effectiveSubagentAllowedModes,
 } from '@shared/types/builtinTools';
+import { resolveEditMode } from '@shared/types/editMode';
 import { resolveAutoRestartMode } from '@shared/updater/idleRestart';
 import { parseWebSearchChain } from '@shared/webSearchChain';
 

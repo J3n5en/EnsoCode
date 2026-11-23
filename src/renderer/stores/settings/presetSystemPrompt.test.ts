@@ -1,5 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const deleteSystemPrompt = vi.fn(async () => ({ ok: true }));
 vi.stubGlobal('navigator', { language: 'en-US' });
@@ -27,7 +26,7 @@ vi.stubGlobal('window', {
   },
 });
 
-let settingsModule: typeof SettingsModule;
+const settingsModule = await import('./index');
 const promptId = '017f23dd-c633-4e83-b695-52236a0d828a';
 const preset = (id: string, systemPromptId = promptId) => ({
   id,
@@ -38,9 +37,6 @@ const preset = (id: string, systemPromptId = promptId) => ({
 });
 
 describe('预设系统提示词文件生命周期', () => {
-  beforeAll(async () => {
-    settingsModule = await import('./index');
-  });
   beforeEach(() => {
     settingsModule.useSettingsStore.setState({
       presets: [preset('custom')],

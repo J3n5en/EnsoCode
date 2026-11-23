@@ -18,6 +18,37 @@ let store: SecretaryStore;
 let clock = 1000;
 const now = () => ++clock;
 
+describe('dispatch 读缓存', () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'secretary-dispatch-'));
+    store = new SecretaryStore(dir, now);
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('多次读互为独立副本：改了上一次读到的不影响下一次', () => {
+    store.saveDispatch({ ...store.dispatch(), named: ['a'] });
+    const first = store.dispatch();
+    first.named.push('b');
+    expect(store.dispatch().named).toEqual(['a']);
+    expect(store.dispatchView().named).toEqual(['a']);
+  });
+
+  it('文件被别处改写后读到新内容', () => {
+    store.saveDispatch({ ...store.dispatch(), named: ['a'] });
+    expect(store.dispatch().named).toEqual(['a']);
+    const onDisk = JSON.parse(readFileSync(join(dir, 'dispatch.json'), 'utf8'));
+    writeFileSync(join(dir, 'dispatch.json'), JSON.stringify({ ...onDisk, named: ['x', 'y'] }));
+    expect(store.dispatch().named).toEqual(['x', 'y']);
+  });
+
+  it('保存后读到的与盘上一致；另一个实例也读到同样内容', () => {
+    store.saveDispatch({ ...store.dispatch(), named: ['a', 'b'] });
+    const fromDisk = new SecretaryStore(dir, now).dispatch();
+    expect(store.dispatch()).toEqual(fromDisk);
+    expect(fromDisk.named).toEqual(['a', 'b']);
+  });
+});
+
 const profile: SecretaryProfile = {
   version: 1,
   name: '小秘',

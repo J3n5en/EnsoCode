@@ -1,3 +1,4 @@
+import type { GoalResultView } from '../secretary/goalResult';
 import type { ModelRef, ThinkingLevel } from './agent';
 
 /**
@@ -296,6 +297,11 @@ export type SecretaryResultKind =
 /** 转交提问的收尾方式：秘书代答、用户在原会话里直接答、超时兜底 */
 export const RELAY_ASK_STATUSES = ['pending', 'answered', 'user-answered', 'timed-out'] as const;
 
+/** 排队会话给秘书的回传：启动失败、被取消 */
+export const QUEUED_UPDATE_STATUSES = ['failed', 'cancelled'] as const;
+
+export type QueuedUpdateStatus = (typeof QUEUED_UPDATE_STATUSES)[number];
+
 export type RelayAskStatus = (typeof RELAY_ASK_STATUSES)[number];
 
 /**
@@ -417,6 +423,8 @@ export interface DispatchRecord {
    * 有了可见回复就清掉。
    */
   sentAt?: number;
+  /** goal_complete 的结构化结果和宿主核验 */
+  goalResult?: GoalResultView;
 }
 
 export type SecretaryUpdate = {
@@ -428,12 +436,16 @@ export type SecretaryUpdate = {
   secretaryConversationId?: string;
   /** 非紧急更新到这个时间再投；缺省表示可以立刻投 */
   deliverAt?: number;
+  /** 只有 goal-complete 带：结构化结果与宿主核验 */
+  goalResult?: GoalResultView;
 } & (
   | { kind: SecretaryResultKind; conversationId: string }
   /** 转交给秘书的提问：pending 要秘书处理，其余是收尾通知 */
   | { kind: 'ask-relay'; conversationId: string; askId: string; status: RelayAskStatus }
   /** 遗留任务巡检：说明哪个会话、什么命令、跑了多久；不自动杀进程 */
   | { kind: 'leftover'; conversationId: string }
+  /** 排队会话：自动启动失败（等用户立即开始或取消）、被取消（会话已删除） */
+  | { kind: 'queued'; conversationId: string; status: QueuedUpdateStatus }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
   | {
@@ -519,7 +531,7 @@ export interface SecretaryBoardTodo extends SecretaryTodo {
   phase?: SecretaryTodoPhase;
   projectName?: string;
   sessionTitle?: string;
-  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone';
+  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone' | 'queued';
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，直接派发 */
@@ -590,7 +602,11 @@ export type SecretaryCard =
       projectId: string;
       projectName: string;
       title: string;
-      state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+      state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
+      /** 排队中：同一秘书内的位次（从 1 开始）；启动失败的不占位，改给 queueFailed */
+      queuePosition?: number;
+      /** 排队会话自动启动失败的原因：等用户立即开始重试或取消 */
+      queueFailed?: string;
       lastText?: string;
       /** 派出时间 */
       startedAt: number;
@@ -685,6 +701,7 @@ export interface SecretaryDailyRecord {
   commit?: string;
   /** 最终汇报里明确说了合并 */
   merged?: true;
+  goalResult?: GoalResultView;
 }
 
 /** 派发/接管会话按当天最终状态落一列；待办与设置变更是另外两类记录 */
@@ -727,6 +744,7 @@ export interface SecretaryDailyItem {
   leftover?: { count: number };
   /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
   persistent?: true;
+  goalResult?: GoalResultView;
 }
 
 export interface SecretaryDailyCounts {
@@ -792,6 +810,7 @@ export interface SecretaryStoredReport {
   imagesGoneAt?: number;
   /** 只在视图里：截图保留天数 */
   retentionDays?: number;
+  goalResult?: GoalResultView;
 }
 
 /** 已完成条目的「结果」视图；没存下报告（旧数据、手动标记完成）时 report 为 null */

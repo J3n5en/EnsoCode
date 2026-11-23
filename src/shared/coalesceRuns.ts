@@ -1,10 +1,10 @@
 /**
  * 在途时再调用不并发重跑：合并成一次尾随执行（保证调用之后的状态被看到），调用方都等它结束。
  */
-export function coalesceRuns(task: () => Promise<void>): () => Promise<void> {
-  let current: Promise<void> | null = null;
-  let next: Promise<void> | null = null;
-  const start = (): Promise<void> => {
+export function coalesceRuns<T>(task: () => Promise<T>): () => Promise<T> {
+  let current: Promise<T> | null = null;
+  let next: Promise<T> | null = null;
+  const start = (): Promise<T> => {
     const run = task().finally(() => {
       if (current === run) current = null;
     });

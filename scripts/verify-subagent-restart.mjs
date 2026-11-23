@@ -2,7 +2,10 @@
 // 子代理跨重启续跑真机验证：隔离 dev 实例（ENSO_VERIFY=1、临时 userData、假模型服务），
 // 父会话派出 task 子代理 → 子代理执行 bash 途中应用优雅退出 → 同一 userData 重新启动 →
 // 子代理接着断点续跑（不重跑已执行的 bash）→ 父会话收到完成通知。
-//   node scripts/verify-subagent-restart.mjs [--keep]
+// --stalled-reply：父会话空闲、子代理回复写到一半卡住时退出 → 等满回复保底后 worker 收尾中止 →
+// Run 记成被打断并带续跑记录（不是 succeeded）→ 重启后子代理自动续跑、父会话收到完成通知。
+// 默认经关窗确认退出；加 --sigterm 改为 SIGTERM（不经确认，到 will-quit 才等安全点，同托盘退出）。
+//   node scripts/verify-subagent-restart.mjs [--keep] [--stalled-reply [--sigterm]]
 // 退出码：全部通过 0，否则 1。不碰真实 userData，不抢焦点（窗口不显示、不进 Dock）。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -24,6 +27,8 @@ import { uiElementElectron } from './verify-electron.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEEP = process.argv.includes('--keep');
+const STALLED = process.argv.includes('--stalled-reply');
+const SIGTERM_QUIT = process.argv.includes('--sigterm');
 const OUT = mkdtempSync('/tmp/enso-subagent-restart-');
 const ENV = path.join(OUT, 'user-data');
 const PROJ = path.join(OUT, 'project');
@@ -85,22 +90,25 @@ const hasToolResult = (messages) =>
     (m) => Array.isArray(m.content) && m.content.some((c) => c?.type === 'tool_result')
   );
 
+const messageStart = () => ({
+  type: 'message_start',
+  message: {
+    id: `msg_${Date.now()}`,
+    type: 'message',
+    role: 'assistant',
+    model: 'fake-model-1',
+    content: [],
+    stop_reason: null,
+    usage: { input_tokens: 10, output_tokens: 5 },
+  },
+});
+const writeEvents = (res, events) => {
+  for (const event of events) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+};
+
 function sse(res, blocks, stop) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-  const events = [
-    {
-      type: 'message_start',
-      message: {
-        id: `msg_${Date.now()}`,
-        type: 'message',
-        role: 'assistant',
-        model: 'fake-model-1',
-        content: [],
-        stop_reason: null,
-        usage: { input_tokens: 10, output_tokens: 5 },
-      },
-    },
-  ];
+  const events = [messageStart()];
   blocks.forEach((block, index) => {
     if (block.type === 'text') {
       events.push({
@@ -134,8 +142,29 @@ function sse(res, blocks, stop) {
   });
   events.push({ type: 'message_delta', delta: { stop_reason: stop }, usage: { output_tokens: 5 } });
   events.push({ type: 'message_stop' });
-  for (const event of events) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  writeEvents(res, events);
   res.end();
+}
+
+/** 回复写到一半卡住：出一点 text delta 后不再出 token，也不结束连接 */
+const stalled = new Set();
+let stallChild = STALLED;
+function stall(res) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+  writeEvents(res, [
+    messageStart(),
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: 'CHILD-PARTIAL ' },
+    },
+  ]);
+  stalled.add(res);
+  res.on('close', () => {
+    stalled.delete(res);
+    note('stalled child reply: connection closed by client');
+  });
 }
 
 function script(body) {
@@ -144,7 +173,8 @@ function script(body) {
   const all = messages.map(textOf).join('\n');
   const tools = (body?.tools ?? []).map((tool) => tool.name);
   if (first.includes('CHILD-TASK')) {
-    if (!hasToolResult(messages)) {
+    if (stallChild) return { who: 'child', action: 'stall', stall: true };
+    if (!STALLED && !hasToolResult(messages)) {
       const bash = tools.find((name) => name === 'bash') ?? 'bash';
       return {
         who: 'child',
@@ -222,6 +252,7 @@ async function startProvider() {
       requests.push({ at: Date.now(), ...reply, lastText });
       if (reply.who !== 'aux')
         note(`model ← ${reply.who}: ${reply.action}  (last: ${lastText.slice(0, 120)})`);
+      if (reply.stall) return stall(res);
       sse(res, reply.blocks, reply.stop);
     });
   });
@@ -349,6 +380,23 @@ async function quit(instance, timeout = 90_000) {
   } catch {}
 }
 
+/**
+ * 用户退出（Cmd+Q / 关窗选「退出」）：关主窗口并在确认里答「退出」，走 beforeConfirmedQuit 等安全点
+ */
+async function quitConfirmed(instance, timeout) {
+  await instance.page.evaluate(`(() => {
+    const api = window.electronAPI.app;
+    api.onCloseRequest((id) => api.respondCloseRequest(id, { action: 'quit' }));
+    setTimeout(() => window.close(), 0);
+    return true;
+  })()`);
+  instance.page.close();
+  await waitFor(() => !alive(instance.main), 'electron exit', timeout, 200);
+  try {
+    process.kill(-instance.child.pid, 'SIGTERM');
+  } catch {}
+}
+
 const json = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null);
 const logLines = (name, pattern) =>
   existsSync(path.join(OUT, `${name}.log`))
@@ -406,6 +454,10 @@ async function main() {
     '父会话建好并发出消息',
     conversationId
   );
+  if (STALLED) {
+    await stalledReply(first);
+    return finish(provider);
+  }
   await waitFor(
     () => requests.some((r) => r.who === 'child' && r.action.startsWith('tool')),
     '子代理发出 bash 调用'
@@ -474,8 +526,96 @@ async function main() {
   ))
     note(`run2 log: ${line.trim()}`);
   await quit(second, 30_000);
-  provider.server.close();
+  return finish(provider);
+}
 
+async function stalledReply(first) {
+  await waitFor(() => requests.some((r) => r.action === 'stall'), '子代理开始写回复');
+  await waitFor(
+    () => requests.some((r) => r.action === 'text PARENT-WAITING'),
+    '父会话结束本轮（空闲）'
+  );
+  await sleep(1500);
+  check(stalled.size === 1, '退出时子代理的回复卡在半路（连接未结束）');
+
+  // 2. 用户退出：没有工具在跑，保底 60s、停止出 token 20s 后超时，worker 收尾中止这条回复
+  note(
+    `quit run1 via ${SIGTERM_QUIT ? 'SIGTERM (will-quit)' : 'close confirm'} (while the child reply is stalled)`
+  );
+  const quitAt = Date.now();
+  if (SIGTERM_QUIT) await quit(first, 150_000);
+  else await quitConfirmed(first, 150_000);
+  const waited = (Date.now() - quitAt) / 1000;
+  note(`run1 exited after ${waited.toFixed(1)}s`);
+  check(waited >= 55, '退出等满了回复保底才中止', waited);
+  check(stalled.size === 0, '卡住的回复已被中止（连接关闭）');
+  const agentDir = path.join(ENV, 'agent');
+  const checkpoint =
+    json(path.join(agentDir, 'restart-checkpoint.json')) ??
+    json(path.join(agentDir, 'restart-checkpoint.consumed.json'));
+  note(
+    `checkpoint: ${JSON.stringify(checkpoint?.sessions?.map((s) => ({ id: s.sessionId.slice(0, 20), nextStep: s.nextStep })))}`
+  );
+  check(
+    checkpoint?.sessions?.some((s) => s.sessionId.includes('::')),
+    '断点里有子会话',
+    checkpoint
+  );
+  const ledgerFile = path.join(agentDir, 'subagent-runs.json');
+  const summary = (runs) =>
+    JSON.stringify(
+      runs?.map((r) => ({
+        runId: r.runId.slice(0, 8),
+        status: r.status,
+        notified: r.notified,
+        restart: Boolean(r.restart),
+      }))
+    );
+  const run = json(ledgerFile)?.runs?.at(-1);
+  note(`ledger after run1: ${summary(json(ledgerFile)?.runs)}`);
+  check(run && run.status !== 'succeeded', '台账里这次 Run 不是 succeeded', run?.status);
+  check(run?.restart, '台账里这次 Run 带 restart 续跑记录');
+  check(run?.notified === false, '台账里这次 Run 还没通知父会话（notified=false）', run?.notified);
+
+  // 3. 重新启动：子代理按断点续跑（这次正常回 CHILD-DONE），父会话收到完成通知
+  stallChild = false;
+  const childBefore = requests.filter((r) => r.who === 'child').length;
+  const second = await launch('run2');
+  const gotIt = await waitFor(
+    () => requests.some((r) => r.who === 'parent' && r.action.includes('PARENT-GOT-IT')),
+    '父会话收到完成通知并开一轮',
+    120_000
+  ).catch(() => false);
+  check(gotIt, '重启后父会话收到完成通知并回 PARENT-GOT-IT');
+  const childAfter = requests.filter((r) => r.who === 'child').slice(childBefore);
+  check(
+    childAfter.some((r) => r.action === 'final CHILD-DONE'),
+    '重启后子代理自动续跑并收尾',
+    childAfter
+  );
+  const notice = requests.find((r) => r.who === 'parent' && r.action.includes('PARENT-GOT-IT'));
+  check(
+    /succeeded/.test(notice?.lastText ?? '') && notice.lastText.includes(run?.runId),
+    '父会话收到的是重启前那个 Run 的完成通知（succeeded）',
+    notice
+  );
+  const lost = [
+    ...requests.filter((r) => /restart-lost|record was lost/.test(r.lastText)),
+    ...logLines('run2', /restart-lost/),
+  ];
+  check(lost.length === 0, '没有 restart-lost', lost);
+  note(`ledger after run2: ${summary(json(ledgerFile)?.runs)}`);
+  for (const line of logLines(
+    'run2',
+    /\[agent\] restart resume|wake owner|cold resume|graceful-restart\] wake/
+  ))
+    note(`run2 log: ${line.trim()}`);
+  await quit(second, 30_000);
+}
+
+function finish(provider) {
+  for (const res of stalled) res.destroy();
+  provider.server.close();
   const failed = results.filter((r) => !r.ok);
   writeFileSync(path.join(OUT, 'timeline.txt'), timeline.join('\n'));
   console.log(`\n${results.length - failed.length}/${results.length} passed → ${OUT}/timeline.txt`);

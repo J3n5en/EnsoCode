@@ -1,4 +1,5 @@
-import { APPROVAL_MODES, type ApprovalMode, THINKING_LEVELS } from '@shared/types/agent';
+import type { ApprovalMode } from '@shared/types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agentConstants';
 import { MODEL_API_KINDS, type ModelApiKind } from '@shared/types/llm';
 
 export const OUTPUT_FORMATS = ['text', 'json', 'stream-json'] as const;

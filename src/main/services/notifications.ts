@@ -1,8 +1,8 @@
 import { join } from 'node:path';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
 import { shouldSilenceTurn } from '@shared/secretary/silence';
-import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, BrowserWindow, type Notification } from 'electron';
 import { showSystemNotification } from '../desktop/systemNotification';
 import { readSettings } from '../ipc/settings';

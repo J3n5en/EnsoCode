@@ -13,7 +13,8 @@
  * - 560-578 clampThinkingLevel：命中即返回；否则先向上（更高档）再向下，
  *   都没有则 `availableLevels[0] ?? "off"`。全程静默。
  */
-import { THINKING_LEVELS, type ThinkingLevel } from './types/agent';
+import type { ThinkingLevel } from './types/agent';
+import { THINKING_LEVELS } from './types/agentConstants';
 
 /** pi 的完整档位序（含我们不暴露的 off），钳位方向依赖这个顺序 */
 const PI_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;

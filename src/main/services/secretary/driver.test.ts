@@ -223,6 +223,15 @@ describe('派出会话的目标续跑', () => {
     expect(waiting.prompts).toHaveLength(0);
   });
 
+  it('挂着自定提醒的一轮不续跑，目标保持 active；提醒叫醒的那一轮结束后照常续跑', () => {
+    h.driver.observe(turnCompleted({ ...digest('等 CI，5 分钟后看'), awaitingReminder: true }));
+    expect(h.prompts).toHaveLength(0);
+    expect(goalOf(h)).toMatchObject({ status: 'active', autoTurns: 0 });
+    h.driver.observe(turnCompleted(digest('CI 过了')));
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0].delivery.text).toContain('<goal-continuation>');
+  });
+
   it('同一轮空闲只续跑一次，压缩结束不再投第二遍', () => {
     h.driver.observe(turnCompleted(digest('step one')));
     expect(h.prompts).toHaveLength(1);
@@ -689,5 +698,34 @@ describe('投递被拒的消息不丢', () => {
 
     expect(h.rows[SID].queuedMessages).toEqual([]);
     expect(h.audits).toEqual([]);
+  });
+});
+
+describe('排队会话', () => {
+  it('还在排队的行：合并写回带来的消息不投、目标不续跑', async () => {
+    const h = harness({
+      queuedStart: { queuedAt: 1, text: '首条' },
+      queuedMessages: [{ id: 'q1', text: '排队期间发的' }],
+    });
+    const patch = mergedQueued('排队期间发的');
+    h.driver.onConversationsMerged(patch);
+    await Promise.resolve();
+    h.driver.observe(turnCompleted(digest('step')));
+    expect(h.prompts).toEqual([]);
+    expect(h.rows[SID].queuedMessages).toHaveLength(1);
+  });
+
+  it('启动后首轮结束：排队期间发的消息先于目标续跑投出，排在首条之后', () => {
+    const h = harness({
+      queuedStart: { queuedAt: 1, text: '首条', startingAt: 2 },
+      queuedMessages: [{ id: 'q1', text: '排队期间发的' }],
+    });
+    // 启动泵投完首条后撤掉 queuedStart
+    const { queuedStart: _queued, ...started } = h.rows[SID];
+    h.rows[SID] = started;
+    h.driver.observe(turnCompleted(digest('首条做完了')));
+    expect(h.prompts.map((prompt) => prompt.delivery.text)).toEqual(['排队期间发的']);
+    h.driver.observe(turnCompleted(digest('补充也做完了')));
+    expect(h.prompts[1].delivery.text).toContain('<goal-continuation>');
   });
 });

@@ -1,5 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -26,13 +25,9 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
+const settings = await import('./index');
 
 describe('subagent allowed modes settings', () => {
-  beforeAll(async () => {
-    settings = await import('./index');
-  });
-
   beforeEach(() => {
     settings.useSettingsStore.setState({
       disabledBuiltinTools: [],

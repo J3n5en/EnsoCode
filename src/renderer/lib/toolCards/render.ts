@@ -310,7 +310,7 @@ function createdSession(
   ctx: ToolCardContext
 ): ToolCardBlock | null {
   const id = str(output?.conversationId);
-  if (output?.status !== 'created' || !id) return null;
+  if ((output?.status !== 'created' && output?.status !== 'queued') || !id) return null;
   // 状态已经在徽标里说过一次，这里只留可点的会话名
   return { kind: 'session', id, label: sessionLabel(id, ctx) };
 }
@@ -542,8 +542,16 @@ function dispatchCard(
       ? { tone: 'error', label: ctx.t('Refused') }
       : output?.status === 'waiting'
         ? { tone: 'queued', label: ctx.t('Waiting for dependencies') }
-        : (confirmation(output, ctx) ??
-          (created ? { tone: 'ok', label: ctx.t('Created the session') } : undefined))
+        : output?.status === 'queued'
+          ? {
+              tone: 'queued',
+              label:
+                typeof output.position === 'number'
+                  ? ctx.t('Queued at #{{n}}', { n: output.position })
+                  : ctx.t('Queued'),
+            }
+          : (confirmation(output, ctx) ??
+            (created ? { tone: 'ok', label: ctx.t('Created the session') } : undefined))
   );
 }
 

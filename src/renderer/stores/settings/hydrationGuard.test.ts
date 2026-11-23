@@ -1,5 +1,5 @@
 import type { SourceAuthorityProjection } from '@shared/types';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type * as SettingsModule from './index';
 import { SETTINGS_VERSION } from './migrate';
 
@@ -38,7 +38,7 @@ vi.stubGlobal('window', {
   },
 });
 
-let settingsModule: typeof SettingsModule;
+const settingsModule = await import('./index');
 
 const projection = (paths: string[]) =>
   ({
@@ -62,10 +62,6 @@ const writtenProviders = () =>
   );
 
 describe('settings persist hydration guard', () => {
-  beforeAll(async () => {
-    settingsModule = await import('./index');
-  });
-
   it('drops every write that lands before persist has merged the first read', async () => {
     // 设置窗刚起：settings.read 还没回，Main 的 source-authority 广播先到
     projectionListener?.(projection(['/tmp/alpha']));

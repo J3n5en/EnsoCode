@@ -1,5 +1,5 @@
 import { applyConversationsPatch, diffConversations } from '@shared/conversationsPatch';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface FakePeer {
@@ -14,6 +14,8 @@ const peers = vi.hoisted(() => ({ local: null as unknown, remote: [] as unknown[
 
 vi.mock('../renderers', () => ({ localMainContents: () => peers.local }));
 vi.mock('./senders', () => ({ remoteSenders: () => peers.remote }));
+
+await import('./conversationSync');
 
 let nextId = 1;
 function peer(): FakePeer {

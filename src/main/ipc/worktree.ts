@@ -6,8 +6,9 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { coalesceRuns, mapLimited } from '@shared/coalesceRuns';
 import type { GitRequest } from '@shared/types/git';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type {
   SessionWorktree,
   WorkspaceBranches,
@@ -49,6 +50,8 @@ import { agentSessionIndex } from './sessionIndex';
 let registry: WorktreeRegistry | null = null;
 const busyWorktrees = new Map<string, Promise<void>>();
 const bindingConversations = new Map<string, Promise<void>>();
+/** 批量查状态时同时跑的 git 数：每个状态要起几次 git，几百条登记不能一起 spawn */
+const STATUS_CONCURRENCY = 4;
 
 function lockWorktree(worktreePath: string): () => void {
   let release!: () => void;
@@ -718,6 +721,24 @@ export function registerWorktreeHandlers(): void {
       }
     }
   );
+
+  // 侧栏徽标与自动归档要全部状态：一次请求代替逐条往返（远端每条都要过隧道）；
+  // 本机与远端各窗口同时刷新共用一轮，途中再来的等下一轮，保证看到调用之后的状态
+  const allStatuses = coalesceRuns(async (): Promise<Record<string, WorktreeStatus>> => {
+    const entries = await mapLimited(
+      ensureRegistry().list(),
+      STATUS_CONCURRENCY,
+      async (record) => {
+        try {
+          return [record.conversationId, await worktreeStatus(record)] as const;
+        } catch {
+          return null;
+        }
+      }
+    );
+    return Object.fromEntries(entries.filter((entry) => entry !== null));
+  });
+  ipcMain.handle(IPC_CHANNELS.WORKTREE_STATUSES, () => allStatuses());
 
   ipcMain.handle(
     IPC_CHANNELS.WORKTREE_REMOVE,

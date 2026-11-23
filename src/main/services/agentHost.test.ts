@@ -222,6 +222,9 @@ describe('agentHost agent type tool filtering', () => {
       'task_output',
       'task_stop',
       'task_settle',
+      'remind_me',
+      'reminder_list',
+      'reminder_cancel',
       'message_main_agent',
       'message_coworker',
     ]);
@@ -238,6 +241,9 @@ describe('agentHost agent type tool filtering', () => {
       'task_output',
       'task_stop',
       'task_settle',
+      'remind_me',
+      'reminder_list',
+      'reminder_cancel',
       'message_main_agent',
       'message_coworker',
     ]);
@@ -263,6 +269,9 @@ describe('agentHost agent type tool filtering', () => {
       'task_output',
       'task_stop',
       'task_settle',
+      'remind_me',
+      'reminder_list',
+      'reminder_cancel',
       'message_main_agent',
       'message_coworker',
     ]);

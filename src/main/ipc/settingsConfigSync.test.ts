@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const userData = mkdtempSync(path.join(tmpdir(), 'enso-settings-config-sync-'));
 const send = vi.fn();
@@ -29,20 +29,16 @@ vi.mock('../services/uiHost', async () =>
   ])
 );
 
-let settings: typeof import('./settings');
-
-beforeAll(async () => {
-  const file = path.join(userData, 'settings.json');
-  writeFileSync(
-    file,
-    JSON.stringify({
-      'enso-settings': { version: 7, state: { theme: 'dark', providers: [] } },
-      'enso-conversations': { state: { conversations: { keep: true } } },
-    })
-  );
-  chmodSync(file, 0o644);
-  settings = await import('./settings');
-});
+const file = path.join(userData, 'settings.json');
+writeFileSync(
+  file,
+  JSON.stringify({
+    'enso-settings': { version: 7, state: { theme: 'dark', providers: [] } },
+    'enso-conversations': { state: { conversations: { keep: true } } },
+  })
+);
+chmodSync(file, 0o644);
+const settings = await import('./settings');
 
 afterAll(() => {
   rmSync(userData, { recursive: true, force: true });

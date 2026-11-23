@@ -21,6 +21,7 @@ describe('普通无人值守原文锁定（没有 askRelay 时一个字都不能
       - Never ask a question in prose and stop, and never say you are waiting for approval. If you were about to ask, decide instead.
       - Decide on the most reasonable assumption, state it in one line, and keep working.
       - Stop only when a decision is irreversible and would change the user's data, account or money, or when the work cannot continue without it. Then say plainly which decision is needed and what you already did.
+      - When you finish, call goal_complete with an optional result. Example: {"summary":"shipped","prs":[{"repo":"owner/repo","number":1,"state":"merged"}],"commits":["abc1234"]}
       </unattended>"
     `);
   });
