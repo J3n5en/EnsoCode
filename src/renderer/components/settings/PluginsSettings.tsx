@@ -272,6 +272,8 @@ function parseLogLines(text: string): LogLine[] | null {
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
 function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const { t } = useI18n();
+  const pluginLoggingEnabled = useSettingsStore((state) => state.pluginLoggingEnabled === true);
+  const setPluginLoggingEnabled = useSettingsStore((state) => state.setPluginLoggingEnabled);
   const [text, setText] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -282,18 +284,37 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
   React.useEffect(() => {
     void load();
   }, [load]);
+  const loggingWasOn = React.useRef(pluginLoggingEnabled);
+  React.useEffect(() => {
+    if (!loggingWasOn.current && pluginLoggingEnabled) void load();
+    loggingWasOn.current = pluginLoggingEnabled;
+  }, [pluginLoggingEnabled, load]);
   React.useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
   const lines = React.useMemo(() => (text ? parseLogLines(text) : null), [text]);
+  const showBody = pluginLoggingEnabled || (text !== null && text !== '');
   React.useLayoutEffect(() => {
     const box = scrollRef.current;
     if (box && text) box.scrollTop = box.scrollHeight;
   }, [text]);
   return (
     <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
+      {!pluginLoggingEnabled && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="text-sm">{t('Plugin logging is off')}</p>
+            <p className="text-muted-foreground text-xs">
+              {t('New plugin logs are not recorded while off. Existing log files are kept.')}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setPluginLoggingEnabled(true)}>
+            {t('Enable plugin logging')}
+          </Button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <p className="text-sm">{t('Plugin logs')}</p>
         <div className="flex items-center gap-1">
@@ -315,37 +336,39 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
           </Button>
         </div>
       </div>
-      {text && !lines && (
+      {showBody && text && !lines && (
         <p className="text-muted-foreground text-xs">{t('Log too large, showing plain text')}</p>
       )}
-      <div
-        ref={scrollRef}
-        className="max-h-96 select-text overflow-auto font-mono text-muted-foreground text-xs"
-      >
-        {lines ? (
-          lines.map((line, index) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: 日志行无稳定标识，按位置渲染
-              key={index}
-              data-log-level={line.level}
-              className={cn('whitespace-pre-wrap break-words', LOG_LEVEL_CLASS[line.level])}
-            >
-              {line.time && (
-                <>
-                  <span data-log-time className="text-muted-foreground/60">
-                    {line.time}
-                  </span>{' '}
-                </>
-              )}
-              {line.body}
-            </div>
-          ))
-        ) : (
-          <pre className="whitespace-pre-wrap break-words">
-            {text === null ? '' : text || t('No logs yet')}
-          </pre>
-        )}
-      </div>
+      {showBody && (
+        <div
+          ref={scrollRef}
+          className="max-h-96 select-text overflow-auto font-mono text-muted-foreground text-xs"
+        >
+          {lines ? (
+            lines.map((line, index) => (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: 日志行无稳定标识，按位置渲染
+                key={index}
+                data-log-level={line.level}
+                className={cn('whitespace-pre-wrap break-words', LOG_LEVEL_CLASS[line.level])}
+              >
+                {line.time && (
+                  <>
+                    <span data-log-time className="text-muted-foreground/60">
+                      {line.time}
+                    </span>{' '}
+                  </>
+                )}
+                {line.body}
+              </div>
+            ))
+          ) : (
+            <pre className="whitespace-pre-wrap break-words">
+              {text === null ? '' : text || t('No logs yet')}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -656,6 +679,8 @@ export function EnsoPluginsSettings({
   const { t } = useI18n();
   const pluginAutoUpdate = useSettingsStore((state) => state.pluginAutoUpdate !== false);
   const setPluginAutoUpdate = useSettingsStore((state) => state.setPluginAutoUpdate);
+  const pluginLoggingEnabled = useSettingsStore((state) => state.pluginLoggingEnabled === true);
+  const setPluginLoggingEnabled = useSettingsStore((state) => state.setPluginLoggingEnabled);
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const themeErrors = usePluginThemesStore((state) => state.errors);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
@@ -892,6 +917,21 @@ export function EnsoPluginsSettings({
           className="shrink-0"
           checked={pluginAutoUpdate}
           onCheckedChange={(on) => setPluginAutoUpdate(on)}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="min-w-0">
+          <span className="block">{t('Record plugin logs')}</span>
+          <span className="block text-muted-foreground text-xs">
+            {t(
+              'Off by default. Record plugin console output and runtime logs to disk. Startup failures and crashes are still shown.'
+            )}
+          </span>
+        </span>
+        <Switch
+          className="shrink-0"
+          checked={pluginLoggingEnabled}
+          onCheckedChange={(on) => setPluginLoggingEnabled(on)}
         />
       </label>
       <div className="space-y-2.5 rounded-lg border bg-muted/30 p-3">

@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => {
     onAppEvent: vi.fn(),
     syncBotModeServices: vi.fn(),
     syncBotDiscussMode: vi.fn(),
+    pluginLogs: {
+      setLoggingEnabled: vi.fn(),
+      syncLoggingEnabled: vi.fn(),
+    },
     listModels: vi.fn(),
     windows: [] as Array<{
       isDestroyed: () => boolean;
@@ -26,6 +30,9 @@ const mocks = vi.hoisted(() => {
 vi.mock('./bots', () => ({
   syncBotModeServices: mocks.syncBotModeServices,
   syncBotDiscussMode: mocks.syncBotDiscussMode,
+}));
+vi.mock('../services/extensionPlugins', () => ({
+  peekExtensionPlugins: () => mocks.pluginLogs,
 }));
 
 // scheduleWrite 成功后会动态通知统一模型目录；mock 掉避免动态 import 链
@@ -230,6 +237,26 @@ describe('settings广播策略', () => {
     });
     reloaded.patchSettingsState('secretaryEnabled', false);
     reloaded.flushSettings();
+  });
+
+  it('插件日志开关是本机字段，变化时热通知插件服务', async () => {
+    vi.resetModules();
+    mocks.pluginLogs.setLoggingEnabled.mockClear();
+    mocks.pluginLogs.syncLoggingEnabled.mockClear();
+    const settings = await import('./settings');
+    expect(settings.SETTINGS_STATE_FIELDS).toContain('pluginLoggingEnabled');
+    expect(settings.CONFIG_SYNC_COMMIT_FIELDS).not.toContain('pluginLoggingEnabled');
+    expect(settings.patchSettingsState('pluginLoggingEnabled', true)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(mocks.pluginLogs.setLoggingEnabled).toHaveBeenCalledWith(true));
+    settings.patchSettingsState('pluginLoggingEnabled', true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.pluginLogs.setLoggingEnabled).toHaveBeenCalledTimes(1);
+    expect(settings.patchSettingsState('pluginLoggingEnabled', false)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(mocks.pluginLogs.setLoggingEnabled).toHaveBeenCalledWith(false));
+    settings.flushSettings();
+    mocks.pluginLogs.syncLoggingEnabled.mockClear();
+    expect(settings.reloadSettingsFromDisk()).toBe(true);
+    await vi.waitFor(() => expect(mocks.pluginLogs.syncLoggingEnabled).toHaveBeenCalled());
   });
 
   it('秘书开关关掉后落盘为 false，重启重读仍是关', async () => {

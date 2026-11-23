@@ -129,6 +129,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   autoRestartForUpdate: { mode: 'excluded', reason: 'device update policy' },
   updateChannel: { mode: 'excluded', reason: 'device update policy' },
   pluginAutoUpdate: { mode: 'excluded', reason: 'device update policy' },
+  pluginLoggingEnabled: { mode: 'excluded', reason: 'device-local plugin logging diagnostics' },
   proxyMode: { mode: 'excluded', reason: 'device network configuration' },
   customProxyUrl: { mode: 'excluded', reason: 'device network configuration may contain secrets' },
   customCaCertPath: { mode: 'excluded', reason: 'device-local certificate file path' },

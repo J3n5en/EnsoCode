@@ -2128,6 +2128,13 @@ export const zhTranslations: Record<string, string> = {
   'Update plugins automatically': '自动更新插件',
   'Marketplace updates that do not ask for new permissions install on their own.':
     '权限不变的市场更新会自动装上。需要新权限的仍等你同意。',
+  'Record plugin logs': '记录插件日志',
+  'Off by default. Record plugin console output and runtime logs to disk. Startup failures and crashes are still shown.':
+    '默认关闭。开启后将插件控制台输出与运行日志写入磁盘；关闭时启动失败和崩溃等错误状态仍会显示。',
+  'Plugin logging is off': '插件日志未开启',
+  'New plugin logs are not recorded while off. Existing log files are kept.':
+    '当前不会记录新的插件日志，已有日志文件不会删除。',
+  'Enable plugin logging': '开启插件日志',
   '{{name}} tried to message another session and was blocked':
     '插件 {{name}} 想向其他会话发消息，已拦截',
   'Turn on': '去开启',
@@ -3909,6 +3916,7 @@ export const zhTranslations: Record<string, string> = {
   'Nothing dispatched today': '今天还没派活',
   Started: '开始执行',
   'Goal complete': '目标完成',
+  'Done · needs your decision': '完成 · 待你决定',
   'Turn ended': '这一轮结束',
   Stalled: '停滞',
   'Stalled, no activity': '已停住',

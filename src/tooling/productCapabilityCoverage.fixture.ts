@@ -104,6 +104,9 @@ export const SETTINGS_DATA_COVERAGE = {
   pluginAutoUpdate: excluded(
     'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
   ),
+  pluginLoggingEnabled: excluded(
+    'Device-local plugin logging diagnostics switch, not an Enso capability.'
+  ),
   proxyMode: surfaces('general.proxy-mode'),
   customProxyUrl: surfaces('general.custom-proxy-url'),
   customCaCertPath: excluded('Device-local CA certificate file path for TLS trust.'),
@@ -299,6 +302,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   setUpdateChannel: excluded('Device update channel policy; not an Enso capability.'),
   setPluginAutoUpdate: excluded(
     'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
+  ),
+  setPluginLoggingEnabled: excluded(
+    'Device-local plugin logging diagnostics switch, not an Enso capability.'
   ),
   setProxyMode: surfaces('general.proxy-mode'),
   setCustomProxyUrl: surfaces('general.custom-proxy-url'),

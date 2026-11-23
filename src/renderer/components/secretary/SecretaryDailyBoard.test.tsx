@@ -532,6 +532,64 @@ describe('SecretaryDailyBoard', () => {
       '确认是否上线生产'
     );
   });
+
+  it('需要你列中 goal-complete 带 needsUser 的卡片展示 needsUser 列表与非「目标完成」标签，完成列不再残留 needsUser 徽标', async () => {
+    const longNeed = '确认宿主发版后是否立即合并上架并同步通知团队';
+    h.daily[TODAY] = daily({
+      groups: [
+        {
+          key: 'needsYou',
+          items: [
+            item({
+              id: 's-decision',
+              conversationId: 'c-decision',
+              label: 'Done · needs your decision',
+              summary: undefined,
+              detail: 'channel: "github" }`。未改动 wrapUntrusted',
+              tracked: true,
+              needsUser: ['是否合并上架 #62', longNeed],
+              goalResult: {
+                at: 1,
+                result: { needsUser: ['是否合并上架 #62', longNeed] },
+              },
+            }),
+          ],
+        },
+        {
+          key: 'done',
+          items: [
+            item({
+              id: 's-done-cleared',
+              conversationId: 'c-done-cleared',
+              label: 'Goal complete',
+              tracked: true,
+              goalResult: {
+                at: 1,
+                result: {
+                  prs: [{ repo: 'acme/plugins', number: 62, state: 'merged' }],
+                  needsUser: ['旧待确认'],
+                },
+              },
+            }),
+          ],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    const needCard = container.querySelector('[data-group="needsYou"] [data-item="s-decision"]');
+    expect(needCard?.textContent).toContain('[Done · needs your decision]');
+    expect(needCard?.textContent).not.toContain('[Goal complete]');
+    expect(needCard?.textContent).not.toContain('wrapUntrusted');
+    const needItems = Array.from(
+      needCard?.querySelectorAll('[data-enso="secretary-daily-needs-user-item"]') ?? []
+    );
+    expect(needItems.map((el) => el.textContent)).toEqual(['是否合并上架 #62', longNeed]);
+    expect(needItems[1]?.getAttribute('title')).toBe(longNeed);
+    expect(needCard?.querySelector('[data-enso="secretary-goal-needs-user"]')).toBeNull();
+
+    const doneCard = container.querySelector('[data-group="done"] [data-item="s-done-cleared"]');
+    expect(doneCard?.querySelector('[data-enso="secretary-goal-needs-user"]')).toBeNull();
+  });
 });
 
 describe('遗留任务', () => {

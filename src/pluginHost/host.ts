@@ -120,7 +120,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 /** 插件里的 console 输出转给 Main 落盘；桌面端子进程的 stdout 没人看 */
 export function captureConsole(
   target: Pick<Console, 'log' | 'info' | 'warn' | 'error' | 'debug'>,
-  send: (message: PluginHostToMain) => void
+  send: (message: PluginHostToMain) => void,
+  isEnabled: () => boolean = () => true
 ): void {
   const levels: Record<'log' | 'info' | 'warn' | 'error' | 'debug', LogLevel> = {
     log: 'info',
@@ -130,7 +131,10 @@ export function captureConsole(
     error: 'error',
   };
   for (const [method, level] of Object.entries(levels) as [keyof typeof levels, LogLevel][])
-    target[method] = (...args: unknown[]) => send(logMessage(level, args));
+    target[method] = (...args: unknown[]) => {
+      if (!isEnabled()) return;
+      send(logMessage(level, args));
+    };
 }
 
 function toErrorShape(error: unknown): PluginErrorShape {
@@ -216,7 +220,10 @@ function readDeclared(pluginRoot: string, pluginId: string): Declared {
  * 插件进程本体：自己不持有任何宿主能力，每个 `enso.*` 宿主调用都转回 Main 校验执行。
  * 处理器内的调用经 AsyncLocalStorage 自动带上本次调用 id，Main 据此找到会话与手势。
  */
-export function runPluginHost(transport: HostTransport): void {
+export function runPluginHost(
+  transport: HostTransport,
+  options?: { onLoggingChange?: (enabled: boolean) => void }
+): void {
   installChildProcessHooks();
   beginChildTracking();
   const tools = new Map<string, Handler>();
@@ -722,6 +729,7 @@ export function runPluginHost(transport: HostTransport): void {
   };
 
   const onInit = async (message: Extract<MainToPluginHost, { t: 'init' }>) => {
+    options?.onLoggingChange?.(message.loggingEnabled === true);
     if (initialized) return;
     initialized = true;
     declared = readDeclared(message.pluginRoot, message.pluginId);
@@ -764,6 +772,9 @@ export function runPluginHost(transport: HostTransport): void {
     switch (message.t) {
       case 'init':
         void onInit(message);
+        return;
+      case 'set-logging':
+        if (typeof message.enabled === 'boolean') options?.onLoggingChange?.(message.enabled);
         return;
       case 'call':
         void onCall(message);

@@ -354,6 +354,7 @@ function expireFailedPending(
 
 interface GoalVerifySlot {
   result: GoalResult;
+  startedAt: number;
   checks?: GoalResultCheck[];
   done: boolean;
   cancelled?: boolean;
@@ -796,6 +797,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     if (kind === 'goal-complete' && goalResult) {
       update.goalResult = goalResult;
       record.goalResult = goalResult;
+    } else {
+      delete record.goalResult;
     }
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
@@ -1183,9 +1186,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     goalVerifyTimers.delete(conversationId);
   }
 
-  function startGoalVerify(conversationId: string, result: GoalResult): void {
+  function startGoalVerify(conversationId: string, result: GoalResult, now: number): void {
     cancelGoalVerify(conversationId);
-    const slot: GoalVerifySlot = { result, done: !ports.verifyGoalResult };
+    const slot: GoalVerifySlot = { result, startedAt: now, done: !ports.verifyGoalResult };
     goalVerifies.set(conversationId, slot);
     const port = ports.verifyGoalResult;
     if (!port) return;
@@ -1214,6 +1217,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const file = withEventStamps(ports.file());
     const record = file.dispatched[conversationId];
     if (!record) return;
+    // 核验期间如果已被手动标完成或产生了更新结果，迟到的核验不再覆写
+    if (record.lastResult && record.lastResult.at >= slot.startedAt) return;
     recordResult(
       file,
       record,
@@ -1284,7 +1289,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         if (own && event.type === 'goal-signal' && event.kind === 'complete') {
           pendingComplete.add(conversationId);
-          if (event.result) startGoalVerify(conversationId, event.result);
+          if (event.result) startGoalVerify(conversationId, event.result, now);
         }
         if (
           own &&

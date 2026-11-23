@@ -4636,6 +4636,37 @@ describe('手动标完成写入 daily、新 goal 才解除锁定与停止清旧�
     expect(h.file.dispatched.c1.reopenedAt).toBe(NOW);
   });
 
+  it('result_mark_done 清除带 needsUser 的 goal-complete，去掉残留 needsUser 并保留客观事实，工作台不再留在需要你', async () => {
+    const file = dispatchedFile('c1', 'idle');
+    file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: NOW - 10_000 };
+    file.dispatched.c1.goalResult = {
+      at: NOW - 10_000,
+      result: {
+        summary: 'PR #62 review 完了',
+        prs: [{ repo: 'acme/plugins', number: 62, state: 'merged' }],
+        needsUser: ['是否合并上架 #62'],
+      },
+    };
+    const h = harness({
+      file,
+      rows: {
+        c1: { id: 'c1', title: 'Review PR #62', sessionFile: '/s/c1.jsonl', driver: 'main' },
+      },
+      statuses: { c1: idle },
+    });
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+
+    expect(await call(h.handlers.result_mark_done, { conversationId: 'c1' })).toEqual({
+      ok: true,
+      result: { status: 'marked-done', conversationId: 'c1' },
+    });
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+    expect(h.file.dispatched.c1.goalResult?.result.needsUser).toBeUndefined();
+    expect(h.file.dispatched.c1.goalResult?.result.prs).toEqual([
+      { repo: 'acme/plugins', number: 62, state: 'merged' },
+    ]);
+  });
+
   it('session_stop 清掉早先的 failed 结果，但保留停之前已经交过的 goal-complete', async () => {
     const h1 = harness({
       file: {

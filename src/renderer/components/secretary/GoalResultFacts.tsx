@@ -46,15 +46,19 @@ function checkFor(
 export function GoalResultFacts({
   view,
   detail = false,
+  hideNeedsUser = false,
 }: {
   view: GoalResultView;
   detail?: boolean;
+  hideNeedsUser?: boolean;
 }) {
   const { t } = useI18n();
   const result = view.result;
   const shots = result.screenshots?.length ?? 0;
   const needsUser =
-    !detail && hasNeedsUser(view) ? (result.needsUser ?? []).filter((s) => s.trim()) : [];
+    !detail && !hideNeedsUser && hasNeedsUser(view)
+      ? (result.needsUser ?? []).filter((s) => s.trim())
+      : [];
   return (
     <div data-enso="secretary-goal-result" className="flex flex-col gap-1.5 text-[11.5px]">
       {detail && result.summary && <p className="text-[13px]">{result.summary}</p>}

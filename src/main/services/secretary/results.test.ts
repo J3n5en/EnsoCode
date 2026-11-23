@@ -1405,6 +1405,42 @@ describe('排队会话', () => {
       'done',
       'manual',
     ]);
+    const needCard = board.needsYou[0];
+    expect(needCard).toMatchObject({
+      kind: 'session',
+      conversationId: 'need',
+      needsUser: ['确认账号'],
+    });
+    const manualCard = board.done.find(
+      (c) => c.kind === 'session' && c.conversationId === 'manual'
+    );
+    expect(manualCard).not.toHaveProperty('needsUser');
+  });
+
+  it('点「知道了」(dismissed) 后，带 needsUser 的 goal-complete 移出「需要你处理」进入「完成」且不再带 needsUser', () => {
+    const file = emptyFile({
+      dispatched: {
+        dismissedNeed: record({
+          conversationId: 'dismissedNeed',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 10, dismissed: true },
+          goalResult: {
+            at: 10,
+            result: { summary: 'PR #62 review 完了', needsUser: ['是否合并上架 #62'] },
+          },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: { dismissedNeed: { title: 'Review PR #62', sessionFile: '/s/d.jsonl' } },
+      statuses: { dismissedNeed: idle },
+      projects,
+      todos: [],
+    });
+    expect(board.needsYou).toEqual([]);
+    expect(board.done).toHaveLength(1);
+    expect(board.done[0]).toMatchObject({ kind: 'session', conversationId: 'dismissedNeed' });
+    expect(board.done[0]).not.toHaveProperty('needsUser');
   });
 
   it('运行中的会话（无待审批/提问）即使带历史残留结果也进「进行中」，不进「需要你处理」', () => {

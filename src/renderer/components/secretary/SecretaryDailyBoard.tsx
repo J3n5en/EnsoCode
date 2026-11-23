@@ -149,6 +149,7 @@ function DailyCard({
   const [stopping, setStopping] = useState(false);
   const body = item.summary ?? item.detail;
   const detail = item.detail ?? item.summary;
+  const needsUser = item.needsUser && item.needsUser.length > 0 ? item.needsUser : undefined;
   // 待办卡把新增与完成时间都挂在卡上，已完成的划掉，与未完成区分开
   const done = item.doneAt !== undefined;
   const times = [
@@ -282,15 +283,44 @@ function DailyCard({
         >
           {item.title}
         </span>
-        {body && (
-          <span
-            className={cn(
-              'mt-[3px] block whitespace-pre-wrap break-words text-[12px] text-muted-foreground',
-              expanded ? undefined : 'line-clamp-3'
+        {needsUser ? (
+          <>
+            <ul
+              data-enso="secretary-daily-needs-user"
+              className="mt-[4px] flex flex-col gap-0.5 text-[12px] text-foreground/90"
+            >
+              {needsUser.map((entry) => (
+                <li
+                  key={entry}
+                  data-enso="secretary-daily-needs-user-item"
+                  title={entry}
+                  className={cn(
+                    'line-clamp-2 break-words',
+                    needsUser.length > 1 &&
+                      'relative pl-3 before:absolute before:left-1 before:content-["·"] before:text-muted-foreground'
+                  )}
+                >
+                  {entry}
+                </li>
+              ))}
+            </ul>
+            {expanded && detail && (
+              <span className="mt-1.5 block whitespace-pre-wrap break-words border-t border-border/60 pt-1 text-[11.5px] text-muted-foreground">
+                {detail}
+              </span>
             )}
-          >
-            {expanded ? detail : body}
-          </span>
+          </>
+        ) : (
+          body && (
+            <span
+              className={cn(
+                'mt-[3px] block whitespace-pre-wrap break-words text-[12px] text-muted-foreground',
+                expanded ? undefined : 'line-clamp-3'
+              )}
+            >
+              {expanded ? detail : body}
+            </span>
+          )
         )}
       </button>
       {leftovers.length > 0 && item.conversationId && (
@@ -371,7 +401,12 @@ function DailyCard({
             <span className="truncate">{t('Session')}</span>
           </button>
         )}
-        {item.goalResult && <GoalResultFacts view={item.goalResult} />}
+        {item.goalResult && (
+          <GoalResultFacts
+            view={item.goalResult}
+            hideNeedsUser={column.key === 'done' || Boolean(needsUser)}
+          />
+        )}
         <span data-enso="secretary-daily-times" className="tabular-nums">
           {times.length > 0 ? times.join(' · ') : stampOf(item.at, day, locale)}
         </span>
