@@ -13,7 +13,7 @@ import { installDesktopLocalUi } from './desktop/localUi';
 import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
-import { resumeRootFromRestartManifest } from './ipc/agent';
+import { resumeRootFromRestartManifest, wakeInterruptedRunOwners } from './ipc/agent';
 import {
   clearRestartOverlay,
   registerAppRestartHandlers,
@@ -399,7 +399,10 @@ if (!gotTheLock) {
       // 冷启动接管断点：第一代 worker 带上断点，再按清单重走 spawn（凭据现取）
       const startWorker = (): void => {
         startAgentWorker(coldRestart ? { restartCheckpointFile: coldRestart.checkpointFile } : {});
-        if (coldRestart) void resumeColdRestartSessions(coldRestart, resumeRootFromRestartManifest);
+        if (coldRestart)
+          void resumeColdRestartSessions(coldRestart, resumeRootFromRestartManifest).then(() =>
+            wakeInterruptedRunOwners(coldRestart)
+          );
       };
       // worker 的 env 是 fork 时的快照：等系统代理解析后再 fork，
       // 打包版再等登录 shell 探测出真实 PATH。

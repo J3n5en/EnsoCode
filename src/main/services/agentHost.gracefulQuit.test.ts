@@ -387,11 +387,22 @@ describe('应用退出走优雅重启', () => {
     // 以前 10 秒就中止正在写的回复；现在要等它写完
     await vi.advanceTimersByTimeAsync(QUIT_REPLY_WAIT_FLOOR_MS - 1_000);
     expect(done).toBe(false);
-    fork.children[index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    // 子会话不进清单：日志标成子会话，不能只截 id 前 8 位而看着像父会话
+    const child = {
+      ...checkpoint.sessions[0],
+      sessionId: `${identity.sessionId}::cw-reviewer`,
+      nextStep: 'await-user' as const,
+      turnId: null,
+      lastCompletedToolCallId: null,
+    };
+    fork.children[index].emit('message', {
+      type: 'graceful-restart-ready',
+      checkpoint: { ...checkpoint, sessions: [...checkpoint.sessions, child] },
+    });
     await expect(pending).resolves.toBe('checkpointed');
     const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
     expect(log).toContain(
-      'update: 到安全点，恢复清单 1 个会话：session-=model-request（冷启动续跑）'
+      'update: 到安全点，恢复清单 1 个会话：session-=model-request（冷启动续跑） cw-revie(子会话)=不进清单'
     );
   });
 
