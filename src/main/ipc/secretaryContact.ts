@@ -65,7 +65,9 @@ import { readSettingsState } from './settings';
  */
 export interface SecretaryContactDeps {
   /** 这个秘书的回传端口：目标会话解析与投递复用同一口径，且不跨秘书 */
-  delivery(ctx: SecretaryContext): DeliveryPorts;
+  delivery(
+    ctx: SecretaryContext
+  ): DeliveryPorts & Required<Pick<DeliveryPorts, 'startConversation'>>;
   /** 秘书状态推送：联系方式状态变化时一起刷新界面 */
   publish(): void;
   /** 确认卡在手机上确认时用；审批没有这条路径 */
@@ -285,6 +287,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       notifyMode: () => profileOf(ctx)?.notify ?? null,
       secretaryName: () => nameOf(ctx),
       secretaryConversationId: () => resolveTarget(delivery),
+      startConversation: () => delivery.startConversation(),
       // /last：读秘书会话的 jsonl 尾窗，按轮切好交回去；只读，不进会话
       recentTurns: async (rounds) => {
         const conversationId = resolveTarget(delivery);

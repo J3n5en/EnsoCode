@@ -21,6 +21,7 @@ import { secretaryToolFor } from '../services/secretary/customTools';
 import { buildDaily, dailyPortsFor, parseDailyRequest } from '../services/secretary/daily';
 import { appendDailyRecord } from '../services/secretary/dailyLog';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
+import { resolveTarget } from '../services/secretary/deliveries';
 import {
   buildSecretaryState,
   dismissPending,
@@ -48,6 +49,10 @@ import {
   type GoalAction,
 } from '../services/secretary/driver';
 import { secretaryEnabled } from '../services/secretary/enabled';
+import {
+  ensureHomeConversation,
+  type HomeConversationResult,
+} from '../services/secretary/homeConversation';
 import {
   createSecretaryHost,
   type SecretaryHost,
@@ -86,6 +91,7 @@ import {
   secretaryRoot,
 } from '../services/secretary/secretaries';
 import {
+  createSecretaryConversationFromMain,
   createSessionFromMain,
   type MainSessionRequest,
   type MainSessionResult,
@@ -191,6 +197,37 @@ export async function createSessionViaMain(
   return createSessionFromMain(sessionFactoryPorts(credentialKeys), request);
 }
 
+/** 秘书还没有会话时由 Main 建一条：联系渠道、定时、同事消息共用，同一个秘书只建一条 */
+function startHomeConversation(ctx: SecretaryContext): Promise<HomeConversationResult> {
+  return ensureHomeConversation(ctx.id, {
+    existing: () => resolveTarget(hostPortsFor(ctx)),
+    create: async () => {
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const projectId = secretaryContext(ctx.id)?.projectId;
+      if (!projectId) return { ok: false, error: 'secretary not found' };
+      let credentialKeys: ReadonlySet<string>;
+      try {
+        credentialKeys = await readStoredOauthCredentialKeys();
+      } catch {
+        return { ok: false, error: 'model credentials unavailable' };
+      }
+      const created = await createSecretaryConversationFromMain(
+        sessionFactoryPorts(credentialKeys),
+        { projectId, title: new SecretaryStore(ctx.dir).profile()?.name.trim() || 'Secretary' }
+      );
+      appendAudit(ctx.dir, {
+        at: Date.now(),
+        secretaryConversationId: created.ok ? created.conversationId : null,
+        op: 'secretary_conversation_start',
+        ok: created.ok,
+        ...(created.ok ? {} : { detail: created.error }),
+      });
+      if (created.ok) broadcastState();
+      return created;
+    },
+  });
+}
+
 function disabledState(): SecretaryState {
   return {
     secretaryId: null,
@@ -281,7 +318,9 @@ function isProfileEditor(webContentsId: number): boolean {
 }
 
 /** 一个秘书的回传宿主端口：读写全部同步，读改写之间不留 await */
-function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
+function hostPortsFor(
+  ctx: SecretaryContext
+): SecretaryHostPorts & Required<Pick<SecretaryHostPorts, 'startConversation'>> {
   const store = () => new SecretaryStore(ctx.dir);
   const dispatchPorts = dispatchPortsFor(ctx);
   return {
@@ -301,6 +340,7 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     resume: (conversationId) => resumeRootFromMain(conversationId),
     // 回落只在这个秘书自己的会话里找，结果不会投到别的秘书那里
     secretaryProjectId: () => ctx.projectId,
+    startConversation: () => startHomeConversation(ctx),
     profile: () => store().profile(),
     todos: () => store().todos(),
     saveTodos: (todos) => {

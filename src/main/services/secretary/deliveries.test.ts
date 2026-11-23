@@ -231,10 +231,11 @@ describe('注入', () => {
     ],
   ])('新秘书还没有会话时，%s 到了就建一条会话来处理', async (_label, extra) => {
     const h = harness({ rows: {}, conversations: [] });
-    const { conversationId: _c, secretaryConversationId: _s, ...base } = update() as Record<
-      string,
-      unknown
-    >;
+    const {
+      conversationId: _c,
+      secretaryConversationId: _s,
+      ...base
+    } = update() as Record<string, unknown>;
     h.state.file.outbox = [{ ...base, ...extra } as unknown as SecretaryUpdate];
     let starts = 0;
     h.ports.startConversation = async () => {
