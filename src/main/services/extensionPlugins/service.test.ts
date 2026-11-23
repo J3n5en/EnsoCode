@@ -15,7 +15,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPluginHost } from '../../../pluginHost/host';
 import { setNativeAgentTypeSource, withPluginAgentTypes } from '../pluginRuntime';
 import { readRegistry } from './registry';
-import { ExtensionPluginService, uiCallTimeout } from './service';
+import {
+  ExtensionPluginService,
+  type ExtensionPluginServiceOptions,
+  uiCallTimeout,
+} from './service';
 
 /** 用进程内的插件宿主替代真实子进程，测试完整往返 */
 class InProcessChild extends EventEmitter {
@@ -48,6 +52,12 @@ const temp = (p: string) => {
   const d = mkdtempSync(join(tmpdir(), p));
   temps.push(d);
   return d;
+};
+/** 测试里的服务一律经此创建，收尾时 dispose 会等日志刷盘，删临时目录才不会撞上迟到的写入 */
+const create = (options: ExtensionPluginServiceOptions) => {
+  const svc = new ExtensionPluginService(options);
+  services.push(svc);
+  return svc;
 };
 afterEach(async () => {
   vi.useRealTimers();
@@ -85,7 +95,7 @@ let service: ExtensionPluginService;
 
 beforeEach(() => {
   root = temp('plugins-root-');
-  service = new ExtensionPluginService({
+  service = create({
     root,
     hostVersion: '0.2.12',
     hostPath: '/unused',
@@ -100,7 +110,6 @@ beforeEach(() => {
       now: () => Date.now(),
     },
   });
-  services.push(service);
 });
 
 async function install(files: Record<string, string>) {
@@ -115,7 +124,7 @@ describe('ExtensionPluginService', () => {
   it('开发模式：目录来源的插件改动后自动重装，授权扩大时停下并报错', async () => {
     const watchers = new Map<string, () => void>();
     const closed: string[] = [];
-    const dev = new ExtensionPluginService({
+    const dev = create({
       root: temp('plugins-dev-'),
       hostVersion: '0.2.12',
       hostPath: '/unused',
@@ -474,7 +483,7 @@ describe('ExtensionPluginService', () => {
       if (!record) throw new Error('no record');
       const { source: _source, ...legacy } = record;
       writeFileSync(join(root, 'registry.json'), JSON.stringify({ version: 1, plugins: [legacy] }));
-      const reloaded = new ExtensionPluginService({
+      const reloaded = create({
         root,
         hostVersion: '0.2.12',
         hostPath: '/unused',
@@ -506,7 +515,7 @@ describe('ExtensionPluginService', () => {
         source: { kind: 'url', url: repo },
       }));
       writeFileSync(join(root, 'registry.json'), JSON.stringify(registry));
-      return new ExtensionPluginService({
+      return create({
         root,
         hostVersion: '0.2.12',
         hostPath: '/unused',
@@ -1031,7 +1040,7 @@ const gate = {
 };
 
 function bootService(dir: string, fork: () => unknown) {
-  const svc = new ExtensionPluginService({
+  const svc = create({
     root: dir,
     hostVersion: '0.2.12',
     hostPath: '/unused',
@@ -1039,7 +1048,6 @@ function bootService(dir: string, fork: () => unknown) {
     fork: fork as never,
     gate,
   });
-  services.push(svc);
   return svc;
 }
 
@@ -1066,11 +1074,18 @@ describe('插件运行期收敛', () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     const changed = vi.fn();
     service.onChange(changed);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await service.setEnabled('example.demo', true);
+    vi.advanceTimersByTime(100);
     await service.setEnabled('example.demo', false);
+    vi.advanceTimersByTime(100);
     await service.setEnabled('example.demo', true);
+    vi.advanceTimersByTime(149);
     expect(changed).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    vi.advanceTimersByTime(1);
+    expect(changed).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1_000);
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 
   it('非常驻且进程没在跑时不投递通知；在跑或常驻则投递', async () => {
@@ -1583,7 +1598,7 @@ describe('插件运行期收敛', () => {
     const children: HoldChild[] = [];
     let spawned = 0;
     let fast = false;
-    const svc = new ExtensionPluginService({
+    const svc = create({
       root: dir,
       hostVersion: '0.2.12',
       hostPath: '/unused',
@@ -1912,7 +1927,7 @@ describe('uiCallTimeout', () => {
 
 describe('丢弃的登记记录', () => {
   const boot = (root: string) =>
-    new ExtensionPluginService({
+    create({
       root,
       hostVersion: '0.2.12',
       hostPath: '/unused',
@@ -2143,7 +2158,7 @@ describe('插件市场', () => {
     market: unknown,
     options: { auto?: boolean; composer?: () => Promise<unknown> } = {}
   ) =>
-    new ExtensionPluginService({
+    create({
       root,
       hostVersion: '0.2.12',
       hostPath: '/unused',
