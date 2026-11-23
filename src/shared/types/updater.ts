@@ -25,6 +25,12 @@ export interface ManualInstall {
   downloadUrl?: string;
 }
 
+/** 重启更新的受理结果：没装成时渲染层据此提示 */
+export type RestartToUpdateResult =
+  | { ok: true }
+  | { ok: false; reason: 'not-downloaded' | 'busy' }
+  | { ok: false; reason: 'error'; error: string };
+
 /** 无界面服务端的更新途径：npm 为全局安装可自更新；manual（npx、不可写前缀）只报告新版本 */
 export type ServerUpdateMode = 'npm' | 'manual';
 
