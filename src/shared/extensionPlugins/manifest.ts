@@ -31,6 +31,7 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'agent.observe',
   'agent.intercept',
   'agent.inject',
+  'agent.injectTrusted',
   'process.background',
   'plugin.call',
   'ui.clipboard',
