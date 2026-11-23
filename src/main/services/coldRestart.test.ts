@@ -2,7 +2,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
+import type { AgentControlContext } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
+import type { AgentRunLedgerEntry } from './agentRunLedger';
+import { AgentService, type AgentServiceRuntime } from './agentService';
 import {
   COLD_RESUME_OVERLAY_TIMEOUT_MS,
   coldResumeReady,
@@ -12,9 +15,14 @@ import {
   resumeColdRestartSessions,
   settleColdResume,
   trackColdResume,
+  wakeColdRestartOwners,
   wakeColdRestartSession,
 } from './coldRestart';
-import { buildRestartManifest, writeRestartManifest } from './restartManifest';
+import {
+  buildRestartManifest,
+  type RestartManifestEntry,
+  writeRestartManifest,
+} from './restartManifest';
 
 const entry = (sessionId: string, nextStep: 'model-request' | 'await-user') => ({
   sessionId,
@@ -88,6 +96,122 @@ describe('coldRestart', () => {
     expect((await wakeColdRestartSession('ghost', resume, plan)).ok).toBe(false);
     expect((await wakeColdRestartSession('idle', resume, null)).ok).toBe(false);
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('冷启动叫醒子代理 Run 被重启打断的父会话', () => {
+  const ownerContext = (ownerId: string): AgentControlContext => ({
+    owner: { ownerId, projectId: 'p1', kind: 'chatSession' },
+    actor: {
+      kind: 'agent',
+      actorId: ownerId,
+      ownerId,
+      projectId: 'p1',
+      identity: { sessionId: ownerId, generation: `${ownerId}-gen` },
+    },
+  });
+  const run = (ownerId: string, runId: string, notified = false): AgentRunLedgerEntry => ({
+    runId,
+    agentId: `agent-${runId}`,
+    ownerId,
+    projectId: 'p1',
+    ownerKind: 'chatSession',
+    mode: 'task',
+    status: 'interrupted',
+    createdAt: 1,
+    finishedAt: 2,
+    notified,
+  });
+
+  /** 冷启动：按上次的台账建 AgentService、按清单叫醒；叫醒即 spawn，就绪后 Main 调 recoverOwner */
+  async function coldStart(
+    ledger: AgentRunLedgerEntry[],
+    sessions: Array<[string, 'model-request' | 'await-user']>,
+    gone: string[] = []
+  ) {
+    const plan = loadColdRestartPlan(seed(500))!;
+    plan.manifest.sessions = sessions.map(([sessionId, nextStep]) => ({
+      ...plan.manifest.sessions[0],
+      sessionId,
+      nextStep,
+    }));
+    plan.resume = plan.manifest.sessions.filter((item) => item.nextStep === 'model-request');
+    const notify = vi.fn();
+    const service = new AgentService({
+      runtime: {} as AgentServiceRuntime,
+      ledger: { load: () => ledger, save: () => {} },
+      notify,
+    });
+    const resume = vi.fn(async (item: RestartManifestEntry) => {
+      if (gone.includes(item.sessionId)) return { ok: false, error: 'conversation unavailable' };
+      service.recoverOwner(ownerContext(item.sessionId));
+      return { ok: true };
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await wakeColdRestartOwners(service.restartInterruptedOwners(), resume, plan);
+    log.mockRestore();
+    return { resume, notify, woken: resume.mock.calls.map(([item]) => item.sessionId) };
+  }
+
+  it('现场：父会话在清单里是 await-user，被叫醒恰好一次并收到中断通知（提示 worktree 改动还在）', async () => {
+    const { woken, notify } = await coldStart(
+      [run('w1-parent', 'w1-run')],
+      [['w1-parent', 'await-user']]
+    );
+    expect(woken).toEqual(['w1-parent']);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0].owner.ownerId).toBe('w1-parent');
+    expect(notify.mock.calls[0][1]).toContain('runId w1-run');
+    expect(notify.mock.calls[0][1]).toContain('uncommitted changes');
+  });
+
+  it('没有未通知的被打断 Run：空闲会话不叫醒', async () => {
+    const { woken, notify } = await coldStart(
+      [run('w2-parent', 'w2-run', true)],
+      [
+        ['w2-parent', 'await-user'],
+        ['w2-other', 'await-user'],
+      ]
+    );
+    expect(woken).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('父会话已在冷启动续跑名单里：不重复叫醒', async () => {
+    const { woken } = await coldStart(
+      [run('w3-parent', 'w3-run')],
+      [['w3-parent', 'model-request']]
+    );
+    expect(woken).toEqual([]);
+  });
+
+  it('一个父会话有多个被打断的 Run：只叫醒一次，通知一次列全', async () => {
+    const { woken, notify } = await coldStart(
+      [run('w4-parent', 'w4-a'), run('w4-parent', 'w4-b'), run('w4-second', 'w4-c')],
+      [
+        ['w4-parent', 'await-user'],
+        ['w4-second', 'await-user'],
+      ]
+    );
+    expect(woken).toEqual(['w4-parent', 'w4-second']);
+    const parent = notify.mock.calls.filter(([context]) => context.owner.ownerId === 'w4-parent');
+    expect(parent).toHaveLength(1);
+    expect(parent[0][1]).toContain('runId w4-a');
+    expect(parent[0][1]).toContain('runId w4-b');
+  });
+
+  it('父会话已删除 / 归档或不在清单里：不报错，其他父会话照常叫醒', async () => {
+    const { woken, notify } = await coldStart(
+      [run('w5-gone', 'w5-a'), run('w5-unlisted', 'w5-b'), run('w5-parent', 'w5-c')],
+      [
+        ['w5-gone', 'await-user'],
+        ['w5-parent', 'await-user'],
+      ],
+      ['w5-gone']
+    );
+    expect(woken).toEqual(['w5-gone', 'w5-parent']);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toContain('runId w5-c');
   });
 });
 

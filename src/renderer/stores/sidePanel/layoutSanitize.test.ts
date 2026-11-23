@@ -46,6 +46,22 @@ describe('sanitizeSidePanelLayout', () => {
     expect(removeLayoutPanel(layout, 'missing')).toBe(layout);
   });
 
+  it('removeLayoutPanel 摘掉激活标签时选相邻的，优先左边', () => {
+    const layout = (views: string[], activeView: string) =>
+      ({
+        grid: { root: { type: 'leaf', data: { views, activeView, id: 'g1' }, size: 100 } },
+        panels: Object.fromEntries(views.map((id) => [id, { id, contentComponent: 'plugin' }])),
+      }) as unknown as SerializedDockview;
+    expect(
+      removeLayoutPanel(layout(['files', 't1', 'plugin:g:w', 'b1'], 'plugin:g:w'), 'plugin:g:w')
+        ?.grid.root
+    ).toMatchObject({ data: { views: ['files', 't1', 'b1'], activeView: 't1' } });
+    expect(
+      removeLayoutPanel(layout(['plugin:g:w', 'files', 't1'], 'plugin:g:w'), 'plugin:g:w')?.grid
+        .root
+    ).toMatchObject({ data: { views: ['files', 't1'], activeView: 'files' } });
+  });
+
   it('returns undefined for dirty layouts', () => {
     expect(sanitizeSidePanelLayout(undefined, known)).toBeUndefined();
     expect(sanitizeSidePanelLayout(null, known)).toBeUndefined();

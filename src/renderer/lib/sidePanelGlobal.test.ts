@@ -7,6 +7,7 @@ const harness = vi.hoisted(() => ({
     globalScopeOverrides: {} as Record<string, 'global' | 'session'>,
     uiByConversation: {} as Record<string, { open?: boolean; width: number }>,
     liveGlobalTabs: [] as string[],
+    layouts: {} as Record<string, unknown>,
     dropped: [] as { panelId: string; keep: string[] }[],
   },
 }));
@@ -50,6 +51,7 @@ import {
   closeGlobalTab,
   disposeConversationResources,
   openGlobalTab,
+  pruneUndeclaredPluginTabs,
   setPluginPanelScope,
   syncDockGlobalTabs,
   unbindSidePanelDock,
@@ -62,7 +64,8 @@ const NOTES = 'plugin:notes:board';
 interface FakePanel {
   id: string;
   inactive?: boolean;
-  api: { close: () => void };
+  group: { panels: FakePanel[] };
+  api: { close: () => void; setActive: () => void };
   focus: () => void;
 }
 
@@ -80,7 +83,13 @@ function fakeDock() {
   const make = (id: string, inactive?: boolean): FakePanel => ({
     id,
     inactive,
-    api: { close: () => remove(id) },
+    group: { panels },
+    api: {
+      close: () => remove(id),
+      setActive: () => {
+        active = id;
+      },
+    },
     focus: () => {
       active = id;
     },
@@ -251,5 +260,127 @@ describe('全局标签跨 dock 同步', () => {
     expect(a.ids()).toEqual([NOTES]);
     expect(b.ids()).toEqual([]);
     expect(harness.state.dropped.at(-1)).toEqual({ panelId: NOTES, keep: ['a', 'b'] });
+  });
+});
+
+const WATCH = 'plugin:enso.github:watch';
+const PRS = 'plugin:enso.github:prs';
+
+function summary(id: string, state: 'enabled' | 'disabled' | 'crashed', views: string[]) {
+  return {
+    id,
+    state,
+    views: views.map((view) => ({ id: view, title: view, entry: `${view}.html` })),
+  };
+}
+
+function storedLayout(...ids: string[]) {
+  return {
+    grid: { root: { type: 'leaf', data: { views: ids, activeView: ids[0], id: 'g1' } } },
+    panels: Object.fromEntries(ids.map((id) => [id, { id, contentComponent: 'plugin' }])),
+  };
+}
+
+describe('插件不再声明的视图标签自动清理', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', {});
+    for (const id of ['a', 'b', 'c']) disposeConversationResources(id);
+    harness.state.globalTabs = [];
+    harness.state.globalScopeOverrides = {};
+    harness.state.uiByConversation = {};
+    harness.state.layouts = {};
+    harness.state.dropped = [];
+    setPluginViews([
+      {
+        pluginId: 'enso.github',
+        pluginName: 'GitHub',
+        id: 'watch',
+        title: 'GitHub 监听',
+        entry: 'watch.html',
+        scope: 'global',
+      },
+    ]);
+  });
+
+  it('升级后清单里没了的视图：全局标签、各已挂载 dock 与未挂载会话布局都清掉', () => {
+    const a = mount('a');
+    const b = mount('b');
+    a.add('files');
+    openGlobalTab(WATCH, 'a');
+    b.add(PRS);
+    harness.state.layouts = { c: storedLayout('plugin:enso.github:old-session', PRS) };
+    setPluginViews([]);
+
+    pruneUndeclaredPluginTabs([summary('enso.github', 'enabled', ['prs'])]);
+
+    expect(harness.state.globalTabs).toEqual([]);
+    expect(a.ids()).toEqual(['files']);
+    expect(b.ids()).toEqual([PRS]);
+    expect(harness.state.dropped).toEqual([
+      { panelId: WATCH, keep: ['a', 'b'] },
+      { panelId: 'plugin:enso.github:old-session', keep: ['a', 'b'] },
+    ]);
+  });
+
+  it('插件禁用或卸载：标签全部保留', () => {
+    const a = mount('a');
+    openGlobalTab(WATCH, 'a');
+    harness.state.layouts = { c: storedLayout(WATCH) };
+    setPluginViews([]);
+
+    pruneUndeclaredPluginTabs([summary('enso.github', 'disabled', [])]);
+    pruneUndeclaredPluginTabs([]);
+
+    expect(harness.state.globalTabs).toEqual([WATCH]);
+    expect(a.ids()).toEqual([WATCH]);
+    expect(harness.state.dropped).toEqual([]);
+  });
+
+  it('插件崩溃或清单读不出（不在列表里）：不删任何标签', () => {
+    const a = mount('a');
+    openGlobalTab(WATCH, 'a');
+
+    pruneUndeclaredPluginTabs([summary('enso.github', 'crashed', [])]);
+    pruneUndeclaredPluginTabs([summary('other', 'enabled', [])]);
+
+    expect(harness.state.globalTabs).toEqual([WATCH]);
+    expect(a.ids()).toEqual([WATCH]);
+    expect(harness.state.dropped).toEqual([]);
+  });
+
+  it('仍在声明中的视图与非插件标签不受影响', () => {
+    const a = mount('a');
+    a.add('files');
+    a.add('terminal-1');
+    a.add('browser:1');
+    openGlobalTab(WATCH, 'a');
+    a.add('plugin:other:view');
+    harness.state.layouts = { c: storedLayout(WATCH, 'files') };
+
+    pruneUndeclaredPluginTabs([summary('enso.github', 'enabled', ['watch'])]);
+
+    expect(harness.state.globalTabs).toEqual([WATCH]);
+    expect(a.ids()).toEqual(['files', 'terminal-1', 'browser:1', WATCH, 'plugin:other:view']);
+    expect(harness.state.dropped).toEqual([]);
+  });
+
+  it('删的是激活标签：切到相邻标签，优先左边', () => {
+    const a = mount('a');
+    a.add('files');
+    a.add('terminal-1');
+    openGlobalTab(WATCH, 'a');
+    a.add('browser:1');
+    const b = mount('b');
+    b.add(WATCH);
+    b.add('files');
+    b.panel(WATCH)?.focus();
+    expect(a.active()).toBe(WATCH);
+
+    pruneUndeclaredPluginTabs([summary('enso.github', 'enabled', [])]);
+
+    expect(a.ids()).toEqual(['files', 'terminal-1', 'browser:1']);
+    expect(a.active()).toBe('terminal-1');
+    expect(b.ids()).toEqual(['files']);
+    expect(b.active()).toBe('files');
   });
 });
