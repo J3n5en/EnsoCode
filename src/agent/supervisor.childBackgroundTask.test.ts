@@ -563,4 +563,45 @@ describe('子代理起的后台任务归属子代理', () => {
     ).toBe(false);
     await ctx.supervisor.shutdown();
   });
+
+  it('子代理的 task 工具碰不到兄弟子代理（含同名前缀）的任务，task_settle 也表态不了别人的任务', async () => {
+    const ctx = await setup();
+    const tool = (name: string) => ctx.childTools.find((item) => item.name === name) as Tool;
+    const bgTasks = (
+      ctx.supervisor as unknown as {
+        bgTasks: {
+          start(sessionId: string, command: string, cwd: string): string;
+          taskInfo(taskId: string): { status: string; keep?: unknown } | undefined;
+        };
+      }
+    ).bgTasks;
+    const foreign = ['parent::cw-other', `${child.sessionId}2`, parent.sessionId].map((owner) =>
+      bgTasks.start(owner, 'sleep 30', tmpdir())
+    );
+
+    for (const taskId of foreign) {
+      await expect(tool('task_output').execute(`o-${taskId}`, { taskId })).rejects.toThrow(
+        /unknown task/
+      );
+      expect(JSON.stringify(await tool('task_stop').execute(`s-${taskId}`, { taskId }))).not.toContain(
+        'Stopped'
+      );
+    }
+    const settled = await tool('task_settle').execute('settle', {
+      tasks: foreign.map((taskId, index) => ({
+        taskId,
+        action: index === 0 ? 'stop' : 'keep',
+        reason: 'not mine',
+      })),
+    });
+    const parsed = JSON.parse(
+      (settled as { content: Array<{ text: string }> }).content[0]?.text ?? '{}'
+    ) as { settled: Array<{ ok: boolean }> };
+    expect(parsed.settled.map((entry) => entry.ok)).toEqual([false, false, false]);
+    for (const taskId of foreign) {
+      expect(bgTasks.taskInfo(taskId)).toMatchObject({ status: 'running' });
+      expect(bgTasks.taskInfo(taskId)?.keep).toBeUndefined();
+    }
+    await ctx.supervisor.shutdown();
+  });
 });

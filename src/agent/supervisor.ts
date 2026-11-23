@@ -3171,7 +3171,7 @@ export class SessionSupervisor {
             : [
                 ...buildBaseTools(childGate, undefined, agentType?.writeScope, taskOwnerId),
                 // 子代理要能读、停、表态自己起的任务，否则常驻任务会让持有中的 Run 收不了口
-                ...createTaskTools(this.bgTasks, taskOwnerId ?? sessionId),
+                ...(taskOwnerId ? createTaskTools(this.bgTasks, taskOwnerId) : []),
               ]),
           ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
           ...childPluginTools,
