@@ -13,6 +13,8 @@ vi.mock('@/i18n', () => ({
   }),
 }));
 vi.mock('@/components/chat/Markdown', () => ({ markdownComponents: {} }));
+const addToast = vi.hoisted(() => vi.fn());
+vi.mock('@/components/ui/toast', () => ({ addToast }));
 vi.mock('@/components/ui/button', () => ({
   Button: ({
     children,
@@ -58,6 +60,12 @@ let root: Root;
 let container: HTMLElement;
 const downloadUpdate = vi.fn();
 const quitAndInstall = vi.fn();
+let frames: Array<() => void> = [];
+const nextFrame = () => {
+  const due = frames;
+  frames = [];
+  for (const run of due) run();
+};
 const dialog = () => container.querySelector('[role="dialog"]');
 const buttonOf = (text: string) =>
   [...(dialog()?.querySelectorAll('button') ?? [])].find((b) => b.textContent === text) as
@@ -85,6 +93,7 @@ async function render(element: ReturnType<typeof createElement>): Promise<void> 
   vi.stubGlobal('window', window);
   vi.stubGlobal('document', window.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('requestAnimationFrame', (run: () => void) => frames.push(run));
   Object.assign(window, {
     electronAPI: {
       updater: {
@@ -115,6 +124,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   downloadUpdate.mockReset();
   quitAndInstall.mockReset();
+  addToast.mockReset();
+  frames = [];
 });
 
 describe('ReleaseNotesDialog', () => {
@@ -147,12 +158,24 @@ describe('ReleaseNotesDialog', () => {
     expect(dialog()?.textContent).toContain('Update failed: net::ERR_INTERNET_DISCONNECTED');
   });
 
-  it('下载完成后点「重启以更新」先关掉对话框再重启，不和重启等待蒙版叠在一起', async () => {
+  it('下载完成后点「重启以更新」先关掉对话框，下一帧才发重启，不和关闭挤在同一帧', async () => {
     await mount(available);
     await act(async () => push({ ...available, status: 'downloaded' } as UpdateStatus));
     await act(async () => buttonOf('Restart to update')?.click());
-    expect(quitAndInstall).toHaveBeenCalledTimes(1);
     expect(dialog()).toBeNull();
+    expect(quitAndInstall).not.toHaveBeenCalled();
+    await act(async () => nextFrame());
+    expect(quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it('重启没被受理时给出提示，不再静默', async () => {
+    quitAndInstall.mockResolvedValue({ ok: false, reason: 'error', error: 'boom' });
+    await mount({ ...available, status: 'downloaded' } as UpdateStatus);
+    await act(async () => buttonOf('Restart to update')?.click());
+    await act(async () => nextFrame());
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', title: 'Restart to update failed: boom' })
+    );
   });
 });
 

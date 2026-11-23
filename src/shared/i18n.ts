@@ -251,6 +251,9 @@ export const zhTranslations: Record<string, string> = {
     '新版本 {{version}} 已下载。重启会在当前工具结束后进行，转到后台的命令会接着跑。',
   'Update check failed': '检查更新失败',
   'Restart to update': '重启更新',
+  'Restart to update is already in progress': '正在重启更新，请稍候',
+  'No downloaded update to install': '没有已下载的更新可安装，请重新检查更新',
+  'Restart to update failed: {{error}}': '重启更新失败：{{error}}',
   '{{count}} conversation(s) interrupted by app exit':
     '{{count}} 个会话因应用退出被中断，已在会话里说明原因',
   'Update failed: {{error}}': '更新失败：{{error}}',

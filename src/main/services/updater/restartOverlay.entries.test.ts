@@ -88,11 +88,13 @@ describe('有工具在跑时三个重启入口都显示同一个等待蒙版', (
     autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
     m.updaterEvents.get('update-downloaded')?.({ version: '9.9.9' });
     const settingsSender = { sender: { id: 42 } };
-    await m.handlers.get('updater:quitAndInstall')?.(settingsSender);
+    // 受理结果等整条安装链路走完才回：工具结束前一直挂着
+    const accepted = m.handlers.get('updater:quitAndInstall')?.(settingsSender);
     await vi.waitFor(() => expect(m.overlays).toContainEqual(waitingFor('update')));
     expect(m.present).toHaveBeenCalledExactlyOnceWith(m.mainWindow);
     m.finishTool();
     await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
+    await expect(accepted).resolves.toEqual({ ok: true });
     expect(m.overlays.at(-1)).toBeNull();
   });
 

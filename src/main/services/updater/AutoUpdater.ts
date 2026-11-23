@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
-import type { ManualInstall, UpdateStatus } from '@shared/types/updater';
+import type { ManualInstall, RestartToUpdateResult, UpdateStatus } from '@shared/types/updater';
 import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
@@ -31,6 +31,8 @@ const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 // focus 检查最小间隔:30 分钟
 const MIN_FOCUS_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const BUSY_POLL_MS = 5_000;
+// 渲染层落盘只等在途的设置写入（毫秒级）；短于通用的 5s，超时由这里记日志
+const UPDATE_FLUSH_TIMEOUT_MS = 3_000;
 
 /**
  * 自动更新单例(移植自 EnsoAI,剥离 proxy 耦合)。
@@ -257,9 +259,9 @@ class AutoUpdaterService {
   }
 
   /** 用户点重启更新：不等回合结束，直接走优雅重启的安全点 */
-  requestRestart(): void {
-    if (!this.updateDownloaded || this.quittingForUpdate) return;
-    void this.install(() => true);
+  requestRestart(): Promise<RestartToUpdateResult> {
+    if (!this.updateDownloaded) return Promise.resolve({ ok: false, reason: 'not-downloaded' });
+    return this.install(() => true);
   }
 
   private async quitAndInstall(): Promise<void> {
@@ -368,26 +370,44 @@ class AutoUpdaterService {
   }
 
   /** 落盘渲染层状态与设置后安装；recheck 在落盘后复核仍可重启 */
-  private async install(recheck: () => boolean): Promise<void> {
-    if (this.installingIdleRestart || this.quittingForUpdate) return;
+  private async install(recheck: () => boolean): Promise<RestartToUpdateResult> {
+    if (this.installingIdleRestart || this.quittingForUpdate) return { ok: false, reason: 'busy' };
     this.installingIdleRestart = true;
     try {
       const { flushRendererPersist, isServerMode } = await import('../appServerMode');
-      await flushRendererPersist();
+      await flushWithin(flushRendererPersist(), UPDATE_FLUSH_TIMEOUT_MS);
       flushSettings();
-      if (!recheck()) return;
+      if (!recheck()) return { ok: true };
       if (isServerMode()) writeTrayReenterAfterUpdate(true);
       await this.quitAndInstall();
+      return { ok: true };
     } catch (error) {
       console.error('Restart to update failed:', error);
       this.idleGate.markFailed();
       writeTrayReenterAfterUpdate(false);
       this.clearIdleTimer();
+      return {
+        ok: false,
+        reason: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      };
     } finally {
       this.installingIdleRestart = false;
       if (!this.quittingForUpdate && !this.idleGate.isFailed()) this.notifyIdleStateChanged();
     }
   }
+}
+
+/** 渲染层落盘尽力而为：主进程设置随后由 flushSettings 落盘，超时只丢在途的那次写入，记日志后照常安装 */
+async function flushWithin(flush: Promise<void>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = await Promise.race([
+    flush.then(() => false),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  if (timedOut) console.warn(`[updater] 渲染层落盘 ${ms}ms 未回应，跳过等待继续安装`);
 }
 
 /** electron-updater 的 UpdateInfo 收窄成可序列化的白名单形状 */
