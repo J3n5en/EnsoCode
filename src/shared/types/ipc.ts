@@ -138,6 +138,8 @@ export const IPC_CHANNELS = {
   /** renderer → main：macOS 布局变化后重算窗口形状与拖拽命中区 */
   WINDOW_REFRESH_DRAG_REGIONS: 'window:refresh-drag-regions',
   WINDOW_OPEN_SETTINGS: 'window:open-settings',
+  /** renderer → main：给本机主窗口打开独立 DevTools（window: 前缀，远程一律不可调） */
+  WINDOW_OPEN_DEV_TOOLS: 'window:open-dev-tools',
   /** main → 主界面 renderer：macOS View 菜单要求切换侧栏（与渲染层快捷键同一条逻辑） */
   WINDOW_TOGGLE_SIDEBAR: 'window:toggle-sidebar',
   /** main → settings renderer：打开后切分类并闪行 */
@@ -750,6 +752,8 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+
+export type OpenDevToolsResult = { ok: true } | { ok: false; error: string };
 
 /** 重启在等什么：在跑的工具、没法脱离应用只能等它结束的转后台命令，或正在写的回复 */
 export type RestartWaitReason = 'tool' | 'background-not-detachable' | 'reply';
