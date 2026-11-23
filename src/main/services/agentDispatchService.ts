@@ -326,13 +326,12 @@ export class AgentDispatchService {
       };
     }
     if (overrides?.thinking) {
+      // 调用方显式档位走类型槽（派发 > 类型预设 > 父会话 > 模型条目）；写进 model 槽会排到父会话之后，还会被当成模型能力覆盖
+      const { thinkingLevel: _preset, ...rest } = spawnConfig;
       spawnConfig = {
-        ...spawnConfig,
-        model: {
-          ...spawnConfig.model,
-          reasoning: overrides.thinking === 'off' ? 'off' : 'on',
-          ...(overrides.thinking === 'off' ? {} : { thinkingLevel: overrides.thinking }),
-        },
+        ...rest,
+        reasoning: overrides.thinking === 'off' ? 'off' : 'on',
+        ...(overrides.thinking === 'off' ? {} : { thinkingLevel: overrides.thinking }),
       };
     }
     if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
