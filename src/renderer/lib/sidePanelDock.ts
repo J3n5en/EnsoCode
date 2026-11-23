@@ -21,6 +21,7 @@ import {
 import { getPluginViews, pluginViewsReady, subscribePluginViews } from '../plugins/viewBridge';
 import { isRemoteClient } from './remoteClient';
 import { resolveSidePanelDockConversationId } from './sidePanelDockId';
+import { releaseTerminal } from './terminalInstances';
 
 const docks = new Map<string, DockviewApi>();
 const dockRemoveDisposers = new Map<string, { dispose: () => void }>();
@@ -695,8 +696,7 @@ export function disposeConversationResources(conversationId: string): void {
       if (panel.id === 'changes' || panel.id === 'files') continue;
       if (panel.id === 'secretary') continue;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) continue;
-      // xterm 只在打开过终端时才加载
-      void import('@/lib/terminalRegistry').then((m) => m.releaseTerminal(panel.id));
+      releaseTerminal(panel.id);
       void window.electronAPI?.terminal?.dispose(panel.id);
     }
   }

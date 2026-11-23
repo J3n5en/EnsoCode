@@ -19,7 +19,6 @@ vi.mock('@/stores/sidePanel', () => ({
     getState: () => ({ ensureOpen: harness.ensureOpen, forgetConversation: vi.fn() }),
   },
 }));
-vi.mock('@/lib/terminalRegistry', () => ({ releaseTerminal: vi.fn() }));
 
 import {
   bindSidePanelDock,

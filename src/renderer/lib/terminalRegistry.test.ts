@@ -52,7 +52,7 @@ let releaseTerminal: ((termId: string) => void) | undefined;
 async function loadTerminalRegistry() {
   vi.resetModules();
   const registry = await import('./terminalRegistry');
-  releaseTerminal = registry.releaseTerminal;
+  releaseTerminal = (await import('./terminalInstances')).releaseTerminal;
   return registry;
 }
 
