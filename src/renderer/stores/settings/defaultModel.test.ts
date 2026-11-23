@@ -1,9 +1,8 @@
 import type { OauthCredentialAvailability } from '@shared/defaultModel';
 import type { ModelProvider } from '@shared/types';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useModelDirectoryStore } from '@/stores/modelDirectory';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
-import type * as SettingsModule from './index';
 
 const writeKey = vi.fn(async () => undefined);
 const readSettings = vi.fn(async (): Promise<Record<string, unknown> | null> => null);
@@ -32,7 +31,7 @@ vi.stubGlobal('window', {
     instructions: { delete: vi.fn(async () => ({ ok: true })) },
   },
 });
-let settingsModule: typeof SettingsModule;
+const settingsModule = await import('./index');
 
 function provider(id: string, overrides: Partial<ModelProvider> = {}): ModelProvider {
   return {
@@ -74,10 +73,6 @@ function setDirectory(sections?: { key: string; modelIds: string[] }[]) {
 }
 
 describe('settings default model actions', () => {
-  beforeAll(async () => {
-    // settings/index reads browser globals at module load; import only after this test installs them.
-    settingsModule = await import('./index');
-  });
   beforeEach(() => {
     useOauthCredentialStore.setState({
       snapshot: { revision: 0, availability: { status: 'unloaded' } },

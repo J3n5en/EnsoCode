@@ -65,6 +65,9 @@ vi.mock('../services/gitVersionControl', async (importOriginal) => ({
   GitRepository: { open: mocks.open },
 }));
 
+await import('./worktree');
+await import('./git');
+
 const request = { conversationId: 'c', projectId: 'p' };
 const invoke = (channel: string, value: unknown, sender = 1) =>
   mocks.handlers.get(channel)!({ sender: { id: sender } }, value);

@@ -105,6 +105,9 @@ function runCli(
   });
 }
 
+await import('../../ipc/settings');
+await import('./server');
+
 beforeAll(async () => {
   const settings = await import('../../ipc/settings');
   const { startConfigCli } = await import('./server');

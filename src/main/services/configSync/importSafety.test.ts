@@ -1,6 +1,6 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { encodeBundle } from './codec';
 import type { ConfigSyncBundle } from './types';
 
@@ -30,31 +30,26 @@ const emptyBundle = (): ConfigSyncBundle => ({
   secretsIncluded: false,
 });
 
-let service: typeof import('./index');
-let settings: typeof import('../../ipc/settings');
-
-beforeAll(async () => {
-  writeFileSync(
-    settingsPath,
-    JSON.stringify({
-      'enso-settings': {
-        version: 1,
-        state: {
-          theme: 'dark',
-          providers: [],
-          skills: [],
-          mcpServers: [],
-          instructions: [],
-          presets: [],
-          agentTypes: [],
-          subagentModels: [],
-        },
+writeFileSync(
+  settingsPath,
+  JSON.stringify({
+    'enso-settings': {
+      version: 1,
+      state: {
+        theme: 'dark',
+        providers: [],
+        skills: [],
+        mcpServers: [],
+        instructions: [],
+        presets: [],
+        agentTypes: [],
+        subagentModels: [],
       },
-    })
-  );
-  service = await import('./index');
-  settings = await import('../../ipc/settings');
-});
+    },
+  })
+);
+const service = await import('./index');
+const settings = await import('../../ipc/settings');
 
 afterAll(() => {
   chmodSync(userData, 0o700);

@@ -36,6 +36,8 @@ vi.mock('../services/uiHost', async () =>
   })
 );
 
+await import('./settings');
+
 afterAll(async () => {
   (await import('./settings')).flushSettings();
   rmSync(userData, { recursive: true, force: true });
