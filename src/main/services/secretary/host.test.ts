@@ -3241,4 +3241,27 @@ describe('看板与终态防回拉/防误报失败', () => {
     expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
     expect(daily.map((d) => d.kind)).toEqual(['failed', 'goal-complete']);
   });
+
+  it('会话处于 running（含重启续跑无边沿变化与旧 goal-complete(needsUser) 重跑）时清掉过时 lastResult', () => {
+    // 场景 1：重启续跑时 status 已经是 running 且无 previous !== running 边沿事件，旧 needs-user 仍会被清掉
+    const h1 = harness({});
+    h1.state.file.dispatched.c1.lastState = 'running';
+    h1.state.file.dispatched.c1.lastResult = { kind: 'needs-user', turn: 1, at: 100 };
+    h1.state.statuses.c1 = running;
+    h1.host.onAgentEvent(event('text-delta', { text: '继续跑测试' }), []);
+    expect(h1.state.file.dispatched.c1.lastResult).toBeUndefined();
+
+    // 场景 2：上一轮 goal-complete 带 needsUser，随后重新进入 running 时清掉旧结果与 goalResult
+    const h2 = harness({});
+    h2.state.file.dispatched.c1.lastState = 'idle';
+    h2.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: 100 };
+    h2.state.file.dispatched.c1.goalResult = {
+      at: 100,
+      result: { summary: '待拍板', needsUser: ['确认方案'] },
+    };
+    h2.state.statuses.c1 = running;
+    h2.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'idle'));
+    expect(h2.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h2.state.file.dispatched.c1.goalResult).toBeUndefined();
+  });
 });

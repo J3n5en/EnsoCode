@@ -915,4 +915,56 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
     ).toEqual(['c-blk-need', 'c-need-field', 'c-approval']);
     expect(daily.counts.needsYou).toBe(3);
   });
+
+  it('今日正在运行的会话即使历史曾记过 needs-user / failed / goal-complete(needsUser) 也归「进行中」', () => {
+    const daily = buildSecretaryDaily({
+      day: '2024-05-15',
+      now: at(15, 20),
+      session: (id) => ({ title: id, projectName: 'enso-code' }),
+      projectName: () => 'enso-code',
+      results: [
+        record({ at: at(15, 10), conversationId: 'c-run-need', kind: 'needs-user' }),
+        record({ at: at(15, 10), conversationId: 'c-run-fail', kind: 'failed' }),
+        record({
+          at: at(15, 10),
+          conversationId: 'c-run-goal-need',
+          kind: 'goal-complete',
+          goalResult: { at: at(15, 10), result: { needsUser: ['旧待确认'] } },
+        }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-run-need',
+          createdAt: at(15, 0),
+          lastState: 'running',
+          stateSince: at(15, 5),
+        }),
+        dispatch({
+          conversationId: 'c-run-fail',
+          createdAt: at(15, 0),
+          lastState: 'running',
+          stateSince: at(15, 5),
+          lastResult: { kind: 'failed', turn: 1, at: at(15, 10) },
+        }),
+        dispatch({
+          conversationId: 'c-run-goal-need',
+          createdAt: at(15, 0),
+          lastState: 'running',
+          stateSince: at(15, 12),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 10) },
+          goalResult: { at: at(15, 10), result: { needsUser: ['旧待确认'] } },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(
+      daily.groups
+        .find((g) => g.key === 'running')
+        ?.items.map((i) => i.conversationId)
+        .sort()
+    ).toEqual(['c-run-fail', 'c-run-goal-need', 'c-run-need']);
+    expect(daily.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    expect(daily.groups.find((g) => g.key === 'failed')).toBeUndefined();
+  });
 });

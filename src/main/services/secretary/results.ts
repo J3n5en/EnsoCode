@@ -464,6 +464,8 @@ export function countsAsRunning(
 
 export function sessionNeedsUser(record: DispatchRecord, state: SessionLiveState): boolean {
   if (state === 'waiting') return true;
+  // 运行中（且非 waiting，说明此刻没有待审批或待回答提问）：历史结果已过时，不能占「需要你处理」
+  if (state === 'running') return false;
   const result = record.lastResult;
   if (!result || result.dismissed) return false;
   if (result.kind === 'goal-complete' || result.kind === 'goal-blocked') {
