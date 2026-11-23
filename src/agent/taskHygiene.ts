@@ -186,6 +186,13 @@ function ranText(ms: number): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+function taskLines(tasks: readonly BackgroundTaskInfo[], now: number): string[] {
+  return tasks.map(
+    (task) =>
+      `- ${task.taskId}: ${task.command.replace(/\s+/g, ' ').slice(0, 160)} (running ${ranText(now - task.startedAt)})`
+  );
+}
+
 /** 收尾清单：还在跑、没表态（没保留）的任务；没有返回 undefined */
 export function settleChecklist(
   tasks: readonly BackgroundTaskInfo[],
@@ -193,15 +200,20 @@ export function settleChecklist(
 ): string | undefined {
   const open = tasks.filter((task) => task.status === 'running' && !task.keep);
   if (open.length === 0) return undefined;
-  const lines = open.map(
-    (task) =>
-      `- ${task.taskId}: ${task.command.replace(/\s+/g, ' ').slice(0, 160)} (running ${ranText(now - task.startedAt)})`
-  );
   return [
     `<${TASK_WRAP_UP_TAG}>`,
     'These background tasks are still running and you have not said what happens to them:',
-    ...lines,
+    ...taskLines(open, now),
     'Call task_settle once for all of them: stop each one you no longer need, or keep it with a one-line reason the user will see. Do not leave them undeclared.',
     `</${TASK_WRAP_UP_TAG}>`,
+  ].join('\n');
+}
+
+/** 子代理的 Run 因这些任务被持有：等结果就结束回合，该在汇报后继续跑的 keep，不要的 stop */
+export function awaitChecklist(tasks: readonly BackgroundTaskInfo[], now: number): string {
+  return [
+    'These background tasks you started are still running:',
+    ...taskLines(tasks, now),
+    'Your Run waits for them before it reports back. If you need their results, end your turn; each completion wakes you. Keep tasks that should run on after your report (such as servers) with task_settle keep, and stop the ones you no longer need.',
   ].join('\n');
 }
