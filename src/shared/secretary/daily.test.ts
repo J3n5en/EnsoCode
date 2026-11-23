@@ -968,6 +968,149 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
     expect(daily.groups.find((g) => g.key === 'failed')).toBeUndefined();
   });
 
+  it('goal-complete 带 needsUser 时标签为「完成 · 待你决定」、直接暴露 needsUser 且不把正文当主摘要', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({
+          at: at(15, 14),
+          conversationId: 'c-pr62',
+          kind: 'goal-complete',
+          text: 'PR #62 review 完了，补修已推到 PR 分支，CI 通过',
+          goalResult: {
+            at: at(15, 14),
+            result: {
+              summary: 'Review 完成',
+              needsUser: ['是否合并上架 #62', '确认是否同步发版'],
+            },
+          },
+        }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-pr62',
+          createdAt: at(15, 10),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 14) },
+          goalResult: {
+            at: at(15, 14),
+            result: {
+              summary: 'Review 完成',
+              needsUser: ['是否合并上架 #62', '确认是否同步发版'],
+            },
+          },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    const card = daily.groups.find((g) => g.key === 'needsYou')?.items[0];
+    expect(card).toBeDefined();
+    expect(card?.label).toBe('Done · needs your decision');
+    expect(card?.label).not.toBe('Goal complete');
+    expect(card?.needsUser).toEqual(['是否合并上架 #62', '确认是否同步发版']);
+    expect(card?.summary).toBeUndefined();
+  });
+
+  it('点「知道了」(dismissed) 后，看板卡片移入「完成了什么」不再留在「需要你」，除非产生带新 needsUser 的新结果', () => {
+    const goalResult = {
+      at: at(15, 14),
+      result: { summary: 'PR #62 review 完了', needsUser: ['是否合并上架 #62'] },
+    };
+    const dismissed = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({
+          at: at(15, 14),
+          conversationId: 'c-pr62',
+          kind: 'goal-complete',
+          text: 'PR #62 review 完了',
+          goalResult,
+        }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-pr62',
+          createdAt: at(15, 10),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 14), dismissed: true },
+          goalResult,
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(dismissed.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    const doneCard = dismissed.groups.find((g) => g.key === 'done')?.items[0];
+    expect(doneCard).toMatchObject({ conversationId: 'c-pr62', label: 'Goal complete' });
+    expect(doneCard).not.toHaveProperty('needsUser');
+
+    // 之后会话产生了更新的结果且新结果里 needsUser 非空 -> 再次进入「需要你」
+    const newGoalResult = {
+      at: at(15, 30),
+      result: { summary: '发版就绪', needsUser: ['确认是否部署阿里'] },
+    };
+    const renewed = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({
+          at: at(15, 14),
+          conversationId: 'c-pr62',
+          kind: 'goal-complete',
+          goalResult,
+        }),
+        record({
+          at: at(15, 30),
+          conversationId: 'c-pr62',
+          kind: 'goal-complete',
+          goalResult: newGoalResult,
+        }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-pr62',
+          createdAt: at(15, 10),
+          lastResult: { kind: 'goal-complete', turn: 2, at: at(15, 30) },
+          goalResult: newGoalResult,
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(
+      renewed.groups.find((g) => g.key === 'needsYou')?.items.map((i) => i.conversationId)
+    ).toEqual(['c-pr62']);
+  });
+
+  it('隔天调 result_mark_done / 标记完成后，历史日的旧 needsUser 卡也不再留在「需要你」', () => {
+    const yesterdayAt = at(14, 22);
+    const todayAt = at(15, 10);
+    const daily = buildSecretaryDaily({
+      ...base,
+      day: '2024-05-14',
+      now: at(15, 0),
+      results: [
+        record({
+          at: yesterdayAt,
+          conversationId: 'c-old',
+          kind: 'goal-complete',
+          goalResult: { at: yesterdayAt, result: { needsUser: ['是否合并上架 #62'] } },
+        }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-old',
+          createdAt: yesterdayAt - 60_000,
+          lastResult: { kind: 'goal-complete', turn: 1, at: todayAt, manual: true },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    expect(daily.groups.find((g) => g.key === 'done')?.items.map((i) => i.conversationId)).toEqual([
+      'c-old',
+    ]);
+  });
+
   it('空闲但挂着未到点提醒的会话留在进行中列并标 pendingReminder，切回运行中后不标', () => {
     const dueAt = at(15, 25);
     const reminderItem = {

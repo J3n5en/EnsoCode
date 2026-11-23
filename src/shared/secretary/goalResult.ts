@@ -61,8 +61,25 @@ export interface GoalResultView {
 }
 
 /** 结构化结果里是否明确列出了需要用户亲自处理的事项 */
+export function needsUserItems(view: GoalResultView | undefined): string[] {
+  return (view?.result.needsUser ?? [])
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 export function hasNeedsUser(view: GoalResultView | undefined): boolean {
-  return (view?.result.needsUser ?? []).some((item) => item.trim().length > 0);
+  return needsUserItems(view).length > 0;
+}
+
+/** 清除已处理的 needsUser，保留 PR/commit/checks 等客观事实；无剩余内容时返回 undefined */
+export function stripGoalResultNeedsUser(
+  view: GoalResultView | undefined
+): GoalResultView | undefined {
+  if (!view?.result.needsUser) return view;
+  const { needsUser: _needsUser, ...rest } = view.result;
+  const hasRest = Object.keys(rest).length > 0 || (view.checks?.length ?? 0) > 0;
+  if (!hasRest) return undefined;
+  return { ...view, result: rest };
 }
 
 export type GoalResultParse = { ok: true; value: GoalResult } | { ok: false; error: string };

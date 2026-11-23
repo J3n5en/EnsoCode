@@ -7,6 +7,7 @@ import {
   formatGoalResultChecks,
   formatGoalResultClaims,
   hasNeedsUser,
+  needsUserItems,
 } from '@shared/secretary/goalResult';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import { wrapUntrusted } from '@shared/secretary/transcript';
@@ -601,6 +602,13 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       going && record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)
         ? undefined
         : record.lastResult;
+    const needsUser =
+      visibleResult &&
+      !visibleResult.dismissed &&
+      !visibleResult.manual &&
+      (visibleResult.kind === 'goal-complete' || visibleResult.kind === 'goal-blocked')
+        ? needsUserItems(record.goalResult).map((item) => redactSecrets(item))
+        : [];
     // 巡检报过停住、之后没有新活动：进行中列表标「已停住」，等它真的动起来才消失
     const stalled =
       going &&
@@ -621,6 +629,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       secretaryConversationId: record.secretaryConversationId,
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
       ...(visibleResult ? { result: visibleResult.kind, resultAt: visibleResult.at } : {}),
+      ...(needsUser.length > 0 ? { needsUser } : {}),
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going &&
       state !== 'running' &&

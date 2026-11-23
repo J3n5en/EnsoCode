@@ -634,6 +634,8 @@ export type SecretaryCard =
       result?: SecretaryResultKind;
       /** 与 result 同时出现：结果发生的时间 */
       resultAt?: number;
+      /** 结构化结果里待用户处理的条目（已脱敏，未清除时展示） */
+      needsUser?: readonly string[];
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
       /** 会话空闲但挂着未到点的 remind_me 提醒：看板与工作台标「等提醒 · HH:MM」，不标「续跑中」 */
@@ -809,6 +811,8 @@ export interface SecretaryDailyItem {
   /** 空闲且挂着未到点的 remind_me 提醒：每日看板卡片标「等提醒 · HH:MM」 */
   pendingReminder?: PendingReminderView;
   goalResult?: GoalResultView;
+  /** 结构化结果里待用户处理的条目（未清除时在需要你列直接展示） */
+  needsUser?: readonly string[];
 }
 
 export interface SecretaryDailyCounts {

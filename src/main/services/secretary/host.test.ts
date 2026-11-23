@@ -3480,4 +3480,62 @@ describe('看板与终态防回拉/防误报失败', () => {
     expect(h2.state.file.dispatched.c1.lastResult).toBeUndefined();
     expect(h2.state.file.dispatched.c1.goalResult).toBeUndefined();
   });
+
+  it('手动标完成或后续新 goal-complete(无 needsUser) 后，旧 goalResult.needsUser 和迟到核验不会把卡片拉回需要你', async () => {
+    // 场景 1：在途 goalVerify 还没返回前被手动标记完成，迟到的核验结果不能覆写 manual: true
+    const h1 = harness({});
+    let resolveVerify: (value: { kind: 'commit'; ref: string; status: 'verified' }[]) => void =
+      () => {};
+    h1.ports.verifyGoalResult = () =>
+      new Promise((resolve) => {
+        resolveVerify = resolve;
+      });
+    h1.state.statuses.c1 = idle;
+    h1.host.onAgentEvent(
+      event('goal-signal', {
+        kind: 'complete',
+        note: 'ok',
+        result: { summary: '待拍板', needsUser: ['确认部署'] },
+      }),
+      []
+    );
+    h1.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    h1.state.now += 1000;
+    h1.state.file.dispatched.c1.lastResult = {
+      kind: 'goal-complete',
+      turn: h1.state.file.dispatched.c1.turn,
+      at: h1.state.now,
+      manual: true,
+    };
+    resolveVerify([]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h1.state.file.dispatched.c1.lastResult).toMatchObject({
+      kind: 'goal-complete',
+      manual: true,
+    });
+    expect(h1.state.file.dispatched.c1.goalResult).toBeUndefined();
+
+    // 场景 2：上一轮 goal-complete 带 needsUser 且已「知道了」，新结果 goal-complete 不带 goalResult 时清除旧 goalResult
+    const h2 = harness({});
+    h2.state.file.dispatched.c1.turn = 1;
+    h2.state.file.dispatched.c1.lastResult = {
+      kind: 'goal-complete',
+      turn: 1,
+      at: 100,
+      dismissed: true,
+    };
+    h2.state.file.dispatched.c1.goalResult = {
+      at: 100,
+      result: { summary: '旧结果', needsUser: ['旧待确认'] },
+    };
+    h2.state.statuses.c1 = idle;
+    h2.host.onAgentEvent(
+      event('goal-signal', { kind: 'complete', note: '新结果无 needsUser' }),
+      []
+    );
+    h2.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h2.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(h2.state.file.dispatched.c1.goalResult).toBeUndefined();
+  });
 });

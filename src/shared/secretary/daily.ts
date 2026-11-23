@@ -9,7 +9,8 @@ import type {
   SecretaryResultKind,
   SecretaryTodo,
 } from '../types/secretary';
-import { type GoalResultView, hasNeedsUser } from './goalResult';
+import { DONE_NEEDS_USER_LABEL } from './feed';
+import { type GoalResultView, hasNeedsUser, needsUserItems } from './goalResult';
 
 /** 结果记录（daily.jsonl）保留天数；派发记录与待办不清理，审计按体积轮转 */
 export const DAILY_RETENTION_DAYS = 180;
@@ -166,10 +167,15 @@ function newestFirst(left: SecretaryDailyItem, right: SecretaryDailyItem): numbe
 type SessionColumn = 'done' | 'failed' | 'needsYou' | 'withSecretary';
 
 /** 终态结果落哪一列；中间态（turn-ended 之类）不上板 */
-function columnOf(kind: SecretaryResultKind, goalResult?: GoalResultView): SessionColumn | null {
-  if (kind === 'needs-user') return 'needsYou';
-  if (kind === 'goal-complete') return hasNeedsUser(goalResult) ? 'needsYou' : 'done';
-  if (kind === 'goal-blocked') return hasNeedsUser(goalResult) ? 'needsYou' : 'withSecretary';
+function columnOf(
+  kind: SecretaryResultKind,
+  goalResult?: GoalResultView,
+  cleared = false
+): SessionColumn | null {
+  if (kind === 'needs-user') return cleared ? 'done' : 'needsYou';
+  if (kind === 'goal-complete') return !cleared && hasNeedsUser(goalResult) ? 'needsYou' : 'done';
+  if (kind === 'goal-blocked')
+    return !cleared && hasNeedsUser(goalResult) ? 'needsYou' : 'withSecretary';
   if (FAILED_KINDS.has(kind)) return 'failed';
   return null;
 }
@@ -181,6 +187,7 @@ interface Terminal {
   record?: SecretaryDailyRecord;
   goalResult?: GoalResultView;
   manual?: true;
+  dismissed?: true;
 }
 
 /**
@@ -222,21 +229,35 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   // 与派发记录的 lastResult 按时间合并：更晚的结果（含手动标完成、后续恢复）覆盖旧日志
   for (const record of input.dispatched) {
     const last = record.lastResult;
-    if (!last || !within(last.at)) continue;
+    if (!last) continue;
+    const existing = terminal.get(record.conversationId);
+    const cleared = last.manual === true || last.dismissed === true;
+    if (!within(last.at)) {
+      // 历史日看板：如果旧结果已被后续手动标完成或点过「知道了」，不再留在「需要你」
+      if (existing && cleared && last.at >= existing.at) {
+        terminal.set(record.conversationId, {
+          ...existing,
+          ...(last.manual ? { manual: true as const } : {}),
+          ...(last.dismissed ? { dismissed: true as const } : {}),
+        });
+      }
+      continue;
+    }
     const goalResult =
       !last.manual && (last.kind === 'goal-complete' || last.kind === 'goal-blocked')
         ? record.goalResult
         : undefined;
-    if (!columnOf(last.kind, goalResult)) continue;
-    const existing = terminal.get(record.conversationId);
-    if (!existing || last.at > existing.at || (last.at === existing.at && last.manual === true)) {
+    if (!columnOf(last.kind, goalResult, cleared)) continue;
+    if (!existing || last.at > existing.at || (last.at === existing.at && cleared)) {
       const keepRecord = existing?.kind === last.kind && !last.manual ? existing.record : undefined;
+      const keptGoal = goalResult ?? (last.dismissed ? existing?.goalResult : undefined);
       terminal.set(record.conversationId, {
         at: last.at,
         kind: last.kind,
         ...(keepRecord ? { record: keepRecord } : {}),
-        ...(goalResult ? { goalResult } : {}),
+        ...(keptGoal ? { goalResult: keptGoal } : {}),
         ...(last.manual ? { manual: true as const } : {}),
+        ...(last.dismissed ? { dismissed: true as const } : {}),
       });
     }
   }
@@ -252,12 +273,15 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     const meta = metaOf(conversationId, projectId);
     const record = result?.record;
     const goalResult = result?.goalResult ?? record?.goalResult;
+    const cleared = Boolean(result?.manual || result?.dismissed);
+    const needsUser =
+      !cleared && result?.kind === 'goal-complete' ? needsUserItems(goalResult) : [];
     const label = result
-      ? result.kind === 'goal-complete' && hasNeedsUser(goalResult)
-        ? RESULT_LABEL['needs-user']
+      ? needsUser.length > 0
+        ? DONE_NEEDS_USER_LABEL
         : RESULT_LABEL[result.kind]
       : undefined;
-    const summary = record ? summarize(record.text) : undefined;
+    const summary = needsUser.length > 0 ? undefined : record ? summarize(record.text) : undefined;
     return {
       id: `session:${conversationId}`,
       at,
@@ -269,6 +293,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       ...(record?.branch ? { branch: record.branch } : {}),
       ...(record?.commit ? { commit: record.commit } : {}),
       ...(goalResult ? { goalResult } : {}),
+      ...(needsUser.length > 0 ? { needsUser } : {}),
       ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
       conversationId,
     };
@@ -313,6 +338,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     placed.add(record.conversationId);
     const goal = record.goal?.split('\n')[0]?.trim();
     const effectiveGoalResult = result?.goalResult ?? result?.record?.goalResult;
+    const resultCleared = Boolean(result?.manual || result?.dismissed);
     // 移出只影响看板：记录还在，但哪一列都不进
     if (record.dismissedFromBoard === true && !result) continue;
     // 主动停止（秘书 session_stop 或用户中止）：
@@ -321,7 +347,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     const resultAfterStop =
       result !== undefined && record.stoppedAt !== undefined && result.at > record.stoppedAt;
     const completedBeforeStop =
-      result !== undefined && result.kind === 'goal-complete' && !hasNeedsUser(effectiveGoalResult);
+      result !== undefined &&
+      result.kind === 'goal-complete' &&
+      (resultCleared || !hasNeedsUser(effectiveGoalResult));
     if (
       record.stoppedAt !== undefined &&
       !resultAfterStop &&
@@ -348,7 +376,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       result !== undefined &&
       running &&
       !result.manual &&
-      (result.kind !== 'goal-complete' || hasNeedsUser(effectiveGoalResult));
+      (result.kind !== 'goal-complete' || (!resultCleared && hasNeedsUser(effectiveGoalResult)));
     const recoveredTurnEnded =
       result !== undefined &&
       !result.manual &&
@@ -375,8 +403,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     };
     // 当天没有终态结果时：真在跑、或从来没报过结果的才进「进行中」。
     // 报过结果、这一轮又没给新结果的会话，活已经干完，不能一直挂在进行中。
+    const effectiveCleared = Boolean(effectiveResult?.manual || effectiveResult?.dismissed);
     const column = effectiveResult
-      ? columnOf(effectiveResult.kind, effectiveGoalResult)
+      ? columnOf(effectiveResult.kind, effectiveGoalResult, effectiveCleared)
       : running || record.lastResult === undefined
         ? 'running'
         : 'done';
@@ -398,7 +427,11 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   // 没有派发记录、但当天有结果的会话（记录被清理或不属于本机派发）也要上板
   for (const [conversationId, result] of terminal) {
     if (placed.has(conversationId)) continue;
-    const column = columnOf(result.kind, result.goalResult ?? result.record?.goalResult);
+    const column = columnOf(
+      result.kind,
+      result.goalResult ?? result.record?.goalResult,
+      Boolean(result.manual || result.dismissed)
+    );
     if (!column) continue;
     columns[column].push(
       sessionCard(conversationId, result.record?.projectId, result.at, result, undefined, undefined)
