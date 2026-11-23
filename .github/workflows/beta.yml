@@ -8,11 +8,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# 同组最多一个在跑、一个排队；新推送替换排队中的那个，连续提交只构建一两次
-concurrency:
-  group: beta-release
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
@@ -20,6 +15,11 @@ jobs:
   prepare:
     # 发版提交本身就是正式版内容，不再出 beta
     if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release)')
+    # prepare -> verify -> desktop 严格串行并共用 beta-build：新推送立刻取消旧轮次的构建，
+    # 而 release 放在独立且 cancel-in-progress: false 的 beta-release 组，避免发布中途被取消留下残缺预发布。
+    concurrency:
+      group: beta-build
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -49,6 +49,9 @@ jobs:
   verify:
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'
+    concurrency:
+      group: beta-build
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -85,6 +88,9 @@ jobs:
 
   desktop:
     needs: [prepare, verify]
+    concurrency:
+      group: beta-build
+      cancel-in-progress: true
     uses: ./.github/workflows/desktop-build.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
@@ -94,6 +100,9 @@ jobs:
 
   release:
     needs: [prepare, desktop]
+    concurrency:
+      group: beta-release
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
