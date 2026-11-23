@@ -320,15 +320,28 @@ describe('forkAnchorForTurnKey', () => {
     expect(forkAnchorForTurnKey(tail, 3)).toBe(null);
   });
 
-  it('user 无 entryId 或仍是乐观回显时退回从末尾计数', () => {
+  it('user 无 entryId 时退回从末尾计数；乐观回显不在 jsonl，不算轮次也不计数', () => {
     const messages = [
       { role: 'user' },
       { role: 'assistant' },
       { role: 'user', entryId: 'u2', optimistic: true },
       { role: 'assistant' },
     ];
-    expect(forkAnchorForTurnKey({ messages }, 1)).toEqual({ userIndexFromEnd: 1 });
+    expect(forkAnchorForTurnKey({ messages }, 1)).toEqual({ userIndexFromEnd: 0 });
     expect(forkAnchorForTurnKey({ messages }, 3)).toEqual({ userIndexFromEnd: 0 });
+  });
+
+  it('本轮 user 未加载时，尾部被拒的未发送气泡不计入从末尾计数', () => {
+    const tail = {
+      messages: [
+        { role: 'assistant' },
+        { role: 'user', entryId: 'u9' },
+        { role: 'assistant' },
+        { role: 'user', optimistic: true },
+      ],
+      historyBaseIndex: 30,
+    };
+    expect(forkAnchorForTurnKey(tail, 30)).toEqual({ userIndexFromEnd: 1 });
   });
 
   it('从头就没有 user 或 key 非法返回 null', () => {

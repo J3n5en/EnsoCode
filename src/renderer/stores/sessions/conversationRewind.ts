@@ -175,7 +175,7 @@ export function userIndexFromEndForTimelineKey(
 
 /**
  * 轮末行 key（绝对下标）→ 分叉锚点：优先本轮 user 的 entryId，压缩前的早期轮次与 worker 计数口径无关。
- * user 无 entryId 或在未加载的更早页时，按其后 user 数从末尾定位，由 worker 校验。
+ * user 无 entryId 或在未加载的更早页时，按其后 user 数从末尾定位，由 worker 校验；乐观回显不在 jsonl，不计。
  */
 export function forkAnchorForTurnKey(
   conversation: {
@@ -188,15 +188,13 @@ export function forkAnchorForTurnKey(
   const base = conversation.historyBaseIndex ?? 0;
   const local = absIndex - base;
   if (local < 0 || local >= conversation.messages.length) return null;
-  const userIndexFromEnd = conversation.messages
-    .slice(local + 1)
-    .filter((message) => message.role === 'user').length;
+  const isUser = (message: { role: string; optimistic?: boolean }) =>
+    message.role === 'user' && !message.optimistic;
+  const userIndexFromEnd = conversation.messages.slice(local + 1).filter(isUser).length;
   for (let i = local; i >= 0; i--) {
     const message = conversation.messages[i];
-    if (message.role !== 'user') continue;
-    return !message.optimistic && message.entryId
-      ? { entryId: message.entryId }
-      : { userIndexFromEnd };
+    if (!isUser(message)) continue;
+    return message.entryId ? { entryId: message.entryId } : { userIndexFromEnd };
   }
   return base > 0 ? { userIndexFromEnd } : null;
 }
