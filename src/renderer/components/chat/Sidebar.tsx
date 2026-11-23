@@ -3404,25 +3404,38 @@ function ConversationDot({
   conversation,
 }: {
   conversation: {
+    id?: string;
     status: string;
     spawning: boolean;
     unread?: boolean;
     pendingAsks?: readonly PendingAskMark[];
     pendingApprovals?: readonly unknown[];
     hasRunningChild?: boolean;
+    queued?: boolean;
+    queuePosition?: number;
+    queueFailed?: string;
   };
 }) {
+  const { t } = useI18n();
   // 待审批与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
   const tone =
     (conversation.pendingApprovals?.length ?? 0) > 0
       ? 'attention'
       : conversationDotTone({
-          status: conversation.status,
+          status: conversation.queueFailed ? 'failed' : conversation.status,
           spawning: conversation.spawning,
           unread: conversation.unread,
           pendingAskCount: userAskCount(conversation.pendingAsks),
           hasRunningChild: conversation.hasRunningChild,
+          queued: conversation.queued === true && !conversation.queueFailed,
         });
+  const title = conversation.queueFailed
+    ? conversation.queueFailed
+    : conversation.queued
+      ? t('Queued · #{{n}}, starts automatically when a slot opens', {
+          n: conversation.queuePosition ?? 1,
+        })
+      : undefined;
   // 锁进与项目行同宽的图标列:圆点/图标两种形态切换时标题不再左右跳动。
   // 空闲不画点:满列空心圈没有信息量,只有运行/待回答/失败/未读才需要被看见
   return (
@@ -3430,9 +3443,11 @@ function ConversationDot({
       {tone !== 'idle' && (
         <ConversationStatusIndicator
           tone={tone}
+          title={title}
           size="sm"
           data-enso="session-status"
           data-status={conversationThemeState(conversation)}
+          conversationId={conversation.id}
         />
       )}
     </span>

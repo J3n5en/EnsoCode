@@ -4083,6 +4083,16 @@ export const zhTranslations: Record<string, string> = {
   'Run in a worktree': '使用隔离工作区',
   'Run in the project checkout': '在项目目录里',
   'Created the session': '已创建',
+  'Queued · #{{n}}': '排队中 · 第 {{n}} 位',
+  'Queued · #{{n}}, starts automatically when a slot opens':
+    '排队中 · 第 {{n}} 位，有空位后自动开始',
+  'Queued at #{{n}}': '已排队 · 第 {{n}} 位',
+  'Start now': '立即开始',
+  'Cancel queue': '取消排队',
+  'Cancel this queued session? It has not run and will be deleted.':
+    '取消这个排队会话？它还没运行，会被删除。',
+  'Starting…': '正在开始…',
+  'Queued start is unavailable': '暂时不能开始排队会话',
   'Handed to {{name}}': '已转给 {{name}}',
   'No answer in time': '超时未答',
   '{{name}} answered: {{answer}}': '{{name}} 已回答：{{answer}}',

@@ -727,6 +727,14 @@ describe('activeConversationIds', () => {
       expect(activeRetentionRemainingMs('readRecent', all, { now, ms: 0 })).toBeUndefined();
     });
   });
+
+  it('排队会话留在活跃中，启动失败也留着', () => {
+    const rows = {
+      q: { ...conv('p1', 1, 10), status: 'idle', spawning: false, queued: true },
+      bad: { ...conv('p1', 2, 20), status: 'idle', spawning: false, queueFailed: 'full' },
+    };
+    expect(activeConversationIds(['q', 'bad'], rows).sort()).toEqual(['bad', 'q']);
+  });
 });
 
 describe('等你处理优先', () => {
