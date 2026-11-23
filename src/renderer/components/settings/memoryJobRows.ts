@@ -1,3 +1,4 @@
+import { translate } from '@shared/i18n';
 import type { MemoryJobsSnapshot } from '@shared/memory/dto';
 
 /**
@@ -7,6 +8,9 @@ import type { MemoryJobsSnapshot } from '@shared/memory/dto';
 
 export type JobKind = 'distill' | 'kg' | 'reembed';
 export type JobState = 'running' | 'done' | 'failed' | 'cancelled';
+export type JobTranslate = (key: string, params?: Record<string, string | number>) => string;
+
+const defaultTranslate: JobTranslate = (key, params) => translate('en', key, params);
 
 export interface JobRow {
   key: string;
@@ -26,7 +30,8 @@ const shortId = (id: string) => id.slice(0, 8);
 function stateOf(status: string, error: string | null): JobState {
   if (status === 'pending' || status === 'running') return 'running';
   if (status === 'cancelled') return 'cancelled';
-  return error ? 'failed' : 'done';
+  if (status === 'failed' || error) return 'failed';
+  return 'done';
 }
 
 const NOTE_LABELS: Record<string, string> = {
@@ -36,7 +41,10 @@ const NOTE_LABELS: Record<string, string> = {
   rejected: 'rejected',
 };
 
-export function toJobRows(snapshot: MemoryJobsSnapshot): JobRow[] {
+export function toJobRows(
+  snapshot: MemoryJobsSnapshot,
+  t: JobTranslate = defaultTranslate
+): JobRow[] {
   const rows: JobRow[] = [];
 
   for (const job of snapshot.distill) {
@@ -48,16 +56,20 @@ export function toJobRows(snapshot: MemoryJobsSnapshot): JobRow[] {
       state,
       detail:
         state === 'failed'
-          ? (job.error ?? '')
+          ? job.error || t('failed')
           : state === 'cancelled'
-            ? 'superseded'
+            ? t('superseded')
             : state === 'running'
               ? job.attempts > 1
-                ? `retry ${job.attempts}`
-                : 'queued'
-              : `${job.done} stored`,
+                ? t('retry {{count}}', { count: job.attempts })
+                : job.status === 'running'
+                  ? t('running')
+                  : t('queued')
+              : t('{{count}} stored', { count: job.done }),
       notes: (job.notes ?? []).map((note) =>
-        [note.title, NOTE_LABELS[note.kind] ?? note.kind].filter(Boolean).join(' — ')
+        [note.title, NOTE_LABELS[note.kind] ? t(NOTE_LABELS[note.kind]) : note.kind]
+          .filter(Boolean)
+          .join(' — ')
       ),
       updatedAt: job.updatedAt,
     });
@@ -72,13 +84,18 @@ export function toJobRows(snapshot: MemoryJobsSnapshot): JobRow[] {
       state,
       detail:
         state === 'failed'
-          ? (job.error ?? '')
+          ? job.error || t('failed')
           : state === 'cancelled'
-            ? 'memory changed'
+            ? t('memory changed')
             : state === 'running'
-              ? 'extracting'
+              ? job.status === 'pending'
+                ? t('queued')
+                : t('extracting')
               : // kg 任务复用 total/done 两列存实体数与关系数
-                `${job.total} entities · ${job.done} links`,
+                t('{{entities}} entities · {{links}} links', {
+                  entities: job.total,
+                  links: job.done,
+                }),
       notes: [],
       updatedAt: job.updatedAt,
     });
@@ -94,10 +111,17 @@ export function toJobRows(snapshot: MemoryJobsSnapshot): JobRow[] {
       state,
       detail:
         state === 'failed'
-          ? (reembed.error ?? '')
-          : state === 'running'
-            ? `${reembed.done}/${reembed.total}`
-            : `${reembed.done} vectorized${reembed.failed > 0 ? ` · ${reembed.failed} failed` : ''}`,
+          ? reembed.error || t('failed')
+          : state === 'cancelled'
+            ? t('cancelled')
+            : state === 'running'
+              ? `${reembed.done}/${reembed.total}`
+              : reembed.failed > 0
+                ? t('{{done}} vectorized · {{failed}} failed', {
+                    done: reembed.done,
+                    failed: reembed.failed,
+                  })
+                : t('{{done}} vectorized', { done: reembed.done }),
       notes: [],
       updatedAt: reembed.updatedAt,
     });
