@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { useI18n } from '@/i18n';
 import { ManualInstallActions } from './ManualInstallActions';
+import { restartToUpdate } from './restartToUpdate';
 
 const REMARK_PLUGINS = [remarkGfm];
 // GitHub release 的 releaseNotes 是 HTML，先 raw 解析再按默认白名单清洗
@@ -58,7 +59,7 @@ export function ReleaseNotesDialog({
         onClick={() => {
           // 先关对话框，避免和重启等待蒙版叠在一起
           onOpenChange(false);
-          void window.electronAPI.updater.quitAndInstall();
+          void restartToUpdate(t);
         }}
       >
         {t('Restart to update')}

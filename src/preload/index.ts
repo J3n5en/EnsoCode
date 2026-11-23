@@ -271,7 +271,7 @@ import type {
   TerminalDataEvent,
   TerminalExitEvent,
 } from '@shared/types/sidePanel';
-import type { UpdaterState, UpdateStatus } from '@shared/types/updater';
+import type { RestartToUpdateResult, UpdaterState, UpdateStatus } from '@shared/types/updater';
 import type {
   WorkflowPresetDraft,
   WorkflowPresetSaveResult,
@@ -1579,7 +1579,8 @@ const electronAPI = {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
     /** 走优雅重启的安全点：当前工具结束后重启安装，后台命令交给新实例 */
-    quitAndInstall: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL),
+    quitAndInstall: (): Promise<RestartToUpdateResult | undefined> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL),
     setAutoUpdateEnabled: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, enabled),
     setAutoRestartMode: (mode: AutoRestartMode): Promise<void> =>

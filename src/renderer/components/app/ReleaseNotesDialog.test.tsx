@@ -13,6 +13,8 @@ vi.mock('@/i18n', () => ({
   }),
 }));
 vi.mock('@/components/chat/Markdown', () => ({ markdownComponents: {} }));
+const addToast = vi.hoisted(() => vi.fn());
+vi.mock('@/components/ui/toast', () => ({ addToast }));
 vi.mock('@/components/ui/button', () => ({
   Button: ({
     children,
@@ -115,6 +117,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   downloadUpdate.mockReset();
   quitAndInstall.mockReset();
+  addToast.mockReset();
 });
 
 describe('ReleaseNotesDialog', () => {
@@ -153,6 +156,19 @@ describe('ReleaseNotesDialog', () => {
     await act(async () => buttonOf('Restart to update')?.click());
     expect(quitAndInstall).toHaveBeenCalledTimes(1);
     expect(dialog()).toBeNull();
+  });
+
+  it('重启没被受理时给出提示，不再静默', async () => {
+    quitAndInstall.mockResolvedValue({ ok: false, reason: 'error', error: 'boom' });
+    await mount({ ...available, status: 'downloaded' } as UpdateStatus);
+    await act(async () => buttonOf('Restart to update')?.click());
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        title:
+          'Restart to update failed: boom. Try Restart to update again in a moment; if it still fails, quit EnsoCode completely and reopen it.',
+      })
+    );
   });
 });
 
