@@ -315,6 +315,26 @@ describe('安装更新途中失败', () => {
     }
   });
 
+  it('交给 electron-updater 时同步抛错：返回错误，撤掉退出状态，再点能重新安装而不是一直 busy', async () => {
+    const service = await downloaded();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    m.quitAndInstall.mockImplementationOnce(() => {
+      throw new Error('installer missing');
+    });
+    try {
+      await expect(service.requestRestart()).resolves.toEqual({
+        ok: false,
+        reason: 'error',
+        error: 'installer missing',
+      });
+      expect(service.isQuittingForUpdate()).toBe(false);
+      await expect(service.requestRestart()).resolves.toEqual({ ok: true });
+      expect(m.quitAndInstall).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('看门狗跟住整个安装；Squirrel 报错（窗口可能已被关掉）时撤掉退出、恢复主窗口并说明原因', async () => {
     vi.resetModules();
     const { autoUpdaterService: service } = await import('./AutoUpdater');

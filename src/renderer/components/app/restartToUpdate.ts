@@ -13,14 +13,17 @@ export async function restartToUpdate(t: TFunction): Promise<void> {
   }
   if (!result || result.ok) return;
   if (result.reason === 'busy') {
-    addToast({ type: 'info', title: t('Restart to update is already in progress') });
+    addToast({ type: 'info', title: t('Restart to update is already in progress. Please wait.') });
     return;
   }
   addToast({
     type: 'error',
     title:
       result.reason === 'error'
-        ? t('Restart to update failed: {{error}}', { error: result.error })
-        : t('No downloaded update to install'),
+        ? t(
+            'Restart to update failed: {{error}}. Try Restart to update again in a moment; if it still fails, quit EnsoCode completely and reopen it.',
+            { error: result.error }
+          )
+        : t('No downloaded update to install. Check for updates again.'),
   });
 }

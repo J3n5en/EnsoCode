@@ -286,6 +286,7 @@ class AutoUpdaterService {
       autoUpdater.quitAndInstall();
     } catch (error) {
       // 没退成：worker 已停在安全点，撤掉清单并按断点换代接着跑
+      this.quittingForUpdate = false;
       cancelAgentQuitCheckpoint();
       quitWatchdog.cancel();
       throw error;
