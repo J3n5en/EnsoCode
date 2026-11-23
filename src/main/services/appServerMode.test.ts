@@ -47,6 +47,7 @@ vi.mock('../ipc/settings', () => ({
   readTraySleepPolicy: () => 'when-agent-running',
   writeTrayPreventDisplaySleep: vi.fn(),
   writeTraySleepPolicy: vi.fn(),
+  writeTrayReenterAfterUpdate: vi.fn(),
 }));
 vi.mock('../windows/createAppWindow', () => ({
   closeWindowWebContents: vi.fn(),
@@ -76,13 +77,16 @@ vi.mock('./pairSessionHost', () => ({ setPairHeadless: vi.fn() }));
 vi.mock('./nodeRemote', () => ({ closeNodeSettingsWindows: mocks.closeNodeSettingsWindows }));
 
 import { app, Menu } from 'electron';
+import { writeTrayReenterAfterUpdate } from '../ipc/settings';
 import { getWindowWebContents } from '../windows/createAppWindow';
 import { attachAppCloseConfirm } from './appCloseConfirm';
+import type { AppRestartState } from './appRestart';
 import {
   ensureTray,
   enterServerMode,
   isServerMode,
   leaveServerMode,
+  setTrayRestartActions,
   toggleTrayMode,
 } from './appServerMode';
 
@@ -314,5 +318,76 @@ describe('tray toggle follows actual window visibility', () => {
     trayHandler('click')();
     expect(isServerMode()).toBe(false);
     expect(win.show).toHaveBeenCalled();
+  });
+});
+
+function trayItems() {
+  return (vi.mocked(Menu.buildFromTemplate).mock.lastCall?.[0] ?? []) as Array<{
+    label?: string;
+    type?: string;
+    enabled?: boolean;
+    click?: () => void;
+  }>;
+}
+
+describe('tray restart', () => {
+  let state: AppRestartState;
+  const restartApp = vi.fn(() => {
+    state = 'restarting';
+  });
+
+  beforeEach(() => {
+    state = 'idle';
+    restartApp.mockClear();
+    vi.mocked(writeTrayReenterAfterUpdate).mockClear();
+    vi.mocked(Menu.buildFromTemplate).mockClear();
+    mocks.win = eventedWindow().win;
+    setTrayRestartActions({ restartApp, restartState: () => state });
+  });
+
+  it('「重启」紧挨在「退出」上面', () => {
+    ensureTray();
+    const items = trayItems();
+    expect(items.slice(-3).map((item) => item.type ?? item.label)).toEqual([
+      'separator',
+      'Restart',
+      'Quit',
+    ]);
+  });
+
+  it('点「重启」走注入的应用重启，窗口模式下不标记回托盘', () => {
+    ensureTray();
+    trayItems().at(-2)?.click?.();
+    expect(restartApp).toHaveBeenCalledOnce();
+    expect(writeTrayReenterAfterUpdate).not.toHaveBeenCalled();
+  });
+
+  it('重启进行中菜单项置灰，不会重复登记重启', () => {
+    ensureTray();
+    const restart = trayItems().at(-2);
+    restart?.click?.();
+    restart?.click?.();
+    expect(restartApp).toHaveBeenCalledOnce();
+
+    ensureTray();
+    expect(trayItems().at(-2)).toMatchObject({ label: 'Restarting…', enabled: false });
+    state = 'waiting-for-tools';
+    ensureTray();
+    expect(trayItems().at(-2)).toMatchObject({ enabled: false });
+  });
+
+  it('托盘模式下重启：新实例冷启动后回到托盘', async () => {
+    vi.mocked(getWindowWebContents).mockReturnValueOnce({
+      isDestroyed: () => true,
+    } as unknown as WebContents);
+    const entering = enterServerMode();
+    await vi.waitFor(() => expect(isServerMode()).toBe(true));
+    mocks.hibernate.release();
+    await entering;
+
+    trayItems().at(-2)?.click?.();
+    expect(writeTrayReenterAfterUpdate).toHaveBeenCalledWith(true);
+    expect(restartApp).toHaveBeenCalledOnce();
+    leaveServerMode();
   });
 });

@@ -60,8 +60,10 @@ import { createAppRestart, restartOverlayFor } from './services/appRestart';
 import {
   ensureTray,
   leaveServerMode,
+  rebuildTrayMenu,
   restoreFromSecondInstance,
   scheduleReenterServerMode,
+  setTrayRestartActions,
   shouldQuitOnWindowAllClosed,
   toggleTrayMode,
 } from './services/appServerMode';
@@ -193,6 +195,7 @@ const appRestart = createAppRestart({
     }),
   stateChanged: (state, waitReason, blockers) => {
     installAppMenu(readLocale());
+    rebuildTrayMenu();
     const overlay = restartOverlayFor(state, waitReason, blockers);
     if (overlay) setRestartOverlay(overlay);
     else clearRestartOverlay('restart');
@@ -301,6 +304,10 @@ if (!gotTheLock) {
       restartApp: () => void appRestart.restart(),
       restartState: () => appRestart.state,
       reportError: showMenuError,
+    });
+    setTrayRestartActions({
+      restartApp: () => void appRestart.restart(),
+      restartState: () => appRestart.state,
     });
     registerAppRestartHandlers(forceExitWait);
     installAppMenu(readLocale());
