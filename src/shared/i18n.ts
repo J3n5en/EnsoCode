@@ -2084,6 +2084,7 @@ export const zhTranslations: Record<string, string> = {
   'Plugin command failed': '插件命令执行失败',
   'Plugin logs': '插件日志',
   'No logs yet': '暂无日志',
+  'Log too large, showing plain text': '日志过大，已切换为纯文本',
   'Reinstall from source': '从来源重新安装',
   'No plugins installed from GitHub to check': '没有从 GitHub 安装的插件可以检查',
   '{{count}} update(s) available': '{{count}} 个插件有新版本',
