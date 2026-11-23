@@ -1,4 +1,9 @@
-import type { GoalResult, GoalResultCheck, GoalResultView } from '@shared/secretary/goalResult';
+import {
+  type GoalResult,
+  type GoalResultCheck,
+  type GoalResultView,
+  hasNeedsUser,
+} from '@shared/secretary/goalResult';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -48,10 +53,21 @@ export function GoalResultFacts({
   const { t } = useI18n();
   const result = view.result;
   const shots = result.screenshots?.length ?? 0;
+  const needsUser =
+    !detail && hasNeedsUser(view) ? (result.needsUser ?? []).filter((s) => s.trim()) : [];
   return (
     <div data-enso="secretary-goal-result" className="flex flex-col gap-1.5 text-[11.5px]">
       {detail && result.summary && <p className="text-[13px]">{result.summary}</p>}
       <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+        {needsUser.length > 0 && (
+          <span
+            data-enso="secretary-goal-needs-user"
+            className={cn(CHIP, 'text-warning')}
+            title={needsUser.join('\n')}
+          >
+            {t('Needs the user')}: {needsUser[0]}
+          </span>
+        )}
         {(result.prs ?? []).map((pr) => (
           <a
             key={`${pr.repo}#${pr.number}`}

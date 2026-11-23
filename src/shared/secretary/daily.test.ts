@@ -414,20 +414,35 @@ describe('一天的看板投影', () => {
     expect(daily.groups[0].items[0]).not.toHaveProperty('summary');
   });
 
-  it('结果日志有记录时优先用它，不被 lastResult 覆盖', () => {
-    const daily = buildSecretaryDaily({
+  it('同时间点或更早的 lastResult 优先保留带原文的结果日志，更晚的 lastResult 以最后一次为准覆盖', () => {
+    const sameTime = buildSecretaryDaily({
       ...base,
       results: [record({ at: at(15, 10) })],
       dispatched: [
         dispatch({
           createdAt: at(15, 9),
-          lastResult: { kind: 'failed', turn: 2, at: at(15, 12) },
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 10) },
         }),
       ],
       todos: [],
       audit: [],
     });
-    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(sameTime.groups.map((group) => group.key)).toEqual(['done']);
+    expect(sameTime.groups[0].items[0].summary).toBe('登录流程拆成三步，测试补齐。');
+
+    const newer = buildSecretaryDaily({
+      ...base,
+      results: [record({ at: at(15, 10), kind: 'failed' })],
+      dispatched: [
+        dispatch({
+          createdAt: at(15, 9),
+          lastResult: { kind: 'goal-complete', turn: 2, at: at(15, 12) },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(newer.groups.map((group) => group.key)).toEqual(['done']);
   });
 
   it('历史日期按当天结束时的状态归列', () => {
@@ -566,21 +581,29 @@ describe('一天的看板投影', () => {
     expect(daily.groups.map((group) => group.key)).toEqual(['done']);
   });
 
-  it('失败与需要你处理的结果不被停止标记改列', () => {
+  it('停止早于结果时按新结果归列，停止晚于非完成结果时归入「已停止」', () => {
     const daily = buildSecretaryDaily({
       ...base,
       results: [
         record({ at: at(15, 10), kind: 'failed' }),
         record({ at: at(15, 11), conversationId: 'c2', kind: 'needs-user' }),
+        record({ at: at(15, 13), conversationId: 'c3', kind: 'needs-user' }),
       ],
       dispatched: [
         dispatch({ stoppedAt: at(15, 12) }),
         dispatch({ conversationId: 'c2', createdAt: at(15, 9), stoppedAt: at(15, 12) }),
+        dispatch({ conversationId: 'c3', createdAt: at(15, 9), stoppedAt: at(15, 11) }),
       ],
       todos: [],
       audit: [],
     });
-    expect(daily.groups.map((group) => group.key)).toEqual(['needsYou', 'failed']);
+    expect(daily.groups.map((group) => group.key)).toEqual(['stopped', 'needsYou']);
+    expect(
+      daily.groups.find((group) => group.key === 'stopped')?.items.map((i) => i.conversationId)
+    ).toEqual(['c1', 'c2']);
+    expect(
+      daily.groups.find((group) => group.key === 'needsYou')?.items.map((i) => i.conversationId)
+    ).toEqual(['c3']);
   });
 
   it('完成卡片带上结构化结果', () => {
@@ -687,5 +710,209 @@ describe('还在跑但带着常驻服务', () => {
       audit: [],
     });
     expect(daily.groups[0].items[0]).toMatchObject({ persistent: true });
+  });
+});
+
+describe('看板分类规则（防误入「需要你」与「失败或中断」）', () => {
+  const base = {
+    day: '2024-05-15',
+    now: at(15, 21),
+    session: (id: string) => ({ title: `任务 ${id}`, projectName: 'enso-code' }),
+    projectName: () => 'enso-code',
+  };
+
+  it('1) goal_blocked 与 needsUser 为空的结构化结果不进「需要你」，普通 goal_blocked 进「秘书处理中」', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        // 核验器拿不到命令输出 / 等秘书看截图 -> goal-blocked，无 needsUser
+        record({
+          at: at(15, 12, 45),
+          conversationId: 'c-blocked',
+          kind: 'goal-blocked',
+          text: '核验器需要命令输出，PR #57 已合并',
+        }),
+        // 带结构化结果且 needsUser 为空 -> 明确不需要用户
+        record({
+          at: at(15, 12, 50),
+          conversationId: 'c-structured-empty',
+          kind: 'goal-blocked',
+          goalResult: {
+            at: at(15, 12, 50),
+            result: { summary: '等秘书看截图', needsUser: [] },
+          },
+        }),
+        // goal-complete 且 needsUser 为空 -> 进完成
+        record({
+          at: at(15, 13, 0),
+          conversationId: 'c-done-empty',
+          kind: 'goal-complete',
+          goalResult: {
+            at: at(15, 13, 0),
+            result: { summary: '已合入', needsUser: [] },
+          },
+        }),
+      ],
+      dispatched: [
+        dispatch({ conversationId: 'c-blocked', createdAt: at(15, 11) }),
+        dispatch({ conversationId: 'c-structured-empty', createdAt: at(15, 11, 10) }),
+        dispatch({ conversationId: 'c-done-empty', createdAt: at(15, 11, 20) }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    expect(daily.counts.needsYou).toBe(0);
+    expect(
+      daily.groups.find((g) => g.key === 'withSecretary')?.items.map((i) => i.conversationId)
+    ).toEqual(['c-structured-empty', 'c-blocked']);
+    expect(daily.groups.find((g) => g.key === 'done')?.items.map((i) => i.conversationId)).toEqual([
+      'c-done-empty',
+    ]);
+  });
+
+  it('2) 手动标完成后立刻移到「完成」，即使 daily.jsonl 里有早先的 goal-blocked 也不留在「需要你」', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({
+          at: at(15, 20, 9),
+          conversationId: 'aa8d8a41',
+          kind: 'goal-blocked',
+          text: '误报，无须修改',
+        }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'aa8d8a41',
+          createdAt: at(15, 17, 37),
+          lastResult: { kind: 'goal-complete', turn: 2, at: at(15, 20, 10), manual: true },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    expect(daily.groups.find((g) => g.key === 'withSecretary')).toBeUndefined();
+    const done = daily.groups.find((g) => g.key === 'done')?.items ?? [];
+    expect(done.map((i) => i.conversationId)).toEqual(['aa8d8a41']);
+    expect(done[0]).toMatchObject({ manual: true, label: 'Goal complete', at: at(15, 20, 10) });
+  });
+
+  it('3) 主动停止的会话进「已停止」而非「失败或中断」；停之前已交完成结果的仍按完成显示', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        // 失败/受阻后被秘书主动停掉
+        record({ at: at(15, 10), conversationId: 'c-dup', kind: 'failed', text: 'aborted' }),
+        record({ at: at(15, 10, 30), conversationId: 'c-blk', kind: 'goal-blocked' }),
+        // 停之前已经交过完成结果
+        record({ at: at(15, 11), conversationId: 'c-finished', kind: 'goal-complete' }),
+      ],
+      dispatched: [
+        dispatch({ conversationId: 'c-dup', createdAt: at(15, 9), stoppedAt: at(15, 10, 5) }),
+        dispatch({ conversationId: 'c-blk', createdAt: at(15, 9), stoppedAt: at(15, 10, 40) }),
+        dispatch({ conversationId: 'c-finished', createdAt: at(15, 9), stoppedAt: at(15, 11, 5) }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((g) => g.key === 'failed')).toBeUndefined();
+    expect(daily.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    expect(daily.groups.find((g) => g.key === 'withSecretary')).toBeUndefined();
+    expect(
+      daily.groups.find((g) => g.key === 'stopped')?.items.map((i) => i.conversationId)
+    ).toEqual(['c-blk', 'c-dup']);
+    expect(daily.groups.find((g) => g.key === 'done')?.items.map((i) => i.conversationId)).toEqual([
+      'c-finished',
+    ]);
+  });
+
+  it('4) 上游 403/503 失败后重试恢复：完成进「完成」、重跑中进「进行中」、普通收尾也不留「失败」', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        // 情况 A：先 503 failed，后 goal-complete
+        record({ at: at(15, 10), conversationId: 'c-rec-done', kind: 'failed', text: '503' }),
+        record({ at: at(15, 10, 30), conversationId: 'c-rec-done', kind: 'goal-complete' }),
+        // 情况 B：先 403 failed，现在重试正在跑
+        record({ at: at(15, 11), conversationId: 'c-rec-run', kind: 'failed', text: '403' }),
+        // 情况 C：先 503 failed，重试后以 turn-ended 正常收尾
+        record({ at: at(15, 12), conversationId: 'c-rec-turn', kind: 'failed', text: '503' }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-rec-done',
+          createdAt: at(15, 9),
+          lastResult: { kind: 'goal-complete', turn: 2, at: at(15, 10, 30) },
+        }),
+        dispatch({
+          conversationId: 'c-rec-run',
+          createdAt: at(15, 10, 50),
+          lastState: 'running',
+          stateSince: at(15, 11, 5),
+        }),
+        dispatch({
+          conversationId: 'c-rec-turn',
+          createdAt: at(15, 11, 50),
+          lastState: 'idle',
+          lastResult: { kind: 'turn-ended', turn: 2, at: at(15, 12, 10) },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((g) => g.key === 'failed')).toBeUndefined();
+    expect(daily.counts.failed).toBe(0);
+    expect(
+      daily.groups.find((g) => g.key === 'running')?.items.map((i) => i.conversationId)
+    ).toEqual(['c-rec-run']);
+    expect(daily.groups.find((g) => g.key === 'done')?.items.map((i) => i.conversationId)).toEqual([
+      'c-rec-turn',
+      'c-rec-done',
+    ]);
+  });
+
+  it('5) 真正需要用户的（审批/提问 needs-user、结构化 needsUser 非空）照样进「需要你」', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({
+          at: at(15, 14),
+          conversationId: 'c-approval',
+          kind: 'needs-user',
+          text: '需要审批执行删除命令',
+        }),
+        record({
+          at: at(15, 14, 10),
+          conversationId: 'c-need-field',
+          kind: 'goal-complete',
+          goalResult: {
+            at: at(15, 14, 10),
+            result: { summary: '代码就绪', needsUser: ['请提供生产环境支付账号'] },
+          },
+        }),
+        record({
+          at: at(15, 14, 20),
+          conversationId: 'c-blk-need',
+          kind: 'goal-blocked',
+          goalResult: {
+            at: at(15, 14, 20),
+            result: { needsUser: ['需要用户确认是否上线'] },
+          },
+        }),
+      ],
+      dispatched: [
+        dispatch({ conversationId: 'c-approval', createdAt: at(15, 13) }),
+        dispatch({ conversationId: 'c-need-field', createdAt: at(15, 13, 10) }),
+        dispatch({ conversationId: 'c-blk-need', createdAt: at(15, 13, 20) }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(
+      daily.groups.find((g) => g.key === 'needsYou')?.items.map((i) => i.conversationId)
+    ).toEqual(['c-blk-need', 'c-need-field', 'c-approval']);
+    expect(daily.counts.needsYou).toBe(3);
   });
 });

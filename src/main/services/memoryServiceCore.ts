@@ -37,6 +37,7 @@ import {
   lastDistillWatermark,
   listDistillJobs,
   listResumableDistillJobs,
+  resetInterruptedDistillJobs,
   runDistillJob,
   sliceTranscript,
   type TranscriptMessage,
@@ -258,6 +259,7 @@ export function releaseMemoryChatSlot(): Promise<void> {
 function memoryDb(): Database.Database {
   if (!db) {
     db = openMemoryDb(path.join(memoryRoot(), 'memory.db'));
+    resetInterruptedDistillJobs(db);
     // 上次进程退出时可能留下 pending 任务，或有旧行从未拿到当前模型的向量；开库后统一调度
     scheduleReembed();
     resumeMemoryDistill();
@@ -621,7 +623,7 @@ async function readBatchTranscript(members: readonly DistillBatchMember[]): Prom
 }
 
 async function runOneDistill(job: DistillJob, transcript: string): Promise<void> {
-  const complete = await distillConfig.complete?.();
+  const complete = await (distillConfig.complete ?? serviceComplete())?.();
   if (!complete || !db) return;
   // 与 memory_capture 的缺省归属一致：bot 会话进 bot space，项目会话进项目 space
   const { projectId, botId, chatId } = job.payload;
@@ -637,6 +639,7 @@ async function runOneDistill(job: DistillJob, transcript: string): Promise<void>
     spaceId: spaces.self,
     ...(spaces.chat ? { chatSpaceId: spaces.chat } : {}),
     onCreated: onMemoryCreated,
+    onStarted: notifyMemoryChanged,
   });
   // 一条都没写入时（全部低重要度 / 撞去重）也要通知：任务状态和丢弃原因变了
   notifyMemoryChanged();

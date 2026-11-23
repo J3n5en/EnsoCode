@@ -728,6 +728,7 @@ export type SecretaryDailyGroupKey =
   | 'done'
   | 'failed'
   | 'needsYou'
+  | 'withSecretary'
   | 'running'
   | 'stopped'
   | 'todos'

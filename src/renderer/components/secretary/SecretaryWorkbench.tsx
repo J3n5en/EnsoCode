@@ -171,7 +171,11 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   };
   // 实时审批与提问由会话状态决定，清结果不会让它消失，所以只在原因是结果时给「知道了」
   const dismissible =
-    card.state !== 'waiting' && card.result !== undefined && NEEDS_YOU_RESULTS.has(card.result);
+    card.state !== 'waiting' &&
+    card.result !== undefined &&
+    (NEEDS_YOU_RESULTS.has(card.result) ||
+      card.result === 'goal-complete' ||
+      card.result === 'goal-blocked');
   const feed = sessionFeed(card);
   return (
     <div

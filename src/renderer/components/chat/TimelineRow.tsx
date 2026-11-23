@@ -46,6 +46,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleAlert,
   CircleX,
   ClipboardCheck,
@@ -2420,6 +2421,31 @@ function formatPerf(perf: TurnPerf, t: TFunction, hasTurnDuration = false): stri
   return parts.join(' · ');
 }
 
+/** 长思考块点底部收起时，行头已滚出视口外则计算拉回视口所需的 scrollTop 偏移量；已在视口内返回 0 */
+export function thinkingCollapseScrollDelta(
+  rowRect: { top: number; bottom: number },
+  viewportRect: { top: number; bottom: number },
+  padding = 16
+): number {
+  if (rowRect.top < viewportRect.top) return rowRect.top - viewportRect.top - padding;
+  if (rowRect.bottom > viewportRect.bottom) return rowRect.bottom - viewportRect.bottom + padding;
+  return 0;
+}
+
+function findScrollContainer(element: HTMLElement): HTMLElement | null {
+  let current = element.parentElement;
+  while (current) {
+    if (current.hasAttribute('data-virtuoso-scroller')) return current;
+    const overflowY =
+      typeof window.getComputedStyle === 'function'
+        ? window.getComputedStyle(current).overflowY
+        : current.style.overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
 /** Think 行：仅在 expandLiveReasoning 时流式展开、结束收起；手动点击覆盖默认 */
 function ThinkingRow({
   itemKey,
@@ -2438,13 +2464,34 @@ function ThinkingRow({
   const expandLiveReasoning = useSettingsStore((s) => s.expandLiveReasoning);
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const expanded = thinkingRowExpanded(userToggled, streaming, expandLiveReasoning);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const restoreScrollRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (expanded || !restoreScrollRef.current) return;
+    restoreScrollRef.current = false;
+    const row = rowRef.current;
+    if (!row) return;
+    const scroller = findScrollContainer(row);
+    if (!scroller) {
+      if (row.getBoundingClientRect().top < 0) row.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
+    const delta = thinkingCollapseScrollDelta(
+      row.getBoundingClientRect(),
+      scroller.getBoundingClientRect()
+    );
+    if (delta !== 0) scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
+  }, [expanded]);
+
   return (
-    <div data-enso="thinking" data-live={streaming || undefined}>
+    <div ref={rowRef} data-enso="thinking" data-live={streaming || undefined}>
       <button
         type="button"
+        data-quote-skip=""
         onClick={() => setUserToggled(!expanded)}
         className={cn(
-          'flex min-h-6 items-center gap-2 text-[13px] transition-colors hover:text-foreground',
+          'flex min-h-6 select-none items-center gap-2 text-[13px] transition-colors hover:text-foreground',
           SUBTLE_TEXT
         )}
       >
@@ -2462,6 +2509,24 @@ function ThinkingRow({
         <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
       </button>
       {expanded && <PluginThinkingBody text={text} streaming={streaming} itemKey={itemKey} />}
+      {expanded && !streaming && (
+        <button
+          type="button"
+          data-enso="thinking-collapse"
+          data-quote-skip=""
+          onClick={() => {
+            restoreScrollRef.current = true;
+            setUserToggled(false);
+          }}
+          className={cn(
+            'mt-1 ml-[31px] flex min-h-6 select-none items-center gap-1 text-[12px] transition-colors hover:text-foreground',
+            SUBTLE_TEXT
+          )}
+        >
+          <ChevronUp className="h-3 w-3" />
+          <span>{t('Collapse thinking')}</span>
+        </button>
+      )}
     </div>
   );
 }

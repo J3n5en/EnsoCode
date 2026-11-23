@@ -90,6 +90,20 @@ export function needsBulkPrompt(scope: readonly { distilled: boolean }[]): boole
   return scope.some((session) => session.distilled);
 }
 
+/**
+ * 正在提炼的会话以 Main 的任务快照为准：本地 state 随组件卸载丢失，快照不会。
+ * 只认 running：暂时失败的任务以 pending 停到下次重试，算进来按钮会一直卡在「提炼中」。
+ */
+export function runningDistillSessions(jobs: MemoryJobsSnapshot): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const job of jobs.distill) {
+    if (job.status !== 'running') continue;
+    ids.add(job.sessionId);
+    for (const id of job.sessionIds ?? []) ids.add(id);
+  }
+  return ids;
+}
+
 interface BulkPrompt {
   token: string;
   label: string;
@@ -347,11 +361,13 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const memoryEnabled = !disabledBuiltinTools.includes('memory');
   const [stats, setStats] = React.useState<MemoryStats | null>(null);
   const [jobs, setJobs] = React.useState<MemoryJobsSnapshot>(EMPTY_JOBS);
+  const [jobsLoaded, setJobsLoaded] = React.useState(false);
   const [models, setModels] = React.useState<EmbeddingModelDto[]>([]);
   const [progress, setProgress] = React.useState<EmbeddingDownloadProgressDto | null>(null);
   const [chatModels, setChatModels] = React.useState<ChatModelDto[]>([]);
   const [chatProgress, setChatProgress] = React.useState<EmbeddingDownloadProgressDto | null>(null);
   const [sessions, setSessions] = React.useState<DistillableSessionDto[]>([]);
+  // 本页发起的批次标记（哪个按钮 + 快照跟上前的空窗），卸载即丢；是否在提炼以任务快照为准
   const [distilling, setDistilling] = React.useState<string | null>(null);
   const [sessionsOf, setSessionsOf] = React.useState<SessionGroup | null>(null);
   const [batch, setBatch] = React.useState<BatchProgress | null>(null);
@@ -381,6 +397,8 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   // 轮询回调里要读最新值，state 会被闭包定住
   const backfillingRef = React.useRef(false);
   backfillingRef.current = backfilling;
+  const distillingRef = React.useRef(false);
+  const runningSessionsRef = React.useRef<ReadonlySet<string>>(new Set());
   // 点补齐后立刻拉一次，不等下一个轮询周期
   const loadRef = React.useRef<(() => void) | null>(null);
 
@@ -420,6 +438,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     if (!memoryEnabled) {
       setStats(null);
       setJobs(EMPTY_JOBS);
+      setJobsLoaded(false);
       return;
     }
     let cancelled = false;
@@ -427,18 +446,27 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
       void window.electronAPI.memory.stats().then((next) => {
         if (!cancelled) setStats(next);
       });
-      void window.electronAPI.memory.jobs().then((next) => {
-        if (cancelled) return;
-        setJobs(next);
-        // 重嵌收尾（或压根没建任务：模型未就绪 / 没有待补的行）就退出补齐态，
-        // 否则按钮会一直显示「补齐中」
-        if (backfillingRef.current && next.reembed?.status !== 'running') setBackfilling(false);
-      });
+      void window.electronAPI.memory
+        .jobs()
+        .then((next) => {
+          if (cancelled) return;
+          setJobs(next);
+          setJobsLoaded(true);
+          // 重嵌收尾（或压根没建任务：模型未就绪 / 没有待补的行）就退出补齐态，
+          // 否则按钮会一直显示「补齐中」
+          if (backfillingRef.current && next.reembed?.status !== 'running') setBackfilling(false);
+        })
+        .catch(() => {
+          if (!cancelled) setJobsLoaded(true);
+        });
     };
     loadRef.current = load;
     load();
     // 记忆库变化时统计要立刻跟上，不等下一个轮询周期
-    const offChanged = window.electronAPI.memory.onChanged(load);
+    const offChanged = window.electronAPI.memory.onChanged(() => {
+      load();
+      refreshSessions();
+    });
     const timer = window.setInterval(load, backfilling ? BACKFILL_POLL_MS : JOBS_POLL_MS);
     return () => {
       cancelled = true;
@@ -446,7 +474,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
       offChanged();
       window.clearInterval(timer);
     };
-  }, [memoryEnabled, backfilling]);
+  }, [memoryEnabled, backfilling, refreshSessions]);
 
   const groups = groupSessionsByProject(sessions);
   const pendingSessions = sessions.filter((session) => !session.distilled);
@@ -505,8 +533,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   };
 
   const runDistill = async (targets: DistillableSessionDto[], token: string, force = false) => {
+    if (distillingRef.current || runningSessionsRef.current.size > 0) return;
     const selected = chatModels.find((model) => model.id === chatModel) ?? null;
     if (localChatBlocksDistill(selected)) return;
+    distillingRef.current = true;
     setDistilling(token);
     const startedAt = Date.now();
     setBatch({ done: 0, total: targets.length, startedAt });
@@ -515,9 +545,13 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
         await window.electronAPI.memory.distillSession(targets[i].sessionId, force);
         setBatch({ done: i + 1, total: targets.length, startedAt });
       }
+    } catch {
+      // 失败原因由任务快照 / 主进程日志呈现，避免未处理 rejection 卡住交互
     } finally {
+      distillingRef.current = false;
       setDistilling(null);
       setBatch(null);
+      loadRef.current?.();
       refreshSessions();
       // 记忆库是另一个组件在拉数据，提炼写入后它不会自己知道
       onLibraryChanged?.();
@@ -550,7 +584,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   ];
   const showRemotePicker =
     isRemoteEmbeddingId(embeddingModel) || selectedModel?.runtime === 'openai-compatible';
-  const jobRows = React.useMemo(() => toJobRows(jobs), [jobs]);
+  const jobRows = React.useMemo(() => toJobRows(jobs, t), [jobs, t]);
+  const runningSessions = React.useMemo(() => runningDistillSessions(jobs), [jobs]);
+  runningSessionsRef.current = runningSessions;
+  const distillBusy = distilling !== null || runningSessions.size > 0;
 
   return (
     <div className="space-y-6" data-settings-row="memory.root">
@@ -1229,10 +1266,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
             <Button
               size="sm"
               variant="outline"
-              disabled={!memoryEnabled || distilling !== null || chatBlocked !== null}
+              disabled={!memoryEnabled || !jobsLoaded || distillBusy || chatBlocked !== null}
               onClick={() => requestBulkDistill(sessions, 'all', t('All sessions'))}
             >
-              {distilling === 'all'
+              {distillBusy
                 ? t('Distilling…')
                 : t('Distill all ({{count}})', { count: String(pendingSessions.length) })}
             </Button>
@@ -1283,13 +1320,17 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                       variant="outline"
                       disabled={
                         !memoryEnabled ||
-                        distilling !== null ||
+                        !jobsLoaded ||
+                        distillBusy ||
                         group.sessions.length === 0 ||
                         chatBlocked !== null
                       }
                       onClick={() => requestBulkDistill(group.sessions, group.key, group.name)}
                     >
-                      {distilling === group.key ? t('Distilling…') : t('Distill project')}
+                      {distilling === group.key ||
+                      group.sessions.some((s) => runningSessions.has(s.sessionId))
+                        ? t('Distilling…')
+                        : t('Distill project')}
                     </Button>
                   </div>
                 </li>
@@ -1330,12 +1371,14 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                         size="sm"
                         variant="ghost"
                         className="shrink-0"
-                        disabled={!memoryEnabled || distilling !== null || chatBlocked !== null}
+                        disabled={
+                          !memoryEnabled || !jobsLoaded || distillBusy || chatBlocked !== null
+                        }
                         onClick={() =>
                           void runDistill([session], session.sessionId, session.distilled)
                         }
                       >
-                        {distilling === session.sessionId
+                        {distilling === session.sessionId || runningSessions.has(session.sessionId)
                           ? t('Distilling…')
                           : session.distilled
                             ? t('Distill again')
@@ -1383,7 +1426,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 <Button
                   variant={bulkPrompt.pending.length > 0 ? 'default' : 'outline'}
                   size="sm"
-                  disabled={bulkPrompt.pending.length === 0}
+                  disabled={bulkPrompt.pending.length === 0 || !jobsLoaded || distillBusy}
                   onClick={() => {
                     const target = bulkPrompt;
                     setBulkPrompt(null);
@@ -1397,6 +1440,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 <Button
                   variant={bulkPrompt.pending.length > 0 ? 'outline' : 'default'}
                   size="sm"
+                  disabled={!jobsLoaded || distillBusy}
                   onClick={() => {
                     const target = bulkPrompt;
                     setBulkPrompt(null);

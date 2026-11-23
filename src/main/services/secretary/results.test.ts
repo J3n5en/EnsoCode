@@ -1314,4 +1314,46 @@ describe('排队会话', () => {
     expect(board.todos[0].problem).toBeUndefined();
     expect(board.todos[1].problem).toBeUndefined();
   });
+
+  it('结构化结果 needsUser 非空时进工作台「需要你处理」，为空或手动标完成时进「完成」', () => {
+    const file = emptyFile({
+      dispatched: {
+        need: record({
+          conversationId: 'need',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 10 },
+          goalResult: { at: 10, result: { summary: '待拍板', needsUser: ['确认账号'] } },
+        }),
+        done: record({
+          conversationId: 'done',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 10 },
+          goalResult: { at: 10, result: { summary: '已完成', needsUser: [] } },
+        }),
+        manual: record({
+          conversationId: 'manual',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 11, manual: true },
+          goalResult: { at: 10, result: { needsUser: ['旧提示'] } },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        need: { title: '需用户确认', sessionFile: '/s/need.jsonl' },
+        done: { title: '已完成', sessionFile: '/s/done.jsonl' },
+        manual: { title: '手动收口', sessionFile: '/s/manual.jsonl' },
+      },
+      statuses: { need: idle, done: idle, manual: idle },
+      projects,
+      todos: [],
+    });
+    expect(board.needsYou.map((c) => (c.kind === 'session' ? c.conversationId : ''))).toEqual([
+      'need',
+    ]);
+    expect(board.done.map((c) => (c.kind === 'session' ? c.conversationId : '')).sort()).toEqual([
+      'done',
+      'manual',
+    ]);
+  });
 });

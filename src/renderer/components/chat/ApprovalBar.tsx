@@ -1,8 +1,14 @@
 import type { ApprovalReviewFallback } from '@shared/approvalReviewRecord';
 import { explainDcgGuard } from '@shared/dcgRuleHints';
+import { isDcgRuleExemptible } from '@shared/dcgRuleMemory';
 import { isNestedToolCallId } from '@shared/toolCallId';
 import type { ApprovalDecision, ApprovalKind, ApprovalRequestInfo } from '@shared/types/agent';
-import type { DcgGuardHit, DcgRuleState, DcgSeverity } from '@shared/types/dcg';
+import {
+  type DcgGuardHit,
+  type DcgRuleState,
+  type DcgSeverity,
+  TEMP_ROOT_RULE_ID,
+} from '@shared/types/dcg';
 import { FileEdit, FilePlus, Plug, ShieldAlert, TerminalSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
@@ -95,11 +101,36 @@ const SEVERITY_LABELS: Record<DcgSeverity, string> = {
   low: 'Low',
 };
 
+function BuiltinGuardDetail({ guard }: { guard: DcgGuardHit }) {
+  const { t } = useI18n();
+  const isTempRoot = guard.ruleId === TEMP_ROOT_RULE_ID;
+  return (
+    <div className="mt-1 space-y-0.5 text-[11px]">
+      <p className="text-destructive">
+        {t(guard.reason)}{' '}
+        <code className="rounded bg-muted/60 px-1 font-mono text-[10px] text-muted-foreground">
+          {guard.ruleId}
+        </code>
+      </p>
+      <p className="text-muted-foreground">
+        {isTempRoot
+          ? t(
+              'Safety floor rule — still requires confirmation in full-access mode. Click Adjust to target a specific subdirectory or session temp folder, or Allow once.'
+            )
+          : t(
+              'Blocked by built-in guard — still requires confirmation in full-access mode. Review the command, click Adjust, or Allow once.'
+            )}
+      </p>
+    </div>
+  );
+}
+
 function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
   const { t, locale } = useI18n();
   const [rule, setRule] = useState<{ ruleId: string; state: DcgRuleState } | null>(null);
   const warn = guard.decision === 'warn';
   const canRemember = guard.decision === undefined || guard.decision === 'deny';
+  const exemptible = isDcgRuleExemptible(guard.ruleId);
   const [confirming, setConfirming] = useState(false);
   useEffect(() => {
     if (!canRemember) return;
@@ -136,7 +167,25 @@ function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
           </span>
         )}
         {t(warn ? 'dcg notice: {{reason}}' : 'dcg: {{reason}}', { reason: explained.what })}
+        <code className="ml-1 rounded bg-muted/60 px-1 font-mono text-[10px] text-muted-foreground">
+          {guard.ruleId}
+        </code>
       </p>
+      {!warn && (
+        <p className="text-muted-foreground">
+          {!exemptible
+            ? t(
+                'High-risk safety floor (cannot be exempted) — still requires confirmation in full-access mode. Click Adjust for a safer command or path, or Allow once.'
+              )
+            : guard.decision === 'ask'
+              ? t(
+                  'Guard rule requires confirmation each time — still prompts in full-access mode. Click Adjust for a safer command, or Allow once.'
+                )
+              : t(
+                  'Triggered by command guard — still prompts in full-access mode. Click Adjust to change the command or path, or manage exemptions in Settings (auto-suggested after 5 allows).'
+                )}
+        </p>
+      )}
       {guard.matched && (
         <p className="text-muted-foreground">
           {t('Matched')}:{' '}
@@ -302,9 +351,7 @@ export function ApprovalBar({
       )}
       {active.guard &&
         (active.guard.ruleId.startsWith('enso.') ? (
-          <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
-            {t(active.guard.reason)}
-          </p>
+          <BuiltinGuardDetail guard={active.guard} />
         ) : (
           <DcgGuardDetail guard={active.guard} />
         ))}
