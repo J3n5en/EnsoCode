@@ -75,6 +75,23 @@ describe('连接前缀与计数器', () => {
     expect(await host.open(key, frames[0])).toBeUndefined();
   });
 
+  it('直连与中继混发导致数百帧乱序时，慢帧仍能收到且不能重放', async () => {
+    const key = generateContentKey();
+    const host = createFrameReplay();
+    const phone = createFrameReplay();
+    await phone.open(key, await host.seal(key, { type: 'host-info' }));
+    await host.open(key, await phone.seal(key, { type: 'snapshot' }));
+
+    const slow = await host.seal(key, { type: 'part', id: 'big' });
+    let last: Uint8Array | undefined;
+    for (let i = 0; i < 300; i++) {
+      last = await host.seal(key, { type: 'rpc-event', i });
+    }
+    expect(await phone.open(key, last as Uint8Array)).toEqual({ type: 'rpc-event', i: 299 });
+    expect(await phone.open(key, slow)).toEqual({ type: 'part', id: 'big' });
+    expect(await phone.open(key, slow)).toBeUndefined();
+  });
+
   it('对端重连后发送计数不回头', async () => {
     const key = generateContentKey();
     const host = createFrameReplay();

@@ -9,7 +9,10 @@ import { fromBase64Url, toBase64Url } from './encoding';
 
 const PREFIX_LEN = 8;
 const NONCE_LEN = 12;
-const WINDOW = 64;
+/** 直连小帧与中继分片共用序号，窗口需要容忍流式突发与补发期间的跨路径乱序 */
+const WINDOW = 4096;
+const WINDOW_BIG = BigInt(WINDOW);
+const WINDOW_MASK = (1n << WINDOW_BIG) - 1n;
 
 type Seal = (key: Uint8Array, payload: unknown, nonce?: Uint8Array) => Promise<Uint8Array>;
 type Open = (key: Uint8Array, frame: Uint8Array) => Promise<unknown>;
@@ -79,7 +82,7 @@ export function createFrameReplay(seal: Seal = sealFrame, open: Open = openFrame
     }
     if (counter > high) {
       const shift = BigInt(counter - high);
-      bits = shift >= BigInt(WINDOW) ? 1n : ((bits << shift) | 1n) & ((1n << BigInt(WINDOW)) - 1n);
+      bits = shift >= WINDOW_BIG ? 1n : ((bits << shift) | 1n) & WINDOW_MASK;
       high = counter;
       return true;
     }
