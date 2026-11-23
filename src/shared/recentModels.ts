@@ -32,3 +32,13 @@ export function parseRecentModels(value: unknown): ModelRef[] {
   }
   return out;
 }
+
+/** 外部写入只收原样合法的列表：恰好 providerId/modelId 两个字段、去重、不超上限；不看键序。 */
+export function isRecentModelList(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  const parsed = parseRecentModels(value);
+  return (
+    parsed.length === value.length &&
+    parsed.every((ref, i) => Object.keys(value[i]).length === 2 && sameModelRef(ref, value[i]))
+  );
+}

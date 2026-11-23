@@ -374,6 +374,11 @@ describe('config CLI socket', () => {
       });
     }
     expect((await state()).recentModels).toEqual(refs);
+    const reordered = [{ modelId: 'm3', providerId: 'p2' }];
+    expect(await config({ action: 'set', key: 'recentModels', value: reordered })).toEqual({
+      ok: true,
+    });
+    expect(await config({ action: 'set', key: 'recentModels', value: refs })).toEqual({ ok: true });
     const schema = await config({ action: 'schema' });
     const keys = new Map(
       (schema.keys as Array<Record<string, unknown>>).map((entry) => [entry.path, entry])
