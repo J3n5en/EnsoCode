@@ -67,7 +67,7 @@ export function ImportProjectSessionsDialog({
           <DialogTitle>{t('Import conversations from another project')}</DialogTitle>
           <DialogDescription>
             {t(
-              'All conversations of the selected project, archived ones included, will be moved under {{name}}. Session files stay where they are.',
+              'All conversations of the selected project, archived ones included, will be moved under {{name}} and no longer appear in the original project. This is a move, not a copy: session files are not copied, changed or deleted.',
               { name: project ? project.alias || project.name : '' }
             )}
           </DialogDescription>
@@ -107,13 +107,19 @@ export function ImportProjectSessionsDialog({
           <Button variant="outline" onClick={onClose}>
             {t('Cancel')}
           </Button>
-          <Button onClick={() => void handleImport()} disabled={!selectedId || importing}>
+          <Button
+            onClick={() => void handleImport()}
+            disabled={
+              importing ||
+              !candidates.some(({ project: item, count }) => item.id === selectedId && count > 0)
+            }
+          >
             {importing ? (
               <Spinner className="mr-1.5 size-3.5" />
             ) : (
               <FolderInput className="mr-1.5 h-3.5 w-3.5" />
             )}
-            {t('Import')}
+            {t('Move here')}
           </Button>
         </DialogFooter>
       </DialogContent>

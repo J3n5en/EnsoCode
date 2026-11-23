@@ -46,7 +46,7 @@ import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { deleteSystemPrompt } from '../services/systemPromptStore';
 import { localUi } from '../services/uiHost';
-import type { ImportProjectSessionsPorts } from './conversationsMove';
+import type { ConversationsMovePorts, ImportProjectSessionsPorts } from './conversationsMove';
 
 function getSettingsPath(): string {
   return join(app.getPath('userData'), 'settings.json');
@@ -1093,7 +1093,9 @@ export function registerSettingsHandlers(): void {
     }, event.sender.id);
   });
 
-  const conversationsMovePorts = async (): Promise<ImportProjectSessionsPorts | null> => {
+  const conversationsMovePorts = async (): Promise<
+    (ConversationsMovePorts & ImportProjectSessionsPorts) | null
+  > => {
     const { projectRootConversationIds } = await import('./conversationsMove');
     const { getSourceAuthorityRegistry, releaseRootFromMain } = await import('./agent');
     const { agentSessionIndex } = await import('./sessionIndex');
@@ -1102,10 +1104,13 @@ export function registerSettingsHandlers(): void {
     const registry = getSourceAuthorityRegistry();
     if (!registry) return null;
     return {
+      projectKind: (projectId) => registry.project(projectId)?.kind,
       rootConversationIds: (projectId) =>
         projectRootConversationIds(registry.rendererProjection().conversations, projectId),
       moveConversation: (conversationId, targetProjectId, options) =>
         registry.moveConversation(conversationId, targetProjectId, options),
+      moveConversations: (requests, targetProjectId) =>
+        registry.moveConversations(requests, targetProjectId),
       isRunning: (conversationId) =>
         agentSessionIndex.workspaceTreeRunning(conversationId) ||
         agentSessionIndex.btwTreeRunning(conversationId),
@@ -1120,16 +1125,18 @@ export function registerSettingsHandlers(): void {
         };
       },
       readConversations: readPersistedConversations,
-      patchProjectIds: (ids, targetProjectId, rootId) => {
+      patchProjectIds: (ids, targetProjectId, rootIds) => {
         patchConversationsState((state) => {
           for (const id of ids) {
             const row = state.conversations[id];
             if (row) row.projectId = targetProjectId;
           }
-          const root = state.conversations[rootId];
-          if (root) {
-            delete root.worktree;
-            delete root.worktreeMissing;
+          for (const rootId of rootIds) {
+            const root = state.conversations[rootId];
+            if (root) {
+              delete root.worktree;
+              delete root.worktreeMissing;
+            }
           }
         });
       },

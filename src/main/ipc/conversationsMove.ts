@@ -25,7 +25,12 @@ export interface ConversationsMovePorts {
   /** 移动前的归属；scratch 来源带上 scratch 根，移动后清理 `<根>/<会话 id>` */
   source: (conversationId: string) => { projectId: string; scratchRoot?: string } | undefined;
   readConversations: () => Record<string, Record<string, unknown>>;
-  patchProjectIds: (ids: readonly string[], targetProjectId: string, rootId: string) => void;
+  /** 会话行改挂目标项目，并清掉 rootIds 根会话行上的 worktree 绑定 */
+  patchProjectIds: (
+    ids: readonly string[],
+    targetProjectId: string,
+    rootIds: readonly string[]
+  ) => void;
   /** 只解除登记，不删 worktree 目录 */
   unbindWorktree: (conversationId: string) => void;
   /** 释放 worker 里挂着的根会话与 btw 旁路，下次 spawn 按新项目推导 cwd；全部释放成功返回 true */
@@ -55,7 +60,7 @@ export async function handleConversationsMove(
   ports.patchProjectIds(
     conversationIdsToMove(ports.readConversations(), conversationId),
     targetProjectId,
-    conversationId
+    [conversationId]
   );
   const released = await ports.releaseSessions(conversationId).catch(() => false);
   if (released && source.scratchRoot)
@@ -63,9 +68,25 @@ export async function handleConversationsMove(
   return { ok: true, value: result.value };
 }
 
-export interface ImportProjectSessionsPorts extends ConversationsMovePorts {
+export type ImportProjectSessionsPorts = Pick<
+  ConversationsMovePorts,
+  | 'isRunning'
+  | 'worktreeBusy'
+  | 'readConversations'
+  | 'patchProjectIds'
+  | 'unbindWorktree'
+  | 'releaseSessions'
+> & {
+  projectKind: (projectId: string) => string | undefined;
   rootConversationIds: (projectId: string) => string[];
-}
+  moveConversations: (
+    requests: { conversationId: string; running: boolean; worktreeBusy: boolean }[],
+    targetProjectId: string
+  ) => AuthorityMutationResult<{
+    moved: string[];
+    skipped: { conversationId: string; error: string }[];
+  }>;
+};
 
 /** 源项目下仍有效的根会话；子会话不在权威表里，随根会话一起改归属 */
 export function projectRootConversationIds(
@@ -83,10 +104,10 @@ export function projectRootConversationIds(
     .map((conversation) => conversation.conversationId);
 }
 
-/** 项目级错误：每条都会同样失败，直接中止 */
-const PROJECT_LEVEL_ERRORS = new Set(['target-unavailable', 'target-scratch', 'source-secretary']);
-
-/** 整项目导入：逐条复用单会话移动；运行中等会话级拒绝跳过并回报 */
+/**
+ * 整项目导入（移动，不复制）：权威归属一次提交、会话行一次补丁，运行中等会话级拒绝跳过并回报。
+ * 临时会话来源拒绝：单条移出 scratch 会清理其工作区，整批导入不能顺带删文件。
+ */
 export async function handleImportProjectSessions(
   input: unknown,
   ports: ImportProjectSessionsPorts
@@ -94,13 +115,34 @@ export async function handleImportProjectSessions(
   const parsed = parseImportProjectSessionsInput(input);
   if (!parsed) return { ok: false, error: 'invalid' };
   const { sourceProjectId, targetProjectId } = parsed;
-  const moved: string[] = [];
-  const skipped: { conversationId: string; error: string }[] = [];
-  for (const conversationId of ports.rootConversationIds(sourceProjectId)) {
-    const result = await handleConversationsMove({ conversationId, targetProjectId }, ports);
-    if (result.ok) moved.push(conversationId);
-    else if (PROJECT_LEVEL_ERRORS.has(result.error)) return { ok: false, error: result.error };
-    else skipped.push({ conversationId, error: result.error });
+  const sourceKind = ports.projectKind(sourceProjectId);
+  if (sourceKind === 'scratch' || sourceKind === 'secretary') {
+    return { ok: false, error: `source-${sourceKind}` };
   }
+  const result = ports.moveConversations(
+    ports.rootConversationIds(sourceProjectId).map((conversationId) => ({
+      conversationId,
+      running: ports.isRunning(conversationId),
+      worktreeBusy: ports.worktreeBusy(conversationId),
+    })),
+    targetProjectId
+  );
+  if (!result.accepted) return { ok: false, error: result.error };
+  const { moved, skipped } = result.value;
+  if (moved.length === 0) return { ok: true, moved, skipped };
+  for (const conversationId of moved) {
+    try {
+      ports.unbindWorktree(conversationId);
+    } catch {}
+  }
+  const rows = ports.readConversations();
+  ports.patchProjectIds(
+    moved.flatMap((conversationId) => conversationIdsToMove(rows, conversationId)),
+    targetProjectId,
+    moved
+  );
+  await Promise.all(
+    moved.map((conversationId) => ports.releaseSessions(conversationId).catch(() => false))
+  );
   return { ok: true, moved, skipped };
 }

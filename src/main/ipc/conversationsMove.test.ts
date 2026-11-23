@@ -123,7 +123,7 @@ describe('handleConversationsMove', () => {
     expect(ports.patchProjectIds).toHaveBeenCalledWith(
       expect.arrayContaining([input.conversationId, 'child']),
       target,
-      input.conversationId
+      [input.conversationId]
     );
     expect(ports.unbindWorktree).toHaveBeenCalledWith(input.conversationId);
     expect(ports.releaseSessions).toHaveBeenCalledWith(input.conversationId);

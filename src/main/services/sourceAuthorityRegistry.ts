@@ -491,17 +491,9 @@ export class SourceAuthorityRegistry {
     if (this.projects.get(conversation.projectId)?.kind === 'secretary') {
       return { accepted: false, error: 'source-secretary' };
     }
-    const target = this.projects.get(targetProjectId);
-    if (target?.state !== 'active') {
-      return { accepted: false, error: 'target-unavailable' };
-    }
-    if (target.kind === 'bot-home' || target.kind === 'secretary') {
-      return { accepted: false, error: 'target-unavailable' };
-    }
-    if (target.kind === 'scratch') {
-      return { accepted: false, error: 'target-scratch' };
-    }
-    if (conversation.projectId === target.projectId) {
+    const targetError = this.moveTargetError(targetProjectId);
+    if (targetError) return { accepted: false, error: targetError };
+    if (conversation.projectId === targetProjectId) {
       return { accepted: true, value: this.copyConversation(conversation) };
     }
     if (options?.running) {
@@ -510,10 +502,56 @@ export class SourceAuthorityRegistry {
     if (options?.worktreeBusy) {
       return { accepted: false, error: 'worktree-busy' };
     }
-    conversation.projectId = target.projectId;
+    conversation.projectId = targetProjectId;
     conversation.version += 1;
     this.commit();
     return { accepted: true, value: this.copyConversation(conversation) };
+  }
+
+  /** 批量改挂：目标不可用整批拒绝；逐条拒绝的跳过并回报；被接受的一次落盘、一次广播 */
+  moveConversations(
+    requests: readonly { conversationId: string; running?: boolean; worktreeBusy?: boolean }[],
+    targetProjectId: string
+  ): AuthorityMutationResult<{
+    moved: string[];
+    skipped: { conversationId: string; error: string }[];
+  }> {
+    const targetError = this.moveTargetError(targetProjectId);
+    if (targetError) return { accepted: false, error: targetError };
+    const moved: string[] = [];
+    const skipped: { conversationId: string; error: string }[] = [];
+    for (const { conversationId, running, worktreeBusy } of requests) {
+      const conversation = this.conversations.get(conversationId);
+      const error =
+        !conversation || conversation.bot || conversation.lifecycle === 'ended'
+          ? 'not-found'
+          : this.projects.get(conversation.projectId)?.kind === 'secretary'
+            ? 'source-secretary'
+            : running
+              ? 'running'
+              : worktreeBusy
+                ? 'worktree-busy'
+                : undefined;
+      if (error || !conversation) {
+        skipped.push({ conversationId, error: error ?? 'not-found' });
+        continue;
+      }
+      if (conversation.projectId === targetProjectId) continue;
+      conversation.projectId = targetProjectId;
+      conversation.version += 1;
+      moved.push(conversationId);
+    }
+    if (moved.length > 0) this.commit();
+    return { accepted: true, value: { moved, skipped } };
+  }
+
+  private moveTargetError(targetProjectId: string): string | undefined {
+    const target = this.projects.get(targetProjectId);
+    if (target?.state !== 'active' || target.kind === 'bot-home' || target.kind === 'secretary') {
+      return 'target-unavailable';
+    }
+    if (target.kind === 'scratch') return 'target-scratch';
+    return undefined;
   }
 
   updateSelection(

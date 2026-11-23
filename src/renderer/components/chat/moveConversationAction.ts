@@ -98,10 +98,10 @@ export async function importProjectSessionsFromDialog(
       const { conversations } = useSessionsStore.getState();
       addToast({
         type: 'warning',
-        title: t('Imported {{moved}} conversations, skipped {{count}} running or busy', {
-          moved: result.moved.length,
-          count: result.skipped.length,
-        }),
+        title: t(
+          'Imported {{moved}} conversations; {{count}} running or busy ones stay in the original project',
+          { moved: result.moved.length, count: result.skipped.length }
+        ),
         description: result.skipped
           .map(({ conversationId }) => conversations[conversationId]?.title || t('Untitled'))
           .join('、'),

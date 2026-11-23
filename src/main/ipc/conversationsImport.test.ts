@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseImportProjectSessionsInput } from '@shared/moveConversation';
@@ -36,7 +36,14 @@ describe('handleImportProjectSessions', () => {
   const setup = () => {
     const root = mkdtempSync(path.join(tmpdir(), 'enso-import-'));
     for (const dir of ['a', 'b', 'c', 'sessions']) mkdirSync(path.join(root, dir));
-    const registry = new SourceAuthorityRegistry({ registryFile: path.join(root, 'auth.json') });
+    let broadcasts = 0;
+    let rowPatches = 0;
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'auth.json'),
+      onChanged: () => {
+        broadcasts += 1;
+      },
+    });
     const project = (name: string) => {
       const created = registry.createProject({ requestId: name, path: path.join(root, name) });
       if (!created.accepted) throw new Error('setup project');
@@ -59,22 +66,19 @@ describe('handleImportProjectSessions', () => {
     };
     const sessions = new AgentSessionIndex({ readSettings: () => null });
     const ports: ImportProjectSessionsPorts = {
+      projectKind: (projectId) => registry.project(projectId)?.kind,
       rootConversationIds: (projectId) =>
         projectRootConversationIds(registry.rendererProjection().conversations, projectId),
-      moveConversation: (id, targetId, options) => registry.moveConversation(id, targetId, options),
+      moveConversations: (requests, targetId) => registry.moveConversations(requests, targetId),
       isRunning: (id) => sessions.workspaceTreeRunning(id) || sessions.btwTreeRunning(id),
       worktreeBusy: () => false,
-      source: (id) => {
-        const current = registry.conversation(id);
-        return current ? { projectId: current.projectId } : undefined;
-      },
       readConversations: () => rows,
       patchProjectIds: (ids, targetProjectId) => {
+        rowPatches += 1;
         for (const id of ids) if (rows[id]) rows[id].projectId = targetProjectId;
       },
       unbindWorktree: () => {},
       releaseSessions: async () => true,
-      removeScratchWorkspace: () => {},
     };
     const importInto = (from: { projectId: string }, to: { projectId: string }) =>
       handleImportProjectSessions(
@@ -93,8 +97,38 @@ describe('handleImportProjectSessions', () => {
       sessions,
       importInto,
       owner,
+      broadcasts: () => broadcasts,
+      rowPatches: () => rowPatches,
     };
   };
+
+  it('commits a multi-conversation import as one authority change and one row patch', async () => {
+    const env = setup();
+    const ids = ['one', 'two', 'three'].map((name) => env.create(name, env.projectA));
+    const before = env.broadcasts();
+    const result = await env.importInto(env.projectA, env.projectB);
+    expect(result).toMatchObject({ ok: true, skipped: [] });
+    expect(result.ok && [...result.moved].sort()).toEqual([...ids].sort());
+    expect(env.broadcasts() - before).toBe(1);
+    expect(env.rowPatches()).toBe(1);
+    for (const id of ids) expect(env.rows[id].projectId).toBe(env.projectB.projectId);
+  });
+
+  it('rejects a scratch source project without moving or deleting anything', async () => {
+    const env = setup();
+    const scratchDir = path.join(env.root, 'scratch');
+    const scratch = env.registry.ensureScratchProject(scratchDir);
+    if (!scratch) throw new Error('setup scratch');
+    const id = env.create('temp', scratch);
+    mkdirSync(path.join(scratchDir, id));
+    expect(await env.importInto(scratch, env.projectB)).toEqual({
+      ok: false,
+      error: 'source-scratch',
+    });
+    expect(env.owner(id)).toBe(scratch.projectId);
+    expect(env.rows[id].projectId).toBe(scratch.projectId);
+    expect(existsSync(path.join(scratchDir, id))).toBe(true);
+  });
 
   it('moves every root conversation of project A onto project B', async () => {
     const env = setup();
