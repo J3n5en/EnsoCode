@@ -625,6 +625,8 @@ export class AgentService implements AgentServiceContract {
       for (const run of open) {
         run.delivered = true;
         run.stopRequested = true;
+        // 等重启续跑的也算停：不再自动接着跑，台账不再留续跑记录
+        run.restartCandidate = false;
         const agent = this.agents.get(run.agentId);
         if (agent && 'queue' in agent.state) {
           const queue = agent.state.queue.filter((id) => id !== run.runId);
@@ -634,6 +636,11 @@ export class AgentService implements AgentServiceContract {
       await Promise.all(
         open.map(async (run) => {
           const agent = this.agents.get(run.agentId);
+          if (agent && run.restartPending) {
+            run.restartPending = false;
+            this.finishRun(run, 'interrupted', PARENT_STOPPED_TEXT);
+            return;
+          }
           if (!agent || run.status === 'queued') {
             this.finishRun(run, 'cancelled');
             return;
