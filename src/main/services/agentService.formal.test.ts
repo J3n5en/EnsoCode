@@ -362,6 +362,12 @@ function key(w: World): string {
 function safetyViolation(w: World): string | null {
   const sessions = [...internals(w).agents.values()].map((a) => a.identity.sessionId);
   if (new Set(sessions).size !== sessions.length) return '同一子会话对应多条 Agent 记录';
+  for (const c of w.children) {
+    const state = c.agentId && internals(w).agents.get(c.agentId)?.state.status;
+    if (c.mode === 'coworker' && c.dismissed && state && state !== 'closed') {
+      return `已 dismiss 的 coworker 又变成 ${state}`;
+    }
+  }
   for (const [runId, count] of w.notified) if (count > 1) return `Run ${runId} 通知了 ${count} 次`;
   for (const run of internals(w).runs.values()) {
     const first = w.terminal.get(run.runId);

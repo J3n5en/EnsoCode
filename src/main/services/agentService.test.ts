@@ -495,6 +495,28 @@ describe('AgentService lifecycle', () => {
     expect(runtime.dismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('已 dismiss 的 coworker 遇到 worker 退出仍是 closed，不会被复活成 parked', async () => {
+    const { service, runtime } = setup();
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    await service.dismiss({ context, requestId: 'dismiss', agentId: spawned.value.agentId });
+    service.observe({ type: 'worker-exited' });
+    const listed = await service.list({ context, requestId: 'list', limit: 10 });
+    expect(listed).toMatchObject({
+      ok: true,
+      value: { agents: [{ agentId: spawned.value.agentId, status: 'closed' }] },
+    });
+    expect(
+      await service.send({
+        context,
+        requestId: 'send-after-dismiss',
+        agentId: spawned.value.agentId,
+        message: 'again',
+      })
+    ).toMatchObject({ ok: false, code: 'invalid-state' });
+    expect(runtime.prompt).toHaveBeenCalledTimes(1);
+  });
+
   it('stop 掉 task 唯一的 Run 后关闭实例并回收子会话，不留孤儿', async () => {
     const { service, runtime } = setup();
     const spawned = await service.spawn(spawnRequest());

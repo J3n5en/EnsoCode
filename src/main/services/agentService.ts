@@ -768,6 +768,7 @@ export class AgentService implements AgentServiceContract {
   observe(event: AgentWorkerEvent | { type: 'worker-exited' }): void {
     if (event.type === 'worker-exited') {
       for (const agent of this.agents.values()) {
+        if (agent.state.status === 'closed') continue;
         const activeRunId = activeRunIdOf(agent);
         const active = activeRunId ? this.runs.get(activeRunId) : undefined;
         const interrupted = Boolean(active && !TERMINAL_RUN_STATUSES.has(active.status));
