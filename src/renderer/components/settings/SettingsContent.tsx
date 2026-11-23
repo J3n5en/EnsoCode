@@ -16,6 +16,7 @@ import {
   Palette,
   Plug,
   Puzzle,
+  ScrollText,
   Search,
   Server,
   Settings,
@@ -44,6 +45,7 @@ import { ExperimentalSettings } from './ExperimentalSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
+import { LogsSettings } from './LogsSettings';
 import { McpSettings } from './McpSettings';
 import { MemoryKnowledge } from './MemoryKnowledge';
 import { MemoryLibrary } from './MemoryLibrary';
@@ -171,6 +173,7 @@ export function SettingsContent() {
     { id: 'ssh', icon: Terminal, label: 'SSH' },
     { id: 'usage', icon: BarChart3, label: 'Usage' },
     { id: 'resources', icon: Gauge, label: 'Resources' },
+    { id: 'logs', icon: ScrollText, label: 'Logs' },
     { id: 'experimental', icon: FlaskConical, label: 'Experimental' },
     { id: 'bots', icon: BotMessageSquare, label: 'Bot mode', sub: true },
     { id: 'botTemplates', icon: LayoutTemplate, label: 'Bot templates', sub: true },
@@ -350,6 +353,7 @@ export function SettingsContent() {
             {activeCategory === 'usage' && <UsageSettings />}
             {activeCategory === 'privacy' && <PrivacySettings />}
             {activeCategory === 'resources' && <ResourcesSettings />}
+            {activeCategory === 'logs' && <LogsSettings />}
             {activeCategory === 'experimental' && (
               <ExperimentalSettings onOpenBots={() => setActiveCategory('bots')} />
             )}

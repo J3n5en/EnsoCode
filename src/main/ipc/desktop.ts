@@ -4,13 +4,16 @@ import { registerNodeRemoteHandlers } from '../services/nodeRemote';
 import { registerBrowserHandlers } from './browser';
 import { registerComputerHandlers } from './computer';
 import { registerConfigSyncHandlers } from './configSync';
+import { registerDevToolsHandlers } from './devTools';
 import { registerExtensionPluginDesktopHandlers } from './extensionPlugins.desktop';
+import { registerLogHandlers } from './logs.desktop';
 import { registerUpdaterHandlers } from './updater';
 import { attachWindowStateEvents, registerWindowHandlers } from './window';
 
 /** 只有桌面壳有窗口、内嵌浏览器、桌面控制和自动更新。 */
 export function registerDesktopIpcHandlers(): void {
   registerWindowHandlers();
+  registerDevToolsHandlers();
   registerConfigSyncHandlers();
   registerUpdaterHandlers();
   registerBrowserHandlers();
@@ -18,6 +21,7 @@ export function registerDesktopIpcHandlers(): void {
   registerComputerHandlers();
   registerNodeRemoteHandlers();
   registerDropShelfHandlers();
+  registerLogHandlers();
   app.on('browser-window-created', (_event, win: BrowserWindow) => {
     attachWindowStateEvents(win);
   });

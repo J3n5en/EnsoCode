@@ -336,6 +336,69 @@ describe('ExtensionPluginsSection', () => {
   });
 });
 
+describe('ExtensionPluginLogs', () => {
+  const LOG = [
+    '2026-11-06T12:29:34.080Z [info] started at /Users/me/plugin',
+    '2026-11-06T12:48:54.789Z [warn] 已丢弃 3 行',
+    '2026-11-06T13:15:49.129Z [error] renderer.call 失败： Error: 请先登录 Telegram',
+    '    at Object.invoke (file:///Users/me/vendor/gramjs.mjs:2161:47198)',
+    '',
+  ].join('\n');
+
+  const openLogs = async (text: string) => {
+    harness.logs.mockResolvedValue({ ok: true, text });
+    await act(async () => byLabel('Plugin logs').click());
+  };
+  const lines = () => [...container.querySelectorAll('[data-log-level]')];
+
+  it('复制按钮把完整日志原文写入剪贴板', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    await openLogs(LOG);
+    await act(async () => byLabel('Copy').click());
+    expect(writeText).toHaveBeenCalledWith(LOG);
+  });
+
+  it('空日志显示暂无日志，复制按钮禁用', async () => {
+    await openLogs('');
+    expect(container.textContent).toContain('No logs yet');
+    expect(byLabel('Copy').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('按行渲染：error 行与其续行带错误样式，warn 行带警告样式，info 行都没有', async () => {
+    await openLogs(LOG);
+    const rendered = lines();
+    expect(rendered.map((line) => line.getAttribute('data-log-level'))).toEqual([
+      'info',
+      'warn',
+      'error',
+      'error',
+    ]);
+    expect(rendered[0]?.className).not.toMatch(/color-(warning|destructive)/);
+    expect(rendered[1]?.className).toContain('color-warning');
+    expect(rendered[2]?.className).toContain('color-destructive');
+    expect(rendered[3]?.className).toBe(rendered[2]?.className);
+  });
+
+  it('行首时间戳单独渲染', async () => {
+    await openLogs(LOG);
+    const stamp = lines()[2]?.querySelector('[data-log-time]');
+    expect(stamp?.textContent).toBe('2026-11-06T13:15:49.129Z');
+    expect(lines()[3]?.querySelector('[data-log-time]')).toBeNull();
+  });
+
+  it('超大日志退回纯文本并提示', async () => {
+    const big = Array.from(
+      { length: 5001 },
+      (_, i) => `2026-11-06T12:00:00.000Z [info] line-${i}`
+    ).join('\n');
+    await openLogs(big);
+    expect(lines()).toHaveLength(0);
+    expect(container.textContent).toContain('Log too large, showing plain text');
+    expect(container.querySelector('pre')?.textContent).toBe(big);
+  });
+});
+
 describe('插件市场安装', () => {
   const marketDialog = () =>
     [...container.querySelectorAll('[data-dialog="open"]')].find((dialog) =>

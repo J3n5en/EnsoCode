@@ -123,6 +123,7 @@ import { readSessionReminders } from '../services/sessionReminders';
 import { deleteUntouchedSessionBranch } from '../services/worktree/service';
 import {
   getSourceAuthorityRegistry,
+  getUpstreamRecoveryService,
   isRootSessionAlive,
   observedBackgroundTasks,
   observedSessionStatus,
@@ -132,6 +133,7 @@ import {
   resumeRootFromMain,
   rootImageInput,
   setSecretaryDriverObserver,
+  setUpstreamSessionWakeHandler,
   spawnRootFromMain,
 } from './agent';
 import { createSecretaryContacts, type SecretaryContacts } from './secretaryContact';
@@ -702,7 +704,18 @@ export function registerSecretaryHandlers(): void {
   });
   // 同事发来的消息：让收件秘书的宿主立刻试投
   setPeerDeliveryListener((secretaryId) => hosts.get(secretaryId)?.flushNow());
-  driver = createDispatchDriver(driverPorts);
+  driver = createDispatchDriver({
+    ...driverPorts,
+    upstreamRecovery: getUpstreamRecoveryService() ?? undefined,
+    providerOf: (conversationId) => {
+      const row = readPersistedConversation(conversationId);
+      if (typeof row?.lastProviderId === 'string' && row.lastProviderId) return row.lastProviderId;
+      return getSourceAuthorityRegistry()?.conversation(conversationId)?.selection?.providerId;
+    },
+  });
+  setUpstreamSessionWakeHandler(
+    (conversationId, reason) => driver?.wakeUpstream(conversationId, reason) ?? false
+  );
   const queued = createQueuedSessions(queuedSessionPorts());
   setQueuedSessions(queued);
   // 用户点确认后立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick

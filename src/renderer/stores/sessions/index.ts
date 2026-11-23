@@ -47,6 +47,12 @@ import type {
   WorktreeStatus,
 } from '@shared/types/worktree';
 import { splitUnattendedPrefix } from '@shared/unattendedNote';
+import {
+  type GoalUpstreamRetry,
+  isUpstreamWaitingGoal,
+  type ProviderHealthSnapshot,
+  upstreamContinuationText,
+} from '@shared/upstreamRecovery';
 // 纯逻辑模块(仅类型级依赖),store 引用不破坏 node 环境测试
 import {
   cleanTitleSummarySource,
@@ -66,6 +72,8 @@ export interface SessionGoal {
   noProgressRuns: number;
   /** 上一轮最终 assistant 文本的归一化指纹 */
   lastOutput?: string;
+  /** 上游瞬态/配额故障自动退避等待元数据；仅 status === 'waiting' 时有值 */
+  retry?: GoalUpstreamRetry;
 }
 
 /** 排队待发的用户消息(agent running 时入队,轮次结束自动投递) */
@@ -592,6 +600,10 @@ interface SessionsState {
   pauseGoal(conversationId: string): void;
   resumeGoal(conversationId: string): void;
   clearGoal(conversationId: string): void;
+  /** 各 provider 上游健康快照（仅包含降级或探测中的 provider） */
+  upstreamHealth: ProviderHealthSnapshot[];
+  /** 立即重试等待上游恢复的会话或子代理 */
+  retryUpstreamNow(waiterId: string): Promise<void>;
 }
 
 /** 未投递成功的乐观消息回队：文本 + 图片都不丢 */
@@ -1255,6 +1267,41 @@ export const useSessionsStore = create<SessionsState>()(
 
       /** 上一轮收束时会话还挂着自定提醒：goal 先不续跑，等提醒叫醒的那一轮收束再刷新 */
       const awaitingReminder = new Set<string>();
+      window.electronAPI.agent.onUpstreamHealth?.((snapshots) => {
+        set({ upstreamHealth: snapshots });
+      });
+      void window.electronAPI.agent
+        .listUpstreamHealth?.()
+        .then((snapshots) => {
+          if (Array.isArray(snapshots)) set({ upstreamHealth: snapshots });
+        })
+        .catch(() => {});
+      window.electronAPI.agent.onUpstreamWake?.(({ conversationId }) => {
+        if (!isLeaderRenderer()) return;
+        const conversation = get().conversations[conversationId];
+        if (!conversation || conversation.driver === 'main') return;
+        if (conversation.abortRequested || conversation.status !== 'idle') return;
+        const goal = conversation.goal;
+        if (!isUpstreamWaitingGoal(goal)) return;
+        if (!conversation.started) return;
+        const text = upstreamContinuationText(goal.text);
+        const deliveryId = crypto.randomUUID();
+        set((state) =>
+          state.conversations[conversationId]
+            ? patch(state, conversationId, {
+                error: undefined,
+                messages: [
+                  ...state.conversations[conversationId].messages,
+                  optimisticUserMessage(text, undefined, deliveryId),
+                ],
+              })
+            : state
+        );
+        void deliver(conversationId, text, undefined, 'prompt', {
+          deliveryId,
+          restore: { kind: 'goal' },
+        });
+      });
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
           set((state) => {
@@ -2027,14 +2074,87 @@ export const useSessionsStore = create<SessionsState>()(
           else awaitingReminder.delete(id);
           // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口。
           // 中断标记只在发起窗口本地，别的窗口（如 PWA 完整模式）发起的中断靠 worker 的 aborted 认出
-          const aborted = event.type === 'turn-completed' && event.aborted === true;
+          const aborted = event.aborted === true;
           if (get().conversations[id]?.abortRequested || aborted) {
             if (get().conversations[id]?.abortRequested) {
               set((state) => patch(state, id, { abortRequested: false }));
             }
             return;
           }
-          if (event.type !== 'turn-completed') return;
+          if (event.type === 'turn-failed') {
+            if (!isLeaderRenderer() || event.interrupted) return;
+            const current = get().conversations[id];
+            if (!current || current.driver === 'main') return;
+            const goal = current.goal;
+            const eligible = goal?.status === 'active' || isUpstreamWaitingGoal(goal);
+            if (!eligible || !goal) return;
+            const report = window.electronAPI.agent.reportUpstreamFailure;
+            if (!report) return;
+            void report({
+              sessionId: id,
+              error: event.error,
+              ...((event.provider ?? current.lastProviderId)
+                ? { provider: event.provider ?? current.lastProviderId }
+                : {}),
+              ...(event.retryExhausted ? { retryExhausted: true } : {}),
+              ...(goal.retry
+                ? { since: goal.retry.since, previousAttempt: goal.retry.attempt }
+                : {}),
+            })
+              .then((decision) => {
+                set((state) => {
+                  const latest = state.conversations[id];
+                  if (!latest || latest.abortRequested || !latest.goal) return state;
+                  if (latest.goal.status !== 'active' && !isUpstreamWaitingGoal(latest.goal)) {
+                    return state;
+                  }
+                  if (decision.action === 'wait') {
+                    return patch(state, id, {
+                      status: 'idle',
+                      error: undefined,
+                      goal: {
+                        ...latest.goal,
+                        status: 'waiting',
+                        note: undefined,
+                        retry: decision.retry,
+                      },
+                    });
+                  }
+                  const note =
+                    decision.action === 'exhausted'
+                      ? decision.note
+                      : decision.hint
+                        ? `${event.error}\n${decision.hint}`
+                        : event.error;
+                  return patch(state, id, {
+                    goal: {
+                      ...latest.goal,
+                      status: 'paused',
+                      note,
+                      retry: undefined,
+                    },
+                  });
+                });
+              })
+              .catch(() => {});
+            return;
+          }
+          // 探测/恢复成功：把 waiting(upstream) 还原为 active 并清掉 retry
+          const currentGoal = get().conversations[id]?.goal;
+          if (isUpstreamWaitingGoal(currentGoal)) {
+            set((state) =>
+              state.conversations[id]?.goal
+                ? patch(state, id, {
+                    goal: {
+                      ...state.conversations[id].goal!,
+                      status: 'active',
+                      note: undefined,
+                      retry: undefined,
+                    },
+                  })
+                : state
+            );
+          }
           // 留下本轮摘要供侧栏红叹号的手动重试用；在发起滚动总结之前写，重试拿到的是最新一轮
           if (event.digest) {
             const digest = event.digest;
@@ -2322,6 +2442,7 @@ export const useSessionsStore = create<SessionsState>()(
         activeId: null,
         worktreeStatuses: {},
         workspaceRevisionByConversation: {},
+        upstreamHealth: [],
 
         async switchWorkspaceBranch(id, branch, create = false) {
           const conversation = get().conversations[id];
@@ -3944,18 +4065,31 @@ export const useSessionsStore = create<SessionsState>()(
             })();
           if (!id) return;
           const conversation = get().conversations[id];
-          if (!conversation?.started) return;
+          if (!conversation) return;
+          const waitingUpstream = isUpstreamWaitingGoal(conversation.goal);
+          if (!conversation.started && !waitingUpstream) return;
           // 停止 = 用户接管：本轮收束不再自动续跑，活动目标一并暂停（可手动恢复），在跑的子代理一并停掉
           // 只有在跑的轮次会回流收束来消费中断标记；空闲压缩中停止不置，否则标记残留吞掉下一轮
           const goal = conversation.goal;
           set((state) =>
             patch(state, id, {
               ...(conversation.status === 'running' ? { abortRequested: true } : {}),
-              ...(goal?.status === 'active'
-                ? { goal: { ...goal, status: 'paused' as const, note: 'stopped by user' } }
+              ...(goal && (goal.status === 'active' || waitingUpstream)
+                ? {
+                    goal: {
+                      ...goal,
+                      status: 'paused' as const,
+                      note: 'stopped by user',
+                      retry: undefined,
+                    },
+                  }
                 : {}),
             })
           );
+          if (waitingUpstream) {
+            void window.electronAPI.agent.cancelUpstreamWait?.(id);
+          }
+          if (!conversation.started) return;
           // 用户停止：一并停子代理、取消会话自己定的提醒
           await window.electronAPI.agent.abort(id, { stopSubagents: true, cancelReminders: true });
         },
@@ -3967,6 +4101,7 @@ export const useSessionsStore = create<SessionsState>()(
             mainGoalAction(conversationId, 'set', text.trim());
             return;
           }
+          void window.electronAPI.agent.cancelUpstreamWait?.(conversationId);
           set((state) =>
             patch(state, conversationId, {
               goal: {
@@ -4004,8 +4139,11 @@ export const useSessionsStore = create<SessionsState>()(
             mainGoalAction(conversationId, 'pause');
             return;
           }
+          void window.electronAPI.agent.cancelUpstreamWait?.(conversationId);
           set((state) =>
-            patch(state, conversationId, { goal: { ...goal, status: 'paused', note: undefined } })
+            patch(state, conversationId, {
+              goal: { ...goal, status: 'paused', note: undefined, retry: undefined },
+            })
           );
         },
 
@@ -4018,6 +4156,7 @@ export const useSessionsStore = create<SessionsState>()(
             mainGoalAction(conversationId, 'resume');
             return;
           }
+          void window.electronAPI.agent.cancelUpstreamWait?.(conversationId);
           // 恢复即重置安全计数(与 pi-goal 的 guided review 语义一致:人已过目)
           set((state) =>
             patch(state, conversationId, {
@@ -4025,6 +4164,7 @@ export const useSessionsStore = create<SessionsState>()(
                 ...goal,
                 status: 'active',
                 note: undefined,
+                retry: undefined,
                 autoTurns: 0,
                 noProgressRuns: 0,
               },
@@ -4057,7 +4197,12 @@ export const useSessionsStore = create<SessionsState>()(
             mainGoalAction(conversationId, 'clear');
             return;
           }
+          void window.electronAPI.agent.cancelUpstreamWait?.(conversationId);
           set((state) => patch(state, conversationId, { goal: undefined }));
+        },
+
+        async retryUpstreamNow(waiterId) {
+          await window.electronAPI.agent.retryUpstreamNow?.(waiterId);
         },
 
         selectTab(parentId, tabId) {

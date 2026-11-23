@@ -519,6 +519,19 @@ export const zhTranslations: Record<string, string> = {
   'Protected: secrets': '受保护：密钥',
   'Protected: destructive command': '受保护：破坏性命令',
   'dcg: {{reason}}': 'dcg：{{reason}}',
+  'dcg notice: {{reason}}': 'dcg 提醒（不拦截）：{{reason}}',
+  'dcg notice': 'dcg 提醒',
+  'dcg explanation': 'dcg 详细说明',
+  Matched: '命中片段',
+  Critical: '严重',
+  'dcg returned invalid output; confirmation required.': 'dcg 返回了无法解析的输出，请人工确认。',
+  'dcg exited abnormally despite allow decision; confirmation required.':
+    'dcg 退出状态异常（即使标记放行），请人工确认。',
+  'dcg returned malformed warning; confirmation required.':
+    'dcg 返回了格式异常的警告，请人工确认。',
+  'dcg returned an unknown decision; confirmation required.':
+    'dcg 返回了未知决策类型，请人工确认。',
+  'dcg required confirmation without details.': 'dcg 要求人工确认（未提供规则详情）。',
   'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.':
     '在系统共用的 Temp 根目录里删除，那里有其他程序的文件；只应在会话专属临时目录内删除。',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',
@@ -535,6 +548,12 @@ export const zhTranslations: Record<string, string> = {
   'Install Finder Quick Action': '安装访达快速操作',
   "'enso' terminal command": 'enso 终端命令',
   'Finder Quick Action': '访达快速操作',
+  Troubleshooting: '故障排查',
+  'Developer tools': '开发者工具',
+  'Open the console of the main window to see errors and logs.':
+    '打开主窗口的控制台，查看报错和日志。',
+  'Could not open developer tools': '无法打开开发者工具',
+  'The main window is closed. Open it and try again.': '主窗口已关闭，请先打开主窗口再试。',
   "Couldn't install the 'enso' command": '无法安装 enso 命令',
   "Shell command 'enso' installed in {{dir}}.": '已在 {{dir}} 安装 enso 命令。',
   'Run `enso .` in a terminal to open the current folder in EnsoCode.':
@@ -553,6 +572,26 @@ export const zhTranslations: Record<string, string> = {
   'dcg is licensed under MIT with an additional rider: no rights are granted to OpenAI, Anthropic, their affiliates, or anyone acting on their behalf. Install only if this restriction does not apply to you.':
     'dcg 使用附加限制条款的 MIT 许可证：不授予 OpenAI、Anthropic 及其关联方或代表它们行事的任何人任何权利。仅在该限制不适用于你时安装。',
   'Agree and install': '同意并安装',
+  'Up to date (latest v{{latest}})': '已是最新（最新版 v{{latest}}）',
+  'dcg v{{latest}} is available (built-in v{{current}}). It can be installed after an EnsoCode update ships its checksum.':
+    '发现 dcg 新版 v{{latest}}（内置 v{{current}}）。需等 EnsoCode 更新内置校验值后才能安装。',
+  'GitHub rate limit reached. Try again in an hour.': 'GitHub 接口请求已达上限，请一小时后再试。',
+  'Could not read the latest dcg release.': '无法读取 dcg 最新版本信息。',
+  'Could not reach GitHub. Check your network.': '无法连接 GitHub，请检查网络。',
+  'Clear rule exemptions': '清除规则豁免',
+  'Rule exemptions cleared.': '已清除规则豁免与放过记录。',
+  'Why it is dangerous': '为什么危险',
+  'Safer alternative': '安全替代',
+  'You have allowed this rule {{count}} times. Allow it automatically from now on?':
+    '这条规则你已经放过 {{count}} 次，要不要以后直接通过？',
+  'Always allow this rule': '以后直接通过',
+  'Confirm exemption': '确认豁免',
+  'Allow "{{rule}}" automatically in new conversations? You can revoke this anytime in Settings.':
+    '确认在新会话中自动放行「{{rule}}」？随时可在设置中撤销。',
+  'Exempted rules': '已豁免规则',
+  'No rule exemptions.': '暂无规则豁免。',
+  'This rule is allowed automatically in new conversations until dcg is updated.':
+    '新会话中这条规则将直接通过，dcg 版本更新后失效。',
   'Memory write': '记忆写入',
   'Secrets redacted': '已脱敏密钥',
   'Memory writes awaiting approval': '待批准的记忆写入',
@@ -2079,6 +2118,7 @@ export const zhTranslations: Record<string, string> = {
   'Plugin command failed': '插件命令执行失败',
   'Plugin logs': '插件日志',
   'No logs yet': '暂无日志',
+  'Log too large, showing plain text': '日志过大，已切换为纯文本',
   'Reinstall from source': '从来源重新安装',
   'No plugins installed from GitHub to check': '没有从 GitHub 安装的插件可以检查',
   '{{count}} update(s) available': '{{count}} 个插件有新版本',
@@ -2865,6 +2905,24 @@ export const zhTranslations: Record<string, string> = {
   'When off, this project uses its own explicit Agent mode permission mask.':
     '关闭后，此项目使用自己明确配置的 Agent 模式权限掩码。',
   Resources: '资源',
+  'Recent errors and log export. API keys, tokens and passwords are masked.':
+    '最近的错误与日志导出。API Key、Token、密码等已脱敏。',
+  'Recent errors': '最近错误',
+  'Errors only': '仅错误',
+  'Warnings and errors': '警告及以上',
+  'No errors recorded.': '暂无错误记录。',
+  'Agent worker': 'Agent 进程',
+  'Export logs': '导出日志',
+  'Pack logs from the selected period into a zip file for troubleshooting.':
+    '把所选时间段内的日志打包成 zip，便于排查问题。',
+  'Time range': '时间范围',
+  'Last hour': '最近 1 小时',
+  'Last 6 hours': '最近 6 小时',
+  'Last 24 hours': '最近 24 小时',
+  'Last 3 days': '最近 3 天',
+  'Exporting...': '导出中...',
+  'Logs exported': '日志已导出',
+  'Log export failed': '日志导出失败',
   'CPU, memory and disk usage of EnsoCode and the processes it started.':
     'EnsoCode 及其启动的进程占用的 CPU、内存和磁盘。',
   RAM: '内存',

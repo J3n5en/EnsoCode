@@ -4,11 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { app, net } from '@platform';
-import type { DcgStatus } from '@shared/types/dcg';
+import type { DcgStatus, DcgUpdateCheck } from '@shared/types/dcg';
 
 export const DCG_VERSION = '0.16.0';
 
 const RELEASE = `https://github.com/Dicklesworthstone/destructive_command_guard/releases/download/v${DCG_VERSION}`;
+
+export const DCG_LATEST_RELEASE_API =
+  'https://api.github.com/repos/Dicklesworthstone/destructive_command_guard/releases/latest';
 
 const ASSETS: Record<string, { file: string; sha256: string }> = {
   'darwin-arm64': {
@@ -125,4 +128,51 @@ export async function installDcg(opts: {
 
 export async function uninstallDcg(root: string): Promise<void> {
   await fs.promises.rm(baseDir(root), { recursive: true, force: true });
+}
+
+const parseVersion = (value: string) => {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+  return match ? match.slice(1).map(Number) : null;
+};
+
+/** 只比较正式版 major.minor.patch；预发布或非法版本返回 null */
+export function compareDcgVersions(a: string, b: string): number | null {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  if (!left || !right) return null;
+  for (let i = 0; i < 3; i += 1) if (left[i] !== right[i]) return left[i] - right[i];
+  return 0;
+}
+
+/** 仅由用户点击「检查更新」触发；未认证 GitHub API 每小时 60 次，限流与网络错误分开报告 */
+export async function checkDcgUpdate(
+  opts: { current?: string; fetch?: (url: string, init: RequestInit) => Promise<Response> } = {}
+): Promise<DcgUpdateCheck> {
+  const current = opts.current ?? DCG_VERSION;
+  const fetchImpl = opts.fetch ?? ((url: string, init: RequestInit) => net.fetch(url, init));
+  let response: Response;
+  try {
+    response = await fetchImpl(DCG_LATEST_RELEASE_API, {
+      headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return { status: 'failed', current, reason: 'network' };
+  }
+  if (
+    response.status === 429 ||
+    (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
+  )
+    return { status: 'failed', current, reason: 'rate-limited' };
+  if (!response.ok) return { status: 'failed', current, reason: 'network' };
+  let tag: unknown;
+  try {
+    tag = ((await response.json()) as { tag_name?: unknown } | null)?.tag_name;
+  } catch {
+    return { status: 'failed', current, reason: 'invalid' };
+  }
+  const order = typeof tag === 'string' ? compareDcgVersions(tag, current) : null;
+  if (order === null) return { status: 'failed', current, reason: 'invalid' };
+  const latest = (tag as string).trim().replace(/^v/, '');
+  return { status: order > 0 ? 'available' : 'latest', current, latest };
 }

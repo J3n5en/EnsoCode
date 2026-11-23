@@ -119,6 +119,26 @@ describe('projectMessage', () => {
     }
   });
 
+  it('命令结果投影 dcg warn 提示，脏值与非命令工具不投影', () => {
+    const dcgWarning = { ruleId: 'core.git:stash-drop', reason: 'drops', severity: 'medium' };
+    expect(
+      projectMessage({ role: 'toolResult', toolName: 'bash', content: [], details: { dcgWarning } })
+    ).toEqual({ role: 'toolResult', toolName: 'bash', content: [], dcgWarning });
+    for (const [toolName, value] of [
+      ['read', dcgWarning],
+      ['bash', { ...dcgWarning, severity: 'huge' }],
+      ['bash', { ...dcgWarning, explanation: 'x' }],
+    ] as const)
+      expect(
+        projectMessage({
+          role: 'toolResult',
+          toolName,
+          content: [],
+          details: { dcgWarning: value },
+        })
+      ).not.toHaveProperty('dcgWarning');
+  });
+
   it('插件注入的消息带来源投影，其它 custom 消息与脏来源不带', () => {
     expect(
       projectMessage({

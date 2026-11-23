@@ -586,6 +586,9 @@ export const IPC_PRODUCT_COVERAGE = {
     'macOS window-shape refresh after a layout change; not a user product action.'
   ),
   WINDOW_OPEN_SETTINGS: surfaces('window.open-settings'),
+  WINDOW_OPEN_DEV_TOOLS: excluded(
+    'Host-only troubleshooting action that opens Chromium DevTools for the local main window.'
+  ),
   WINDOW_TOGGLE_SIDEBAR: excluded(
     'Main-to-renderer transport for the macOS View menu; the toggle itself stays in the renderer.'
   ),
@@ -690,6 +693,14 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_ABORT: surfaces('conversations.abort'),
   AGENT_ABORT_RETRY: surfaces('conversations.abort'),
   AGENT_RETRY: surfaces('conversations.retry-turn'),
+  AGENT_UPSTREAM_REPORT_FAILURE: excluded(
+    'Internal upstream health gate failure report from renderer.'
+  ),
+  AGENT_UPSTREAM_RETRY_NOW: surfaces('conversations.retry-turn'),
+  AGENT_UPSTREAM_CANCEL: surfaces('conversations.abort'),
+  AGENT_UPSTREAM_HEALTH_LIST: excluded('Read-only upstream provider health snapshot query.'),
+  AGENT_UPSTREAM_HEALTH_EVENT: excluded('Main-to-renderer upstream provider health push stream.'),
+  AGENT_UPSTREAM_WAKE_EVENT: excluded('Main-to-renderer upstream recovery wake signal.'),
   AGENT_EVENT: excluded('Worker-to-renderer event stream transport.'),
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
   AGENT_TAKE_INTERRUPTED_TURNS: excluded(
@@ -1032,6 +1043,9 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   RESOURCES_SESSIONS_CLEAN_REQUEST: excluded('Main-to-renderer session cleanup relay event.'),
   RESOURCES_SESSIONS_CLEAN_DONE: excluded('Main window acknowledgement of a session cleanup.'),
+  LOGS_ERRORS: excluded('Read-only redacted error summary for Settings → Logs.'),
+  LOGS_EXPORT: excluded('Human-only save dialog exporting redacted logs for Settings → Logs.'),
+  LOGS_REVEAL_EXPORT: excluded('Reveal the last log export in the OS file manager.'),
   MEMORY_LIST: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DETAIL: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_ARCHIVE: excluded('Memory desktop UI; not an Enso capability.'),
@@ -1064,6 +1078,13 @@ export const IPC_PRODUCT_COVERAGE = {
   DCG_STATUS: excluded('dcg install settings UI; not an Enso capability.'),
   DCG_INSTALL: excluded('dcg install settings UI; not an Enso capability.'),
   DCG_UNINSTALL: excluded('dcg install settings UI; not an Enso capability.'),
+  DCG_CHECK_UPDATE: excluded('dcg install settings UI; not an Enso capability.'),
+  DCG_RULE_STATE: excluded('dcg approval card rule memory; not an Enso capability.'),
+  DCG_RULE_ALLOWED: excluded('dcg approval card rule memory; not an Enso capability.'),
+  DCG_RULE_EXEMPT: excluded('dcg approval card rule memory; not an Enso capability.'),
+  DCG_RULE_REVOKE: excluded('dcg settings exemption revoke; not an Enso capability.'),
+  DCG_EXEMPTIONS_LIST: excluded('dcg settings exemption list; not an Enso capability.'),
+  DCG_EXEMPTIONS_CLEAR: excluded('dcg install settings UI; not an Enso capability.'),
   MEMORY_REEMBED: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_CHANGED: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_GRAPH: excluded('Memory desktop UI; not an Enso capability.'),

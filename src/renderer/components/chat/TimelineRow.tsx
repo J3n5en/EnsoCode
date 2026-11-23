@@ -161,7 +161,7 @@ import { fileMentionBasename, splitInlineMentions, splitMentionRefs } from './me
 import { PrivacyMaskBadge } from './PrivacyMaskBadge';
 import { splitQuoteFences } from './quoteSelection';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
-import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
+import { DcgWarningBadge, ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { StepDot } from './StepNode';
 import { SubagentResult } from './SubagentResult';
@@ -301,6 +301,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.waiting === b.waiting &&
         a.pluginArtifacts === b.pluginArtifacts &&
         a.shellFailure === b.shellFailure &&
+        a.dcgWarning === b.dcgWarning &&
         JSON.stringify(a.args ?? null) === JSON.stringify(b.args ?? null) &&
         cardPeersEqual(a.cardPeers, b.cardPeers)
       );
@@ -3136,6 +3137,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           {item.shellFailure && item.state !== 'running' && (
             <ShellFailureBadge failure={item.shellFailure} />
           )}
+          {item.dcgWarning && <DcgWarningBadge warning={item.dcgWarning} />}
           {item.state === 'reviewing' ? (
             <span className={cn('shrink-0 text-[11px] text-foreground', BREATHE)}>
               {t('Assistant reviewing…')}

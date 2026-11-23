@@ -202,6 +202,16 @@ describe('插件 IPC 入参', () => {
         });
       });
     });
+
+    it('日志里的密钥打码后才交给界面，显示与复制都拿不到原文', async () => {
+      await withLogger(async (plugins) => {
+        const secret = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz';
+        plugins.logs = vi.fn(async () => `2026-11-06T12:00:00.000Z [error] key ${secret}\n`);
+        const result = await readPluginLogs(plugins, 'enso.example.notes');
+        expect(result.ok && result.text).toContain('[error] key [REDACTED]');
+        expect(JSON.stringify(result)).not.toContain(secret);
+      });
+    });
   });
 
   it('配置写入把收窄后的补丁交给服务', async () => {
