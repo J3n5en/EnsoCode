@@ -118,6 +118,8 @@ const DAILY_KINDS: ReadonlySet<SecretaryResultKind> = new Set([
 
 export interface SecretaryHostPorts extends DeliveryPorts {
   enabled(): boolean;
+  /** 派发记录的只读视图（不复制）：流式事件先据此判断要不要读整份；不得修改 */
+  peekFile?(): Readonly<SecretaryDispatchFile>;
   profile(): SecretaryProfile | null;
   todos(): SecretaryTodo[];
   saveTodos(todos: SecretaryTodo[]): void;
@@ -193,6 +195,9 @@ function sessionIdOf(event: RendererAgentEvent): string | undefined {
   if (!('identity' in event) || !event.identity) return undefined;
   return 'sessionId' in event.identity ? event.identity.sessionId : undefined;
 }
+
+/** 高频的流式事件：没有状态变化时只和派出会话、在途投递的秘书会话有关 */
+const STREAM_EVENTS = new Set(['message-upsert', 'message-update', 'tool-output', 'session-meta']);
 
 /** 审计里列出的任务：id 与命令摘要，最多三个 */
 function taskList(tasks: readonly ObservedTask[]): string {
@@ -1182,6 +1187,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (!sessionId && changes.length === 0) return;
       if (sessionId && ports.contact && ports.isSecretaryConversation?.(sessionId)) {
         forwardToContact(event, sessionId);
+      }
+      if (sessionId && changes.length === 0 && STREAM_EVENTS.has(event.type) && ports.peekFile) {
+        const view = ports.peekFile();
+        if (
+          !view.dispatched[sessionId] &&
+          !view.dispatched[rootIdOf(event, sessionId)] &&
+          view.inflight?.secretaryConversationId !== sessionId
+        )
+          return;
       }
       const now = ports.now();
       const touched = new Set<string>(changes.map((change) => change.sessionId));

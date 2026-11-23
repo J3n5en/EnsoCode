@@ -2565,6 +2565,27 @@ describe('派出会话的流式事件', () => {
     expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000 + MINUTE);
     expect(h.state.file.dispatched.c2?.lastEventAt).toBe(20_000);
   });
+
+  it('与派出、在途投递都无关的会话流式事件不读派发记录（整份近 1MB）', () => {
+    const h = harness();
+    let reads = 0;
+    const file = h.ports.file;
+    h.ports.file = () => {
+      reads += 1;
+      return file();
+    };
+    h.ports.peekFile = () => h.state.file;
+    const other = (type: string) =>
+      ({ type, identity: { sessionId: 'zz', generation: 'g9' }, seq: 1, turnId: 't9' }) as never;
+    h.state.now = 1_000;
+    for (const type of ['message-upsert', 'message-update', 'tool-output', 'session-meta'])
+      h.host.onAgentEvent(other(type), []);
+    expect(reads).toBe(0);
+    // 派出会话的流式事件照常处理
+    h.host.onAgentEvent(event('message-update'), []);
+    expect(reads).toBeGreaterThan(0);
+    expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000);
+  });
 });
 
 describe('优雅重启续跑的会话', () => {
