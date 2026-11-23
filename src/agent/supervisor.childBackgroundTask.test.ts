@@ -327,6 +327,35 @@ describe('子代理起的后台任务归属子代理', () => {
     await ctx.supervisor.shutdown();
   });
 
+  it('持有中空闲时被 abort：发出接上被持有 Run 的 aborted 终态，之后任务完成不再唤醒', async () => {
+    const ctx = await setup();
+    ctx.supervisor.handleCommand({
+      type: 'prompt-child',
+      identity: child,
+      requestId: 'run-1',
+      requestBudget: true,
+      task: { text: 'start the server', images: [], fileMentions: [] },
+    });
+    await round(ctx.childSession, '服务已起，等它跑完', () =>
+      ctx.childBash.execute('call-1', {
+        command: 'sleep 0.3; echo child-bg-out',
+        background: true,
+      })
+    );
+    expect(turnsCompleted(ctx.events).at(-1)).toMatchObject({ awaitingTasks: true });
+
+    ctx.supervisor.handleCommand({ type: 'abort', identity: child });
+    await settle();
+    const last = turnsCompleted(ctx.events).at(-1);
+    expect(last).toMatchObject({ aborted: true, continues: 'run-1' });
+    expect(last?.turnId).not.toBe('run-1');
+
+    await until(() => ctx.events.some((event) => event.type === 'task-ended'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(promptTexts(ctx.childSession).some((text) => text.includes('child-bg-out'))).toBe(false);
+    await ctx.supervisor.shutdown();
+  });
+
   it('子代理还在跑的后台任务不算进父会话的收尾清单', async () => {
     const ctx = await setup();
     await ctx.childBash.execute('call-1', { command: 'sleep 30', background: true });

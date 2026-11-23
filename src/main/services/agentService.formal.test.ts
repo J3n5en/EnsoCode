@@ -310,6 +310,17 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         },
       ]);
     }
+    // 用户在子代理 tab 里对持有中、空闲的子代理点停止
+    const held = c.held;
+    if (held && !c.turn && c.live && u.faults < cfg.faults) {
+      out.push([
+        `idle-abort:${i}`,
+        () => {
+          u.faults++;
+          c.held = undefined;
+        },
+      ]);
+    }
     const agentId = c.agentId;
     if (!agentId) return;
     if (c.mode === 'coworker' && u.sends < cfg.sends) {
