@@ -339,7 +339,7 @@ import {
   systemReminderExtension,
   withSystemReminders,
 } from './systemReminder';
-import { settleChecklist } from './taskHygiene';
+import { awaitChecklist, settleChecklist } from './taskHygiene';
 import {
   buildInitialTitleUserText,
   buildRollingTitleUserText,
@@ -3085,13 +3085,24 @@ export class SessionSupervisor {
             : Promise.resolve([]);
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
         const base = await resolveSessionModel(runtime, selectedModel);
-        // 派发 thinking > 类型预设 > 模型条目预设 > 父会话。
+        // 派发 thinking > 类型预设 > 父会话 > 模型条目预设：默认值不压过用户当下的选择。
         // 类型预设来源：typed-spawn 用 resolved（Main 组装的类型配置），
         // coworker 直雇用 agentType（worker 侧快照）——此前 typed-spawn 不传，类型档被静默丢弃。
+        // 父会话读实时状态：会话中途改档走 set-thinking/set-reasoning，闭包里的 spawn 参数已过期。
+        const parentSession = this.sessions.get(identity.sessionId)?.session;
+        const parentLevel = parentSession
+          ? parentSession.thinkingLevel
+          : reasoningEnabled
+            ? thinkingLevel
+            : 'off';
+        const parentEnabled = parentSession
+          ? parentSession.model?.reasoning === true && parentLevel !== 'off'
+          : reasoningEnabled;
         const childReasoning = resolveChildReasoning(
-          pickChildReasoningOverride(thinkingOverride, resolved ?? agentType, selectedModel),
-          reasoningEnabled,
-          thinkingLevel
+          pickChildReasoningOverride(thinkingOverride, resolved ?? agentType),
+          parentEnabled,
+          parentLevel === 'off' ? undefined : parentLevel,
+          selectedModel
         );
         const fittedReasoning = fitChildReasoningToModel(childReasoning, base);
         const subModel = applyReasoningToModel(
@@ -3168,7 +3179,11 @@ export class SessionSupervisor {
           resolved?.tools === 'readonly' ||
           agentType?.tools === 'readonly'
             ? readOnlyTools(childGate)
-            : buildBaseTools(childGate, undefined, agentType?.writeScope, taskOwnerId)),
+            : [
+                ...buildBaseTools(childGate, undefined, agentType?.writeScope, taskOwnerId),
+                // 子代理要能读、停、表态自己起的任务，否则常驻任务会让持有中的 Run 收不了口
+                ...(taskOwnerId ? createTaskTools(this.bgTasks, taskOwnerId) : []),
+              ]),
           ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
           ...childPluginTools,
           ...(extraTools as Def[]),
@@ -5111,9 +5126,13 @@ export class SessionSupervisor {
       ...(continues ? { continues } : {}),
       ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
     });
-    // 忙时攒下、没等到工具结果的完成通知：持有中就开新一轮交给它
-    if (awaitingTasks && managed.childTaskNotices?.length) {
-      for (const text of managed.childTaskNotices.splice(0)) this.queueReminder(managed, text);
+    if (awaitingTasks) {
+      // 常驻任务没有完成事件：第一次因这批任务持有时唤醒一次
+      const fresh = this.takeUnnudged(managed);
+      if (fresh) this.queueReminder(managed, awaitChecklist(fresh, Date.now()));
+      // 忙时攒下、没等到工具结果的完成通知：持有中就开新一轮交给它
+      for (const text of managed.childTaskNotices?.splice(0) ?? [])
+        this.queueReminder(managed, text);
     }
     // 到时限时它正忙：这一轮结束再要它表态交报告
     if (awaitingTasks && run.expiry === 'due')
@@ -5170,6 +5189,16 @@ export class SessionSupervisor {
       this.bgTasks.stop(task.taskId, true);
   }
 
+  /** 没表态的任务里有没提醒过的：整批记为已提醒并返回，同一批任务只提醒一次 */
+  private takeUnnudged(managed: ManagedSession): BackgroundTaskInfo[] | undefined {
+    const open = this.bgTasks.undeclared(managed.identity.sessionId);
+    managed.taskWrapUpNudged ??= new Set();
+    const nudged = managed.taskWrapUpNudged;
+    if (!open.some((task) => !nudged.has(task.taskId))) return undefined;
+    for (const task of open) nudged.add(task.taskId);
+    return open;
+  }
+
   /** 收尾清单：根会话自己起的、还在跑、没表态的后台任务（子代理起的归子代理，不要求父会话表态） */
   private taskWrapUp(sessionId: string): string | undefined {
     if (sessionId.includes('::')) return undefined;
@@ -5181,13 +5210,9 @@ export class SessionSupervisor {
    * 不为此另起一轮；同一批任务只提醒一次。
    */
   private nudgeTaskWrapUp(managed: ManagedSession): void {
-    const sessionId = managed.identity.sessionId;
-    if (sessionId.includes('::')) return;
-    const open = this.bgTasks.undeclared(sessionId);
-    managed.taskWrapUpNudged ??= new Set();
-    const nudged = managed.taskWrapUpNudged;
-    if (!open.some((task) => !nudged.has(task.taskId))) return;
-    for (const task of open) nudged.add(task.taskId);
+    if (managed.identity.sessionId.includes('::')) return;
+    const open = this.takeUnnudged(managed);
+    if (!open) return;
     managed.taskWrapUpPending = true;
     const entry: AgentSessionCustomEntry = {
       kind: 'task-wrap-up-nudge',
