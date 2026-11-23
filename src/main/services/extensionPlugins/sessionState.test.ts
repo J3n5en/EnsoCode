@@ -134,4 +134,15 @@ describe('SessionStateTracker', () => {
     ]);
     expect(t.status('kept').state).toBe('running');
   });
+
+  it('ownStatus 只看主会话自身状态：子会话在跑时 status 为 running，但 ownStatus 为 idle', () => {
+    const t = new SessionStateTracker();
+    t.observe(ev({ type: 'status', status: 'idle' }));
+    t.observe(ev({ type: 'status', status: 'running', identity: child }));
+    expect(t.status('r').state).toBe('running');
+    expect(t.ownStatus('r').state).toBe('idle');
+
+    t.observe(ev({ type: 'status', status: 'running' }));
+    expect(t.ownStatus('r').state).toBe('running');
+  });
 });

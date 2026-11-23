@@ -55,6 +55,28 @@ export class SessionStateTracker {
     return { sessionId: root, state, pendingAsks, pendingApprovals };
   }
 
+  /** 仅主会话自身的状态（不把子代理运行折算进去）：用于判断主会话自身是否空闲可接排队消息 */
+  ownStatus(sessionId: string): PluginSessionStatus {
+    const root = rootOf(sessionId);
+    const own = this.nodes.get(root);
+    let pendingAsks = 0;
+    let pendingApprovals = 0;
+    for (const node of this.nodes.values()) {
+      if (node.root !== root) continue;
+      pendingAsks += node.asks.size;
+      pendingApprovals += node.approvals.size;
+    }
+    const state: PluginSessionState =
+      own?.status === 'failed'
+        ? 'error'
+        : pendingAsks + pendingApprovals > 0
+          ? 'waiting'
+          : own?.status === 'running'
+            ? 'running'
+            : 'idle';
+    return { sessionId: root, state, pendingAsks, pendingApprovals };
+  }
+
   /** 返回状态或挂起数有变化的主会话 */
   observe(event: RendererAgentEvent): SessionStatusPayload[] {
     const touched = this.apply(event);

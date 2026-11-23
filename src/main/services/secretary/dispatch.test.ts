@@ -942,6 +942,21 @@ describe('session_send', () => {
     expect(h.queued).toEqual([]);
   });
 
+  it('聚合状态因等子代理为 running、但父会话自身 idle：普通发送与 steer 都直接 prompt，不堵在队列里', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+    });
+    h.ports.ownStatus = async () => ({ state: 'idle', pendingAsks: 0, pendingApprovals: 0 });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '进度如何',
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.prompts).toEqual([{ conversationId: 'c1', text: '进度如何', deliveryId: 'id-1' }]);
+    expect(h.queued).toEqual([]);
+  });
+
   it('带 goal 且目标已完成：把新目标挂回会话行，会话按这个目标继续跑', async () => {
     const h = harness({
       file: dispatchedFile(),

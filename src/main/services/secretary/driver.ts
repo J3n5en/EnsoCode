@@ -45,6 +45,10 @@ export interface DispatchDriverPorts {
   row(conversationId: string): Record<string, unknown> | undefined;
   saveRuntime(conversationId: string, runtime: HeadlessSessionRuntime): void;
   status(conversationId: string): DriverSessionStatus;
+  /** 主会话自身状态（不含子代理运行态）：空闲时即可泵出排队消息，不必干等子代理结束 */
+  ownStatus?(conversationId: string): DriverSessionStatus;
+  /** 主会话名下是否有未结束的子代理 Run：有则不触发 goal 自动续跑 */
+  subagentsRunning?(conversationId: string): boolean;
   alive(conversationId: string): boolean;
   prompt(
     conversationId: string,
@@ -328,7 +332,7 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
     // 排队会话还没开始：不泵队列、不续目标，启动泵撤掉 queuedStart 后才归驱动者管
     if (row?.driver !== 'main' || queuedStartOf(row)) return null;
     seedTasks(conversationId, row);
-    const status = ports.status(conversationId);
+    const status = (ports.ownStatus ?? ports.status)(conversationId);
     return {
       status: status.state,
       started: ports.alive(conversationId),
@@ -452,7 +456,10 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
     const continuation = isContinuation(applied.deliver);
     if (
       continuation &&
-      (!allowContinue || runningCount(conversationId) > 0 || awaitingReminder.has(conversationId))
+      (!allowContinue ||
+        runningCount(conversationId) > 0 ||
+        ports.subagentsRunning?.(conversationId) === true ||
+        awaitingReminder.has(conversationId))
     )
       return;
     if (continuation) continued.add(conversationId);

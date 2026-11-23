@@ -1,7 +1,7 @@
 import { formatGoalResultChecks, formatGoalResultClaims } from '@shared/secretary/goalResult';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import { wrapUntrusted } from '@shared/secretary/transcript';
-import type { ProjectAuthority, TurnReport } from '@shared/types/agent';
+import type { AgentRunProgress, ProjectAuthority, TurnReport } from '@shared/types/agent';
 import { TURN_REPORT_MAX_CHARS } from '@shared/types/agentConstants';
 import {
   type DispatchRecord,
@@ -12,6 +12,7 @@ import {
   type SecretaryDispatchFile,
   type SecretaryProposal,
   type SecretaryResultKind,
+  type SecretarySubagentView,
   type SecretaryTakeoverView,
   type SecretaryTodo,
   type SecretaryUntrackedView,
@@ -490,9 +491,29 @@ export function linkedTodoSession(
 export interface BoardInput {
   rows: Readonly<Record<string, Record<string, unknown>>>;
   statuses: Readonly<Record<string, SecretarySessionStatus>>;
+  subagents?: Readonly<Record<string, readonly AgentRunProgress[]>>;
   projects: readonly ProjectAuthority[];
   todos: readonly SecretaryTodo[];
   aliases?: Readonly<Record<string, string>>;
+}
+
+function boardSubagents(
+  runs: readonly AgentRunProgress[] | undefined
+): SecretarySubagentView[] | undefined {
+  if (!runs || runs.length === 0) return undefined;
+  return runs.map((run) => {
+    const activity =
+      run.activity?.phase === 'tool'
+        ? [run.activity.tool, run.activity.detail].filter(Boolean).join(' ')
+        : run.activity?.phase;
+    return {
+      agentId: run.agentId,
+      runId: run.runId,
+      ...(run.title ? { title: redactSecrets(run.title) } : {}),
+      elapsedMs: run.elapsedMs,
+      ...(activity ? { activity: redactSecrets(activity) } : {}),
+    };
+  });
 }
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
@@ -557,6 +578,9 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(upstreamRetry ? { upstreamRetry } : {}),
       ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
       ...(going && record.backgroundPersistent ? { backgroundPersistent: true as const } : {}),
+      ...(going && boardSubagents(input.subagents?.[record.conversationId])
+        ? { subagents: boardSubagents(input.subagents?.[record.conversationId]) }
+        : {}),
       ...(stalled ? { stalled } : {}),
       ...(!going && record.leftoverTasks
         ? { leftoverTasks: { count: record.leftoverTasks.count } }

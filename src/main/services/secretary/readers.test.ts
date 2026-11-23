@@ -1240,3 +1240,56 @@ describe('排队会话的读取', () => {
     expect(result).toMatchObject({ state: 'queued', queuePosition: 2 });
   });
 });
+
+describe('等子代理的可见性', () => {
+  it('session_activity / session_tasks / session_read / session_list 都返回在跑子代理的名称、已运行时长与当前活动', async () => {
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        status: () => ({ state: 'running', pendingAsks: 0, pendingApprovals: 0 }),
+        subagents: () => [
+          {
+            agentId: 'a-1',
+            runId: 'r-1',
+            title: `实现子代理 ${SECRET}`,
+            status: 'running',
+            elapsedMs: 5 * 60_000 + 12_000,
+            activity: { phase: 'tool', tool: 'bash', detail: `pnpm test ${SECRET}` },
+          },
+        ],
+      })
+    );
+
+    const activity = await run(handlers.session_activity, { conversationId: 's1' });
+    const tasks = await run(handlers.session_tasks, { conversationId: 's1' });
+    const read = await run(handlers.session_read, { conversationId: 's1' });
+    const list = await run(handlers.session_list);
+
+    for (const payload of [activity, tasks, read]) {
+      expect(payload.subagents).toEqual([
+        expect.objectContaining({
+          agentId: 'a-1',
+          runId: 'r-1',
+          status: 'running',
+          elapsedMs: 5 * 60_000 + 12_000,
+          elapsedMinutes: 5,
+        }),
+      ]);
+      const serialized = JSON.stringify(payload.subagents);
+      expect(serialized).toContain('实现子代理');
+      expect(serialized).toContain('bash');
+      expect(serialized).not.toContain(SECRET);
+    }
+    expect(
+      (list.sessions as Array<{ conversationId: string; subagents?: unknown[] }>)[0]?.subagents
+    ).toEqual([
+      expect.objectContaining({
+        agentId: 'a-1',
+        runId: 'r-1',
+        elapsedMinutes: 5,
+      }),
+    ]);
+  });
+});

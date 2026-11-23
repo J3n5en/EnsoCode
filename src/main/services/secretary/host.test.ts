@@ -2646,6 +2646,23 @@ describe('优雅重启续跑的会话', () => {
     expect(h.state.file.outbox).toEqual([]);
   });
 
+  it('自动巡检：父会话空闲但在等运行中的子代理时，不误判停滞', () => {
+    const h = harness({});
+    h.state.patrolEnabled = true;
+    h.state.statuses.c1 = idle;
+    h.state.subagents.c1 = true;
+    h.state.rows.c1 = {
+      ...h.state.rows.c1,
+      goal: { text: '完成任务', status: 'active', autoTurns: 0 },
+    };
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.state.file.dispatched.c1.lastEventAt = 1_000;
+    h.state.now = 1_000 + 25 * 60_000;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
   it('续跑没接上：报 failed 并说明原因', () => {
     const h = harness({});
     h.state.statuses.c1 = idle;

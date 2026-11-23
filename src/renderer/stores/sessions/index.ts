@@ -58,6 +58,7 @@ import {
   cleanTitleSummarySource,
   extractRepresentativeTitle,
 } from '@/components/chat/mentionComposer';
+import { useSubagentRunsStore } from '@/stores/subagentRuns';
 import { useWorkflowRunsStore } from '@/stores/workflowRuns';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
@@ -1301,6 +1302,9 @@ export const useSessionsStore = create<SessionsState>()(
           deliveryId,
           restore: { kind: 'goal' },
         });
+      });
+      window.electronAPI.agent.onSubagentProgress?.((push) => {
+        useSubagentRunsStore.getState().replace(push.sessionId, push.runs);
       });
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {

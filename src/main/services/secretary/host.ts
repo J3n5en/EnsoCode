@@ -937,6 +937,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           : {}),
         ...(reminderPending(record.conversationId, now) ? { reminderPending: true } : {}),
         ...(upstreamRetryOf(rows[record.conversationId]) ? { upstreamWaiting: true } : {}),
+        ...(ports.subagentsRunning?.(record.conversationId) ? { subagentsRunning: true } : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {

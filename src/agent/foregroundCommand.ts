@@ -2,7 +2,7 @@ import type { BashOperations } from '@earendil-works/pi-coding-agent';
 import { type FileBackedRun, requestFileBackedRun } from './shell/detachedRun';
 
 /** 转后台的原因：用户点「转后台」、插话、到让位时刻 */
-export type DetachReason = 'user' | 'yield' | 'steer';
+export type DetachReason = 'user' | 'yield' | 'steer' | 'restart';
 
 /** 移交给后台任务的在跑进程：输出改接到新的接收者，退出码经 done 送达 */
 export interface DetachableProcess {

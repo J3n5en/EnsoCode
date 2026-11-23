@@ -199,3 +199,10 @@ describe('排队会话', () => {
     ).toEqual([]);
   });
 });
+
+describe('等子代理期间不误判停住', () => {
+  it('有在跑子代理时：即使父会话空闲超过 3 分钟和 20 分钟也不报 idle-stalled / goal-idle-stalled', () => {
+    const now = PATROL_IDLE_MS + 1;
+    expect(patrolAnomalies([facts({ state: 'idle', subagentsRunning: true })], now)).toEqual([]);
+  });
+});

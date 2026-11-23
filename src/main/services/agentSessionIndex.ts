@@ -323,6 +323,12 @@ export class AgentSessionIndex {
     return false;
   }
 
+  /** 仅根会话自身是否在跑（不含子会话 / 子代理） */
+  rootRunning(rootId: string): boolean {
+    const session = this.sessions.get(rootId);
+    return Boolean(session?.alive && (!session.ready || session.status === 'running'));
+  }
+
   linkBtw(sessionId: string, parentConversationId: string): void {
     this.btwParents.set(sessionId, parentConversationId);
   }

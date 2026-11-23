@@ -1204,4 +1204,42 @@ describe('排队会话', () => {
     expect(board.done).toEqual([]);
     expect(board.todos[0]).toMatchObject({ phase: 'active', sessionState: 'queued' });
   });
+
+  it('看板：正在等子代理的进行中会话附带脱敏后的子代理标题、耗时与活动', () => {
+    const file = emptyFile({
+      dispatched: {
+        run: record({ conversationId: 'run', projectId: 'p1' }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: { run: { id: 'run', title: '父会话', sessionFile: '/tmp/r.jsonl' } },
+      statuses: { run: running },
+      subagents: {
+        run: [
+          {
+            agentId: 'a1',
+            runId: 'r1',
+            title: '实现子代理',
+            status: 'running',
+            elapsedMs: 360_000,
+            activity: { phase: 'tool', tool: 'read', detail: 'src/a.ts' },
+          },
+        ],
+      },
+      projects,
+      todos: [],
+    });
+    expect(board.running[0]).toMatchObject({
+      conversationId: 'run',
+      subagents: [
+        {
+          agentId: 'a1',
+          runId: 'r1',
+          title: '实现子代理',
+          elapsedMs: 360_000,
+          activity: 'read src/a.ts',
+        },
+      ],
+    });
+  });
 });

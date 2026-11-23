@@ -4,8 +4,10 @@
 // 子代理接着断点续跑（不重跑已执行的 bash）→ 父会话收到完成通知。
 // --stalled-reply：父会话空闲、子代理回复写到一半卡住时退出 → 等满回复保底后 worker 收尾中止 →
 // Run 记成被打断并带续跑记录（不是 succeeded）→ 重启后子代理自动续跑、父会话收到完成通知。
+// --parent-wait：父会话在 subagent(wait) 阻塞等待子代理期间 → 验证侧栏子代理标记 → 插话(steer)
+// 提前打断 wait 并立即响应且不中断子代理 → 再次 wait 途中优雅重启 → 重启后子代理续跑并通知父会话。
 // 默认经关窗确认退出；加 --sigterm 改为 SIGTERM（不经确认，到 will-quit 才等安全点，同托盘退出）。
-//   node scripts/verify-subagent-restart.mjs [--keep] [--stalled-reply [--sigterm]]
+//   node scripts/verify-subagent-restart.mjs [--keep] [--stalled-reply [--sigterm]] [--parent-wait]
 // 退出码：全部通过 0，否则 1。不碰真实 userData，不抢焦点（窗口不显示、不进 Dock）。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -28,6 +30,7 @@ import { uiElementElectron } from './verify-electron.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEEP = process.argv.includes('--keep');
 const STALLED = process.argv.includes('--stalled-reply');
+const PARENT_WAIT = process.argv.includes('--parent-wait');
 const SIGTERM_QUIT = process.argv.includes('--sigterm');
 const OUT = mkdtempSync('/tmp/enso-subagent-restart-');
 const ENV = path.join(OUT, 'user-data');
@@ -167,6 +170,11 @@ function stall(res) {
   });
 }
 
+function extractRunId(text) {
+  const match = text.match(/\\?"runId\\?"\s*:\s*\\?"([^"\\]+)\\?"/);
+  return match ? match[1] : null;
+}
+
 function script(body) {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const first = textOf(messages[0]);
@@ -176,11 +184,16 @@ function script(body) {
     if (stallChild) return { who: 'child', action: 'stall', stall: true };
     if (!STALLED && !hasToolResult(messages)) {
       const bash = tools.find((name) => name === 'bash') ?? 'bash';
+      const waitSec = PARENT_WAIT ? 12 : 6;
       return {
         who: 'child',
         action: `tool ${bash}`,
         blocks: [
-          { type: 'tool_use', name: bash, input: { command: `sleep 6; echo step1 >> ${MARKER}` } },
+          {
+            type: 'tool_use',
+            name: bash,
+            input: { command: `sleep ${waitSec}; echo step1 >> ${MARKER}` },
+          },
         ],
         stop: 'tool_use',
       };
@@ -218,6 +231,46 @@ function script(body) {
         ],
         stop: 'tool_use',
       };
+    if (PARENT_WAIT) {
+      const runId = extractRunId(all);
+      if (all.includes('Paused waiting because EnsoCode is restarting')) {
+        return {
+          who: 'parent',
+          action: 'text PARENT-WAITING-AFTER-RESTART',
+          blocks: [{ type: 'text', text: 'PARENT-WAITING-AFTER-RESTART' }],
+          stop: 'end_turn',
+        };
+      }
+      if (all.includes('STEER-PING') && runId) {
+        return {
+          who: 'parent',
+          action: 'steer ack + wait #2',
+          blocks: [
+            { type: 'text', text: 'STEER-ACK' },
+            {
+              type: 'tool_use',
+              name: 'subagent',
+              input: { operation: 'wait', runId, timeoutMs: 120_000 },
+            },
+          ],
+          stop: 'tool_use',
+        };
+      }
+      if (runId) {
+        return {
+          who: 'parent',
+          action: 'tool subagent wait #1',
+          blocks: [
+            {
+              type: 'tool_use',
+              name: 'subagent',
+              input: { operation: 'wait', runId, timeoutMs: 120_000 },
+            },
+          ],
+          stop: 'tool_use',
+        };
+      }
+    }
     return {
       who: 'parent',
       action: 'text PARENT-WAITING',
@@ -458,6 +511,10 @@ async function main() {
     await stalledReply(first);
     return finish(provider);
   }
+  if (PARENT_WAIT) {
+    await parentWaitRestart(first, conversationId);
+    return finish(provider);
+  }
   await waitFor(
     () => requests.some((r) => r.who === 'child' && r.action.startsWith('tool')),
     '子代理发出 bash 调用'
@@ -610,6 +667,108 @@ async function stalledReply(first) {
     /\[agent\] restart resume|wake owner|cold resume|graceful-restart\] wake/
   ))
     note(`run2 log: ${line.trim()}`);
+  await quit(second, 30_000);
+}
+
+async function parentWaitRestart(first, conversationId) {
+  await waitFor(
+    () => requests.some((r) => r.who === 'parent' && r.action === 'tool subagent wait #1'),
+    '父会话进入 subagent wait #1'
+  );
+  await waitFor(
+    () => requests.some((r) => r.who === 'child' && r.action.startsWith('tool')),
+    '子代理发出 bash 调用'
+  );
+  await sleep(1000);
+  // 1. 侧栏子代理运行标记可见
+  const markerInfo = await waitFor(
+    () =>
+      first.page.evaluate(`(() => {
+        const el = document.querySelector('[data-enso="session-subagent-marker"]');
+        return el ? { text: el.textContent, title: el.getAttribute('title') } : null;
+      })()`),
+    '侧栏显示子代理标记',
+    10_000
+  );
+  check(
+    Boolean(markerInfo?.title?.includes('restart probe')),
+    '侧栏会话行可见正在等的子代理名称',
+    markerInfo
+  );
+
+  // 2. 插话(steer)打断长时间 subagent wait，子代理不受影响
+  note('sending steer STEER-PING while parent is inside subagent(wait)');
+  const steerRes = await first.page.evaluate(`(async () => {
+    return await window.electronAPI.agent.steer(${JSON.stringify(conversationId)}, 'STEER-PING');
+  })()`);
+  check(steerRes?.ok === true, 'steer 调用成功', steerRes);
+  await waitFor(
+    () => requests.some((r) => r.who === 'parent' && r.action === 'steer ack + wait #2'),
+    '父会话 wait 提前返回并立即响应 STEER-PING',
+    15_000
+  );
+  const steerReq = requests.find((r) => r.who === 'parent' && r.action === 'steer ack + wait #2');
+  check(steerReq?.lastText.includes('STEER-PING'), '插话内容立即注入父会话', steerReq?.lastText);
+  check(!existsSync(MARKER), '插话提前结束 wait 时子代理仍在跑（marker 未写）');
+  await sleep(800);
+
+  // 3. 父会话再次停在 subagent(wait) 途中优雅退出：主动 detach wait，父子都干净到安全点
+  note('SIGTERM run1 while parent is in subagent(wait) #2 and child bash is still running');
+  const quitAt = Date.now();
+  await quit(first);
+  const quitSec = (Date.now() - quitAt) / 1000;
+  note(`run1 exited in ${quitSec.toFixed(1)}s`);
+  check(quitSec < 45, '重启未卡在 wait 超时，迅速到达安全点退出', quitSec);
+  check(readFileSync(MARKER, 'utf8').trim() === 'step1', '退出前子代理 bash 跑完');
+
+  const agentDir = path.join(ENV, 'agent');
+  const checkpoint = json(path.join(agentDir, 'restart-checkpoint.json'));
+  const parentEntry = checkpoint?.sessions?.find((s) => !s.sessionId.includes('::'));
+  const childEntry = checkpoint?.sessions?.find((s) => s.sessionId.includes('::'));
+  check(
+    parentEntry?.nextStep === 'model-request' && childEntry?.nextStep === 'model-request',
+    '断点里父会话与子会话都停在 model-request 安全点',
+    checkpoint?.sessions
+  );
+  const ledger = json(path.join(agentDir, 'subagent-runs.json'));
+  const pendingRun = ledger?.runs?.find((r) => r.notified === false && r.restart);
+  check(Boolean(pendingRun), '台账保留子代理续跑记录', ledger?.runs);
+
+  // 4. 重启后子代理自动续跑并收尾，父会话收到同一 runId 的完成通知
+  const childBefore = requests.filter((r) => r.who === 'child').length;
+  const second = await launch('run2');
+  await waitFor(
+    () => requests.some((r) => r.who === 'parent' && r.action.includes('PARENT-GOT-IT')),
+    '重启后父会话收到子代理完成通知并回 PARENT-GOT-IT',
+    90_000
+  );
+  const childAfter = requests.filter((r) => r.who === 'child').slice(childBefore);
+  check(
+    childAfter.length === 1 && childAfter[0].action === 'final CHILD-DONE',
+    '子代理重启后只补发一次收尾请求，不重跑 bash',
+    childAfter
+  );
+  check(readFileSync(MARKER, 'utf8').trim() === 'step1', '子代理 bash 全程只执行过一次');
+  const notice = requests.find((r) => r.who === 'parent' && r.action.includes('PARENT-GOT-IT'));
+  check(
+    Boolean(
+      pendingRun &&
+        /succeeded/.test(notice?.lastText ?? '') &&
+        notice.lastText.includes(pendingRun.runId)
+    ),
+    '父会话收到重启前同一 runId 的 succeeded 完成通知',
+    { runId: pendingRun?.runId, notice: notice?.lastText }
+  );
+  check(
+    requests.some((r) => r.who === 'parent' && r.action === 'text PARENT-WAITING-AFTER-RESTART'),
+    '父会话重启续跑收到了 wait 主动脱离提示而非报错'
+  );
+  check(
+    !requests.some(
+      (r) => r.who === 'parent' && /<agent-notification>[\s\S]*interrupted/.test(r.lastText)
+    ),
+    '父会话未收到误报的 interrupted 通知'
+  );
   await quit(second, 30_000);
 }
 

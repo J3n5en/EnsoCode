@@ -9,6 +9,7 @@ import {
   wrapUntrusted,
 } from '@shared/secretary/transcript';
 import type {
+  AgentRunProgress,
   ConversationAuthority,
   ParentHistoryTailResult,
   ProjectAuthority,
@@ -86,6 +87,8 @@ export interface SecretaryReadPorts {
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
+  /** 该会话名下正在运行的子代理进度；缺省表示没有 */
+  subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   /** 会话（含子代理）挂着的自定提醒；缺省表示没有 */
   reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   /** 派发记录上的结构化结果；缺省表示没有 */
@@ -284,6 +287,30 @@ function queueFields(session: ListedSession): Record<string, unknown> {
     : { queuePosition: session.queue.position };
 }
 
+function subagentActivityText(run: AgentRunProgress): string | undefined {
+  const activity = run.activity;
+  if (!activity) return undefined;
+  if (activity.phase === 'tool') {
+    return [activity.tool, activity.detail].filter(Boolean).join(' ') || 'tool';
+  }
+  return activity.phase;
+}
+
+function presentSubagents(runs: readonly AgentRunProgress[], source: string) {
+  return runs.map((run) => {
+    const activity = subagentActivityText(run);
+    return {
+      agentId: run.agentId,
+      runId: run.runId,
+      ...(run.title ? { title: wrapUntrusted(source, redactSecrets(run.title)) } : {}),
+      status: run.status,
+      elapsedMs: run.elapsedMs,
+      elapsedMinutes: Math.max(0, Math.floor(run.elapsedMs / 60_000)),
+      ...(activity ? { activity: wrapUntrusted(source, redactSecrets(activity)) } : {}),
+    };
+  });
+}
+
 /**
  * repo_status 的对外形状。提交标题与作者是仓库里的自由文本，按不可信内容包起来；
  * 路径与 ref 沿用 project_list / project_info 的口径只做脱敏，保证秘书能原样回传。
@@ -404,6 +431,10 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const rows = [];
       for (const session of scoped.slice(0, limit)) {
         const status = await ports.status(session.conversationId);
+        const subagents = presentSubagents(
+          (await ports.subagents?.(session.conversationId)) ?? [],
+          `session:${session.conversationId}`
+        );
         rows.push({
           conversationId: session.conversationId,
           projectId: session.projectId,
@@ -413,6 +444,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           ...(session.goal ? { goal: session.goal } : {}),
+          ...(subagents.length > 0 ? { subagents } : {}),
         });
       }
       return { ok: true, result: { sessions: rows } };
@@ -474,6 +506,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       }));
       const nextBefore = page.ok ? (messages[0]?.index ?? page.baseIndex) : (before ?? 0);
       const reminders = (await ports.reminders?.(conversationId)) ?? [];
+      const subagents = presentSubagents((await ports.subagents?.(conversationId)) ?? [], source);
       return {
         ok: true,
         result: {
@@ -497,6 +530,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
                 })),
               }
             : {}),
+          ...(subagents.length > 0 ? { subagents } : {}),
           ...goal,
         },
       };
@@ -535,12 +569,17 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         };
       });
       const reminders = (await ports.reminders?.(conversationId)) ?? [];
+      const subagents = presentSubagents(
+        (await ports.subagents?.(conversationId)) ?? [],
+        `session:${conversationId}`
+      );
       return {
         ok: true,
         result: {
           conversationId,
           projectId: session.projectId,
           tasks,
+          ...(subagents.length > 0 ? { subagents } : {}),
           ...(reminders.length > 0
             ? {
                 reminders: reminders.map((item) => ({
@@ -571,9 +610,15 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ...(call.at === undefined ? {} : { at: call.at }),
         ...(call.command ? { command: wrapUntrusted(source, redactSecrets(call.command)) } : {}),
       }));
+      const subagents = presentSubagents((await ports.subagents?.(conversationId)) ?? [], source);
       return {
         ok: true,
-        result: { conversationId, projectId: session.projectId, calls },
+        result: {
+          conversationId,
+          projectId: session.projectId,
+          calls,
+          ...(subagents.length > 0 ? { subagents } : {}),
+        },
       };
     },
 
@@ -667,6 +712,9 @@ export function readPortsFor(
     },
     async tasks(conversationId) {
       return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
+    },
+    async subagents(conversationId) {
+      return (await import('../../ipc/agent')).observedSubagentProgress(conversationId);
     },
     async reminders(conversationId) {
       return (await import('../sessionReminders')).readSessionReminders(conversationId);

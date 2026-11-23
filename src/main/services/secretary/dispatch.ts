@@ -35,6 +35,7 @@ import {
 } from '@shared/secretary/tools';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type {
+  AgentRunProgress,
   AttachedImage,
   ConversationAuthority,
   ProjectAuthority,
@@ -177,6 +178,9 @@ export interface SecretaryDispatchPorts {
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
+  /** 主会话自身状态（不含子代理运行态）：自身空闲时直接 prompt，不必排队干等子代理结束 */
+  ownStatus?(conversationId: string): MaybePromise<SecretarySessionStatus>;
+  subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   createSession(request: MainSessionRequest): Promise<MainSessionResult>;
   prompt(
     conversationId: string,
@@ -1865,7 +1869,8 @@ export function createSecretaryDispatchHandlers(
           ports.saveDispatch(file);
         }
       }
-      if (status.state === 'running') {
+      const ownStatus = ports.ownStatus ? await ports.ownStatus(conversationId) : status;
+      if (ownStatus.state === 'running') {
         // 插话复用用户自己的 steer 通道：pi 在当前工具调用结束后读到它，不等整轮结束
         if (mode === 'steer') {
           const body = await message();
@@ -2998,6 +3003,7 @@ export interface SecretaryStatePorts {
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
+  subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
 }
 
 export async function buildSecretaryState(
@@ -3043,16 +3049,26 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
   const projects = await ports.projects();
   const aliases = (await ports.projectAliases?.()) ?? {};
   const statuses: Record<string, SecretarySessionStatus> = {};
+  const subagents: Record<string, readonly AgentRunProgress[]> = {};
   for (const record of Object.values(file.dispatched)) {
     if (!rows[record.conversationId]) continue;
     statuses[record.conversationId] = await ports.status(record.conversationId);
+    const runs = await ports.subagents?.(record.conversationId);
+    if (runs && runs.length > 0) subagents[record.conversationId] = runs;
   }
   return {
     file,
     rows,
     projects,
     aliases,
-    board: buildBoard(file, { rows, statuses, projects, aliases, todos: await ports.todos() }),
+    board: buildBoard(file, {
+      rows,
+      statuses,
+      subagents,
+      projects,
+      aliases,
+      todos: await ports.todos(),
+    }),
   };
 }
 
@@ -3097,6 +3113,10 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
     status: async (conversationId) =>
       (await import('../../ipc/agent')).observedSessionStatus(conversationId),
+    ownStatus: async (conversationId) =>
+      (await import('../../ipc/agent')).observedOwnSessionStatus(conversationId),
+    subagents: async (conversationId) =>
+      (await import('../../ipc/agent')).observedSubagentProgress(conversationId),
     createSession: async (request) =>
       (await import('../../ipc/secretary')).createSessionViaMain(request),
     prompt: async (conversationId, text, deliveryId, images) =>

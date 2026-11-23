@@ -107,6 +107,7 @@ import {
   reloadConversationFromMenu,
   restartConversationFromMenu,
 } from '@/components/chat/reloadConversationAction';
+import { SubagentMarker } from '@/components/chat/SubagentMarker';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
 import { PhoneDeviceChip, PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import { phoneLinkEntry, showCompactButton } from '@/components/nodes/phoneLinkEntry';
@@ -2986,6 +2987,7 @@ function ConversationRow({
         )}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
+        <SubagentMarker conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />
         <SecretaryDispatchBadge count={dispatchRunning} />
         {!renaming && isUpstreamWaitingGoal(conversation.goal) && (

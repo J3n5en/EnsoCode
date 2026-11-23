@@ -2213,7 +2213,8 @@ export class SessionSupervisor {
           return;
         }
         // 持有中空闲：没有活轮可插，pi 只会把插话排进没人取的队列，改开新一轮接着这次 Run
-        if (managed.agentRun && managed.status !== 'running') {
+        // 空闲等异步子代理 / 后台任务或刚结束回合的竞态同样没有活轮可插，一律改开新一轮
+        if (managed.status !== 'running' && !managed.session.isStreaming) {
           this.promptFresh(managed, command.text, images, command.deliveryId);
           return;
         }
@@ -6284,6 +6285,9 @@ export class SessionSupervisor {
     // 去抖中的完成通知先投递：闲会话被唤起（回合在跑），停在边界的会话进持久化待投递队列
     for (const sessionId of this.sessions.keys()) this.notifier.flush(sessionId);
     for (const managed of this.sessions.values()) {
+      // 重启时父会话若正停在阻塞等待（如 subagent wait），主动解除等待而不打断子代理：
+      // 父会话随即到 model-request 安全点，子会话也不再被父会话的 toolStartAt 挡住
+      this.bgTasks.detachBlockingWaits(managed.identity.sessionId, 'restart');
       // 停在边界后用户又插话 / 排了 follow-up：pi 要等 prepareNextTurn 返回后才把它写进会话文件，
       // 这时落断点新进程就丢了这句话。放开挂起让 loop 先写入，回合接着跑，到下一个边界或空闲再判
       const queued = managed.session.pendingMessageCount > 0;
