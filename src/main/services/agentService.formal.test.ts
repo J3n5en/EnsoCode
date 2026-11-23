@@ -685,7 +685,8 @@ const none = {
   faults: 1,
   crashes: FULL ? 2 : 1,
   holds: 1,
-  deletes: 1,
+  // 删除父会话只在默认档的 coworker 与两档的 task 穷举；FULL 的 coworker 叠加它状态数爆炸
+  deletes: FULL ? 0 : 1,
 };
 
 const configs = [
@@ -696,7 +697,7 @@ const configs = [
   },
   {
     name: 'task：stop、停放与 resume、worker 退出与重启',
-    cfg: { ...none, modes: ['task'] as Mode[], resumes: 1 },
+    cfg: { ...none, modes: ['task'] as Mode[], resumes: 1, deletes: 1 },
     min: 300,
   },
   ...(FULL
