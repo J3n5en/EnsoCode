@@ -15,6 +15,8 @@ const LABELS: Record<ExtensionPluginPermission, string> = {
   'agent.intercept': '拦截并改写会话事件',
   'agent.inject':
     '向会话发送消息，并可触发该会话继续执行；默认只发到发起调用的会话，允许后可发到任意运行中的会话',
+  'agent.injectTrusted':
+    '以你的名义向普通会话发任务：发出的消息不标成外部数据，模型会照着执行（秘书会话仍按外部数据处理）',
   'process.background': '常驻后台并拉起子进程',
   'plugin.call': '调用其他插件',
   'ui.clipboard': '写入剪贴板',

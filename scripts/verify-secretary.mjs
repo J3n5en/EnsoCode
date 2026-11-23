@@ -3344,6 +3344,72 @@ async function verifyTelegramContact(cdp, setup) {
 
   log('== 联系方式：里程碑出站遵循 notify');
   const dispatchDirect = directDispatcher(page, setup);
+
+  log('== 联系方式：派出会话转给秘书的提问不推手机、侧栏不亮待答');
+  const relayQuestion = '转交提问选哪个分支';
+  const relayRun = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: `选分支 [[tool:ask_user {"question":"${relayQuestion}","options":["A","B"]}]]`,
+    title: '转交提问',
+  });
+  assert(relayRun.ok, '联系方式: 会提问的派出会话建成', relayRun);
+  const relayPending = await waitFor(
+    () =>
+      Object.values(readJson(dispatchFile).relays ?? {}).find(
+        (relay) => relay.conversationId === relayRun.conversationId && relay.status === 'pending'
+      ) ?? null,
+    'relay pending',
+    60_000,
+    500
+  );
+  const relayRow = async () =>
+    page(`
+      const id = ${JSON.stringify(relayRun.conversationId)};
+      S().selectConversation(${JSON.stringify(setup.secretaryId)});
+      const asks = await until(() => (S().conversations[id]?.pendingAsks ?? []).length > 0 ? S().conversations[id].pendingAsks : null, 15000);
+      await sleep(300);
+      const rows = [...document.querySelectorAll('[data-enso=session-row]')].filter((row) =>
+        row.textContent.includes('转交提问')
+      );
+      return JSON.stringify({
+        relay: asks?.[0]?.relay?.name ?? null,
+        answered: asks?.[0]?.answered?.by ?? null,
+        rows: rows.map((row) => row.dataset.status),
+      });
+    `);
+  await sleep(1500);
+  const pendingView = await relayRow();
+  log(`  relay pending view ${JSON.stringify(pendingView)}`);
+  assert(pendingView.relay, '联系方式: 原会话的提问标着已转给秘书', pendingView);
+  assert(
+    pendingView.rows.length > 0 && !pendingView.rows.includes('waiting'),
+    '联系方式: 转交中的提问不让侧栏亮待答',
+    pendingView
+  );
+  assert(
+    !tg.sent.some((message) => message.text?.includes(relayQuestion)),
+    '联系方式: 转给秘书的提问不推到手机',
+    tg.sent.slice(-3)
+  );
+  const relayAnswered = await secretaryTool(
+    cdp,
+    setup,
+    'session_answer',
+    { conversationId: relayRun.conversationId, askId: relayPending.askId, answer: 'A' },
+    '替它选'
+  );
+  assert(
+    relayAnswered.text?.includes('"status":"answered"'),
+    '联系方式: 秘书代答成功',
+    relayAnswered
+  );
+  await sleep(1500);
+  assert(
+    !tg.sent.some((message) => message.text?.includes(relayQuestion)),
+    '联系方式: 秘书代答后手机上也没有这条提问',
+    tg.sent.slice(-3)
+  );
+
   const runDispatch = () =>
     dispatchDirect('session_create', {
       projectId: setup.projectId,

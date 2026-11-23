@@ -11,7 +11,7 @@ import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { appendInboundImageLines } from '@shared/secretary/inboundImages';
-import { wrapUntrusted } from '@shared/secretary/transcript';
+import { wrapPluginDelivery } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   cleanToolBatchLabel,
@@ -1780,13 +1780,13 @@ export function registerAgentHandlers(): void {
         return undefined;
       return identity;
     },
-    // 插件消息进秘书会话一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导
-    (sessionId, pluginId, text) => {
+    // 插件消息一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导。
+    // 声明了 agent.injectTrusted 的插件可以给普通会话发不包的任务；秘书会话不认，照包
+    (sessionId, pluginId, text, trusted) => {
       const conversation = sourceAuthority?.conversation(sessionId);
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-      return isSecretaryProject(project)
-        ? wrapUntrusted(`plugin:${pluginId}`, redactSecrets(text))
-        : text;
+      if (isSecretaryProject(project)) return wrapPluginDelivery(pluginId, redactSecrets(text));
+      return trusted ? text : wrapPluginDelivery(pluginId, text);
     }
   );
   const sessionSource = () => ({

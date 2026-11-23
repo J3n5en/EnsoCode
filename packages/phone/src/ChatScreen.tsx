@@ -430,8 +430,8 @@ export function ChatScreen(props: Props) {
         {sessionId !== null && (
           // 浏览器里 safe-area 为 0，用 0.5rem 兜底不贴边；standalone 下取
           // home indicator 的实际高度，不再叠加，避免下方留出多余空白
-          <div className="phone-dock @container shrink-0 pt-1 pb-safe">
-            <div className={CHAT_COL}>
+          <div className="phone-dock @container flex min-h-0 flex-col pt-1 pb-safe">
+            <div className={cn(CHAT_COL, 'flex min-h-0 flex-col')}>
               {/* 自动重试横幅：只展示不可取消（pair 桥无 abort-retry 通道，整轮 abort 已够用） */}
               {view?.retry && <RetryBar retry={view.retry} />}
               {/* 排队区：复用桌面组件，编辑/删除/立即发送/打断并发送经桩发 pair 命令 */}
@@ -452,31 +452,37 @@ export function ChatScreen(props: Props) {
                 subagents={view?.subagents ?? []}
                 readOnly={props.deviceReadOnly}
               />
-              {bot?.outbox}
-              {bot?.notice && (
-                <p className="mb-1 rounded-md bg-destructive/10 px-2 py-1 text-destructive text-xs">
-                  {bot.notice}
-                </p>
-              )}
-              {props.deviceReadOnly ? (
-                <p className="mb-1 rounded-md bg-muted px-2 py-1 text-center text-muted-foreground text-xs">
-                  {readOnlyBanner(props.readOnlyRejected)}
-                </p>
-              ) : (
-                <>
-                  <ApprovalBar
-                    approvals={view?.approvals ?? []}
-                    onRespond={props.onApproval}
-                    clockOffset={props.clockOffset}
-                  />
-                  <AskBar
-                    asks={view?.asks ?? []}
-                    onAnswer={props.onAsk}
-                    clockOffset={props.clockOffset}
-                    autoFocus={false}
-                  />
-                </>
-              )}
+              {/* TaskBar 的详情浮层向上弹出，不能放进滚动容器；可能很高的审批/提问放这里 */}
+              <div
+                data-enso="composer-stack"
+                className="flex min-h-0 flex-col overflow-y-auto overscroll-contain"
+              >
+                {bot?.outbox}
+                {bot?.notice && (
+                  <p className="mb-1 rounded-md bg-destructive/10 px-2 py-1 text-destructive text-xs">
+                    {bot.notice}
+                  </p>
+                )}
+                {props.deviceReadOnly ? (
+                  <p className="mb-1 rounded-md bg-muted px-2 py-1 text-center text-muted-foreground text-xs">
+                    {readOnlyBanner(props.readOnlyRejected)}
+                  </p>
+                ) : (
+                  <>
+                    <ApprovalBar
+                      approvals={view?.approvals ?? []}
+                      onRespond={props.onApproval}
+                      clockOffset={props.clockOffset}
+                    />
+                    <AskBar
+                      asks={view?.asks ?? []}
+                      onAnswer={props.onAsk}
+                      clockOffset={props.clockOffset}
+                      autoFocus={false}
+                    />
+                  </>
+                )}
+              </div>
               {!readOnly && (
                 <Composer
                   commands={slashCommands}

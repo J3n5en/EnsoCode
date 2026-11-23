@@ -1,4 +1,8 @@
-import { conversationHasRunningChild } from '@shared/conversationDotTone';
+import {
+  conversationHasRunningChild,
+  type PendingAskMark,
+  userAskCount,
+} from '@shared/conversationDotTone';
 
 export interface SidebarDirectoryEntry {
   id: string;
@@ -18,7 +22,7 @@ export interface SidebarDirectoryEntry {
   forkedFromConversationId?: string;
   unread?: boolean;
   activeRenewedAt?: number;
-  pendingAsks?: readonly { requestId: string }[];
+  pendingAsks?: readonly PendingAskMark[];
   pendingApprovals?: readonly unknown[];
   coworkerIds?: readonly string[];
   coworkerName?: string;
@@ -48,7 +52,7 @@ type Source = {
   forkedFromConversationId?: string;
   unread?: boolean;
   activeRenewedAt?: number;
-  pendingAsks?: readonly { requestId: string }[];
+  pendingAsks?: readonly PendingAskMark[];
   pendingApprovals?: readonly unknown[];
   coworkerIds?: readonly string[];
   coworkerName?: string;
@@ -230,7 +234,7 @@ export function selectCoworkerTabConversations(
             status: conversation.status ?? 'idle',
             spawning: conversation.spawning === true,
             pendingApprovalCount: conversation.pendingApprovals?.length ?? 0,
-            pendingAskCount: conversation.pendingAsks?.length ?? 0,
+            pendingAskCount: userAskCount(conversation.pendingAsks),
             coworkerName: conversation.coworkerName,
             child: conversation.child?.agentInstanceName
               ? { agentInstanceName: conversation.child.agentInstanceName }

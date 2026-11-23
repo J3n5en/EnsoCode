@@ -217,6 +217,8 @@ export interface GateDeps {
       images: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
+      /** 插件请求免包裹；是否生效由服务按 agent.injectTrusted 判 */
+      trusted: boolean;
     }
   ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
   /** 让发起窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
@@ -743,6 +745,8 @@ export class PluginHostGate {
           throw pluginError('INVALID_ARGS', 'deliverAs 不合法');
         if (a.triggerTurn !== undefined && typeof a.triggerTurn !== 'boolean')
           throw pluginError('INVALID_ARGS', 'triggerTurn 不合法');
+        if (a.trusted !== undefined && typeof a.trusted !== 'boolean')
+          throw pluginError('INVALID_ARGS', 'trusted 不合法');
         const bridge = this.deps.inject;
         if (!bridge) throw pluginError('UNSUPPORTED', '当前环境不能注入消息');
         this.admitInject(pluginId);
@@ -752,6 +756,7 @@ export class PluginHostGate {
           images,
           deliverAs,
           triggerTurn: a.triggerTurn === true,
+          trusted: a.trusted === true,
         };
         const result = await this.untilRunning(
           () => bridge(pluginId, input),

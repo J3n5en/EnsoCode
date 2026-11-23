@@ -17,14 +17,61 @@ export interface ReadableMessage {
 }
 
 const END_TAG = '</untrusted-content';
+const OPEN_TAG = '<untrusted-content';
 
 /**
- * 不可信内容包裹。正文里出现的结束标签先转义，否则内容可以提前闭合包裹，
- * 让后半段文本落回"可信"位置。
+ * 不可信内容包裹。正文里的结束标签先转义，否则内容可以提前闭合包裹，让后半段落回"可信"位置；
+ * 开始标签也转义，否则内容能伪造出另一层来源。转义幂等，包过的正文再包不会越转越多。
  */
 export function wrapUntrusted(source: string, text: string): string {
-  const escaped = text.split(END_TAG).join('<\\/untrusted-content');
+  const escaped = text
+    .split(END_TAG)
+    .join('<\\/untrusted-content')
+    .split(OPEN_TAG)
+    .join('<\\untrusted-content');
   return `<untrusted-content source="${source}">${escaped}</untrusted-content>`;
+}
+
+/** wrapUntrusted 转义的逆操作：界面上还原成原本打的字 */
+export function unescapeUntrusted(text: string): string {
+  return text
+    .split('<\\/untrusted-content')
+    .join(END_TAG)
+    .split('<\\untrusted-content')
+    .join(OPEN_TAG);
+}
+
+/** 插件投递送给模型前的包裹。旧版插件自己包好的同来源完整一层原样保留，不叠第二层 */
+export function wrapPluginDelivery(pluginId: string, text: string): string {
+  const source = `plugin:${pluginId}`;
+  const head = `<untrusted-content source="${source}">`;
+  const tail = '</untrusted-content>';
+  const inner =
+    text.startsWith(head) && text.endsWith(tail)
+      ? text.slice(head.length, text.length - tail.length)
+      : null;
+  return wrapUntrusted(source, inner !== null && !inner.includes(END_TAG) ? inner : text);
+}
+
+const HOST_WRAP = /^<untrusted-content(?:\s[^<>\n]*)?>([\s\S]*)<\/untrusted-content>$/u;
+const PLUGIN_OPEN = /<\\?untrusted-content source="plugin:[^"<>\n]*"[^<>\n]*>/u;
+const TRAILING_CLOSE = /<\\?\/untrusted-content>\s*$/u;
+
+/**
+ * 显示用：剥掉包裹，来源由卡片标题表达。只给界面用，送给模型的仍是原文。
+ * 宿主包裹里的标签都转义过，唯一的字面结束标签就是它自己的；旧版插件自己包的一层
+ * 是第一个插件来源的开始标签加正文末尾的结束标签。其余标签是第三方打的字，还原转义后照显示。
+ */
+export function unwrapUntrustedForDisplay(text: string): string {
+  const host = HOST_WRAP.exec(text.trim());
+  const hosted = Boolean(host && !host[1].includes(END_TAG));
+  let out = hosted && host ? host[1] : text;
+  const open = PLUGIN_OPEN.exec(out);
+  const close = TRAILING_CLOSE.exec(out);
+  if (open && close && close.index >= open.index + open[0].length)
+    out = out.slice(0, open.index) + out.slice(open.index + open[0].length, close.index);
+  if (hosted) out = unescapeUntrusted(out);
+  return out === text ? text : out.trim();
 }
 
 /** 一条消息的可见正文：只取 text 段，工具调用参数、工具输出、思考一律丢弃 */

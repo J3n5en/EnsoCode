@@ -1,5 +1,6 @@
 import { toPairProjectEntry } from '@enso/pair';
 import { conversationCwd } from '@shared/conversationCwd';
+import { userAskCount } from '@shared/conversationDotTone';
 import { normalizeLocale, translate } from '@shared/i18n';
 import { catalogSyncFingerprint, pairJsonFingerprint } from '@shared/pair/metaSync';
 import { projectDisplayName } from '@shared/projectName';
@@ -96,9 +97,7 @@ function buildPayload(): PairCatalogPayload {
       ...(c.reasoningEnabled !== undefined ? { reasoningEnabled: c.reasoningEnabled } : {}),
       ...(c.thinkingLevel ? { thinkingLevel: c.thinkingLevel } : {}),
       ...(c.unread === true ? { unread: true } : {}),
-      ...(c.pendingAsks && c.pendingAsks.length > 0
-        ? { pendingAskCount: c.pendingAsks.length }
-        : {}),
+      ...(userAskCount(c.pendingAsks) > 0 ? { pendingAskCount: userAskCount(c.pendingAsks) } : {}),
       ...(c.pendingApprovals && c.pendingApprovals.length > 0
         ? { pendingApprovalCount: c.pendingApprovals.length }
         : {}),
