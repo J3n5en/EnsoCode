@@ -98,6 +98,30 @@ describe('snapshotReady', () => {
       step({ now: 8700, liveChars: 45, settingsLoaded: true, liveLoading: false, ...on })
     ).toBe(true);
   });
+
+  it('启动请求都回来、没有缺帧满 QUIET 就揭开，不等文字量稳定 2.5s', () => {
+    const step = createSnapshotTracker(0, 5000);
+    const ready = { settingsLoaded: true, liveLoading: false, hostOnline: true };
+    const early = { ...ready, settingsLoaded: false, requestsIdle: true };
+    // 设置未到时请求空闲不算
+    expect(step({ now: 200, liveChars: 45, ...early })).toBe(false);
+    // 有请求在途：照旧等
+    expect(step({ now: 1000, liveChars: 1000, ...ready, requestsIdle: false })).toBe(false);
+    expect(step({ now: 1200, liveChars: 1100, ...ready, requestsIdle: true })).toBe(false);
+    // 会话还在流式输出、文字一直在变，也照样揭开
+    expect(step({ now: 1600, liveChars: 1300, ...ready, requestsIdle: true })).toBe(false);
+    expect(step({ now: 1800, liveChars: 1400, ...ready, requestsIdle: true })).toBe(true);
+  });
+
+  it('空闲中途又有请求发出：空闲时长重新计', () => {
+    const step = createSnapshotTracker(0, 5000);
+    const ready = { settingsLoaded: true, liveLoading: false, hostOnline: true };
+    expect(step({ now: 1000, liveChars: 1000, ...ready, requestsIdle: true })).toBe(false);
+    expect(step({ now: 1400, liveChars: 1100, ...ready, requestsIdle: false })).toBe(false);
+    expect(step({ now: 1600, liveChars: 1200, ...ready, requestsIdle: true })).toBe(false);
+    expect(step({ now: 2100, liveChars: 1300, ...ready, requestsIdle: true })).toBe(false);
+    expect(step({ now: 2200, liveChars: 1400, ...ready, requestsIdle: true })).toBe(true);
+  });
 });
 
 describe('offlineSnapshotNote', () => {

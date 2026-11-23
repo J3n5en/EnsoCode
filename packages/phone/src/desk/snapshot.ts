@@ -12,6 +12,8 @@ const SAVED_HEADER = 'x-desk-saved';
 /** 桌面在线后盖着的上限：在线却迟迟起不来时不能一直挡住（桌面不在线的时间不计） */
 const MAX_SNAPSHOT_MS = 20_000;
 const SETTLED_MS = 2_500;
+/** 启动请求全部回来、没有缺帧持续这么久：数据已到齐，不必再等文字量稳定 */
+const QUIET_MS = 600;
 /** 文字太少的快照（存的时候 renderer 正在重载）盖上去只是一片空白 */
 const MIN_SNAPSHOT_CHARS = 200;
 
@@ -28,6 +30,8 @@ export interface SnapshotProgress {
   liveLoading: boolean;
   /** 桌面在线（不在线时快照一直留着，好过空白页） */
   hostOnline: boolean;
+  /** 设置与历史就绪后，renderer 请求全部回来且没有缺帧多久了 */
+  idleFor?: number;
 }
 
 export interface SnapshotSample {
@@ -36,13 +40,17 @@ export interface SnapshotSample {
   settingsLoaded: boolean;
   liveLoading: boolean;
   hostOnline: boolean;
+  /** renderer 没有在途请求、宿主帧没有缺口；不知道时按不空闲 */
+  requestsIdle?: boolean;
 }
 
 export function snapshotReady(p: SnapshotProgress): boolean {
   if (!p.hostOnline) return false;
   if (p.elapsed >= MAX_SNAPSHOT_MS) return true;
   if (!p.settingsLoaded || p.liveLoading) return false;
-  return p.liveChars >= p.snapChars * 0.8 || p.stableFor >= SETTLED_MS;
+  return (
+    p.liveChars >= p.snapChars * 0.8 || p.stableFor >= SETTLED_MS || (p.idleFor ?? 0) >= QUIET_MS
+  );
 }
 
 /**
@@ -59,19 +67,18 @@ export function createSnapshotTracker(
   let lastAt = startedAt;
   let wasOnline = false;
   let onlineMs = 0;
+  let idleSince: number | null = null;
   return (sample) => {
     if (wasOnline) onlineMs += sample.now - lastAt;
     lastAt = sample.now;
     wasOnline = sample.hostOnline;
-    if (
-      !sample.hostOnline ||
-      !sample.settingsLoaded ||
-      sample.liveLoading ||
-      sample.liveChars !== lastChars
-    ) {
+    const waiting = !sample.hostOnline || !sample.settingsLoaded || sample.liveLoading;
+    if (waiting || sample.liveChars !== lastChars) {
       lastChars = sample.liveChars;
       changedAt = sample.now;
     }
+    if (waiting || !sample.requestsIdle) idleSince = null;
+    else idleSince ??= sample.now;
     return snapshotReady({
       elapsed: onlineMs,
       liveChars: sample.liveChars,
@@ -80,6 +87,7 @@ export function createSnapshotTracker(
       stableFor: sample.now - changedAt,
       liveLoading: sample.liveLoading,
       hostOnline: sample.hostOnline,
+      idleFor: idleSince === null ? 0 : sample.now - idleSince,
     });
   };
 }

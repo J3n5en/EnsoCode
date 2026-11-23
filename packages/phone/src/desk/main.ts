@@ -22,6 +22,7 @@ import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
 import { createDeviceDrawer } from './deviceDrawer';
 import { createDeskDevices, toggleDeskPush } from './devices';
+import { formatDiagnostics } from './diagnostics';
 import { themeOfFrame, watchFrameTheme } from './drawerTheme';
 import {
   buildReady,
@@ -359,6 +360,16 @@ async function main(): Promise<void> {
       }),
     theme: () => themeOfFrame(iframes.main),
     watchTheme: (listener) => watchFrameTheme(iframes.main, listener),
+    diagnostics: () =>
+      formatDiagnostics({
+        now: Date.now(),
+        bornAt: tunnel.bornAt,
+        build: version,
+        userAgent: navigator.userAgent,
+        visibility: document.visibilityState,
+        link: toRemoteLinkStatus(link, pushAvailability()),
+        trace: tunnel.trace,
+      }),
   });
 
   const bridge: RemoteBridge = {
@@ -575,6 +586,7 @@ async function main(): Promise<void> {
       release();
       return;
     }
+    tunnel.note('snapshot-reveal');
     el.style.opacity = '0';
     setTimeout(release, 200);
   };
@@ -624,6 +636,7 @@ async function main(): Promise<void> {
     }
     syncing = true;
     coverSavedAt = saved.savedAt;
+    tunnel.note('snapshot-cover');
     renderStatus();
     const step = createSnapshotTracker(Date.now(), saved.chars);
     snapshotTimer = setInterval(() => {
@@ -640,6 +653,7 @@ async function main(): Promise<void> {
           iframes.main?.contentDocument?.querySelector('[data-timeline-loading]')
         ),
         hostOnline: lastState === 'online',
+        requestsIdle: tunnel.idle('main'),
       });
       if (!ready) return;
       dropSnapshot();
@@ -649,6 +663,7 @@ async function main(): Promise<void> {
   /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
   const reads = new Map<string, { h: string; json: string }>();
   (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
+  (window as Window & { __deskTrace?: unknown }).__deskTrace = tunnel.trace;
 
   /** 切后台/离开时存一份当前界面和只读缓存，下次启动先显示它 */
   const keepSnapshot = async (): Promise<void> => {
