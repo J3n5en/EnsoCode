@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   cleanupSessionFiles: vi.fn(),
   credentials: vi.fn(async () => new Set<string>()),
   readSettingsState: vi.fn((): Record<string, unknown> | undefined => undefined),
+  onConversationsRemoved: vi.fn(),
   sendComputerResult: vi.fn(),
   computerInvoke: vi.fn(),
   computerCloseAll: vi.fn(),
@@ -189,6 +190,7 @@ vi.mock('./sessionIndex', () => ({
 vi.mock('./settings', () => ({
   readSettings: mocks.readSettings,
   readSettingsState: mocks.readSettingsState,
+  onConversationsRemoved: mocks.onConversationsRemoved,
 }));
 vi.mock('../services/memoryHost', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/memoryHost')>()),
@@ -315,6 +317,16 @@ describe('agent IPC Main identity boundary', () => {
     mocks.configurePairSessionHost.mock.calls.at(-1)![0].abort('conv-1');
     expect(mocks.abortSession).toHaveBeenLastCalledWith(parent);
     expect(cancelOwner).not.toHaveBeenCalled();
+  });
+
+  it('用户删除会话：名下子代理 Run 记为父会话已不在，不再补通知', () => {
+    const abandonOwner = vi.spyOn(getAgentService()!, 'abandonOwner');
+    const removed = mocks.onConversationsRemoved.mock.calls.at(-1)?.[0] as (ids: string[]) => void;
+
+    removed(['conv-1', 'conv-2']);
+
+    expect(abandonOwner).toHaveBeenCalledWith('conv-1');
+    expect(abandonOwner).toHaveBeenCalledWith('conv-2');
   });
 
   it('插件投递进任意会话都包成不可信内容；trusted 只在普通会话免包，秘书会话一律包', () => {

@@ -316,6 +316,33 @@ describe('重启打断的子代理自动续跑', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it('冷启动后父会话还没就绪就被用户停止：台账里等续跑 / 等补通知的条目清掉，就绪后不续跑也不通知', async () => {
+    for (const mode of ['task', 'coworker'] as const) {
+      const { service, runtime, notify, spawned, child, ledger } = await restartDuringRun(mode);
+      expect(service.claimsRestartChild(child.sessionId)).toBe(true);
+
+      await service.cancelOwner('chat-1');
+
+      expect(service.restartInterruptedOwners()).toEqual([]);
+      expect(service.claimsRestartChild(child.sessionId)).toBe(false);
+      expect(ledger.load().find((entry) => entry.runId === spawned.runId)).toMatchObject({
+        notified: true,
+      });
+      expect(ledger.load()[0]?.restart).toBeUndefined();
+      service.recoverOwner(context);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(runtime.resume).not.toHaveBeenCalled();
+      expect(runtime.retry).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+      // 再重启一次也不会复活
+      const again = setup({ ledger, notify, restartCheckpoint: checkpointOf(child) });
+      expect(again.service.restartInterruptedOwners()).toEqual([]);
+      again.service.recoverOwner(context);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(again.runtime.retry).not.toHaveBeenCalled();
+    }
+  });
+
   it('等续跑期间用户停止父会话：不再自动续跑，task 停放可手动 resume，台账不留续跑记录', async () => {
     const ledger = fileLikeLedger();
     const notify = vi.fn();
@@ -340,5 +367,22 @@ describe('重启打断的子代理自动续跑', () => {
     await expect(
       service.resume({ context, requestId: 'r', agentId: spawned.value.agentId })
     ).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe('父会话就绪前被用户停止', () => {
+  it('同一 Main 里 worker 退出打断的 Run 等着补通知：用户先停止，父会话就绪后不再补通知唤醒它', async () => {
+    const ledger = fileLikeLedger();
+    const notify = vi.fn();
+    const { service } = setup({ ledger, notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({ type: 'worker-exited' });
+
+    await service.cancelOwner('chat-1');
+    service.recoverOwner(context);
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(ledger.load()).toMatchObject([{ runId: spawned.value.runId, notified: true }]);
   });
 });
