@@ -361,6 +361,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const memoryEnabled = !disabledBuiltinTools.includes('memory');
   const [stats, setStats] = React.useState<MemoryStats | null>(null);
   const [jobs, setJobs] = React.useState<MemoryJobsSnapshot>(EMPTY_JOBS);
+  const [jobsLoaded, setJobsLoaded] = React.useState(false);
   const [models, setModels] = React.useState<EmbeddingModelDto[]>([]);
   const [progress, setProgress] = React.useState<EmbeddingDownloadProgressDto | null>(null);
   const [chatModels, setChatModels] = React.useState<ChatModelDto[]>([]);
@@ -396,6 +397,8 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   // 轮询回调里要读最新值，state 会被闭包定住
   const backfillingRef = React.useRef(false);
   backfillingRef.current = backfilling;
+  const distillingRef = React.useRef(false);
+  const runningSessionsRef = React.useRef<ReadonlySet<string>>(new Set());
   // 点补齐后立刻拉一次，不等下一个轮询周期
   const loadRef = React.useRef<(() => void) | null>(null);
 
@@ -435,6 +438,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     if (!memoryEnabled) {
       setStats(null);
       setJobs(EMPTY_JOBS);
+      setJobsLoaded(false);
       return;
     }
     let cancelled = false;
@@ -442,18 +446,27 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
       void window.electronAPI.memory.stats().then((next) => {
         if (!cancelled) setStats(next);
       });
-      void window.electronAPI.memory.jobs().then((next) => {
-        if (cancelled) return;
-        setJobs(next);
-        // 重嵌收尾（或压根没建任务：模型未就绪 / 没有待补的行）就退出补齐态，
-        // 否则按钮会一直显示「补齐中」
-        if (backfillingRef.current && next.reembed?.status !== 'running') setBackfilling(false);
-      });
+      void window.electronAPI.memory
+        .jobs()
+        .then((next) => {
+          if (cancelled) return;
+          setJobs(next);
+          setJobsLoaded(true);
+          // 重嵌收尾（或压根没建任务：模型未就绪 / 没有待补的行）就退出补齐态，
+          // 否则按钮会一直显示「补齐中」
+          if (backfillingRef.current && next.reembed?.status !== 'running') setBackfilling(false);
+        })
+        .catch(() => {
+          if (!cancelled) setJobsLoaded(true);
+        });
     };
     loadRef.current = load;
     load();
     // 记忆库变化时统计要立刻跟上，不等下一个轮询周期
-    const offChanged = window.electronAPI.memory.onChanged(load);
+    const offChanged = window.electronAPI.memory.onChanged(() => {
+      load();
+      refreshSessions();
+    });
     const timer = window.setInterval(load, backfilling ? BACKFILL_POLL_MS : JOBS_POLL_MS);
     return () => {
       cancelled = true;
@@ -461,7 +474,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
       offChanged();
       window.clearInterval(timer);
     };
-  }, [memoryEnabled, backfilling]);
+  }, [memoryEnabled, backfilling, refreshSessions]);
 
   const groups = groupSessionsByProject(sessions);
   const pendingSessions = sessions.filter((session) => !session.distilled);
@@ -520,8 +533,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   };
 
   const runDistill = async (targets: DistillableSessionDto[], token: string, force = false) => {
+    if (distillingRef.current || runningSessionsRef.current.size > 0) return;
     const selected = chatModels.find((model) => model.id === chatModel) ?? null;
     if (localChatBlocksDistill(selected)) return;
+    distillingRef.current = true;
     setDistilling(token);
     const startedAt = Date.now();
     setBatch({ done: 0, total: targets.length, startedAt });
@@ -530,9 +545,13 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
         await window.electronAPI.memory.distillSession(targets[i].sessionId, force);
         setBatch({ done: i + 1, total: targets.length, startedAt });
       }
+    } catch {
+      // 失败原因由任务快照 / 主进程日志呈现，避免未处理 rejection 卡住交互
     } finally {
+      distillingRef.current = false;
       setDistilling(null);
       setBatch(null);
+      loadRef.current?.();
       refreshSessions();
       // 记忆库是另一个组件在拉数据，提炼写入后它不会自己知道
       onLibraryChanged?.();
@@ -567,6 +586,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     isRemoteEmbeddingId(embeddingModel) || selectedModel?.runtime === 'openai-compatible';
   const jobRows = React.useMemo(() => toJobRows(jobs), [jobs]);
   const runningSessions = React.useMemo(() => runningDistillSessions(jobs), [jobs]);
+  runningSessionsRef.current = runningSessions;
   const distillBusy = distilling !== null || runningSessions.size > 0;
 
   return (
@@ -1246,7 +1266,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
             <Button
               size="sm"
               variant="outline"
-              disabled={!memoryEnabled || distillBusy || chatBlocked !== null}
+              disabled={!memoryEnabled || !jobsLoaded || distillBusy || chatBlocked !== null}
               onClick={() => requestBulkDistill(sessions, 'all', t('All sessions'))}
             >
               {distillBusy
@@ -1300,6 +1320,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                       variant="outline"
                       disabled={
                         !memoryEnabled ||
+                        !jobsLoaded ||
                         distillBusy ||
                         group.sessions.length === 0 ||
                         chatBlocked !== null
@@ -1350,7 +1371,9 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                         size="sm"
                         variant="ghost"
                         className="shrink-0"
-                        disabled={!memoryEnabled || distillBusy || chatBlocked !== null}
+                        disabled={
+                          !memoryEnabled || !jobsLoaded || distillBusy || chatBlocked !== null
+                        }
                         onClick={() =>
                           void runDistill([session], session.sessionId, session.distilled)
                         }
@@ -1403,7 +1426,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 <Button
                   variant={bulkPrompt.pending.length > 0 ? 'default' : 'outline'}
                   size="sm"
-                  disabled={bulkPrompt.pending.length === 0}
+                  disabled={bulkPrompt.pending.length === 0 || !jobsLoaded || distillBusy}
                   onClick={() => {
                     const target = bulkPrompt;
                     setBulkPrompt(null);
@@ -1417,6 +1440,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 <Button
                   variant={bulkPrompt.pending.length > 0 ? 'outline' : 'default'}
                   size="sm"
+                  disabled={!jobsLoaded || distillBusy}
                   onClick={() => {
                     const target = bulkPrompt;
                     setBulkPrompt(null);

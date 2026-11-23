@@ -462,6 +462,74 @@ describe('memoryHost 会话结束蒸馏接线', () => {
     configureMemoryDistill({ enabled: false });
   });
 
+  it('服务重启/崩溃后，关闭自动提炼时遗留的 running 任务会重置为 pending，jobs 冷启动即可读到且不卡死', async () => {
+    const { dispatchMemoryOp } = await import('../../memoryService/ops');
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: 'none' });
+    configureMemoryDistill({ enabled: false, complete: () => null });
+    const conn = memoryDatabase();
+    const now = new Date().toISOString();
+    conn
+      .prepare(
+        `INSERT INTO memory_jobs (kind, target, payload, status, cursor, total, done, failed, created_at, updated_at)
+         VALUES ('distill', 'crashed-s1#fp', ?, 'running', 1, 0, 0, 0, ?, ?)`
+      )
+      .run(
+        JSON.stringify({
+          sessionId: 'crashed-s1',
+          sessionFile: '/fake/crashed.jsonl',
+          projectId: null,
+        }),
+        now,
+        now
+      );
+    // 模拟 utilityProcess 崩溃后重启：db 尚未打开，首个请求是设置页拉 jobs 快照
+    closeMemoryDb();
+
+    const result = (await dispatchMemoryOp('jobs', undefined)) as {
+      snapshot: { distill: { sessionId: string; status: string; error: string | null }[] };
+    };
+    const recovered = result.snapshot.distill.find((j) => j.sessionId === 'crashed-s1');
+    expect(recovered).toBeDefined();
+    expect(recovered?.status).toBe('pending');
+    expect(recovered?.error).toBeTruthy();
+  });
+
+  it('提炼进入 running 时立即发出变更通知，便于多窗口与远程页同步状态', async () => {
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: 'none' });
+    let releaseLlm!: () => void;
+    const llmStarted = new Promise<void>((resolve) => {
+      configureMemoryDistill({
+        enabled: false,
+        readTranscript: async () => [{ role: 'user', text: 'remember multi-window sync' }],
+        complete: () => async () => {
+          resolve();
+          await new Promise<void>((done) => {
+            releaseLlm = done;
+          });
+          return JSON.stringify({ memories: [] });
+        },
+      });
+    });
+    const onChanged = vi.fn();
+    setMemoryChangeListener(onChanged);
+    const run = distillSessionNow({
+      sessionId: 'notify-running-s1',
+      sessionFile: '/fake/notify.jsonl',
+      projectId: null,
+    });
+    await llmStarted;
+    await new Promise((r) => setTimeout(r, 220));
+    try {
+      expect(onChanged).toHaveBeenCalled();
+    } finally {
+      releaseLlm();
+      await run;
+      setMemoryChangeListener(null);
+    }
+  });
+
   it('开关打开：写入 source=distill；同会话同内容重复触发不重复调 LLM 也不重复写', async () => {
     const complete = vi.fn(llm('pnpm workspaces chosen for monorepo'));
     configureMemoryDistill({

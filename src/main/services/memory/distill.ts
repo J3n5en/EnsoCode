@@ -718,6 +718,19 @@ export function listResumableDistillJobs(db: Database.Database): DistillJob[] {
   ).map(toJob);
 }
 
+/** 开库时清理上次进程异常退出遗留的 running 行，避免快照永久卡在进行中；pending 仍由续跑或手动提炼接手 */
+export function resetInterruptedDistillJobs(db: Database.Database): number {
+  return db
+    .prepare(
+      `UPDATE memory_jobs
+       SET status = 'pending',
+           error = COALESCE(error, 'interrupted before completion'),
+           updated_at = ?
+       WHERE kind = ? AND status = 'running'`
+    )
+    .run(new Date().toISOString(), KIND).changes;
+}
+
 /** 设置页出口：最近的蒸馏任务（含结构化 notes），新在前 */
 export function listDistillJobs(db: Database.Database, limit = 50): DistillJob[] {
   return (
@@ -738,6 +751,8 @@ export interface RunDistillOptions {
   chatSpaceId?: string;
   /** 透传 createMemory 的 on_memory_created hook（蒸馏出的记忆同样要排 KG 抽取） */
   onCreated?: (memory: Memory) => void;
+  /** 任务落库进入 running 后回调，便于多窗口与远程页立即刷新快照 */
+  onStarted?: () => void;
 }
 
 /**
@@ -793,6 +808,7 @@ export async function runDistillJob(
   }
   const attempts = job.attempts + 1;
   finish('running', attempts, zero, null, []);
+  opts.onStarted?.();
 
   let distilled: DistilledMemory[];
   try {

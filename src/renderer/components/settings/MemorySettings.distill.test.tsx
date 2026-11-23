@@ -32,6 +32,27 @@ vi.mock('@/components/chat/ModelPicker', () => ({
   ModelPicker: () => null,
 }));
 
+vi.mock('@/components/ui/dialog', () => {
+  const Wrap = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
+  return {
+    Dialog: ({ open, children }: { open?: boolean; children?: React.ReactNode }) =>
+      open ? <div>{children}</div> : null,
+    DialogClose: ({
+      render,
+      children,
+    }: {
+      render?: React.ReactElement;
+      children?: React.ReactNode;
+    }) => (render ? <div>{children}</div> : <button type="button">{children}</button>),
+    DialogContent: Wrap,
+    DialogDescription: Wrap,
+    DialogFooter: Wrap,
+    DialogHeader: Wrap,
+    DialogPanel: Wrap,
+    DialogTitle: Wrap,
+  };
+});
+
 const session: DistillableSessionDto = {
   sessionId: 's1',
   title: 'Fix the retry loop',
@@ -59,25 +80,36 @@ function job(id: number, status: DistillJobDto['status'], sessionId = 's1'): Dis
 }
 
 let jobs: MemoryJobsSnapshot;
+let sessionsList: DistillableSessionDto[];
+let jobsFn: () => Promise<MemoryJobsSnapshot>;
+let onChangedListener: (() => void) | null;
 let root: Root | undefined;
 let container: HTMLElement;
 const distillSession = vi.fn();
 
 beforeEach(() => {
   jobs = { distill: [], kg: [], reembed: null, kgFailed: 0 };
+  sessionsList = [session];
+  jobsFn = async () => jobs;
+  onChangedListener = null;
   distillSession.mockReset();
   const dom = parseHTML('<html><body><div id="root"></div></body></html>');
   Object.assign(dom.window, {
     electronAPI: {
       memory: {
         stats: async () => null,
-        jobs: async () => jobs,
+        jobs: () => jobsFn(),
         models: async () => [],
         chatModels: async () => [],
         onModelProgress: () => () => {},
         onChatModelProgress: () => () => {},
-        onChanged: () => () => {},
-        distillableSessions: async () => [session],
+        onChanged: (cb: () => void) => {
+          onChangedListener = cb;
+          return () => {
+            if (onChangedListener === cb) onChangedListener = null;
+          };
+        },
+        distillableSessions: async () => sessionsList,
         distillSession,
       },
     },
@@ -160,5 +192,83 @@ describe('MemorySettings 提炼按钮状态', () => {
 
     expect(distillAllButton()?.textContent).toBe('提炼中…');
     expect(distillAllButton()?.disabled).toBe(true);
+  });
+
+  it('切回页面后首个任务快照返回前禁用按钮，防止竞态重复触发', async () => {
+    let resolveJobs!: (snapshot: MemoryJobsSnapshot) => void;
+    jobsFn = () =>
+      new Promise<MemoryJobsSnapshot>((resolve) => {
+        resolveJobs = resolve;
+      });
+    await mount();
+    expect(distillAllButton()?.disabled).toBe(true);
+    await act(async () => distillAllButton()?.click());
+    expect(distillSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveJobs({ ...jobs, distill: [job(1, 'running')] });
+    });
+    expect(distillAllButton()?.textContent).toBe('提炼中…');
+    expect(distillAllButton()?.disabled).toBe(true);
+  });
+
+  it('快速连点不会重复触发 distillSession', async () => {
+    distillSession.mockReturnValue(new Promise(() => {}));
+    await mount();
+    const btn = distillAllButton();
+    await act(async () => {
+      btn?.click();
+      btn?.click();
+    });
+    expect(distillSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('批量确认弹窗打开期间另一端进入 running，确认按钮禁用且不会重复触发', async () => {
+    sessionsList = [session, { ...session, sessionId: 's2', distilled: true }];
+    await mount();
+    await act(async () => distillAllButton()?.click());
+    jobs = { ...jobs, distill: [job(1, 'running')] };
+    await act(async () => {
+      onChangedListener?.();
+    });
+    const buttons = [...container.querySelectorAll('button')];
+    const remainingBtn = buttons.find((b) => b.textContent?.includes('只提炼剩下的')) as
+      | HTMLButtonElement
+      | undefined;
+    const redistillBtn = buttons.find((b) => b.textContent?.includes('重新提炼全部')) as
+      | HTMLButtonElement
+      | undefined;
+    expect(remainingBtn?.disabled).toBe(true);
+    expect(redistillBtn?.disabled).toBe(true);
+    await act(async () => {
+      remainingBtn?.click();
+      redistillBtn?.click();
+    });
+    expect(distillSession).not.toHaveBeenCalled();
+  });
+
+  it('distillSession 失败（如服务崩溃/超时）后清理状态并重拉快照，不卡死按钮', async () => {
+    const jobsSpy = vi.fn(async () => jobs);
+    jobsFn = jobsSpy;
+    distillSession.mockRejectedValueOnce(new Error('memory service exited'));
+    await mount();
+    const callsBefore = jobsSpy.mock.calls.length;
+    await act(async () => distillAllButton()?.click());
+    expect(distillAllButton()?.textContent).toBe('全部提炼（1）');
+    expect(distillAllButton()?.disabled).toBe(false);
+    expect(jobsSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  it('外部提炼完成触发 onChanged 后同步刷新可提炼会话列表', async () => {
+    jobs = { ...jobs, distill: [job(1, 'running')] };
+    await mount();
+    expect(distillAllButton()?.textContent).toBe('提炼中…');
+
+    jobs = { ...jobs, distill: [job(1, 'done')] };
+    sessionsList = [{ ...session, distilled: true }];
+    await act(async () => {
+      onChangedListener?.();
+    });
+    expect(distillAllButton()).toBeNull();
   });
 });

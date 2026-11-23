@@ -125,6 +125,7 @@ export async function dispatchMemoryOp(op: string, args: unknown): Promise<unkno
     case 'reembed-progress':
       return core.getMemoryReembedProgress();
     case 'jobs': {
+      const db = existingDb();
       const snapshot = toMemoryJobsSnapshot(
         core.getMemoryDistillJobs(),
         core.getMemoryKgJobs(),
@@ -132,7 +133,6 @@ export async function dispatchMemoryOp(op: string, args: unknown): Promise<unkno
       ) as MemoryJobsSnapshot;
       // kg 任务只存 memoryId；界面要标题，服务侧一并带出
       const memoryTitles = new Map<string, string>();
-      const db = existingDb();
       if (db && snapshot.kg.length > 0) {
         const unique = [...new Set(snapshot.kg.map((job) => job.memoryId))];
         const rows = db
