@@ -27,6 +27,34 @@ export function wrapUntrusted(source: string, text: string): string {
   return `<untrusted-content source="${source}">${escaped}</untrusted-content>`;
 }
 
+const HOST_WRAP = /^<untrusted-content(?:\s[^<>\n]*)?>([\s\S]*)<\/untrusted-content>$/u;
+const TAG = /<untrusted-content(?:\s[^<>\n]*)?>|<\\?\/untrusted-content>/gu;
+
+/**
+ * 显示用：剥掉包裹，来源由卡片标题表达。只给界面用，送给模型的仍是原文。
+ * 宿主包裹里的结束标签都转义过，唯一的字面结束标签就是它自己的；
+ * 内层只剥最外一级成对的标签，不成对就原样显示，第三方写的标签不动。
+ */
+export function unwrapUntrustedForDisplay(text: string): string {
+  const host = HOST_WRAP.exec(text.trim());
+  const body = host && !host[1].includes(END_TAG) ? host[1] : text;
+  let cuts: [number, number][] = [];
+  let depth = 0;
+  for (const match of body.matchAll(TAG)) {
+    const opening = match[0].startsWith('<untrusted');
+    if (opening ? depth === 0 : depth === 1)
+      cuts.push([match.index, match.index + match[0].length]);
+    depth += opening ? 1 : -1;
+    if (depth < 0) break;
+  }
+  if (depth !== 0) cuts = [];
+  const out = cuts.reduceRight(
+    (rest, [start, end]) => rest.slice(0, start) + rest.slice(end),
+    body
+  );
+  return out === text ? text : out.trim();
+}
+
 /** 一条消息的可见正文：只取 text 段，工具调用参数、工具输出、思考一律丢弃 */
 export function readableText(message: ProjectedMessage): string {
   return message.content
