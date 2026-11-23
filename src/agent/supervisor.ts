@@ -2414,7 +2414,7 @@ export class SessionSupervisor {
           managed.session.sessionManager.getBranch(),
           command.entryId
             ? { entryId: command.entryId }
-            : { userIndexFromEnd: command.userIndexFromEnd ?? 0 }
+            : { turnIndexFromEnd: command.turnIndexFromEnd ?? 0 }
         );
         if (!entryId) {
           this.options.emit({
