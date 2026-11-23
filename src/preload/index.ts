@@ -1479,6 +1479,8 @@ const electronAPI = {
       conversationId: string
     ): Promise<{ ok: true; value: WorktreeStatus } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_STATUS, conversationId),
+    statuses: (): Promise<Record<string, WorktreeStatus>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_STATUSES),
     remove: (
       conversationId: string
     ): Promise<{ ok: true; value: null } | { ok: false; error: string }> =>
