@@ -7,7 +7,7 @@ import {
   removesAllConversations,
   type SequencedConversationsPatch,
 } from '@shared/conversationsPatch';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { localMainContents } from '../renderers';
 import { remoteSenders } from './senders';
 

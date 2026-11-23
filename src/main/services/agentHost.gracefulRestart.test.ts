@@ -138,3 +138,30 @@ it('菜单重启：没有会话明确返回 no-session；有会话只发一次�
   expect(requestGracefulWorkerRestart()).toBe('requested');
   expect(types(1).filter((type) => type === 'graceful-restart')).toHaveLength(1);
 });
+
+it('换代：断点与换代都转给 Main（子代理 Run 据此续跑），换代不算 worker 退出', () => {
+  const events: Array<{ type: string }> = [];
+  setAgentEventListener((event) => events.push(event));
+  // 接上一个用例：第二代已收到重启请求
+  const checkpoint = {
+    version: 1,
+    pid: 101,
+    writtenAt: 2,
+    sessions: [
+      {
+        sessionId: `${identity.sessionId}::cw-a`,
+        generation: '22222222-2222-4222-8222-222222222222',
+        sessionFile: '/data/sessions/child.jsonl',
+        seq: 3,
+        nextStep: 'model-request',
+        messageCount: 2,
+        toolsInFlight: [],
+      },
+    ],
+  };
+  fork.children[1].emit('message', { type: 'graceful-restart-ready', checkpoint });
+  expect(events).toContainEqual({ type: 'graceful-restart-ready', checkpoint });
+  fork.children[1].emit('exit', 0);
+  expect(events).toContainEqual({ type: 'worker-swapped' });
+  expect(events).not.toContainEqual(expect.objectContaining({ type: 'worker-exited' }));
+});

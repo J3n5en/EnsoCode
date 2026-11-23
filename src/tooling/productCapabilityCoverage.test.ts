@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceDomain } from '../shared/productSurfaces';
-import { IPC_CHANNELS } from '../shared/types';
+import { IPC_CHANNELS } from '../shared/types/ipc';
 import {
   AUTHORITATIVE_COVERAGE_SOURCES,
   auditAuthorityCoverage,

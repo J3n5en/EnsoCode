@@ -1,8 +1,8 @@
 import type { OccupancyTool } from '@shared/occupancy';
 import { EMPTY_PLAN_STATE } from '@shared/planMode';
 import { SHELL_LIMITS } from '@shared/shellLimits';
-import { BUILTIN_AGENT_TYPES } from '@shared/types';
 import type { AgentTypeSpawnConfig, SubagentModelOption } from '@shared/types/agent';
+import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
 import { AskManager, createAskTool } from './ask';
 import { createTaskTools } from './backgroundTasks';
 import { codemodeToolSnapshot } from './codemode';

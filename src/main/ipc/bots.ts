@@ -10,9 +10,8 @@ import { BOT_NOTES_MAX_CHARS } from '@shared/bots/notes';
 import { isSkipReply } from '@shared/bots/router';
 import { assignTeamNames } from '@shared/bots/team';
 import type { SessionIdentity } from '@shared/builtinAgents';
-import { BUILTIN_AGENT_TYPES, IPC_CHANNELS } from '@shared/types';
 import { type AgentWorkerEvent, type AttachedImage, isDeliveryId } from '@shared/types/agent';
-import type { SkillEntry } from '@shared/types/assets';
+import { BUILTIN_AGENT_TYPES, type SkillEntry } from '@shared/types/assets';
 import {
   type BotChat,
   type BotChatWorkspace,
@@ -44,6 +43,7 @@ import type {
   BotTimelineResult,
   BotWriteIpcResult,
 } from '@shared/types/botIpc';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { isUsageRangeDays } from '@shared/usage/types';
 import {
   abortCompleteText,

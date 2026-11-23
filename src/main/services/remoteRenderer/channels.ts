@@ -1,4 +1,4 @@
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 
 /** 宿主原生能力或作用于宿主桌面的通道（打开窗口/对话框/定位文件/系统剪贴板等），远端一律不可调 */
 const DENIED_PREFIXES = [

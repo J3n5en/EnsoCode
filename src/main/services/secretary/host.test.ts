@@ -1311,6 +1311,29 @@ describe('自动巡检', () => {
     expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
   });
 
+  it('goal 会话空闲、没有后台任务但挂着没到点的提醒：不报停住；到点 2 分钟后还没被叫醒才照报', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    const due = 30 * MINUTE;
+    h.ports.reminders = () => [
+      {
+        id: 'r00000001',
+        sessionId: 'c1',
+        dueAt: due,
+        createdAt: 0,
+        prompt: 'check CI',
+        ifIdle: true,
+        chain: 1,
+      },
+    ];
+    h.host.tick(3 * MINUTE + 1);
+    h.host.tick(25 * MINUTE);
+    h.host.tick(due + 1 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toEqual([]);
+    h.host.tick(due + 5 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
   it('有存活后台任务的 idle 会话不走 3 分钟规则，20 分钟才兜底报', () => {
     const h = harness({});
     idleWithGoal(h);
@@ -2565,6 +2588,27 @@ describe('派出会话的流式事件', () => {
     expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000 + MINUTE);
     expect(h.state.file.dispatched.c2?.lastEventAt).toBe(20_000);
   });
+
+  it('与派出、在途投递都无关的会话流式事件不读派发记录（整份近 1MB）', () => {
+    const h = harness();
+    let reads = 0;
+    const file = h.ports.file;
+    h.ports.file = () => {
+      reads += 1;
+      return file();
+    };
+    h.ports.peekFile = () => h.state.file;
+    const other = (type: string) =>
+      ({ type, identity: { sessionId: 'zz', generation: 'g9' }, seq: 1, turnId: 't9' }) as never;
+    h.state.now = 1_000;
+    for (const type of ['message-upsert', 'message-update', 'tool-output', 'session-meta'])
+      h.host.onAgentEvent(other(type), []);
+    expect(reads).toBe(0);
+    // 派出会话的流式事件照常处理
+    h.host.onAgentEvent(event('message-update'), []);
+    expect(reads).toBeGreaterThan(0);
+    expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000);
+  });
 });
 
 describe('优雅重启续跑的会话', () => {
@@ -2694,6 +2738,26 @@ describe('派出会话完成后自动归档', () => {
     complete(h, 1000);
     expect(h.state.rows.c1.archived).toBeUndefined();
     h.state.tasks.c1 = [];
+    h.host.tick(2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
+  });
+
+  it('挂着没触发的自定提醒时先不归档，提醒没了再归档', () => {
+    const h = archiving();
+    h.ports.reminders = () => [
+      {
+        id: 'r00000001',
+        sessionId: 'c1',
+        dueAt: 10 * MINUTE,
+        createdAt: 0,
+        prompt: 'check deploy',
+        ifIdle: true,
+        chain: 1,
+      },
+    ];
+    complete(h, 1000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    h.ports.reminders = () => [];
     h.host.tick(2000);
     expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
   });
@@ -2928,6 +2992,100 @@ describe('派出会话完成后自动归档', () => {
     h.host.recover();
     expect(h.state.rows.c1.archived).toBeUndefined();
     expect(held(h)).toHaveLength(1);
+  });
+});
+
+describe('排队会话', () => {
+  const queuedRow = (extra: Record<string, unknown> = {}) => ({
+    id: 'c1',
+    title: '排队的',
+    projectId: 'p1',
+    secretaryOrigin: { secretaryConversationId: 'sec1' },
+    queuedStart: { queuedAt: 0, text: '修构建', ...extra },
+  });
+  const queuedFile = () => ({
+    dispatched: {
+      c1: {
+        conversationId: 'c1',
+        projectId: 'p1',
+        secretaryConversationId: 'sec1',
+        createdAt: 0,
+        turn: 0,
+        lastState: 'idle' as const,
+        lastEventAt: 0,
+      },
+    },
+  });
+
+  it('每分钟检查时让启动泵补位', () => {
+    const h = harness({});
+    let drains = 0;
+    h.ports.drainQueued = () => {
+      drains += 1;
+    };
+    h.host.tick(MINUTE);
+    expect(drains).toBe(1);
+  });
+
+  it('派出会话一轮结束：可能空出名额，让启动泵补位', () => {
+    const h = harness({});
+    let drains = 0;
+    h.ports.drainQueued = () => {
+      drains += 1;
+    };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(drains).toBe(1);
+  });
+
+  it('排队会话的 spawn 被拒：由启动泵标失败并回传，这里不再记一次', () => {
+    const h = harness({ file: queuedFile() });
+    h.state.rows.c1 = queuedRow({ startingAt: 0 });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      {
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'model unavailable',
+      } as RendererAgentEvent,
+      []
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('巡检不把排队很久的会话报成停住或空闲', () => {
+    const h = harness({ file: queuedFile() });
+    h.state.rows.c1 = queuedRow();
+    h.state.statuses.c1 = idle;
+    h.host.tick(5 * 60 * MINUTE);
+    h.host.tick(6 * 60 * MINUTE);
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('启动恢复不把排队会话报成中断', () => {
+    const h = harness({ file: queuedFile() });
+    h.state.rows.c1 = queuedRow();
+    h.state.statuses.c1 = idle;
+    h.host.recover();
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('排队会话不自动归档', () => {
+    const h = harness({ file: queuedFile() });
+    const archived: string[] = [];
+    h.ports.archive = (conversationId) => {
+      archived.push(conversationId);
+    };
+    h.state.rows.c1 = queuedRow();
+    h.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 0, at: 0 };
+    h.state.statuses.c1 = idle;
+    h.host.tick(MINUTE);
+    expect(archived).toEqual([]);
   });
 });
 

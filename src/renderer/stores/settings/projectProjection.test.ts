@@ -1,6 +1,5 @@
 import type { SourceAuthorityProjection } from '@shared/types';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const writeKey = vi.fn(async () => undefined);
 const readSettings = vi.fn(async (): Promise<Record<string, unknown> | null> => null);
@@ -32,7 +31,7 @@ vi.stubGlobal('window', {
   },
 });
 
-let settingsModule: typeof SettingsModule;
+const settingsModule = await import('./index');
 
 function projection(paths: string[]): SourceAuthorityProjection {
   return {
@@ -47,10 +46,6 @@ function projection(paths: string[]): SourceAuthorityProjection {
 }
 
 describe('project authority projection write guard', () => {
-  beforeAll(async () => {
-    settingsModule = await import('./index');
-  });
-
   beforeEach(() => {
     settingsModule.useSettingsStore.setState({ projects: [] });
     writeKey.mockClear();

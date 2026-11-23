@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConfigCliHandle } from './server';
 
@@ -104,6 +104,9 @@ function runCli(
     );
   });
 }
+
+await import('../../ipc/settings');
+await import('./server');
 
 beforeAll(async () => {
   const settings = await import('../../ipc/settings');

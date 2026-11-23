@@ -1,8 +1,6 @@
 import type { ModelProvider } from '@shared/types';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
-import type * as SettingsModule from '../settings';
-import type * as SessionsModule from './index';
 
 const calls: string[] = [];
 const spawn = vi.fn(async () => {
@@ -81,8 +79,8 @@ vi.stubGlobal('window', {
   },
 });
 
-let sessionsModule: typeof SessionsModule;
-let settingsModule: typeof SettingsModule;
+const settingsModule = await import('../settings');
+const sessionsModule = await import('./index');
 
 const provider: ModelProvider = {
   id: 'p',
@@ -120,11 +118,6 @@ async function seed(overrides: Record<string, unknown> = {}): Promise<string> {
 const state = (id: string) => sessionsModule.useSessionsStore.getState().conversations[id];
 
 describe('restartConversation', () => {
-  beforeAll(async () => {
-    settingsModule = await import('../settings');
-    sessionsModule = await import('./index');
-  });
-
   beforeEach(() => {
     calls.length = 0;
     spawn.mockClear();

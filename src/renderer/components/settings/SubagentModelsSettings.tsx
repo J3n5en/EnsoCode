@@ -1,6 +1,6 @@
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import type { ModelProvider, ModelThinkingLevelOverride } from '@shared/types';
-import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
+import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types/llm';
 import { isVirtualRef, selectableVirtualModels, VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import { Plus, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';

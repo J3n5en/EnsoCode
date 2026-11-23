@@ -1,5 +1,5 @@
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
-import { DEFAULT_PRESET_ID } from '@shared/types';
+import { DEFAULT_PRESET_ID } from '@shared/types/assets';
 import { Check, ChevronDown, Layers } from 'lucide-react';
 import { useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';

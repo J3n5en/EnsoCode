@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { SessionWorktree } from '@shared/types/worktree';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorktreeRegistry } from '../services/worktree/registry';
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   btwRunning: vi.fn((_id: string) => false),
   remove: vi.fn(async () => {}),
   create: vi.fn(),
-  status: vi.fn(async () => ({ exists: true, dirty: false, ahead: 0 })),
+  status: vi.fn(async (_record: SessionWorktree) => ({ exists: true, dirty: false, ahead: 0 })),
   rebuild: vi.fn(async (record: SessionWorktree) => ({ ...record, path: '/rebuilt' })),
 }));
 vi.mock('electron', () => ({
@@ -54,6 +54,9 @@ vi.mock('../services/worktree/service', () => ({
   repoIsClean: vi.fn(),
   worktreeStatus: mocks.status,
 }));
+
+await import('./worktree');
+
 const record: SessionWorktree = {
   conversationId: 'source',
   projectId: 'p',
@@ -89,6 +92,41 @@ beforeEach(async () => {
   registerWorktreeHandlers();
 });
 afterEach(() => rmSync(mocks.root, { recursive: true, force: true }));
+
+describe('worktree statuses (batch)', () => {
+  it('一次返回全部登记的状态；查失败的不在结果里', async () => {
+    readRegistry().set({ ...record, conversationId: 'b', path: '/managed/b' });
+    readRegistry().set({ ...record, conversationId: 'c', path: '/managed/c' });
+    mocks.status.mockImplementation(async (r: SessionWorktree) => {
+      if (r.conversationId === 'c') throw new Error('git broke');
+      return { exists: true, dirty: r.conversationId === 'b', ahead: 0 };
+    });
+    expect(await invoke(IPC_CHANNELS.WORKTREE_STATUSES)).toEqual({
+      source: { exists: true, dirty: false, ahead: 0 },
+      b: { exists: true, dirty: true, ahead: 0 },
+    });
+  });
+
+  it('多个窗口同时请求共用一次查询；查询途中的新请求等下一轮，看得到之后的状态', async () => {
+    let release!: () => void;
+    let dirty = false;
+    mocks.status.mockImplementation(async () => {
+      const seen = dirty;
+      if (!release) await new Promise<void>((resolve) => (release = resolve));
+      return { exists: true, dirty: seen, ahead: 0 };
+    });
+    const first = invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    dirty = true;
+    const second = invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+    const third = invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+    release();
+    expect((await first).source.dirty).toBe(false);
+    expect((await second).source.dirty).toBe(true);
+    expect(await third).toEqual(await second);
+    expect(mocks.status).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('worktree binding', () => {
   it('does not let create replace an existing or in-flight shared binding', async () => {

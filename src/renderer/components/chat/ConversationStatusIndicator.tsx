@@ -1,6 +1,7 @@
 import type { CoworkerTabTone } from '@shared/conversationDotTone';
 import type { ThemeState } from '@shared/theme/themeState';
-import { CircleHelp } from 'lucide-react';
+import { AlarmClock, CircleHelp } from 'lucide-react';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +17,7 @@ export function ConversationStatusIndicator({
   size = 'sm',
   title,
   className,
+  conversationId,
   'data-enso': anchor,
   'data-status': status,
 }: {
@@ -24,6 +26,7 @@ export function ConversationStatusIndicator({
   /** 非 waiting 态的悬停提示（waiting 态固定为「等待你回答」） */
   title?: string;
   className?: string;
+  conversationId?: string;
   /** 主题锚点，只有侧栏会话行的圆点挂 */
   'data-enso'?: 'session-status';
   'data-status'?: ThemeState;
@@ -44,6 +47,32 @@ export function ConversationStatusIndicator({
       >
         <CircleHelp className={cn(ICON_SIZE[size], 'stroke-[2.5]')} aria-hidden />
       </span>
+    );
+  }
+  if (tone === 'queued') {
+    const label = title ?? t('Queued');
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label={label}
+              data-slot="conversation-status"
+              data-tone="queued"
+              data-enso="conversation-queued"
+              data-conversation-id={conversationId}
+              data-status={status}
+              className={cn('flex shrink-0 items-center text-orange-500', className)}
+            />
+          }
+        >
+          <AlarmClock className={cn(ICON_SIZE[size], 'stroke-[2.5]')} aria-hidden />
+        </TooltipTrigger>
+        <TooltipPopup side="right" data-enso="conversation-queued-tooltip">
+          {label}
+        </TooltipPopup>
+      </Tooltip>
     );
   }
   return (

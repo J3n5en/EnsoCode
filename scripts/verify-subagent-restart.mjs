@@ -4,7 +4,8 @@
 // 子代理接着断点续跑（不重跑已执行的 bash）→ 父会话收到完成通知。
 // --stalled-reply：父会话空闲、子代理回复写到一半卡住时退出 → 等满回复保底后 worker 收尾中止 →
 // Run 记成被打断并带续跑记录（不是 succeeded）→ 重启后子代理自动续跑、父会话收到完成通知。
-//   node scripts/verify-subagent-restart.mjs [--keep] [--stalled-reply]
+// 默认经关窗确认退出；加 --sigterm 改为 SIGTERM（不经确认，到 will-quit 才等安全点，同托盘退出）。
+//   node scripts/verify-subagent-restart.mjs [--keep] [--stalled-reply [--sigterm]]
 // 退出码：全部通过 0，否则 1。不碰真实 userData，不抢焦点（窗口不显示、不进 Dock）。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -27,6 +28,7 @@ import { uiElementElectron } from './verify-electron.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEEP = process.argv.includes('--keep');
 const STALLED = process.argv.includes('--stalled-reply');
+const SIGTERM_QUIT = process.argv.includes('--sigterm');
 const OUT = mkdtempSync('/tmp/enso-subagent-restart-');
 const ENV = path.join(OUT, 'user-data');
 const PROJ = path.join(OUT, 'project');
@@ -379,8 +381,7 @@ async function quit(instance, timeout = 90_000) {
 }
 
 /**
- * 用户退出（Cmd+Q / 关窗选「退出」）：dev 下 SIGTERM 不进关窗确认，直接到 will-quit 收尾、30s 看门狗强退，
- * 等不到回复保底；这里关主窗口并在确认里答「退出」，走 beforeConfirmedQuit 等安全点
+ * 用户退出（Cmd+Q / 关窗选「退出」）：关主窗口并在确认里答「退出」，走 beforeConfirmedQuit 等安全点
  */
 async function quitConfirmed(instance, timeout) {
   await instance.page.evaluate(`(() => {
@@ -538,9 +539,12 @@ async function stalledReply(first) {
   check(stalled.size === 1, '退出时子代理的回复卡在半路（连接未结束）');
 
   // 2. 用户退出：没有工具在跑，保底 60s、停止出 token 20s 后超时，worker 收尾中止这条回复
-  note('quit run1 via close confirm (while the child reply is stalled)');
+  note(
+    `quit run1 via ${SIGTERM_QUIT ? 'SIGTERM (will-quit)' : 'close confirm'} (while the child reply is stalled)`
+  );
   const quitAt = Date.now();
-  await quitConfirmed(first, 150_000);
+  if (SIGTERM_QUIT) await quit(first, 150_000);
+  else await quitConfirmed(first, 150_000);
   const waited = (Date.now() - quitAt) / 1000;
   note(`run1 exited after ${waited.toFixed(1)}s`);
   check(waited >= 55, '退出等满了回复保底才中止', waited);

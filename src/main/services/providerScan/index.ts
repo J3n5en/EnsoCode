@@ -7,7 +7,7 @@ import type {
   ScanAppReport,
   ScanCandidate,
 } from '@shared/types';
-import { SCAN_APP_IDS } from '@shared/types';
+import { SCAN_APP_IDS } from '@shared/types/providerScan';
 import { readSettings } from '../../ipc/settings';
 import { locateApp } from './locations';
 import {

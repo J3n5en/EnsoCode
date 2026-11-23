@@ -242,6 +242,10 @@ export interface CatalogEntry {
   /** 工具实际执行目录（worktree 优先，回落项目路径）：手机把项目内绝对路径收成相对路径 */
   cwd?: string;
   status: string;
+  /** 排队位次。status 为 queued 且尚未失败时才有；旧客户端忽略 */
+  queuePosition?: number;
+  /** 自动启动失败的原因。status 仍是 queued，避免旧客户端把未知状态丢掉 */
+  queueFailed?: string;
   /** 完成后未查看：桌面绿点、手机灰点 */
   unread?: boolean;
   /** 挂起的 ask_user 数：抽屉「活跃中」与桌面 waiting 色点同口径 */

@@ -235,6 +235,7 @@ const LABEL_ZH: Record<string, string> = {
   Started: '开始',
   Idle: '空闲',
   'Not started': '未开始',
+  Queued: '排队中',
   'In progress': '进行中',
   'Waiting on a background task': '等后台任务',
   'Waiting for your confirmation': '等你确认',

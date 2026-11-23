@@ -1,5 +1,5 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
-import { coalesceRuns, mapLimited } from '@shared/coalesceRuns';
+import { coalesceRuns } from '@shared/coalesceRuns';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { conversationCwd } from '@shared/conversationCwd';
 import { diffConversations } from '@shared/conversationsPatch';
@@ -19,6 +19,7 @@ import {
   planPhase,
   splitPlanPrefix,
 } from '@shared/planMode';
+import type { QueuedStart } from '@shared/secretary/queuedSession';
 import { unwrapUntrustedForDisplay } from '@shared/secretary/transcript';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
@@ -78,6 +79,7 @@ import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import { create } from 'zustand';
 import { persist, type StorageValue } from 'zustand/middleware';
+import { startQueuedSession } from '@/lib/queuedSessionApi';
 import { isLeaderRenderer } from '@/lib/rendererRole';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -183,7 +185,6 @@ function hotSessionIds(
   for (const id of peekedIds.keys()) ids.add(id);
   return ids;
 }
-const WORKTREE_STATUS_CONCURRENCY = 6;
 const parentTailInFlight = new Set<string>();
 const olderHistoryInFlight = new Set<string>();
 /** 冷缓存清掉的 child 再被看到时补历史。实现在 store 创建后赋值。 */
@@ -374,6 +375,11 @@ export interface Conversation extends SessionProjection {
   activeRenewedAt?: number;
   /** 排队待发消息(running 时用户消息先入队) */
   queuedMessages?: QueuedMessage[];
+  /**
+   * 秘书派发超过同时派发上限：会话已建出但未启动，首条消息在这里。
+   * Main 写入，启动成功后整段删除。渲染层不 spawn、不 attach、不本地 prompt。
+   */
+  queuedStart?: QueuedStart;
   /** 会话目标(设定后空闲自动续跑) */
   goal?: SessionGoal;
   /** Main 驱动的派出会话：续跑与队列泵由 Main 负责，本窗口只显示与转发指令 */
@@ -718,6 +724,42 @@ export const useSessionsStore = create<SessionsState>()(
       const pendingTitleBaselines = new Map<string, string>();
       const rewindInFlight = new Set<string>();
       const forkWakeInFlight = new Set<string>();
+      const queuedStartFlight = new Set<string>();
+
+      /** 排队会话的用户消息是首条之后的 follow-up。被拒时不回显，原文退回输入框。 */
+      async function startQueuedFollowUp(
+        id: string,
+        text: string,
+        images: AttachedImage[] | undefined
+      ): Promise<string | null> {
+        const restore = (error: string) => {
+          set((state) =>
+            patch(state, id, {
+              draftText: text,
+              ...(images?.length ? { draftImages: images } : {}),
+              error,
+            })
+          );
+          return error;
+        };
+        if (queuedStartFlight.has(id)) return restore('queued start in progress');
+        queuedStartFlight.add(id);
+        try {
+          const result = await startQueuedSession(id, {
+            text,
+            ...(images?.length ? { images } : {}),
+          });
+          if (!result.ok) return restore(result.error);
+          set((state) =>
+            state.conversations[id] ? patch(state, id, { error: undefined }) : state
+          );
+          return null;
+        } catch (error) {
+          return restore(error instanceof Error ? error.message : String(error));
+        } finally {
+          queuedStartFlight.delete(id);
+        }
+      }
 
       /** 唤醒后等该会话 worker 真正 ready（spawn ack 后 spawning 仍在，需等其 snapshot） */
       function waitForWorkerReady(
@@ -1211,6 +1253,8 @@ export const useSessionsStore = create<SessionsState>()(
         });
       });
 
+      /** 上一轮收束时会话还挂着自定提醒：goal 先不续跑，等提醒叫醒的那一轮收束再刷新 */
+      const awaitingReminder = new Set<string>();
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
           set((state) => {
@@ -1979,6 +2023,8 @@ export const useSessionsStore = create<SessionsState>()(
           void recoverStaleSession(id, event.reason, event.identity.generation);
         }
         if (event.type === 'turn-completed' || event.type === 'turn-failed') {
+          if (event.type === 'turn-completed' && event.awaitingReminder) awaitingReminder.add(id);
+          else awaitingReminder.delete(id);
           // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口。
           // 中断标记只在发起窗口本地，别的窗口（如 PWA 完整模式）发起的中断靠 worker 的 aborted 认出
           const aborted = event.type === 'turn-completed' && event.aborted === true;
@@ -2164,6 +2210,7 @@ export const useSessionsStore = create<SessionsState>()(
         )
           return;
         if (goal?.status !== 'active') return;
+        if (awaitingReminder.has(id)) return;
         if ((conversation.queuedMessages ?? []).length > 0) return;
         // 规划与待审期间不自动推进：计划需要用户审批
         const phase = planPhase(conversation.planState);
@@ -2605,18 +2652,16 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        // 启动、侧栏挂载、回焦会同时触发：合并成一次尾随刷新；每个状态要跑几次 git，限并发免得压垮宿主
+        // 启动、侧栏挂载、回焦会同时触发：合并成一次尾随刷新；状态一次批量取（宿主限并发跑 git）
         refreshWorktreeStatuses: coalesceRuns(async () => {
           const targets = get().conversations;
-          const records = await window.electronAPI.worktree.list();
-          const entries = await mapLimited(
-            records.filter((record) => targets[record.conversationId]),
-            WORKTREE_STATUS_CONCURRENCY,
-            async (record) => {
-              const result = await window.electronAPI.worktree.status(record.conversationId);
-              return { record, status: result.ok ? result.value : undefined };
-            }
-          );
+          const [records, statuses] = await Promise.all([
+            window.electronAPI.worktree.list(),
+            window.electronAPI.worktree.statuses(),
+          ]);
+          const entries = records
+            .filter((record) => targets[record.conversationId])
+            .map((record) => ({ record, status: statuses[record.conversationId] }));
           set((state) => {
             const conversations = { ...state.conversations };
             const worktreeStatuses = { ...state.worktreeStatuses };
@@ -3288,6 +3333,8 @@ export const useSessionsStore = create<SessionsState>()(
           if (!id) return 'no conversation';
           const conversation = get().conversations[id];
           if (!conversation) return 'no conversation';
+          // 排队会话还没有 worker。必须在任何回显之前改走立即开始。
+          if (conversation.queuedStart) return startQueuedFollowUp(id, submittedText, images);
           // /compact 应用级命令:压缩上下文,不发给 agent。工作区操作中/未启动由 compact() 提示原因
           const compactCommand = parseCompactCommand(text);
           if (conversation.workspaceMigrating && !compactCommand) {
@@ -3534,6 +3581,7 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           if (
             !conversation ||
+            conversation.queuedStart ||
             conversation.btwParentId ||
             conversation.started ||
             conversation.spawning ||
@@ -3908,7 +3956,8 @@ export const useSessionsStore = create<SessionsState>()(
                 : {}),
             })
           );
-          await window.electronAPI.agent.abort(id, { stopSubagents: true });
+          // 用户停止：一并停子代理、取消会话自己定的提醒
+          await window.electronAPI.agent.abort(id, { stopSubagents: true, cancelReminders: true });
         },
 
         setGoal(conversationId, text) {

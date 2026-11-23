@@ -41,6 +41,10 @@ export const IPC_CHANNELS = {
   SECRETARY_STOP_TASKS: 'secretary:stop-tasks',
   /** 秘书：派出会话的目标由 Main 续跑，界面只发指令 */
   SECRETARY_GOAL_ACTION: 'secretary:goal-action',
+  /** 秘书：排队会话「立即开始」，不看上限；可带用户在排队期间发的一条消息，排在首条之后 */
+  SECRETARY_QUEUED_START: 'secretary:queued-start',
+  /** 秘书：取消排队会话 */
+  SECRETARY_QUEUED_CANCEL: 'secretary:queued-cancel',
   /** 秘书：全部定时（含系统生成的每日简报与待办提醒） */
   SECRETARY_SCHEDULES_LIST: 'secretary:schedules-list',
   /** 秘书：删除一条定时；系统生成的条目由档案与待办派生，不接受删除 */
@@ -362,6 +366,7 @@ export const IPC_CHANNELS = {
   WORKTREE_GET: 'worktree:get',
   WORKTREE_LIST: 'worktree:list',
   WORKTREE_STATUS: 'worktree:status',
+  WORKTREE_STATUSES: 'worktree:statuses',
   WORKTREE_REMOVE: 'worktree:remove',
   WORKTREE_REBUILD: 'worktree:rebuild',
   WORKTREE_REPO_CLEAN: 'worktree:repo-clean',

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   order: [] as string[],
@@ -182,11 +182,9 @@ vi.mock('./desktop/revealExternalConfirm', () => ({ confirmRevealExternal: vi.fn
 const originalUserDataOverride = process.env.ENSO_USER_DATA_DIR;
 const originalVerify = process.env.ENSO_VERIFY;
 
-// 首次加载入口要 transform 约 125 个模块，耗时随机器负载线性放大；在这里一次付清，用例只计重新求值
-beforeAll(async () => {
-  await import('./index');
-  for (let i = 0; i < 2; i++) await new Promise<void>((resolve) => setImmediate(resolve));
-}, 60_000);
+// 入口依赖图在收集阶段加载一次；用例里 resetModules 之后只重新求值
+await import('./index');
+for (let i = 0; i < 2; i++) await new Promise<void>((resolve) => setImmediate(resolve));
 
 beforeEach(() => {
   vi.resetModules();

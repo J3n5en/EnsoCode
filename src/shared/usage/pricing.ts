@@ -1,4 +1,4 @@
-import { THINKING_LEVELS } from '../types/agent';
+import { THINKING_LEVELS } from '../types/agentConstants';
 import type { UsageRecord } from './types';
 
 /** 单价 $/M tokens，与 pi-ai `ModelCostRates` 同形 */

@@ -1,10 +1,8 @@
 import type { OauthCredentialAvailability } from '@shared/defaultModel';
 import type { ModelProvider } from '@shared/types';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as OauthStoreModule from '@/stores/oauthCredentials';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
-import type * as SettingsModule from '../settings';
-import type * as SessionsModule from './index';
 
 const spawn = vi.fn(async () => ({ ok: true }));
 let conversationCounter = 0;
@@ -85,8 +83,8 @@ vi.stubGlobal('window', {
   },
 });
 
-let sessionsModule: typeof SessionsModule;
-let settingsModule: typeof SettingsModule;
+const settingsModule = await import('../settings');
+const sessionsModule = await import('./index');
 
 function provider(id: string, overrides: Partial<ModelProvider> = {}): ModelProvider {
   return {
@@ -130,12 +128,6 @@ async function resumableConversation(
 }
 
 describe('resumeConversation model resolution', () => {
-  beforeAll(async () => {
-    // Both stores bind Electron/browser globals at module load; import after this test installs stubs.
-    settingsModule = await import('../settings');
-    sessionsModule = await import('./index');
-  });
-
   beforeEach(() => {
     spawn.mockClear();
     conversationCounter = 0;
@@ -253,11 +245,6 @@ describe('resumeConversation model resolution', () => {
 });
 
 describe('setModel follow-last default', () => {
-  beforeAll(async () => {
-    settingsModule = await import('../settings');
-    sessionsModule = await import('./index');
-  });
-
   beforeEach(() => {
     conversationCounter = 0;
     sourceProjection = {

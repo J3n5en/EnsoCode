@@ -1,4 +1,4 @@
-import { BUILTIN_TOOLS } from '@shared/types';
+import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { describe, expect, it } from 'vitest';
 import { builtinToolsInSection, TOOL_SECTION, TOOL_SECTIONS } from './builtinToolSections';
 

@@ -137,36 +137,35 @@ import type {
   SshHostKeyChallenge,
   TestProviderResult,
 } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
-import type {
-  AgentActionResult,
-  AgentRunProgress,
-  AgentSpawnRequest,
-  ApprovalDecision,
-  ApprovalMode,
-  AttachedImage,
-  AuthorityMutationResult,
-  ChildHistoryResult,
-  ChildRunListResult,
-  ConversationAuthorityProjection,
-  ConversationAuthorityRequest,
-  ConversationReloadResult,
-  CreateConversationAuthorityRequest,
-  CreateProjectAuthorityRequest,
-  DispatchMainEvent,
-  McpStatusEvent,
-  McpStatusPush,
-  ParentHistoryTailResult,
-  ProjectAuthorityProjection,
-  RemoveProjectAuthorityRequest,
-  RendererAgentEvent,
-  SelectProjectAuthorityRequest,
-  SourceAuthorityProjection,
-  ThinkingLevel,
-  TitleSummaryInput,
-  UpdateConversationSelectionRequest,
+import {
+  type AgentActionResult,
+  type AgentRunProgress,
+  type AgentSpawnRequest,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type AttachedImage,
+  type AuthorityMutationResult,
+  type ChildHistoryResult,
+  type ChildRunListResult,
+  type ConversationAuthorityProjection,
+  type ConversationAuthorityRequest,
+  type ConversationReloadResult,
+  type CreateConversationAuthorityRequest,
+  type CreateProjectAuthorityRequest,
+  type DispatchMainEvent,
+  type McpStatusEvent,
+  type McpStatusPush,
+  type ParentHistoryTailResult,
+  type ProjectAuthorityProjection,
+  parseDispatchMainEvent,
+  type RemoveProjectAuthorityRequest,
+  type RendererAgentEvent,
+  type SelectProjectAuthorityRequest,
+  type SourceAuthorityProjection,
+  type ThinkingLevel,
+  type TitleSummaryInput,
+  type UpdateConversationSelectionRequest,
 } from '@shared/types/agent';
-import { parseDispatchMainEvent } from '@shared/types/agent';
 import type {
   BotAbilitySuggestRequest,
   BotAbilitySuggestResult,
@@ -233,7 +232,12 @@ import type {
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
-import type { OpenDevToolsResult, RestartBlocker, RestartOverlayState } from '@shared/types/ipc';
+import {
+  IPC_CHANNELS,
+  type OpenDevToolsResult,
+  type RestartBlocker,
+  type RestartOverlayState,
+} from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -559,6 +563,18 @@ const electronAPI = {
       text?: string;
     }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GOAL_ACTION, request),
+    /** 排队会话立即开始：不看上限；followUp 是排队期间在输入框发的消息，排在首条之后送达 */
+    startQueued: (
+      conversationId: string,
+      followUp?: { text: string; images?: AttachedImage[] }
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_QUEUED_START, {
+        conversationId,
+        ...(followUp ? { followUp } : {}),
+      }),
+    /** 取消排队会话：还没开始的会话直接删除；已开始或正在启动的拒绝 */
+    cancelQueued: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_QUEUED_CANCEL, { conversationId }),
     /** 全部定时（含系统生成的每日简报与待办提醒），下一次触发时间由 Main 算 */
     listSchedules: (
       secretaryId?: string
@@ -1261,7 +1277,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text, images, deliveryId),
     withdrawSteer: (sessionId: string, deliveryId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_WITHDRAW_STEER, sessionId, deliveryId),
-    abort: (sessionId: string, options?: { stopSubagents?: boolean }): Promise<AgentActionResult> =>
+    /** 用户停止带 stopSubagents 与 cancelReminders：一并停子代理、取消会话自己定的提醒 */
+    abort: (
+      sessionId: string,
+      options?: { stopSubagents?: boolean; cancelReminders?: boolean }
+    ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId, options),
     abortRetry: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT_RETRY, sessionId),
@@ -1479,6 +1499,8 @@ const electronAPI = {
       conversationId: string
     ): Promise<{ ok: true; value: WorktreeStatus } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_STATUS, conversationId),
+    statuses: (): Promise<Record<string, WorktreeStatus>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_STATUSES),
     remove: (
       conversationId: string
     ): Promise<{ ok: true; value: null } | { ok: false; error: string }> =>

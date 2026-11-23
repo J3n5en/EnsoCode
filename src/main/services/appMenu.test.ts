@@ -1,4 +1,4 @@
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sendToLocalMain = vi.hoisted(() => vi.fn());

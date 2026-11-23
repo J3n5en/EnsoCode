@@ -32,7 +32,7 @@
 
 1. 先写能因缺少功能而失败的测试。
 2. 写最小实现使其通过。
-3. 跑全量测试，再提交。
+3. 跑 `pnpm test:changed`，再提交；跨模块改动再跑全量，见 [测试规范](engineering-reference/testing.md#跑哪些测试)。
 
 重点覆盖：身份/去重定义、字符串拼接与解析、安全边界、坏配置和脏输入。文件读取测试使用临时目录，不依赖开发机上的真实配置。测试应断言可观察行为，不要只断言内部函数调用或错误文案。
 
@@ -41,7 +41,7 @@
 提交前运行：
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test
+pnpm typecheck && pnpm lint && pnpm test:changed
 ```
 
 一个可独立描述的修复、功能或重构使用一个独立提交，不把无关改动混在一起。

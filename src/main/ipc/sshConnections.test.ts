@@ -41,7 +41,7 @@ vi.mock('../services/sshHostKey', async (importOriginal) => {
   };
 });
 
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { sshKeyFingerprint } from '../services/sshHostKey';
 import { registerSshConnectionHandlers } from './sshConnections';
 

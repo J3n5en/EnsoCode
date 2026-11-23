@@ -1,10 +1,6 @@
 import type { DefaultModelRef } from './defaultModel';
-import {
-  APPROVAL_MODES,
-  type ApprovalMode,
-  THINKING_LEVELS,
-  type ThinkingLevel,
-} from './types/agent';
+import type { ApprovalMode, ThinkingLevel } from './types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from './types/agentConstants';
 
 export const BTW_SNAPSHOT_LIMIT = 40;
 export const BTW_TITLE_MAX_CHARS = 32;

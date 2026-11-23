@@ -1,6 +1,6 @@
 import { ipcMain } from '@platform';
 import type { CaCertStatus } from '@shared/caCert';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { getCaCertConfig } from '../services/caCert';
 
 export function registerCaCertHandlers(): void {
