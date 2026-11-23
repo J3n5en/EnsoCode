@@ -4,6 +4,7 @@ import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
 import { projectDisplayName } from '@shared/projectName';
+import { formatReminderTooltip } from '@shared/reminders';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import { isVirtualRef, modelDisplayName } from '@shared/virtualModels';
 import { Loader2 } from 'lucide-react';
@@ -20,6 +21,7 @@ import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
+import { usePendingReminder } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
 import { selectChatChrome, selectEmptyChatState } from '@/stores/sessions/chatChrome';
 import { selectChatCandidateConversations } from '@/stores/sessions/sidebarDirectory';
@@ -465,7 +467,13 @@ export function ChatView() {
               />
             )}
             <MessageQueue conversationId={chrome.id} queued={chrome.queuedMessages ?? []} />
-            {chrome.goal && <GoalBar conversationId={chrome.id} goal={chrome.goal} />}
+            {chrome.goal && (
+              <GoalBar
+                conversationId={chrome.id}
+                goal={chrome.goal}
+                sessionStatus={chrome.spawning ? 'running' : chrome.status}
+              />
+            )}
             <TodoBar key={chrome.id} conversationId={chrome.id} />
             {!chrome.displayedParentId && modelBlockMessage && (
               <div
@@ -649,15 +657,27 @@ function StatusDot({
   conversationId?: string;
 }) {
   const { t } = useI18n();
+  const { reminder: pendingReminder, now } = usePendingReminder(
+    conversationId,
+    status !== 'running' && !hasRunningChild && !queued
+  );
   const tone = queueFailed
     ? 'failed'
-    : conversationDotTone({ status, pendingAskCount, hasRunningChild, queued });
+    : conversationDotTone({
+        status,
+        pendingAskCount,
+        hasRunningChild,
+        queued,
+        hasPendingReminder: pendingReminder !== undefined,
+      });
   const title = queueFailed
     ? queueFailed
     : queued
       ? t('Queued · #{{n}}, starts automatically when a slot opens', {
           n: queuePosition ?? 1,
         })
-      : status;
+      : pendingReminder
+        ? formatReminderTooltip(pendingReminder, now, t)
+        : status;
   return <ConversationStatusIndicator tone={tone} title={title} conversationId={conversationId} />;
 }

@@ -27,6 +27,7 @@ import {
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
 import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
+import { formatReminderTooltip } from '@shared/reminders';
 import { conversationThemeState } from '@shared/theme/themeState';
 import type { Project } from '@shared/types';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
@@ -103,6 +104,7 @@ import {
 } from '@/components/chat/moveConversationAction';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
 import { ProjectSettingsDialog } from '@/components/chat/ProjectSettingsDialog';
+import { ReminderMarker } from '@/components/chat/ReminderMarker';
 import {
   reloadConversationFromMenu,
   restartConversationFromMenu,
@@ -173,6 +175,7 @@ import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { closeBackgroundTasks } from '@/stores/backgroundTasksView';
 import { useSecretaryStore } from '@/stores/secretary';
+import { usePendingReminder } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   activeConversationIds,
@@ -2990,6 +2993,15 @@ function ConversationRow({
         <SubagentMarker conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />
         <SecretaryDispatchBadge count={dispatchRunning} />
+        <ReminderMarker
+          conversationId={id}
+          running={
+            conversation.status === 'running' ||
+            Boolean(conversation.spawning) ||
+            Boolean(conversation.hasRunningChild)
+          }
+          hidden={renaming || isUpstreamWaitingGoal(conversation.goal)}
+        />
         {!renaming && isUpstreamWaitingGoal(conversation.goal) && (
           <span
             data-enso="sidebar-upstream-waiting"
@@ -3464,6 +3476,14 @@ function ConversationDot({
   const upstreamRetry = isUpstreamWaitingGoal(conversation.goal)
     ? conversation.goal.retry
     : undefined;
+  const { reminder: pendingReminder, now } = usePendingReminder(
+    conversation.id,
+    conversation.status !== 'running' &&
+      !conversation.spawning &&
+      !conversation.hasRunningChild &&
+      !upstreamRetry &&
+      !conversation.queued
+  );
   // 待审批与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
   const tone =
     (conversation.pendingApprovals?.length ?? 0) > 0
@@ -3477,6 +3497,7 @@ function ConversationDot({
           queued:
             (conversation.queued === true && !conversation.queueFailed) ||
             upstreamRetry !== undefined,
+          hasPendingReminder: pendingReminder !== undefined,
         });
   const title = conversation.queueFailed
     ? conversation.queueFailed
@@ -3490,7 +3511,9 @@ function ConversationDot({
         ? t('Queued · #{{n}}, starts automatically when a slot opens', {
             n: conversation.queuePosition ?? 1,
           })
-        : undefined;
+        : pendingReminder
+          ? formatReminderTooltip(pendingReminder, now, t)
+          : undefined;
   // 锁进与项目行同宽的图标列:圆点/图标两种形态切换时标题不再左右跳动。
   // 空闲不画点:满列空心圈没有信息量,只有运行/待回答/失败/未读才需要被看见
   return (

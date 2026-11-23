@@ -1438,4 +1438,96 @@ describe('排队会话', () => {
     );
     expect(countsAsRunning(file.dispatched.staleGoalNeed, rows.staleGoalNeed, running)).toBe(true);
   });
+
+  it('空闲且 goal active 并挂着未到点提醒时：留在进行中、标 pendingReminder 且不标 continuing；提醒到点开新一轮后切回 running', () => {
+    const now = new Date(2026, 4, 1, 14, 20, 0).getTime();
+    const dueAt = new Date(2026, 4, 1, 14, 23, 0).getTime();
+    const file = emptyFile({
+      dispatched: {
+        rem: record({ conversationId: 'rem', lastState: 'idle' }),
+      },
+    });
+    const rows = {
+      rem: {
+        title: 'Beta mac 构建排队',
+        sessionFile: '/tmp/rem.jsonl',
+        goal: { status: 'active', text: '等新版 Beta 跑完' },
+      },
+    };
+    const reminders = {
+      rem: [
+        {
+          id: 'r00000001',
+          sessionId: 'rem',
+          dueAt,
+          createdAt: now - 30_000,
+          prompt: '检查 Beta #153 结果',
+          label: '检查合并后首轮新版 Beta (#153) 运行结果',
+          ifIdle: true,
+          chain: 1,
+        },
+      ],
+    };
+    const waitingBoard = buildBoard(file, {
+      rows,
+      statuses: { rem: idle },
+      reminders,
+      now,
+      projects,
+      todos: [
+        {
+          id: 't-rem',
+          text: '跟进 Beta 构建',
+          conversationId: 'rem',
+          createdAt: now - 60_000,
+          updatedAt: now - 60_000,
+        },
+      ],
+    });
+    expect(waitingBoard.running).toHaveLength(1);
+    const waitingCard = waitingBoard.running[0];
+    expect(waitingCard).toMatchObject({
+      kind: 'session',
+      conversationId: 'rem',
+      state: 'idle',
+      pendingReminder: {
+        id: 'r00000001',
+        dueAt,
+        label: '检查合并后首轮新版 Beta (#153) 运行结果',
+        count: 1,
+      },
+    });
+    expect(waitingCard?.kind === 'session' ? waitingCard.continuing : undefined).toBeUndefined();
+    expect(waitingBoard.todos[0]).toMatchObject({
+      id: 't-rem',
+      phase: 'active',
+      pendingReminder: {
+        id: 'r00000001',
+        dueAt,
+        label: '检查合并后首轮新版 Beta (#153) 运行结果',
+        count: 1,
+      },
+    });
+
+    // 提醒到点开始新一轮后，切回 running，不再标 pendingReminder 或 continuing
+    const wokenBoard = buildBoard(
+      emptyFile({ dispatched: { rem: record({ conversationId: 'rem', lastState: 'running' }) } }),
+      {
+        rows,
+        statuses: { rem: running },
+        reminders: {},
+        now: dueAt + 1_000,
+        projects,
+        todos: [],
+      }
+    );
+    const wokenCard = wokenBoard.running[0];
+    expect(wokenCard).toMatchObject({
+      kind: 'session',
+      conversationId: 'rem',
+      state: 'running',
+    });
+    expect(wokenCard?.kind === 'session' ? wokenCard.pendingReminder : undefined).toBeUndefined();
+    expect(wokenCard?.kind === 'session' ? wokenCard.continuing : undefined).toBeUndefined();
+  });
 });

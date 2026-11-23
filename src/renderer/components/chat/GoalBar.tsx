@@ -1,7 +1,9 @@
+import { formatReminderClock, formatReminderTooltip } from '@shared/reminders';
 import { formatRetryClock, isUpstreamWaitingGoal } from '@shared/upstreamRecovery';
-import { Pause, Play, RotateCcw, Square, X } from 'lucide-react';
+import { Clock, Pause, Play, RotateCcw, Square, X } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { usePendingReminder } from '@/stores/sessionReminders';
 import type { SessionGoal } from '@/stores/sessions';
 import { useSessionsStore } from '@/stores/sessions';
 import { GOAL_FRAME, GoalIcon } from './injectedVisual';
@@ -16,10 +18,22 @@ const STATUS_DOT: Record<SessionGoal['status'], string> = {
 };
 
 /** 会话目标状态条:目标文本 + 状态/轮数 + 暂停/继续/清除 */
-export function GoalBar({ conversationId, goal }: { conversationId: string; goal: SessionGoal }) {
+export function GoalBar({
+  conversationId,
+  goal,
+  sessionStatus,
+}: {
+  conversationId: string;
+  goal: SessionGoal;
+  sessionStatus?: string;
+}) {
   const { t } = useI18n();
   const upstreamWaiting = isUpstreamWaitingGoal(goal);
   const retry = upstreamWaiting ? goal.retry : undefined;
+  const { reminder: pendingReminder, now } = usePendingReminder(
+    conversationId,
+    !retry && goal.status === 'active' && sessionStatus !== 'running'
+  );
   const statusLabel: Record<SessionGoal['status'], string> = {
     active: t('working'),
     paused: t('paused'),
@@ -32,6 +46,9 @@ export function GoalBar({ conversationId, goal }: { conversationId: string; goal
       ? t('Quota exhausted · next {{time}}', { time: formatRetryClock(retry.at) })
       : t('Waiting for upstream recovery · next {{time}}', { time: formatRetryClock(retry.at) })
     : statusLabel[goal.status];
+  const reminderTooltip = pendingReminder
+    ? formatReminderTooltip(pendingReminder, now, t)
+    : undefined;
   return (
     <div className={cn('mb-1 flex items-center gap-2', GOAL_FRAME)}>
       <GoalIcon />
@@ -40,19 +57,39 @@ export function GoalBar({ conversationId, goal }: { conversationId: string; goal
         title={
           retry?.lastError
             ? `${goal.text} — ${retry.lastError}`
-            : goal.note
-              ? `${goal.text} — ${goal.note}`
-              : goal.text
+            : reminderTooltip
+              ? `${goal.text} — ${reminderTooltip}`
+              : goal.note
+                ? `${goal.text} — ${goal.note}`
+                : goal.text
         }
       >
         {goal.text}
         {goal.note && <span className="text-muted-foreground"> — {goal.note}</span>}
       </span>
-      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', STATUS_DOT[goal.status])} />
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
-        {label}
-        {goal.status === 'active' && goal.autoTurns > 0 ? ` · ${goal.autoTurns}/25` : ''}
-      </span>
+      {pendingReminder ? (
+        <span
+          data-enso="goal-reminder-waiting"
+          title={reminderTooltip}
+          className="inline-flex min-w-0 max-w-[260px] shrink-0 items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 font-mono text-[10px] text-sky-600 tabular-nums dark:text-sky-400"
+        >
+          <Clock className="h-3 w-3 shrink-0" aria-hidden />
+          <span className="truncate">
+            {t('Waiting for reminder · {{time}}', {
+              time: formatReminderClock(pendingReminder.dueAt),
+            })}
+            {pendingReminder.label ? ` · ${pendingReminder.label}` : ''}
+          </span>
+        </span>
+      ) : (
+        <>
+          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', STATUS_DOT[goal.status])} />
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
+            {label}
+            {goal.status === 'active' && goal.autoTurns > 0 ? ` · ${goal.autoTurns}/25` : ''}
+          </span>
+        </>
+      )}
       {retry ? (
         <>
           <button
