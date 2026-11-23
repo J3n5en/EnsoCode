@@ -85,6 +85,7 @@ import {
   rootSessionId,
   runMemoryReconcileNow,
   scheduleMemoryDistill,
+  syncMemoryChatFromSettings,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
@@ -527,6 +528,38 @@ describe('memoryHost 会话结束蒸馏接线', () => {
       releaseLlm();
       await run;
       setMemoryChangeListener(null);
+    }
+  });
+
+  it('utilityProcess 生产路径：未注入 distillConfig.complete 时回落 serviceComplete 调用 remoteComplete 完成提炼', async () => {
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: 'none' });
+    const remoteFn = vi.fn(llm('distill uses serviceComplete fallback in utilityProcess'));
+    initMemoryService({ remoteComplete: async () => remoteFn });
+    syncMemoryChatFromSettings({ memoryChatModel: 'remote' });
+    configureMemoryDistill({
+      enabled: false,
+      complete: null,
+      readTranscript: async () => [
+        { role: 'user', text: 'we moved memory distill into utilityProcess' },
+      ],
+    });
+    try {
+      await expect(
+        distillSessionNow({
+          sessionId: 'service-complete-fallback-s1',
+          sessionFile: '/fake/fallback.jsonl',
+          projectId: null,
+        })
+      ).resolves.toBe(true);
+      await awaitMemoryDistill();
+      expect(remoteFn).toHaveBeenCalledTimes(1);
+      const job = getMemoryDistillJobs().find(
+        (j) => j.payload.sessionId === 'service-complete-fallback-s1'
+      );
+      expect(job?.status).toBe('done');
+    } finally {
+      initMemoryService({ remoteComplete: undefined });
     }
   });
 

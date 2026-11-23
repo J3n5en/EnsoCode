@@ -623,7 +623,7 @@ async function readBatchTranscript(members: readonly DistillBatchMember[]): Prom
 }
 
 async function runOneDistill(job: DistillJob, transcript: string): Promise<void> {
-  const complete = await distillConfig.complete?.();
+  const complete = await (distillConfig.complete ?? serviceComplete())?.();
   if (!complete || !db) return;
   // 与 memory_capture 的缺省归属一致：bot 会话进 bot space，项目会话进项目 space
   const { projectId, botId, chatId } = job.payload;

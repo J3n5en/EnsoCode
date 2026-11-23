@@ -4,8 +4,8 @@
  * 检索 / 写入 / 本地推理不再阻塞渲染。
  */
 import path from 'node:path';
-import type { Complete, CompleteOptions } from '../main/services/memory/distill';
 import { initMemoryService } from '../main/services/memoryServiceCore';
+import { createMemoryServiceBridge, type MemoryServicePort } from './bridge';
 import { dispatchMemoryOp } from './ops';
 
 const memoryRoot = process.env.ENSO_MEMORY_ROOT;
@@ -14,65 +14,7 @@ if (!memoryRoot || !sessionDir) {
   throw new Error('ENSO_MEMORY_ROOT and ENSO_MEMORY_SESSION_DIR are required');
 }
 
-interface LlmRequestMessage {
-  requestId: number;
-  system: string;
-  user: string;
-  maxTokens?: number;
-  stage?: string;
-}
-
-const pendingLlm = new Map<
-  number,
-  { resolve: (text: string) => void; reject: (error: Error) => void }
->();
-let llmSeq = 0;
-let port: { postMessage(message: unknown): void };
-
-/** 转录代读：服务 → transcript-request → Main 回 transcript-result */
-const transcriptWaiters = new Map<number, (messages: unknown) => void>();
-let transcriptSeq = 0;
-function requestTranscript(sessionFile: string): Promise<unknown> {
-  return new Promise((resolve) => {
-    const requestId = ++transcriptSeq;
-    transcriptWaiters.set(requestId, resolve);
-    port.postMessage({ type: 'transcript-request', requestId, sessionFile });
-    setTimeout(() => {
-      if (transcriptWaiters.delete(requestId)) resolve([]);
-    }, 60_000).unref?.();
-  });
-}
-
-/** 远程补全代发：Main 侧经 resolver 复用 completeText / OAuth 候选链 */
-function remoteComplete(): Promise<Complete | null> {
-  const request = (requestId: number) =>
-    new Promise<string>((resolve, reject) => {
-      pendingLlm.set(requestId, { resolve, reject });
-    });
-  return Promise.resolve(
-    (system: string, user: string, options?: CompleteOptions): Promise<string> => {
-      const requestId = ++llmSeq;
-      const _message: LlmRequestMessage = {
-        requestId,
-        system,
-        user,
-        ...(options?.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
-        ...(options?.stage !== undefined ? { stage: options.stage } : {}),
-      };
-      const external = options?.signal;
-      if (external) {
-        const cancel = () => port.postMessage({ type: 'llm-cancel', requestId });
-        external.addEventListener('abort', cancel, { once: true });
-      }
-      return request(requestId).finally(() => pendingLlm.delete(requestId));
-    }
-  );
-}
-
-function workerPort(): {
-  postMessage(message: unknown): void;
-  onMessage(listener: (data: unknown) => void): void;
-} {
+function workerPort(): MemoryServicePort {
   const parent = process.parentPort;
   if (parent) {
     return {
@@ -93,51 +35,13 @@ function workerPort(): {
 }
 
 const wport = workerPort();
-port = wport;
+const bridge = createMemoryServiceBridge(wport, dispatchMemoryOp);
 
 initMemoryService({
   paths: { memoryRoot: path.resolve(memoryRoot), sessionDir: path.resolve(sessionDir) },
   postEvent: (event) => wport.postMessage(event),
-  remoteComplete,
-  transcriptReader: (sessionFile) =>
-    requestTranscript(sessionFile) as Promise<
-      import('../main/services/memory/distill').TranscriptMessage[]
-    >,
-});
-
-wport.onMessage((raw: unknown) => {
-  const message = raw as Record<string, unknown>;
-  switch (message?.type) {
-    case 'op': {
-      const requestId = message.requestId as number;
-      void dispatchMemoryOp(message.op as string, message.args).then(
-        (result) => wport.postMessage({ type: 'op-result', requestId, result }),
-        (error) =>
-          wport.postMessage({
-            type: 'op-result',
-            requestId,
-            error: error instanceof Error ? error.message : String(error),
-          })
-      );
-      return;
-    }
-    case 'llm-result': {
-      const entry = pendingLlm.get(message.requestId as number);
-      if (entry) {
-        pendingLlm.delete(message.requestId as number);
-        entry.resolve(String(message.text ?? ''));
-      }
-      return;
-    }
-    case 'llm-error': {
-      const entry = pendingLlm.get(message.requestId as number);
-      if (entry) {
-        pendingLlm.delete(message.requestId as number);
-        entry.reject(new Error(String(message.error ?? 'llm request failed')));
-      }
-      return;
-    }
-  }
+  remoteComplete: bridge.remoteComplete,
+  transcriptReader: bridge.requestTranscript,
 });
 
 wport.postMessage({ type: 'ready' });
