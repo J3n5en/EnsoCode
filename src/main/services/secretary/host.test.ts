@@ -2930,3 +2930,97 @@ describe('派出会话完成后自动归档', () => {
     expect(held(h)).toHaveLength(1);
   });
 });
+
+describe('排队会话', () => {
+  const queuedRow = (extra: Record<string, unknown> = {}) => ({
+    id: 'c1',
+    title: '排队的',
+    projectId: 'p1',
+    secretaryOrigin: { secretaryConversationId: 'sec1' },
+    queuedStart: { queuedAt: 0, text: '修构建', ...extra },
+  });
+  const queuedFile = () => ({
+    dispatched: {
+      c1: {
+        conversationId: 'c1',
+        projectId: 'p1',
+        secretaryConversationId: 'sec1',
+        createdAt: 0,
+        turn: 0,
+        lastState: 'idle' as const,
+        lastEventAt: 0,
+      },
+    },
+  });
+
+  it('每分钟检查时让启动泵补位', () => {
+    const h = harness({});
+    let drains = 0;
+    h.ports.drainQueued = () => {
+      drains += 1;
+    };
+    h.host.tick(MINUTE);
+    expect(drains).toBe(1);
+  });
+
+  it('派出会话一轮结束：可能空出名额，让启动泵补位', () => {
+    const h = harness({});
+    let drains = 0;
+    h.ports.drainQueued = () => {
+      drains += 1;
+    };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(drains).toBe(1);
+  });
+
+  it('排队会话的 spawn 被拒：由启动泵标失败并回传，这里不再记一次', () => {
+    const h = harness({ file: queuedFile() });
+    h.state.rows.c1 = queuedRow({ startingAt: 0 });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      {
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'model unavailable',
+      } as RendererAgentEvent,
+      []
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('巡检不把排队很久的会话报成停住或空闲', () => {
+    const h = harness({ file: queuedFile() });
+    h.state.rows.c1 = queuedRow();
+    h.state.statuses.c1 = idle;
+    h.host.tick(5 * 60 * MINUTE);
+    h.host.tick(6 * 60 * MINUTE);
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('启动恢复不把排队会话报成中断', () => {
+    const h = harness({ file: queuedFile() });
+    h.state.rows.c1 = queuedRow();
+    h.state.statuses.c1 = idle;
+    h.host.recover();
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('排队会话不自动归档', () => {
+    const h = harness({ file: queuedFile() });
+    const archived: string[] = [];
+    h.ports.archive = (conversationId) => {
+      archived.push(conversationId);
+    };
+    h.state.rows.c1 = queuedRow();
+    h.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 0, at: 0 };
+    h.state.statuses.c1 = idle;
+    h.host.tick(MINUTE);
+    expect(archived).toEqual([]);
+  });
+});

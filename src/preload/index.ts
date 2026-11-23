@@ -559,6 +559,18 @@ const electronAPI = {
       text?: string;
     }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GOAL_ACTION, request),
+    /** 排队会话立即开始：不看上限；followUp 是排队期间在输入框发的消息，排在首条之后送达 */
+    startQueued: (
+      conversationId: string,
+      followUp?: { text: string; images?: AttachedImage[] }
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_QUEUED_START, {
+        conversationId,
+        ...(followUp ? { followUp } : {}),
+      }),
+    /** 取消排队会话：还没开始的会话直接删除；已开始或正在启动的拒绝 */
+    cancelQueued: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_QUEUED_CANCEL, { conversationId }),
     /** 全部定时（含系统生成的每日简报与待办提醒），下一次触发时间由 Main 算 */
     listSchedules: (
       secretaryId?: string

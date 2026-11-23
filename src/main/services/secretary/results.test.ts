@@ -1122,3 +1122,61 @@ describe('常驻服务与遗留任务', () => {
     });
   });
 });
+
+describe('排队会话', () => {
+  const projects = [
+    { projectId: 'p1', canonicalPath: '/tmp/enso-code', state: 'active' },
+  ] as ProjectAuthority[];
+  const queuedRow = (queuedAt: number, extra: Record<string, unknown> = {}) => ({
+    title: `排队 ${queuedAt}`,
+    projectId: 'p1',
+    secretaryOrigin: { secretaryConversationId: 'sec1', secretaryId: 's1' },
+    queuedStart: { queuedAt, text: '修构建', ...extra },
+  });
+
+  it('不算在跑；正在启动的占着名额', () => {
+    const queued = record({ conversationId: 'q', lastState: 'idle' });
+    expect(countsAsRunning(queued, queuedRow(1), idle)).toBe(false);
+    expect(countsAsRunning(queued, queuedRow(1, { startingAt: 5 }), idle)).toBe(true);
+  });
+
+  it('看板：排队卡在真正在跑的后面、按排队先后带位次；启动失败的进需要你处理', () => {
+    const file = emptyFile({
+      dispatched: {
+        run: record({ conversationId: 'run', projectId: 'p1' }),
+        q2: record({ conversationId: 'q2', projectId: 'p1', lastState: 'idle', createdAt: 1 }),
+        q1: record({ conversationId: 'q1', projectId: 'p1', lastState: 'idle', createdAt: 2 }),
+        bad: record({ conversationId: 'bad', projectId: 'p1', lastState: 'idle' }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        run: { id: 'run', title: '在跑', sessionFile: '/tmp/r.jsonl' },
+        q2: queuedRow(20),
+        q1: queuedRow(10),
+        bad: queuedRow(5, { failed: { at: 6, error: 'spawn failed' } }),
+      },
+      statuses: { run: running, q1: idle, q2: idle, bad: idle },
+      projects,
+      todos: [{ id: 't1', text: '修构建', createdAt: 1, updatedAt: 1, conversationId: 'q1' }],
+    });
+    expect(
+      board.running.map((card) =>
+        card.kind === 'session' ? [card.conversationId, card.state, card.queuePosition] : []
+      )
+    ).toEqual([
+      ['run', 'running', undefined],
+      ['q1', 'queued', 1],
+      ['q2', 'queued', 2],
+    ]);
+    expect(board.needsYou).toEqual([
+      expect.objectContaining({
+        conversationId: 'bad',
+        state: 'queued',
+        queueFailed: 'spawn failed',
+      }),
+    ]);
+    expect(board.done).toEqual([]);
+    expect(board.todos[0]).toMatchObject({ phase: 'active', sessionState: 'queued' });
+  });
+});

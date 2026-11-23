@@ -691,3 +691,32 @@ describe('投递被拒的消息不丢', () => {
     expect(h.audits).toEqual([]);
   });
 });
+
+describe('排队会话', () => {
+  it('还在排队的行：合并写回带来的消息不投、目标不续跑', async () => {
+    const h = harness({
+      queuedStart: { queuedAt: 1, text: '首条' },
+      queuedMessages: [{ id: 'q1', text: '排队期间发的' }],
+    });
+    const patch = mergedQueued('排队期间发的');
+    h.driver.onConversationsMerged(patch);
+    await Promise.resolve();
+    h.driver.observe(turnCompleted(digest('step')));
+    expect(h.prompts).toEqual([]);
+    expect(h.rows[SID].queuedMessages).toHaveLength(1);
+  });
+
+  it('启动后首轮结束：排队期间发的消息先于目标续跑投出，排在首条之后', () => {
+    const h = harness({
+      queuedStart: { queuedAt: 1, text: '首条', startingAt: 2 },
+      queuedMessages: [{ id: 'q1', text: '排队期间发的' }],
+    });
+    // 启动泵投完首条后撤掉 queuedStart
+    const { queuedStart: _queued, ...started } = h.rows[SID];
+    h.rows[SID] = started;
+    h.driver.observe(turnCompleted(digest('首条做完了')));
+    expect(h.prompts.map((prompt) => prompt.delivery.text)).toEqual(['排队期间发的']);
+    h.driver.observe(turnCompleted(digest('补充也做完了')));
+    expect(h.prompts[1].delivery.text).toContain('<goal-continuation>');
+  });
+});

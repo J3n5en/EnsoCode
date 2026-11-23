@@ -3033,6 +3033,11 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     managedElsewhere: async (conversationId) =>
       (await import('./crossSecretary')).managedElsewhere(ctx.id, conversationId),
     runningTotal: async () => (await import('./crossSecretary')).runningTotal(),
+    cancelQueued: async (conversationId, secretaryConversationId) =>
+      (await import('./queuedSessions')).cancelQueuedSession(
+        conversationId,
+        secretaryConversationId
+      ),
     profile: () => store().profile(),
     persona: () => store().readPersona(),
     dispatchFile: () => store().dispatch(),

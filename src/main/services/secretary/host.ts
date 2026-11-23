@@ -11,6 +11,7 @@ import {
   patrolStallDetail,
 } from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
+import { queuedStartOf } from '@shared/secretary/queuedSession';
 import {
   isPureSessionUpdate,
   messageText,
@@ -139,6 +140,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   coldResumed?(conversationId: string): boolean;
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
   startPending?(pendingIds: readonly string[], now: number): void;
+  /** 可能空出了名额：让排队会话的启动泵按先进先出补位；缺省表示没有排队会话 */
+  drainQueued?(): void;
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
@@ -1148,10 +1151,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           if (resultEvent) kind = classify(record, resultEvent, status);
           // 会话没能启动（spawn 被拒）：没有任何轮次事件，在这里记一次失败。
           // STALE 是发给已不在 worker 的会话的命令被拒，不是会话本身出错
+          // 排队会话的启动失败由启动泵自己标记并回传，这里不再记一次
           if (
             !kind &&
             event.type === 'parent-rejected' &&
             !event.reason.startsWith(STALE_SESSION_ERROR) &&
+            !queuedStartOf(rows[conversationId]) &&
             awaitsOutcome(record)
           ) {
             kind = 'failed';
@@ -1273,6 +1278,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const reported = ports.reportPeerTodos?.() ?? false;
       if (changed || todosChanged || reported) ports.publish();
       flush(now);
+      // 派出会话一轮结束、报错或停下：可能空出了名额
+      const settled =
+        (sessionId !== undefined &&
+          (event.type === 'turn-completed' || event.type === 'turn-failed')) ||
+        changes.some((entry) => entry.previous === 'running' && entry.state !== 'running');
+      if (settled && [...touched].some((id) => file.dispatched[id] !== undefined))
+        ports.drainQueued?.();
     },
 
     tick(now = ports.now()) {
@@ -1349,6 +1361,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         .filter((pending) => pending.status === 'waiting')
         .map((pending) => pending.id);
       if (waiting.length > 0) ports.startPending?.(waiting, now);
+      // 每分钟兜底：名额的变化不一定都有事件（手动标完成、改上限、会话被删）
+      ports.drainQueued?.();
     },
 
     recordBackgroundStalls(stalls, now = ports.now()) {
