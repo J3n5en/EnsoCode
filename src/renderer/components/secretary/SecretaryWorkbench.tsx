@@ -7,6 +7,7 @@ import {
   type SecretaryTodoMutate,
   type TodoProblemCode,
 } from '@shared/types/secretary';
+import { formatRetryClock } from '@shared/upstreamRecovery';
 import {
   ArrowUpRight,
   Coffee,
@@ -566,6 +567,7 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
   const ownBoard = useSecretaryStore((s) =>
     secretaryId ? (s.states[secretaryId]?.board ?? s.secretary.board) : s.secretary.board
   );
+  const upstreamHealth = useSessionsStore((s) => s.upstreamHealth) ?? [];
   const secretaries = useSecretaryStore((s) => s.secretaries);
   /** 多个秘书时可以看总看板：全部，或筛到某一个 */
   const [scope, setScope] = useState<'own' | 'all'>('own');
@@ -646,6 +648,27 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
 
   return (
     <div data-enso="secretary-workbench" className="flex flex-col gap-3 px-3 py-3">
+      {upstreamHealth.length > 0 && (
+        <div
+          data-enso="secretary-upstream-health"
+          className="flex flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[12px] text-amber-700 dark:text-amber-300"
+        >
+          {upstreamHealth.map((item) => (
+            <div key={item.provider} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate">
+                {t('Upstream unavailable ({{provider}}), retrying automatically', {
+                  provider: item.provider,
+                })}
+              </span>
+              {item.nextProbeAt && (
+                <span className="shrink-0 font-mono text-[11px] tabular-nums">
+                  {formatRetryClock(item.nextProbeAt)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {secretaries.length > 1 && (
         <div className="flex items-center gap-1.5">
           {(['own', 'all'] as const).map((option) => (

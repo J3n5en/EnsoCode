@@ -368,6 +368,9 @@ function parsePending(value: unknown): PendingDispatch | undefined {
   if (value.status !== 'waiting' && value.status !== 'failed') return undefined;
   const problem = parsePendingProblem(value.problem);
   const failedDependency = text(value.failedDependency);
+  const retryCount = clampInt(value.retryCount, 1, 20);
+  const nextRetryAt = time(value.nextRetryAt);
+  const lastError = text(value.lastError);
   return {
     id,
     projectId,
@@ -379,6 +382,9 @@ function parsePending(value: unknown): PendingDispatch | undefined {
     draft,
     ...(problem ? { problem } : {}),
     ...(failedDependency ? { failedDependency } : {}),
+    ...(retryCount !== undefined ? { retryCount } : {}),
+    ...(nextRetryAt !== undefined ? { nextRetryAt } : {}),
+    ...(lastError ? { lastError } : {}),
   };
 }
 

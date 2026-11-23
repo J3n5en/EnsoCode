@@ -34,6 +34,8 @@ export interface PatrolFacts {
   awaitingReplySince?: number;
   /** 挂着没到点（或到点不足 2 分钟）的自定提醒：会话在等自己定的时间点，不是卡住 */
   reminderPending?: boolean;
+  /** 会话因上游瞬态/配额故障在等待自动退避恢复：不是卡住 */
+  upstreamWaiting?: boolean;
 }
 
 export interface PatrolAnomaly {
@@ -104,6 +106,7 @@ export function patrolAnomalies(facts: readonly PatrolFacts[], now: number): Pat
     if (entry.state !== 'idle') continue;
     if (entry.pending > 0) continue;
     if (entry.reminderPending) continue;
+    if (entry.upstreamWaiting) continue;
     // 秘书发过消息、之后没有任何可见回复：与 goal 空闲停住共用同一个空闲阈值
     if (
       entry.awaitingReplySince !== undefined &&

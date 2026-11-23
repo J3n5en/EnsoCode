@@ -1,6 +1,7 @@
 import { type ContactBadge, sessionBadge } from '@shared/secretary/commands';
 import type { PendingDispatch, SecretaryCard } from '@shared/types/secretary';
-import { ArrowUpRight, Check } from 'lucide-react';
+import { formatRetryClock } from '@shared/upstreamRecovery';
+import { ArrowUpRight, Check, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
@@ -42,6 +43,14 @@ function RunningRow({ card }: { card: SessionCard }) {
   const [expanded, setExpanded] = useState(false);
   const badge = badgeOf(card);
   const model = modelLabel(providers, card.model);
+  const upstreamRetry = card.upstreamRetry;
+  const upstreamLabel = upstreamRetry
+    ? upstreamRetry.kind === 'quota'
+      ? t('Quota exhausted · next {{time}}', { time: formatRetryClock(upstreamRetry.at) })
+      : t('Waiting for upstream recovery · next {{time}}', {
+          time: formatRetryClock(upstreamRetry.at),
+        })
+    : null;
   const queuedLabel =
     card.state === 'queued'
       ? card.queueFailed
@@ -66,13 +75,23 @@ function RunningRow({ card }: { card: SessionCard }) {
       >
         <span className="flex min-w-0 items-center gap-1.5">
           <span
-            data-enso={queuedLabel ? 'secretary-queued-card' : 'secretary-running-badge'}
+            data-enso={
+              upstreamLabel
+                ? 'secretary-upstream-waiting'
+                : queuedLabel
+                  ? 'secretary-queued-card'
+                  : 'secretary-running-badge'
+            }
             className={cn(
               BADGE_CLASS,
-              queuedLabel ? 'bg-orange-500/15 text-orange-600' : badge.className
+              upstreamLabel
+                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                : queuedLabel
+                  ? 'bg-orange-500/15 text-orange-600'
+                  : badge.className
             )}
           >
-            {queuedLabel ?? t(badge.label)}
+            {upstreamLabel ?? queuedLabel ?? t(badge.label)}
           </span>
           {card.takeover && (
             <span
@@ -125,6 +144,21 @@ function RunningRow({ card }: { card: SessionCard }) {
       </button>
       {/* 行内收口：只有派发或接管跟踪的会话才会出现在这张表里 */}
       <HoverActions className="pr-7">
+        {upstreamRetry && (
+          <button
+            type="button"
+            data-enso="secretary-upstream-retry-now"
+            title={t('Retry now')}
+            aria-label={t('Retry now')}
+            onClick={(event) => {
+              event.stopPropagation();
+              void window.electronAPI.agent.retryUpstreamNow?.(card.conversationId);
+            }}
+            className="flex size-5 shrink-0 items-center justify-center rounded-[5px] text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           data-enso="secretary-running-mark-done"
