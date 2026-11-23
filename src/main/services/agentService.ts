@@ -550,6 +550,25 @@ export class AgentService implements AgentServiceContract {
     });
   }
 
+  /**
+   * 用户停止父会话：名下未结束的 Run 按 stop 一并收口（模型视同知情，不再唤醒父会话）。
+   * 排队的先撤，免得停掉 coworker 当前 Run 后又被拉起；单个停失败不影响其余。
+   */
+  async cancelOwner(ownerId: string): Promise<void> {
+    const open = [...this.runs.values()]
+      .filter(
+        (run) => run.context.owner.ownerId === ownerId && !TERMINAL_RUN_STATUSES.has(run.status)
+      )
+      .sort((left, right) => Number(right.status === 'queued') - Number(left.status === 'queued'));
+    await Promise.all(
+      open.map((run) =>
+        this.stop({ context: run.context, requestId: this.randomUuid(), runId: run.runId }).catch(
+          () => undefined
+        )
+      )
+    );
+  }
+
   dismiss(request: AgentControlDismissRequest): Promise<AgentServiceResult<{ agentId: string }>> {
     return this.serial(request.context.owner.ownerId, async () => {
       const agent = this.ownedAgent(request.context, request.agentId);

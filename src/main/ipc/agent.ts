@@ -2899,12 +2899,23 @@ export function registerAgentHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_ABORT, (_event, sessionId: unknown): AgentActionResult => {
-    const identity = exactIdentity(sessionId);
-    return identity
-      ? abortSession(identity)
-      : { ok: false, error: 'invalid abort or stale session generation' };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_ABORT,
+    (_event, sessionId: unknown, options: unknown): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      if (!identity) return { ok: false, error: 'invalid abort or stale session generation' };
+      const result = abortSession(identity);
+      // 用户点停止：根会话名下在跑的子代理一并停掉；插话立即发送 / 卡死重试只断当前轮
+      const stopSubagents =
+        typeof options === 'object' &&
+        options !== null &&
+        (options as { stopSubagents?: unknown }).stopSubagents === true;
+      if (stopSubagents && !('parent' in identity)) {
+        void agentService?.cancelOwner(identity.sessionId);
+      }
+      return result;
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ABORT_RETRY,

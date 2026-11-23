@@ -225,7 +225,12 @@ import { parseProfile } from '@shared/secretary/parse';
 import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
 import { SecretaryStore } from '../services/secretary/store';
-import { getSourceAuthorityRegistry, registerAgentHandlers, spawnRootFromMain } from './agent';
+import {
+  getAgentService,
+  getSourceAuthorityRegistry,
+  registerAgentHandlers,
+  spawnRootFromMain,
+} from './agent';
 
 const sender = {
   id: 1,
@@ -264,6 +269,32 @@ describe('agent IPC Main identity boundary', () => {
 
   it('派发 host 接上子代理模型解析，模型覆盖才不会被当成档案禁止', () => {
     expect(mocks.dispatchHost.resolveSubagentModel).toBe(resolveSubagentModelSelection);
+  });
+
+  it('停止带 stopSubagents 时一并停掉根会话名下的子代理；不带选项或 child 身份不级联', async () => {
+    const parent = { sessionId: 'conv-1', generation: 'gen-1' };
+    const cancelOwner = vi.spyOn(getAgentService()!, 'cancelOwner').mockResolvedValue();
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_ABORT)!;
+
+    mocks.currentIdentity.mockReturnValue(parent);
+    await handler(event, 'conv-1');
+    expect(mocks.abortSession).toHaveBeenCalledWith(parent);
+    expect(cancelOwner).not.toHaveBeenCalled();
+
+    await handler(event, 'conv-1', { stopSubagents: true });
+    expect(cancelOwner).toHaveBeenCalledWith('conv-1');
+
+    cancelOwner.mockClear();
+    mocks.currentIdentity.mockReturnValue({
+      sessionId: 'conv-1::cw-1',
+      generation: 'g',
+      parent,
+      instanceId: 'i',
+      instanceName: 'Enso-1',
+      typeKey: 'agent:enso',
+    });
+    await handler(event, 'conv-1::cw-1', { stopSubagents: true });
+    expect(cancelOwner).not.toHaveBeenCalled();
   });
 
   it('desktop rewind requires a persisted entry ID and a current generation', () => {

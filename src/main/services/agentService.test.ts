@@ -1939,3 +1939,113 @@ describe('AgentService 找不到 Run / Agent 时说明原因', () => {
     expect(!result.ok && result.error).toContain('subagent list');
   });
 });
+
+describe('AgentService 父会话停止时级联停止子代理', () => {
+  const otherOwner: AgentControlContext = {
+    owner: { ...owner, ownerId: 'chat-2' },
+    actor: {
+      kind: 'agent',
+      actorId: 'chat-2',
+      ownerId: 'chat-2',
+      projectId: owner.projectId,
+      identity: { sessionId: 'chat-2', generation: '33333333-3333-4333-8333-333333333333' },
+    },
+  };
+
+  it('停掉名下在跑的 task 与 coworker：task 关闭，coworker 保留，不另发通知', async () => {
+    const notify = vi.fn();
+    const { service, runtime } = setup({ notify });
+    const task = await service.spawn(spawnRequest({ requestId: 'spawn-task' }));
+    const coworker = await service.spawn(
+      spawnRequest({ requestId: 'spawn-coworker', mode: 'coworker' })
+    );
+    if (!task.ok || !coworker.ok) throw new Error('spawn failed');
+
+    await service.cancelOwner(owner.ownerId);
+
+    expect(runtime.stop).toHaveBeenCalledTimes(2);
+    expect(runtime.stop).toHaveBeenCalledWith(expect.objectContaining({ runId: task.value.runId }));
+    expect(runtime.stop).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: coworker.value.runId })
+    );
+    const listed = await service.list({ context, requestId: 'list', limit: 10 });
+    if (!listed.ok) throw new Error(listed.error);
+    expect(
+      Object.fromEntries(listed.value.agents.map((agent) => [agent.agentId, agent.status]))
+    ).toEqual({ [task.value.agentId]: 'closed', [coworker.value.agentId]: 'ready' });
+    expect(runtime.dismiss).toHaveBeenCalledTimes(1);
+    expect(runtime.dismiss).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: task.value.agentId })
+    );
+    expect(service.progress(owner.ownerId)).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('已结束的 Run 与别的父会话的 Run 不动', async () => {
+    const { service, runtime, children } = setup();
+    const done = await service.spawn(spawnRequest({ requestId: 'spawn-done' }));
+    const foreign = await service.spawn(
+      spawnRequest({ requestId: 'spawn-foreign', context: otherOwner })
+    );
+    if (!done.ok || !foreign.ok) throw new Error('spawn failed');
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: done.value.runId,
+    });
+
+    await service.cancelOwner(owner.ownerId);
+
+    expect(runtime.stop).not.toHaveBeenCalled();
+    expect(service.progress('chat-2')).toHaveLength(1);
+  });
+
+  it('coworker 排队的 Run 一并撤掉，不会在停掉当前 Run 后被拉起', async () => {
+    const { service, runtime } = setup();
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    await service.send({
+      context,
+      requestId: 'send-next',
+      agentId: spawned.value.agentId,
+      message: 'second round',
+      delivery: 'next',
+    });
+
+    await service.cancelOwner(owner.ownerId);
+
+    expect(runtime.stop).toHaveBeenCalledTimes(1);
+    expect(runtime.prompt).toHaveBeenCalledTimes(1);
+    expect(service.progress(owner.ownerId)).toEqual([]);
+  });
+
+  it('在等这些 Run 的 wait 随之返回，不留孤儿等待', async () => {
+    const { service } = setup();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    const waiting = service.wait({ context, requestId: 'w', runIds: [spawned.value.runId] });
+
+    await service.cancelOwner(owner.ownerId);
+
+    expect(await waiting).toMatchObject({ ok: true, value: { timedOut: false } });
+  });
+
+  it('某个 Run 停止失败或抛错时其余照停，整体不抛', async () => {
+    const { service, runtime } = setup();
+    const first = await service.spawn(spawnRequest({ requestId: 'spawn-1' }));
+    const second = await service.spawn(spawnRequest({ requestId: 'spawn-2' }));
+    const third = await service.spawn(spawnRequest({ requestId: 'spawn-3' }));
+    if (!first.ok || !second.ok || !third.ok) throw new Error('spawn failed');
+    vi.mocked(runtime.stop)
+      .mockImplementationOnce(async () => {
+        throw new Error('worker gone');
+      })
+      .mockImplementationOnce(async () => ({ ok: false, error: 'not running' }));
+
+    await expect(service.cancelOwner(owner.ownerId)).resolves.toBeUndefined();
+
+    expect(runtime.stop).toHaveBeenCalledTimes(3);
+    expect(service.progress(owner.ownerId)).toHaveLength(2);
+  });
+});
