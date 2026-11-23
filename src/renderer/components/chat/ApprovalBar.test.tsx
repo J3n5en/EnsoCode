@@ -66,6 +66,17 @@ describe('ApprovalBar dcg 规则解释', () => {
     expect(html).toContain('nwipe overwrites the disk');
     expect(html).not.toContain('Why it is dangerous');
   });
+
+  it('内置守卫规则直接显示原因，dcg 规则保留 dcg 前缀', () => {
+    const reason = 'Deletes in the shared system Temp folder root.';
+    const enso = render([
+      { ...request, guard: { ruleId: 'enso.windows:temp-root-delete', reason } },
+    ]);
+    expect(enso).toContain(reason);
+    expect(enso).not.toContain('dcg: ');
+    const dcg = render([{ ...request, guard: { ruleId: 'core.git:reset-hard', reason: 'x' } }]);
+    expect(dcg).toContain('dcg: ');
+  });
 });
 
 describe('ApprovalBar 复制详情', () => {

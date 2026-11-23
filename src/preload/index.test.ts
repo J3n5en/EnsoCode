@@ -75,6 +75,15 @@ describe('秘书接管 IPC 出口', () => {
 });
 
 describe('preload agentDispatch.onEvent', () => {
+  it('window.openDevTools 走 WINDOW_OPEN_DEV_TOOLS，不带参数，返回结果对象', async () => {
+    const api = mocks.exposeInMainWorld.mock.calls[0]?.[1] as ElectronAPI;
+    const typed: () => Promise<{ ok: true } | { ok: false; error: string }> =
+      api.window.openDevTools;
+    mocks.invoke.mockResolvedValueOnce({ ok: true });
+    await expect(typed()).resolves.toEqual({ ok: true });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WINDOW_OPEN_DEV_TOOLS);
+  });
+
   it('window 出口不含 summonAgent / onAgentComposerPrefill', () => {
     expect(noSummonExports).toBe(true);
     const api = mocks.exposeInMainWorld.mock.calls[0]?.[1] as ElectronAPI | undefined;

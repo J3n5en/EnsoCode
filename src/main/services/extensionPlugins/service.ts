@@ -529,7 +529,12 @@ export class ExtensionPluginService {
       tools: m.contributes.agentTools.map(({ name, description }) => ({ name, description })),
       hasRenderer: m.renderer !== undefined,
       warnings: [...staged.warnings, ...versionWarnings(m.version, existing?.version)],
-      ...(existing ? { existingVersion: existing.version } : {}),
+      ...(existing
+        ? {
+            existingVersion: existing.version,
+            addedPermissions: m.permissions.filter((p) => !existing.grant.permissions.includes(p)),
+          }
+        : {}),
       expands: existing ? grantExpands(existing.grant, grant) : true,
     };
     return { ok: true as const, preview };
@@ -597,6 +602,7 @@ export class ExtensionPluginService {
         latest: p.latest,
         permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
         ...(installed ? { installedVersion: installed } : {}),
+        ...(rec?.pending ? { pendingVersion: rec.pending.version } : {}),
         updateAvailable,
       };
     });

@@ -2,7 +2,15 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { createDcgGuard, dcgDialect, parseDcgVerdict, withDcgExemptions } from './dcg';
+import {
+  createDcgGuard,
+  dcgDialect,
+  deletesTempRoot,
+  parseDcgVerdict,
+  TEMP_ROOT_RULE_ID,
+  withDcgExemptions,
+  withTempRootGuard,
+} from './dcg';
 
 const DENY = JSON.stringify({
   decision: 'deny',
@@ -62,7 +70,86 @@ describe('parseDcgVerdict', () => {
       reason: 'git reset --hard destroys uncommitted changes.',
     });
   });
+});
 
+describe('deletesTempRoot', () => {
+  it('删除系统 Temp 根或根下通配视为命中', () => {
+    for (const command of [
+      'Remove-Item $env:TEMP\\* -Recurse -Force',
+      'Remove-Item -Recurse -Force "$env:TEMP\\*"',
+      'Remove-Item $env:TMP -Recurse',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: PowerShell 的 ${env:TEMP} 写法
+      'Remove-Item "${env:TEMP}/*.*" -Force',
+      'rm -r -fo $env:TEMP/*',
+      'Get-ChildItem $env:TEMP | Remove-Item -Recurse -Force',
+      'Get-ChildItem -Path $env:TEMP -Recurse | ForEach-Object { Remove-Item $_.FullName }',
+      'cmd /c del /s /q %TEMP%\\*',
+      'cmd /c rd /s /q "%LOCALAPPDATA%\\Temp"',
+      'Remove-Item "$env:LOCALAPPDATA\\Temp\\*" -Recurse',
+      "Remove-Item 'C:\\Users\\alice\\AppData\\Local\\Temp\\*' -Recurse -Force",
+      'Remove-Item ([System.IO.Path]::GetTempPath() + "*") -Recurse',
+      'Remove-Item (Join-Path $env:TEMP "*") -Recurse',
+      'Remove-Item ~\\AppData\\Local\\Temp\\* -Recurse',
+      'Clear-RecycleBin; ri $env:temp\\* -r',
+      // 根下按通配删一批：会连带删掉别的程序的同类文件
+      'Remove-Item $env:TEMP\\*.tmp -Force',
+      'Remove-Item "$env:TEMP\\tmp*" -Recurse',
+      'cmd /c "del /q %TEMP%\\*"',
+      // macOS / Linux 的 Temp 根同样只读不删
+      'rm -rf /tmp/*',
+      'rm -rf /tmp',
+      'rm -rf /private/tmp/enso-*',
+      'rm -rf /var/tmp/*',
+      'rm -rf $TMPDIR/*',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 写法
+      'rm -rf "${TMPDIR}"*',
+    ]) {
+      expect(deletesTempRoot(command), command).toBe(true);
+    }
+  });
+
+  it('会话子目录内删除、只读访问与无关命令放行', () => {
+    for (const command of [
+      'Remove-Item $env:TEMP\\enso\\abc -Recurse -Force',
+      'Remove-Item "C:\\Users\\alice\\AppData\\Local\\Temp\\enso\\abc\\run.ps1"',
+      'rm -r -fo "$env:TEMP/enso/abc/*"',
+      'Get-ChildItem $env:TEMP',
+      'New-Item -ItemType Directory $env:TEMP\\enso\\x',
+      'Set-Content $env:TEMP\\enso\\x\\a.txt hi',
+      'Remove-Item .\\build -Recurse',
+      'rm -rf /tmp/x',
+      'rm -rf "$TMPDIR/enso-x"',
+      'rm -rf ./tmp/*',
+      'rm -rf build/tmp/*',
+      'ls /tmp',
+      'Write-Output "remove temp files"',
+    ]) {
+      expect(deletesTempRoot(command), command).toBe(false);
+    }
+  });
+});
+
+describe('withTempRootGuard', () => {
+  it('Temp 根删除先于 dcg 命中，其余交给内层守卫', async () => {
+    const inner = async (_tool: string, command: string) =>
+      command === 'git reset --hard' ? { ruleId: 'core.git:reset-hard', reason: 'x' } : null;
+    const guard = withTempRootGuard(inner);
+    expect((await guard('powershell', 'Remove-Item $env:TEMP\\* -Recurse'))?.ruleId).toBe(
+      TEMP_ROOT_RULE_ID
+    );
+    expect(await guard('powershell', 'Remove-Item $env:TEMP\\enso\\a -Recurse')).toBeNull();
+    expect((await guard('bash', 'git reset --hard'))?.ruleId).toBe('core.git:reset-hard');
+  });
+
+  it('没装 dcg 也生效；非命令工具不检查', async () => {
+    const guard = withTempRootGuard(undefined);
+    expect((await guard('powershell', 'Remove-Item $env:TEMP\\*'))?.ruleId).toBe(TEMP_ROOT_RULE_ID);
+    expect(await guard('powershell', 'git reset --hard')).toBeNull();
+    expect(await guard('edit', 'Remove-Item $env:TEMP\\*')).toBeNull();
+  });
+});
+
+describe('parseDcgVerdict 放行', () => {
   it('放行、坏 JSON、缺字段、其它退出码一律放行', () => {
     expect(parseDcgVerdict(0, JSON.stringify({ decision: 'allow' }))).toBeNull();
     expect(parseDcgVerdict(1, 'not json')).toBeNull();

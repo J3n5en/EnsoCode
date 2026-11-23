@@ -224,7 +224,7 @@ export function ApprovalBar({
   const respond = (decision: ApprovalDecision) => {
     // 代审可能原卡退回，不能把按钮锁死
     if (decision !== 'review') setResponding(active.requestId);
-    if (decision === 'allow' && active.guard)
+    if (decision === 'allow' && active.guard && !active.guard.ruleId.startsWith('enso.'))
       void dcgApi()
         ?.ruleAllowed(active.guard.ruleId)
         .catch(() => {});
@@ -268,7 +268,14 @@ export function ApprovalBar({
           {t(REVIEW_FALLBACK_LABELS[active.reviewFallback])}
         </p>
       )}
-      {active.guard && <DcgGuardDetail guard={active.guard} />}
+      {active.guard &&
+        (active.guard.ruleId.startsWith('enso.') ? (
+          <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
+            {t(active.guard.reason)}
+          </p>
+        ) : (
+          <DcgGuardDetail guard={active.guard} />
+        ))}
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       {!reviewing && (
         <div className="mt-2 flex items-center justify-end gap-1.5">

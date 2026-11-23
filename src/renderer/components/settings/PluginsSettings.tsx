@@ -7,8 +7,10 @@ import type {
 } from '@shared/extensionPlugins/types';
 import {
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Files,
   FileText,
   FolderOpen,
@@ -46,6 +48,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { copyText } from '@/lib/copyText';
 import { cn } from '@/lib/utils';
 import { PluginArtifactList } from '@/plugins/artifactViews';
 import { coerceConfigValue } from '@/plugins/configValue';
@@ -239,10 +242,37 @@ function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plai
   );
 }
 
+/** 超过这个行数就退回纯文本，避免几千个节点卡住面板 */
+const MAX_LOG_LINES = 5000;
+/** 与 Main 的 PluginLogger 写入格式一致：`<ISO> [level] message`；无前缀的是上一条的续行 */
+const LOG_HEAD = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (\[(info|warn|error)\] .*)$/;
+/** 状态色本身是给底色用的，直接当字色在亮色（warn）和暗色（error）下都太淡；向前景色混一点，两种主题都清楚 */
+const LOG_LEVEL_CLASS = {
+  info: 'text-muted-foreground',
+  warn: 'text-[color-mix(in_oklab,var(--color-warning)_60%,var(--color-foreground))]',
+  error: 'text-[color-mix(in_oklab,var(--color-destructive)_55%,var(--color-foreground))]',
+} as const;
+
+type LogLine = { time: string | null; body: string; level: keyof typeof LOG_LEVEL_CLASS };
+
+function parseLogLines(text: string): LogLine[] | null {
+  const raw = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n');
+  if (raw.length > MAX_LOG_LINES) return null;
+  let level: LogLine['level'] = 'info';
+  return raw.map((line) => {
+    const head = LOG_HEAD.exec(line);
+    if (!head) return { time: null, body: line, level };
+    level = head[3] as LogLine['level'];
+    return { time: head[1] ?? null, body: head[2] ?? '', level };
+  });
+}
+
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
 function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const { t } = useI18n();
   const [text, setText] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
   const load = React.useCallback(async () => {
     const result = await window.electronAPI.extensionPlugins.logs(pluginId);
     setText(result.ok ? result.text : result.error);
@@ -250,17 +280,70 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
   React.useEffect(() => {
     void load();
   }, [load]);
+  React.useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const lines = React.useMemo(() => (text ? parseLogLines(text) : null), [text]);
+  React.useLayoutEffect(() => {
+    const box = scrollRef.current;
+    if (box && text) box.scrollTop = box.scrollHeight;
+  }, [text]);
   return (
     <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
       <div className="flex items-center justify-between">
         <p className="text-sm">{t('Plugin logs')}</p>
-        <Button size="icon" variant="ghost" aria-label={t('Refresh')} onClick={() => void load()}>
-          <RefreshCw className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={t('Copy')}
+            title={copied ? t('Copied') : t('Copy')}
+            disabled={!text}
+            onClick={() => {
+              if (!text) return;
+              void copyText(text).then((ok) => ok && setCopied(true));
+            }}
+          >
+            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          </Button>
+          <Button size="icon" variant="ghost" aria-label={t('Refresh')} onClick={() => void load()}>
+            <RefreshCw className="size-4" />
+          </Button>
+        </div>
       </div>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-muted-foreground text-xs">
-        {text === null ? '' : text || t('No logs yet')}
-      </pre>
+      {text && !lines && (
+        <p className="text-muted-foreground text-xs">{t('Log too large, showing plain text')}</p>
+      )}
+      <div
+        ref={scrollRef}
+        className="max-h-96 select-text overflow-auto font-mono text-muted-foreground text-xs"
+      >
+        {lines ? (
+          lines.map((line, index) => (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: 日志行无稳定标识，按位置渲染
+              key={index}
+              data-log-level={line.level}
+              className={cn('whitespace-pre-wrap break-words', LOG_LEVEL_CLASS[line.level])}
+            >
+              {line.time && (
+                <>
+                  <span data-log-time className="text-muted-foreground/60">
+                    {line.time}
+                  </span>{' '}
+                </>
+              )}
+              {line.body}
+            </div>
+          ))
+        ) : (
+          <pre className="whitespace-pre-wrap break-words">
+            {text === null ? '' : text || t('No logs yet')}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }
@@ -293,20 +376,37 @@ function PluginErrorText({ message }: { message: string }) {
 function PermissionLines({
   permissions,
   styles = false,
+  added = [],
 }: {
   permissions: readonly string[];
   styles?: boolean;
+  /** 更新时新增的权限：单独标出 */
+  added?: readonly string[];
 }) {
+  const { t } = useI18n();
   if (permissions.length === 0)
     return styles ? null : <p className="text-muted-foreground text-xs">无特殊权限</p>;
   return (
     <ul className="space-y-0.5">
-      {permissions.map((permission) => (
-        <li key={permission} className="text-xs">
-          <span className="font-mono text-muted-foreground">{permission}</span>
-          <span className="ml-2">{pluginPermissionLabel(permission)}</span>
-        </li>
-      ))}
+      {permissions.map((permission) => {
+        const isAdded = added.includes(permission);
+        return (
+          <li
+            key={permission}
+            className={cn('text-xs', isAdded && 'font-medium text-amber-700 dark:text-amber-400')}
+          >
+            {isAdded && (
+              <Badge variant="warning" className="mr-1.5 text-[11px]">
+                {t('Added')}
+              </Badge>
+            )}
+            <span className={cn('font-mono', !isAdded && 'text-muted-foreground')}>
+              {permission}
+            </span>
+            <span className="ml-2">{pluginPermissionLabel(permission)}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -340,6 +440,7 @@ function capabilitySummary(plugin: ExtensionPluginSummary): string {
 
 function PluginCapabilityBlock({
   permissions,
+  addedPermissions,
   env,
   interop,
   resident,
@@ -350,6 +451,7 @@ function PluginCapabilityBlock({
   schedules,
 }: {
   permissions: readonly string[];
+  addedPermissions?: readonly string[];
   env?: readonly string[];
   interop?: readonly string[];
   resident?: boolean;
@@ -367,7 +469,11 @@ function PluginCapabilityBlock({
 }) {
   return (
     <div className="space-y-1">
-      <PermissionLines permissions={permissions} styles={styles || trustedUi} />
+      <PermissionLines
+        permissions={permissions}
+        styles={styles || trustedUi}
+        added={addedPermissions}
+      />
       {trustedUi && <TrustedUiLine />}
       {resident && (
         <p className="text-xs">
@@ -406,6 +512,88 @@ function TrustedUiLine() {
     <p className="text-amber-700 text-xs dark:text-amber-400">
       界面代码：运行在主界面里，可读写页面内容、调用界面能力，不受上面权限清单约束；只安装信任的插件
     </p>
+  );
+}
+
+function InstallPreviewTitle({ preview }: { preview: ExtensionPluginInstallPreview }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {preview.name} {preview.version}
+      {preview.existingVersion && (
+        <span className="ml-2 text-base text-muted-foreground">
+          {t('updating from {{version}}', { version: preview.existingVersion })}
+        </span>
+      )}
+    </>
+  );
+}
+
+function InstallPreviewDetails({ preview }: { preview: ExtensionPluginInstallPreview }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {preview.existingVersion && preview.expands && (
+        <p className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
+          {t(
+            'This update asks for more than {{version}}. {{version}} keeps running until you allow the update in the plugin list.',
+            { version: preview.existingVersion }
+          )}
+        </p>
+      )}
+      <PluginCapabilityBlock
+        permissions={preview.permissions}
+        addedPermissions={preview.addedPermissions}
+        env={preview.env}
+        interop={preview.interop}
+        resident={preview.resident}
+        styles={preview.styles}
+        trustedUi={preview.hasRenderer}
+        events={preview.events}
+        schedules={preview.schedules}
+      />
+      {preview.mcpServers.map((server) => (
+        <p key={server.name} className="font-mono text-xs">
+          {server.command} {server.args.join(' ')}
+        </p>
+      ))}
+      {preview.mcpTools.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          {t('Host MCP tools it may call')}：
+          <span className="font-mono">{preview.mcpTools.join(', ')}</span>
+        </p>
+      )}
+      {preview.warnings.map((warning) => (
+        <p key={warning} className="text-muted-foreground text-xs">
+          {warning}
+        </p>
+      ))}
+    </>
+  );
+}
+
+/** 确认按钮出现后稍等才可点：防止连点或按住回车把刚弹出的权限确认直接点掉 */
+const CONFIRM_ARM_MS = 1000;
+
+function ConfirmInstallButton({
+  token,
+  busy,
+  onConfirm,
+}: {
+  token: string;
+  busy: boolean;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  const [armed, setArmed] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setArmed(token), CONFIRM_ARM_MS);
+    return () => clearTimeout(timer);
+  }, [token]);
+  return (
+    <Button size="sm" disabled={busy || armed !== token} onClick={onConfirm}>
+      {busy ? <Spinner /> : t('Install')}
+    </Button>
   );
 }
 
@@ -469,6 +657,10 @@ export function EnsoPluginsSettings({
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const themeErrors = usePluginThemesStore((state) => state.errors);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
+  /** 当前暂存来自市场弹窗：确认卡片就地显示在市场里，市场不关 */
+  const [previewInMarket, setPreviewInMarket] = React.useState(false);
+  /** 每关一次市场自增，用来识别关掉后才回来的市场暂存结果 */
+  const marketSession = React.useRef(0);
   const [panel, setPanel] = React.useState<{
     kind: 'config' | 'logs' | 'artifacts';
     pluginId: string;
@@ -573,15 +765,21 @@ export function EnsoPluginsSettings({
     };
   }, [requestedInstallUrl, onRequestedInstallUrlConsumed]);
 
-  const restage = async (id: string, fromMarket = false) => {
+  const restage = async (id: string, fromMarket = false, inMarket = false) => {
     setError(null);
     if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
     setPreview(null);
+    setPreviewInMarket(inMarket);
     setDownloading(true);
+    const session = marketSession.current;
     const api = window.electronAPI.extensionPlugins;
     const result = await (fromMarket ? api.marketStage(id) : api.restage(id)).finally(() => {
       setDownloading(false);
     });
+    if (inMarket && session !== marketSession.current) {
+      if (result.ok) void api.discard(result.preview.token);
+      return;
+    }
     if (!result.ok) setError(result.error);
     else setPreview(result.preview);
   };
@@ -612,22 +810,36 @@ export function EnsoPluginsSettings({
       setError(result.error ?? t('Install failed'));
     } else {
       setUrl('');
-      const enabled = preview.existingVersion
-        ? { ok: true }
-        : await window.electronAPI.extensionPlugins.setEnabled(preview.id, true);
-      addToast({
-        type: enabled.ok ? 'success' : 'warning',
-        title: t('{{name}} installed', { name: preview.name }),
-        description: enabled.ok ? undefined : enabled.error,
-      });
+      // 扩大授权的更新只是暂存待授权：Main 会发「需要授权」通知，这里不报已安装
+      if (!preview.existingVersion || !preview.expands) {
+        const enabled = preview.existingVersion
+          ? { ok: true }
+          : await window.electronAPI.extensionPlugins.setEnabled(preview.id, true);
+        addToast({
+          type: enabled.ok ? 'success' : 'warning',
+          title: t('{{name}} installed', { name: preview.name }),
+          description: enabled.ok ? undefined : enabled.error,
+        });
+      }
+      void refresh();
     }
     setPreview(null);
+    setPreviewInMarket(false);
   };
 
   const discard = () => {
     if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
     setPreview(null);
+    setPreviewInMarket(false);
   };
+
+  const closeMarket = () => {
+    if (busy) return;
+    marketSession.current += 1;
+    if (previewInMarket) discard();
+    setMarketOpen(false);
+  };
+  const marketPreview = previewInMarket ? preview : null;
 
   return (
     <div className="space-y-5" data-settings-row="plugins.enso">
@@ -727,22 +939,50 @@ export function EnsoPluginsSettings({
         </div>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
-      <Dialog open={marketOpen} onOpenChange={setMarketOpen}>
+      <Dialog
+        open={marketOpen}
+        onOpenChange={(open) => (open ? setMarketOpen(true) : closeMarket())}
+      >
         <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>{t('Marketplace')}</DialogTitle>
           </DialogHeader>
-          <DialogPanel>
-            <PluginMarket
-              key={marketQuery}
-              initialQuery={marketQuery}
-              disabled={busy || downloading}
-              installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
-              onInstall={(id) => {
-                setMarketOpen(false);
-                void restage(id, true);
-              }}
-            />
+          <DialogPanel className="space-y-3">
+            {error && <p className="text-destructive text-sm">{error}</p>}
+            {marketPreview && (
+              <div className="flex h-[min(72vh,720px)] min-h-0 flex-col gap-3">
+                <p className="font-medium text-base">
+                  <InstallPreviewTitle preview={marketPreview} />
+                </p>
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                  <InstallPreviewDetails preview={marketPreview} />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
+                    {t('Cancel')}
+                  </Button>
+                  <ConfirmInstallButton
+                    token={marketPreview.token}
+                    busy={busy}
+                    onConfirm={() => void commit()}
+                  />
+                </div>
+              </div>
+            )}
+            {/* 确认期间只隐藏不卸载，回到列表时保留搜索词、分类与详情位置 */}
+            <div hidden={marketPreview !== null}>
+              <PluginMarket
+                key={marketQuery}
+                initialQuery={marketQuery}
+                disabled={busy || downloading}
+                installedKey={plugins
+                  .map(
+                    (p) => `${p.id}@${p.version}${p.pendingVersion ? `>${p.pendingVersion}` : ''}`
+                  )
+                  .join(',')}
+                onInstall={(id) => void restage(id, true, true)}
+              />
+            </div>
           </DialogPanel>
         </DialogContent>
       </Dialog>
@@ -759,55 +999,30 @@ export function EnsoPluginsSettings({
           }
         />
       )}
-      <Dialog open={preview !== null} onOpenChange={(open) => !open && !busy && discard()}>
+      <Dialog
+        open={preview !== null && !previewInMarket}
+        onOpenChange={(open) => !open && !busy && discard()}
+      >
         <DialogContent>
-          {preview && (
+          {preview && !previewInMarket && (
             <>
               <DialogHeader>
                 <DialogTitle>
-                  {preview.name} {preview.version}
-                  {preview.existingVersion && (
-                    <span className="ml-2 text-base text-muted-foreground">
-                      {t('updating from {{version}}', { version: preview.existingVersion })}
-                    </span>
-                  )}
+                  <InstallPreviewTitle preview={preview} />
                 </DialogTitle>
               </DialogHeader>
               <DialogPanel className="space-y-3">
-                <PluginCapabilityBlock
-                  permissions={preview.permissions}
-                  env={preview.env}
-                  interop={preview.interop}
-                  resident={preview.resident}
-                  styles={preview.styles}
-                  trustedUi={preview.hasRenderer}
-                  events={preview.events}
-                  schedules={preview.schedules}
-                />
-                {preview.mcpServers.map((server) => (
-                  <p key={server.name} className="font-mono text-xs">
-                    {server.command} {server.args.join(' ')}
-                  </p>
-                ))}
-                {preview.mcpTools.length > 0 && (
-                  <p className="text-muted-foreground text-xs">
-                    {t('Host MCP tools it may call')}：
-                    <span className="font-mono">{preview.mcpTools.join(', ')}</span>
-                  </p>
-                )}
-                {preview.warnings.map((warning) => (
-                  <p key={warning} className="text-muted-foreground text-xs">
-                    {warning}
-                  </p>
-                ))}
+                <InstallPreviewDetails preview={preview} />
               </DialogPanel>
               <DialogFooter>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
                   {t('Cancel')}
                 </Button>
-                <Button size="sm" disabled={busy} onClick={() => void commit()}>
-                  {busy ? <Spinner /> : t('Install')}
-                </Button>
+                <ConfirmInstallButton
+                  token={preview.token}
+                  busy={busy}
+                  onConfirm={() => void commit()}
+                />
               </DialogFooter>
             </>
           )}

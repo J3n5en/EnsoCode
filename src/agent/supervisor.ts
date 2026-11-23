@@ -221,7 +221,7 @@ import {
   previewModelDirectoryPush,
   registerCustomProviderModels,
 } from './customProviderRegistry';
-import { createDcgGuard, withDcgExemptions } from './dcg';
+import { createDcgGuard, withDcgExemptions, withTempRootGuard } from './dcg';
 import {
   appendInterruptedTasks,
   DETACHED_TASKS_FILE,
@@ -2924,9 +2924,9 @@ export class SessionSupervisor {
         protectedFloor: botMode || protectedActions,
         autoReject: autoRejectApprovals,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
-        ...(dcgPath
-          ? { commandGuard: withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) }
-          : {}),
+        commandGuard: withTempRootGuard(
+          dcgPath ? withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) : undefined
+        ),
       }
     );
     const checkpoints = new CheckpointManager(

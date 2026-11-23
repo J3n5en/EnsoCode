@@ -28,7 +28,7 @@ export const isDcgRuleId = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 128 && RULE_ID.test(value);
 
 export const isDcgRuleExemptible = (ruleId: string): boolean =>
-  isDcgRuleId(ruleId) && !NON_EXEMPTIBLE_DCG_RULES.has(ruleId);
+  isDcgRuleId(ruleId) && !ruleId.startsWith('enso.') && !NON_EXEMPTIBLE_DCG_RULES.has(ruleId);
 
 export const emptyDcgRuleMemory = (): DcgRuleMemory => ({ allowCounts: {}, exemptions: {} });
 
