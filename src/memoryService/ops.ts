@@ -147,6 +147,11 @@ export async function dispatchMemoryOp(op: string, args: unknown): Promise<unkno
     case 'await-distill':
       await core.awaitMemoryDistill();
       return true;
+    case 'await-session-distill':
+      await core.awaitSessionDistill(
+        String((args as { sessionId?: unknown } | undefined)?.sessionId ?? '')
+      );
+      return true;
     case 'await-kg':
       await core.awaitMemoryKg();
       return true;

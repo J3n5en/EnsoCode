@@ -34,6 +34,7 @@ import {
   type DistillPayload,
   distillFingerprint,
   ensureDistillJob,
+  getDistillJob,
   lastDistillWatermark,
   listDistillJobs,
   listResumableDistillJobs,
@@ -357,6 +358,33 @@ const enqueueLlmJob = (task: () => Promise<void>): Promise<void> => {
   return run;
 };
 
+/**
+ * 蒸馏切片（读 jsonl、读续作水位、建任务 / 待办）走独立轻锁：只与其他切片互斥，
+ * 不排在慢 LLM 任务后面，schedule-distill 落库后即可返回。
+ */
+let distillSliceRun: Promise<unknown> = Promise.resolve();
+function withDistillSlice<T>(task: () => Promise<T>): Promise<T> {
+  const run = distillSliceRun.then(task);
+  distillSliceRun = run.catch(() => {});
+  return run;
+}
+
+/** 每个会话最近一次排进 LLM 链的提炼；Bot 笔记只等自己这次，不等全局链空闲 */
+const sessionDistillRuns = new Map<string, Promise<void>>();
+function enqueueSessionDistill(sessionId: string, task: () => Promise<void>): Promise<void> {
+  const run = enqueueLlmJob(task);
+  sessionDistillRuns.set(sessionId, run);
+  void run.finally(() => {
+    if (sessionDistillRuns.get(sessionId) === run) sessionDistillRuns.delete(sessionId);
+  });
+  return run;
+}
+
+export async function awaitSessionDistill(sessionId: string): Promise<void> {
+  await distillSliceRun;
+  await sessionDistillRuns.get(sessionId);
+}
+
 // ---------------------------------------------------------------------------
 // 会话结束后的异步蒸馏。任务落 memory_jobs，重启后续跑；任何失败只吞掉，不影响会话本身。
 // ---------------------------------------------------------------------------
@@ -408,8 +436,9 @@ export function syncMemoryDistillFromSettings(state: Record<string, unknown>): v
 
 /**
  * 会话结束 / 闲置回收 / Bot「新对话」时调用。读权威 jsonl → 按 fromEntryId 切出增量 → 打码拼接 →
- * 建幂等任务（同会话同内容只一次）→ 后台跑。返回新水位（下次的 fromEntryId），由调用方保存；
- * 读失败 / 开关关闭时原样返回起点。开关关闭不建库也不建任务。绝不抛。
+ * 建幂等任务（同会话同内容只一次）后立即返回，LLM 提炼在后台串行链里跑，不等它。
+ * 返回新水位（下次的 fromEntryId），由调用方保存；读失败 / 开关关闭时原样返回起点。
+ * 开关关闭不建库也不建任务。绝不抛。
  */
 export async function scheduleMemoryDistill(
   payload: DistillPayload,
@@ -417,18 +446,19 @@ export async function scheduleMemoryDistill(
   opts: { continueFromLastJob?: boolean } = {}
 ): Promise<string | undefined> {
   if (!distillConfig.enabled) return payload.fromEntryId;
-  let watermark = payload.fromEntryId;
-  const onWatermark = (next: string | undefined) => {
-    watermark = next;
-  };
   const continueFromLastJob = opts.continueFromLastJob === true;
-  // Bot 会话不聚合：它的水位与 onDistilled（整理 bot 笔记）依赖本次提炼真正跑完
-  if (distillConfig.windowMinutes > 0 && !payload.botId) {
-    await queueDistill(payload, onWatermark, continueFromLastJob);
-  } else {
-    await runDistill(payload, undefined, undefined, false, onWatermark, continueFromLastJob);
+  // Bot 会话不聚合：它的 onDistilled（整理 bot 笔记）等的是本会话这次提炼，不能再晚一个窗口
+  const queued = distillConfig.windowMinutes > 0 && !payload.botId;
+  try {
+    return await withDistillSlice(async () => {
+      if (queued) return queueDistill(payload, continueFromLastJob);
+      const { watermark, job, transcript } = await persistDistill(payload, continueFromLastJob);
+      if (job) void enqueueSessionDistill(payload.sessionId, () => runOneDistill(job, transcript));
+      return watermark;
+    });
+  } catch {
+    return payload.fromEntryId;
   }
-  return watermark;
 }
 
 /**
@@ -441,58 +471,44 @@ export async function distillSessionNow(
   opts: { force?: boolean } = {}
 ): Promise<boolean> {
   const overallStartedAt = performance.now();
-  let started = false;
-  await runDistill(
-    payload,
-    () => {
-      started = true;
-    },
-    opts.force,
-    true
-  );
-  console.info('[memory-distill] manual overall', {
-    sessionId: payload.sessionId,
-    durationMs: Math.round(performance.now() - overallStartedAt),
-    started,
-  });
-  return started;
-}
-
-function runDistill(
-  payload: DistillPayload,
-  onStarted?: () => void,
-  force?: boolean,
-  manual = false,
-  onWatermark?: (watermark: string | undefined) => void,
-  continueFromLastJob = false
-): Promise<void> {
-  const queuedAt = performance.now();
-  return enqueueLlmJob(async () => {
-    if (manual)
+  const { job, transcript } = await withDistillSlice(() =>
+    persistDistill(payload, false, opts.force)
+  ).catch(() => ({ job: null, transcript: '' }));
+  if (job) {
+    const queuedAt = performance.now();
+    await enqueueSessionDistill(payload.sessionId, async () => {
       console.info('[memory-distill] manual background queue wait', {
         sessionId: payload.sessionId,
         durationMs: Math.round(performance.now() - queuedAt),
       });
-    const { stamped, transcript, watermark, fingerprint } = await sliceForDistill(
-      payload,
-      continueFromLastJob
-    );
-    if (!transcript) {
-      onWatermark?.(watermark);
-      return;
-    }
-    const job = ensureDistillJob(memoryDb(), stamped, fingerprint, { force });
-    // 任务已落 memory_jobs（或同内容已提炼过）才推进水位：之后失败可续跑，不丢增量
-    onWatermark?.(watermark);
-    if (!job) return;
-    onStarted?.();
-    await runOneDistill(job, transcript);
+      await runOneDistill(job, transcript);
+    });
+  }
+  console.info('[memory-distill] manual overall', {
+    sessionId: payload.sessionId,
+    durationMs: Math.round(performance.now() - overallStartedAt),
+    started: job !== null,
   });
+  return job !== null;
 }
 
-/** 读权威 jsonl 切出本次增量并盖章；必须在串行队列里调用（见续作水位） */
+/** 切出增量并建幂等任务；任务已落 memory_jobs（或同内容已提炼过）才返回新水位，之后失败可续跑，不丢增量 */
+async function persistDistill(
+  payload: DistillPayload,
+  continueFromLastJob: boolean,
+  force?: boolean
+): Promise<{ watermark: string | undefined; job: DistillJob | null; transcript: string }> {
+  const { stamped, transcript, watermark, fingerprint } = await sliceForDistill(
+    payload,
+    continueFromLastJob
+  );
+  const job = transcript ? ensureDistillJob(memoryDb(), stamped, fingerprint, { force }) : null;
+  return { watermark, job, transcript };
+}
+
+/** 读权威 jsonl 切出本次增量并盖章；必须在切片锁里调用（见续作水位） */
 async function sliceForDistill(payload: DistillPayload, continueFromLastJob: boolean) {
-  // 在串行队列里读水位：压缩触发与会话结束触发先后到达时，后者能看到前者盖的终点
+  // 在切片锁里读水位：压缩触发与会话结束触发先后到达时，后者能看到前者盖的终点
   if (continueFromLastJob && payload.fromEntryId === undefined) {
     const fromEntryId = lastDistillWatermark(memoryDb(), payload.sessionId);
     if (fromEntryId) payload = { ...payload, fromEntryId };
@@ -515,36 +531,33 @@ async function sliceForDistill(payload: DistillPayload, continueFromLastJob: boo
 
 // ---------------------------------------------------------------------------
 // 会话聚合：窗口内同项目的会话合并成一次提炼。待办落 memory_jobs(kind='distill-queue')，
-// 区间在排队时就盖章，水位立即推进；到期后（或下次开库时已过期）由串行队列出队建任务。
+// 区间在排队时就盖章，水位立即推进；到期后（或下次开库时已过期）由 LLM 串行链出队建任务。
 // ---------------------------------------------------------------------------
 
 const MINUTE_MS = 60_000;
 let distillQueueTimer: NodeJS.Timeout | null = null;
 
-function queueDistill(
+async function queueDistill(
   payload: DistillPayload,
-  onWatermark: (watermark: string | undefined) => void,
   continueFromLastJob: boolean
-): Promise<void> {
-  return enqueueLlmJob(async () => {
-    const { stamped, transcript, watermark, fingerprint } = await sliceForDistill(
-      payload,
-      continueFromLastJob
+): Promise<string | undefined> {
+  const { stamped, transcript, watermark, fingerprint } = await sliceForDistill(
+    payload,
+    continueFromLastJob
+  );
+  if (transcript) {
+    const now = distillConfig.now();
+    enqueueDistill(
+      memoryDb(),
+      stamped,
+      fingerprint,
+      new Date(now + distillConfig.windowMinutes * MINUTE_MS),
+      new Date(now)
     );
-    if (transcript) {
-      const now = distillConfig.now();
-      enqueueDistill(
-        memoryDb(),
-        stamped,
-        fingerprint,
-        new Date(now + distillConfig.windowMinutes * MINUTE_MS),
-        new Date(now)
-      );
-      armDistillQueue();
-    }
-    // 待办已落库才推进水位：进程随后退出，下次开库按盖章的区间补跑
-    onWatermark(watermark);
-  });
+    armDistillQueue();
+  }
+  // 待办已落库才推进水位：进程随后退出，下次开库按盖章的区间补跑
+  return watermark;
 }
 
 /** 按库里最早的到期时间排一个定时器；已过期的直接进串行队列 */
@@ -623,16 +636,19 @@ async function readBatchTranscript(members: readonly DistillBatchMember[]): Prom
 }
 
 async function runOneDistill(job: DistillJob, transcript: string): Promise<void> {
+  // 同一任务可能被多次排进 LLM 链（重复触发 / 开库续跑）：按库里的最新状态与尝试次数跑
+  const current = db ? getDistillJob(db, job.id) : null;
+  if (current?.status !== 'pending' && current?.status !== 'running') return;
   const complete = await (distillConfig.complete ?? serviceComplete())?.();
   if (!complete || !db) return;
   // 与 memory_capture 的缺省归属一致：bot 会话进 bot space，项目会话进项目 space
-  const { projectId, botId, chatId } = job.payload;
+  const { projectId, botId, chatId } = current.payload;
   const spaces = distillSpaces({
     projectId,
     ...(botId ? { botId } : {}),
     ...(chatId ? { chatId } : {}),
   });
-  await runDistillJob(db, job, {
+  await runDistillJob(db, current, {
     transcript,
     complete,
     embedder: await memoryEmbedder(),
@@ -673,18 +689,20 @@ export function getMemoryDistillJobs(limit?: number): DistillJob[] {
   return db ? listDistillJobs(db, limit) : [];
 }
 
-/** 等后台蒸馏收尾（测试 / 退出前用）；与 KG 共链，所以也等到排在前面的 KG 任务 */
+/** 等后台蒸馏收尾（测试 / 退出前用）；含切片，与 KG 共链，所以也等到排在前面的 KG 任务 */
 export async function awaitMemoryDistill(): Promise<void> {
   await awaitLlmJobs();
 }
 
 // 任务跑完可能又排了新任务（蒸馏写入 → KG 排队），循环到链真正空闲
 async function awaitLlmJobs(): Promise<void> {
-  let seen: Promise<void>;
+  let slice: Promise<unknown>;
+  let llm: Promise<void>;
   do {
-    seen = llmJobRun;
-    await seen;
-  } while (seen !== llmJobRun);
+    slice = distillSliceRun;
+    llm = llmJobRun;
+    await Promise.all([slice, llm]);
+  } while (slice !== distillSliceRun || llm !== llmJobRun);
 }
 
 // ---------------------------------------------------------------------------

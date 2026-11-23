@@ -128,9 +128,8 @@ describe('memory service client', () => {
     await expect(second).resolves.toBe('ok');
   });
 
-  it('单个 op 超时只拒绝它自己：服务回 pong 就不杀进程，其余在途 op 与后续 op 照常', async () => {
+  it('单个 op 超时只拒绝它自己：服务回 pong 就不杀进程，迟到回包被丢弃，后续 op 照常', async () => {
     const slow = client.invoke('schedule-distill', {}).catch((e) => e);
-    const other = client.invoke('stats');
     const child = forks[0];
     await vi.advanceTimersByTimeAsync(0);
     child.becomeReady();
@@ -143,15 +142,29 @@ describe('memory service client', () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(child.killed).toBe(false);
 
-    const [slowMsg, otherMsg] = child.sent('op').filter((m) => m.op !== 'config');
-    child.reply(slowMsg.requestId, 'late');
-    child.reply(otherMsg.requestId, 'stats');
-    await expect(other).resolves.toBe('stats');
+    child.reply(child.sent('op')[0].requestId, 'late');
     const next = client.invoke('kg-failed');
     expect(forks).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(0);
     child.reply(child.sent('op').at(-1)!.requestId, 0);
     await expect(next).resolves.toBe(0);
+  });
+
+  it('探活进行中又有 op 超时：只发一次 ping，按第一次探活的期限判定', async () => {
+    const first = client.invoke('search', { query: 'hang' }).catch((e) => e);
+    const child = forks[0];
+    await vi.advanceTimersByTimeAsync(0);
+    child.becomeReady();
+    await vi.advanceTimersByTimeAsync(10_000);
+    const second = client.invoke('stats').catch((e) => e);
+    await vi.advanceTimersByTimeAsync(20_001);
+    await expect(first).resolves.toBeInstanceOf(Error);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(second).resolves.toBeInstanceOf(Error);
+    expect(child.sent('ping')).toHaveLength(1);
+    expect(child.killed).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(child.killed).toBe(true);
   });
 
   it('op 超时后 ping 也无响应才杀掉服务，下次调用重新拉起', async () => {

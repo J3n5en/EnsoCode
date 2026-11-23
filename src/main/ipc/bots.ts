@@ -800,7 +800,18 @@ export function getBotServices(): BotServices | null {
     },
     schedule: async (payload) =>
       (await import('../services/memoryHost')).scheduleMemoryDistill(payload),
-    onDistilled: (input) => void notes.afterDistill(input),
+    // schedule 落库即返回：等本会话这次提炼写完再重写笔记，否则读不到本次结论
+    onDistilled: (input) =>
+      void import('../services/memoryHost')
+        .then((host) => host.awaitSessionDistill(input.sessionId))
+        .then(
+          () => notes.afterDistill(input),
+          (error: unknown) =>
+            console.warn('[bots] notes update skipped: distill wait failed', {
+              botId: input.botId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+        ),
   });
   host.onDiscard((scope) => {
     if (scope.conversationId) memory.remove(scope.conversationId);

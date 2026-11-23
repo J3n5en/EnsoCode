@@ -79,6 +79,9 @@ export function createMemoryServiceBridge(
   function handleMessage(raw: unknown): void {
     const message = raw as Record<string, unknown>;
     switch (message?.type) {
+      case 'ping':
+        port.postMessage({ type: 'pong', requestId: message.requestId });
+        return;
       case 'op': {
         const requestId = message.requestId as number;
         void dispatchOp(message.op as string, message.args).then(
