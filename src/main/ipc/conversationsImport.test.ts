@@ -72,6 +72,7 @@ describe('handleImportProjectSessions', () => {
     const sessions = new AgentSessionIndex({ readSettings: () => null });
     const ports: ImportProjectSessionsPorts = {
       sessionDir: path.join(root, 'sessions'),
+      durableFiles: [],
       project: (projectId) => registry.project(projectId),
       conversation: (id) => registry.conversation(id),
       projectHasConversations: (projectId) =>

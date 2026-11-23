@@ -64,6 +64,7 @@ import {
   watchGlobalTabs,
   watchSidePanelAutoCollapse,
 } from '@/lib/sidePanelDock';
+import { releaseTerminal } from '@/lib/terminalInstances';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
@@ -1127,7 +1128,7 @@ function ConversationDock({
         void useSessionsStore.getState().disposeBtwConversation(panel.id.slice(4));
         return;
       }
-      void import('@/lib/terminalRegistry').then((m) => m.releaseTerminal(panel.id));
+      releaseTerminal(panel.id);
       void window.electronAPI.terminal.dispose(panel.id);
     });
     dockApiRef.current = event.api;

@@ -20,6 +20,8 @@ export interface DeviceDrawerHost {
   togglePush(): void;
   theme(): DeskTheme | null;
   watchTheme(listener: () => void): () => void;
+  /** 复制给开发者排查卡顿的诊断文本 */
+  diagnostics(): string;
 }
 
 const ICONS = {
@@ -34,6 +36,8 @@ const ICONS = {
   phone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  clipboard:
+    '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
 } as const;
 
 const STYLE = `
@@ -340,6 +344,38 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     setTimeout(() => node.remove(), 260);
   };
 
+  /** clipboard API 不可用（非安全上下文、权限）时退回选中文本框复制 */
+  const copyText = async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      const area = el('textarea', { readonly: '', style: 'position:fixed;opacity:0' });
+      area.value = text;
+      doc.body.append(area);
+      area.select();
+      const ok = doc.execCommand('copy');
+      area.remove();
+      return ok;
+    }
+  };
+
+  const diagnosticsButton = () => {
+    const label = el('span', { class: 'dd-grow' }, '复制诊断信息');
+    return button(
+      { class: 'dd-line dd-dim' },
+      () =>
+        void copyText(host.diagnostics()).then((ok) => {
+          label.textContent = ok ? '已复制，发给开发者即可' : '复制失败';
+          setTimeout(() => {
+            label.textContent = '复制诊断信息';
+          }, 2000);
+        }),
+      icon('clipboard'),
+      label
+    );
+  };
+
   const open = () => {
     if (root) return;
     if (!doc.getElementById('dd-style')) doc.head.append(el('style', { id: 'dd-style' }, STYLE));
@@ -370,7 +406,8 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
         () => host.devices.exitDesk(),
         icon('phone'),
         el('span', { class: 'dd-grow' }, '切换到精简版')
-      )
+      ),
+      diagnosticsButton()
     );
     const scrim = el('div', { class: 'dd-scrim' });
     scrim.addEventListener('click', close);

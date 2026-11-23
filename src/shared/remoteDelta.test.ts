@@ -106,6 +106,23 @@ describe('远端写入增量', () => {
     expect(written).toEqual([{ ...first, n: 1 }]);
   });
 
+  it('两端基线内容相同、对象键顺序不同（客户端由缓存加增量拼出）：仍只发变化', async () => {
+    const { host, client, written, sent, send } = writePair();
+    const rows = { b: { t: 'r'.repeat(3000) }, a: { t: 's'.repeat(3000), n: 1 } };
+    host.seed('k', { state: { rows, activeId: 'a' }, version: 1 });
+    const reordered = {
+      version: 1,
+      state: { activeId: 'a', rows: { a: { n: 1, t: rows.a.t }, b: rows.b } },
+    };
+    client.seed('k', reordered);
+    const next = structuredClone(reordered);
+    next.state.activeId = 'b';
+    await client.write('k', next, send);
+    expect(written).toEqual([next]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0]).length).toBeLessThan(200);
+  });
+
   it('会话读取结果映射到会话记录的写入键', () => {
     expect(writeSeedOf('conversations:read', { value: { state: {} }, seq: 3 })).toEqual({
       name: 'enso-conversations',

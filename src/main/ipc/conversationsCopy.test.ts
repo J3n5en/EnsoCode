@@ -154,6 +154,7 @@ function setup() {
   let failInsert = false;
   const ports: ImportProjectSessionsPorts = {
     sessionDir,
+    durableFiles: [],
     projectKind: (projectId) => registry.project(projectId)?.kind,
     project: (projectId) => registry.project(projectId),
     conversation: (id) => registry.conversation(id),

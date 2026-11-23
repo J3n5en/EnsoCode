@@ -56,8 +56,28 @@ export function writeSeedOf(
   return value === undefined ? null : { name: 'enso-conversations', value };
 }
 
+/** 对象键排序后的 JSON：两端内容相同但键顺序不同（缓存加增量拼出的对象，新键排在最后）时结果一致 */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value))
+    return `[${value.map((item) => canonicalJson(item) || 'null').join(',')}]`;
+  if (
+    value &&
+    typeof value === 'object' &&
+    typeof (value as { toJSON?: unknown }).toJSON !== 'function'
+  ) {
+    const record = value as Record<string, unknown>;
+    const fields: string[] = [];
+    for (const key of Object.keys(record).sort()) {
+      const item = canonicalJson(record[key]);
+      if (item) fields.push(`${JSON.stringify(key)}:${item}`);
+    }
+    return `{${fields.join(',')}}`;
+  }
+  return JSON.stringify(value) ?? '';
+}
+
 function seedRevision(value: unknown): number {
-  const json = JSON.stringify(value) ?? '';
+  const json = canonicalJson(value);
   let h = 0x811c9dc5;
   for (let i = 0; i < json.length; i++) h = Math.imul(h ^ json.charCodeAt(i), 0x01000193);
   return -1 - (h >>> 0) * 1024;
