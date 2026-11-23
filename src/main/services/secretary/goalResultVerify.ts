@@ -1,6 +1,78 @@
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import type { GoalResult, GoalResultCheck } from '@shared/secretary/goalResult';
+import { runGit } from './repoStatus';
 
 const COMMAND_MS = 5_000;
+
+function runGh(args: readonly string[]): Promise<GoalResultCommandResult | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'gh',
+      [...args],
+      { encoding: 'utf8', timeout: COMMAND_MS, maxBuffer: 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ code: 0, stdout: stdout ?? '', stderr: stderr ?? '' });
+          return;
+        }
+        const code = (error as { code?: unknown }).code;
+        if (typeof code === 'string') {
+          resolve(null);
+          return;
+        }
+        resolve({
+          code: typeof code === 'number' ? code : 1,
+          stdout: stdout ?? '',
+          stderr: stderr ?? '',
+        });
+      }
+    );
+  });
+}
+
+async function readImageHead(file: string): Promise<Uint8Array | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(file, 'r');
+    const buf = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(buf, 0, 16, 0);
+    return buf.subarray(0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function dispatchedCwd(conversationId: string): Promise<string | null> {
+  const { sessionWorktree } = await import('../../ipc/worktree');
+  const { agentSessionIndex } = await import('../../ipc/sessionIndex');
+  const { getSourceAuthorityRegistry } = await import('../../ipc/agent');
+  const worktree = sessionWorktree(agentSessionIndex.workspaceRoot(conversationId));
+  if (worktree && existsSync(worktree.path)) return worktree.path;
+  const registry = getSourceAuthorityRegistry();
+  const projectId = registry?.conversation(conversationId)?.projectId;
+  const project = projectId ? registry?.project(projectId) : undefined;
+  return project && (project.kind ?? 'local') === 'local' && existsSync(project.canonicalPath)
+    ? project.canonicalPath
+    : null;
+}
+
+/** 生产核验：工作目录只认会话自己的 worktree 或项目根，不信 result.worktree.path。 */
+export async function verifyDispatchedGoalResult(
+  conversationId: string,
+  result: GoalResult
+): Promise<GoalResultCheck[]> {
+  const cwd = await dispatchedCwd(conversationId);
+  return verifyGoalResult(result, {
+    cwd: cwd ?? '/',
+    git: (dir, args) => (cwd ? runGit(dir, args) : Promise.resolve(null)),
+    gh: runGh,
+    readHead: readImageHead,
+  });
+}
 
 export interface GoalResultCommandResult {
   code: number;
