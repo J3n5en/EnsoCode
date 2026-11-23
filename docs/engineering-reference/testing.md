@@ -113,6 +113,7 @@ afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 - 不真实等待超时、轮询或退避：用 `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()`，或通过参数注入缩短时限。
 - 冷加载大模块（首次 `await import`）放在文件顶层（收集阶段，不受超时约束），不要放进 `beforeAll` / `beforeEach`：钩子有 10 秒 `hookTimeout`，冷加载耗时随机器负载线性放大，满载时会超时。需要 `vi.resetModules()` 的文件，在顶层先 `await import` 预热一次，钩子里只剩重新求值。
+- 被大量模块引用的公共模块（`transcript`、`@shared/types/*`、`@shared/secretary/*` 这类）不要为一两个常量或纯函数静态 import 重依赖（`@earendil-works/pi-coding-agent` 单次加载约 0.4 秒，`types/agent.ts` 五千多行）：常量放轻模块，运行时才用的在调用处 `await import`。值从具体子模块引入（`@shared/types/ipc`），不经 `@shared/types` 桶文件——桶会把所有类型模块连同 `agent.ts` 一起加载，也会让 `pnpm test:changed` 选中无关测试。
 - 断言中间态时不要和真实定时器赛跑（例如 `sleep(400)` 等一个 150ms 的 `setTimeout`）：负载高时定时器会提前或推后触发，用假时钟控制它何时触发。
 - 需要真实 git 仓库、子进程的用例，在 `beforeAll` 建一次模板，各用例复制副本，不要每条都从零 `git init`。
 - 穷举类验证（如 `deliveryEcho.formal.test.ts`）日常跑小界限，完整界限放单独脚本（`pnpm test:formal`）。
