@@ -1,4 +1,5 @@
 import type { ProviderGroup } from '@shared/providerGroups';
+import { pushRecentModel } from '@shared/recentModels';
 import type {
   ModelEntry,
   ModelMeta,
@@ -1660,6 +1661,37 @@ describe('最近使用分组', () => {
     )?.parentElement;
     await act(async () => relayRow?.click());
     expect(commonProps.onSelect).toHaveBeenCalledWith('relay', 'rl');
+  });
+
+  it('用过 12 个不同模型：分组只列最近的 10 个，按最近使用排序，原有分组仍在', async () => {
+    const many: ModelProvider = {
+      ...providers[0],
+      id: 'many',
+      name: 'Many',
+      baseUrl: 'https://many.example.test/v1',
+      models: Array.from({ length: 12 }, (_, i) => ({ id: `m${i + 1}`, label: `Model ${i + 1}` })),
+    };
+    let recent: ModelRef[] = [];
+    for (const model of many.models) recent = pushRecentModel(recent, ref('many', model.id));
+    harness.recentModels = recent;
+    await mount({ providers: [...recentProviders, many] });
+    await act(async () => harness.menuOnOpenChange?.(true, openDetails));
+    const nav = q('[data-model-picker="nav-list"]') as HTMLElement;
+    const order = Array.from(nav.children).map(
+      (el) =>
+        el.getAttribute('data-model-picker-nav') ?? el.getAttribute('data-model-picker-vendor')
+    );
+    expect(order[0]).toBe('favorites');
+    expect(order[1]).toBe('recent');
+    expect(order.length).toBeGreaterThan(2);
+    expect(q('[data-model-picker-nav="recent"]')?.textContent).toContain('10');
+
+    await act(async () => q('[data-model-picker-nav="recent"]')?.click());
+    expect(recentRemoveKeys()).toEqual(
+      ['m12', 'm11', 'm10', 'm9', 'm8', 'm7', 'm6', 'm5', 'm4', 'm3'].map((id) =>
+        pinnedModelKey('many', id)
+      )
+    );
   });
 
   it('移除按钮只移除该条，不触发切换模型、不关闭弹层、不影响星标', async () => {

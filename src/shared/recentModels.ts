@@ -1,6 +1,6 @@
 import type { ModelRef } from './types/agent';
 
-export const MAX_RECENT_MODELS = 5;
+export const MAX_RECENT_MODELS = 10;
 
 export function sameModelRef(a: ModelRef, b: ModelRef): boolean {
   return a.providerId === b.providerId && a.modelId === b.modelId;

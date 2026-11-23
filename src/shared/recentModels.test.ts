@@ -26,10 +26,42 @@ describe('最近使用模型', () => {
   });
 
   it(`最多保留 ${MAX_RECENT_MODELS} 个，丢掉最旧的`, () => {
-    expect(MAX_RECENT_MODELS).toBe(5);
-    let list = [ref('p', '1'), ref('p', '2'), ref('p', '3'), ref('p', '4'), ref('p', '5')];
-    list = pushRecentModel(list, ref('p', '6'));
-    expect(list.map((entry) => entry.modelId)).toEqual(['6', '1', '2', '3', '4']);
+    expect(MAX_RECENT_MODELS).toBe(10);
+    let list = Array.from({ length: 10 }, (_, i) => ref('p', String(i + 1)));
+    list = pushRecentModel(list, ref('p', '11'));
+    expect(list.map((entry) => entry.modelId)).toEqual([
+      '11',
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+    ]);
+  });
+
+  it('依次用过 12 个不同模型：只留最近的 10 个，最近用的排最前', () => {
+    let list: ReturnType<typeof pushRecentModel> = [];
+    for (let i = 1; i <= 12; i++) list = pushRecentModel(list, ref('p', `m${i}`));
+    expect(list.map((entry) => entry.modelId)).toEqual([
+      'm12',
+      'm11',
+      'm10',
+      'm9',
+      'm8',
+      'm7',
+      'm6',
+      'm5',
+      'm4',
+      'm3',
+    ]);
+    // 再用一次较早的模型，它回到最前
+    list = pushRecentModel(list, ref('p', 'm5'));
+    expect(list.slice(0, 3).map((entry) => entry.modelId)).toEqual(['m5', 'm12', 'm11']);
+    expect(list).toHaveLength(10);
   });
 
   it('只存 providerId/modelId，不带入其他字段', () => {
@@ -46,6 +78,7 @@ describe('最近使用模型', () => {
   it('读入时丢弃脏数据、去重并截断', () => {
     expect(parseRecentModels(undefined)).toEqual([]);
     expect(parseRecentModels('a/x')).toEqual([]);
+    const many = Array.from({ length: 10 }, (_, i) => ref('p', String(i + 1)));
     expect(
       parseRecentModels([
         ref('a', 'x'),
@@ -55,12 +88,8 @@ describe('最近使用模型', () => {
         { providerId: '', modelId: 'x' },
         { providerId: 1, modelId: 'x' },
         { ...ref('a', 'x'), extra: true },
-        ref('p', '1'),
-        ref('p', '2'),
-        ref('p', '3'),
-        ref('p', '4'),
-        ref('p', '5'),
+        ...many,
       ])
-    ).toEqual([ref('a', 'x'), ref('p', '1'), ref('p', '2'), ref('p', '3'), ref('p', '4')]);
+    ).toEqual([ref('a', 'x'), ...many.slice(0, 9)]);
   });
 });

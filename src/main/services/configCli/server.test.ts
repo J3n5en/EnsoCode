@@ -355,7 +355,7 @@ describe('config CLI socket', () => {
     expect((await state()).longCacheRetention).toBe(true);
   });
 
-  it('最近使用模型可写，只接受去重且不超过 5 条的 providerId/modelId 列表', async () => {
+  it('最近使用模型可写，只接受去重且不超过 10 条的 providerId/modelId 列表', async () => {
     const refs = [
       { providerId: 'p1', modelId: 'm1' },
       { providerId: 'p1', modelId: 'm2' },
@@ -367,13 +367,15 @@ describe('config CLI socket', () => {
       [refs[0], refs[0]],
       [{ providerId: 'p1' }],
       [{ ...refs[0], apiKey: 'x' }],
-      Array.from({ length: 6 }, (_, i) => ({ providerId: 'p', modelId: String(i) })),
+      Array.from({ length: 11 }, (_, i) => ({ providerId: 'p', modelId: String(i) })),
     ]) {
       expect(await config({ action: 'set', key: 'recentModels', value })).toMatchObject({
         ok: false,
       });
     }
     expect((await state()).recentModels).toEqual(refs);
+    const ten = Array.from({ length: 10 }, (_, i) => ({ providerId: 'p', modelId: String(i) }));
+    expect(await config({ action: 'set', key: 'recentModels', value: ten })).toEqual({ ok: true });
     const reordered = [{ modelId: 'm3', providerId: 'p2' }];
     expect(await config({ action: 'set', key: 'recentModels', value: reordered })).toEqual({
       ok: true,
