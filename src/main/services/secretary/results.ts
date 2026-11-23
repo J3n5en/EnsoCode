@@ -381,9 +381,11 @@ export function sessionLiveState(
 export function sessionStateOf(
   record: DispatchRecord,
   row: Record<string, unknown> | undefined,
-  status: SecretarySessionStatus | undefined
+  status: SecretarySessionStatus | undefined,
+  hasSubagents = false
 ): SessionLiveState {
   const live = sessionLiveState(row, status);
+  if (hasSubagents && (live === 'idle' || live === 'not-started')) return 'running';
   // 秘书停止过的不算：停止写了 idle，残留的 running 是停止之前的旧记录
   if (record.stoppedAt !== undefined) return live;
   // 会话文件还没出现时实时状态是 not-started：记录已经标回运行中，照样算在跑，
@@ -437,12 +439,13 @@ export function upstreamRetryOf(
 export function countsAsRunning(
   record: DispatchRecord,
   row: Record<string, unknown> | undefined,
-  status: SecretarySessionStatus | undefined
+  status: SecretarySessionStatus | undefined,
+  hasSubagents = false
 ): boolean {
   // 正在启动的排队会话已经占了名额：否则启动期间并发的派发会多建一个
   const queued = queuedStartOf(row);
   if (queued) return queued.startingAt !== undefined;
-  const state = sessionStateOf(record, row, status);
+  const state = sessionStateOf(record, row, status, hasSubagents);
   if (sessionNeedsUser(record, state)) return false;
   if (upstreamRetryOf(row)) return true;
   // 用户撤销手动标记：放回进行中，直到这一轮出现新结果
@@ -459,11 +462,12 @@ export function countsAsRunning(
 }
 
 export function sessionNeedsUser(record: DispatchRecord, state: SessionLiveState): boolean {
+  if (state === 'waiting') return true;
+  if (state === 'running') return false;
   return (
-    state === 'waiting' ||
-    (record.lastResult !== undefined &&
-      NEEDS_YOU_RESULTS.has(record.lastResult.kind) &&
-      !record.lastResult.dismissed)
+    record.lastResult !== undefined &&
+    NEEDS_YOU_RESULTS.has(record.lastResult.kind) &&
+    !record.lastResult.dismissed
   );
 }
 
@@ -472,10 +476,15 @@ export function linkedTodoSession(
   record: DispatchRecord | undefined,
   row: Record<string, unknown> | undefined,
   status: { state: 'running' | 'idle' | 'waiting' | 'error' } | undefined,
-  aborted = false
+  aborted = false,
+  hasSubagents = false
 ) {
   const view = todoSessionView(row, status, record?.lastResult?.kind, aborted);
-  if (!record || !view.present || view.state !== 'idle') return view;
+  if (!view.present) return view;
+  if (hasSubagents && (view.state === 'idle' || view.state === 'not-started')) {
+    return { ...view, state: 'running' as const };
+  }
+  if (!record || view.state !== 'idle') return view;
   const going = sessionStillGoing({
     state: view.state,
     recordedState: record.lastState,
@@ -546,11 +555,17 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     // 用户从看板上移出：记录与会话都还在，只是不再占工作台的列
     if (record.dismissedFromBoard === true) continue;
     const status = input.statuses[record.conversationId];
-    const state = sessionStateOf(record, row, status);
-    const going = countsAsRunning(record, row, status);
+    const hasSubagents = (input.subagents?.[record.conversationId]?.length ?? 0) > 0;
+    const state = sessionStateOf(record, row, status, hasSubagents);
+    const going = countsAsRunning(record, row, status, hasSubagents);
     const queued = queuedStartOf(row);
     const upstreamRetry = upstreamRetryOf(row);
     const position = positions.get(record.conversationId);
+    // 正在运行的会话不展示过期的终态结果（如重启误标的 interrupted / 旧 failed），以最新实际状态为准
+    const visibleResult =
+      going && record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)
+        ? undefined
+        : record.lastResult;
     // 巡检报过停住、之后没有新活动：进行中列表标「已停住」，等它真的动起来才消失
     const stalled =
       going &&
@@ -570,9 +585,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       stateSince: record.stateSince ?? Math.max(record.createdAt, record.lastResult?.at ?? 0),
       secretaryConversationId: record.secretaryConversationId,
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
-      ...(record.lastResult
-        ? { result: record.lastResult.kind, resultAt: record.lastResult.at }
-        : {}),
+      ...(visibleResult ? { result: visibleResult.kind, resultAt: visibleResult.at } : {}),
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
       ...(upstreamRetry ? { upstreamRetry } : {}),
@@ -632,11 +645,16 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     running,
     done,
     todos: input.todos.flatMap((todo) => {
+      const hasSubagents = todo.conversationId
+        ? (input.subagents?.[todo.conversationId]?.length ?? 0) > 0
+        : false;
       const session = todo.conversationId
         ? linkedTodoSession(
             file.dispatched[todo.conversationId],
             input.rows[todo.conversationId],
-            input.statuses[todo.conversationId]
+            input.statuses[todo.conversationId],
+            false,
+            hasSubagents
           )
         : null;
       const phase = todoStatus(todo, session);
@@ -644,9 +662,11 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       const project = todo.projectId
         ? input.projects.find((candidate) => candidate.projectId === todo.projectId)
         : undefined;
+      const { problem, ...baseTodo } = todo;
       return [
         {
-          ...todo,
+          ...baseTodo,
+          ...(phase === 'problem' && problem ? { problem } : {}),
           phase,
           ...(project ? { projectName: secretaryProjectName(project, input.aliases) } : {}),
           ...(session?.title ? { sessionTitle: redactSecrets(session.title) } : {}),

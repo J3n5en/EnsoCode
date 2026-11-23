@@ -313,6 +313,19 @@ function awaitsOutcome(record: DispatchRecord): boolean {
   );
 }
 
+/** 会话恢复成运行中后，清掉上次落盘的 interrupted / failed / stoppedAt，避免与实际状态冲突 */
+function clearStaleStoppedOnLive(record: DispatchRecord): boolean {
+  let cleared = false;
+  if (record.lastResult?.kind === 'interrupted' || record.lastResult?.kind === 'failed') {
+    delete record.lastResult;
+    cleared = true;
+  }
+  if (record.stoppedAt !== undefined) {
+    delete record.stoppedAt;
+    cleared = true;
+  }
+  return cleared;
+}
 function expireFailedPending(
   file: SecretaryDispatchFile,
   now: number,
@@ -1280,6 +1293,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           event.type === 'ask-request' ||
           event.type === 'approval-request';
         if (resumedLive) coldResumePending.delete(conversationId);
+        const runningNow =
+          (status.state === 'running' || ports.subagentsRunning?.(conversationId) === true) &&
+          !(own && event.type === 'turn-completed' && event.aborted);
+        if (runningNow && clearStaleStoppedOnLive(record)) changed = true;
         // 冷启动续跑中先到 parent-ready/idle：别把看板状态翻回 idle，等续跑轮次真正起来或失败/超时
         const holdResumingState =
           coldResumePending.has(conversationId) &&
@@ -1522,6 +1539,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             coldResumePending.delete(record.conversationId);
             if (status?.state === 'running' || ports.subagentsRunning?.(record.conversationId)) {
               record.lastEventAt = Math.max(record.lastEventAt, now);
+              if (clearStaleStoppedOnLive(record)) changed = true;
             }
           } else if (now - resumeStartedAt >= COLD_RESUME_TIMEOUT_MS) {
             coldResumePending.delete(record.conversationId);
@@ -1543,6 +1561,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           delete record.backgroundPersistent;
         }
         changed = true;
+      }
+      for (const record of records) {
+        const status = statuses[record.conversationId];
+        if (
+          (status?.state === 'running' ||
+            ports.subagentsRunning?.(record.conversationId) === true) &&
+          clearStaleStoppedOnLive(record)
+        ) {
+          changed = true;
+        }
       }
       // 配对窗口的定时器没赶上（如刚好停掉）时兜底
       if (settleFailures(file, now)) changed = true;
@@ -1683,12 +1711,21 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         recordResult(file, record, 'failed', now, failure.detail);
       }
       for (const record of Object.values(file.dispatched)) {
-        if (record.lastState !== 'running') continue;
-        // 冷启动正按恢复清单接着跑：不是中断，之后按它的事件照常判定
+        // 冷启动正按恢复清单接着跑：即使之前被误标过 interrupted / idle，也恢复成进行中等待续跑
         if (ports.coldResumed?.(record.conversationId)) {
+          if (record.lastState !== 'running') {
+            record.lastState = 'running';
+            record.stateSince = now;
+            changed = true;
+          }
+          if (record.lastResult?.kind === 'interrupted') {
+            delete record.lastResult;
+            changed = true;
+          }
           coldResumePending.set(record.conversationId, now);
           continue;
         }
+        if (record.lastState !== 'running') continue;
         // 存量修正：记录还写着进行中，但会话已经空闲、没有后台任务与待处理项，
         // 最后一条结果又是终态——直接收回终态，升级后不用用户一个个点
         const status = ports.status(record.conversationId);
@@ -1771,7 +1808,8 @@ function syncLinkedTodos(
         file.dispatched[conversationId],
         rows[conversationId],
         ports.status(conversationId),
-        aborted.has(conversationId)
+        aborted.has(conversationId),
+        ports.subagentsRunning?.(conversationId) === true
       ),
     ports.now()
   );

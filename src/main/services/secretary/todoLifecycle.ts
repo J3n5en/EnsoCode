@@ -56,13 +56,17 @@ export function advanceTodo(
   if (session.result === 'goal-complete' && !live(session)) {
     return patchTodo(todo, { doneAt: now, problem: null }, now);
   }
-  if (session.aborted || session.result === 'interrupted') {
+  if (session.aborted) {
     return todo.problem === 'stopped' ? todo : patchTodo(todo, { problem: 'stopped' }, now);
   }
-  if (todo.problem === 'stopped') return todo;
+  // 会话恢复运行 / 等待 / 排队：以最新实际状态为准，清掉之前标上的 problem（含被误标成 stopped 的待办）
   if (live(session)) {
     return todo.problem ? patchTodo(todo, { problem: null }, now) : todo;
   }
+  if (session.result === 'interrupted') {
+    return todo.problem === 'stopped' ? todo : patchTodo(todo, { problem: 'stopped' }, now);
+  }
+  if (todo.problem === 'stopped') return todo;
   if (session.result === 'failed' || session.state === 'error') {
     return todo.problem === 'failed' ? todo : patchTodo(todo, { problem: 'failed' }, now);
   }
@@ -75,9 +79,9 @@ export function todoStatus(todo: SecretaryTodo, session: TodoSessionView | null)
   if (!todo.conversationId) return todo.problem ? 'problem' : 'todo';
   if (!session?.present) return 'problem';
   if (session.result === 'goal-complete' && !live(session)) return 'done';
-  if (session.aborted || session.result === 'interrupted' || todo.problem === 'stopped')
-    return 'problem';
+  if (session.aborted) return 'problem';
   if (live(session)) return 'active';
+  if (session.result === 'interrupted' || todo.problem === 'stopped') return 'problem';
   if (
     session.result === 'failed' ||
     session.state === 'error' ||

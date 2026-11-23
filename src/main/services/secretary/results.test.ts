@@ -1242,4 +1242,76 @@ describe('排队会话', () => {
       ],
     });
   });
+
+  it('三处一致性：曾被误标成 interrupted/stopped 的会话恢复运行或有在跑子代理时，卡片、待办与会话状态全为运行中且无 problem', () => {
+    const file = emptyFile({
+      dispatched: {
+        c1: record({
+          conversationId: 'c1',
+          projectId: 'p1',
+          lastState: 'idle',
+          lastResult: { kind: 'interrupted', turn: 1, at: 9 },
+        }),
+        c2: record({
+          conversationId: 'c2',
+          projectId: 'p1',
+          lastState: 'idle',
+          lastResult: { kind: 'interrupted', turn: 1, at: 9 },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        c1: { id: 'c1', title: '自动续跑会话', sessionFile: '/tmp/c1.jsonl' },
+        c2: { id: 'c2', title: '等子代理续跑', sessionFile: '/tmp/c2.jsonl' },
+      },
+      statuses: { c1: running, c2: idle },
+      subagents: {
+        c2: [
+          {
+            agentId: 'a1',
+            runId: 'r1',
+            title: '子代理',
+            status: 'running',
+            elapsedMs: 60_000,
+          },
+        ],
+      },
+      projects,
+      todos: [
+        {
+          id: 't1',
+          text: '待办1',
+          createdAt: 1,
+          updatedAt: 1,
+          conversationId: 'c1',
+          problem: 'stopped',
+        },
+        {
+          id: 't2',
+          text: '待办2',
+          createdAt: 1,
+          updatedAt: 1,
+          conversationId: 'c2',
+          problem: 'stopped',
+        },
+      ],
+    });
+    expect(
+      board.running
+        .map((card) => (card.kind === 'session' ? card.conversationId : card.kind))
+        .sort()
+    ).toEqual(['c1', 'c2']);
+    expect(board.done).toEqual([]);
+    for (const card of board.running) {
+      expect(card).toMatchObject({ kind: 'session', state: 'running' });
+      if (card.kind === 'session') expect(card.result).toBeUndefined();
+    }
+    expect(board.todos).toEqual([
+      expect.objectContaining({ id: 't1', phase: 'active', sessionState: 'running' }),
+      expect.objectContaining({ id: 't2', phase: 'active', sessionState: 'running' }),
+    ]);
+    expect(board.todos[0].problem).toBeUndefined();
+    expect(board.todos[1].problem).toBeUndefined();
+  });
 });

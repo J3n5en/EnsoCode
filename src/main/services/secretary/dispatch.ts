@@ -2335,7 +2335,9 @@ export function createSecretaryDispatchHandlers(
           ? linkedTodoSession(
               file.dispatched[todo.conversationId],
               rows[todo.conversationId],
-              await ports.status(todo.conversationId)
+              await ports.status(todo.conversationId),
+              false,
+              ((await ports.subagents?.(todo.conversationId))?.length ?? 0) > 0
             )
           : null;
         const phase = todoStatus(todo, session);
