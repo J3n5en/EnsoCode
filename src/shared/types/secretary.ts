@@ -1,3 +1,4 @@
+import type { PendingReminderView } from '../reminders';
 import type { GoalResultView } from '../secretary/goalResult';
 import type { GoalUpstreamRetry } from '../upstreamRecovery';
 import type { ModelRef, ThinkingLevel } from './agent';
@@ -539,6 +540,8 @@ export interface SecretaryBoardTodo extends SecretaryTodo {
   projectName?: string;
   sessionTitle?: string;
   sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone' | 'queued';
+  /** 关联会话空闲且挂着未到点提醒：工作台待办显示「等提醒 · HH:MM」，不显示「运行中」 */
+  pendingReminder?: PendingReminderView;
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，直接派发 */
@@ -632,6 +635,8 @@ export type SecretaryCard =
       resultAt?: number;
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
+      /** 会话空闲但挂着未到点的 remind_me 提醒：看板与工作台标「等提醒 · HH:MM」，不标「续跑中」 */
+      pendingReminder?: PendingReminderView;
       /** 目标因上游瞬态/配额故障等待自动恢复 */
       upstreamRetry?: GoalUpstreamRetry;
       /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
@@ -778,6 +783,8 @@ export interface SecretaryDailyItem {
   leftover?: { count: number };
   /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
   persistent?: true;
+  /** 空闲且挂着未到点的 remind_me 提醒：每日看板卡片标「等提醒 · HH:MM」 */
+  pendingReminder?: PendingReminderView;
   goalResult?: GoalResultView;
 }
 

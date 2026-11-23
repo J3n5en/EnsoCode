@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatReminderClock,
+  formatReminderRemaining,
+  formatReminderTooltip,
   hasPendingReminder,
+  nextPendingReminder,
   parseReminderFile,
   REMINDER_OVERDUE_GRACE_MS,
   remindersOf,
@@ -71,5 +75,38 @@ describe('hasPendingReminder', () => {
     expect(hasPendingReminder([reminder({ dueAt: 10_000 })], 0)).toBe(true);
     expect(hasPendingReminder([reminder({ dueAt: 0 })], REMINDER_OVERDUE_GRACE_MS - 1)).toBe(true);
     expect(hasPendingReminder([reminder({ dueAt: 0 })], REMINDER_OVERDUE_GRACE_MS + 1)).toBe(false);
+  });
+});
+
+describe('nextPendingReminder 与展示格式化', () => {
+  const t = (key: string, params?: Record<string, string | number>) =>
+    params ? key.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String(params[k] ?? '')) : key;
+
+  it('返回最早一条仍在等的提醒并统计未过期总数，过期项被过滤', () => {
+    const now = new Date(2026, 4, 1, 14, 20, 0).getTime();
+    const first = reminder({
+      id: 'r00000002',
+      dueAt: now + 3 * 60_000,
+      label: '检查 Beta #153',
+    });
+    const second = reminder({ id: 'r00000003', dueAt: now + 10 * 60_000, label: '第二条' });
+    const expired = reminder({
+      id: 'r00000004',
+      dueAt: now - REMINDER_OVERDUE_GRACE_MS - 1,
+      label: '过期',
+    });
+    const view = nextPendingReminder([second, expired, first], now);
+    expect(view).toEqual({
+      id: 'r00000002',
+      dueAt: first.dueAt,
+      label: '检查 Beta #153',
+      count: 2,
+    });
+    expect(formatReminderClock(first.dueAt)).toBe('14:23');
+    expect(formatReminderRemaining(first.dueAt, now, t)).toBe('in 3m');
+    expect(formatReminderTooltip(view!, now, t)).toBe(
+      'Waiting for reminder · 14:23 (in 3m) — 检查 Beta #153 — 2 reminders'
+    );
+    expect(nextPendingReminder([expired], now)).toBeUndefined();
   });
 });

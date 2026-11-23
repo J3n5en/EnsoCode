@@ -1,6 +1,6 @@
 import type { CoworkerTabTone } from '@shared/conversationDotTone';
 import type { ThemeState } from '@shared/theme/themeState';
-import { AlarmClock, CircleHelp } from 'lucide-react';
+import { AlarmClock, CircleHelp, Clock } from 'lucide-react';
 import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -70,6 +70,33 @@ export function ConversationStatusIndicator({
           <AlarmClock className={cn(ICON_SIZE[size], 'stroke-[2.5]')} aria-hidden />
         </TooltipTrigger>
         <TooltipPopup side="right" data-enso="conversation-queued-tooltip">
+          {label}
+        </TooltipPopup>
+      </Tooltip>
+    );
+  }
+  if (tone === 'reminder') {
+    const label = title ?? t('Waiting for reminder');
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label={label}
+              title={label}
+              data-slot="conversation-status"
+              data-tone="reminder"
+              data-enso={anchor}
+              data-conversation-id={conversationId}
+              data-status={status}
+              className={cn('flex shrink-0 items-center text-sky-500', className)}
+            />
+          }
+        >
+          <Clock className={cn(ICON_SIZE[size], 'stroke-[2.2]')} aria-hidden />
+        </TooltipTrigger>
+        <TooltipPopup side="right" data-enso="conversation-reminder-tooltip">
           {label}
         </TooltipPopup>
       </Tooltip>

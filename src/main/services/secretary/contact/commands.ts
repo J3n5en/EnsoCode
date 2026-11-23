@@ -58,6 +58,7 @@ function statusRow(card: SessionCard): ContactStatusRow {
     title: card.title,
     projectName: card.projectName,
     badge: badgeOf(card),
+    ...(card.pendingReminder ? { pendingReminder: card.pendingReminder } : {}),
     since: card.stateSince,
     ...(card.lastText ? { lastText: card.lastText } : {}),
     conversationId: card.conversationId,
