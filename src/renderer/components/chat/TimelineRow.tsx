@@ -46,6 +46,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleAlert,
   CircleX,
   ClipboardCheck,
@@ -2460,6 +2461,19 @@ function ThinkingRow({
         <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
       </button>
       {expanded && <PluginThinkingBody text={text} streaming={streaming} itemKey={itemKey} />}
+      {expanded && !streaming && (
+        <button
+          type="button"
+          onClick={() => setUserToggled(false)}
+          className={cn(
+            'mt-1 ml-[31px] flex items-center gap-1 text-[12px] transition-colors hover:text-foreground',
+            SUBTLE_TEXT
+          )}
+        >
+          <ChevronUp className="h-3 w-3" />
+          <span>{t('Collapse thinking')}</span>
+        </button>
+      )}
     </div>
   );
 }
