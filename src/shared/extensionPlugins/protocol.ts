@@ -227,6 +227,14 @@ export const PLUGIN_HOST_APIS = [
   'artifact.write',
   /** 向会话注入消息；args { sessionId?, text, images?, deliverAs?, triggerTurn?, trusted? } */
   'session.inject',
+  /** 认领一个外部对象；args { key, sessionId?, label?, group?, subscribedAt?, candidates? } */
+  'claims.claim',
+  /** 续期自己持有的认领；args { key, sessionId? } */
+  'claims.renew',
+  /** 释放自己持有的认领；args { key, sessionId? } */
+  'claims.release',
+  /** 列出未过期认领；args { prefix?, sessionId?, pluginId? } */
+  'claims.list',
   /** 中止会话当前一轮；args { sessionId? }，权限同 session.inject */
   'session.abort',
   /** 调用其他插件导出的方法；args { pluginId, name, args } */

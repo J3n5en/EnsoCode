@@ -157,6 +157,7 @@ import {
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
+import { peekEventClaimStore, setClaimSessionProtectedCheck } from '../services/eventClaims';
 import { takeInterruptedTurns } from '../services/exitInterruptHost';
 import { exitInterruptionOf } from '../services/exitWindow';
 import {
@@ -409,6 +410,39 @@ function markExitInterrupted<T extends AgentWorkerEvent | WorkerExitedEvent>(eve
   return { ...event, interrupted: { at: interruption.at, kind: interruption.kind } } as T;
 }
 
+function noteClaimLiveness(event: AgentWorkerEvent | WorkerExitedEvent): void {
+  const store = peekEventClaimStore();
+  if (!store) return;
+  if (event.type === 'worker-exited') {
+    for (const claim of store.list()) {
+      if (resumesAfterQuit(claim.sessionId)) continue;
+      if (upstreamRecovery?.getWaiter(claim.sessionId)) continue;
+      store.release(claim.key, claim.sessionId);
+    }
+    return;
+  }
+  if (!('identity' in event) || !event.identity) return;
+  const root = rootSessionId(event.identity);
+  if (event.type === 'parent-ended') {
+    store.releaseSession(event.identity.sessionId);
+    return;
+  }
+  if (event.type === 'turn-failed' && event.identity.sessionId === root) {
+    if (event.interrupted || upstreamRecovery?.getWaiter(root)) return;
+    store.releaseSession(root);
+    return;
+  }
+  if (
+    event.type === 'goal-signal' &&
+    event.kind === 'complete' &&
+    event.identity.sessionId === root
+  ) {
+    store.releaseSession(root);
+    return;
+  }
+  store.heartbeat(root);
+}
+
 function broadcastAgentEvent(event: RendererAgentEvent): void {
   try {
     broadcastToRenderers(IPC_CHANNELS.AGENT_EVENT, event);
@@ -547,6 +581,7 @@ function removeConversationFiles(conversation: {
 }): void {
   const project = sourceAuthority?.project(conversation.projectId);
   peekExtensionPlugins()?.forgetSession(conversation.conversationId);
+  peekEventClaimStore()?.releaseSession(conversation.conversationId);
   getSecretaryImageStore()?.remove(conversation.conversationId);
   getSecretaryReportStore()?.remove(conversation.conversationId);
   removeConversationSessionFiles({
@@ -927,6 +962,7 @@ export function abortRootFromMain(sessionId: string): void {
 
 /** 用户（或替用户的秘书）停止：根会话名下在跑的子代理一并停掉；插话立即发送 / 卡死重试只断当前轮 */
 function stopWithSubagents(identity: SessionIdentity): AgentActionResult {
+  peekEventClaimStore()?.releaseSession(identity.sessionId);
   const result = abortSession(identity);
   if (!('parent' in identity)) void agentService?.cancelOwner(identity.sessionId);
   return result;
@@ -2015,6 +2051,9 @@ export function registerAgentHandlers(): void {
       }
     },
   });
+  setClaimSessionProtectedCheck(
+    (sessionId) => upstreamRecovery?.getWaiter(sessionId) !== undefined
+  );
 
   agentService = new AgentService({
     ledger: fileAgentRunLedger(path.join(app.getPath('userData'), 'agent', 'subagent-runs.json')),
@@ -2118,6 +2157,7 @@ export function registerAgentHandlers(): void {
       return;
     }
     const workerEvent = markExitInterrupted(incomingEvent);
+    noteClaimLiveness(workerEvent);
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
       recordMcpStatus(workerEvent);
@@ -3054,8 +3094,12 @@ export function registerAgentHandlers(): void {
       const flag = (key: 'stopSubagents' | 'cancelReminders') =>
         typeof options === 'object' && options !== null && Reflect.get(options, key) === true;
       // 用户停止才带 cancelReminders；卡死重试、插话立即发送不带，提醒照留
-      if (flag('cancelReminders')) clearSessionReminders(identity.sessionId);
+      const cancelReminders = flag('cancelReminders');
+      if (cancelReminders) clearSessionReminders(identity.sessionId);
       const stopSubagents = flag('stopSubagents');
+      if (stopSubagents || cancelReminders) {
+        peekEventClaimStore()?.releaseSession(identity.sessionId);
+      }
       return stopSubagents ? stopWithSubagents(identity) : abortSession(identity);
     }
   );

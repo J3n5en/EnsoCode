@@ -1,5 +1,5 @@
 import type { FeedEvent } from '@shared/secretary/feed';
-import type { SecretaryBoard, SecretaryCard } from '@shared/types/secretary';
+import type { SecretaryBoard, SecretaryCard, SecretaryClaimView } from '@shared/types/secretary';
 import { parseHTML } from 'linkedom';
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -168,6 +168,34 @@ describe('SecretaryWorkbench 结果卡', () => {
     h.board = board([sessionCard({ state: 'running' })]);
     await render(<SecretaryWorkbench name="小安" />);
     expect(dismissButton()).toBeNull();
+  });
+
+  it('有对象认领时列出对象和会话，没有认领则不显示', async () => {
+    const claim: SecretaryClaimView = {
+      key: 'github:acme/app#1:review',
+      sessionId: 'c1',
+      sessionTitle: '写 hello.txt',
+      pluginId: 'github',
+      label: 'PR 审查',
+      claimedAt: NOW - 60_000,
+      lastHeartbeatAt: NOW - 5_000,
+      active: true,
+    };
+    h.board = { ...board([sessionCard()]), claims: [claim] };
+    await render(<SecretaryWorkbench name="小安" />);
+    const section = container.querySelector('[data-enso="secretary-claims"]');
+    expect(section?.textContent).toContain('[Object claims]');
+    expect(section?.textContent).toContain('PR 审查');
+    expect(section?.textContent).toContain('github:acme/app#1:review');
+    expect(section?.textContent).toContain('写 hello.txt');
+    expect(section?.textContent).toContain('github');
+    act(() => {
+      (container.querySelector('[data-enso="secretary-claim"]') as HTMLElement).click();
+    });
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    h.board = board([sessionCard()]);
+    await render(<SecretaryWorkbench name="小安" />);
+    expect(container.querySelector('[data-enso="secretary-claims"]')).toBeNull();
   });
 });
 

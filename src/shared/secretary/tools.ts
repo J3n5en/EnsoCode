@@ -7,6 +7,7 @@ export const SECRETARY_OPS = [
   'project_info',
   'repo_status',
   'session_list',
+  'claims_list',
   'session_read',
   'session_tasks',
   'session_activity',

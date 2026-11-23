@@ -52,6 +52,7 @@ import {
   REPLACEABLE_GOAL_STATUSES,
   type SecretaryAuditEntry,
   type SecretaryBoard,
+  type SecretaryClaimView,
   type SecretaryDispatchFile,
   type SecretaryProfile,
   type SecretaryProfileDraft,
@@ -66,6 +67,7 @@ import {
   type TakeoverVia,
 } from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
+import { peekEventClaimStore } from '../eventClaims';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
@@ -176,6 +178,7 @@ export interface SecretaryDispatchPorts {
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
+  claims?(): MaybePromise<readonly SecretaryClaimView[]>;
   createSession(request: MainSessionRequest): Promise<MainSessionResult>;
   prompt(
     conversationId: string,
@@ -2962,6 +2965,7 @@ export interface SecretaryStatePorts {
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
+  claims?(): MaybePromise<readonly SecretaryClaimView[]>;
 }
 
 export async function buildSecretaryState(
@@ -3016,7 +3020,14 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
     rows,
     projects,
     aliases,
-    board: buildBoard(file, { rows, statuses, projects, aliases, todos: await ports.todos() }),
+    board: buildBoard(file, {
+      rows,
+      statuses,
+      projects,
+      aliases,
+      todos: await ports.todos(),
+      claims: (await ports.claims?.()) ?? [],
+    }),
   };
 }
 
@@ -3061,6 +3072,25 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
     status: async (conversationId) =>
       (await import('../../ipc/agent')).observedSessionStatus(conversationId),
+    async claims() {
+      const store = peekEventClaimStore();
+      if (!store) return [];
+      const rows = await (await import('../../ipc/settings')).readPersistedConversations();
+      return store.list().map((claim) => {
+        const title = rows[claim.sessionId]?.title;
+        return {
+          key: claim.key,
+          sessionId: claim.sessionId,
+          sessionTitle: typeof title === 'string' && title.trim() ? title : claim.sessionId,
+          pluginId: claim.pluginId,
+          ...(claim.label !== undefined ? { label: claim.label } : {}),
+          ...(claim.group !== undefined ? { group: claim.group } : {}),
+          claimedAt: claim.claimedAt,
+          lastHeartbeatAt: claim.lastHeartbeatAt,
+          active: claim.active,
+        };
+      });
+    },
     createSession: async (request) =>
       (await import('../../ipc/secretary')).createSessionViaMain(request),
     prompt: async (conversationId, text, deliveryId, images) =>

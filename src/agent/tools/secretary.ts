@@ -46,6 +46,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     aliases: { id: 'projectId', dir: 'path', directory: 'path', cwd: 'path', sha: 'contains' },
   },
   session_list: { keys: ['projectId', 'limit'], numbers: ['limit'] },
+  claims_list: { keys: ['prefix', 'sessionId', 'pluginId'] },
   session_read: {
     keys: ['conversationId', 'limit', 'before', 'index', 'entryId', 'offset'],
     numbers: ['limit', 'before', 'index', 'offset'],
@@ -437,6 +438,20 @@ const SCHEMAS: Record<
     parameters: object({
       projectId: id('Optional: only sessions of this project'),
       limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Max rows (default 50)' },
+    }),
+  },
+  claims_list: {
+    description:
+      'List active object claims: which session currently receives events for an external object such as a pull request or a chat. Optional filters are prefix, sessionId and pluginId.',
+    parameters: object({
+      prefix: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 256,
+        description: 'Only claims whose key starts with this prefix',
+      },
+      sessionId: id('Only claims held by this session'),
+      pluginId: id('Only claims created by this plugin'),
     }),
   },
   session_read: {

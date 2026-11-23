@@ -9,6 +9,7 @@ import {
   type PendingDispatch,
   type SecretaryBoard,
   type SecretaryCard,
+  type SecretaryClaimView,
   type SecretaryDispatchFile,
   type SecretaryProposal,
   type SecretaryResultKind,
@@ -481,6 +482,7 @@ export interface BoardInput {
   projects: readonly ProjectAuthority[];
   todos: readonly SecretaryTodo[];
   aliases?: Readonly<Record<string, string>>;
+  claims?: readonly SecretaryClaimView[];
 }
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
@@ -619,6 +621,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ];
     }),
     ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
+    ...(input.claims && input.claims.length > 0 ? { claims: [...input.claims] } : {}),
   };
 }
 
