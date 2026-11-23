@@ -596,7 +596,10 @@ describe('settings广播策略', () => {
     expect(disk()?.state.conversations).toEqual({ a: { id: 'a', title: 'a' } });
     expect(mocks.sends[0]).toHaveBeenCalledWith(IPC_CHANNELS.CONVERSATIONS_RESYNC);
 
+    const removed = vi.fn();
+    settings.onConversationsRemoved(removed);
     expect(await remove(sender, ['a'])).toBe(true);
+    expect(removed).toHaveBeenCalledWith(['a']);
     await write(sender, 'enso-conversations', empty, seq);
     expect(disk()?.state).toMatchObject({ conversations: {}, order: [] });
 

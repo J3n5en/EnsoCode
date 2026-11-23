@@ -2103,3 +2103,116 @@ describe('AgentService 父会话停止时级联停止子代理', () => {
     expect(service.progress(owner.ownerId)).toEqual([]);
   });
 });
+
+describe('AgentService 父会话被释放（删除 / worktree 归档 / 移入 worktree）时收口子代理 Run', () => {
+  function fileLedger() {
+    let saved: AgentRunLedgerEntry[] = [];
+    return {
+      load: () => saved.map((entry) => ({ ...entry })),
+      save: (entries: readonly AgentRunLedgerEntry[]) => {
+        saved = entries.map((entry) => ({ ...entry }));
+      },
+    } satisfies AgentRunLedgerStore;
+  }
+  const parentEnded = {
+    type: 'parent-ended',
+    identity: context.actor.kind === 'agent' ? context.actor.identity : ({} as never),
+    seq: 9,
+    reason: 'released',
+  } as AgentWorkerEvent;
+
+  it('worker 拆掉子会话树后 Main 侧 Run 全部收口：wait 返回、不发通知、台账落终态', async () => {
+    const notify = vi.fn();
+    const ledger = fileLedger();
+    const { service } = setup({ notify, ledger });
+    const task = await service.spawn(spawnRequest({ requestId: 'spawn-task' }));
+    const coworker = await service.spawn(
+      spawnRequest({ requestId: 'spawn-coworker', mode: 'coworker' })
+    );
+    if (!task.ok || !coworker.ok) throw new Error('spawn failed');
+    const waiting = service.wait({ context, requestId: 'w', runIds: [task.value.runId] });
+
+    service.observe(parentEnded);
+
+    expect(service.progress(owner.ownerId)).toEqual([]);
+    expect(await waiting).toMatchObject({ ok: true, value: { timedOut: false } });
+    expect(notify).not.toHaveBeenCalled();
+    expect(ledger.load().map((entry) => entry.status)).toEqual(['interrupted', 'interrupted']);
+    expect(ledger.load().every((entry) => entry.restart === undefined)).toBe(true);
+  });
+
+  it('会话被删除：台账记为已告知，冷启动不再叫醒它；删除先于 parent-ended 到达也一样', async () => {
+    for (const order of ['released-first', 'removed-first'] as const) {
+      const notify = vi.fn();
+      const ledger = fileLedger();
+      const { service } = setup({ notify, ledger });
+      const task = await service.spawn(spawnRequest());
+      if (!task.ok) throw new Error(task.error);
+
+      if (order === 'released-first') service.observe(parentEnded);
+      service.abandonOwner(owner.ownerId);
+      if (order === 'removed-first') service.observe(parentEnded);
+
+      expect(service.progress(owner.ownerId)).toEqual([]);
+      expect(ledger.load()).toMatchObject([{ status: 'interrupted', notified: true }]);
+      const next = setup({ ledger, notify });
+      expect(next.service.restartInterruptedOwners()).toEqual([]);
+      next.service.recoverOwner(context);
+      expect(notify).not.toHaveBeenCalled();
+    }
+  });
+
+  it('父会话之后回来（移入 worktree / 重启会话）：就绪时补告一次，task 可 resume', async () => {
+    const notify = vi.fn();
+    const { service, runtime } = setup({ notify });
+    runtime.resume = vi.fn(async ({ identity }) => identity);
+    runtime.retry = vi.fn(async () => ({ ok: true }));
+    const task = await service.spawn(spawnRequest());
+    if (!task.ok) throw new Error(task.error);
+
+    service.observe(parentEnded);
+    expect(notify).not.toHaveBeenCalled();
+    service.recoverOwner(context);
+    service.recoverOwner(context);
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]?.[1]).toContain(task.value.runId);
+    await expect(
+      service.resume({ context, requestId: 'r', agentId: task.value.agentId })
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it('释放时还在初始化的 spawn 不再起 Run', async () => {
+    const { service, runtime } = setup();
+    const create = vi.mocked(runtime.spawn).getMockImplementation()!;
+    let finishSpawn!: () => void;
+    vi.mocked(runtime.spawn).mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve) => {
+        finishSpawn = resolve;
+      });
+      return create(input);
+    });
+    const pending = service.spawn(spawnRequest());
+    await Promise.resolve();
+
+    service.observe(parentEnded);
+    finishSpawn();
+
+    expect(await pending).toMatchObject({ ok: false });
+    expect(runtime.prompt).not.toHaveBeenCalled();
+    expect(service.progress(owner.ownerId)).toEqual([]);
+  });
+
+  it('别的父会话被释放不影响本会话的 Run', async () => {
+    const { service } = setup();
+    const task = await service.spawn(spawnRequest());
+    if (!task.ok) throw new Error(task.error);
+
+    service.observe({
+      ...parentEnded,
+      identity: { sessionId: 'chat-2', generation: '33333333-3333-4333-8333-333333333333' },
+    } as AgentWorkerEvent);
+
+    expect(service.progress(owner.ownerId)).toHaveLength(1);
+  });
+});
