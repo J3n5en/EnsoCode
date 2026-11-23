@@ -826,7 +826,12 @@ describe('typed Agent child projection', () => {
         index: 0,
         message: {
           role: 'custom',
-          content: [{ type: 'text', text: '你是这场战役的指挥官，先跑 engage_status' }],
+          content: [
+            {
+              type: 'text',
+              text: '<untrusted-content source="plugin:enso.hornet">你是这场战役的指挥官，先跑 engage_status</untrusted-content>',
+            },
+          ],
           pluginSource: { pluginId: 'enso.hornet', pluginName: 'Hornet' },
         },
       });

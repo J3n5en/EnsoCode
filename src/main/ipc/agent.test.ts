@@ -266,11 +266,12 @@ describe('agent IPC Main identity boundary', () => {
     expect(mocks.dispatchHost.resolveSubagentModel).toBe(resolveSubagentModelSelection);
   });
 
-  it('插件投递进秘书会话时，送给模型的正文整段包成不可信内容', () => {
+  it('插件投递进任意会话都包成不可信内容；trusted 只在普通会话免包，秘书会话一律包', () => {
     const decorate = mocks.registerPluginSessionBridge.mock.calls.at(-1)?.[1] as (
       sessionId: string,
       pluginId: string,
-      text: string
+      text: string,
+      trusted: boolean
     ) => string;
     const authority = getSourceAuthorityRegistry()!;
     vi.spyOn(authority, 'conversation').mockReturnValue({
@@ -289,8 +290,11 @@ describe('agent IPC Main identity boundary', () => {
     });
     const text =
       'GitHub 动态\n<untrusted-content source="plugin:enso.github">\n- PR #409\n</untrusted-content>';
-    expect(decorate('sec', 'enso.github', text)).toBe(
-      '<untrusted-content source="plugin:enso.github">GitHub 动态\n<untrusted-content source="plugin:enso.github">\n- PR #409\n<\\/untrusted-content></untrusted-content>'
+    const wrapped =
+      '<untrusted-content source="plugin:enso.github">GitHub 动态\n<\\untrusted-content source="plugin:enso.github">\n- PR #409\n<\\/untrusted-content></untrusted-content>';
+    expect(decorate('sec', 'enso.github', text, false)).toBe(wrapped);
+    expect(decorate('sec', 'enso.scheduler', '跑一遍测试', true)).toBe(
+      '<untrusted-content source="plugin:enso.scheduler">跑一遍测试</untrusted-content>'
     );
     project.mockReturnValue({
       projectId: 'sp',
@@ -298,7 +302,9 @@ describe('agent IPC Main identity boundary', () => {
       state: 'active',
       version: 1,
     });
-    expect(decorate('sec', 'enso.github', text)).toBe(text);
+    expect(decorate('sec', 'enso.github', text, false)).toBe(wrapped);
+    expect(decorate('sec', 'enso.github', wrapped, false)).toBe(wrapped);
+    expect(decorate('sec', 'enso.scheduler', '跑一遍测试', true)).toBe('跑一遍测试');
   });
 
   it('desktop rewind requires a persisted entry ID and a current generation', () => {
