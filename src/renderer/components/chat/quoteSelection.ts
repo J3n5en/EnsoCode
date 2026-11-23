@@ -56,6 +56,8 @@ export function splitQuoteFences(
 }
 
 const CODE_BLOCK = '[data-enso="code-block"]';
+/** 消息行里的界面元素（模型抬头、悬停操作条）：拖选越界时不进引用 */
+const SKIP = '[data-quote-skip]';
 const BLOCK_TAGS = new Set([
   'P',
   'DIV',
@@ -88,7 +90,7 @@ function fragmentText(node: Node): string {
   if (node.nodeType === 3) return node.textContent ?? '';
   if (!(node.nodeType === 1 || node.nodeType === 11)) return '';
   const element = node.nodeType === 1 ? (node as Element) : null;
-  if (element?.tagName === 'BUTTON') return '';
+  if (element?.tagName === 'BUTTON' || element?.matches(SKIP)) return '';
   if (element?.tagName === 'BR') return '\n';
   if (element?.matches(CODE_BLOCK)) {
     const code = element.querySelector('pre')?.textContent ?? element.textContent ?? '';
@@ -115,7 +117,7 @@ export function selectionQuoteText(selection: Selection | null, container: Eleme
   const codeBlock = elementOf(range.commonAncestorContainer)?.closest(CODE_BLOCK);
   if (codeBlock) return fence(plain, codeBlock.getAttribute('data-language') ?? undefined);
   const fragment = range.cloneContents();
-  if (!fragment.querySelector(CODE_BLOCK)) return plain;
+  if (!fragment.querySelector(`${CODE_BLOCK}, ${SKIP}`)) return plain;
   return fragmentText(fragment)
     .replace(/\n{3,}/g, '\n\n')
     .trim();

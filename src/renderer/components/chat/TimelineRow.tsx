@@ -1376,7 +1376,10 @@ export function ReplyHeader({
   const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');
   if (!speaker && !meta && !privacyMask) return null;
   return (
-    <div className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none">
+    <div
+      data-quote-skip=""
+      className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none"
+    >
       {speaker &&
         (speaker.image ? (
           <img
@@ -2184,7 +2187,10 @@ function CollapsedTurnBar({
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 select-none">
+    <div
+      data-quote-skip=""
+      className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 select-none"
+    >
       <button
         type="button"
         onClick={() => onToggle?.(turnKey, false)}
@@ -2236,7 +2242,10 @@ function UserMeta({
   const { t } = useI18n();
   const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
   return (
-    <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
+    <div
+      data-quote-skip=""
+      className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none"
+    >
       <RewindButton messageIndex={messageIndex} />
       <ResendButton messageIndex={messageIndex} />
       <WithdrawButton messageIndex={messageIndex} />
@@ -2303,7 +2312,10 @@ function TextRow({
       />
       {item.turnEnd && !item.streaming && host?.turnFooter?.(Number(item.key.split('-')[0]))}
       {!item.streaming && (
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+        <div
+          data-quote-skip=""
+          className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+        >
           <PluginMessageActions position="left" {...pluginActionProps} />
           <CopyButton text={item.text} />
           <PluginMessageActions position="right" {...pluginActionProps} />

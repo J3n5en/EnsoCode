@@ -142,6 +142,20 @@ describe('selectionQuoteText', () => {
     );
   });
 
+  // 真机：拖选回复末尾时多拖一点，「对话分支 / 用时 / TTFT」操作条文字会混进引用
+  it('选区带上消息的操作条 / 模型抬头时，引用里不含这些界面文字', () => {
+    const fragment = document.createDocumentFragment();
+    const wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div data-quote-skip="">fake-model-1 · 18:01</div><p>最后一段正文</p><div data-quote-skip=""><button>复制</button><span>对话分支</span><span>用时 0.1s</span></div>';
+    fragment.append(...wrap.childNodes);
+    const selection = {
+      ...sel(node('p'), node('p'), 'fake-model-1 · 18:01\n最后一段正文\n\n对话分支\n用时 0.1s'),
+      getRangeAt: () => ({ commonAncestorContainer: node('p'), cloneContents: () => fragment }),
+    } as unknown as Selection;
+    expect(selectionQuoteText(selection, container)).toBe('最后一段正文');
+  });
+
   it('真实代码块带上语言标记，选中时才能还原围栏语言', () => {
     const html = renderToStaticMarkup(
       createElement(CodeBlock, { code: 'x', language: 'ts', streaming: true })
