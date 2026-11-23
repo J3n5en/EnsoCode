@@ -272,6 +272,7 @@ export function BtwView({
             toolbar={
               <ModelPicker
                 providers={enabledProviders}
+                recordRecent
                 activeAccount={resolveSessionUsageAccount(providers, conversation ?? undefined)}
                 virtualModels={virtualModels}
                 providerId={selectedProviderId}

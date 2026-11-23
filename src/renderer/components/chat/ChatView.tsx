@@ -532,6 +532,7 @@ export function ChatView() {
                     <ModelPicker
                       listenHotkey
                       refreshAllModels
+                      recordRecent
                       compact={isMobile}
                       providers={enabledProviders}
                       virtualModels={virtualModels}
