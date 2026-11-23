@@ -2070,6 +2070,9 @@ export const zhTranslations: Record<string, string> = {
   '{{name}} installed': '已安装 {{name}}',
   'Turn it on in the list below to use it.': '在下面的列表里打开开关即可使用。',
   'updating from {{version}}': '从 {{version}} 更新',
+  'This update asks for more than {{version}}. {{version}} keeps running until you allow the update in the plugin list.':
+    '这次更新申请的权限比 {{version}} 多。确认后 {{version}} 继续运行，在插件列表里点「允许」才会切到新版。',
+  'Awaiting approval': '待授权',
   'Keep current': '保持现状',
   'Stopped after crashes': '多次崩溃后已停止',
   'Plugin command failed': '插件命令执行失败',
