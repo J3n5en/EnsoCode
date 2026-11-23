@@ -74,7 +74,6 @@ interface Harness {
     interruptDetails: Record<string, string>;
     contact: {
       milestones: { kind: string; title: string; conversationId: string; lastText?: string }[];
-      relayAsks: { conversationId: string; question: string; label: string }[];
       asks: { conversationId: string; requestId: string }[];
       resolved: { conversationId: string; requestId: string }[];
       replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
@@ -117,7 +116,6 @@ function harness(
     interruptDetails: {},
     contact: {
       milestones: [],
-      relayAsks: [],
       asks: [],
       resolved: [],
       replies: [],
@@ -183,9 +181,6 @@ function harness(
       },
       onScheduleFired: (input) => {
         state.contact.scheduleFired.push(input);
-      },
-      onRelayAsk: (input) => {
-        state.contact.relayAsks.push(input);
       },
       onAskRequest: (conversationId, ask) => {
         state.contact.asks.push({ conversationId, requestId: ask.requestId });

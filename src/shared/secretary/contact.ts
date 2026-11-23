@@ -263,9 +263,9 @@ export function formatNeedsAppConfirmLine(lang: ContactLang): string {
 /** 秘书用 ask_user 问 J 哥：问题、选项、怎么答，一条说完 */
 export function formatAskMessage(
   lang: ContactLang,
-  input: { question: string; options?: readonly string[]; title?: string; plain?: boolean }
+  input: { question: string; options?: readonly string[]; plain?: boolean }
 ): string {
-  const lines = [input.title ? `❓ ${input.title}` : lang === 'zh' ? '❓ 秘书问你' : '❓ Question'];
+  const lines = [lang === 'zh' ? '❓ 秘书问你' : '❓ Question'];
   lines.push(input.question.trim());
   if (input.options && input.options.length > 0) {
     lines.push(...input.options.map((option, index) => `${index + 1}. ${option}`));
