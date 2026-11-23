@@ -7,6 +7,7 @@ import {
   normalizeProviderModelRefreshIntervalHours,
 } from '@shared/providers/modelRefreshInterval';
 import { isValidProxyUrl, PROXY_MODES } from '@shared/proxy';
+import { isRecentModelList, MAX_RECENT_MODELS } from '@shared/recentModels';
 
 /**
  * 本机配置 CLI 的键策略：键 = `<state 字段>[.<子键>…]`，数组段按元素 id（或下标）定位。
@@ -268,6 +269,8 @@ function validateField(field: string, value: unknown): string | null {
   if (field === 'language' && value !== 'en' && value !== 'zh') return 'language must be en or zh';
   if (field === 'longCacheRetention' && typeof value !== 'boolean')
     return 'longCacheRetention must be a boolean';
+  if (field === 'recentModels' && !isRecentModelList(value))
+    return `recentModels must be at most ${MAX_RECENT_MODELS} unique { providerId, modelId } entries`;
   if (
     field === 'memoryDistillWindowMinutes' &&
     !(MEMORY_DISTILL_WINDOW_MINUTES as readonly unknown[]).includes(value)

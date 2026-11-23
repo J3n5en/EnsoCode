@@ -24,7 +24,7 @@ import type {
   SkillEntry,
   SubagentModelEntry,
 } from '@shared/types';
-import type { AgentMode, ApprovalMode, ThinkingLevel } from '@shared/types/agent';
+import type { AgentMode, ApprovalMode, ModelRef, ThinkingLevel } from '@shared/types/agent';
 import type { UpdateChannel } from '@shared/updater/channel';
 import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
@@ -111,6 +111,8 @@ export interface SettingsState {
   favoriteTerminalThemes: string[];
   /** 模型选择器星标，`providerId/modelId` */
   pinnedModels: string[];
+  /** 模型选择器最近使用，最近的在前 */
+  recentModels: ModelRef[];
 
   /**
    * 状态栏开启的段位序列。⚠️ **数组顺序即渲染顺序**（段位支持用户拖拽排序）；
@@ -400,6 +402,8 @@ export interface SettingsState {
   setContextMenuOpen: (value: unknown) => void;
   toggleFavoriteTerminalTheme: (theme: string) => void;
   togglePinnedModel: (key: string) => void;
+  recordRecentModel: (ref: ModelRef) => void;
+  removeRecentModel: (ref: ModelRef) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setLoadHarnessAssets: (value: boolean) => void;
   setWindowsLocalShell: (value: WindowsLocalShell) => void;

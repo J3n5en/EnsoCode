@@ -6,6 +6,7 @@ import type {
   ModelEntry,
   ModelMeta,
   ModelProvider,
+  ModelRef,
   OauthProviderInfo,
 } from '@shared/types';
 import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
@@ -15,9 +16,20 @@ import {
   VIRTUAL_PROVIDER_ID,
   type VirtualModelEntry,
 } from '@shared/virtualModels';
-import { Brain, Check, ChevronDown, Loader2, RefreshCw, Shuffle, Star } from 'lucide-react';
+import {
+  Brain,
+  Check,
+  ChevronDown,
+  History,
+  Loader2,
+  RefreshCw,
+  Shuffle,
+  Star,
+  X,
+} from 'lucide-react';
 import {
   type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -57,6 +69,7 @@ export function requestOpenChatModelPicker() {
 
 export type ModelPickerNavTarget =
   | { readonly kind: 'favorites' }
+  | { readonly kind: 'recent' }
   | { readonly kind: 'vendor'; readonly vendorId: string };
 
 export function pinnedModelKey(providerId: string, modelId: string): string {
@@ -115,6 +128,8 @@ export function resolveActiveWorkbenchView(options: {
   groups: readonly ProviderGroup[];
   selectableVirtualModels: readonly VirtualModelEntry[];
   pinnedCount: number;
+  /** 可用的最近使用条目数；为 0 时不显示该分组 */
+  recentCount?: number;
   selectedProviderId: string;
   activeNav: ModelPickerNavTarget | null;
   activeProviderByVendor?: Readonly<Record<string, string>>;
@@ -123,16 +138,22 @@ export function resolveActiveWorkbenchView(options: {
   activeGroup: ProviderGroup | undefined;
   activeProvider: ModelProvider | undefined;
   showFavoritesNav: boolean;
+  showRecentNav: boolean;
 } {
   const showFavoritesNav = options.selectableVirtualModels.length > 0 || options.pinnedCount > 0;
+  const showRecentNav = (options.recentCount ?? 0) > 0;
   const favorites = {
     activeNav: { kind: 'favorites' } as const,
     activeGroup: undefined,
     activeProvider: undefined,
     showFavoritesNav,
+    showRecentNav,
   };
   const explicit = options.activeNav;
   if (explicit?.kind === 'favorites' && showFavoritesNav) return favorites;
+  if (explicit?.kind === 'recent' && showRecentNav) {
+    return { ...favorites, activeNav: { kind: 'recent' } };
+  }
   if (explicit?.kind === 'vendor') {
     const group = options.groups.find((entry) => entry.vendorId === explicit.vendorId);
     if (group) {
@@ -145,6 +166,7 @@ export function resolveActiveWorkbenchView(options: {
           options.activeProviderByVendor
         ),
         showFavoritesNav,
+        showRecentNav,
       };
     }
   }
@@ -176,6 +198,7 @@ export function resolveActiveWorkbenchView(options: {
         )
       : undefined,
     showFavoritesNav,
+    showRecentNav,
   };
 }
 
@@ -317,6 +340,8 @@ interface ModelPickerProps {
   listenHotkey?: boolean;
   /** 仅会话工具行：弹层顶部显示刷新 icon，一次拉取全部模型与模型信息 */
   refreshAllModels?: boolean;
+  /** 仅会话选择器：选中即记入「最近使用」；设置页里的选择不算在用 */
+  recordRecent?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
@@ -498,6 +523,35 @@ function ModelRowContent({
   );
 }
 
+/** 「最近使用」行尾的移除控件：悬停/高亮行时才显示；不是 button，避免嵌套交互元素，并拦住冒泡到行的选择。 */
+function RecentRemoveButton({ refKey, onRemove }: { refKey: string; onRemove: () => void }) {
+  const { t } = useI18n();
+  const label = t('Remove from recently used');
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      data-model-recent-remove={refKey}
+      aria-label={label}
+      title={label}
+      onMouseUp={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onRemove();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onRemove();
+      }}
+      className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100 group-data-highlighted:opacity-100"
+    >
+      <X className="h-3 w-3" />
+    </span>
+  );
+}
+
 /**
  * 一个供应商「条目」（订阅账号或 API-key 配置）在菜单里的展示名。
  * 读法与设置页 `ProvidersSettings.tsx` 同款口径对齐（同一套账号信息，不让用户学两遍）：
@@ -674,6 +728,17 @@ interface SearchHit {
   score: number;
 }
 
+type RecentHit =
+  | { kind: 'virtual'; ref: ModelRef; entry: VirtualModelEntry }
+  | {
+      kind: 'model';
+      ref: ModelRef;
+      provider: ModelProvider;
+      model: ModelEntry;
+      entryTag: string;
+      showId: boolean;
+    };
+
 /** composer 工具行的模型选择。 */
 export function ModelPicker({
   providers,
@@ -690,6 +755,7 @@ export function ModelPicker({
   showReasoningControls = true,
   listenHotkey = false,
   refreshAllModels = false,
+  recordRecent = false,
   onSelect,
   onReasoningChange,
   onThinkingChange,
@@ -711,6 +777,9 @@ export function ModelPicker({
   const [keyword, setKeyword] = useState('');
   const pinnedModels = useSettingsStore((s) => s.pinnedModels);
   const handleTogglePin = useSettingsStore((s) => s.togglePinnedModel);
+  const recentModels = useSettingsStore((s) => s.recentModels);
+  const recordRecentModel = useSettingsStore((s) => s.recordRecentModel);
+  const removeRecentModel = useSettingsStore((s) => s.removeRecentModel);
   const allProviders = useSettingsStore((s) => s.providers);
   const updateProvider = useSettingsStore((s) => s.updateProvider);
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -826,18 +895,6 @@ export function ModelPicker({
   const groups = useMemo(
     () => expandWorkbenchGroups(groupProviders(providers, oauthInfos)),
     [providers, oauthInfos]
-  );
-  const view = useMemo(
-    () =>
-      resolveActiveWorkbenchView({
-        groups,
-        selectableVirtualModels: visibleVirtualModels,
-        pinnedCount: pinnedKeys.size,
-        selectedProviderId: providerId,
-        activeNav,
-        activeProviderByVendor,
-      }),
-    [groups, visibleVirtualModels, pinnedKeys, providerId, activeNav, activeProviderByVendor]
   );
 
   // 弹层打开时才刷新订阅账号展示名（登录/登出可能已发生），关闭时不必轮询。
@@ -964,6 +1021,55 @@ export function ModelPicker({
     return hits;
   }, [providers, entryInfoByProviderId, pinnedKeys]);
 
+  // 已删除/停用的 provider 与模型、不可选的虚拟模型直接跳过，不显示点不了的条目
+  const recentHits = useMemo(() => {
+    const hits: RecentHit[] = [];
+    for (const ref of recentModels ?? []) {
+      if (ref.providerId === VIRTUAL_PROVIDER_ID) {
+        const entry = visibleVirtualModels.find((item) => item.id === ref.modelId);
+        if (entry) hits.push({ kind: 'virtual', ref, entry });
+        continue;
+      }
+      const provider = providers.find((item) => item.id === ref.providerId);
+      const model = provider?.models.find(
+        (item) => item.id === ref.modelId && item.enabled !== false
+      );
+      if (!provider || !model) continue;
+      const info = entryInfoByProviderId[provider.id];
+      hits.push({
+        kind: 'model',
+        ref,
+        provider,
+        model,
+        entryTag: info ? `${info.vendorLabel} · ${info.primary}` : provider.name,
+        showId: duplicateModelLabels(provider.models).has(model.label ?? model.id),
+      });
+    }
+    return hits;
+  }, [recentModels, visibleVirtualModels, providers, entryInfoByProviderId]);
+
+  const view = useMemo(
+    () =>
+      resolveActiveWorkbenchView({
+        groups,
+        selectableVirtualModels: visibleVirtualModels,
+        pinnedCount: pinnedKeys.size,
+        recentCount: recentHits.length,
+        selectedProviderId: providerId,
+        activeNav,
+        activeProviderByVendor,
+      }),
+    [
+      groups,
+      visibleVirtualModels,
+      pinnedKeys,
+      recentHits.length,
+      providerId,
+      activeNav,
+      activeProviderByVendor,
+    ]
+  );
+
   const handleMetaData = useCallback((pid: string, meta: Record<string, ModelMeta>) => {
     setMetaByProvider((prev) => (prev[pid] === meta ? prev : { ...prev, [pid]: meta }));
   }, []);
@@ -1009,13 +1115,16 @@ export function ModelPicker({
         : visibleVirtualModels,
     [searching, keyword, visibleVirtualModels]
   );
-  const virtualItems = virtualHits.map((entry) => {
+  const renderVirtualItem = (entry: VirtualModelEntry, key: string, trailing?: ReactNode) => {
     // 窄屏触发器只显示虚拟名，当前路由成员挪到这一行
     const routed = compact && currentVirtual?.id === entry.id ? routedModelLabel : undefined;
     return (
       <MenuItem
-        key={`virtual/${entry.id}`}
-        className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
+        key={key}
+        className={cn(
+          'min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs',
+          trailing && 'group'
+        )}
         data-model-picker-virtual={entry.id}
         onClick={() => handleSelectModel(VIRTUAL_PROVIDER_ID, entry.id)}
       >
@@ -1036,13 +1145,16 @@ export function ModelPicker({
           </span>
         )}
         {currentVirtual?.id === entry.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+        {trailing}
       </MenuItem>
     );
-  });
+  };
+  const virtualItems = virtualHits.map((entry) => renderVirtualItem(entry, `virtual/${entry.id}`));
 
   const handleSelectModel = useCallback(
     (targetProviderId: string, targetModelId: string) => {
       onSelect(targetProviderId, targetModelId);
+      if (recordRecent) recordRecentModel({ providerId: targetProviderId, modelId: targetModelId });
       // 同一次交互内钳位:目标模型已知的支持档集若不含当前档,自动降到最近支持档并回写
       const target = findVirtualModel(virtualModels, {
         providerId: targetProviderId,
@@ -1067,6 +1179,8 @@ export function ModelPicker({
     },
     [
       onSelect,
+      recordRecent,
+      recordRecentModel,
       providers,
       virtualModels,
       modelCapabilityOverrides,
@@ -1356,6 +1470,24 @@ export function ModelPicker({
                       </Badge>
                     </button>
                   )}
+                  {view.showRecentNav && (
+                    <button
+                      type="button"
+                      data-model-picker-nav="recent"
+                      onMouseEnter={() => setActiveNav({ kind: 'recent' })}
+                      onClick={() => setActiveNav({ kind: 'recent' })}
+                      className={cn(
+                        'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
+                        view.activeNav.kind === 'recent' && 'bg-accent'
+                      )}
+                    >
+                      <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">{t('Recently used')}</span>
+                      <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
+                        {recentHits.length}
+                      </Badge>
+                    </button>
+                  )}
                   {groups.map((group) => {
                     const vendorLabel =
                       group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
@@ -1436,6 +1568,43 @@ export function ModelPicker({
                               selected={provider.id === providerId && model.id === modelId}
                               pin={{ key, pinned: true, onToggle: handleTogglePin }}
                             />
+                          </MenuItem>
+                        );
+                      })}
+                    </div>
+                  ) : view.activeNav.kind === 'recent' ? (
+                    <div data-model-picker="recent-list" className="min-h-0 flex-1 overflow-y-auto">
+                      {recentHits.map((hit) => {
+                        const key = pinnedModelKey(hit.ref.providerId, hit.ref.modelId);
+                        const remove = (
+                          <RecentRemoveButton
+                            refKey={key}
+                            onRemove={() => removeRecentModel(hit.ref)}
+                          />
+                        );
+                        if (hit.kind === 'virtual') {
+                          return renderVirtualItem(hit.entry, `recent/${key}`, remove);
+                        }
+                        const { provider, model, entryTag, showId } = hit;
+                        return (
+                          <MenuItem
+                            key={`recent/${key}`}
+                            className="group min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
+                            onClick={() => handleSelectModel(provider.id, model.id)}
+                          >
+                            <ModelRowContent
+                              model={model}
+                              meta={metaByProvider[provider.id]?.[model.id]}
+                              entryTag={entryTag}
+                              showId={showId}
+                              selected={provider.id === providerId && model.id === modelId}
+                              pin={{
+                                key,
+                                pinned: pinnedKeys.has(key),
+                                onToggle: handleTogglePin,
+                              }}
+                            />
+                            {remove}
                           </MenuItem>
                         );
                       })}

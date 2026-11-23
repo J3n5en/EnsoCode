@@ -110,6 +110,7 @@ export const SETTINGS_DATA_COVERAGE = {
   contextMenuOpen: excluded('Device-local preference for right-clicking chat file links.'),
   compactReadOnlyTools: excluded('Renderer timeline density preference; not an Enso capability.'),
   pinnedModels: excluded('Renderer model picker starred list; not an Enso capability.'),
+  recentModels: excluded('Renderer model picker recently used list; not an Enso capability.'),
   expandLiveEdits: excluded('Renderer timeline expansion preference; not an Enso capability.'),
   expandLiveReasoning: excluded(
     'Renderer timeline reasoning expansion preference; not an Enso capability.'
@@ -304,6 +305,8 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Renderer timeline density preference; not an Enso capability.'
   ),
   togglePinnedModel: excluded('Renderer model picker starred list; not an Enso capability.'),
+  recordRecentModel: excluded('Renderer model picker recently used list; not an Enso capability.'),
+  removeRecentModel: excluded('Renderer model picker recently used list; not an Enso capability.'),
   setExpandLiveEdits: excluded('Renderer timeline expansion preference; not an Enso capability.'),
   setExpandLiveReasoning: excluded(
     'Renderer timeline reasoning expansion preference; not an Enso capability.'

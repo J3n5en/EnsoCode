@@ -1,8 +1,10 @@
 import type { ProviderGroup } from '@shared/providerGroups';
+import { pushRecentModel } from '@shared/recentModels';
 import type {
   ModelEntry,
   ModelMeta,
   ModelProvider,
+  ModelRef,
   OauthAccountUsage,
   ThinkingLevel,
 } from '@shared/types';
@@ -44,6 +46,10 @@ const harness = vi.hoisted(() => ({
   usageAccountKeys: [] as string[],
   usageData: {} as Record<string, OauthAccountUsage>,
   pinnedModels: [] as string[],
+  recentModels: [] as ModelRef[],
+  togglePinnedModel: vi.fn(),
+  recordRecentModel: vi.fn(),
+  removeRecentModel: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({
@@ -62,8 +68,21 @@ vi.mock('@/stores/modelMeta', () => ({
 
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: <T>(
-    selector: (state: { pinnedModels: string[]; togglePinnedModel: () => void }) => T
-  ) => selector({ pinnedModels: harness.pinnedModels, togglePinnedModel: () => {} }),
+    selector: (state: {
+      pinnedModels: string[];
+      togglePinnedModel: (key: string) => void;
+      recentModels: ModelRef[];
+      recordRecentModel: (ref: ModelRef) => void;
+      removeRecentModel: (ref: ModelRef) => void;
+    }) => T
+  ) =>
+    selector({
+      pinnedModels: harness.pinnedModels,
+      togglePinnedModel: harness.togglePinnedModel,
+      recentModels: harness.recentModels,
+      recordRecentModel: harness.recordRecentModel,
+      removeRecentModel: harness.removeRecentModel,
+    }),
 }));
 
 vi.mock('@/hooks/useAccountUsage', () => ({
@@ -103,7 +122,7 @@ vi.mock('@/components/ui/menu', () => {
   };
   const MenuItem = ({ children, onClick }: ClickWrapperProps) => {
     if (onClick) harness.menuItemClicks.push(onClick);
-    return createElement('div', null, children);
+    return createElement('div', { onClick }, children);
   };
   const MenuTrigger = ({
     children,
@@ -183,6 +202,10 @@ beforeEach(() => {
   harness.meta = {};
   harness.usageAccountKeys = [];
   harness.usageData = {};
+  harness.recentModels = [];
+  harness.togglePinnedModel.mockClear();
+  harness.recordRecentModel.mockClear();
+  harness.removeRecentModel.mockClear();
   commonProps.onSelect.mockClear();
   commonProps.onReasoningChange.mockClear();
   commonProps.onThinkingChange.mockClear();
@@ -1491,5 +1514,268 @@ describe('ModelPicker 窄屏 compact 触发器', () => {
     expect(label(html)).toBe('deepseek-v4.1-flash');
     expect(doc(html).querySelector('[data-trigger-thinking]')).toBeNull();
     expect(doc(html).body.firstElementChild?.className).toContain('min-w-[2.75rem]');
+  });
+});
+
+describe('最近使用分组', () => {
+  const recentProviders: ModelProvider[] = [
+    {
+      ...providers[0],
+      id: 'gateway',
+      name: 'Gateway',
+      models: [
+        { id: 'gw', label: 'Gateway model' },
+        { id: 'off', label: 'Disabled model', enabled: false },
+      ],
+    },
+    {
+      ...providers[0],
+      id: 'relay',
+      name: 'Relay',
+      baseUrl: 'https://relay.example.test/v1',
+      models: [{ id: 'rl', label: 'Relay model' }],
+    },
+  ];
+  const auto: VirtualModelEntry = {
+    id: 'auto',
+    name: 'Auto route',
+    enabled: true,
+    primary: { providerId: 'gateway', modelId: 'gw' },
+    fallbacks: [],
+  };
+  const ref = (providerId: string, modelId: string): ModelRef => ({ providerId, modelId });
+  const openDetails = { cancel() {}, allowPropagation() {} };
+  let doc: Document;
+  let root: Root;
+
+  async function mount(props: Partial<Parameters<typeof ModelPicker>[0]> = {}) {
+    await act(async () => {
+      root.render(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: recentProviders,
+          providerId: 'gateway',
+          modelId: 'gw',
+          virtualModels: [auto],
+          ...props,
+        })
+      );
+    });
+  }
+
+  const q = (selector: string) => doc.querySelector(selector) as HTMLElement | null;
+  const active = (selector: string) =>
+    (q(selector)?.className.split(/\s+/) ?? []).includes('bg-accent');
+  const recentRemoveKeys = () =>
+    Array.from(doc.querySelectorAll('[data-model-recent-remove]')).map((el) =>
+      el.getAttribute('data-model-recent-remove')
+    );
+
+  beforeEach(() => {
+    const dom = parseHTML('<html><body><div id="root"></div></body></html>');
+    Object.assign(dom.window, {
+      electronAPI: { providers: { listOauth: () => Promise.resolve([]) } },
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    doc = dom.document as unknown as Document;
+    root = createRoot(dom.document.getElementById('root') as unknown as HTMLElement);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    harness.pinnedModels = [];
+    vi.unstubAllGlobals();
+  });
+
+  it('会话选择器选中模型时记录到最近使用；未开启记录的选择器不记录', () => {
+    renderToStaticMarkup(createElement(ModelPicker, { ...commonProps, recordRecent: true }));
+    harness.menuItemClicks[0]();
+    expect(harness.recordRecentModel).toHaveBeenCalledWith({ providerId: 'api', modelId: 'model' });
+
+    harness.recordRecentModel.mockClear();
+    harness.menuItemClicks = [];
+    renderToStaticMarkup(createElement(ModelPicker, commonProps));
+    harness.menuItemClicks[0]();
+    expect(commonProps.onSelect).toHaveBeenCalledTimes(2);
+    expect(harness.recordRecentModel).not.toHaveBeenCalled();
+  });
+
+  it('最近使用为空或全部失效时整组不显示', () => {
+    const render = () =>
+      renderToStaticMarkup(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: recentProviders,
+          providerId: 'gateway',
+          modelId: 'gw',
+        })
+      );
+    harness.recentModels = [];
+    expect(render()).not.toContain('data-model-picker-nav="recent"');
+    expect(render()).not.toContain('Recently used');
+    harness.recentModels = [ref('deleted', 'gw'), ref('gateway', 'off'), ref('gateway', 'gone')];
+    expect(render()).not.toContain('data-model-picker-nav="recent"');
+    harness.recentModels = [ref('relay', 'rl')];
+    expect(render()).toContain('data-model-picker-nav="recent"');
+  });
+
+  it('分组排在「星标与虚拟」之后；点击切到右侧最近列表，失效条目被跳过', async () => {
+    harness.recentModels = [
+      ref('relay', 'rl'),
+      ref('deleted', 'gw'),
+      ref('gateway', 'off'),
+      ref(VIRTUAL_PROVIDER_ID, 'auto'),
+      ref(VIRTUAL_PROVIDER_ID, 'gone'),
+      ref('gateway', 'gw'),
+    ];
+    await mount();
+    await act(async () => harness.menuOnOpenChange?.(true, openDetails));
+    const nav = q('[data-model-picker="nav-list"]') as HTMLElement;
+    const order = Array.from(nav.children).map((el) => el.getAttribute('data-model-picker-nav'));
+    expect(order.slice(0, 2)).toEqual(['favorites', 'recent']);
+    const recentNav = q('[data-model-picker-nav="recent"]') as HTMLElement;
+    expect(recentNav.textContent).toContain('Recently used');
+    expect(recentNav.textContent).toContain('3');
+    expect(active('[data-model-picker-nav="recent"]')).toBe(false);
+    expect(active('[data-model-picker-vendor="__custom:gateway"]')).toBe(true);
+    expect(q('[data-model-picker="recent-list"]')).toBeNull();
+
+    await act(async () => recentNav.click());
+    expect(active('[data-model-picker-nav="recent"]')).toBe(true);
+    expect(active('[data-model-picker-vendor="__custom:gateway"]')).toBe(false);
+    const list = q('[data-model-picker="recent-list"]') as HTMLElement;
+    expect(list.textContent).toContain('Relay model');
+    expect(list.textContent).toContain('Auto route');
+    expect(list.textContent).toContain('Gateway model');
+    expect(list.textContent).not.toContain('Disabled model');
+    expect(recentRemoveKeys()).toEqual([
+      pinnedModelKey('relay', 'rl'),
+      pinnedModelKey(VIRTUAL_PROVIDER_ID, 'auto'),
+      pinnedModelKey('gateway', 'gw'),
+    ]);
+
+    const relayRow = q(
+      `[data-model-recent-remove="${pinnedModelKey('relay', 'rl')}"]`
+    )?.parentElement;
+    await act(async () => relayRow?.click());
+    expect(commonProps.onSelect).toHaveBeenCalledWith('relay', 'rl');
+  });
+
+  it('用过 12 个不同模型：分组只列最近的 10 个，按最近使用排序，原有分组仍在', async () => {
+    const many: ModelProvider = {
+      ...providers[0],
+      id: 'many',
+      name: 'Many',
+      baseUrl: 'https://many.example.test/v1',
+      models: Array.from({ length: 12 }, (_, i) => ({ id: `m${i + 1}`, label: `Model ${i + 1}` })),
+    };
+    let recent: ModelRef[] = [];
+    for (const model of many.models) recent = pushRecentModel(recent, ref('many', model.id));
+    harness.recentModels = recent;
+    await mount({ providers: [...recentProviders, many] });
+    await act(async () => harness.menuOnOpenChange?.(true, openDetails));
+    const nav = q('[data-model-picker="nav-list"]') as HTMLElement;
+    const order = Array.from(nav.children).map(
+      (el) =>
+        el.getAttribute('data-model-picker-nav') ?? el.getAttribute('data-model-picker-vendor')
+    );
+    expect(order[0]).toBe('favorites');
+    expect(order[1]).toBe('recent');
+    expect(order.length).toBeGreaterThan(2);
+    expect(q('[data-model-picker-nav="recent"]')?.textContent).toContain('10');
+
+    await act(async () => q('[data-model-picker-nav="recent"]')?.click());
+    expect(recentRemoveKeys()).toEqual(
+      ['m12', 'm11', 'm10', 'm9', 'm8', 'm7', 'm6', 'm5', 'm4', 'm3'].map((id) =>
+        pinnedModelKey('many', id)
+      )
+    );
+  });
+
+  it('移除按钮只移除该条，不触发切换模型、不关闭弹层、不影响星标', async () => {
+    harness.pinnedModels = [pinnedModelKey('relay', 'rl')];
+    harness.recentModels = [ref('relay', 'rl'), ref('gateway', 'gw')];
+    harness.removeRecentModel.mockImplementation((target: ModelRef) => {
+      harness.recentModels = harness.recentModels.filter(
+        (entry) => entry.providerId !== target.providerId || entry.modelId !== target.modelId
+      );
+    });
+    await mount();
+    await act(async () => harness.menuOnOpenChange?.(true, openDetails));
+    await act(async () => q('[data-model-picker-nav="recent"]')?.click());
+
+    const remove = q(
+      `[data-model-recent-remove="${pinnedModelKey('relay', 'rl')}"]`
+    ) as HTMLElement;
+    expect(remove.tagName).toBe('SPAN');
+    expect(remove.getAttribute('role')).toBe('button');
+    expect(remove.className).toContain('opacity-0');
+    expect(remove.className).toContain('group-hover:opacity-100');
+    expect(remove.closest('button')).toBeNull();
+
+    await act(async () => remove.click());
+    expect(harness.removeRecentModel).toHaveBeenCalledWith(ref('relay', 'rl'));
+    expect(commonProps.onSelect).not.toHaveBeenCalled();
+    expect(harness.togglePinnedModel).not.toHaveBeenCalled();
+    expect(harness.menuOpen).toBe(true);
+
+    await mount();
+    expect(active('[data-model-picker-nav="recent"]')).toBe(true);
+    expect(recentRemoveKeys()).toEqual([pinnedModelKey('gateway', 'gw')]);
+    expect(q('[data-model-picker-nav="favorites"]')).not.toBeNull();
+    expect(harness.pinnedModels).toEqual([pinnedModelKey('relay', 'rl')]);
+    harness.removeRecentModel.mockReset();
+  });
+
+  it('移除最后一条后整组消失，右栏退回当前选中厂商', async () => {
+    harness.recentModels = [ref('relay', 'rl')];
+    await mount();
+    await act(async () => harness.menuOnOpenChange?.(true, openDetails));
+    await act(async () => q('[data-model-picker-nav="recent"]')?.click());
+    harness.recentModels = [];
+    await mount();
+    expect(q('[data-model-picker-nav="recent"]')).toBeNull();
+    expect(q('[data-model-picker="recent-list"]')).toBeNull();
+    expect(active('[data-model-picker-vendor="__custom:gateway"]')).toBe(true);
+  });
+});
+
+describe('resolveActiveWorkbenchView 最近使用', () => {
+  const group: ProviderGroup = {
+    vendorId: 'custom',
+    label: 'Custom',
+    providers: [pickerProvider('gateway', 'Gateway')],
+  };
+  const base = {
+    groups: [group],
+    selectableVirtualModels: [],
+    pinnedCount: 0,
+    selectedProviderId: 'gateway',
+  };
+
+  it('显式选中且有条目时停在最近使用，空时退回厂商', () => {
+    const recent = resolveActiveWorkbenchView({
+      ...base,
+      recentCount: 2,
+      activeNav: { kind: 'recent' },
+    });
+    expect(recent.activeNav).toEqual({ kind: 'recent' });
+    expect(recent.showRecentNav).toBe(true);
+    expect(recent.activeGroup).toBeUndefined();
+
+    const stale = resolveActiveWorkbenchView({
+      ...base,
+      recentCount: 0,
+      activeNav: { kind: 'recent' },
+    });
+    expect(stale.showRecentNav).toBe(false);
+    expect(stale.activeNav).toEqual({ kind: 'vendor', vendorId: 'custom' });
+  });
+
+  it('未显式选择时不抢默认落点', () => {
+    const view = resolveActiveWorkbenchView({ ...base, recentCount: 3, activeNav: null });
+    expect(view.activeNav).toEqual({ kind: 'vendor', vendorId: 'custom' });
   });
 });

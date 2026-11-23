@@ -2359,6 +2359,8 @@ export const zhTranslations: Record<string, string> = {
   'Search models': '搜索模型',
   'Virtual models': '虚拟模型',
   'Starred & virtual': '星标与虚拟',
+  'Recently used': '最近使用',
+  'Remove from recently used': '从最近使用中移除',
   'Enable virtual model': '启用虚拟模型',
   'Primary model': '主模型',
   'Default for each new turn': '每轮默认使用',
