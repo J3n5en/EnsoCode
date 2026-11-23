@@ -1330,6 +1330,56 @@ describe('常驻进程里的会话操作', () => {
     expect(inject).toHaveBeenCalledTimes(1);
     expect(abort).toHaveBeenCalledWith('a.b', 's1');
   });
+
+  it('调用结束后带回来的 id 按无调用处理；别的插件的 id、已取消的调用照样拒绝', async () => {
+    const inject = vi.fn(() => ({ ok: true as const }));
+    deps.inject = inject;
+    deps.writeArtifact = vi.fn();
+    deps.manifest = (id) => (id === 'a.b' ? manifest({ permissions: ['agent.inject'] }) : null);
+    gate = new PluginHostGate(deps);
+    const ended = agentCall();
+    gate.invocations.finish(ended);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 's1' }, ended)
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(gate.handle('a.b', 'session.inject', { text: 'hi' }, ended)).rejects.toMatchObject(
+      { code: 'NO_SESSION' }
+    );
+    await expect(
+      gate.handle('a.b', 'artifact.write', { name: 'a.txt', text: 'x' }, ended)
+    ).rejects.toMatchObject({ code: 'NO_INVOCATION' });
+    expect(inject).not.toHaveBeenCalled();
+
+    const foreign = gate.invocations.create({
+      pluginId: 'c.d',
+      sessionId: 's1',
+      projectRoot: root,
+      gesture: false,
+    });
+    const cancelled = agentCall();
+    gate.invocations.cancel(cancelled);
+    const retained = uiCall();
+    gate.invocations.finish(retained);
+    deps.crossSessionInject = () => true;
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 's1' }, foreign)
+    ).rejects.toMatchObject({ code: 'NO_INVOCATION' });
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 's1' }, cancelled)
+    ).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(inject).not.toHaveBeenCalled();
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 's1' }, ended)
+    ).resolves.toBeNull();
+    // 手势调用结束后保留到令牌过期，仍算发起会话里的调用
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, retained)
+    ).resolves.toBeNull();
+    expect(inject.mock.calls.map((call) => (call as unknown[])[1])).toEqual([
+      expect.objectContaining({ sessionId: 's1' }),
+      expect.objectContaining({ sessionId: 's1' }),
+    ]);
+  });
 });
 
 describe('秘书联系方式', () => {

@@ -365,7 +365,7 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 `session.inject({ text, images?, sessionId?, deliverAs?, triggerTurn? })` 把一条消息加进会话。需要 `agent.inject`。消息在会话里单独成行，标明「来自插件 <名称>」和插件 id，样式与用户消息、模型回复都不同。模型侧按用户角色收到原文，不带来源标记；需要模型知道来源时请在文本里自己写明。
 
 - `sessionId` 缺省取当前调用所属的会话，都没有则返回 `NO_SESSION`。会话必须正在运行，否则返回 `INJECT_FAILED`。
-- 常驻进程在宿主调用之外（如自己的轮询循环）也能用 `session.inject` / `session.abort`，但必须指明 `sessionId`，并且同样要用户打开下面的跨会话开关。
+- 常驻进程在宿主调用之外（如自己的轮询循环）也能用 `session.inject` / `session.abort`，但必须指明 `sessionId`，并且同样要用户打开下面的跨会话开关。调用里排下的定时器、回调在这次调用结束后才触发时也按调用之外处理；只能在调用内用的接口这时照样返回 `NO_INVOCATION`。
 - 发到发起调用以外的会话（包括定时任务、常驻进程里没有当前会话时指定的 `sessionId`）要用户在设置页该插件下打开「允许向任意运行中的会话发送消息」（命令行 `enso-server plugin inject-anywhere <id>`），否则返回 `PERMISSION_DENIED`。新装的插件默认关闭。关闭开关只影响之后的发送，已经投递、排队等下一轮的消息不会撤回。
 - 每个插件 10 秒内最多 5 条，超过返回 `RATE_LIMITED`。只有参数不合法和目标未授权被拒的不计入；目标会话没在运行（`INJECT_FAILED`）也计入。
 - `deliverAs`：`nextTurn`（缺省，并入下一轮）、`steer`（插入正在进行的回复）、`followUp`（当前回复结束后排队）。

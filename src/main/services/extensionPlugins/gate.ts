@@ -501,7 +501,7 @@ export class PluginHostGate {
 
   /**
    * 缺省发起会话；指向别的会话要用户授权跨会话。
-   * 常驻进程不在调用里（inv 为 null），只能凭跨会话授权指明会话。
+   * 常驻进程不在调用里或调用已结束（inv 为 null），只能凭跨会话授权指明会话。
    */
   private targetSession(
     pluginId: string,
@@ -541,7 +541,8 @@ export class PluginHostGate {
       if (inv.cancelled) throw pluginError('ABORTED', '调用已取消');
       return inv;
     };
-    const optionalInvocation = () => (invocationId === undefined ? null : invocation());
+    /** 调用已结束（id 不在表里）按无调用处理：插件本就能不带 id 来调，回退不多给任何权限 */
+    const optionalInvocation = () => (this.invocations.get(invocationId) ? invocation() : null);
     const gestured = (what: string) => {
       const inv = invocation();
       if (!inv.gesture || this.deps.now() - inv.createdAt > GESTURE_TTL_MS)
