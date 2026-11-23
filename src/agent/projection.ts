@@ -16,6 +16,7 @@ import {
   parseShellFailure,
   type TodoItem,
 } from '@shared/types/agent';
+import { isDcgWarning } from '@shared/types/dcg';
 import {
   PROJECTED_APPLY_PATCH_PATH_COUNT_LIMIT,
   PROJECTED_APPLY_PATCH_PATH_TEXT_LIMIT,
@@ -235,6 +236,7 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   ) {
     const shellFailure = parseShellFailure(value.details.shellFailure);
     if (shellFailure) projected.shellFailure = shellFailure;
+    if (isDcgWarning(value.details.dcgWarning)) projected.dcgWarning = value.details.dcgWarning;
   }
   if (
     value.role === 'toolResult' &&

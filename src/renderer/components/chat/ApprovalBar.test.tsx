@@ -67,6 +67,30 @@ describe('ApprovalBar dcg 规则解释', () => {
     expect(html).not.toContain('Why it is dangerous');
   });
 
+  it('带出风险等级、命中片段与可折叠的 dcg 说明；warn 档用提醒而非拦截文案', () => {
+    const deny = render([
+      {
+        ...guarded('core.git:reset-hard'),
+        guard: {
+          ruleId: 'core.git:reset-hard',
+          reason: 'r',
+          decision: 'ask',
+          severity: 'critical',
+          matched: 'git reset --hard',
+          explanation: 'discards ALL uncommitted changes',
+        },
+      },
+    ]);
+    expect(deny).toContain('Critical');
+    expect(deny).toContain('git reset --hard</code>');
+    expect(deny).toContain('discards ALL uncommitted changes');
+    expect(deny).toContain('text-destructive');
+    const { protected: _protected, ...plain } = guarded('core.git:stash-drop');
+    const warn = render([{ ...plain, guard: { ...plain.guard, decision: 'warn' } }]);
+    expect(warn).toContain('dcg notice: ');
+    expect(warn).not.toContain('dcg: ');
+  });
+
   it('内置守卫规则直接显示原因，dcg 规则保留 dcg 前缀', () => {
     const reason = 'Deletes in the shared system Temp folder root.';
     const enso = render([
@@ -212,5 +236,30 @@ describe('ApprovalBar 队首切换', () => {
     expect(confirmBtn).toBeDefined();
     await act(async () => confirmBtn?.click());
     expect(ruleExempt).toHaveBeenCalledWith('core.git:reset-hard');
+  });
+
+  it('decision=ask 时不查询/展示记忆豁免，点 Allow 也不累计放行次数', async () => {
+    const ruleState = vi
+      .fn()
+      .mockResolvedValue({ allowCount: 5, exempt: false, suggestExempt: true });
+    const ruleAllowed = vi.fn().mockResolvedValue(null);
+    Object.assign(window, {
+      electronAPI: {
+        dcg: { ruleState, ruleExempt: vi.fn(), ruleAllowed },
+      },
+    });
+    await mount([
+      {
+        ...request,
+        summary: 'git reset --hard',
+        protected: 'destructive',
+        guard: { ruleId: 'core.git:reset-hard', reason: 'r', decision: 'ask' },
+      },
+    ]);
+    expect(ruleState).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Always allow this rule');
+    await act(async () => vi.advanceTimersByTime(1000));
+    await allow();
+    expect(ruleAllowed).not.toHaveBeenCalled();
   });
 });
