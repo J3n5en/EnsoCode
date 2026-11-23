@@ -112,7 +112,7 @@ function renderQuoteBody(chip: HTMLElement, labels: QuoteLabels): void {
     body.textContent = expanded ? text : clipped ? `${preview}\n…` : preview;
     body.className = cn(
       'mt-0.5 block whitespace-pre-wrap break-words text-foreground/80',
-      expanded ? 'max-h-32 overflow-y-auto' : 'max-h-16 overflow-hidden'
+      expanded ? 'max-h-32 overflow-y-auto overscroll-contain' : 'max-h-16 overflow-hidden'
     );
   }
   chip.querySelector('[data-quote-toggle]')?.remove();

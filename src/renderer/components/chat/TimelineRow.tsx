@@ -983,7 +983,7 @@ function QuoteBlock({ text, originalLines }: { text: string; originalLines?: num
   return (
     <span
       data-enso="quote-block"
-      className="my-1 block max-h-60 overflow-y-auto border-l-2 border-brand/40 pl-2.5 text-muted-foreground"
+      className="my-1 block max-h-60 overflow-y-auto overscroll-contain border-l-2 border-brand/40 pl-2.5 text-muted-foreground"
     >
       {originalLines ? (
         <span data-quote-truncated="" className="mb-0.5 block text-[11px] text-warning">

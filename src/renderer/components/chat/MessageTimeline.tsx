@@ -1,3 +1,4 @@
+import { withoutQuoteBlocks } from '@shared/quoteBlock';
 import { ArrowDown, LoaderCircle } from 'lucide-react';
 import type { CSSProperties, ReactNode, Ref } from 'react';
 import {
@@ -320,7 +321,7 @@ export function MessageTimeline({
           break;
         }
       }
-      result.push({ key: item.key, question: item.text || '[image]', answer });
+      result.push({ key: item.key, question: withoutQuoteBlocks(item.text) || '[image]', answer });
     }
     return result;
   }, [items]);

@@ -26,6 +26,18 @@ function doc(
 const baseOptions = { currentProjectId: 'proj-a', scope: 'project' as const };
 
 describe('searchWorkspace 排序', () => {
+  it('正文命中的摘要不露引用块标签', () => {
+    const docs = [
+      doc({
+        conversationId: 'c1',
+        fields: [{ field: 'body', text: '<quote>\n引用里的 term\n</quote>\n追问' }],
+      }),
+    ];
+    const [hit] = searchWorkspace(docs, 'term', baseOptions);
+    expect(hit?.snippet).not.toMatch(/<\/?quote/);
+    expect(hit?.snippet).toContain('引用里的 term');
+  });
+
   it('标题精确匹配排在标题包含匹配之前', () => {
     const docs = [
       doc({ conversationId: 'c1', title: 'hello world contains term' }),
