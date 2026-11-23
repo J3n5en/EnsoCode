@@ -296,6 +296,12 @@ export class DeskTunnel {
 
   private hello(slot: Slot): void {
     slot.helloAt = Date.now();
+    // 外部路径（resync / watch / online）已发补发请求时，推迟正在计时的缺口重发，避免 1 秒内叠发两遍
+    if (slot.gapTimer) {
+      clearTimeout(slot.gapTimer);
+      slot.gapTimer = null;
+      this.watchGap(slot, slot.helloAt, false);
+    }
     this.post({
       type: 'rpc-hello',
       cid: slot.cid,
@@ -338,18 +344,20 @@ export class DeskTunnel {
   }
 
   /** 缺口持续且这段时间没收到大帧才判丢帧、重新 hello；大帧还在传时继续等，但有上限 */
-  private watchGap(slot: Slot, since: number): void {
-    const delay = gapResyncDelay(Date.now(), since, this.lastBulk, this.linkAt);
+  private watchGap(slot: Slot, since: number, fast = true): void {
+    const linkAt = fast ? this.linkAt : Number.NEGATIVE_INFINITY;
+    const delay = gapResyncDelay(Date.now(), since, this.lastBulk, linkAt);
     slot.gapTimer = setTimeout(() => {
       slot.gapTimer = null;
       if (!slot.stream.gap || !this.slots.has(slot.cid)) return;
-      if (gapResyncDelay(Date.now(), since, this.lastBulk, this.linkAt) > 0) {
-        this.watchGap(slot, since);
+      if (gapResyncDelay(Date.now(), since, this.lastBulk, linkAt) > 0) {
+        this.watchGap(slot, since, fast);
         return;
       }
       this.note(`rehello-gap ${slot.cid.slice(0, 4)} applied=${slot.stream.applied}`);
       if (this.online) this.hello(slot);
-      this.watchGap(slot, Date.now());
+      // 链路切换后的 1.5s 快速补发只触发一次，之后退回常规窗口，免得反复灌入重放帧
+      this.watchGap(slot, Date.now(), false);
     }, delay);
   }
 
