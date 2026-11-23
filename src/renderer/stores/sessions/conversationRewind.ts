@@ -173,19 +173,46 @@ export function userIndexFromEndForTimelineKey(
     .length;
 }
 
-/** 轮末行 key（绝对下标）回溯到本轮 user，再从末尾计数 */
-export function userIndexFromEndForTurnKey(
-  conversation: { messages: readonly { role: string }[]; historyBaseIndex?: number },
+type TurnInputCandidate = {
+  role: string;
+  entryId?: string;
+  optimistic?: boolean;
+  pluginSource?: unknown;
+};
+
+/**
+ * 轮次输入：已落盘的用户消息（含宿主合成注入）或插件投递，与 worker 的 isTurnInputEntry 同口径。
+ * 压缩摘要、隐藏 custom、toolResult、本地乐观回显都不开新一轮。
+ */
+export function isTurnInput(message: TurnInputCandidate): boolean {
+  if (message.optimistic) return false;
+  return message.role === 'user' || (message.role === 'custom' && Boolean(message.pluginSource));
+}
+
+/**
+ * 轮末行 key（绝对下标）→ 分叉锚点：优先本轮 user 的 entryId，压缩前的早期轮次与 worker 计数口径无关。
+ * 本轮由插件投递触发、user 无 entryId 或在未加载的更早页时，按其后的轮次输入数从末尾定位，由 worker 校验。
+ */
+export function forkAnchorForTurnKey(
+  conversation: {
+    messages: readonly TurnInputCandidate[];
+    historyBaseIndex?: number;
+  },
   absIndex: number
-): number | null {
+): { entryId: string } | { turnIndexFromEnd: number } | null {
   if (!Number.isInteger(absIndex)) return null;
   const base = conversation.historyBaseIndex ?? 0;
-  for (let i = absIndex; i >= base; i--) {
-    if (conversation.messages[i - base]?.role === 'user') {
-      return userIndexFromEndForTimelineKey(conversation, i);
-    }
+  const local = absIndex - base;
+  if (local < 0 || local >= conversation.messages.length) return null;
+  const turnIndexFromEnd = conversation.messages.slice(local + 1).filter(isTurnInput).length;
+  for (let i = local; i >= 0; i--) {
+    const message = conversation.messages[i];
+    if (!isTurnInput(message)) continue;
+    return message.role === 'user' && message.entryId
+      ? { entryId: message.entryId }
+      : { turnIndexFromEnd };
   }
-  return null;
+  return base > 0 ? { turnIndexFromEnd } : null;
 }
 
 /** 回退到倒数第 N+1 条 user：保留它之前的消息（不含该 user）。对不上返回 null。 */

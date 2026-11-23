@@ -474,7 +474,7 @@ export function GroupChatScreen(props: Props) {
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
           if (el.scrollTop < 60) loadOlder();
         }}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3"
+        className="min-h-24 flex-1 space-y-3 overflow-y-auto px-3 py-3"
       >
         {timeline === undefined ? (
           <p className="flex items-center justify-center gap-1.5 py-8 text-muted-foreground text-sm">
@@ -543,39 +543,44 @@ export function GroupChatScreen(props: Props) {
         )}
       </div>
 
-      <div className="phone-dock shrink-0 space-y-2 px-3 pt-1 pb-safe">
-        {props.outbox}
-        {props.notice && (
-          <p className="rounded-md bg-destructive/10 px-2 py-1 text-destructive text-xs">
-            {props.notice}
-          </p>
-        )}
-        {props.deviceReadOnly && (
-          <p className="rounded-md bg-muted px-2 py-1 text-center text-muted-foreground text-xs">
-            {readOnlyBanner(props.readOnlyRejected)}
-          </p>
-        )}
-        {!props.deviceReadOnly &&
-          props.pending.map(({ sessionId, botId, view }) =>
-            view.approvals.length > 0 || view.asks.length > 0 ? (
-              <div key={sessionId} className="space-y-1">
-                <p className="text-muted-foreground text-xs">{bots.get(botId)?.name ?? '成员'}</p>
-                <ApprovalBar
-                  approvals={view.approvals}
-                  clockOffset={props.clockOffset}
-                  onRespond={(requestId, decision) =>
-                    props.onApproval(sessionId, requestId, decision)
-                  }
-                />
-                <AskBar
-                  asks={view.asks}
-                  clockOffset={props.clockOffset}
-                  onAnswer={(requestId, answer) => props.onAsk(sessionId, requestId, answer)}
-                  autoFocus={false}
-                />
-              </div>
-            ) : null
+      <div className="phone-dock flex min-h-0 flex-col gap-2 px-3 pt-1 pb-safe">
+        <div
+          data-enso="composer-stack"
+          className="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden"
+        >
+          {props.outbox}
+          {props.notice && (
+            <p className="rounded-md bg-destructive/10 px-2 py-1 text-destructive text-xs">
+              {props.notice}
+            </p>
           )}
+          {props.deviceReadOnly && (
+            <p className="rounded-md bg-muted px-2 py-1 text-center text-muted-foreground text-xs">
+              {readOnlyBanner(props.readOnlyRejected)}
+            </p>
+          )}
+          {!props.deviceReadOnly &&
+            props.pending.map(({ sessionId, botId, view }) =>
+              view.approvals.length > 0 || view.asks.length > 0 ? (
+                <div key={sessionId} className="space-y-1">
+                  <p className="text-muted-foreground text-xs">{bots.get(botId)?.name ?? '成员'}</p>
+                  <ApprovalBar
+                    approvals={view.approvals}
+                    clockOffset={props.clockOffset}
+                    onRespond={(requestId, decision) =>
+                      props.onApproval(sessionId, requestId, decision)
+                    }
+                  />
+                  <AskBar
+                    asks={view.asks}
+                    clockOffset={props.clockOffset}
+                    onAnswer={(requestId, answer) => props.onAsk(sessionId, requestId, answer)}
+                    autoFocus={false}
+                  />
+                </div>
+              ) : null
+            )}
+        </div>
         <div className={cn('relative', props.deviceReadOnly && 'hidden')}>
           {options.length > 0 && (
             <div className="absolute right-0 bottom-full left-0 mb-1 max-h-48 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">

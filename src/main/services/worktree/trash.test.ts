@@ -8,10 +8,11 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isTrashPath, type TrashFs, type TrashGit, WorktreeTrash } from './trash';
+import { isTrashPath, realTrashFs, type TrashFs, type TrashGit, WorktreeTrash } from './trash';
 
 const ROOT = '/wt';
 
@@ -260,7 +261,10 @@ describe('WorktreeTrash 真实 git', () => {
     const target = path.join(root, 'a');
     git(repo, 'worktree', 'add', '-q', '-b', 'fix/a', target);
     writeFileSync(path.join(target, 'big.bin'), 'x'.repeat(1024));
-    const trash = new WorktreeTrash();
+    // 生产删除走 macOS background QoS，负载高时排队数秒，等它会让用例时长取决于系统负载
+    const trash = new WorktreeTrash({
+      fs: { ...realTrashFs, remove: (p) => rm(p, { recursive: true, force: true }) },
+    });
     const result = await trash.retire({ repoPath: repo, target, root });
     expect(result.status).toBe('trashed');
     expect(existsSync(target)).toBe(false);

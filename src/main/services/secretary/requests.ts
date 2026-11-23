@@ -90,6 +90,12 @@ export function parseDismissRequest(value: unknown): DismissRequest | null {
   return conversationId ? { conversationId } : null;
 }
 
+export function parseDismissPendingRequest(value: unknown): { pendingId: string } | null {
+  if (!isRecord(value)) return null;
+  const pendingId = nonEmpty(value.pendingId);
+  return pendingId ? { pendingId } : null;
+}
+
 export interface MarkResultRequest {
   conversationId: string;
   action: 'done' | 'undo' | 'dismiss';

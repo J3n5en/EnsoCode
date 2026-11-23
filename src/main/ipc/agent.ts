@@ -11,7 +11,7 @@ import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { appendInboundImageLines } from '@shared/secretary/inboundImages';
-import { wrapUntrusted } from '@shared/secretary/transcript';
+import { wrapPluginDelivery } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   cleanToolBatchLabel,
@@ -142,7 +142,9 @@ import {
 import type { BrowserActor } from '../services/browserTabClaims';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import {
+  CONVERSATION_UNAVAILABLE,
   type ColdRestartPlan,
+  coldRestartChildren,
   coldResumeReady,
   failColdResume,
   wakeColdRestartOwners,
@@ -763,7 +765,7 @@ export async function resumeRootFromRestartManifest(
 ): Promise<AgentActionResult> {
   const conversation = sourceAuthority?.conversation(entry.sessionId);
   if (!conversation || conversation.bot || conversation.lifecycle === 'ended')
-    return { ok: false, error: 'conversation unavailable' };
+    return { ok: false, error: CONVERSATION_UNAVAILABLE };
   if (exactIdentity(entry.sessionId)) return { ok: false, error: 'session already spawned' };
   const cwd = authoritativeSpawnCwd(entry.sessionId);
   const parsed =
@@ -794,7 +796,8 @@ export function wakeInterruptedRunOwners(current: ColdRestartPlan): Promise<void
   return wakeColdRestartOwners(
     agentService?.restartInterruptedOwners() ?? [],
     resumeRootFromRestartManifest,
-    current
+    current,
+    (ownerId) => agentService?.abandonOwner(ownerId)
   );
 }
 
@@ -1777,13 +1780,13 @@ export function registerAgentHandlers(): void {
         return undefined;
       return identity;
     },
-    // 插件消息进秘书会话一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导
-    (sessionId, pluginId, text) => {
+    // 插件消息一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导。
+    // 声明了 agent.injectTrusted 的插件可以给普通会话发不包的任务；秘书会话不认，照包
+    (sessionId, pluginId, text, trusted) => {
       const conversation = sourceAuthority?.conversation(sessionId);
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-      return isSecretaryProject(project)
-        ? wrapUntrusted(`plugin:${pluginId}`, redactSecrets(text))
-        : text;
+      if (isSecretaryProject(project)) return wrapPluginDelivery(pluginId, redactSecrets(text));
+      return trusted ? text : wrapPluginDelivery(pluginId, text);
     }
   );
   const sessionSource = () => ({
@@ -1874,6 +1877,7 @@ export function registerAgentHandlers(): void {
   dispatchService = new AgentDispatchService({
     sourceRegistry: sourceBindings,
     sessionIndex: agentSessionIndex,
+    restoreClaimed: (childSessionId) => agentService?.claimsRestartChild(childSessionId) ?? false,
     readStoredOauthCredentialKeys,
     emitRendererEvent: broadcastAgentEvent,
     emitDispatchEvent: (ownerWebContentsId, dispatchEvent) => {
@@ -1923,6 +1927,7 @@ export function registerAgentHandlers(): void {
 
   agentService = new AgentService({
     ledger: fileAgentRunLedger(path.join(app.getPath('userData'), 'agent', 'subagent-runs.json')),
+    restartCheckpoint: coldRestartChildren(),
     notify: (context, text, urgent) => {
       // 投给父会话当前 generation：换代前派出的 Run 结束后照样通知接续的会话
       const identity = rootIdentity(context.owner.ownerId);
@@ -1977,7 +1982,11 @@ export function registerAgentHandlers(): void {
       stop: async (input) => abortSession(input.identity),
       dismiss: async (input) => dismissChildSession(input.identity.parent, input.identity, false),
       resume: (input) =>
-        dispatchService!.resumeControlledAgent(input.context.owner.ownerId, input.identity),
+        dispatchService!.resumeControlledAgent(
+          input.context.owner.ownerId,
+          input.identity,
+          input.spawn
+        ),
       retry: async (input) =>
         retrySession(input.identity, true, {
           turnId: input.runId,
@@ -2044,6 +2053,9 @@ export function registerAgentHandlers(): void {
       );
       return;
     }
+    // 断点已落盘：记下停在安全点的子会话，worker 退出时它们的 Run 等父会话就绪后接着跑
+    if (workerEvent.type === 'graceful-restart-ready')
+      agentService?.noteRestartCheckpoint(workerEvent.checkpoint.sessions);
     if (
       workerEvent.type === 'session-reloaded' ||
       workerEvent.type === 'workspace-lock-result' ||
@@ -3208,8 +3220,8 @@ export function registerAgentHandlers(): void {
       const identity = exactIdentity(sessionId);
       const record = asRecord(anchor);
       const entryId = typeof record?.entryId === 'string' ? record.entryId : undefined;
-      const userIndexFromEnd =
-        typeof record?.userIndexFromEnd === 'number' ? record.userIndexFromEnd : undefined;
+      const turnIndexFromEnd =
+        typeof record?.turnIndexFromEnd === 'number' ? record.turnIndexFromEnd : undefined;
       if (
         !isMainRenderer(event.sender.id) ||
         !identity ||
@@ -3217,8 +3229,8 @@ export function registerAgentHandlers(): void {
         typeof targetConversationId !== 'string' ||
         !/^[0-9a-f-]{36}$/i.test(targetConversationId) ||
         (entryId
-          ? userIndexFromEnd !== undefined
-          : userIndexFromEnd === undefined || userIndexFromEnd < 0)
+          ? turnIndexFromEnd !== undefined
+          : turnIndexFromEnd === undefined || turnIndexFromEnd < 0)
       ) {
         return { ok: false, error: 'invalid fork or stale generation' };
       }
@@ -3246,7 +3258,7 @@ export function registerAgentHandlers(): void {
         const result = forkSession(
           identity,
           targetConversationId,
-          entryId ? { entryId } : { userIndexFromEnd: userIndexFromEnd as number }
+          entryId ? { entryId } : { turnIndexFromEnd: turnIndexFromEnd as number }
         );
         if (!result.ok) discardForkWorktree(targetConversationId);
         return result;

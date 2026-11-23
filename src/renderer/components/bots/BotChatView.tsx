@@ -347,25 +347,30 @@ export function BotChatView({ chat, group = chat }: { chat: BotChat; group?: Bot
           />
         )}
 
-        <div className="@container pt-1">
-          <div className={cn(CHAT_COL, 'pb-4')}>
-            {direct && (summary.running || summary.queued) && (
-              <BotLiveStatus
-                conversationId={chat.sessions[direct.id]?.conversationId}
-                className="mb-2 rounded-lg border bg-muted/30 px-3 py-2"
-              />
-            )}
-            <PendingBars items={pending} bots={byId} showNames={chat.kind === 'group'} />
-            {chat.kind === 'group' && (
-              <MemberBusyBar
-                chatId={chat.id}
-                memberIds={chat.members}
-                bots={byId}
-                onOpenLive={(id, botId) =>
-                  setLive({ id, botId, title: byId.get(botId)?.name ?? t('Deleted member') })
-                }
-              />
-            )}
+        <div className="@container flex min-h-0 flex-col pt-1">
+          <div className={cn(CHAT_COL, 'flex min-h-0 flex-col pb-4')}>
+            <div
+              data-enso="composer-stack"
+              className="flex min-h-0 flex-col overflow-y-auto overscroll-contain"
+            >
+              {direct && (summary.running || summary.queued) && (
+                <BotLiveStatus
+                  conversationId={chat.sessions[direct.id]?.conversationId}
+                  className="mb-2 rounded-lg border bg-muted/30 px-3 py-2"
+                />
+              )}
+              <PendingBars items={pending} bots={byId} showNames={chat.kind === 'group'} />
+              {chat.kind === 'group' && (
+                <MemberBusyBar
+                  chatId={chat.id}
+                  memberIds={chat.members}
+                  bots={byId}
+                  onOpenLive={(id, botId) =>
+                    setLive({ id, botId, title: byId.get(botId)?.name ?? t('Deleted member') })
+                  }
+                />
+              )}
+            </div>
             <BotComposer
               key={chat.id}
               chatId={chat.id}

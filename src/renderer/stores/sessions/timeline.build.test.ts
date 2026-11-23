@@ -801,6 +801,70 @@ describe('buildTimeline', () => {
     expect(timeline.filter((item) => item.kind === 'text' && item.turnEnd)).toHaveLength(1);
   });
 
+  it('压缩摘要不打断轮次：摘要前的轮末仍标 turnEnd（分叉入口挂在这里），切在轮中则不标', () => {
+    const summary: ProjectedMessage = {
+      role: 'compactionSummary',
+      content: [{ type: 'text', text: 'S' }],
+    };
+    const reply = (text: string): ProjectedMessage => ({
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+    });
+    const turnEnds = (messages: ProjectedMessage[]) =>
+      buildTimeline(messages, false)
+        .filter((item) => item.kind === 'text' && item.turnEnd)
+        .map((item) => (item.kind === 'text' ? item.text : ''));
+    expect(turnEnds([user('q1'), reply('a1'), summary, user('q2'), reply('a2')])).toEqual([
+      'a1',
+      'a2',
+    ]);
+    expect(turnEnds([user('q1'), reply('a1'), summary])).toEqual(['a1']);
+    expect(turnEnds([user('q1'), reply('a1-前半'), summary, reply('a1-后半')])).toEqual([
+      'a1-后半',
+    ]);
+  });
+
+  it('插件投递、隐藏 custom、系统注入都不打断轮次：轮末照常标 turnEnd，计时不回写上一条 user', () => {
+    const reply = (text: string, timestamp?: number): ProjectedMessage => ({
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+      ...(timestamp !== undefined ? { timestamp } : {}),
+    });
+    const plugin = (text: string, timestamp?: number): ProjectedMessage => ({
+      role: 'custom',
+      content: [{ type: 'text', text }],
+      pluginSource: { pluginId: 'enso.github', pluginName: 'GitHub' },
+      ...(timestamp !== undefined ? { timestamp } : {}),
+    });
+    const hidden: ProjectedMessage = { role: 'custom', content: [{ type: 'text', text: 'ctx' }] };
+    const taskNote = user('<background-task-update>\n任务完成\n</background-task-update>');
+    const turnEnds = (messages: ProjectedMessage[]) =>
+      buildTimeline(messages, false)
+        .filter((item) => item.kind === 'text' && item.turnEnd)
+        .map((item) => (item.kind === 'text' ? item.text : ''));
+    expect(turnEnds([user('q1'), reply('a1'), plugin('p'), reply('a2')])).toEqual(['a1', 'a2']);
+    expect(turnEnds([user('q1'), reply('a1'), hidden, user('q2'), reply('a2')])).toEqual([
+      'a1',
+      'a2',
+    ]);
+    expect(
+      turnEnds([user('q1'), reply('a1'), hidden, plugin('p'), reply('a2'), taskNote, reply('a3')])
+    ).toEqual(['a1', 'a2', 'a3']);
+    expect(turnEnds([user('q1'), reply('a1-前半'), hidden, reply('a1-后半')])).toEqual(['a1-后半']);
+
+    const timeline = buildTimeline(
+      [
+        { ...user('q1'), timestamp: 1_000 },
+        reply('a1', 3_000),
+        plugin('p', 10_000),
+        reply('a2', 50_000),
+      ],
+      false
+    );
+    expect(timeline.find((item) => item.kind === 'user')).toMatchObject({ turnDurationMs: 2_000 });
+    expect(timeline.filter((item) => item.kind === 'text' && item.turnEnd)).toHaveLength(2);
+  });
+
   it('整段 <thinking> 包裹的 text 变成 thinking 块，标签不入正文', () => {
     const timeline = buildTimeline(
       [

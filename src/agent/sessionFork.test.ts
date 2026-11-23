@@ -1,3 +1,4 @@
+import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import {
   branchSessionAtLeaf,
@@ -63,7 +64,7 @@ describe('branchSessionFromPersistedFile', () => {
   });
 });
 
-type ForkEntry = { id: string; type: string; message?: { role: string } };
+type ForkEntry = { id: string; type: string; customType?: string; message?: { role: string } };
 
 function branch(entries: ForkEntry[]) {
   return entries;
@@ -79,9 +80,9 @@ describe('resolveForkLeafId', () => {
   ];
 
   it('user 锚点扩到该轮最后一条，未回复则停在该 user', () => {
-    expect(resolveForkLeafId(branch(tree), { userIndexFromEnd: 2 })).toBe('a1');
-    expect(resolveForkLeafId(branch(tree), { userIndexFromEnd: 1 })).toBe('a2');
-    expect(resolveForkLeafId(branch(tree), { userIndexFromEnd: 0 })).toBe('u3');
+    expect(resolveForkLeafId(branch(tree), { turnIndexFromEnd: 2 })).toBe('a1');
+    expect(resolveForkLeafId(branch(tree), { turnIndexFromEnd: 1 })).toBe('a2');
+    expect(resolveForkLeafId(branch(tree), { turnIndexFromEnd: 0 })).toBe('u3');
   });
 
   it('指定 entry 时同样扩到该轮末，compaction 不扩', () => {
@@ -92,5 +93,58 @@ describe('resolveForkLeafId', () => {
       { id: 'u1', type: 'message', message: { role: 'user' } },
     ];
     expect(resolveForkLeafId(branch(compacted), { entryId: 'c1' })).toBe('c1');
+  });
+
+  it('多次压缩后从早期轮次分叉：止于该轮末条，不带上之后才发生的压缩', () => {
+    const history: ForkEntry[] = [
+      { id: 'u1', type: 'message', message: { role: 'user' } },
+      { id: 'a1', type: 'message', message: { role: 'assistant' } },
+      { id: 'c1', type: 'compaction' },
+      { id: 'u2', type: 'message', message: { role: 'user' } },
+      { id: 'a2', type: 'message', message: { role: 'assistant' } },
+      { id: 'c2', type: 'compaction' },
+      { id: 'a2-tail', type: 'message', message: { role: 'assistant' } },
+      { id: 'c3', type: 'compaction' },
+      { id: 'u3', type: 'message', message: { role: 'user' } },
+      { id: 'a3', type: 'message', message: { role: 'assistant' } },
+    ];
+    expect(resolveForkLeafId(branch(history), { entryId: 'u1' })).toBe('a1');
+    expect(resolveForkLeafId(branch(history), { turnIndexFromEnd: 2 })).toBe('a1');
+    // 压缩切在轮中：该轮后半段仍属本轮，止于后半段末条
+    expect(resolveForkLeafId(branch(history), { entryId: 'u2' })).toBe('a2-tail');
+    expect(resolveForkLeafId(branch(history), { entryId: 'u3' })).toBe('a3');
+    expect(resolveForkLeafId(branch(history), { entryId: 'c1' })).toBe('c1');
+  });
+
+  it('插件投递是轮次输入；本轮写入的上下文条目带上，之后才发生的压缩/切模型不带', () => {
+    const message = (id: string, role: string): ForkEntry => ({
+      id,
+      type: 'message',
+      message: { role },
+    });
+    const custom = (id: string, customType: string): ForkEntry => ({
+      id,
+      type: 'custom_message',
+      customType,
+    });
+    const history: ForkEntry[] = [
+      message('u1', 'user'),
+      message('a1', 'assistant'),
+      { id: 'c1', type: 'compaction' },
+      custom('p1', PLUGIN_MESSAGE_TYPE),
+      custom('h1', 'enso-branch-context'),
+      message('a2', 'assistant'),
+      custom('r2', 'output-limit-recovery'),
+      { id: 'm2', type: 'model_change' },
+      custom('p2', PLUGIN_MESSAGE_TYPE),
+      message('u3', 'user'),
+      message('a3', 'assistant'),
+    ];
+    expect(resolveForkLeafId(branch(history), { entryId: 'u1' })).toBe('a1');
+    expect(resolveForkLeafId(branch(history), { turnIndexFromEnd: 3 })).toBe('a1');
+    expect(resolveForkLeafId(branch(history), { turnIndexFromEnd: 2 })).toBe('r2');
+    expect(resolveForkLeafId(branch(history), { turnIndexFromEnd: 1 })).toBe('p2');
+    expect(resolveForkLeafId(branch(history), { turnIndexFromEnd: 0 })).toBe('a3');
+    expect(resolveForkLeafId(branch(history), { turnIndexFromEnd: 4 })).toBe(undefined);
   });
 });

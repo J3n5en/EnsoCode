@@ -51,7 +51,7 @@ import {
   PLUGIN_AGENT_MAX_TIMEOUT_MS,
   PLUGIN_AGENT_PROMPT_MAX_CHARS,
   PLUGIN_AGENT_SYSTEM_MAX_CHARS,
-  PLUGIN_INJECT_MAX_CHARS,
+  PLUGIN_INJECT_WIRE_MAX_CHARS,
   PLUGIN_PROGRESS_MAX_CHARS,
   type PluginAgentRunEvent,
   type PluginAgentSource,
@@ -1671,7 +1671,8 @@ export type AgentCommand =
       identity: SessionIdentity;
       targetConversationId: string;
       entryId?: string;
-      userIndexFromEnd?: number;
+      /** 轮次输入（用户消息或插件投递）从末尾数第几条 */
+      turnIndexFromEnd?: number;
     }
   | { type: 'abort'; identity: SessionIdentity }
   | {
@@ -4490,7 +4491,7 @@ const agentCommandParsers = {
       isNonEmptyString(value.pluginName) &&
       value.pluginName.length <= 256 &&
       isNonEmptyString(value.text) &&
-      isBoundedText(value.text, PLUGIN_INJECT_MAX_CHARS) &&
+      isBoundedText(value.text, PLUGIN_INJECT_WIRE_MAX_CHARS) &&
       (value.deliverAs === 'steer' ||
         value.deliverAs === 'followUp' ||
         value.deliverAs === 'nextTurn') &&
@@ -4564,19 +4565,19 @@ const agentCommandParsers = {
   },
   fork: (value: Record<string, unknown>): AgentCommand | null => {
     const hasEntry = typeof value.entryId === 'string';
-    const hasIndex = typeof value.userIndexFromEnd === 'number';
+    const hasIndex = typeof value.turnIndexFromEnd === 'number';
     return hasOnlyKeys(value, [
       'type',
       'identity',
       'targetConversationId',
       'entryId',
-      'userIndexFromEnd',
+      'turnIndexFromEnd',
     ]) &&
       parseAnySessionIdentity(value.identity) &&
       isUuid(value.targetConversationId) &&
       (hasEntry
         ? !hasIndex && isNonEmptyString(value.entryId)
-        : hasIndex && isSequence(value.userIndexFromEnd))
+        : hasIndex && isSequence(value.turnIndexFromEnd))
       ? (value as unknown as AgentCommand)
       : null;
   },

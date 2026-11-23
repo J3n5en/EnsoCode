@@ -74,7 +74,6 @@ interface Harness {
     interruptDetails: Record<string, string>;
     contact: {
       milestones: { kind: string; title: string; conversationId: string; lastText?: string }[];
-      relayAsks: { conversationId: string; question: string; label: string }[];
       asks: { conversationId: string; requestId: string }[];
       resolved: { conversationId: string; requestId: string }[];
       replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
@@ -117,7 +116,6 @@ function harness(
     interruptDetails: {},
     contact: {
       milestones: [],
-      relayAsks: [],
       asks: [],
       resolved: [],
       replies: [],
@@ -183,9 +181,6 @@ function harness(
       },
       onScheduleFired: (input) => {
         state.contact.scheduleFired.push(input);
-      },
-      onRelayAsk: (input) => {
-        state.contact.relayAsks.push(input);
       },
       onAskRequest: (conversationId, ask) => {
         state.contact.asks.push({ conversationId, requestId: ask.requestId });
@@ -1462,6 +1457,50 @@ describe('自动巡检', () => {
     h.host.tick(2_000);
     expect(started).toEqual([['pend-1']]);
   });
+
+  it('出问题的等待派发满 24 小时由巡检清掉并写审计；未满的、等待中的不动', () => {
+    const DAY = 24 * 60 * MINUTE;
+    const base: PendingDispatch = {
+      id: 'x',
+      projectId: 'p1',
+      secretaryConversationId: 'sec1',
+      createdAt: 0,
+      updatedAt: 0,
+      status: 'failed',
+      problem: 'dependency-failed',
+      after: ['c1'],
+      draft: { projectId: 'p1', prompt: '接着改', worktree: false },
+    };
+    const h = harness({
+      file: {
+        pending: {
+          old: { ...base, id: 'old' },
+          fresh: { ...base, id: 'fresh', updatedAt: MINUTE, problem: 'dispatch-failed' },
+          wait: { ...base, id: 'wait', status: 'waiting', problem: undefined },
+        },
+      },
+    });
+    h.ports.startPending = () => undefined;
+    h.host.tick(DAY - 1);
+    expect(Object.keys(h.state.file.pending ?? {}).sort()).toEqual(['fresh', 'old', 'wait']);
+    expect(h.state.audit.filter((entry) => entry.op === 'pending_expire')).toEqual([]);
+
+    h.host.tick(DAY);
+    expect(Object.keys(h.state.file.pending ?? {}).sort()).toEqual(['fresh', 'wait']);
+    expect(h.state.audit.filter((entry) => entry.op === 'pending_expire')).toEqual([
+      {
+        at: DAY,
+        secretaryConversationId: 'sec1',
+        op: 'pending_expire',
+        targetId: 'old',
+        ok: true,
+        detail: 'dependency-failed',
+      },
+    ]);
+
+    h.host.tick(DAY + MINUTE);
+    expect(Object.keys(h.state.file.pending ?? {})).toEqual(['wait']);
+  });
 });
 
 describe('被 session_send 重新唤起后的收口', () => {
@@ -2234,7 +2273,7 @@ describe('联系方式转发', () => {
     ]);
   });
 
-  it('派出会话的提问转给秘书时，手机上也提示一条', () => {
+  it('派出会话的提问转给秘书时不打扰用户：手机渠道与桌面通知都不发', () => {
     const h = harness({});
     h.state.statuses.c1 = waiting;
     h.host.onAgentEvent(
@@ -2248,9 +2287,12 @@ describe('联系方式转发', () => {
       }),
       change('waiting', 'running')
     );
-    expect(h.state.contact.relayAsks).toEqual([
-      expect.objectContaining({ conversationId: 'c1', question: '用哪个方案？' }),
-    ]);
+    h.host.onAgentEvent(
+      event('ask-resolved', { requestId: 'ask-1', by: 'relay', answer: 'A', name: '小秘' }),
+      change('running', 'waiting')
+    );
+    expect(Object.values(h.state.contact).flat()).toEqual([]);
+    expect(h.state.notifications).toEqual([]);
   });
 
   it('秘书自己会话里的提问、收尾与审批都转发；别的会话不转发', () => {

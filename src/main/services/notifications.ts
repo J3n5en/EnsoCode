@@ -149,6 +149,7 @@ export async function maybeNotifyBot(
   if (!isCurrent) return;
   if (!bot.enabled) return;
   if (event.type !== 'approval-request' && event.type !== 'ask-request') return;
+  if (event.type === 'ask-request' && event.ask.relay) return;
   if (isSessionMuted(event.identity.sessionId)) return;
   const { focusMainWindow } = await import('../windows/MainWindow');
   const inFront = await localUiInFront();

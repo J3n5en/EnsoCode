@@ -19,6 +19,7 @@ import {
   planPhase,
   splitPlanPrefix,
 } from '@shared/planMode';
+import { unwrapUntrustedForDisplay } from '@shared/secretary/transcript';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
   AgentActionResult,
@@ -87,6 +88,7 @@ import { shouldFocusChildReservation } from './childReservationFocus';
 import {
   canWakeConversationForRewind,
   extractRewindDraft,
+  forkAnchorForTurnKey,
   forkDepth,
   MAX_FORK_DEPTH,
   resolveRewindTarget,
@@ -568,8 +570,10 @@ interface SessionsState {
   compact(conversationId: string, instructions?: string, options?: { quiet?: boolean }): void;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
-  forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
+  forkFromMessage(conversationId: string, turnIndexFromEnd: number): Promise<string | null>;
   forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
+  /** 时间线轮末行分叉：按本轮 user entryId 定位（压缩前的早期轮次也可用） */
+  forkFromTurn(conversationId: string, turnKey: number): Promise<string | null>;
   /** 终态失败后不新增 user 消息，从当前上下文续跑 */
   retry(conversationId: string): void;
   /** 被应用退出打断的一轮：冷会话先唤醒，再从断点续跑（只续未完成的回合） */
@@ -643,15 +647,13 @@ function withdrawnDraftPatch(
 
 function userMessageRawText(message: ProjectedMessage): string {
   if (message.role !== 'user' && !message.pluginSource) return '';
-  return splitPlanPrefix(
-    splitUnattendedPrefix(
-      message.content
-        .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-        .map((part) => part.text)
-        .join(' ')
-        .trim()
-    ).rest
-  ).rest;
+  const text = message.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join(' ')
+    .trim();
+  const shown = message.pluginSource ? unwrapUntrustedForDisplay(text) : text;
+  return splitPlanPrefix(splitUnattendedPrefix(shown).rest).rest;
 }
 
 function truncateTitle(text: string): string {
@@ -4180,14 +4182,21 @@ export const useSessionsStore = create<SessionsState>()(
           })();
         },
 
-        async forkFromMessage(conversationId, userIndexFromEnd) {
+        async forkFromMessage(conversationId, turnIndexFromEnd) {
           if (!(await wakeForFork(conversationId))) return null;
-          return forkConversation(get, set, conversationId, { userIndexFromEnd });
+          return forkConversation(get, set, conversationId, { turnIndexFromEnd });
         },
 
         async forkFromEntry(conversationId, entryId) {
           if (!(await wakeForFork(conversationId))) return null;
           return forkConversation(get, set, conversationId, { entryId });
+        },
+
+        async forkFromTurn(conversationId, turnKey) {
+          const conversation = get().conversations[conversationId];
+          const anchor = conversation && forkAnchorForTurnKey(conversation, turnKey);
+          if (!anchor || !(await wakeForFork(conversationId))) return null;
+          return forkConversation(get, set, conversationId, anchor);
         },
 
         retry(conversationId) {
@@ -4701,7 +4710,7 @@ async function forkConversation(
   },
   _set: unknown,
   sourceId: string,
-  anchor: { entryId: string } | { userIndexFromEnd: number }
+  anchor: { entryId: string } | { turnIndexFromEnd: number }
 ): Promise<string | null> {
   const source = get().conversations[sourceId];
   if (
@@ -4716,7 +4725,7 @@ async function forkConversation(
   const targetId = await get().newConversation(source.projectId, {
     forkedFrom: {
       conversationId: source.id,
-      entryId: 'entryId' in anchor ? anchor.entryId : `user:${anchor.userIndexFromEnd}`,
+      entryId: 'entryId' in anchor ? anchor.entryId : `turn:${anchor.turnIndexFromEnd}`,
     },
   });
   if (!targetId) return null;

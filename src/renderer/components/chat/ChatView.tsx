@@ -1,5 +1,5 @@
 import { agentTypeDisplayName } from '@shared/builtinAgents';
-import { conversationDotTone } from '@shared/conversationDotTone';
+import { conversationDotTone, userAskCount } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
@@ -344,7 +344,7 @@ export function ChatView() {
   const statusDot = (
     <StatusDot
       status={chrome.spawning ? 'running' : chrome.status}
-      pendingAskCount={(chrome.pendingAsks ?? []).length}
+      pendingAskCount={userAskCount(chrome.pendingAsks)}
       hasRunningChild={chrome.id === chrome.parentId && chrome.parentHasRunningChild}
     />
   );
@@ -386,8 +386,9 @@ export function ChatView() {
         quotable
       />
 
-      <div className="@container pt-1">
-        <div className={CHAT_COL}>
+      {/* 输入框常驻：时间线留底后，空间不够只压卡片摞，卡片摞内部滚动 */}
+      <div className="@container flex min-h-0 flex-col pt-1">
+        <div className={`${CHAT_COL} flex min-h-0 flex-col`}>
           {project &&
             project.kind !== 'ssh' &&
             project.kind !== 'scratch' &&
@@ -434,38 +435,43 @@ export function ChatView() {
               subagents={chrome.subagents ?? []}
             />
           </MarkdownLinkContext.Provider>
-          <ApprovalBar
-            approvals={chrome.pendingApprovals ?? []}
-            allowSession={chrome.childLockedProfileId === undefined}
-            onRespond={(requestId, decision) =>
-              void window.electronAPI.agent.respondApproval(chrome.id, requestId, decision)
-            }
-          />
-          <ElevationBar />
-          <AskBar
-            asks={chrome.pendingAsks ?? []}
-            onAnswer={(requestId, answer) =>
-              void window.electronAPI.agent.respondAsk(chrome.id, requestId, answer)
-            }
-          />
-          {!chrome.displayedParentId && (
-            <PlanBar
-              conversationId={chrome.id}
-              planState={chrome.planState}
-              approvalMode={chrome.approvalMode ?? 'full'}
+          <div
+            data-enso="composer-stack"
+            className="flex min-h-0 flex-col overflow-y-auto overscroll-contain"
+          >
+            <ApprovalBar
+              approvals={chrome.pendingApprovals ?? []}
+              allowSession={chrome.childLockedProfileId === undefined}
+              onRespond={(requestId, decision) =>
+                void window.electronAPI.agent.respondApproval(chrome.id, requestId, decision)
+              }
             />
-          )}
-          <MessageQueue conversationId={chrome.id} queued={chrome.queuedMessages ?? []} />
-          {chrome.goal && <GoalBar conversationId={chrome.id} goal={chrome.goal} />}
-          <TodoBar key={chrome.id} conversationId={chrome.id} />
-          {!chrome.displayedParentId && modelBlockMessage && (
-            <div
-              role="status"
-              className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs"
-            >
-              {modelBlockMessage}
-            </div>
-          )}
+            <ElevationBar />
+            <AskBar
+              asks={chrome.pendingAsks ?? []}
+              onAnswer={(requestId, answer) =>
+                void window.electronAPI.agent.respondAsk(chrome.id, requestId, answer)
+              }
+            />
+            {!chrome.displayedParentId && (
+              <PlanBar
+                conversationId={chrome.id}
+                planState={chrome.planState}
+                approvalMode={chrome.approvalMode ?? 'full'}
+              />
+            )}
+            <MessageQueue conversationId={chrome.id} queued={chrome.queuedMessages ?? []} />
+            {chrome.goal && <GoalBar conversationId={chrome.id} goal={chrome.goal} />}
+            <TodoBar key={chrome.id} conversationId={chrome.id} />
+            {!chrome.displayedParentId && modelBlockMessage && (
+              <div
+                role="status"
+                className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs"
+              >
+                {modelBlockMessage}
+              </div>
+            )}
+          </div>
           <Composer
             cwd={project?.path}
             chatCandidates={chatCandidates}

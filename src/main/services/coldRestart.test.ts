@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
@@ -148,9 +148,11 @@ describe('冷启动叫醒子代理 Run 被重启打断的父会话', () => {
       return { ok: true };
     });
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await wakeColdRestartOwners(service.restartInterruptedOwners(), resume, plan);
+    await wakeColdRestartOwners(service.restartInterruptedOwners(), resume, plan, (ownerId) =>
+      service.abandonOwner(ownerId)
+    );
     log.mockRestore();
-    return { resume, notify, woken: resume.mock.calls.map(([item]) => item.sessionId) };
+    return { resume, notify, service, woken: resume.mock.calls.map(([item]) => item.sessionId) };
   }
 
   it('现场：父会话在清单里是 await-user，被叫醒恰好一次并收到中断通知（提示 worktree 改动还在）', async () => {
@@ -201,7 +203,7 @@ describe('冷启动叫醒子代理 Run 被重启打断的父会话', () => {
   });
 
   it('父会话已删除 / 归档或不在清单里：不报错，其他父会话照常叫醒', async () => {
-    const { woken, notify } = await coldStart(
+    const { woken, notify, service } = await coldStart(
       [run('w5-gone', 'w5-a'), run('w5-unlisted', 'w5-b'), run('w5-parent', 'w5-c')],
       [
         ['w5-gone', 'await-user'],
@@ -212,6 +214,20 @@ describe('冷启动叫醒子代理 Run 被重启打断的父会话', () => {
     expect(woken).toEqual(['w5-gone', 'w5-parent']);
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][1]).toContain('runId w5-c');
+    // 已删除的父会话：它名下的 Run 直接结束，不再等它；不在清单里的照旧等打开时补通知
+    expect(service.restartInterruptedOwners()).toEqual(['w5-unlisted']);
+  });
+
+  it('断点里的子会话随计划读出，供续跑子代理时核对', () => {
+    const dir = seed(500);
+    const checkpoint = JSON.parse(readFileSync(path.join(dir, RESTART_CHECKPOINT_FILE), 'utf8'));
+    checkpoint.sessions.push({ ...entry('run::cw-a', 'model-request') });
+    writeFileSync(path.join(dir, RESTART_CHECKPOINT_FILE), JSON.stringify(checkpoint));
+    const plan = loadColdRestartPlan(dir);
+    expect(plan?.children).toEqual([
+      { sessionId: 'run::cw-a', generation: 'run::cw-a-gen', nextStep: 'model-request' },
+    ]);
+    expect(plan?.manifest.sessions.map((s) => s.sessionId)).toEqual(['run', 'idle']);
   });
 });
 

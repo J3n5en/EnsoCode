@@ -335,7 +335,7 @@ export function GroupTimeline({
   const newCount = history && timeline ? timeline.lastSeq - history.sinceSeq : 0;
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-24 flex-1 flex-col">
       <div
         ref={scrollRef}
         onScroll={onScroll}

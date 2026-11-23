@@ -427,6 +427,18 @@ describe.each(['session', 'bot'] as const)('%s approval notifications', (surface
     expect(notifications).toHaveLength(2);
   });
 
+  it('转给秘书的提问不通知，之后的普通提问照常通知', async () => {
+    await emit({
+      type: 'ask-request',
+      identity,
+      seq: 1,
+      ask: { requestId: 'relayed', question: '用哪个？', relay: { name: '小秘' } },
+    } as unknown as RendererAgentEvent);
+    expect(notifications).toHaveLength(0);
+    await emit(askEvent('选择哪个？'));
+    expect(notifications).toHaveLength(1);
+  });
+
   it('重复人工状态事件只提醒一次', async () => {
     await emit(request());
     await emit(request(undefined, 2));

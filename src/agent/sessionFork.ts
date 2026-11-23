@@ -1,3 +1,5 @@
+import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
+
 export type SessionForkResult =
   | { ok: true; sessionFile: string }
   | { ok: false; error: 'anchor-not-found' | 'branch-not-persisted' };
@@ -5,13 +7,24 @@ export type SessionForkResult =
 export type ForkBranchEntry = {
   id: string;
   type: string;
+  customType?: string;
   message?: { role: string };
 };
 
-/** 分叉叶子：从锚点扩到下一轮 user 之前（含本轮 assistant）。压缩点不扩。 */
+/** 轮次输入：用户消息或插件投递，都开启新一轮并进入模型上下文 */
+export function isTurnInputEntry(entry: Omit<ForkBranchEntry, 'id'>): boolean {
+  return entry.type === 'custom_message'
+    ? entry.customType === PLUGIN_MESSAGE_TYPE
+    : entry.type === 'message' && entry.message?.role === 'user';
+}
+
+/**
+ * 分叉叶子：锚点所在轮的最后一条上下文条目（message / custom_message），与原会话该轮结束时的上下文一致；
+ * 之后才发生的压缩、切模型等不带上。压缩点不扩。
+ */
 export function resolveForkLeafId(
   branch: readonly ForkBranchEntry[],
-  anchor: { entryId: string } | { userIndexFromEnd: number }
+  anchor: { entryId: string } | { turnIndexFromEnd: number }
 ): string | undefined {
   let start = -1;
   if ('entryId' in anchor) {
@@ -19,19 +32,14 @@ export function resolveForkLeafId(
     if (start < 0) return undefined;
     if (branch[start]?.type === 'compaction') return branch[start].id;
   } else {
-    const users = branch.filter(
-      (entry) => entry.type === 'message' && entry.message?.role === 'user'
-    );
-    const user = users[users.length - 1 - anchor.userIndexFromEnd];
-    if (!user) return undefined;
-    start = branch.findIndex((entry) => entry.id === user.id);
+    const inputs = branch.filter(isTurnInputEntry);
+    const input = inputs[inputs.length - 1 - anchor.turnIndexFromEnd];
+    if (!input) return undefined;
+    start = branch.indexOf(input);
   }
-  if (start < 0) return undefined;
   let leaf = start;
-  for (let i = start + 1; i < branch.length; i++) {
-    const entry = branch[i];
-    if (entry.type === 'message' && entry.message?.role === 'user') break;
-    leaf = i;
+  for (let i = start + 1; i < branch.length && !isTurnInputEntry(branch[i]); i++) {
+    if (branch[i].type === 'message' || branch[i].type === 'custom_message') leaf = i;
   }
   return branch[leaf]?.id;
 }

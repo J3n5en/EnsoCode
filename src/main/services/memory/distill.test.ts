@@ -104,6 +104,10 @@ describe('redactSecrets（蒸馏前的安全边界）', () => {
     expect(out).toContain('We decided to use PostgreSQL; version 16.2 on port 5432.');
     expect(out).toContain('postgres://');
   });
+  it('长串连续单词字符（哈希、十六进制）线性处理，不因 URL 口令规则逐位回溯卡住 Main', () => {
+    const run = 'a'.repeat(200_000);
+    expect(redactSecrets(`${run} https://u:p4ss@h`)).toBe(`${run} https://u:[REDACTED]@h`);
+  });
   it.each([{ token: false }, { auth: { token: null } }])(
     '非秘密 JSON 值 %j 保持原样且保留闭合结构',
     (config) => {
