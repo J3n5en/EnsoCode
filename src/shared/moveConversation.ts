@@ -36,9 +36,9 @@ export function parseImportProjectSessionsInput(value: unknown): ImportProjectSe
 
 export function conversationIdsToMove(
   conversations: Record<string, { parentId?: unknown; btwParentId?: unknown } | undefined>,
-  rootId: string
+  rootIds: string | readonly string[]
 ): string[] {
-  const ids = new Set<string>([rootId]);
+  const ids = new Set<string>(typeof rootIds === 'string' ? [rootIds] : rootIds);
   let grew = true;
   while (grew) {
     grew = false;

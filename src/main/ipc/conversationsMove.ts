@@ -135,9 +135,8 @@ export async function handleImportProjectSessions(
       ports.unbindWorktree(conversationId);
     } catch {}
   }
-  const rows = ports.readConversations();
   ports.patchProjectIds(
-    moved.flatMap((conversationId) => conversationIdsToMove(rows, conversationId)),
+    conversationIdsToMove(ports.readConversations(), moved),
     targetProjectId,
     moved
   );

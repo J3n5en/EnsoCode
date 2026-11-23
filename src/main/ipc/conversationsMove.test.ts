@@ -62,6 +62,22 @@ describe('conversationIdsToMove', () => {
       ).sort()
     ).toEqual(['btw', 'child', 'nested', 'root']);
   });
+
+  it('collects the trees of several roots in one call', () => {
+    expect(
+      conversationIdsToMove(
+        {
+          a: {},
+          b: {},
+          c: {},
+          aChild: { parentId: 'a' },
+          bBtw: { btwParentId: 'b' },
+          cChild: { parentId: 'c' },
+        },
+        ['a', 'b']
+      ).sort()
+    ).toEqual(['a', 'aChild', 'b', 'bBtw']);
+  });
 });
 
 describe('handleConversationsMove', () => {

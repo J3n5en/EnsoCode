@@ -51,11 +51,11 @@ function applyMovedConversations(rootIds: readonly string[], targetProjectId: st
   useSessionsStore.setState((state) => {
     const conversations = { ...state.conversations };
     const worktreeStatuses = { ...state.worktreeStatuses };
+    for (const id of conversationIdsToMove(conversations, rootIds)) {
+      const row = conversations[id];
+      if (row) conversations[id] = { ...row, projectId: targetProjectId };
+    }
     for (const rootId of rootIds) {
-      for (const id of conversationIdsToMove(conversations, rootId)) {
-        const row = conversations[id];
-        if (row) conversations[id] = { ...row, projectId: targetProjectId };
-      }
       const root = conversations[rootId];
       if (root)
         conversations[rootId] = { ...root, worktree: undefined, worktreeMissing: undefined };
