@@ -1,9 +1,14 @@
-import { conversationIdsToMove } from '@shared/moveConversation';
+import { conversationIdsToMove, type ImportProjectSessionsMode } from '@shared/moveConversation';
 import { addToast } from '@/components/ui/toast';
 import type { TFunction } from '@/i18n';
 import { useSessionsStore } from '@/stores/sessions';
+import { useSettingsStore } from '@/stores/settings';
 
-export { canMoveConversationFrom, moveConversationTargets } from '@shared/moveConversation';
+export {
+  canMoveConversationFrom,
+  defaultImportMode,
+  moveConversationTargets,
+} from '@shared/moveConversation';
 
 const MOVE_ERROR_TITLES: Record<string, string> = {
   running: 'Cannot move a running conversation',
@@ -74,16 +79,21 @@ export function projectRootConversationCount(
   ).length;
 }
 
-/** 把源项目的全部会话改挂到目标项目；运行中等被跳过的会话列出标题。返回是否已执行 */
+/**
+ * 把源项目的全部会话移动或复制到目标项目；运行中等被跳过的会话列出标题。
+ * 复制出的会话行由 Main 的会话补丁送达。返回 null 表示失败；offerRemoveSource 表示移动后源项目已空。
+ */
 export async function importProjectSessionsFromDialog(
   sourceProjectId: string,
   targetProjectId: string,
+  mode: ImportProjectSessionsMode,
   t: TFunction
-): Promise<boolean> {
+): Promise<{ offerRemoveSource: boolean } | null> {
   try {
     const result = await window.electronAPI.settings.importProjectSessions({
       sourceProjectId,
       targetProjectId,
+      mode,
     });
     if (!result.ok) {
       addToast({
@@ -91,37 +101,67 @@ export async function importProjectSessionsFromDialog(
         title: t('Failed to import conversations'),
         description: result.error,
       });
-      return false;
+      return null;
     }
-    applyMovedConversations(result.moved, targetProjectId);
+    if (result.mode === 'move') applyMovedConversations(result.imported, targetProjectId);
+    const count = result.imported.length;
     if (result.skipped.length > 0) {
       const { conversations } = useSessionsStore.getState();
       addToast({
         type: 'warning',
-        title: t(
-          'Imported {{moved}} conversations; {{count}} running or busy ones stay in the original project',
-          { moved: result.moved.length, count: result.skipped.length }
-        ),
+        title:
+          result.mode === 'move'
+            ? t(
+                'Imported {{moved}} conversations; {{count}} running or busy ones stay in the original project',
+                { moved: count, count: result.skipped.length }
+              )
+            : t('Copied {{moved}} conversations; {{count}} running ones were not copied', {
+                moved: count,
+                count: result.skipped.length,
+              }),
         description: result.skipped
           .map(({ conversationId }) => conversations[conversationId]?.title || t('Untitled'))
           .join('、'),
       });
     } else {
       addToast({
-        type: result.moved.length > 0 ? 'success' : 'info',
+        type: count > 0 ? 'success' : 'info',
         title:
-          result.moved.length > 0
-            ? t('Imported {{count}} conversations', { count: result.moved.length })
-            : t('No conversations to import'),
+          count === 0
+            ? t('No conversations to import')
+            : result.mode === 'move'
+              ? t('Imported {{count}} conversations', { count })
+              : t('Copied {{count}} conversations', { count }),
       });
     }
-    return true;
+    return { offerRemoveSource: result.mode === 'move' && result.sourceEmpty };
   } catch (error) {
     addToast({
       type: 'error',
       title: t('Failed to import conversations'),
       description: String(error),
     });
+    return null;
+  }
+}
+
+/** 只把空项目从列表里去掉；走 Main 的专用通道，不删会话文件、项目目录与 worktree */
+export async function removeEmptyProjectFromDialog(
+  projectId: string,
+  t: TFunction
+): Promise<boolean> {
+  try {
+    const result = await window.electronAPI.settings.removeEmptyProject({ projectId });
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('Failed to remove project'), description: result.error });
+      return false;
+    }
+    useSettingsStore.setState((state) => ({
+      projects: state.projects.filter((project) => project.id !== projectId),
+    }));
+    return true;
+  } catch (error) {
+    addToast({ type: 'error', title: t('Failed to remove project'), description: String(error) });
     return false;
   }
 }

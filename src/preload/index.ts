@@ -43,7 +43,12 @@ import type {
   TreeNodeDto,
   TreeQuery,
 } from '@shared/memory/graphDto';
-import type { ImportProjectSessionsResult } from '@shared/moveConversation';
+import type {
+  ImportProjectSessionsMode,
+  ImportProjectSessionsPreview,
+  ImportProjectSessionsResult,
+  RemoveEmptyProjectResult,
+} from '@shared/moveConversation';
 import type {
   OauthFlowControlRequest,
   OauthFlowEvent,
@@ -369,8 +374,16 @@ const electronAPI = {
     importProjectSessions: (input: {
       sourceProjectId: string;
       targetProjectId: string;
+      mode: ImportProjectSessionsMode;
     }): Promise<ImportProjectSessionsResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_IMPORT_PROJECT, input),
+    importProjectSessionsPreview: (input: {
+      sourceProjectId: string;
+      targetProjectId: string;
+    }): Promise<ImportProjectSessionsPreview> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_IMPORT_PROJECT_PREVIEW, input),
+    removeEmptyProject: (input: { projectId: string }): Promise<RemoveEmptyProjectResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_REMOVE_EMPTY, input),
     /** Main 拒收本窗口的会话写回，要求重新读会话 */
     onConversationsResync: (callback: () => void): (() => void) => {
       const listener = () => callback();

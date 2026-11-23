@@ -554,6 +554,51 @@ export class SourceAuthorityRegistry {
     return undefined;
   }
 
+  /** 仅 Main：整批登记复制出的根会话，一次落盘、一次广播；任一条不合法则整批拒绝 */
+  insertConversations(
+    targetProjectId: string,
+    records: readonly Pick<
+      ConversationAuthority,
+      'conversationId' | 'lifecycle' | 'sessionFile' | 'selection' | 'forkedFrom'
+    >[]
+  ): AuthorityMutationResult<string[]> {
+    const targetError = this.moveTargetError(targetProjectId);
+    if (targetError) return { accepted: false, error: targetError };
+    const ids = new Set(records.map((record) => record.conversationId));
+    if (
+      ids.size !== records.length ||
+      records.some(
+        (record) =>
+          !validId(record.conversationId) ||
+          this.conversations.has(record.conversationId) ||
+          record.lifecycle === 'ended'
+      )
+    ) {
+      return { accepted: false, error: 'invalid' };
+    }
+    for (const record of records) {
+      this.conversations.set(record.conversationId, {
+        conversationId: record.conversationId,
+        projectId: targetProjectId,
+        kind: 'root',
+        lifecycle: record.lifecycle,
+        version: 1,
+        ...(record.sessionFile ? { sessionFile: record.sessionFile } : {}),
+        ...(record.selection ? { selection: { ...record.selection } } : {}),
+        ...(record.forkedFrom ? { forkedFrom: { ...record.forkedFrom } } : {}),
+      });
+    }
+    if (records.length > 0) this.commit();
+    return { accepted: true, value: [...ids] };
+  }
+
+  /** 仅 Main：撤回 insertConversations 登记的会话（复制失败回滚） */
+  discardConversations(conversationIds: readonly string[]): void {
+    let changed = false;
+    for (const id of conversationIds) changed = this.conversations.delete(id) || changed;
+    if (changed) this.commit();
+  }
+
   updateSelection(
     request: UpdateConversationSelectionRequest
   ): AuthorityMutationResult<ConversationAuthorityProjection> {

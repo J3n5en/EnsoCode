@@ -12,6 +12,7 @@ import {
 } from '@shared/defaultModel';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { normalizeLocale, translate } from '@shared/i18n';
+import type { CopiedFrom } from '@shared/moveConversation';
 import {
   EMPTY_PLAN_STATE,
   type PlanRespondAction,
@@ -326,6 +327,8 @@ export interface Conversation extends SessionProjection {
   compactionNoticeAt?: number;
   forkedFromConversationId?: string;
   forkedFromEntryId?: string;
+  /** 整项目复制出的副本：来源项目与会话，弹窗据此提示已复制过几次 */
+  copiedFrom?: CopiedFrom;
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;

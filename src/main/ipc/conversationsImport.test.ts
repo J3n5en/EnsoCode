@@ -7,15 +7,18 @@ import { AgentSessionIndex } from '../services/agentSessionIndex';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import {
   handleImportProjectSessions,
+  handleRemoveEmptyProject,
   type ImportProjectSessionsPorts,
   projectRootConversationIds,
 } from './conversationsMove';
 
 describe('parseImportProjectSessionsInput', () => {
   it('accepts two distinct project ids only', () => {
-    expect(parseImportProjectSessionsInput({ sourceProjectId: 'a', targetProjectId: 'b' })).toEqual(
-      { sourceProjectId: 'a', targetProjectId: 'b' }
-    );
+    for (const mode of ['move', 'copy'] as const) {
+      expect(
+        parseImportProjectSessionsInput({ sourceProjectId: 'a', targetProjectId: 'b', mode })
+      ).toEqual({ sourceProjectId: 'a', targetProjectId: 'b', mode });
+    }
     for (const bad of [
       undefined,
       null,
@@ -25,7 +28,9 @@ describe('parseImportProjectSessionsInput', () => {
       { sourceProjectId: 'a', targetProjectId: '' },
       { sourceProjectId: 'a', targetProjectId: 'a' },
       { sourceProjectId: 1, targetProjectId: 'b' },
-      { sourceProjectId: 'a', targetProjectId: 'b', extra: 1 },
+      { sourceProjectId: 'a', targetProjectId: 'b' },
+      { sourceProjectId: 'a', targetProjectId: 'b', mode: 'link' },
+      { sourceProjectId: 'a', targetProjectId: 'b', mode: 'move', extra: 1 },
     ]) {
       expect(parseImportProjectSessionsInput(bad)).toBeNull();
     }
@@ -66,6 +71,18 @@ describe('handleImportProjectSessions', () => {
     };
     const sessions = new AgentSessionIndex({ readSettings: () => null });
     const ports: ImportProjectSessionsPorts = {
+      sessionDir: path.join(root, 'sessions'),
+      project: (projectId) => registry.project(projectId),
+      conversation: (id) => registry.conversation(id),
+      projectHasConversations: (projectId) =>
+        registry
+          .rendererProjection()
+          .conversations.some((c) => c.projectId === projectId && c.lifecycle !== 'ended'),
+      insertConversations: (targetId, records) => registry.insertConversations(targetId, records),
+      discardConversations: (ids) => registry.discardConversations(ids),
+      removeProject: (request) => registry.removeProject(request),
+      addConversations: () => true,
+      randomUuid: () => crypto.randomUUID(),
       projectKind: (projectId) => registry.project(projectId)?.kind,
       rootConversationIds: (projectId) =>
         projectRootConversationIds(registry.rendererProjection().conversations, projectId),
@@ -82,7 +99,7 @@ describe('handleImportProjectSessions', () => {
     };
     const importInto = (from: { projectId: string }, to: { projectId: string }) =>
       handleImportProjectSessions(
-        { sourceProjectId: from.projectId, targetProjectId: to.projectId },
+        { sourceProjectId: from.projectId, targetProjectId: to.projectId, mode: 'move' },
         ports
       );
     const owner = (id: string) => registry.conversation(id)?.projectId;
@@ -97,6 +114,7 @@ describe('handleImportProjectSessions', () => {
       sessions,
       importInto,
       owner,
+      ports,
       broadcasts: () => broadcasts,
       rowPatches: () => rowPatches,
     };
@@ -108,7 +126,7 @@ describe('handleImportProjectSessions', () => {
     const before = env.broadcasts();
     const result = await env.importInto(env.projectA, env.projectB);
     expect(result).toMatchObject({ ok: true, skipped: [] });
-    expect(result.ok && [...result.moved].sort()).toEqual([...ids].sort());
+    expect(result.ok && [...result.imported].sort()).toEqual([...ids].sort());
     expect(env.broadcasts() - before).toBe(1);
     expect(env.rowPatches()).toBe(1);
     for (const id of ids) expect(env.rows[id].projectId).toBe(env.projectB.projectId);
@@ -138,8 +156,10 @@ describe('handleImportProjectSessions', () => {
     const result = await env.importInto(env.projectA, env.projectB);
     expect(result).toEqual({
       ok: true,
-      moved: expect.arrayContaining([first, second]),
+      mode: 'move',
+      imported: expect.arrayContaining([first, second]),
       skipped: [],
+      sourceEmpty: true,
     });
     expect(env.owner(first)).toBe(env.projectB.projectId);
     expect(env.owner(second)).toBe(env.projectB.projectId);
@@ -172,8 +192,10 @@ describe('handleImportProjectSessions', () => {
     const result = await env.importInto(env.projectA, env.projectB);
     expect(result).toEqual({
       ok: true,
-      moved: [idle],
+      mode: 'move',
+      imported: [idle],
       skipped: [{ conversationId: busy, error: 'running' }],
+      sourceEmpty: false,
     });
     expect(env.owner(busy)).toBe(env.projectA.projectId);
     expect(env.rows[busy].projectId).toBe(env.projectA.projectId);
@@ -199,8 +221,10 @@ describe('handleImportProjectSessions', () => {
     const version = env.registry.conversation(id)?.version;
     expect(await env.importInto(env.projectA, env.projectB)).toEqual({
       ok: true,
-      moved: [],
+      mode: 'move',
+      imported: [],
       skipped: [],
+      sourceEmpty: true,
     });
     expect(env.owner(id)).toBe(env.projectB.projectId);
     expect(env.registry.conversation(id)?.version).toBe(version);
@@ -251,5 +275,46 @@ describe('handleImportProjectSessions', () => {
       ok: false,
       error: 'invalid',
     });
+  });
+  it('removes an emptied source project from the list without deleting any file or directory', async () => {
+    const env = setup();
+    env.create('c', env.projectA);
+    const ended = env.create('ended', env.projectA);
+    const endedFile = path.join(env.root, 'sessions', 'ended.jsonl');
+    writeFileSync(endedFile, '{"type":"session"}\n');
+    env.registry.markReady(ended, endedFile, { providerId: 'p', modelId: 'm' });
+    const version = env.registry.conversation(ended)?.version ?? 0;
+    expect(
+      env.registry.endConversation({ requestId: 'end', conversationId: ended, version }).accepted
+    ).toBe(true);
+    delete env.rows[ended];
+    const kept = path.join(env.root, 'a', 'keep.txt');
+    writeFileSync(kept, 'keep');
+    const worktree = path.join(env.root, 'a', '.worktrees', 'wt');
+    mkdirSync(worktree, { recursive: true });
+    await env.importInto(env.projectA, env.projectB);
+    expect(handleRemoveEmptyProject({ projectId: env.projectA.projectId }, env.ports)).toEqual({
+      ok: true,
+    });
+    expect(env.registry.project(env.projectA.projectId)?.state).toBe('removed');
+    expect(readFileSync(kept, 'utf8')).toBe('keep');
+    expect(existsSync(worktree)).toBe(true);
+    expect(readFileSync(endedFile, 'utf8')).toBe('{"type":"session"}\n');
+  });
+
+  it('refuses to remove a project that still has conversations', async () => {
+    const env = setup();
+    const id = env.create('c', env.projectA);
+    expect(handleRemoveEmptyProject({ projectId: env.projectA.projectId }, env.ports)).toEqual({
+      ok: false,
+      error: 'not-empty',
+    });
+    expect(env.registry.project(env.projectA.projectId)?.state).toBe('active');
+    expect(env.owner(id)).toBe(env.projectA.projectId);
+    expect(handleRemoveEmptyProject({ projectId: 'missing' }, env.ports)).toEqual({
+      ok: false,
+      error: 'unavailable',
+    });
+    expect(handleRemoveEmptyProject({}, env.ports)).toEqual({ ok: false, error: 'invalid' });
   });
 });

@@ -6,20 +6,28 @@ const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
   moveConversation: vi.fn(),
   importProjectSessions: vi.fn(),
+  removeEmptyProject: vi.fn(),
+  removeProjectWithFiles: vi.fn(),
+  settingsSetState: vi.fn(),
 }));
 
 vi.mock('@/components/ui/toast', () => ({ addToast: mocks.addToast }));
 vi.mock('@/stores/sessions', () => ({
   useSessionsStore: { setState: mocks.setState, getState: mocks.getState },
 }));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: { setState: mocks.settingsSetState },
+}));
 
 import {
   canMoveConversationFrom,
   conversationMoveErrorTitle,
+  defaultImportMode,
   importProjectSessionsFromDialog,
   moveConversationFromMenu,
   moveConversationTargets,
   projectRootConversationCount,
+  removeEmptyProjectFromDialog,
 } from './moveConversationAction';
 
 describe('moveConversationTargets', () => {
@@ -166,13 +174,18 @@ describe('importProjectSessionsFromDialog', () => {
   it('moves imported roots with their children locally and reports success', async () => {
     mocks.importProjectSessions.mockResolvedValue({
       ok: true,
-      moved: ['c1', 'c2', 'archived'],
+      mode: 'move',
+      imported: ['c1', 'c2', 'archived'],
       skipped: [],
+      sourceEmpty: true,
     });
-    expect(await importProjectSessionsFromDialog('p1', 'p2', (s) => s)).toBe(true);
+    expect(await importProjectSessionsFromDialog('p1', 'p2', 'move', (s) => s)).toEqual({
+      offerRemoveSource: true,
+    });
     expect(mocks.importProjectSessions).toHaveBeenCalledWith({
       sourceProjectId: 'p1',
       targetProjectId: 'p2',
+      mode: 'move',
     });
     expect(next?.conversations).toEqual({
       c1: { projectId: 'p2', title: 'One', worktree: undefined, worktreeMissing: undefined },
@@ -194,10 +207,14 @@ describe('importProjectSessionsFromDialog', () => {
   it('names the skipped running conversations', async () => {
     mocks.importProjectSessions.mockResolvedValue({
       ok: true,
-      moved: ['c1'],
+      mode: 'move',
+      imported: ['c1'],
       skipped: [{ conversationId: 'c2', error: 'running' }],
+      sourceEmpty: false,
     });
-    expect(await importProjectSessionsFromDialog('p1', 'p2', (s) => s)).toBe(true);
+    expect(await importProjectSessionsFromDialog('p1', 'p2', 'move', (s) => s)).toEqual({
+      offerRemoveSource: false,
+    });
     expect(next?.conversations.c2.projectId).toBe('p1');
     expect(mocks.addToast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -209,10 +226,65 @@ describe('importProjectSessionsFromDialog', () => {
 
   it('toasts a failure and leaves the local state alone', async () => {
     mocks.importProjectSessions.mockResolvedValue({ ok: false, error: 'target-unavailable' });
-    expect(await importProjectSessionsFromDialog('p1', 'p2', (s) => s)).toBe(false);
+    expect(await importProjectSessionsFromDialog('p1', 'p2', 'move', (s) => s)).toBeNull();
     expect(mocks.setState).not.toHaveBeenCalled();
     expect(mocks.addToast).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'error', description: 'target-unavailable' })
     );
+  });
+
+  it('copies without touching local rows and never offers to remove the source', async () => {
+    mocks.importProjectSessions.mockResolvedValue({
+      ok: true,
+      mode: 'copy',
+      imported: ['n1', 'n2'],
+      skipped: [],
+      sourceEmpty: true,
+    });
+    expect(await importProjectSessionsFromDialog('p1', 'p2', 'copy', (s) => s)).toEqual({
+      offerRemoveSource: false,
+    });
+    expect(mocks.setState).not.toHaveBeenCalled();
+    expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }));
+  });
+});
+
+describe('defaultImportMode', () => {
+  it('moves when the source directory is gone and copies otherwise', () => {
+    expect(defaultImportMode(false)).toBe('move');
+    expect(defaultImportMode(true)).toBe('copy');
+  });
+});
+
+describe('removeEmptyProjectFromDialog', () => {
+  let projects: { id: string }[] = [];
+  beforeEach(() => {
+    vi.clearAllMocks();
+    projects = [{ id: 'p1' }, { id: 'p2' }];
+    mocks.settingsSetState.mockImplementation((fn: (s: unknown) => { projects: unknown }) => {
+      projects = fn({ projects }).projects as { id: string }[];
+    });
+    vi.stubGlobal('window', {
+      electronAPI: {
+        settings: { removeEmptyProject: mocks.removeEmptyProject },
+        sourceAuthority: { removeProject: mocks.removeProjectWithFiles },
+      },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('only drops the list entry through the file-safe channel', async () => {
+    mocks.removeEmptyProject.mockResolvedValue({ ok: true });
+    expect(await removeEmptyProjectFromDialog('p1', (s) => s)).toBe(true);
+    expect(mocks.removeEmptyProject).toHaveBeenCalledWith({ projectId: 'p1' });
+    expect(mocks.removeProjectWithFiles).not.toHaveBeenCalled();
+    expect(projects).toEqual([{ id: 'p2' }]);
+  });
+
+  it('keeps the project and toasts when Main refuses', async () => {
+    mocks.removeEmptyProject.mockResolvedValue({ ok: false, error: 'not-empty' });
+    expect(await removeEmptyProjectFromDialog('p1', (s) => s)).toBe(false);
+    expect(projects).toEqual([{ id: 'p1' }, { id: 'p2' }]);
+    expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
   });
 });
