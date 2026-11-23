@@ -9,6 +9,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import type { FontWeight, ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
+import { terminalInstances as registry, type TerminalInstance } from '@/lib/terminalInstances';
 import { tabTitleFromTerminal } from '@/lib/terminalTitle';
 import '@xterm/xterm/css/xterm.css';
 import '@/styles/terminal-fonts.css';
@@ -28,16 +29,6 @@ export interface TerminalSearchOptions {
   regex?: boolean;
 }
 
-export interface TerminalInstance {
-  term: Terminal;
-  fit: FitAddon;
-  search: SearchAddon;
-  host: HTMLDivElement;
-  opened: boolean;
-  onTitle?: (title: string) => void;
-}
-
-const registry = new Map<string, TerminalInstance>();
 let listenersBound = false;
 
 function ensureListeners(): void {
@@ -156,13 +147,4 @@ export function findInTerminal(
 
 export function clearTerminalSearch(termId: string): void {
   registry.get(termId)?.search.clearDecorations();
-}
-
-/** 关 tab:销毁 xterm(pty 由调用方 dispose) */
-export function releaseTerminal(termId: string): void {
-  const instance = registry.get(termId);
-  if (!instance) return;
-  registry.delete(termId);
-  instance.term.dispose();
-  instance.host.remove();
 }

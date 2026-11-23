@@ -31,14 +31,13 @@ vi.mock('@/stores/sidePanel', () => ({
     },
   },
 }));
-vi.mock('@/lib/terminalRegistry', () => ({ releaseTerminal: vi.fn() }));
 
-import { releaseTerminal } from '@/lib/terminalRegistry';
 import {
   bindSidePanelDock,
   disposeConversationResources,
   watchSidePanelAutoCollapse,
 } from './sidePanelDock';
+import { type TerminalInstance, terminalInstances } from './terminalInstances';
 
 function fakeDock() {
   const panels: { id: string }[] = [];
@@ -184,15 +183,23 @@ describe('disposeConversationResources 回收终端', () => {
   // 曾经异步 import 回收：同一会话的多个终端并发 import，测试结束后还在加载 xterm
   it('会话里每个终端都当场回收，不留异步尾巴', () => {
     vi.stubGlobal('window', {});
+    const fakeTerminal = () => ({ term: { dispose: vi.fn() }, host: { remove: vi.fn() } });
+    const t1 = fakeTerminal();
+    const t2 = fakeTerminal();
+    terminalInstances.set('term-1', t1 as unknown as TerminalInstance);
+    terminalInstances.set('term-2', t2 as unknown as TerminalInstance);
     const dock = fakeDock();
     dock.add('files');
     dock.add('term-1');
     dock.add('term-2');
     bindSidePanelDock('dock', dock.api);
-    vi.mocked(releaseTerminal).mockClear();
 
     disposeConversationResources('dock');
 
-    expect(vi.mocked(releaseTerminal).mock.calls).toEqual([['term-1'], ['term-2']]);
+    expect(t1.term.dispose).toHaveBeenCalledOnce();
+    expect(t1.host.remove).toHaveBeenCalledOnce();
+    expect(t2.term.dispose).toHaveBeenCalledOnce();
+    expect(t2.host.remove).toHaveBeenCalledOnce();
+    expect(terminalInstances.size).toBe(0);
   });
 });
