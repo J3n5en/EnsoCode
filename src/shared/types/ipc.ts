@@ -14,6 +14,11 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_REGISTER: 'conversations:register',
   /** 把会话改挂到另一个项目：改权威 projectId，并补丁 persist 行 */
   CONVERSATIONS_MOVE: 'conversations:move',
+  CONVERSATIONS_IMPORT_PROJECT: 'conversations:import-project',
+  /** 整项目导入前的预览：源目录是否还在、已复制过几次 */
+  CONVERSATIONS_IMPORT_PROJECT_PREVIEW: 'conversations:import-project-preview',
+  /** 只把已无会话的项目移出列表，不删任何文件 */
+  PROJECT_REMOVE_EMPTY: 'projects:remove-empty',
   /** main → 主界面 renderer：它的会话写回被拒收，需重新读会话 */
   CONVERSATIONS_RESYNC: 'conversations:resync',
   /** 秘书：工作台与聊天卡片读的同一份 Main 状态 */

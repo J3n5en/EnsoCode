@@ -17,6 +17,8 @@ interface ConfirmDialogProps {
   description?: string;
   /** 确认按钮文案(动作动词) */
   confirmLabel: string;
+  /** 取消按钮文案；缺省「取消」 */
+  cancelLabel?: string;
   onConfirm: () => void;
   /** 从另一个弹窗里打开时用 nested，压在其上方 */
   zIndexLevel?: 'base' | 'nested';
@@ -29,6 +31,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   onConfirm,
   zIndexLevel,
 }: ConfirmDialogProps) {
@@ -42,7 +45,7 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         <AlertDialogFooter variant="bare">
           <AlertDialogClose render={<Button variant="outline" size="sm" />}>
-            {t('Cancel')}
+            {cancelLabel ?? t('Cancel')}
           </AlertDialogClose>
           <Button
             variant="destructive"

@@ -38,6 +38,7 @@ import {
   Eraser,
   FileText,
   FolderGit2,
+  FolderInput,
   FolderOpen,
   FolderPlus,
   Folders,
@@ -84,6 +85,7 @@ import {
 } from '@/components/chat/dragDrop';
 import { GroupChips } from '@/components/chat/GroupChips';
 import { GroupEditorDialog } from '@/components/chat/GroupEditorDialog';
+import { ImportProjectSessionsDialog } from '@/components/chat/ImportProjectSessionsDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import {
   canMoveConversationFrom,
@@ -707,6 +709,7 @@ export function Sidebar({
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
+  const [importSessionsProject, setImportSessionsProject] = useState<Project | null>(null);
   // 项目行展开了次级操作(设置/导入/归档/删除)的项目 id
   // 待确认的删除动作(项目连带其对话 / 单个对话)
   const [pendingRemove, setPendingRemove] = useState<
@@ -1618,6 +1621,17 @@ export function Sidebar({
                     icon: <HardDriveDownload />,
                     onSelect: () => setImportProject(project),
                   },
+                  ...(project.kind !== 'scratch' && project.kind !== 'secretary'
+                    ? [
+                        {
+                          kind: 'item' as const,
+                          key: 'import-project-sessions',
+                          label: t('Import conversations from another project…'),
+                          icon: <FolderInput />,
+                          onSelect: () => setImportSessionsProject(project),
+                        },
+                      ]
+                    : []),
                   { kind: 'separator', key: 'sep-group' },
                   // 分组列表是动态的,收进二级菜单,否则分组一多主菜单就被撑长
                   {
@@ -2247,6 +2261,10 @@ export function Sidebar({
         }}
       />
       <ImportSessionDialog project={importProject} onClose={() => setImportProject(null)} />
+      <ImportProjectSessionsDialog
+        project={importSessionsProject}
+        onClose={() => setImportSessionsProject(null)}
+      />
       <ConfirmDialog
         open={pendingWorktreeAction !== null}
         onOpenChange={(open) => {
