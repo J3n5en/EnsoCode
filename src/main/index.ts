@@ -308,6 +308,7 @@ if (!gotTheLock) {
     setTrayRestartActions({
       restartApp: () => void appRestart.restart(),
       restartState: () => appRestart.state,
+      reportError: showMenuError,
     });
     registerAppRestartHandlers(forceExitWait);
     installAppMenu(readLocale());
@@ -351,7 +352,10 @@ if (!gotTheLock) {
           await autoUpdaterService.downloadUpdate();
         },
         syncTrayToggleShortcut,
-        syncAppLanguage: () => installAppMenu(readLocale()),
+        syncAppLanguage: () => {
+          installAppMenu(readLocale());
+          rebuildTrayMenu();
+        },
         syncDropShelf,
       },
     });

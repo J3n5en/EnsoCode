@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   win: null as null | Record<string, ReturnType<typeof vi.fn>>,
   closeNodeSettingsWindows: vi.fn(),
   trays: [] as Array<{ on: ReturnType<typeof vi.fn> }>,
+  settings: {} as Record<string, unknown>,
 }));
 Object.assign(process, { resourcesPath: '/resources' });
 
@@ -42,7 +43,7 @@ vi.mock('electron', async () => {
 });
 vi.mock('../ipc/settings', () => ({
   flushSettings: vi.fn(),
-  readSettings: () => ({}),
+  readSettings: () => mocks.settings,
   readTrayPreventDisplaySleep: () => false,
   readTraySleepPolicy: () => 'when-agent-running',
   writeTrayPreventDisplaySleep: vi.fn(),
@@ -77,7 +78,7 @@ vi.mock('./pairSessionHost', () => ({ setPairHeadless: vi.fn() }));
 vi.mock('./nodeRemote', () => ({ closeNodeSettingsWindows: mocks.closeNodeSettingsWindows }));
 
 import { app, Menu } from 'electron';
-import { writeTrayReenterAfterUpdate } from '../ipc/settings';
+import { flushSettings, writeTrayReenterAfterUpdate } from '../ipc/settings';
 import { getWindowWebContents } from '../windows/createAppWindow';
 import { attachAppCloseConfirm } from './appCloseConfirm';
 import type { AppRestartState } from './appRestart';
@@ -332,17 +333,21 @@ function trayItems() {
 
 describe('tray restart', () => {
   let state: AppRestartState;
+  const reportError = vi.fn();
   const restartApp = vi.fn(() => {
     state = 'restarting';
   });
 
   beforeEach(() => {
     state = 'idle';
+    mocks.settings = {};
     restartApp.mockClear();
+    reportError.mockClear();
+    vi.mocked(flushSettings).mockClear();
     vi.mocked(writeTrayReenterAfterUpdate).mockClear();
     vi.mocked(Menu.buildFromTemplate).mockClear();
     mocks.win = eventedWindow().win;
-    setTrayRestartActions({ restartApp, restartState: () => state });
+    setTrayRestartActions({ restartApp, restartState: () => state, reportError });
   });
 
   it('「重启」紧挨在「退出」上面', () => {
@@ -384,10 +389,54 @@ describe('tray restart', () => {
     await vi.waitFor(() => expect(isServerMode()).toBe(true));
     mocks.hibernate.release();
     await entering;
+    try {
+      vi.mocked(flushSettings).mockClear();
+      trayItems().at(-2)?.click?.();
+      expect(writeTrayReenterAfterUpdate).toHaveBeenCalledWith(true);
+      expect(flushSettings).toHaveBeenCalledOnce();
+      expect(restartApp).toHaveBeenCalledOnce();
+    } finally {
+      leaveServerMode();
+    }
+    expect(writeTrayReenterAfterUpdate).toHaveBeenLastCalledWith(false);
+  });
 
-    trayItems().at(-2)?.click?.();
-    expect(writeTrayReenterAfterUpdate).toHaveBeenCalledWith(true);
-    expect(restartApp).toHaveBeenCalledOnce();
-    leaveServerMode();
+  it('重启抛错时回滚回托盘标记、立即落盘并汇报错误', async () => {
+    vi.mocked(getWindowWebContents).mockReturnValueOnce({
+      isDestroyed: () => true,
+    } as unknown as WebContents);
+    const entering = enterServerMode();
+    await vi.waitFor(() => expect(isServerMode()).toBe(true));
+    mocks.hibernate.release();
+    await entering;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.mocked(flushSettings).mockClear();
+      restartApp.mockImplementationOnce(() => {
+        throw new Error('relaunch failed');
+      });
+      trayItems().at(-2)?.click?.();
+      expect(writeTrayReenterAfterUpdate).toHaveBeenNthCalledWith(1, true);
+      expect(writeTrayReenterAfterUpdate).toHaveBeenNthCalledWith(2, false);
+      expect(flushSettings).toHaveBeenCalledTimes(2);
+      expect(reportError).toHaveBeenCalledWith('Restart failed: relaunch failed');
+    } finally {
+      log.mockRestore();
+      leaveServerMode();
+    }
+  });
+
+  it('中文模式下托盘重启项和进行中文案为中文', () => {
+    mocks.settings = { 'enso-settings': { state: { language: 'zh' } } };
+    ensureTray();
+    expect(trayItems().at(-2)).toMatchObject({ label: '重启' });
+
+    state = 'restarting';
+    ensureTray();
+    expect(trayItems().at(-2)).toMatchObject({ label: '正在重启…', enabled: false });
+
+    state = 'waiting-for-tools';
+    ensureTray();
+    expect(trayItems().at(-2)).toMatchObject({ label: '等命令跑完再重启…', enabled: false });
   });
 });

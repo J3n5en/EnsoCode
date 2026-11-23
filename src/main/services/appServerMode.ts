@@ -8,6 +8,7 @@ import {
   trayClickAction,
   trayIconCandidates,
 } from '@shared/appServerMode';
+import { translate } from '@shared/i18n';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   app,
@@ -55,6 +56,7 @@ const watchedWindows = new WeakSet<BrowserWindow>();
 export interface TrayRestartActions {
   restartApp(): void;
   restartState(): AppRestartState;
+  reportError?(message: string): void;
 }
 
 let trayRestart: TrayRestartActions | undefined;
@@ -280,8 +282,10 @@ export async function enterServerMode(): Promise<void> {
 
 export function leaveServerMode(): void {
   transition++;
+  const wasActive = active;
   active = false;
   setPairHeadless(false);
+  if (wasActive) writeTrayReenterAfterUpdate(false);
   flushSettings();
   if (!isVerifyLaunch()) app.dock?.show();
   if (!isMainWindowAlive()) createMainWindow();
@@ -299,12 +303,22 @@ export function restartFromTray(): void {
   if (trayRestart?.restartState() !== 'idle') return;
   // 托盘模式下重启：新实例冷启动等 renderer 推来目录后回到托盘，与更新后重启同一机制
   const reenter = active;
-  if (reenter) writeTrayReenterAfterUpdate(true);
+  if (reenter) {
+    writeTrayReenterAfterUpdate(true);
+    flushSettings();
+  }
   try {
     trayRestart.restartApp();
   } catch (error) {
-    if (reenter) writeTrayReenterAfterUpdate(false);
+    if (reenter) {
+      writeTrayReenterAfterUpdate(false);
+      flushSettings();
+    }
     console.error('[tray] 重启失败:', error);
+    const reason = error instanceof Error ? error.message : String(error);
+    trayRestart.reportError?.(
+      translate(languageIsZh() ? 'zh' : 'en', 'Restart failed: {{error}}', { error: reason })
+    );
   }
 }
 
