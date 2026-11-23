@@ -76,6 +76,8 @@ const KEEP = keepRequested(process.env, process.argv);
 // 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
 const MEMORY_ONLY = process.argv.includes('--memory-only');
 const FORWARD_IMAGES_ONLY = process.argv.includes('--forward-images-only');
+// 只跑「新秘书没开过会话，第一条联系消息」这一段
+const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contact-only');
 // 只跑 setup + 结构化完成结果段：goal_complete 带 result → 宿主核验 → 回传、看板与结果弹窗
 const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
 
@@ -730,6 +732,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (FORWARD_IMAGES_ONLY) {
     await verifyForwardImages(cdp, setup);
+    return;
+  }
+  if (NEW_SECRETARY_CONTACT_ONLY) {
+    await verifyNewSecretaryFirstContact(cdp);
     return;
   }
   if (GOAL_RESULT_ONLY) {
@@ -3174,6 +3180,213 @@ async function shotTelegramCard(cdp, message, file) {
   `);
   await cdp.shotClip(file, rect);
   await cdp.evaluate(`document.getElementById('tg-card-preview')?.remove(); 'ok'`);
+}
+
+/**
+ * 新秘书还没开过会话：不打开它，直接从假 Telegram 发第一条消息，要能自动建会话并回复。
+ * 两个新秘书各用一个 bot，同一时刻一起收到消息（其中一个连收两条），各自只建一条会话。
+ */
+async function verifyNewSecretaryFirstContact(cdp) {
+  const page = cdp.json.bind(cdp);
+  const tg = telegram.state;
+  const push = telegram.push;
+  const t0 = Date.now();
+  const timeline = [];
+  const mark = (event) => {
+    timeline.push({ ms: Date.now() - t0, event });
+    log(`  [+${Date.now() - t0}ms] ${event}`);
+  };
+  const tokens = { xm: tg.token, xk: '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw' };
+  const chats = { xm: 777009, xk: 777010 };
+
+  log('== 新秘书首条联系消息：建两个秘书，不打开、不建会话');
+  const created = await page(`
+    const api = window.electronAPI.secretary;
+    const make = async (name) => {
+      const result = await api.create();
+      if (!result.ok) return { error: result.error };
+      const saved = await api.saveProfile(
+        {
+          name,
+          avatar: { color: '#22c55e' },
+          visibleProjectIds: 'all',
+          maxRunningDispatches: 3,
+          patrolEnabled: false,
+          replyLanguage: 'ui',
+          style: 'concise',
+          notify: 'off',
+          addressAs: null,
+          dailyBriefAt: null,
+        },
+        result.secretaryId
+      );
+      return saved.ok ? { id: result.secretaryId, projectId: result.projectId } : { error: saved.error };
+    };
+    const xm = await make('小幂');
+    const xk = await make('小葵');
+    const projection = await window.electronAPI.sourceAuthority.read();
+    const count = (projectId) =>
+      projection.conversations.filter((c) => c.projectId === projectId && c.kind === 'root').length;
+    return JSON.stringify({
+      ok: Boolean(xm.id && xk.id),
+      xm,
+      xk,
+      conversations: { xm: count(xm.projectId), xk: count(xk.projectId) },
+    });
+  `);
+  assert(
+    created.ok && created.conversations.xm === 0 && created.conversations.xk === 0,
+    '新秘书: 两个秘书建好，都还没有会话',
+    created
+  );
+  mark('两个新秘书建好（0 条会话）');
+
+  log('== 新秘书首条联系消息：各自绑一个 bot');
+  const codes = await page(`
+    const api = window.electronAPI.secretary;
+    const bind = async (token, secretaryId) => {
+      const result = await api.contactBind(token, secretaryId);
+      if (!result.ok) return null;
+      return (await api.contactState(secretaryId)).telegram.bind?.code ?? null;
+    };
+    return JSON.stringify({
+      xm: await bind(${JSON.stringify(tokens.xm)}, ${JSON.stringify(created.xm.id)}),
+      xk: await bind(${JSON.stringify(tokens.xk)}, ${JSON.stringify(created.xk.id)}),
+    });
+  `);
+  assert(codes.xm && codes.xk, '新秘书: 两个 bot 都拿到绑定码', codes);
+  const startUpdate = (key, text, id) => ({
+    update_id: id,
+    message: {
+      message_id: id,
+      chat: { id: chats[key], type: 'private' },
+      from: { id: chats[key], username: `u${chats[key]}`, first_name: 'J' },
+      text,
+    },
+  });
+  push(startUpdate('xm', `/start ${codes.xm}`, 101), tokens.xm);
+  push(startUpdate('xk', `/start ${codes.xk}`, 201), tokens.xk);
+  await waitFor(
+    async () => {
+      const probe = await page(`
+        const api = window.electronAPI.secretary;
+        const a = await api.contactState(${JSON.stringify(created.xm.id)});
+        const b = await api.contactState(${JSON.stringify(created.xk.id)});
+        return JSON.stringify({ a: a.telegram?.status, b: b.telegram?.status });
+      `);
+      return probe.a === 'bound' && probe.b === 'bound' ? probe : null;
+    },
+    'both bound',
+    20_000,
+    300
+  );
+  mark('两个 bot 绑定完成');
+
+  log('== 新秘书首条联系消息：同一刻发消息（小幂连收两条）');
+  const since = tg.sent.length;
+  push(startUpdate('xm', '目前有什么项目在跑 [[reply:小幂收到了]]', 102), tokens.xm);
+  push(startUpdate('xm', '还有别的吗 [[reply:小幂第二条]]', 103), tokens.xm);
+  push(startUpdate('xk', '在吗 [[reply:小葵收到了]]', 202), tokens.xk);
+  mark('假 TG 推入 3 条消息');
+  const replied = (chat, text) =>
+    tg.sent.slice(since).find((m) => m.chat_id === chat && String(m.text ?? '').includes(text));
+  const seen = new Set();
+  await waitFor(
+    async () => {
+      const failed = tg.sent.slice(since).find((m) => String(m.text ?? '').includes('没送到'));
+      if (failed) throw new Error(`新秘书: 收到失败回复「${failed.text}」`);
+      for (const [key, text] of [
+        ['xm', '小幂'],
+        ['xk', '小葵收到了'],
+      ]) {
+        if (!seen.has(text) && replied(chats[key], text)) {
+          seen.add(text);
+          mark(`假 TG 收到回复「${text}」`);
+        }
+      }
+      return seen.size === 2;
+    },
+    'replies from new secretaries',
+    90_000,
+    200
+  );
+  const failures = tg.sent.slice(since).filter((m) => String(m.text ?? '').includes('没送到'));
+  assert(failures.length === 0, '新秘书: 没有「没送到」的失败回复', failures);
+  assert(seen.size === 2, '新秘书: 两个秘书都在 Telegram 上回了话', [...seen]);
+
+  const after = await page(`
+    const projection = await window.electronAPI.sourceAuthority.read();
+    const ids = (projectId) =>
+      projection.conversations
+        .filter((c) => c.projectId === projectId && c.kind === 'root')
+        .map((c) => c.conversationId);
+    return JSON.stringify({
+      xm: ids(${JSON.stringify(created.xm.projectId)}),
+      xk: ids(${JSON.stringify(created.xk.projectId)}),
+      focused: (await SEC()).getState().focusedId,
+    });
+  `);
+  assert(
+    after.xm.length === 1 && after.xk.length === 1,
+    '新秘书: 每个秘书只建了一条会话，没有重复',
+    after
+  );
+  // 连发的两条都进了小幂的会话、各答了一轮：消息不丢（手机上的回复按现有规则合并）
+  const turns = await waitFor(
+    () => {
+      const file = readdirSync(sessionsDir)
+        .map((name) => path.join(sessionsDir, name))
+        .find((candidate) => readFileSync(candidate, 'utf8').includes(`chatId=${chats.xm}`));
+      if (!file) return null;
+      const roles = readFileSync(file, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line).message)
+        .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+        .map((message) => {
+          const content = message.content;
+          const text =
+            typeof content === 'string' ? content : content.map((part) => part.text ?? '').join('');
+          return `${message.role}:${text.includes('目前有什么项目在跑') ? 'q1' : text.includes('还有别的吗') ? 'q2' : text.slice(0, 12)}`;
+        });
+      return roles.length >= 4 ? roles : null;
+    },
+    'xm session turns',
+    30_000,
+    300
+  );
+  assert(
+    turns.includes('user:q1') &&
+      turns.includes('user:q2') &&
+      turns.filter((r) => r.startsWith('assistant:')).length >= 2,
+    '新秘书: 连发的两条都进了会话并各答一轮，消息不丢',
+    turns
+  );
+  mark(`小幂会话轮次 ${JSON.stringify(turns)}`);
+  const audit = (id) =>
+    readFileSync(path.join(ENV, 'secretary', 'members', id, 'audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((entry) => /^(secretary_conversation_start|contact_inbound)/.test(entry.op))
+      .map((entry) => ({
+        at: entry.at - t0,
+        op: entry.op,
+        ok: entry.ok,
+        conversation: entry.secretaryConversationId,
+        ...(entry.ok ? {} : { detail: entry.detail }),
+      }));
+  const audits = { xm: audit(created.xm.id), xk: audit(created.xk.id) };
+  assert(
+    audits.xm.filter((entry) => entry.op === 'secretary_conversation_start').length === 1 &&
+      audits.xk.filter((entry) => entry.op === 'secretary_conversation_start').length === 1 &&
+      [...audits.xm, ...audits.xk].every((entry) => entry.ok),
+    '新秘书: 审计里各一次建会话，入站全部成功',
+    audits
+  );
+  log(`  audit: ${JSON.stringify(audits)}`);
+  log(`  timeline: ${JSON.stringify(timeline)}`);
+  await cdp.shot(path.join(ART, '20-new-secretary-first-contact.png'));
 }
 
 /** 联系方式：绑定向导、里程碑出站、手机发话、按钮回答，全程打假 Telegram */

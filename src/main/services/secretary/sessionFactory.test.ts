@@ -10,6 +10,7 @@ import type { AgentSpawnRequest, ProjectAuthority } from '../../../shared/types/
 import type { ModelProvider } from '../../../shared/types/llm';
 import type { SessionWorktree } from '../../../shared/types/worktree';
 import {
+  createSecretaryConversationFromMain,
   createSessionFromMain,
   type MainSessionDefaults,
   mainSessionDefaults,
@@ -451,5 +452,63 @@ describe('派出会话的静音与无人值守', () => {
     expect(row.muted).toBeUndefined();
     expect(row.autoRejectApprovals).toBeUndefined();
     expect(h.spawns[0].autoRejectApprovals).toBeUndefined();
+  });
+});
+
+describe('createSecretaryConversationFromMain', () => {
+  const SECRETARY: ProjectAuthority = {
+    projectId: 'sec-proj',
+    canonicalPath: '/data/secretary/members/s-1/workspace',
+    kind: 'secretary',
+    state: 'active',
+    version: 2,
+  };
+
+  it('在秘书的隐藏项目里建会话并拉起，不发消息、不建 worktree', async () => {
+    const h = harness({ project: SECRETARY });
+    await expect(
+      createSecretaryConversationFromMain(h.ports, { projectId: 'sec-proj', title: '小幂' })
+    ).resolves.toEqual({ ok: true, conversationId: 'conv-1' });
+    expect(h.log).toEqual(['createConversation', 'writeRow', 'spawn']);
+    expect(h.rows.get('conv-1')).toMatchObject({
+      projectId: 'sec-proj',
+      title: '小幂',
+      driver: 'main',
+      lastProviderId: 'p',
+      lastModelId: 'm1',
+    });
+    expect(h.spawns[0]).toMatchObject({
+      sessionId: 'conv-1',
+      cwd: '/data/secretary/members/s-1/workspace',
+      providerId: 'p',
+      modelId: 'm1',
+    });
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('没有可用模型：什么都不建，原因交回去', async () => {
+    const h = harness({ project: SECRETARY, defaults: null });
+    await expect(
+      createSecretaryConversationFromMain(h.ports, { projectId: 'sec-proj', title: '小幂' })
+    ).resolves.toEqual({ ok: false, error: 'no usable model' });
+    expect(h.log).toEqual([]);
+  });
+
+  it('不是秘书项目：拒绝', async () => {
+    const h = harness();
+    await expect(
+      createSecretaryConversationFromMain(h.ports, { projectId: 'proj-1', title: 'x' })
+    ).resolves.toEqual({ ok: false, error: 'not an active secretary project' });
+    expect(h.log).toEqual([]);
+  });
+
+  it('拉起失败：撤掉行和会话，不留半截', async () => {
+    const h = harness({ project: SECRETARY });
+    h.spawnResult = { ok: false, error: 'boom' };
+    await expect(
+      createSecretaryConversationFromMain(h.ports, { projectId: 'sec-proj', title: '小幂' })
+    ).resolves.toEqual({ ok: false, error: 'boom' });
+    expect(h.removedRows).toEqual(['conv-1']);
+    expect(h.removedConversations).toEqual(['conv-1']);
   });
 });
