@@ -727,14 +727,17 @@ export function EnsoPluginsSettings({
       setError(result.error ?? t('Install failed'));
     } else {
       setUrl('');
-      const enabled = preview.existingVersion
-        ? { ok: true }
-        : await window.electronAPI.extensionPlugins.setEnabled(preview.id, true);
-      addToast({
-        type: enabled.ok ? 'success' : 'warning',
-        title: t('{{name}} installed', { name: preview.name }),
-        description: enabled.ok ? undefined : enabled.error,
-      });
+      // 扩大授权的更新只是暂存待授权：Main 会发「需要授权」通知，这里不报已安装
+      if (!preview.existingVersion || !preview.expands) {
+        const enabled = preview.existingVersion
+          ? { ok: true }
+          : await window.electronAPI.extensionPlugins.setEnabled(preview.id, true);
+        addToast({
+          type: enabled.ok ? 'success' : 'warning',
+          title: t('{{name}} installed', { name: preview.name }),
+          description: enabled.ok ? undefined : enabled.error,
+        });
+      }
       void refresh();
     }
     setPreview(null);

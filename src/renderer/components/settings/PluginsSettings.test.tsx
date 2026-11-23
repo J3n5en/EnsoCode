@@ -15,9 +15,11 @@ const harness = vi.hoisted(() => ({
   commit: vi.fn(),
   discard: vi.fn(),
   setEnabled: vi.fn(async () => ({ ok: true })),
+  addToast: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/ui/toast', () => ({ addToast: harness.addToast }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: unknown) => unknown) =>
     select({
@@ -457,6 +459,8 @@ describe('插件市场安装', () => {
     await armConfirm();
     await act(async () => dialogButton('Install').click());
     expect(harness.setEnabled).not.toHaveBeenCalled();
+    // 还没装上新版：不报「已安装」，由 Main 的待授权通知提示去允许
+    expect(harness.addToast).not.toHaveBeenCalled();
     expect(
       marketDialog()?.querySelector('[data-market]')?.getAttribute('data-installed')
     ).toContain('market.a@1.0.0>2.0.0');
