@@ -297,6 +297,7 @@ import type {
 } from '@shared/types/worktree';
 import type { UpdateChannel } from '@shared/updater/channel';
 import type { AutoRestartMode } from '@shared/updater/idleRestart';
+import type { GoalUpstreamRetry, ProviderHealthSnapshot } from '@shared/upstreamRecovery';
 import type { BotUsageOverviewResult, BotUsageSummaryResult } from '@shared/usage/botUsage';
 import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import type { TitleBarAppearance } from '@shared/windowControls';
@@ -1317,6 +1318,24 @@ const electronAPI = {
       options?: { unfinishedOnly?: boolean }
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_RETRY, sessionId, options),
+    reportUpstreamFailure: (input: {
+      sessionId: string;
+      error: string;
+      provider?: string;
+      retryExhausted?: boolean;
+      since?: number;
+      previousAttempt?: number;
+    }): Promise<
+      | { action: 'wait'; retry: GoalUpstreamRetry }
+      | { action: 'exhausted'; note: string }
+      | { action: 'permanent'; hint?: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.AGENT_UPSTREAM_REPORT_FAILURE, input),
+    retryUpstreamNow: (waiterId: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_UPSTREAM_RETRY_NOW, { waiterId }),
+    cancelUpstreamWait: (sessionId: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_UPSTREAM_CANCEL, sessionId),
+    listUpstreamHealth: (): Promise<ProviderHealthSnapshot[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_UPSTREAM_HEALTH_LIST),
     /** 释放父会话（worker 侧销毁，jsonl 留盘），之后可携新 cwd resume（Move to worktree） */
     release: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_RELEASE, sessionId),
@@ -1472,6 +1491,24 @@ const electronAPI = {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_EVENT, listener);
+    },
+    onUpstreamHealth: (callback: (snapshots: ProviderHealthSnapshot[]) => void): (() => void) => {
+      const listener = (_: unknown, snapshots: ProviderHealthSnapshot[]) => callback(snapshots);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_UPSTREAM_HEALTH_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_UPSTREAM_HEALTH_EVENT, listener);
+    },
+    onUpstreamWake: (
+      callback: (event: {
+        conversationId: string;
+        reason: 'probe' | 'recovered' | 'manual';
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _: unknown,
+        event: { conversationId: string; reason: 'probe' | 'recovered' | 'manual' }
+      ) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_UPSTREAM_WAKE_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_UPSTREAM_WAKE_EVENT, listener);
     },
   },
 
