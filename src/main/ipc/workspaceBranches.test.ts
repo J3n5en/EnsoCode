@@ -60,6 +60,9 @@ vi.mock('../services/gitBranches', async (importOriginal) => ({
   validateWorkspaceBranch: mocks.validate,
   checkWorkspaceBranchSwitch: mocks.check,
 }));
+
+await import('./worktree');
+
 const invoke = (channel: string, ...args: unknown[]) =>
   mocks.handlers.get(channel)!({ sender: { id: 1 } }, ...args);
 const registry = () => new WorktreeRegistry(join(mocks.root, 'worktrees.json'));

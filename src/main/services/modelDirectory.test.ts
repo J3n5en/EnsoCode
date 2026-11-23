@@ -42,6 +42,8 @@ vi.mock('./oauthProviders', () => ({
   getRuntime: () => mocks.getRuntime(),
 }));
 
+await import('./modelDirectory');
+
 const customProvider = (models: ModelProvider['models']): ModelProvider => ({
   id: 'custom-1',
   name: '我的中转',

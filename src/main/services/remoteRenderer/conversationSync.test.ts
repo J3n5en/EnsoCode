@@ -15,6 +15,8 @@ const peers = vi.hoisted(() => ({ local: null as unknown, remote: [] as unknown[
 vi.mock('../renderers', () => ({ localMainContents: () => peers.local }));
 vi.mock('./senders', () => ({ remoteSenders: () => peers.remote }));
 
+await import('./conversationSync');
+
 let nextId = 1;
 function peer(): FakePeer {
   const sent: Array<Record<string, unknown>> = [];

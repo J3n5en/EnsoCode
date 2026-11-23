@@ -94,6 +94,9 @@ vi.mock('./sessionIndex', () => ({
   },
 }));
 
+// 冷加载 bots 依赖图要几秒，放在收集阶段做一次；beforeEach 的 resetModules 之后只重新求值，不再受 hookTimeout 约束
+await import('./bots');
+
 const main = { sender: { id: 1 } };
 it('restricts queued interjection to the writable desktop Main renderer and validates identifiers', async () => {
   const channel = IPC_CHANNELS.BOT_CHAT_INTERJECT_QUEUED;

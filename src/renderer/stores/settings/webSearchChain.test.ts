@@ -1,5 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -26,13 +25,9 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
+const settings = await import('./index');
 
 describe('webSearchChain settings', () => {
-  beforeAll(async () => {
-    settings = await import('./index');
-  });
-
   it('缺省为空链；setWebSearchChain 收窄脏数据并去重', () => {
     expect(settings.useSettingsStore.getState().webSearchChain).toEqual([]);
     settings.useSettingsStore

@@ -43,6 +43,8 @@ vi.mock('../services/pairGuest', () => ({
   }),
 }));
 
+await import('./nodes');
+
 describe('registerNodesHandlers → renderer 推送目标', () => {
   beforeEach(async () => {
     vi.clearAllMocks();

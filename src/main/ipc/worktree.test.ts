@@ -54,6 +54,9 @@ vi.mock('../services/worktree/service', () => ({
   repoIsClean: vi.fn(),
   worktreeStatus: mocks.status,
 }));
+
+await import('./worktree');
+
 const record: SessionWorktree = {
   conversationId: 'source',
   projectId: 'p',
