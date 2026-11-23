@@ -527,12 +527,14 @@ function scheduleWrite(
         contents.send(IPC_CHANNELS.SETTINGS_CHANGED);
       }
     }
-    sendToRemoteRenderers(
-      IPC_CHANNELS.SETTINGS_CHANGED,
-      [],
-      broadcast === 'all-renderers' ? undefined : sender?.id,
-      patchedRemoteMain ? 'main' : undefined
-    );
+    // 远端 settings:read 已剥离 enso-conversations，主界面走会话补丁、设置页不消费会话，无需唤醒任何远端重读
+    if (!patchedRemoteMain) {
+      sendToRemoteRenderers(
+        IPC_CHANNELS.SETTINGS_CHANGED,
+        [],
+        broadcast === 'all-renderers' ? undefined : sender?.id
+      );
+    }
 
     if (pendingWrite) {
       clearTimeout(pendingWrite);
