@@ -365,6 +365,10 @@ export const IPC_CHANNELS = {
   AGENT_SUBAGENT_PROGRESS: 'agent:subagent-progress',
   /** Main → renderer：子代理进度全量快照推送（REPLACE 语义，payload 自带 sessionId） */
   AGENT_SUBAGENT_PROGRESS_CHANGED: 'agent:subagent-progress-changed',
+  /** 获取所有会话当前挂着的自定提醒摘要快照（含冷会话） */
+  AGENT_REMINDERS_LIST: 'agent:reminders-list',
+  /** Main → renderer：单个根会话的自定提醒摘要全量推送（REPLACE 语义） */
+  AGENT_REMINDERS_CHANGED: 'agent:reminders-changed',
   AGENT_SUBAGENT_STOP: 'agent:subagent-stop',
   AGENT_WORKFLOW_STOP: 'agent:workflow-stop',
   AGENT_REWIND: 'agent:rewind',

@@ -780,6 +780,19 @@ describe('重启保留后台命令的协议', () => {
     expect(
       parseAgentWorkerEvent({ type: 'session-reminder-due', sessionId: 'a', extra: 1 })
     ).toBeNull();
+    const remChanged = {
+      type: 'session-reminders-changed',
+      sessionId: 'conv-1',
+      reminders: [{ id: 'r00000001', dueAt: 123456, label: 'check CI' }],
+    };
+    expect(parseAgentWorkerEvent(remChanged)).toEqual(remChanged);
+    expect(parseAgentWorkerEvent({ ...remChanged, sessionId: '' })).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ ...remChanged, reminders: [{ id: 'r1', dueAt: -1 }] })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ ...remChanged, reminders: [{ id: 'r1', dueAt: 1, prompt: 'leak' }] })
+    ).toBeNull();
     const unopened = {
       type: 'unopened-background-tasks',
       sessionId: 'conv-1',

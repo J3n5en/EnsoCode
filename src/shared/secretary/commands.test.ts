@@ -354,4 +354,30 @@ describe('会话徽标', () => {
     expect(badgeText('zh', 'subagent')).toBe('等子代理');
     expect(badgeText('en', 'subagent')).toBe('Waiting on subagent');
   });
+
+  it('空闲且挂着未到点提醒时徽标是 reminder（等提醒），进入运行中后切回 running', () => {
+    const dueAt = new Date(2026, 4, 1, 14, 25, 0).getTime();
+    const pendingReminder = { id: 'r00000001', dueAt, label: '检查 Beta #153', count: 1 };
+    expect(sessionBadge({ state: 'idle', continuing: true, pendingReminder })).toBe('reminder');
+    expect(sessionBadge({ state: 'idle', pendingReminder })).toBe('reminder');
+    expect(sessionBadge({ state: 'running', pendingReminder })).toBe('running');
+    expect(badgeText('zh', 'reminder')).toBe('等提醒');
+    expect(badgeText('en', 'reminder')).toBe('Waiting for reminder');
+    const status = formatStatusMessage('zh', {
+      running: [
+        {
+          title: 'Beta mac 构建排队',
+          projectName: 'enso-code',
+          badge: 'reminder',
+          pendingReminder,
+          since: dueAt - 120_000,
+          conversationId: '45b1a6d7',
+        },
+      ],
+      needsYou: [],
+      now: dueAt - 60_000,
+    });
+    expect(status).toContain('等提醒 · 14:25');
+    expect(status).not.toContain('续跑中');
+  });
 });

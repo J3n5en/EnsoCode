@@ -1,3 +1,4 @@
+import { formatReminderClock, type PendingReminderView } from '../reminders';
 import type {
   SecretaryDaily,
   SecretaryFollowingView,
@@ -160,6 +161,7 @@ export type ContactBadge =
   | 'running'
   | 'waiting'
   | 'background'
+  | 'reminder'
   | 'persistent'
   | 'subagent'
   | 'continuing'
@@ -174,6 +176,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     running: '运行中',
     waiting: '等你回答',
     background: '等后台任务',
+    reminder: '等提醒',
     persistent: '有常驻服务',
     subagent: '等子代理',
     continuing: '续跑中',
@@ -186,6 +189,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     running: 'Running',
     waiting: 'Waiting for you',
     background: 'Waiting on a background task',
+    reminder: 'Waiting for reminder',
     persistent: 'Service running',
     subagent: 'Waiting on subagent',
     continuing: 'Continuing',
@@ -211,6 +215,7 @@ export function sessionBadge(card: {
   backgroundRunning?: boolean;
   backgroundPersistent?: boolean;
   subagents?: readonly { agentId: string; runId: string; title?: string; elapsedMs: number }[];
+  pendingReminder?: Pick<PendingReminderView, 'dueAt' | 'label'>;
   continuing?: boolean;
   /** 巡检判定停住：会话还挂着但已经不动了，比「在跑」「续跑中」更该说 */
   stalled?: boolean;
@@ -222,6 +227,7 @@ export function sessionBadge(card: {
   if (card.subagents && card.subagents.length > 0) return 'subagent';
   if (card.state === 'running') return 'running';
   if (card.backgroundRunning) return 'background';
+  if (card.pendingReminder) return 'reminder';
   // 常驻服务不会自己结束，和「等后台任务」分开说，免得看起来像还在干活
   if (card.backgroundPersistent) return 'persistent';
   if (card.continuing) return 'continuing';
@@ -243,6 +249,7 @@ const LABEL_ZH: Record<string, string> = {
   Queued: '排队中',
   'In progress': '进行中',
   'Waiting on a background task': '等后台任务',
+  'Waiting for reminder': '等提醒',
   'Waiting for your confirmation': '等你确认',
   'Waiting for dependencies': '等依赖',
   'Dispatch problem': '派发出问题',
@@ -259,6 +266,7 @@ export interface ContactStatusRow {
   title: string;
   projectName: string;
   badge: ContactBadge;
+  pendingReminder?: PendingReminderView;
   since: number;
   lastText?: string;
   conversationId: string;
@@ -271,7 +279,11 @@ function linkedTitle(row: { title: string; conversationId?: string }): string {
 }
 
 function statusBlock(lang: ContactLang, row: ContactStatusRow, now: number): string[] {
-  const meta = [badgeText(lang, row.badge), formatElapsed(now - row.since, lang)];
+  const badgeLabel =
+    row.badge === 'reminder' && row.pendingReminder
+      ? `${badgeText(lang, 'reminder')} · ${formatReminderClock(row.pendingReminder.dueAt)}`
+      : badgeText(lang, row.badge);
+  const meta = [badgeLabel, formatElapsed(now - row.since, lang)];
   const project = row.projectName ? ` · ${escapeHtml(row.projectName)}` : '';
   const lines = [`▸ ${linkedTitle(row)}${project}`, `   ${meta.join(' · ')}`];
   const last = shortText(row.lastText);
