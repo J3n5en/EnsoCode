@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { isDcgRuleExemptible } from '@shared/dcgRuleMemory';
 
 export interface CommandGuardHit {
   ruleId: string;
@@ -38,8 +39,9 @@ export function withDcgExemptions(
   guard: CommandGuard,
   exemptRules: readonly string[]
 ): CommandGuard {
-  if (exemptRules.length === 0) return guard;
-  const exempt = new Set(exemptRules);
+  const allowed = exemptRules.filter(isDcgRuleExemptible);
+  if (allowed.length === 0) return guard;
+  const exempt = new Set(allowed);
   return async (tool, command, signal) => {
     const hit = await guard(tool, command, signal);
     return hit && exempt.has(hit.ruleId) ? null : hit;

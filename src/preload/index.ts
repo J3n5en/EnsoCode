@@ -230,7 +230,13 @@ import type {
   DesignTopLeftRect,
   DesignXyRect,
 } from '@shared/types/browser';
-import type { DcgActionResult, DcgRuleState, DcgStatus, DcgUpdateCheck } from '@shared/types/dcg';
+import type {
+  DcgActionResult,
+  DcgRuleExemption,
+  DcgRuleState,
+  DcgStatus,
+  DcgUpdateCheck,
+} from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import { IPC_CHANNELS, type RestartBlocker, type RestartOverlayState } from '@shared/types/ipc';
 import type {
@@ -907,6 +913,10 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_ALLOWED, ruleId),
     ruleExempt: (ruleId: string): Promise<DcgRuleState | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_EXEMPT, ruleId),
+    ruleRevoke: (ruleId: string): Promise<DcgRuleExemption[] | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_REVOKE, ruleId),
+    listExemptions: (): Promise<DcgRuleExemption[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_LIST),
     clearExemptions: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_CLEAR),
   },
 

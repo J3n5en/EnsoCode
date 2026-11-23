@@ -1,6 +1,6 @@
 import { ipcMain } from '@platform';
 import { isDcgRuleId } from '@shared/dcgRuleMemory';
-import type { DcgActionResult, DcgRuleState, DcgStatus } from '@shared/types/dcg';
+import type { DcgActionResult, DcgRuleExemption, DcgRuleState, DcgStatus } from '@shared/types/dcg';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   checkDcgUpdate,
@@ -12,9 +12,12 @@ import {
 } from '../services/dcgBinary';
 import {
   clearDcgRuleMemory,
+  ensureDcgRuleMemoryReady,
   exemptDcgRule,
+  listDcgExemptions,
   readDcgRuleState,
   recordDcgAllow,
+  revokeDcgExemption,
 } from '../services/dcgRuleMemory';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
 
@@ -28,16 +31,18 @@ let installing: Promise<DcgActionResult> | null = null;
 
 const ruleHandler =
   (action: typeof readDcgRuleState) =>
-  (event: { sender: { id: number } }, ruleId: unknown): DcgRuleState | null => {
+  async (event: { sender: { id: number } }, ruleId: unknown): Promise<DcgRuleState | null> => {
     if (!isTrusted(event.sender.id) || !isDcgRuleId(ruleId)) return null;
     try {
-      return action(dcgRoot(), ruleId, DCG_VERSION);
+      return await action(dcgRoot(), ruleId, DCG_VERSION);
     } catch {
       return null;
     }
   };
 
 export function registerDcgHandlers(): void {
+  void ensureDcgRuleMemoryReady(dcgRoot());
+
   ipcMain.handle(IPC_CHANNELS.DCG_STATUS, (event) =>
     isTrusted(event.sender.id) ? dcgStatus(dcgRoot()) : UNTRUSTED
   );
@@ -52,6 +57,25 @@ export function registerDcgHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.DCG_RULE_STATE, ruleHandler(readDcgRuleState));
   ipcMain.handle(IPC_CHANNELS.DCG_RULE_ALLOWED, ruleHandler(recordDcgAllow));
   ipcMain.handle(IPC_CHANNELS.DCG_RULE_EXEMPT, ruleHandler(exemptDcgRule));
+  ipcMain.handle(
+    IPC_CHANNELS.DCG_RULE_REVOKE,
+    async (event, ruleId: unknown): Promise<DcgRuleExemption[] | null> => {
+      if (!isTrusted(event.sender.id) || !isDcgRuleId(ruleId)) return null;
+      try {
+        return await revokeDcgExemption(dcgRoot(), ruleId, DCG_VERSION);
+      } catch {
+        return null;
+      }
+    }
+  );
+  ipcMain.handle(IPC_CHANNELS.DCG_EXEMPTIONS_LIST, async (event): Promise<DcgRuleExemption[]> => {
+    if (!isTrusted(event.sender.id)) return [];
+    try {
+      return await listDcgExemptions(dcgRoot(), DCG_VERSION);
+    } catch {
+      return [];
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.DCG_EXEMPTIONS_CLEAR, async (event) => {
     if (!isTrusted(event.sender.id)) return false;
     try {

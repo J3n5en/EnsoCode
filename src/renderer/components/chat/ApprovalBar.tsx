@@ -91,8 +91,10 @@ const dcgApi = () =>
 function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }) {
   const { t, locale } = useI18n();
   const [rule, setRule] = useState<{ ruleId: string; state: DcgRuleState } | null>(null);
+  const [confirming, setConfirming] = useState(false);
   useEffect(() => {
     let alive = true;
+    setConfirming(false);
     void dcgApi()
       ?.ruleState(guard.ruleId)
       .then((state) => {
@@ -106,6 +108,7 @@ function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }
   const state = rule?.ruleId === guard.ruleId ? rule.state : null;
   const explained = locale === 'zh' ? explainDcgGuard(guard) : { what: guard.reason };
   const exempt = () => {
+    setConfirming(false);
     void dcgApi()
       ?.ruleExempt(guard.ruleId)
       .then((next) => {
@@ -132,15 +135,49 @@ function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }
         </div>
       )}
       {state?.suggestExempt && (
-        <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-          <span>
-            {t('You have allowed this rule {{count}} times. Allow it automatically from now on?', {
-              count: state.allowCount,
-            })}
-          </span>
-          <button type="button" onClick={exempt} className="underline underline-offset-2">
-            {t('Always allow this rule')}
-          </button>
+        <div className="flex flex-wrap items-center gap-2 text-amber-600 dark:text-amber-400">
+          {confirming ? (
+            <>
+              <span>
+                {t(
+                  'Allow "{{rule}}" automatically in new conversations? You can revoke this anytime in Settings.',
+                  { rule: guard.ruleId }
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={exempt}
+                className="font-medium underline underline-offset-2"
+              >
+                {t('Confirm exemption')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="text-muted-foreground underline underline-offset-2"
+              >
+                {t('Cancel')}
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {t(
+                  'You have allowed this rule {{count}} times. Allow it automatically from now on?',
+                  {
+                    count: state.allowCount,
+                  }
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="underline underline-offset-2"
+              >
+                {t('Always allow this rule')}
+              </button>
+            </>
+          )}
         </div>
       )}
       {state?.exempt && (

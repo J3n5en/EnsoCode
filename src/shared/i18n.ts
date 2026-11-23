@@ -564,6 +564,11 @@ export const zhTranslations: Record<string, string> = {
   'You have allowed this rule {{count}} times. Allow it automatically from now on?':
     '这条规则你已经放过 {{count}} 次，要不要以后直接通过？',
   'Always allow this rule': '以后直接通过',
+  'Confirm exemption': '确认豁免',
+  'Allow "{{rule}}" automatically in new conversations? You can revoke this anytime in Settings.':
+    '确认在新会话中自动放行「{{rule}}」？随时可在设置中撤销。',
+  'Exempted rules': '已豁免规则',
+  'No rule exemptions.': '暂无规则豁免。',
   'This rule is allowed automatically in new conversations until dcg is updated.':
     '新会话中这条规则将直接通过，dcg 版本更新后失效。',
   'Memory write': '记忆写入',

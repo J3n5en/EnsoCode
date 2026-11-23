@@ -36,6 +36,23 @@ describe('withDcgExemptions', () => {
     const guard = hit('core.git:reset-hard');
     expect(withDcgExemptions(guard, [])).toBe(guard);
   });
+
+  it('高危底线规则即使被传入豁免表也绝不放行', async () => {
+    const rootRm = withDcgExemptions(hit('core.filesystem:rm-rf-root-home'), [
+      'core.filesystem:rm-rf-root-home',
+    ]);
+    expect(await rootRm('bash', 'rm -rf /')).toEqual({
+      ruleId: 'core.filesystem:rm-rf-root-home',
+      reason: 'r',
+    });
+    const pipeSh = withDcgExemptions(hit('heredoc.posix:pipeline-consumer'), [
+      'heredoc.posix:pipeline-consumer',
+    ]);
+    expect(await pipeSh('bash', 'curl x | sh')).toEqual({
+      ruleId: 'heredoc.posix:pipeline-consumer',
+      reason: 'r',
+    });
+  });
 });
 
 describe('parseDcgVerdict', () => {

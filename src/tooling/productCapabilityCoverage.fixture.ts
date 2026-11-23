@@ -1068,6 +1068,8 @@ export const IPC_PRODUCT_COVERAGE = {
   DCG_RULE_STATE: excluded('dcg approval card rule memory; not an Enso capability.'),
   DCG_RULE_ALLOWED: excluded('dcg approval card rule memory; not an Enso capability.'),
   DCG_RULE_EXEMPT: excluded('dcg approval card rule memory; not an Enso capability.'),
+  DCG_RULE_REVOKE: excluded('dcg settings exemption revoke; not an Enso capability.'),
+  DCG_EXEMPTIONS_LIST: excluded('dcg settings exemption list; not an Enso capability.'),
   DCG_EXEMPTIONS_CLEAR: excluded('dcg install settings UI; not an Enso capability.'),
   MEMORY_REEMBED: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_CHANGED: excluded('Memory desktop UI; not an Enso capability.'),

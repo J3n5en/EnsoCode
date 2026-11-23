@@ -21,3 +21,9 @@ export interface DcgRuleState {
   exempt: boolean;
   suggestExempt: boolean;
 }
+
+export interface DcgRuleExemption {
+  ruleId: string;
+  dcgVersion: string;
+  at: number;
+}

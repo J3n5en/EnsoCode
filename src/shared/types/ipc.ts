@@ -245,6 +245,8 @@ export const IPC_CHANNELS = {
   DCG_RULE_STATE: 'dcg:rule-state',
   DCG_RULE_ALLOWED: 'dcg:rule-allowed',
   DCG_RULE_EXEMPT: 'dcg:rule-exempt',
+  DCG_RULE_REVOKE: 'dcg:rule-revoke',
+  DCG_EXEMPTIONS_LIST: 'dcg:exemptions-list',
   DCG_EXEMPTIONS_CLEAR: 'dcg:exemptions-clear',
   MEMORY_REEMBED: 'memory:reembed',
   MEMORY_CHANGED: 'memory:changed',
