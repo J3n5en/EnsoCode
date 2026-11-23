@@ -19,6 +19,7 @@ import {
   planPhase,
   splitPlanPrefix,
 } from '@shared/planMode';
+import type { QueuedStart } from '@shared/secretary/queuedSession';
 import { unwrapUntrustedForDisplay } from '@shared/secretary/transcript';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
@@ -78,6 +79,7 @@ import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import { create } from 'zustand';
 import { persist, type StorageValue } from 'zustand/middleware';
+import { startQueuedSession } from '@/lib/queuedSessionApi';
 import { isLeaderRenderer } from '@/lib/rendererRole';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -373,6 +375,11 @@ export interface Conversation extends SessionProjection {
   activeRenewedAt?: number;
   /** 排队待发消息(running 时用户消息先入队) */
   queuedMessages?: QueuedMessage[];
+  /**
+   * 秘书派发超过同时派发上限：会话已建出但未启动，首条消息在这里。
+   * Main 写入，启动成功后整段删除。渲染层不 spawn、不 attach、不本地 prompt。
+   */
+  queuedStart?: QueuedStart;
   /** 会话目标(设定后空闲自动续跑) */
   goal?: SessionGoal;
   /** Main 驱动的派出会话：续跑与队列泵由 Main 负责，本窗口只显示与转发指令 */
@@ -717,6 +724,42 @@ export const useSessionsStore = create<SessionsState>()(
       const pendingTitleBaselines = new Map<string, string>();
       const rewindInFlight = new Set<string>();
       const forkWakeInFlight = new Set<string>();
+      const queuedStartFlight = new Set<string>();
+
+      /** 排队会话的用户消息是首条之后的 follow-up。被拒时不回显，原文退回输入框。 */
+      async function startQueuedFollowUp(
+        id: string,
+        text: string,
+        images: AttachedImage[] | undefined
+      ): Promise<string | null> {
+        const restore = (error: string) => {
+          set((state) =>
+            patch(state, id, {
+              draftText: text,
+              ...(images?.length ? { draftImages: images } : {}),
+              error,
+            })
+          );
+          return error;
+        };
+        if (queuedStartFlight.has(id)) return restore('queued start in progress');
+        queuedStartFlight.add(id);
+        try {
+          const result = await startQueuedSession(id, {
+            text,
+            ...(images?.length ? { images } : {}),
+          });
+          if (!result.ok) return restore(result.error);
+          set((state) =>
+            state.conversations[id] ? patch(state, id, { error: undefined }) : state
+          );
+          return null;
+        } catch (error) {
+          return restore(error instanceof Error ? error.message : String(error));
+        } finally {
+          queuedStartFlight.delete(id);
+        }
+      }
 
       /** 唤醒后等该会话 worker 真正 ready（spawn ack 后 spawning 仍在，需等其 snapshot） */
       function waitForWorkerReady(
@@ -3290,6 +3333,8 @@ export const useSessionsStore = create<SessionsState>()(
           if (!id) return 'no conversation';
           const conversation = get().conversations[id];
           if (!conversation) return 'no conversation';
+          // 排队会话还没有 worker。必须在任何回显之前改走立即开始。
+          if (conversation.queuedStart) return startQueuedFollowUp(id, submittedText, images);
           // /compact 应用级命令:压缩上下文,不发给 agent。工作区操作中/未启动由 compact() 提示原因
           const compactCommand = parseCompactCommand(text);
           if (conversation.workspaceMigrating && !compactCommand) {
@@ -3536,6 +3581,7 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           if (
             !conversation ||
+            conversation.queuedStart ||
             conversation.btwParentId ||
             conversation.started ||
             conversation.spawning ||

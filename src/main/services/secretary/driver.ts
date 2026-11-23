@@ -15,6 +15,7 @@ import {
   type HeadlessSessionRuntime,
   onHeadlessIdle,
 } from '@shared/pair/headlessQueue';
+import { queuedStartOf } from '@shared/secretary/queuedSession';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type { SecretaryAuditEntry } from '@shared/types/secretary';
 
@@ -303,7 +304,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
 
   function runtimeOf(conversationId: string): HeadlessSessionRuntime | null {
     const row = ports.row(conversationId);
-    if (row?.driver !== 'main') return null;
+    // 排队会话还没开始：不泵队列、不续目标，启动泵撤掉 queuedStart 后才归驱动者管
+    if (row?.driver !== 'main' || queuedStartOf(row)) return null;
     seedTasks(conversationId, row);
     const status = ports.status(conversationId);
     return {

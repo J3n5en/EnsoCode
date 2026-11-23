@@ -11,7 +11,8 @@ export const PATROL_INTERVAL_MS = 15 * 60 * 1000;
 
 export interface PatrolFacts {
   conversationId: string;
-  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+  /** queued 是排队会话：还没开始，不算停住 */
+  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
   goalStatus?: string;
   /** 待用户回答的提问与审批条数：有待处理项就不是异常 */
   pending: number;

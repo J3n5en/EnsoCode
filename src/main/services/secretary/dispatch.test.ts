@@ -509,7 +509,7 @@ describe('session_create', () => {
     expect(h.audits.map((entry) => entry.op)).toEqual(['session_create']);
   });
 
-  it('达到并发上限时报错且不建会话', async () => {
+  it('达到并发上限时照常建出排队会话：不报错、不运行，返回 queued 与位次', async () => {
     const file = emptyFile();
     for (const id of ['a', 'b', 'c']) {
       file.dispatched[id] = {
@@ -532,28 +532,99 @@ describe('session_create', () => {
       },
       statuses: { a: running, b: running, c: running },
     });
-    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
-    expect(result).toEqual({ ok: false, error: 'dispatch-limit' });
-    expect(h.created).toEqual([]);
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+      goal: '构建通过',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      result: { status: 'queued', conversationId: 'new-1', position: 1, reason: 'dispatch-limit' },
+    });
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0]).toMatchObject({ queued: true, goal: '构建通过' });
+    // 排队会话记成空闲：重启恢复不会报中断，也不占派出名额
+    expect(h.file.dispatched['new-1']).toMatchObject({ lastState: 'idle', goal: '构建通过' });
     expect(h.audits).toEqual([
       {
         at: NOW,
         secretaryConversationId: 'sec-1',
         op: 'session_create',
-        targetId: 'p1',
-        ok: false,
-        detail: 'dispatch-limit',
+        targetId: 'new-1',
+        ok: true,
+        detail: 'queued #1 dispatch-limit',
       },
     ]);
   });
 
-  it('全部秘书合计到上限时拒绝，本秘书自己的名额还有也不行', async () => {
+  it('没超限的派发不排队：createSession 不带 queued，照常 created', async () => {
+    const h = harness({ profile: profile() });
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(result).toEqual({ ok: true, result: { status: 'created', conversationId: 'new-1' } });
+    expect(h.created[0]).not.toHaveProperty('queued');
+    expect(h.file.dispatched['new-1']).toMatchObject({ lastState: 'running' });
+  });
+
+  it('已有排队会话时新派发排在后面，位次接着数', async () => {
+    const h = harness({
+      profile: profile({ maxRunningDispatches: 1 }),
+      rows: {
+        q1: {
+          projectId: 'p1',
+          secretaryOrigin: { secretaryConversationId: 'sec-1' },
+          queuedStart: { queuedAt: 10, text: '先排的' },
+        },
+      },
+    });
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '后来的' });
+    expect(result).toMatchObject({ ok: true, result: { status: 'queued', position: 2 } });
+  });
+
+  it('排队会话带图：只校验并存真实路径，开始时再读', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'queued-img-'));
+    try {
+      const shot = join(dir, 'shot.png');
+      writeFileSync(shot, PNG);
+      const h = harness({ profile: profile() });
+      h.ports.runningTotal = () => ({ running: 10, max: 10 });
+      h.handlers = createSecretaryDispatchHandlers(h.ports);
+      const result = await call(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '看图',
+        attachments: [shot],
+      });
+      expect(result).toMatchObject({ ok: true, result: { status: 'queued' } });
+      expect(h.created[0]).toMatchObject({ queued: true, attachmentPaths: [realpathSync(shot)] });
+      expect(h.created[0]).not.toHaveProperty('attachments');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('基线校验在排队前就做：分支重名直接报错，不建排队会话', async () => {
+    const h = harness({ profile: profile(), baseFacts: { branchExists: true } });
+    h.ports.runningTotal = () => ({ running: 10, max: 10 });
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+      worktree: true,
+      branch: 'feat/x',
+    });
+    expect(result).toEqual({ ok: false, error: 'branch-exists' });
+    expect(h.created).toEqual([]);
+  });
+
+  it('全部秘书合计到上限时排队，本秘书自己的名额还有也一样', async () => {
     const h = harness({ profile: profile() });
     h.ports.runningTotal = () => ({ running: 10, max: 10 });
     h.handlers = createSecretaryDispatchHandlers(h.ports);
     const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
-    expect(result).toEqual({ ok: false, error: 'dispatch-limit-total' });
-    expect(h.created).toEqual([]);
+    expect(result).toMatchObject({
+      ok: true,
+      result: { status: 'queued', reason: 'dispatch-limit-total' },
+    });
+    expect(h.created[0]).toMatchObject({ queued: true });
   });
 
   it('派出的会话带上秘书 id：之后靠它认归属', async () => {
@@ -590,10 +661,7 @@ describe('session_create', () => {
     });
     expect(
       await call(blocked.handlers.session_create, { projectId: 'p1', prompt: '再派一个' })
-    ).toEqual({
-      ok: false,
-      error: 'dispatch-limit',
-    });
+    ).toMatchObject({ ok: true, result: { status: 'queued', reason: 'dispatch-limit' } });
 
     const finished = emptyFile();
     finished.dispatched.a = {
@@ -2607,16 +2675,17 @@ describe('resolveProposal', () => {
 
     const blocked = propose();
     h.profileValue = profile({ maxRunningDispatches: 1 });
-    const refused = await resolveProposal(h.ports, blocked, 'confirm');
-    expect(refused.ok && refused.proposal.status).toBe('failed');
-    expect(refused.ok && refused.proposal.error).toBe('dispatch-limit');
-    expect(h.created).toEqual([]);
+    const queued = await resolveProposal(h.ports, blocked, 'confirm');
+    expect(queued.ok && queued.proposal.status).toBe('succeeded');
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0]).toMatchObject({ queued: true });
 
     h.profileValue = profile({ maxRunningDispatches: 2 });
     const allowed = propose();
     const confirmed = await resolveProposal(h.ports, allowed, 'confirm');
     expect(confirmed.ok && confirmed.proposal.status).toBe('succeeded');
-    expect(h.created).toHaveLength(1);
+    expect(h.created).toHaveLength(2);
+    expect(h.created[1]).not.toHaveProperty('queued');
   });
 
   it('两端同时确认也只执行一次', async () => {
@@ -3554,7 +3623,7 @@ describe('等依赖的派发与确认卡', () => {
     });
   });
 
-  it('依赖全结束后名额已满：标成出问题并推一条，不建会话', async () => {
+  it('依赖全结束后名额已满：照常建出排队会话，不判失败', async () => {
     const h = harness({
       profile: profile({
         maxRunningDispatches: 1,
@@ -3595,12 +3664,29 @@ describe('等依赖的派发与确认卡', () => {
       after: ['c1'],
     })) as { pendingId: string };
     await startPendingDispatches(h.ports, [payload.pendingId], NOW);
-    expect(h.created).toEqual([]);
-    expect(h.file.pending?.[payload.pendingId]).toMatchObject({
-      status: 'failed',
-      problem: 'dispatch-failed',
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0]).toMatchObject({ queued: true, prompt: '接着改' });
+    expect(h.file.pending).toBeUndefined();
+    expect(h.file.outbox).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'dispatch_pending', detail: 'queued new-1' });
+  });
+
+  it('依赖没结束时照旧等待：名额满也不提前建排队会话', async () => {
+    const h = harness({
+      profile: profile({ maxRunningDispatches: 1 }),
+      rows: { c1: { projectId: 'p1', sessionFile: '/s/c1.jsonl' } },
+      statuses: { c1: running },
+      file: dispatchedFile('c1', 'running'),
     });
-    expect(h.file.outbox[0]).toMatchObject({ kind: 'pending', status: 'failed' });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { status: string; pendingId: string };
+    expect(payload.status).toBe('waiting');
+    await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+    expect(h.created).toEqual([]);
+    expect(h.file.pending?.[payload.pendingId]).toMatchObject({ status: 'waiting' });
   });
 });
 
@@ -4233,5 +4319,62 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
     });
     revokeTakeover(h.ports, 'c2', 'settings');
     expect(new FollowingStore(dir).list()).toEqual([]);
+  });
+});
+
+describe('排队会话', () => {
+  const queuedRow = {
+    projectId: 'p1',
+    title: '排队的',
+    secretaryOrigin: { secretaryConversationId: 'sec-1' },
+    queuedStart: { queuedAt: 5, text: '修构建' },
+  };
+
+  it('session_send 发给排队会话：明确拒绝，提示取消或等它开始', async () => {
+    const h = harness({
+      file: dispatchedFile('q1'),
+      rows: { q1: queuedRow },
+      conversations: [rootConversation('q1')],
+    });
+    const result = await call(h.handlers.session_send, { conversationId: 'q1', message: '加一条' });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('session-queued');
+    expect(h.prompts).toEqual([]);
+    expect(h.queued).toEqual([]);
+  });
+
+  it('session_stop 停排队会话就是取消：交给取消入口，不 abort', async () => {
+    const h = harness({
+      file: dispatchedFile('q1'),
+      rows: { q1: queuedRow },
+      conversations: [rootConversation('q1')],
+    });
+    const cancels: { id: string; by: string | null }[] = [];
+    h.ports.cancelQueued = async (id, by) => {
+      cancels.push({ id, by });
+      return { ok: true };
+    };
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    const result = await call(h.handlers.session_stop, { conversationId: 'q1' });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'cancelled', conversationId: 'q1', deleted: true },
+    });
+    expect(cancels).toEqual([{ id: 'q1', by: 'sec-1' }]);
+    expect(h.aborts).toEqual([]);
+  });
+
+  it('正在启动的排队会话停不掉：如实报错', async () => {
+    const h = harness({
+      file: dispatchedFile('q1'),
+      rows: { q1: queuedRow },
+      conversations: [rootConversation('q1')],
+    });
+    h.ports.cancelQueued = async () => ({ ok: false, error: 'starting' });
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    expect(await call(h.handlers.session_stop, { conversationId: 'q1' })).toEqual({
+      ok: false,
+      error: 'starting',
+    });
   });
 });

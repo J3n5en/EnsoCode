@@ -54,7 +54,9 @@ export function needsHistoryHydration(conversation: {
   spawning: boolean;
   status?: string;
   historyLoadAttempted?: boolean;
+  queuedStart?: unknown;
 }): boolean {
+  if (conversation.queuedStart) return false;
   return (
     !conversation.historyLoadAttempted &&
     (conversation.started || Boolean(conversation.sessionFile)) &&
@@ -72,7 +74,9 @@ export function needsWorkerSnapshot(conversation: {
   sessionFile?: string;
   status?: string;
   messages?: readonly { optimistic?: boolean }[];
+  queuedStart?: unknown;
 }): boolean {
+  if (conversation.queuedStart) return false;
   if (conversation.status === 'failed') {
     if (hasAuthoritativeMessages(conversation.messages ?? [])) return false;
     return conversation.started;
@@ -99,7 +103,9 @@ export function chatSurfaceBusy(conversation: {
   status?: string;
   historyLoadAttempted?: boolean;
   syncStalled?: boolean;
+  queuedStart?: unknown;
 }): boolean {
+  if (conversation.queuedStart) return false;
   if (conversation.status === 'running') return true;
   if (hasAuthoritativeMessages(conversation.messages)) return false;
   // 准备超时降级：读历史不再锁输入；spawn 仍在途时发出去不会真正投递，继续锁到重试
@@ -120,7 +126,9 @@ export function chatTimelineActivity(conversation: {
   historyLoadAttempted?: boolean;
   historyLoading?: boolean;
   syncStalled?: boolean;
+  queuedStart?: unknown;
 }): 'working' | 'loading' | null {
+  if (conversation.queuedStart) return null;
   if (conversation.status === 'running') return 'working';
   if (conversation.syncStalled) return null;
   if (conversation.historyLoading) return 'loading';
@@ -132,6 +140,7 @@ export function chatTimelineActivity(conversation: {
       messages: conversation.messages,
       spawning: conversation.spawning,
       historyLoadAttempted: conversation.historyLoadAttempted,
+      queuedStart: conversation.queuedStart,
     })
   )
     return 'loading';

@@ -62,6 +62,7 @@ const STATE_FEED: Record<SessionCard['state'], Feed> = {
   waiting: { tone: 'idle', label: 'Waiting for you' },
   error: { tone: 'idle', label: 'Failed' },
   'not-started': { tone: 'idle', label: 'Not started' },
+  queued: { tone: 'idle', label: 'Queued' },
 };
 
 /** 会话卡片对应的动态说明与发生时间：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */

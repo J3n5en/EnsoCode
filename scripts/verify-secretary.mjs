@@ -76,6 +76,8 @@ const KEEP = keepRequested(process.env, process.argv);
 // 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
 const MEMORY_ONLY = process.argv.includes('--memory-only');
 const FORWARD_IMAGES_ONLY = process.argv.includes('--forward-images-only');
+// 只跑排队会话：上限改成 1，造出 1 个在跑、2 个排队，截侧栏、排队卡与看板
+const QUEUED_ONLY = process.argv.includes('--queued-only');
 // 只跑「新秘书没开过会话，第一条联系消息」这一段
 const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contact-only');
 // 只跑 setup + 结构化完成结果段：goal_complete 带 result → 宿主核验 → 回传、看板与结果弹窗
@@ -732,6 +734,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (FORWARD_IMAGES_ONLY) {
     await verifyForwardImages(cdp, setup);
+    return;
+  }
+  if (QUEUED_ONLY) {
+    await verifyQueuedSessions(cdp, setup);
     return;
   }
   if (NEW_SECRETARY_CONTACT_ONLY) {
@@ -6484,10 +6490,215 @@ async function verifyImageViewAndCleanup(cdp, setup) {
   rmSync(imageFile, { force: true });
 }
 
-/**
- * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
- * session_send attachments 交过去，目标会话时间线上出现图片引用。
- */
+/** 秘书派活：派出会话的 prompt 里还带一条 fake provider 指令，内层 `]]` 先转义 */
+async function queuedDispatch(cdp, setup, args, ask) {
+  const prompt = `${ask} ${toolDirective('session_create', args)}`;
+  const reply = await cdp.json(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation({ secretaryId: 'default' });
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      ${JSON.stringify(prompt)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find((m) => m.toolName === 'session_create') ?? null,
+      40000
+    );
+    return JSON.stringify({ text: result ? textOf(result) : null, isError: result?.isError === true });
+  `);
+  return { ...reply, result: parseToolJson(reply.text) };
+}
+
+const QUEUED_SHOT = (name) => `/tmp/queued-session-${name}.png`;
+const SEL_QUEUED_INDICATOR = (id) =>
+  `[data-enso=conversation-queued][data-conversation-id="${id}"]`;
+const SEL_QUEUED_CARD = '[data-enso=queued-session-card]';
+const SEL_QUEUED_START = '[data-enso=queued-session-start]';
+const SEL_QUEUED_CANCEL = '[data-enso=queued-session-cancel]';
+
+async function verifyQueuedSessions(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 排队会话：上限 1，一个在跑、两个排队');
+  const limited = await page(`
+    const saved = await window.electronAPI.secretary.saveProfile({ maxRunningDispatches: 1 });
+    return JSON.stringify({ ok: saved.ok === true, error: saved.error ?? null });
+  `);
+  assert(limited.ok, '排队: 同时派发上限改成 1', limited);
+
+  const running = await queuedDispatch(
+    cdp,
+    setup,
+    { projectId: setup.projectId, prompt: '慢慢整理文档 [[slow:600000]]', title: '整理文档' },
+    '派个慢活'
+  );
+  assert(running.result?.status === 'created', '排队: 第一条照常创建', running);
+  const runningId = running.result.conversationId;
+  const busy = await page(`
+    const row = await until(() => S().conversations[${JSON.stringify(runningId)}]?.status === 'running', 40000);
+    return JSON.stringify({ running: Boolean(row) });
+  `);
+  assert(busy.running, '排队: 第一条在跑', busy);
+
+  const queued = [];
+  for (const [title, prompt] of [
+    ['补单元测试', '给 utils 补单元测试'],
+    ['升级依赖', '把依赖升级到最新小版本'],
+  ]) {
+    const reply = await queuedDispatch(
+      cdp,
+      setup,
+      { projectId: setup.projectId, prompt, title, goal: `${title}并通过测试`, worktree: true },
+      `再派一个：${title}`
+    );
+    assert(
+      reply.isError === false && reply.result?.status === 'queued',
+      `排队: 超限的「${title}」返回 queued 而不是报错`,
+      reply
+    );
+    queued.push({ title, ...reply.result });
+  }
+  assert(queued[0].position === 1 && queued[1].position === 2, '排队: 位次按先后是 1、2', queued);
+  await sleep(1500);
+  const rows = conversationsIn();
+  for (const entry of queued) {
+    const row = rows[entry.conversationId];
+    assert(
+      row?.queuedStart && !row.goal && !row.sessionFile && row.worktree?.path,
+      `排队: 「${entry.title}」已建会话与 worktree，首条消息存在 queuedStart，没有运行`,
+      row && { queuedStart: row.queuedStart, goal: row.goal, sessionFile: row.sessionFile }
+    );
+  }
+
+  const [first, second] = queued;
+  const sidebar = await page(`
+    const node = await until(() => visible(${JSON.stringify(SEL_QUEUED_INDICATOR(first.conversationId))})[0] ?? null, 15000);
+    node?.scrollIntoView({ block: 'center' });
+    const rect = node?.getBoundingClientRect();
+    const aside = node?.closest('aside, nav, [data-enso=sidebar]')?.getBoundingClientRect();
+    return JSON.stringify({
+      found: Boolean(node),
+      color: node ? getComputedStyle(node).color : null,
+      x: rect ? rect.x + rect.width / 2 : 0,
+      y: rect ? rect.y + rect.height / 2 : 0,
+      aside: aside ? { x: aside.x, y: aside.y, width: aside.width, height: aside.height } : null,
+    });
+  `);
+  assert(sidebar.found, '排队: 侧栏显示排队指示', sidebar);
+  await cdp.mouse('mouseMoved', sidebar.x, sidebar.y);
+  const tooltip = await page(`
+    const tip = await until(() => document.querySelector('[data-enso=conversation-queued-tooltip]'), 5000);
+    return JSON.stringify({ text: tip?.innerText ?? null });
+  `);
+  assert(/1/.test(tooltip.text ?? ''), '排队: 悬停提示写出位次', tooltip);
+  await sleep(300);
+  const clip = sidebar.aside ?? { x: 0, y: 0, width: 320, height: 800 };
+  await cdp.shotClip(QUEUED_SHOT('sidebar'), {
+    x: clip.x,
+    y: Math.max(0, sidebar.y - 220),
+    width: Math.max(clip.width, 420),
+    height: 360,
+  });
+  await cdp.mouse('mouseMoved', 900, 10);
+
+  const card = await page(`
+    S().selectConversation(${JSON.stringify(first.conversationId)});
+    const card = await until(() => visible(${JSON.stringify(SEL_QUEUED_CARD)})[0] ?? null, 15000);
+    return JSON.stringify({
+      text: card?.innerText ?? null,
+      start: Boolean(card?.querySelector(${JSON.stringify(SEL_QUEUED_START)})),
+      cancel: Boolean(card?.querySelector(${JSON.stringify(SEL_QUEUED_CANCEL)})),
+    });
+  `);
+  assert(
+    card.text?.includes('给 utils 补单元测试') && card.start && card.cancel,
+    '排队: 打开排队会话看到首条消息与两个按钮',
+    card
+  );
+  await cdp.shot(QUEUED_SHOT('card'));
+
+  const board = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+    }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    const panel = await until(() => visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    await sleep(300);
+    const toggle = visiblePanel()?.querySelector('[data-enso=secretary-running-toggle]');
+    if (toggle?.getAttribute('aria-expanded') !== 'true') toggle?.click();
+    const cards = await until(() => {
+      const nodes = [...(visiblePanel()?.querySelectorAll('[data-enso=secretary-queued-card]') ?? [])];
+      return nodes.length >= 2 ? nodes : null;
+    }, 20000);
+    cards?.[0]?.scrollIntoView({ block: 'center' });
+    // 右侧面板滑入有动画：等它整块进到视口里再截
+    await until(() => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return box && box.x + box.width <= innerWidth + 1 && box.x < innerWidth - box.width + 1;
+    }, 5000);
+    const rect = visiblePanel()?.getBoundingClientRect();
+    return JSON.stringify({
+      panel: Boolean(panel),
+      rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+      viewport: { width: innerWidth, height: innerHeight },
+      labels: (cards ?? []).map((n) => n.innerText),
+    });
+  `);
+  assert(board.labels.length >= 2, '排队: 秘书看板显示两条排队', board);
+  log(`  board ${JSON.stringify({ rect: board.rect, viewport: board.viewport })}`);
+  await sleep(500);
+  await cdp.shot(QUEUED_SHOT('board'));
+
+  log('== 排队会话：取消一条、停掉在跑的，队头自动开始');
+  const cancelled = await page(`
+    const result = await window.electronAPI.secretary.cancelQueued(${JSON.stringify(second.conversationId)});
+    const gone = await until(() => !S().conversations[${JSON.stringify(second.conversationId)}], 15000);
+    return JSON.stringify({ result, gone: Boolean(gone) });
+  `);
+  assert(cancelled.result?.ok && cancelled.gone, '排队: 取消排队删掉这条会话', cancelled);
+  const stopped = await secretaryTool(
+    cdp,
+    setup,
+    'session_stop',
+    { conversationId: runningId },
+    '停掉慢活'
+  );
+  assert(parseToolJson(stopped.text) !== null, '排队: 秘书停掉在跑的会话', stopped);
+  const started = await waitFor(
+    () => {
+      const row = conversationsIn()?.[first.conversationId];
+      return row && !row.queuedStart && row.goal?.status ? row : null;
+    },
+    'queued head auto-start',
+    90_000,
+    500
+  );
+  assert(Boolean(started), '排队: 空出位置后队头自动开始，目标生效', started?.goal);
+}
+
 async function verifyGoalResult(cdp, setup) {
   const page = cdp.json.bind(cdp);
   log('== 结构化完成结果：goal_complete result → 宿主核验 → 回传、看板、结果弹窗');
@@ -6651,6 +6862,10 @@ async function verifyGoalResult(cdp, setup) {
   log('  shots /tmp/structured-result-{board,card,dialog}.png');
 }
 
+/**
+ * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
+ * session_send attachments 交过去，目标会话时间线上出现图片引用。
+ */
 async function verifyForwardImages(cdp, setup) {
   const page = cdp.json.bind(cdp);
   log('== 转发图片：编码会话看图 + session_send attachments');

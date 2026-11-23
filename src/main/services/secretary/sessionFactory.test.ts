@@ -273,6 +273,31 @@ describe('createSessionFromMain', () => {
     expect(h.prompts).toEqual([]);
   });
 
+  it('排队：照常建行与 worktree，首条消息与目标存进 queuedStart，不 spawn 不 prompt', async () => {
+    const h = harness();
+    const result = await createSessionFromMain(h.ports, {
+      ...REQUEST,
+      worktree: true,
+      goal: '修好',
+      queued: true,
+      attachmentPaths: ['/tmp/shot.png'],
+      askRelay: { name: '小秘' },
+    });
+    expect(result).toEqual({ ok: true, conversationId: 'conv-1' });
+    expect(h.spawns).toEqual([]);
+    expect(h.prompts).toEqual([]);
+    const row = h.rows.get('conv-1');
+    expect(row?.worktree).toEqual(WORKTREE);
+    expect(row?.goal).toBeUndefined();
+    expect(row?.queuedStart).toEqual({
+      queuedAt: 1700000000000,
+      text: '看看这个 bug',
+      goal: '修好',
+      attachments: ['/tmp/shot.png'],
+      askRelay: { name: '小秘' },
+    });
+  });
+
   it('首条 prompt 被拒时先释放已 spawn 的会话再回滚', async () => {
     const h = harness();
     h.promptResult = { ok: false, error: 'unknown or stale session generation' };

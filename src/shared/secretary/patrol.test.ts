@@ -187,3 +187,15 @@ describe('patrolStallDetail', () => {
     );
   });
 });
+
+describe('排队会话', () => {
+  it('排队再久也不是停住：既不报空闲卡住，也不报运行卡住', () => {
+    const now = PATROL_IDLE_MS + PATROL_RUNNING_MS + 1;
+    expect(
+      patrolAnomalies(
+        [facts({ state: 'queued' }), facts({ state: 'queued', goalStatus: undefined })],
+        now
+      )
+    ).toEqual([]);
+  });
+});

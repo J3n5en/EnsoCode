@@ -521,6 +521,8 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_MARK_RESULT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_STOP_TASKS: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_GOAL_ACTION: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_QUEUED_START: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_QUEUED_CANCEL: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SCHEDULES_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SCHEDULE_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_GET_PROFILE: excluded('Experimental secretary agent; not an Enso capability.'),

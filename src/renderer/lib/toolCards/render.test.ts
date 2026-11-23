@@ -79,6 +79,8 @@ const zh: Record<string, string> = {
   Name: '名称',
   Autonomy: '自主度',
   'Dispatch limit reached': '已达到同时派发上限',
+  'Queued at #{{n}}': '已排队 · 第 {{n}} 位',
+  Queued: '排队中',
   'The message changed (the session was rewound or switched branches). List the session again and read it with the new id.':
     '消息已变化（会话回退或换了分支），请重新分页后用新的 id 读取',
   'Unknown session': '未知会话',
@@ -256,6 +258,15 @@ describe('工具卡片', () => {
       ctx()
     );
     expect(cardPlainText(limited)).toContain('已达到同时派发上限');
+    const queued = renderToolCall(
+      call(
+        'session_create',
+        { projectId: 'p1', prompt: 'x' },
+        { status: 'queued', conversationId: 'new-1', position: 2 }
+      ),
+      ctx()
+    );
+    expect(queued.status?.label).toBe('已排队 · 第 2 位');
   });
 
   it('待办更新显示文字和前后差异，没有名称时退回短 id', () => {

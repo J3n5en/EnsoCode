@@ -1,6 +1,6 @@
 import { checkAvatarImage } from '@shared/bots/cardPng';
 import { parseProfile } from '@shared/secretary/parse';
-import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
+import type { AttachedImage, ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
   DispatchDraft,
   SecretaryAuditEntry,
@@ -107,6 +107,41 @@ export function parseMarkResultRequest(value: unknown): MarkResultRequest | null
   if (!conversationId) return null;
   if (value.action !== 'done' && value.action !== 'undo' && value.action !== 'dismiss') return null;
   return { conversationId, action: value.action };
+}
+
+/** 一次「立即开始」最多带几张图：与输入框一次能贴的量级相当 */
+const FOLLOW_UP_IMAGES_MAX = 10;
+
+export interface QueuedStartRequest {
+  conversationId: string;
+  /** 排队期间用户在输入框发的消息：排在首条之后送达 */
+  followUp?: { text: string; images?: AttachedImage[] };
+}
+
+function parseFollowUpImages(value: unknown): AttachedImage[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > FOLLOW_UP_IMAGES_MAX) return null;
+  const images: AttachedImage[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || !nonEmpty(item.data)) return null;
+    if (typeof item.mimeType !== 'string' || !item.mimeType.startsWith('image/')) return null;
+    images.push({ data: item.data as string, mimeType: item.mimeType });
+  }
+  return images;
+}
+
+export function parseQueuedStartRequest(value: unknown): QueuedStartRequest | null {
+  if (!isRecord(value)) return null;
+  const conversationId = nonEmpty(value.conversationId);
+  if (!conversationId) return null;
+  if (value.followUp === undefined) return { conversationId };
+  if (!isRecord(value.followUp) || typeof value.followUp.text !== 'string') return null;
+  const images = parseFollowUpImages(value.followUp.images);
+  if (!images) return null;
+  const text = value.followUp.text;
+  // 空消息没有可送达的内容：当作没带
+  if (!text.trim() && images.length === 0) return { conversationId };
+  return { conversationId, followUp: { text, ...(images.length > 0 ? { images } : {}) } };
 }
 
 export function parseReferenceRequest(value: unknown): ReferenceRequest | null {

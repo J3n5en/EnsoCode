@@ -266,6 +266,21 @@ export async function removeSessionWorktree(record: SessionWorktree, root?: stri
 }
 
 /**
+ * 删掉 worktree 之后：分支还停在创建时的基线上（没有任何提交）就一并删除，
+ * 同名分支能立刻再用；有新提交的保留。
+ */
+export async function deleteUntouchedSessionBranch(record: SessionWorktree): Promise<void> {
+  const tip = await git(
+    record.repoPath,
+    'rev-parse',
+    '--verify',
+    `refs/heads/${record.branch}`
+  ).catch(() => null);
+  if (tip !== record.baseCommit) return;
+  await gitOk(record.repoPath, 'branch', '-D', record.branch);
+}
+
+/**
  * resume 发现 worktree 丢失后的重建：
  * 分支仍在 → 从分支重建（保留已提交工作）；分支也没了 → 从 baseCommit 重建同名分支。
  */
