@@ -51,6 +51,7 @@ import {
   type PluginContactRequest,
   type PluginHostCapabilities,
   type PluginInjectImage,
+  type PluginInjectSender,
   type PluginToolResult,
 } from '@shared/extensionPlugins/protocol';
 import { mergeStatusItems, type StatusPatch } from '@shared/extensionPlugins/statusItems';
@@ -174,8 +175,18 @@ export interface PluginSessionBridge {
       triggerTurn: boolean;
       /** 免去不可信包裹；只有普通会话认，秘书会话一律包 */
       trusted: boolean;
+      requestedTrusted: boolean;
+      permissions: ExtensionPluginManifest['permissions'];
+      source?: PluginInstallSource;
+      sender?: PluginInjectSender;
     }
-  ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
+  ):
+    | {
+        ok: true;
+        trustedIgnored?: boolean;
+        trustedOverriddenByExternal?: boolean;
+      }
+    | { ok: false; error: string; notRunning?: boolean };
   abort(sessionId: string): { ok: true } | { ok: false; error: string };
   /** 在会话旁跑只读代理；事件按序回调，end 之后不再回调 */
   agentRun?(
@@ -2163,20 +2174,22 @@ export class ExtensionPluginService {
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
       trusted: boolean;
+      sender?: PluginInjectSender;
     }
   ): { ok: true } | { ok: false; error: string } {
     const manifest = this.enabledManifest(pluginId) ?? this.gateManifests.get(pluginId);
     const bridge = this.options.sessionBridge?.() ?? null;
     if (!manifest || !bridge) return { ok: false, error: '当前环境不能注入消息' };
+    const source = this.records.find((record) => record.id === pluginId)?.source;
     const trust = resolveInjectTrust({
       pluginId,
       requested: input.trusted,
       permissions: manifest.permissions,
-      source: this.records.find((record) => record.id === pluginId)?.source,
+      source,
     });
     if (trust.ignored)
       this.logger.append(pluginId, 'warn', 'trusted 已忽略：清单没有声明 agent.injectTrusted');
-    return bridge.inject(input.sessionId, {
+    const result = bridge.inject(input.sessionId, {
       pluginId,
       pluginName: manifest.name,
       text: input.text,
@@ -2184,7 +2197,14 @@ export class ExtensionPluginService {
       deliverAs: input.deliverAs,
       triggerTurn: input.triggerTurn,
       trusted: trust.trusted,
+      requestedTrusted: input.trusted,
+      permissions: manifest.permissions,
+      ...(source ? { source } : {}),
+      ...(input.sender ? { sender: input.sender } : {}),
     });
+    if (result.ok && result.trustedOverriddenByExternal)
+      this.logger.append(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
+    return result;
   }
 
   private callExport(

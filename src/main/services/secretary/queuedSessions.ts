@@ -9,6 +9,7 @@ import {
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretaryUpdate } from '@shared/types/secretary';
 import type { SessionWorktree } from '@shared/types/worktree';
+import { classifyUpstreamError, nextPendingRetryDelayMs } from '@shared/upstreamRecovery';
 import { redactSecrets } from '../memory/distill';
 import { notifySecretaryChanged, runningCount, type SecretaryDispatchPorts } from './dispatch';
 import { enqueueUpdate } from './results';
@@ -178,6 +179,50 @@ export function createQueuedSessions(ports: QueuedSessionPorts): QueuedSessions 
     );
   }
 
+  /** 自动启动遇瞬态错误：退避放回排队，最多重试 5 次；超过上限或永久错误再 markFailed */
+  function deferOrFail(conversationId: string, error: string, manual: boolean): void {
+    if (!manual) {
+      const now = ports.now();
+      const classified = classifyUpstreamError({ error }, now);
+      if (classified.kind !== 'permanent') {
+        let deferredAttempt: number | undefined;
+        const row = ports.updateRow(conversationId, (current) => {
+          const queued = queuedStartOf(current);
+          if (!queued) return null;
+          const nextAttempt = (queued.retryCount ?? 0) + 1;
+          const delay = nextPendingRetryDelayMs(nextAttempt);
+          if (delay === null) return null;
+          deferredAttempt = nextAttempt;
+          const { startingAt: _startingAt, failed: _failed, ...rest } = queued;
+          return {
+            ...current,
+            queuedStart: {
+              ...rest,
+              retryCount: nextAttempt,
+              nextRetryAt: now + delay,
+              lastError: error,
+            },
+          };
+        });
+        if (deferredAttempt !== undefined) {
+          const owner = ownerOf(row);
+          owner?.dispatch.audit({
+            at: now,
+            secretaryConversationId:
+              owner.dispatch.dispatchFile().dispatched[conversationId]?.secretaryConversationId ??
+              null,
+            op: 'queued_start',
+            targetId: conversationId,
+            ok: false,
+            detail: `transient-retry ${deferredAttempt} ${error}`,
+          });
+          return;
+        }
+      }
+    }
+    markFailed(conversationId, error, manual);
+  }
+
   async function startLocked(
     conversationId: string,
     manual: boolean,
@@ -225,11 +270,11 @@ export function createQueuedSessions(ports: QueuedSessionPorts): QueuedSessions 
         ...(queued.askRelay ? { askRelay: queued.askRelay } : {}),
       });
       if (launched.ok) finishStarted(conversationId, queued, manual);
-      else markFailed(conversationId, launched.error, manual);
+      else deferOrFail(conversationId, launched.error, manual);
       return launched;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      markFailed(conversationId, message, manual);
+      deferOrFail(conversationId, message, manual);
       return { ok: false, error: message };
     } finally {
       notifySecretaryChanged();
@@ -239,11 +284,13 @@ export function createQueuedSessions(ports: QueuedSessionPorts): QueuedSessions 
   /** 下一条该自动启动的：各秘书有空位、合计也没满，按排队时间最早的先来 */
   async function nextToStart(skip: ReadonlySet<string>): Promise<string | null> {
     const rows = ports.rows();
+    const now = ports.now();
     const positions = queuePositions(rows);
     const heads = new Map<string, { id: string; at: number }>();
     for (const [id, position] of positions) {
       const queued = queuedStartOf(rows[id]);
       if (!queued || queued.startingAt !== undefined || skip.has(id)) continue;
+      if (queued.nextRetryAt !== undefined && now < queued.nextRetryAt) continue;
       const owner = queueOwnerOf(rows[id]);
       const head = heads.get(owner);
       const at = queued.queuedAt;

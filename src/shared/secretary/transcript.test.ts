@@ -178,6 +178,32 @@ describe('wrapPluginDelivery', () => {
       expect(wrapped.startsWith('<untrusted-content source="plugin:enso.github">')).toBe(true);
     }
   });
+
+  it('带发送者时开始标签带渠道和角色，属性里的引号与尖括号被清掉', () => {
+    const wrapped = wrapPluginDelivery('enso.tgclient', 'hello', {
+      sender: {
+        channel: 'telegram',
+        userId: '7',
+        chatId: '9',
+        displayName: 'a"b<c>\nd',
+      },
+    });
+    expect(wrapped).toBe(
+      '<untrusted-content source="plugin:enso.tgclient" channel="telegram" sender-id="7" chat-id="9" sender="abcd" role="external">hello</untrusted-content>'
+    );
+    expect(unwrapUntrustedForDisplay(wrapped)).toBe('hello');
+    expect(literalTags(wrapped)).toEqual({ open: 1, close: 1 });
+  });
+
+  it('宿主核验为 owner 时角色写在标签上，界面仍不露出标签', () => {
+    const wrapped = wrapPluginDelivery('enso.tgclient', '自己的话', {
+      sender: { channel: 'telegram', userId: '1', displayName: 'Ada' },
+      role: 'owner',
+    });
+    expect(wrapped).toContain('role="owner"');
+    expect(wrapped).toContain('sender="Ada"');
+    expect(unwrapUntrustedForDisplay(wrapped)).toBe('自己的话');
+  });
 });
 
 describe('unwrapUntrustedForDisplay', () => {
