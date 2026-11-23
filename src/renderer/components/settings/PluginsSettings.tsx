@@ -7,8 +7,10 @@ import type {
 } from '@shared/extensionPlugins/types';
 import {
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Files,
   FileText,
   FolderOpen,
@@ -46,6 +48,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { copyText } from '@/lib/copyText';
 import { cn } from '@/lib/utils';
 import { PluginArtifactList } from '@/plugins/artifactViews';
 import { coerceConfigValue } from '@/plugins/configValue';
@@ -239,10 +242,36 @@ function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plai
   );
 }
 
+/** 超过这个行数就退回纯文本，避免几千个节点卡住面板 */
+const MAX_LOG_LINES = 5000;
+/** 与 Main 的 PluginLogger 写入格式一致：`<ISO> [level] message`；无前缀的是上一条的续行 */
+const LOG_HEAD = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (\[(info|warn|error)\] .*)$/;
+const LOG_LEVEL_CLASS = {
+  info: 'text-muted-foreground',
+  warn: 'text-warning',
+  error: 'text-destructive',
+} as const;
+
+type LogLine = { time: string | null; body: string; level: keyof typeof LOG_LEVEL_CLASS };
+
+function parseLogLines(text: string): LogLine[] | null {
+  const raw = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n');
+  if (raw.length > MAX_LOG_LINES) return null;
+  let level: LogLine['level'] = 'info';
+  return raw.map((line) => {
+    const head = LOG_HEAD.exec(line);
+    if (!head) return { time: null, body: line, level };
+    level = head[3] as LogLine['level'];
+    return { time: head[1] ?? null, body: head[2] ?? '', level };
+  });
+}
+
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
 function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const { t } = useI18n();
   const [text, setText] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
   const load = React.useCallback(async () => {
     const result = await window.electronAPI.extensionPlugins.logs(pluginId);
     setText(result.ok ? result.text : result.error);
@@ -250,17 +279,70 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
   React.useEffect(() => {
     void load();
   }, [load]);
+  React.useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const lines = React.useMemo(() => (text ? parseLogLines(text) : null), [text]);
+  React.useLayoutEffect(() => {
+    const box = scrollRef.current;
+    if (box && text) box.scrollTop = box.scrollHeight;
+  }, [text]);
   return (
     <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
       <div className="flex items-center justify-between">
         <p className="text-sm">{t('Plugin logs')}</p>
-        <Button size="icon" variant="ghost" aria-label={t('Refresh')} onClick={() => void load()}>
-          <RefreshCw className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={t('Copy')}
+            title={copied ? t('Copied') : t('Copy')}
+            disabled={!text}
+            onClick={() => {
+              if (!text) return;
+              void copyText(text).then((ok) => ok && setCopied(true));
+            }}
+          >
+            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          </Button>
+          <Button size="icon" variant="ghost" aria-label={t('Refresh')} onClick={() => void load()}>
+            <RefreshCw className="size-4" />
+          </Button>
+        </div>
       </div>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-muted-foreground text-xs">
-        {text === null ? '' : text || t('No logs yet')}
-      </pre>
+      {text && !lines && (
+        <p className="text-muted-foreground text-xs">{t('Log too large, showing plain text')}</p>
+      )}
+      <div
+        ref={scrollRef}
+        className="max-h-96 select-text overflow-auto font-mono text-muted-foreground text-xs"
+      >
+        {lines ? (
+          lines.map((line, index) => (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: 日志行无稳定标识，按位置渲染
+              key={index}
+              data-log-level={line.level}
+              className={cn('whitespace-pre-wrap break-words', LOG_LEVEL_CLASS[line.level])}
+            >
+              {line.time && (
+                <>
+                  <span data-log-time className="text-muted-foreground/60">
+                    {line.time}
+                  </span>{' '}
+                </>
+              )}
+              {line.body}
+            </div>
+          ))
+        ) : (
+          <pre className="whitespace-pre-wrap break-words">
+            {text === null ? '' : text || t('No logs yet')}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }
