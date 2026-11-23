@@ -60,6 +60,11 @@ export interface GoalResultView {
   at: number;
 }
 
+/** 结构化结果里是否明确列出了需要用户亲自处理的事项 */
+export function hasNeedsUser(view: GoalResultView | undefined): boolean {
+  return (view?.result.needsUser ?? []).some((item) => item.trim().length > 0);
+}
+
 export type GoalResultParse = { ok: true; value: GoalResult } | { ok: false; error: string };
 
 type Fail = { ok: false; error: string };

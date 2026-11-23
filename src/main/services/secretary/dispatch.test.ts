@@ -1051,9 +1051,8 @@ describe('session_send', () => {
     return file;
   };
 
-  it('手动标完成、goal-complete、failed、interrupted、stalled 之后再发消息：撤下旧终态重新跟踪', async () => {
+  it('goal-complete、failed、interrupted、stalled 之后再发消息：撤下旧终态重新跟踪', async () => {
     const results: NonNullable<DispatchRecord['lastResult']>[] = [
-      { kind: 'goal-complete', turn: 2, at: 950, manual: true },
       { kind: 'goal-complete', turn: 2, at: 950 },
       { kind: 'failed', turn: 2, at: 950 },
       { kind: 'interrupted', turn: 2, at: 950 },
@@ -1080,7 +1079,11 @@ describe('session_send', () => {
       file: closed({ kind: 'goal-complete', turn: 2, at: 950, manual: true }),
       rows: { c1: { id: 'c1', driver: 'main' } },
     });
-    await call(h.handlers.session_send, { conversationId: 'c1', message: '再改一处' });
+    await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '再改一处',
+      goal: '补完下一处修改',
+    });
     const restored = parseDispatchFile(JSON.parse(JSON.stringify(h.file)));
     expect(restored.dispatched.c1.reopenedAt).toBe(NOW);
   });
@@ -4376,5 +4379,78 @@ describe('排队会话', () => {
       ok: false,
       error: 'starting',
     });
+  });
+});
+
+describe('手动标完成写入 daily、新 goal 才解除锁定与停止清旧失败', () => {
+  it('result_mark_done 同步写入 daily.jsonl，不带 goal 的 session_send 不解除手动完成，带 goal 才重新跟踪', async () => {
+    const daily: unknown[] = [];
+    const h = harness({
+      file: dispatchedFile('c1', 'idle'),
+      rows: { c1: { id: 'c1', title: '修引用会话标题泄漏', driver: 'main' } },
+      statuses: { c1: idle },
+    });
+    (h.ports as { recordDaily?: (entry: unknown) => void }).recordDaily = (entry) =>
+      daily.push(entry);
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+
+    expect(await call(h.handlers.result_mark_done, { conversationId: 'c1' })).toEqual({
+      ok: true,
+      result: { status: 'marked-done', conversationId: 'c1' },
+    });
+    expect(daily).toEqual([
+      expect.objectContaining({
+        conversationId: 'c1',
+        kind: 'goal-complete',
+        at: NOW,
+        title: '修引用会话标题泄漏',
+      }),
+    ]);
+
+    // 不带新 goal 的 session_send：不撤下 manual 完成标记
+    expect(
+      await call(h.handlers.session_send, { conversationId: 'c1', message: '收到，不用改了' })
+    ).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+
+    // 带新 goal 的 session_send：撤下 manual 完成标记并重新跟踪
+    expect(
+      await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '继续处理新问题',
+        goal: '修另一个问题',
+      })
+    ).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.file.dispatched.c1.reopenedAt).toBe(NOW);
+  });
+
+  it('session_stop 清掉早先的 failed 结果，但保留停之前已经交过的 goal-complete', async () => {
+    const h1 = harness({
+      file: {
+        ...dispatchedFile('c1', 'idle'),
+        dispatched: {
+          c1: {
+            ...dispatchedFile('c1', 'idle').dispatched.c1,
+            lastState: 'error',
+            lastResult: { kind: 'failed', turn: 1, at: 900 },
+          },
+        },
+      },
+      rows: settledRows(['c1']),
+      statuses: { c1: { state: 'error', pendingAsks: 0, pendingApprovals: 0 } },
+    });
+    await call(h1.handlers.session_stop, { conversationId: 'c1' });
+    expect(h1.file.dispatched.c1.stoppedAt).toBe(NOW);
+    expect(h1.file.dispatched.c1.lastResult).toBeUndefined();
+
+    const h2 = harness({
+      file: settledFile(['c1']),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    await call(h2.handlers.session_stop, { conversationId: 'c1' });
+    expect(h2.file.dispatched.c1.stoppedAt).toBe(NOW);
+    expect(h2.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
   });
 });

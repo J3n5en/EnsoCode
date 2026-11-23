@@ -7,6 +7,7 @@ import {
   type UnavailableImage,
 } from '@shared/secretary/attachments';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
+import { hasNeedsUser } from '@shared/secretary/goalResult';
 import { probeImageView, readImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
@@ -52,6 +53,7 @@ import {
   REPLACEABLE_GOAL_STATUSES,
   type SecretaryAuditEntry,
   type SecretaryBoard,
+  type SecretaryDailyRecord,
   type SecretaryDispatchFile,
   type SecretaryProfile,
   type SecretaryProfileDraft,
@@ -70,6 +72,7 @@ import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
+import { appendDailyRecord } from './dailyLog';
 import { todoDispatchPrompt } from './dispatchBrief';
 import {
   followDepsFor,
@@ -171,6 +174,8 @@ export interface SecretaryDispatchPorts {
   todos(): MaybePromise<SecretaryTodo[]>;
   saveTodos(todos: SecretaryTodo[]): void;
   audit(entry: SecretaryAuditEntry): void;
+  /** 追加按天回看的结果记录（如手动标记完成）；缺省表示不落 daily.jsonl */
+  recordDaily?(entry: SecretaryDailyRecord): void;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   /** projectId → 用户起的别名；缺省按无别名 */
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
@@ -714,12 +719,20 @@ async function sessionLabelOf(
 
 async function noteDispatchResumed(
   ports: SecretaryDispatchPorts,
-  conversationId: string
+  conversationId: string,
+  options?: { newGoal?: boolean }
 ): Promise<void> {
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
   if (!record) return;
   const now = ports.now();
+  // 手动标记完成的会话，只有发了新 goal 才解除完成锁定；普通追问/回复不拉回进行中
+  if (record.lastResult?.manual === true && !options?.newGoal) {
+    record.lastEventAt = now;
+    record.sentAt = now;
+    ports.saveDispatch(file);
+    return;
+  }
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
@@ -1880,7 +1893,7 @@ export function createSecretaryDispatchHandlers(
             );
           }
           await track();
-          await noteDispatchResumed(ports, conversationId);
+          await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
           ports.audit({
             at: ports.now(),
             secretaryConversationId: ctx.secretaryConversationId,
@@ -1905,7 +1918,7 @@ export function createSecretaryDispatchHandlers(
           return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
         await track();
-        await noteDispatchResumed(ports, conversationId);
+        await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
         ports.audit({
           at: ports.now(),
           secretaryConversationId: ctx.secretaryConversationId,
@@ -1949,7 +1962,7 @@ export function createSecretaryDispatchHandlers(
         ok: true,
         detail: `sent (${source})${imageNote}`,
       });
-      await noteDispatchResumed(ports, conversationId);
+      await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
       notifySecretaryChanged();
       return { ok: true, result: { status: 'sent' } };
     },
@@ -2056,10 +2069,14 @@ export function createSecretaryDispatchHandlers(
         if (record.lastState !== 'idle') record.stateSince = now;
         record.lastState = 'idle';
         record.stoppedAt = now;
+        // 停之前已经交过完成结果保留；其余历史失败/受阻随主动停止清掉
+        if (record.lastResult && record.lastResult.kind !== 'goal-complete')
+          delete record.lastResult;
         delete record.backgroundRunning;
         delete record.reopenedAt;
         delete record.stalledTurn;
         delete record.patrol;
+        delete record.failurePending;
         ports.saveDispatch(file);
       }
       const stopped = markTodoProblem(await ports.todos(), conversationId, 'stopped', ports.now());
@@ -2785,6 +2802,8 @@ export async function markResult(
     record.lastResult = { kind: 'goal-complete', turn: record.turn, at: now, manual: true };
     if (record.lastState !== 'idle') record.stateSince = now;
     record.lastState = 'idle';
+    delete record.stoppedAt;
+    delete record.failurePending;
     delete record.backgroundRunning;
     delete record.backgroundPersistent;
     delete record.leftoverTasks;
@@ -2793,6 +2812,17 @@ export async function markResult(
     delete record.dismissedFromBoard;
     if (closedGoal) record.closedGoal = closedGoal;
     else delete record.closedGoal;
+    if (ports.recordDaily) {
+      const row = (await ports.rows())[conversationId];
+      const title = typeof row?.title === 'string' && row.title.trim() ? row.title.trim() : '';
+      ports.recordDaily({
+        at: now,
+        conversationId,
+        kind: 'goal-complete',
+        ...(record.projectId ? { projectId: record.projectId } : {}),
+        ...(title ? { title: redactSecrets(title) } : {}),
+      });
+    }
   } else if (action === 'dismiss') {
     // 移出只动看板记录：不标完成，不碰会话与历史
     if (record.lastState !== 'idle') record.stateSince = now;
@@ -2834,8 +2864,13 @@ export function dismissResult(
   const record = file.dispatched[conversationId];
   if (!record) return { ok: false, error: 'not-found' };
   const result = record.lastResult;
-  if (!result || !NEEDS_YOU_RESULTS.has(result.kind))
-    return { ok: false, error: 'not-dismissible' };
+  const needsUser =
+    result !== undefined &&
+    (NEEDS_YOU_RESULTS.has(result.kind) ||
+      ((result.kind === 'goal-complete' || result.kind === 'goal-blocked') &&
+        !result.manual &&
+        hasNeedsUser(record.goalResult)));
+  if (!result || !needsUser) return { ok: false, error: 'not-dismissible' };
   record.lastResult = { ...result, dismissed: true };
   ports.saveDispatch(file);
   ports.audit({
@@ -3085,6 +3120,7 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
       store().saveTodos(todos);
     },
     audit: (entry) => appendAudit(ctx.dir, entry),
+    recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
     cleanup: realCleanupPorts(ctx),
     projects: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],

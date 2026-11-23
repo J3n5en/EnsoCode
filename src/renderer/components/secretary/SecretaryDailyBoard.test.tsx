@@ -175,6 +175,7 @@ describe('SecretaryDailyBoard', () => {
     ).toBe(TODAY);
     expect(columns()).toEqual([
       { group: 'running', count: '1', cards: 1 },
+      { group: 'withSecretary', count: '0', cards: 0 },
       { group: 'stopped', count: '0', cards: 0 },
       { group: 'needsYou', count: '1', cards: 1 },
       { group: 'done', count: '2', cards: 2 },
@@ -231,7 +232,7 @@ describe('SecretaryDailyBoard', () => {
     await render(createElement(SecretaryDailyBoard));
     expect(columns().every((column) => column.count === '0' && column.cards === 0)).toBe(true);
     expect(container.querySelectorAll('[data-enso="secretary-daily-empty-column"]')).toHaveLength(
-      7
+      8
     );
     expect(text('[data-enso="secretary-daily-empty-column"]')).toBe('[No cards yet]');
     expect(text('[data-enso="secretary-daily-stat"]')).toBe('[Dispatched] 2 · 0/0');
@@ -489,9 +490,47 @@ describe('SecretaryDailyBoard', () => {
     const groups: SecretaryDailyGroup[] = [{ key: 'failed', items: [item({ label: 'Failed' })] }];
     h.daily[TODAY] = daily({ groups });
     await render(createElement(SecretaryDailyBoard));
-    expect(columns()).toHaveLength(7);
+    expect(columns()).toHaveLength(8);
     expect(columns().find((column) => column.group === 'failed')?.cards).toBe(1);
     expect(columns().find((column) => column.group === 'done')?.cards).toBe(0);
+  });
+
+  it('秘书处理中列渲染 goal-blocked 卡片，带 needsUser 的卡片在需要你列展示原因徽标', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        {
+          key: 'withSecretary',
+          items: [
+            item({ id: 's-sec', conversationId: 'c-sec', label: 'Goal blocked', tracked: true }),
+          ],
+        },
+        {
+          key: 'needsYou',
+          items: [
+            item({
+              id: 's-need',
+              conversationId: 'c-need',
+              label: 'Waiting for you',
+              tracked: true,
+              goalResult: {
+                at: 1,
+                result: { needsUser: ['确认是否上线生产'] },
+              },
+            }),
+          ],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(columns().find((column) => column.group === 'withSecretary')?.cards).toBe(1);
+    expect(
+      container.querySelector(
+        '[data-group="withSecretary"] [data-enso="secretary-daily-mark-done"]'
+      )
+    ).not.toBeNull();
+    expect(text('[data-group="needsYou"] [data-enso="secretary-goal-needs-user"]')).toContain(
+      '确认是否上线生产'
+    );
   });
 });
 
