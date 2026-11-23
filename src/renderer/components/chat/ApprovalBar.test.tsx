@@ -66,6 +66,30 @@ describe('ApprovalBar dcg 规则解释', () => {
     expect(html).toContain('nwipe overwrites the disk');
     expect(html).not.toContain('Why it is dangerous');
   });
+
+  it('带出风险等级、命中片段与可折叠的 dcg 说明；warn 档用提醒而非拦截文案', () => {
+    const deny = render([
+      {
+        ...guarded('core.git:reset-hard'),
+        guard: {
+          ruleId: 'core.git:reset-hard',
+          reason: 'r',
+          decision: 'ask',
+          severity: 'critical',
+          matched: 'git reset --hard',
+          explanation: 'discards ALL uncommitted changes',
+        },
+      },
+    ]);
+    expect(deny).toContain('Critical');
+    expect(deny).toContain('git reset --hard</code>');
+    expect(deny).toContain('discards ALL uncommitted changes');
+    expect(deny).toContain('text-destructive');
+    const { protected: _protected, ...plain } = guarded('core.git:stash-drop');
+    const warn = render([{ ...plain, guard: { ...plain.guard, decision: 'warn' } }]);
+    expect(warn).toContain('dcg notice: ');
+    expect(warn).not.toContain('dcg: ');
+  });
 });
 
 describe('ApprovalBar 复制详情', () => {

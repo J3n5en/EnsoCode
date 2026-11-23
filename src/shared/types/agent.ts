@@ -111,6 +111,7 @@ import {
   type ThinkingLevel,
   TURN_REPORT_MAX_CHARS,
 } from './agentConstants';
+import { type DcgGuardHit, type DcgWarning, isDcgGuardHit, isDcgWarning } from './dcg';
 import { type EditMode, isEditMode } from './editMode';
 import {
   PROJECTED_APPLY_PATCH_PATH_COUNT_LIMIT,
@@ -320,8 +321,8 @@ export interface ApprovalRequestInfo {
   expiresAt?: number;
   /** 托管判定无效（超时 / 出错 / 缺字段）退回人工的原因 */
   reviewFallback?: ApprovalReviewFallback;
-  /** dcg 命令守卫命中的规则与原因 */
-  guard?: { ruleId: string; reason: string };
+  /** dcg 命令守卫命中的规则与原因；decision=warn 时只是提示 */
+  guard?: DcgGuardHit;
 }
 
 /** 提问是谁收的尾：用户在原会话里直接答、秘书代答、超时兜底 */
@@ -412,6 +413,7 @@ export interface ShellFailure {
 export interface ShellDetails {
   backgroundTaskId?: string;
   shellFailure?: ShellFailure;
+  dcgWarning?: DcgWarning;
 }
 
 export function parseShellFailure(value: unknown): ShellFailure | null {
@@ -1870,6 +1872,8 @@ export interface ProjectedMessage {
   backgroundTaskId?: string;
   /** bash / powershell 结果的结构化失败分类 */
   shellFailure?: ShellFailure;
+  /** dcg warn 档命中：不拦，只提示 */
+  dcgWarning?: DcgWarning;
   /** 插件工具写出的产出文件 */
   pluginArtifacts?: PluginArtifactInfo[];
   /** ImageGen 已落盘的本地图片，含 codemode 嵌套生成的产物。 */
@@ -2949,6 +2953,7 @@ function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
     return false;
   }
   if (value.shellFailure !== undefined && !parseShellFailure(value.shellFailure)) return false;
+  if (value.dcgWarning !== undefined && !isDcgWarning(value.dcgWarning)) return false;
   if (value.pluginSource !== undefined && !parsePluginMessageSource(value.pluginSource))
     return false;
   if (
@@ -5422,11 +5427,7 @@ const agentWorkerEventParsers = {
         isOptionalTimestamp(value.request.expiresAt) &&
         (value.request.reviewFallback === undefined ||
           APPROVAL_REVIEW_FALLBACKS.includes(value.request.reviewFallback as never)) &&
-        (value.request.guard === undefined ||
-          (isRecord(value.request.guard) &&
-            hasOnlyKeys(value.request.guard, ['ruleId', 'reason']) &&
-            isNonEmptyString(value.request.guard.ruleId) &&
-            isNonEmptyString(value.request.guard.reason)))
+        (value.request.guard === undefined || isDcgGuardHit(value.request.guard))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }

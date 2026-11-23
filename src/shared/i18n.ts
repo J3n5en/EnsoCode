@@ -519,6 +519,11 @@ export const zhTranslations: Record<string, string> = {
   'Protected: secrets': '受保护：密钥',
   'Protected: destructive command': '受保护：破坏性命令',
   'dcg: {{reason}}': 'dcg：{{reason}}',
+  'dcg notice: {{reason}}': 'dcg 提醒（不拦截）：{{reason}}',
+  'dcg notice': 'dcg 提醒',
+  'dcg explanation': 'dcg 详细说明',
+  Matched: '命中片段',
+  Critical: '严重',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',
   'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.':
     '执行 bash 和 PowerShell 命令前先用 dcg 检查。命中 git reset --hard、递归删除等危险命令时，即使在完全放行模式下也必须由你确认。新会话生效。',

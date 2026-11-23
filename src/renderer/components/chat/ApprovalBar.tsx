@@ -2,7 +2,7 @@ import type { ApprovalReviewFallback } from '@shared/approvalReviewRecord';
 import { explainDcgGuard } from '@shared/dcgRuleHints';
 import { isNestedToolCallId } from '@shared/toolCallId';
 import type { ApprovalDecision, ApprovalKind, ApprovalRequestInfo } from '@shared/types/agent';
-import type { DcgRuleState } from '@shared/types/dcg';
+import type { DcgGuardHit, DcgRuleState, DcgSeverity } from '@shared/types/dcg';
 import { FileEdit, FilePlus, Plug, ShieldAlert, TerminalSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
@@ -88,10 +88,19 @@ const REVIEW_FALLBACK_LABELS: Record<ApprovalReviewFallback, string> = {
 const dcgApi = () =>
   typeof window === 'undefined' || window.electronAPI?.remote ? undefined : window.electronAPI?.dcg;
 
-function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }) {
+const SEVERITY_LABELS: Record<DcgSeverity, string> = {
+  critical: 'Critical',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+};
+
+function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
   const { t, locale } = useI18n();
   const [rule, setRule] = useState<{ ruleId: string; state: DcgRuleState } | null>(null);
+  const warn = guard.decision === 'warn';
   useEffect(() => {
+    if (warn) return;
     let alive = true;
     void dcgApi()
       ?.ruleState(guard.ruleId)
@@ -102,7 +111,7 @@ function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }
     return () => {
       alive = false;
     };
-  }, [guard.ruleId]);
+  }, [guard.ruleId, warn]);
   const state = rule?.ruleId === guard.ruleId ? rule.state : null;
   const explained = locale === 'zh' ? explainDcgGuard(guard) : { what: guard.reason };
   const exempt = () => {
@@ -116,9 +125,20 @@ function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }
 
   return (
     <div className="mt-1 space-y-0.5 text-[11px]">
-      <p className="text-destructive" title={guard.ruleId}>
-        {t('dcg: {{reason}}', { reason: explained.what })}
+      <p className={warn ? 'text-muted-foreground' : 'text-destructive'} title={guard.ruleId}>
+        {guard.severity && (
+          <span className="mr-1 rounded bg-muted px-1 text-[10px]">
+            {t(SEVERITY_LABELS[guard.severity])}
+          </span>
+        )}
+        {t(warn ? 'dcg notice: {{reason}}' : 'dcg: {{reason}}', { reason: explained.what })}
       </p>
+      {guard.matched && (
+        <p className="text-muted-foreground">
+          {t('Matched')}:{' '}
+          <code className="rounded bg-muted/60 px-1 font-mono">{guard.matched}</code>
+        </p>
+      )}
       {explained.why && (
         <p className="text-muted-foreground">
           {t('Why it is dangerous')}: {explained.why}
@@ -130,6 +150,12 @@ function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }
           <code className="rounded bg-muted/60 px-1 font-mono">{explained.alt}</code>
           <CopyButton text={explained.alt} className="p-0.5" />
         </div>
+      )}
+      {guard.explanation && (
+        <details className="text-muted-foreground">
+          <summary className="cursor-pointer">{t('dcg explanation')}</summary>
+          <p className="whitespace-pre-wrap">{guard.explanation}</p>
+        </details>
       )}
       {state?.suggestExempt && (
         <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
@@ -187,7 +213,7 @@ export function ApprovalBar({
   const respond = (decision: ApprovalDecision) => {
     // 代审可能原卡退回，不能把按钮锁死
     if (decision !== 'review') setResponding(active.requestId);
-    if (decision === 'allow' && active.guard)
+    if (decision === 'allow' && active.guard && active.guard.decision !== 'warn')
       void dcgApi()
         ?.ruleAllowed(active.guard.ruleId)
         .catch(() => {});

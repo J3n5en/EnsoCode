@@ -1,4 +1,6 @@
+import { explainDcgGuard } from '@shared/dcgRuleHints';
 import type { ShellFailure } from '@shared/types/agent';
+import type { DcgWarning } from '@shared/types/dcg';
 import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
@@ -101,6 +103,21 @@ export function ShellFailureBadge({ failure }: { failure: ShellFailure }) {
       )}
     >
       {failureLabel(failure, t)}
+    </span>
+  );
+}
+
+/** dcg warn 档：命令照常执行，行头只留一枚淡色提示，悬停看原因 */
+export function DcgWarningBadge({ warning }: { warning: DcgWarning }) {
+  const { t, locale } = useI18n();
+  const explained = locale === 'zh' ? explainDcgGuard(warning) : { what: warning.reason };
+  return (
+    <span
+      data-dcg-warning={warning.ruleId}
+      title={[explained.what, explained.why, warning.ruleId].filter(Boolean).join('\n')}
+      className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground"
+    >
+      {t('dcg notice')}
     </span>
   );
 }

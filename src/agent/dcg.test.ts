@@ -39,18 +39,78 @@ describe('withDcgExemptions', () => {
 });
 
 describe('parseDcgVerdict', () => {
-  it('退出码 1 且 decision=deny 返回规则与原因', () => {
+  const robot = (fields: Record<string, unknown>) =>
+    JSON.stringify({
+      schema_version: 1,
+      command: 'git stash drop',
+      rule_id: 'core.git:stash-drop',
+      reason: 'git stash drop deletes a single stash.',
+      ...fields,
+    });
+
+  it('decision=deny 返回规则、原因与 deny 档', () => {
     expect(parseDcgVerdict(1, DENY)).toEqual({
       ruleId: 'core.git:reset-hard',
       reason: 'git reset --hard destroys uncommitted changes.',
+      decision: 'deny',
     });
   });
 
-  it('放行、坏 JSON、缺字段、其它退出码一律放行', () => {
+  it('decision=warn 且退出码 0 也返回 warn 档命中', () => {
+    expect(parseDcgVerdict(0, robot({ decision: 'warn', severity: 'medium' }))).toEqual({
+      ruleId: 'core.git:stash-drop',
+      reason: 'git stash drop deletes a single stash.',
+      decision: 'warn',
+      severity: 'medium',
+    });
+  });
+
+  it('decision=ask（策略为 ask）返回 ask 档命中', () => {
+    expect(parseDcgVerdict(1, robot({ decision: 'ask', severity: 'critical' }))).toMatchObject({
+      ruleId: 'core.git:stash-drop',
+      decision: 'ask',
+      severity: 'critical',
+    });
+  });
+
+  it('带出 explanation 与 matched_span 对应的命令片段（按 UTF-8 字节偏移）', () => {
+    const hit = parseDcgVerdict(
+      1,
+      robot({
+        decision: 'deny',
+        severity: 'high',
+        command: 'echo 中 && git stash drop',
+        explanation: 'stash entries become unreferenced',
+        matched_span: [12, 26],
+      })
+    );
+    expect(hit).toMatchObject({
+      severity: 'high',
+      explanation: 'stash entries become unreferenced',
+      matched: 'git stash drop',
+    });
+  });
+
+  it('未知 severity、坏 matched_span 不带出，但不影响命中', () => {
+    const hit = parseDcgVerdict(
+      1,
+      robot({ decision: 'deny', severity: 'huge', matched_span: [9, 2] })
+    );
+    expect(hit).toEqual({
+      ruleId: 'core.git:stash-drop',
+      reason: 'git stash drop deletes a single stash.',
+      decision: 'deny',
+    });
+  });
+
+  it('放行、无 decision、坏 JSON、缺字段、被杀（无退出码）一律 null', () => {
     expect(parseDcgVerdict(0, JSON.stringify({ decision: 'allow' }))).toBeNull();
+    expect(parseDcgVerdict(0, robot({ decision: 'allow' }))).toBeNull();
+    expect(parseDcgVerdict(1, robot({}))).toBeNull();
     expect(parseDcgVerdict(1, 'not json')).toBeNull();
+    expect(parseDcgVerdict(1, 'null')).toBeNull();
     expect(parseDcgVerdict(1, JSON.stringify({ decision: 'deny' }))).toBeNull();
-    expect(parseDcgVerdict(2, DENY)).toBeNull();
+    expect(parseDcgVerdict(1, robot({ decision: 'warn', reason: '' }))).toBeNull();
     expect(parseDcgVerdict(null, DENY)).toBeNull();
   });
 });

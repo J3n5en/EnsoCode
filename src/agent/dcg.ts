@@ -1,9 +1,14 @@
 import { spawn } from 'node:child_process';
+import {
+  DCG_EXPLANATION_MAX,
+  DCG_GUARD_DECISIONS,
+  DCG_MATCHED_MAX,
+  DCG_SEVERITIES,
+  type DcgGuardHit,
+  type DcgSeverity,
+} from '@shared/types/dcg';
 
-export interface CommandGuardHit {
-  ruleId: string;
-  reason: string;
-}
+export type CommandGuardHit = DcgGuardHit;
 
 /** 命令守卫：命中返回规则与原因；出错 / 超时 / 不适用一律 null（fail-open，交回原审批逻辑） */
 export type CommandGuard = (
@@ -18,14 +23,44 @@ export function dcgDialect(tool: string): 'posix' | 'ps' | null {
   return null;
 }
 
+/** warn 只提示不拦；缺省 decision 视同 deny */
+export const isBlockingGuardHit = (hit: CommandGuardHit): boolean => hit.decision !== 'warn';
+
+/** matched_span 是 command 的 UTF-8 字节区间 */
+function matchedText(command: unknown, span: unknown): string | undefined {
+  if (typeof command !== 'string' || !Array.isArray(span) || span.length !== 2) return undefined;
+  const [start, end] = span;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start)
+    return undefined;
+  const bytes = Buffer.from(command);
+  if (end > bytes.length) return undefined;
+  const text = bytes.subarray(start, end).toString().trim();
+  return text ? text.slice(0, DCG_MATCHED_MAX) : undefined;
+}
+
+/** 按 robot JSON 的 decision 判定，不看退出码（warn 退出 0）；被杀（无退出码）或解析失败 fail-open */
 export function parseDcgVerdict(exitCode: number | null, stdout: string): CommandGuardHit | null {
-  if (exitCode !== 1) return null;
+  if (exitCode === null) return null;
   try {
-    const value = JSON.parse(stdout) as Record<string, unknown>;
-    if (value.decision !== 'deny') return null;
-    const { rule_id: ruleId, reason } = value;
+    const value: unknown = JSON.parse(stdout);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    const { decision, rule_id: ruleId, reason, severity, explanation } = record;
+    if (!(DCG_GUARD_DECISIONS as readonly unknown[]).includes(decision)) return null;
     if (typeof ruleId !== 'string' || !ruleId || typeof reason !== 'string' || !reason) return null;
-    return { ruleId, reason };
+    const matched = matchedText(record.command, record.matched_span);
+    return {
+      ruleId,
+      reason,
+      decision: decision as CommandGuardHit['decision'],
+      ...((DCG_SEVERITIES as readonly unknown[]).includes(severity)
+        ? { severity: severity as DcgSeverity }
+        : {}),
+      ...(typeof explanation === 'string' && explanation.trim()
+        ? { explanation: explanation.trim().slice(0, DCG_EXPLANATION_MAX) }
+        : {}),
+      ...(matched ? { matched } : {}),
+    };
   } catch {
     return null;
   }

@@ -9,7 +9,7 @@ import type {
   ProtectedActionCategory,
 } from '@shared/types/agent';
 import { rememberApprovalReview } from './approvalReviewRecords';
-import type { CommandGuard, CommandGuardHit } from './dcg';
+import { type CommandGuard, type CommandGuardHit, isBlockingGuardHit } from './dcg';
 import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
@@ -362,10 +362,13 @@ export function withApproval(
         ? classifyProtectedTool(definition.name, kind, params)
         : null;
       const command = (params as { command?: unknown } | undefined)?.command;
-      const guard =
+      const hit =
         kind === 'command' && typeof command === 'string'
           ? await gate.commandGuard?.(definition.name, command, signal)
           : undefined;
+      // warn 只提示：不升级为受保护动作，卡片本来要弹时顺带展示
+      const guard = hit && isBlockingGuardHit(hit) ? hit : undefined;
+      const warning = hit && !guard ? hit : undefined;
       const protectedCategory = floorCategory ?? (guard ? 'destructive' : null);
       if (protectedCategory || gate.needsApproval(kind, definition.name)) {
         const filePaths =
@@ -380,7 +383,7 @@ export function withApproval(
           toolCallId,
           filePaths,
           protectedCategory ?? undefined,
-          guard ?? undefined
+          hit ?? undefined
         );
         // 无人值守的拒绝要点名动作，让模型知道是哪一条被拦、别原样重试
         if (result === 'no-approver') {
@@ -388,8 +391,20 @@ export function withApproval(
         }
         throwUnlessAllowed(result);
       }
-      return definition.execute(toolCallId, params, signal, onUpdate, ctx);
+      const result = await definition.execute(toolCallId, params, signal, onUpdate, ctx);
+      return warning ? withDcgWarning(result, warning) : result;
     },
+  };
+}
+
+/** warn 命中写进结果 details，时间线工具行据此显示淡色提示；details 非对象时不写 */
+function withDcgWarning<T extends { details?: unknown }>(result: T, hit: CommandGuardHit): T {
+  const details = result.details ?? {};
+  if (typeof details !== 'object' || Array.isArray(details)) return result;
+  const { ruleId, reason, severity } = hit;
+  return {
+    ...result,
+    details: { ...details, dcgWarning: { ruleId, reason, ...(severity ? { severity } : {}) } },
   };
 }
 
