@@ -663,6 +663,13 @@ export function lastDistillWatermark(db: Database.Database, sessionId: string): 
   return row ? toJob(row).payload.toEntryId : undefined;
 }
 
+export function getDistillJob(db: Database.Database, id: number): DistillJob | null {
+  const row = db.prepare('SELECT * FROM memory_jobs WHERE id = ? AND kind = ?').get(id, KIND) as
+    | JobRow
+    | undefined;
+  return row ? toJob(row) : null;
+}
+
 /** 重启后要续跑的任务：pending 与上次进程死在半路的 running */
 export function listResumableDistillJobs(db: Database.Database): DistillJob[] {
   return (

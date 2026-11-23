@@ -1,7 +1,8 @@
+import { formatReminderClock, formatReminderTooltip } from '@shared/reminders';
 import { type ContactBadge, sessionBadge } from '@shared/secretary/commands';
 import type { PendingDispatch, SecretaryCard } from '@shared/types/secretary';
 import { formatRetryClock } from '@shared/upstreamRecovery';
-import { ArrowUpRight, Check, RotateCcw } from 'lucide-react';
+import { ArrowUpRight, Check, Clock, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
@@ -25,6 +26,10 @@ const BADGE_STYLE: Record<ContactBadge, { label: string; className: string }> = 
   waiting: { label: 'Waiting for you', className: 'bg-warning/15 text-warning' },
   running: { label: 'Running', className: 'bg-success/15 text-success' },
   background: { label: 'Waiting on a background task', className: 'bg-warning/15 text-warning' },
+  reminder: {
+    label: 'Waiting for reminder',
+    className: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+  },
   persistent: { label: 'Service running', className: 'bg-warning/15 text-warning' },
   subagent: { label: 'Waiting on subagent', className: 'bg-warning/15 text-warning' },
   continuing: { label: 'Continuing', className: 'bg-success/15 text-success' },
@@ -60,6 +65,12 @@ function RunningRow({ card }: { card: SessionCard }) {
           ? t('Queued · #{{n}}', { n: card.queuePosition })
           : t('Queued')
       : null;
+  const reminder = !upstreamLabel && !queuedLabel ? card.pendingReminder : undefined;
+  const reminderNow = Date.now();
+  const reminderLabel = reminder
+    ? t('Waiting for reminder · {{time}}', { time: formatReminderClock(reminder.dueAt) })
+    : null;
+  const reminderTooltip = reminder ? formatReminderTooltip(reminder, reminderNow, t) : undefined;
   return (
     <div
       data-enso="secretary-running-row"
@@ -81,18 +92,24 @@ function RunningRow({ card }: { card: SessionCard }) {
                 ? 'secretary-upstream-waiting'
                 : queuedLabel
                   ? 'secretary-queued-card'
-                  : 'secretary-running-badge'
+                  : reminderLabel
+                    ? 'secretary-reminder-waiting'
+                    : 'secretary-running-badge'
             }
+            title={reminderTooltip}
             className={cn(
               BADGE_CLASS,
               upstreamLabel
                 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                 : queuedLabel
                   ? 'bg-orange-500/15 text-orange-600'
-                  : badge.className
+                  : reminderLabel
+                    ? 'inline-flex items-center gap-1 bg-sky-500/15 text-sky-600 tabular-nums dark:text-sky-400'
+                    : badge.className
             )}
           >
-            {upstreamLabel ?? queuedLabel ?? t(badge.label)}
+            {reminderLabel && <Clock className="h-2.5 w-2.5 shrink-0" aria-hidden />}
+            {upstreamLabel ?? queuedLabel ?? reminderLabel ?? t(badge.label)}
           </span>
           {card.takeover && (
             <span
@@ -144,6 +161,15 @@ function RunningRow({ card }: { card: SessionCard }) {
                 </span>
               );
             })}
+          </span>
+        )}
+        {reminder?.label && (
+          <span
+            data-enso="secretary-running-reminder"
+            title={reminderTooltip}
+            className="mt-0.5 block truncate text-[11.5px] text-muted-foreground"
+          >
+            {reminder.label}
           </span>
         )}
         {card.lastText && (

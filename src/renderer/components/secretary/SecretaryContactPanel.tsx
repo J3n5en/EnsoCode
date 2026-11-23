@@ -4,12 +4,14 @@ import type {
   SecretaryContactChannelPrefs,
   SecretaryContactChannelStatus,
   SecretaryContactChannelView,
+  SecretaryContactOutboundHealth,
   SecretaryContactState,
 } from '@shared/types/secretary';
 import {
   Check,
   ChevronDown,
   ChevronRight,
+  CirclePause,
   Copy,
   ExternalLink,
   Loader2,
@@ -25,6 +27,7 @@ import QRCode from 'qrcode';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { PluginIcon } from '@/plugins/PluginIcon';
 import { PluginFrame } from '@/plugins/PluginView';
@@ -51,6 +54,7 @@ const ERROR_TEXT: Record<string, string> = {
   'no-secretary': 'No secretary conversation is available',
   'deliver-failed': 'Could not reach the secretary session',
   'invalid-chat-id': 'Group chat IDs are numbers, e.g. -1001234567890',
+  'channel-paused': 'Pushes to this channel are paused after repeated failures',
   'invalid sender': 'Not allowed from this window',
 };
 
@@ -108,6 +112,95 @@ function writeCollapsed(value: Record<string, boolean>): void {
   }
 }
 
+/** 插件渠道出站失败：最近一次的时间和原因，插件给的提示原样展示；暂停中说清楚何时再试 */
+function OutboundNotice({
+  outbound,
+  busy,
+  onRetry,
+}: {
+  outbound: SecretaryContactOutboundHealth;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  const { t, locale } = useI18n();
+  const now = Date.now();
+  const paused = outbound.state === 'paused';
+  const waiting = paused && outbound.pausedUntil !== undefined && outbound.pausedUntil > now;
+  return (
+    <div
+      data-enso="secretary-contact-outbound"
+      data-state={outbound.state}
+      className={cn(
+        'rounded-lg border px-2.5 py-2 text-[12px]',
+        paused ? 'border-warning/50 bg-warning/5' : 'border-destructive/40 bg-destructive/5'
+      )}
+    >
+      <div
+        className={cn(
+          'flex items-center gap-1.5 font-medium',
+          paused ? 'text-warning' : 'text-destructive'
+        )}
+      >
+        {paused ? (
+          <CirclePause className="size-3.5 shrink-0" />
+        ) : (
+          <ShieldAlert className="size-3.5 shrink-0" />
+        )}
+        {paused
+          ? t('Pushes paused: {{count}} sends failed in a row', {
+              count: outbound.consecutiveFailures,
+            })
+          : t('The last send failed ({{count}} in a row)', {
+              count: outbound.consecutiveFailures,
+            })}
+      </div>
+      {outbound.userMessage && (
+        <p data-enso="secretary-contact-outbound-hint" className="mt-1 text-[12.5px]">
+          {outbound.userMessage}
+        </p>
+      )}
+      <p className="mt-1 text-[11.5px] text-muted-foreground">
+        {t('Last failure: {{time}}', {
+          time: `${formatClock(outbound.lastErrorAt, locale)} (${formatRelativeTime(outbound.lastErrorAt, locale, now)})`,
+        })}
+      </p>
+      {outbound.detail && (
+        <p
+          data-enso="secretary-contact-outbound-detail"
+          className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground"
+        >
+          {outbound.detail}
+        </p>
+      )}
+      {paused && (
+        <p className="mt-1 text-[11.5px] text-muted-foreground">
+          {waiting
+            ? t(
+                'Next try at {{time}}. A message from this channel or Retry now resumes pushes right away.',
+                { time: formatClock(outbound.pausedUntil ?? now, locale) }
+              )
+            : t('The next push will try again.')}
+          {outbound.suppressedCount > 0 &&
+            ` ${t('{{count}} pushes held back.', { count: outbound.suppressedCount })}`}
+        </p>
+      )}
+      <button
+        type="button"
+        data-enso="secretary-contact-outbound-retry"
+        disabled={busy}
+        className={cn(BUTTON_CLASS, 'mt-1.5')}
+        onClick={onRetry}
+      >
+        <RefreshCw className="size-3.5" />
+        {t('Retry now')}
+      </button>
+      <span className="ml-2 text-[11px] text-subtle-foreground">
+        {t('Sends a test message to this channel.')}
+      </span>
+    </div>
+  );
+}
+
 /** 同样用 Telegram bot token 的远程操作插件：两边抢同一个 bot 会互相吞消息 */
 const TELEGRAM_REMOTE_PLUGIN = 'enso.telegram';
 
@@ -151,6 +244,7 @@ function ChannelCard({
   busy,
   onToggle,
   onPrefs,
+  onRetry,
   children,
 }: {
   channel: SecretaryContactChannelView;
@@ -158,6 +252,7 @@ function ChannelCard({
   busy: boolean;
   onToggle: () => void;
   onPrefs: (prefs: Partial<SecretaryContactChannelPrefs>) => void;
+  onRetry: () => void;
   children?: ReactNode;
 }) {
   const { t } = useI18n();
@@ -202,6 +297,19 @@ function ChannelCard({
           >
             {t(STATUS_LABEL[channel.status])}
           </span>
+          {channel.outbound && (
+            <span
+              data-enso="secretary-contact-channel-outbound"
+              className={cn(
+                'shrink-0 rounded px-1 text-[10.5px]',
+                channel.outbound.state === 'paused'
+                  ? 'bg-warning/15 text-warning'
+                  : 'bg-destructive/15 text-destructive'
+              )}
+            >
+              {channel.outbound.state === 'paused' ? t('Pushes paused') : t('Send failed')}
+            </span>
+          )}
         </button>
         <Switch
           data-enso="secretary-contact-channel-enabled"
@@ -215,6 +323,9 @@ function ChannelCard({
         <div className="flex flex-col gap-2 border-t border-border px-3 py-2.5">
           {channel.detail && channel.status === 'error' && (
             <p className="text-[11.5px] text-destructive">{channel.detail}</p>
+          )}
+          {channel.outbound && (
+            <OutboundNotice outbound={channel.outbound} busy={busy} onRetry={onRetry} />
           )}
           <PrefRow
             dataEnso="secretary-contact-push"
@@ -388,6 +499,16 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
   );
   const setPrefs = (channelId: string, prefs: Partial<SecretaryContactChannelPrefs>) =>
     run(() => window.electronAPI.secretary.contactSettings({ channelId, prefs }, secretaryId));
+  // 重试的发送失败写在渠道卡片上（原因与时间），顶部只报没绑定这类发不出去的情况
+  const retryChannel = (channelId: string) =>
+    run(() =>
+      window.electronAPI.secretary.contactTest(secretaryId, channelId).then((result) => {
+        if (result.ok) setNotice(t('Test message sent'));
+        else if (['api', 'network', 'unauthorized', 'channel-paused'].includes(result.error))
+          return { ok: true as const };
+        return result;
+      })
+    );
   const pollFailed = telegram.poll.state === 'error' || telegram.poll.state === 'backoff';
   // 轮询在跑时连不上与否以它为准：动作留下的 network 结果不单独挂着，否则恢复后没人撤
   const pollAlive = telegram.poll.state !== 'stopped' && telegram.poll.state !== 'error';
@@ -856,6 +977,7 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
               busy={busy}
               onToggle={() => toggleCollapsed(channel.id)}
               onPrefs={(prefs) => setPrefs(channel.id, prefs)}
+              onRetry={() => retryChannel(channel.id)}
             >
               {channel.id === 'telegram' ? (
                 telegramBody

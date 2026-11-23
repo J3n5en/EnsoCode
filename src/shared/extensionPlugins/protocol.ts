@@ -291,6 +291,14 @@ export const PLUGIN_HOST_APIS = [
   'claims.release',
   /** 列出未过期认领；args { prefix?, sessionId?, pluginId? } */
   'claims.list',
+  /** 登记一条需求线程；args { source, sessionId, subagentId?, secretaryId?, pr? } */
+  'threads.open',
+  /** 把 PR 绑到需求线程；args { threadId? , sessionId?, pr } */
+  'threads.bindPr',
+  /** 把 PR 事件只投给负责会话；args 即事件 */
+  'threads.routePrEvent',
+  /** 列出需求线程；args { status?, sessionId?, repo?, activeOnly? } */
+  'threads.list',
   /** 中止会话当前一轮；args { sessionId? }，权限同 session.inject */
   'session.abort',
   /** 调用其他插件导出的方法；args { pluginId, name, args } */
@@ -332,6 +340,8 @@ export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 export interface PluginErrorShape {
   code: string;
   message: string;
+  /** 插件给用户看的提示（如「会话已过期，请在微信里给机器人发一条消息」）；旧插件没有 */
+  userMessage?: string;
 }
 
 export interface PluginRegistrations {

@@ -164,9 +164,13 @@ describe('PluginProcess', () => {
         t: 'res',
         id: sentCall.id,
         ok: false,
-        error: { code: 'X', message: 'bad' },
+        error: { code: 'X', message: 'bad', userMessage: '请在微信里给机器人发一条消息' },
       });
-    await expect(result).rejects.toMatchObject({ code: 'X' });
+    await expect(result).rejects.toMatchObject({
+      code: 'X',
+      message: 'bad',
+      userMessage: '请在微信里给机器人发一条消息',
+    });
     expect(s.onExit).not.toHaveBeenCalled();
   });
 

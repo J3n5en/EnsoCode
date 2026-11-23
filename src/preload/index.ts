@@ -61,6 +61,7 @@ import type { PastedTextFileResult } from '@shared/pastedText';
 import type { PlanRespondAction } from '@shared/planMode';
 import type { PresetImportDraft } from '@shared/presetImport';
 import type { PrivacyMaskRecord } from '@shared/privacyMask/report';
+import type { SessionReminderSummary } from '@shared/reminders';
 import type { RemoteApi } from '@shared/remoteBridge';
 import type {
   ResourceSnapshot,
@@ -700,8 +701,16 @@ const electronAPI = {
       secretaryId?: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT, secretaryId),
-    contactTest: (secretaryId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST, secretaryId),
+    /** 不带 channelId 发 Telegram 测试消息；带插件渠道 id 是「立即重试」 */
+    contactTest: (
+      secretaryId?: string,
+      channelId?: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.SECRETARY_CONTACT_TEST,
+        secretaryId,
+        channelId ? { channelId } : undefined
+      ),
     /** 总开关 enabled、Telegram 老开关，或某个渠道卡片上的通用开关 */
     contactSettings: (
       patch:
@@ -1453,6 +1462,18 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.AGENT_SUBAGENT_PROGRESS_CHANGED, listener);
       return () =>
         ipcRenderer.removeListener(IPC_CHANNELS.AGENT_SUBAGENT_PROGRESS_CHANGED, listener);
+    },
+    listReminders: (): Promise<Record<string, SessionReminderSummary[]>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_REMINDERS_LIST),
+    onRemindersChanged: (
+      callback: (push: { sessionId: string; reminders: SessionReminderSummary[] }) => void
+    ): (() => void) => {
+      const listener = (
+        _: unknown,
+        push: { sessionId: string; reminders: SessionReminderSummary[] }
+      ) => callback(push);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_REMINDERS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_REMINDERS_CHANGED, listener);
     },
     stopSubagent: (sessionId: string, agentId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUBAGENT_STOP, sessionId, agentId),

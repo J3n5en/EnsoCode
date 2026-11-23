@@ -1,3 +1,4 @@
+import { formatReminderClock, formatReminderTooltip } from '@shared/reminders';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   NEEDS_YOU_RESULTS,
@@ -5,6 +6,7 @@ import {
   type SecretaryBoard,
   type SecretaryBoardTodo,
   type SecretaryClaimView,
+  type SecretaryDemandThreadView,
   type SecretaryTodoMutate,
   type TodoProblemCode,
 } from '@shared/types/secretary';
@@ -81,6 +83,11 @@ function todoStateText(
   conversations: Record<string, unknown>,
   t: (key: string, params?: Record<string, string | number>) => string
 ): string {
+  if (todo.pendingReminder) {
+    return t('Waiting for reminder · {{time}}', {
+      time: formatReminderClock(todo.pendingReminder.dueAt),
+    });
+  }
   if (!todo.sessionState) return '';
   if (todo.sessionState !== 'queued') return t(SESSION_STATE_LABEL[todo.sessionState]);
   const row = todo.conversationId ? conversations[todo.conversationId] : undefined;
@@ -136,6 +143,36 @@ function ClaimList({ claims }: { claims: readonly SecretaryClaimView[] }) {
             {claim.pluginId}
             {' · '}
             {formatRelativeTime(claim.lastHeartbeatAt, locale, now)}
+          </span>
+        </button>
+      ))}
+    </section>
+  );
+}
+
+function ThreadList({ threads }: { threads: readonly SecretaryDemandThreadView[] }) {
+  const { t } = useI18n();
+  return (
+    <section data-enso="secretary-threads" className="flex flex-col gap-1.5">
+      <p className="text-[12px] font-medium text-muted-foreground">{t('Demand threads')}</p>
+      {threads.map((thread) => (
+        <button
+          key={thread.id}
+          type="button"
+          data-enso="secretary-thread"
+          onClick={() => openSessionFromSecretary(thread.sessionId)}
+          className="flex flex-col items-start rounded-lg border border-border px-2.5 py-2 text-left"
+        >
+          <span className="text-[13px] font-medium">
+            {thread.summary || `${thread.channel} ${thread.messageId}`}
+          </span>
+          <span className="text-[11.5px] text-muted-foreground">
+            {thread.requesterIsOwner ? t('Thread owner') : t('Thread external')}
+            {thread.pr ? ` · #${thread.pr.number}` : ''}
+            {` · ${thread.status}`}
+          </span>
+          <span className="text-[11.5px] text-muted-foreground">
+            {t('Handled by {{session}}', { session: thread.sessionTitle })}
           </span>
         </button>
       ))}
@@ -414,13 +451,20 @@ function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?
             type="button"
             data-enso="secretary-todo-session"
             disabled={!openable}
+            title={
+              todo.pendingReminder
+                ? formatReminderTooltip(todo.pendingReminder, Date.now(), t)
+                : undefined
+            }
             onClick={() => {
               if (todo.conversationId) openSessionPeek(todo.conversationId);
             }}
             className="mt-0.5 block max-w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground disabled:cursor-default"
           >
             {todo.sessionTitle || t('Open session')}
-            {todo.sessionState ? ` · ${todoStateText(todo, conversations, t)}` : ''}
+            {todo.sessionState || todo.pendingReminder
+              ? ` · ${todoStateText(todo, conversations, t)}`
+              : ''}
           </button>
         )}
         {phase === 'problem' && todo.problem && (
@@ -817,6 +861,7 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
         <Stat value={digest.counts.todos} label={t('To do')} />
       </div>
       {board.claims && board.claims.length > 0 && <ClaimList claims={board.claims} />}
+      {board.threads && board.threads.length > 0 && <ThreadList threads={board.threads} />}
       {board.needsYou.length > 0 && (
         <section data-enso="secretary-needs-you" className="flex flex-col gap-1.5">
           {board.needsYou.map((card) =>

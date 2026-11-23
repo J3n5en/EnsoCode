@@ -134,9 +134,11 @@ export function captureConsole(
 
 function toErrorShape(error: unknown): PluginErrorShape {
   const code = (error as { code?: unknown })?.code;
+  const userMessage = (error as { userMessage?: unknown })?.userMessage;
   return {
     code: typeof code === 'string' ? code : 'PLUGIN_ERROR',
     message: error instanceof Error ? error.message : String(error),
+    ...(typeof userMessage === 'string' && userMessage ? { userMessage } : {}),
   };
 }
 
@@ -515,6 +517,16 @@ export function runPluginHost(transport: HostTransport): void {
         release: (key: string, sessionId?: string) =>
           hostCall('claims.release', sessionId !== undefined ? { key, sessionId } : { key }),
         list: (filter?: unknown) => hostCall('claims.list', filter ?? {}),
+      },
+      threads: {
+        open: (input: unknown) => hostCall('threads.open', input ?? {}),
+        bindPr: (target: unknown, pr: unknown) =>
+          hostCall('threads.bindPr', {
+            ...(typeof target === 'object' && target !== null ? target : {}),
+            pr,
+          }),
+        routePrEvent: (event: unknown) => hostCall('threads.routePrEvent', event ?? {}),
+        list: (filter?: unknown) => hostCall('threads.list', filter ?? {}),
       },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
       contact: {

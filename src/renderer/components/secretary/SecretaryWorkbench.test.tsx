@@ -231,6 +231,43 @@ describe('SecretaryWorkbench 结果卡', () => {
     await render(<SecretaryWorkbench name="小安" />);
     expect(container.querySelector('[data-enso="secretary-claims"]')).toBeNull();
   });
+
+  it('有需求线程时列出来源、PR 和负责会话，没有则不显示', async () => {
+    h.board = {
+      ...board([sessionCard()]),
+      threads: [
+        {
+          id: 'dt-1',
+          channel: 'telegram',
+          chatId: '-100',
+          messageId: '42',
+          summary: '修登录',
+          requesterIsOwner: true,
+          sessionId: 'c1',
+          sessionTitle: '写 hello.txt',
+          pr: { repo: 'Enso/App', number: 7 },
+          status: 'pr_opened',
+          milestones: ['pr_opened'],
+          createdAt: NOW - 60_000,
+          updatedAt: NOW - 5_000,
+        },
+      ],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    const section = container.querySelector('[data-enso="secretary-threads"]');
+    expect(section?.textContent).toContain('[Demand threads]');
+    expect(section?.textContent).toContain('修登录');
+    expect(section?.textContent).toContain('#7');
+    expect(section?.textContent).toContain('pr_opened');
+    expect(section?.textContent).toContain('写 hello.txt');
+    act(() => {
+      (container.querySelector('[data-enso="secretary-thread"]') as HTMLElement).click();
+    });
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    h.board = board([sessionCard()]);
+    await render(<SecretaryWorkbench name="小安" />);
+    expect(container.querySelector('[data-enso="secretary-threads"]')).toBeNull();
+  });
 });
 
 describe('SecretaryWorkbench 等依赖的派发出问题', () => {

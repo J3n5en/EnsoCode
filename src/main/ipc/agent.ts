@@ -156,8 +156,21 @@ import {
 } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
+import { getDemandThreadRouter } from '../services/demandThreadRouter';
+import {
+  demandRequesterIsOwner,
+  getDemandThreadStore,
+  peekDemandThreadStore,
+  releaseReassignedDemandClaims,
+  setDemandOwnerResolver,
+  setDemandSessionReassignedHook,
+} from '../services/demandThreads';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
-import { peekEventClaimStore, setClaimSessionProtectedCheck } from '../services/eventClaims';
+import {
+  peekEventClaimStore,
+  setClaimSessionProtectedCheck,
+  setPreferredClaimOwnerResolver,
+} from '../services/eventClaims';
 import { takeInterruptedTurns } from '../services/exitInterruptHost';
 import { exitInterruptionOf } from '../services/exitWindow';
 import {
@@ -195,6 +208,7 @@ import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import type { RestartManifestEntry } from '../services/restartManifest';
 import { ContactStore, hasContactRoutes } from '../services/secretary/contact/store';
 import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
+import { notifySecretaryChanged } from '../services/secretary/dispatch';
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { unfollowTargetEverywhere } from '../services/secretary/following';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
@@ -247,6 +261,7 @@ import {
   readExternalSession,
 } from '../services/sessionImport';
 import { setSessionMuteOverride } from '../services/sessionMuteGate';
+import { readAllSessionReminders } from '../services/sessionReminders';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { SubagentProgressPush } from '../services/subagentProgressPush';
@@ -431,6 +446,7 @@ function markExitInterrupted<T extends AgentWorkerEvent | WorkerExitedEvent>(eve
 }
 
 function noteClaimLiveness(event: AgentWorkerEvent | WorkerExitedEvent): void {
+  noteDemandThreadSignal(event);
   const store = peekEventClaimStore();
   if (!store) return;
   if (event.type === 'worker-exited') {
@@ -461,6 +477,20 @@ function noteClaimLiveness(event: AgentWorkerEvent | WorkerExitedEvent): void {
     return;
   }
   store.heartbeat(root);
+}
+
+function noteDemandThreadSignal(event: AgentWorkerEvent | WorkerExitedEvent): void {
+  if (event.type !== 'goal-signal') return;
+  const root = rootSessionId(event.identity);
+  if (event.identity.sessionId !== root) return;
+  const summary = event.note.trim();
+  if (event.kind === 'complete') {
+    void getDemandThreadRouter().onSessionGoalCompleted(root, summary ? { summary } : undefined);
+    return;
+  }
+  if (event.kind === 'blocked') {
+    void getDemandThreadRouter().onSessionNeedsHuman(root, summary, summary);
+  }
 }
 
 function broadcastAgentEvent(event: RendererAgentEvent): void {
@@ -1532,13 +1562,18 @@ function distillSessionMemory(identity: SessionIdentity) {
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
     if (conversation?.bot) void getBotServices()?.memory.distill({ ...conversation, sessionFile });
     else
-      void scheduleMemoryDistill(
+      scheduleMemoryDistill(
         {
           sessionId: identity.sessionId,
           sessionFile,
           projectId: project?.state === 'active' ? project.projectId : null,
         },
         { continueFromLastJob: true }
+      ).catch((error: unknown) =>
+        console.warn('[memory] schedule distill failed', {
+          sessionId: identity.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
       );
   }
   return conversation?.bot;
@@ -1892,6 +1927,12 @@ async function runAgentControl(
 }
 
 export function registerAgentHandlers(): void {
+  setDemandOwnerResolver((source) => demandRequesterIsOwner(source, pluginOwnerBindings()));
+  setDemandSessionReassignedHook(releaseReassignedDemandClaims);
+  getDemandThreadStore();
+  setPreferredClaimOwnerResolver(
+    (key) => peekDemandThreadStore()?.resolveOwnerForClaimKey(key) ?? null
+  );
   registerPluginSessionBridge(
     (sessionId) => {
       const identity = agentSessionIndex.currentIdentity(sessionId);
@@ -2219,6 +2260,18 @@ export function registerAgentHandlers(): void {
       void wakeForReminder(workerEvent.sessionId).catch((error: unknown) =>
         console.warn('[reminder] wake failed:', error instanceof Error ? error.message : error)
       );
+      return;
+    }
+    if (workerEvent.type === 'session-reminders-changed') {
+      try {
+        broadcastToRenderers(IPC_CHANNELS.AGENT_REMINDERS_CHANGED, {
+          sessionId: workerEvent.sessionId,
+          reminders: workerEvent.reminders,
+        });
+      } catch {
+        // renderer 已崩但 webContents 对象还在
+      }
+      notifySecretaryChanged();
       return;
     }
     // 断点已落盘：记下停在安全点的子会话，worker 退出时它们的 Run 等父会话就绪后接着跑
@@ -3659,6 +3712,8 @@ export function registerAgentHandlers(): void {
       return stopSubagent(identity, agentId);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_REMINDERS_LIST, () => readAllSessionReminders());
 
   ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, root: unknown, query: unknown) => {
     if (!isNonEmptyString(root) || typeof query !== 'string') return [];

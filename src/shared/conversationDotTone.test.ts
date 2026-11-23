@@ -148,6 +148,21 @@ describe('conversationDotTone', () => {
     expect(conversationDotTone({ status: 'failed', queued: true })).toBe('failed');
     expect(conversationDotTone({ status: 'failed', queued: false })).toBe('failed');
   });
+
+  it('空闲挂着未到点提醒时为 reminder，运行中或出错/等回答/排队时各按原优先级', () => {
+    expect(conversationDotTone({ status: 'idle', hasPendingReminder: true })).toBe('reminder');
+    expect(conversationDotTone({ status: 'idle', unread: true, hasPendingReminder: true })).toBe(
+      'reminder'
+    );
+    expect(conversationDotTone({ status: 'running', hasPendingReminder: true })).toBe('running');
+    expect(
+      conversationDotTone({ status: 'idle', pendingAskCount: 1, hasPendingReminder: true })
+    ).toBe('waiting');
+    expect(conversationDotTone({ status: 'failed', hasPendingReminder: true })).toBe('failed');
+    expect(conversationDotTone({ status: 'idle', queued: true, hasPendingReminder: true })).toBe(
+      'queued'
+    );
+  });
 });
 
 describe('coworkerTabTone', () => {

@@ -88,7 +88,7 @@ import {
   qoderProviderConfig,
 } from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
-import { REMINDER_MAX_DELAY_MS, REMINDERS_FILE } from '@shared/reminders';
+import { REMINDER_MAX_DELAY_MS, REMINDERS_FILE, toReminderSummary } from '@shared/reminders';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
 import { turnCalledSilenceTurn, turnRequestedSilence } from '@shared/secretary/silence';
 import { isSecretaryToolAllowed, type SecretaryInvokeOp } from '@shared/secretary/tools';
@@ -1347,8 +1347,22 @@ export class SessionSupervisor {
     this.pendingNotifications = new PendingNotificationStore(
       path.join(options.sessionDir, 'pending-notifications')
     );
-    this.reminders = new ReminderStore(path.join(options.sessionDir, REMINDERS_FILE), () =>
-      this.onRemindersDue()
+    this.reminders = new ReminderStore(
+      path.join(options.sessionDir, REMINDERS_FILE),
+      () => this.onRemindersDue(),
+      (rootIds) => {
+        for (const rootId of rootIds) {
+          const reminders = this.reminders
+            .forRoot(rootId)
+            .sort((a, b) => a.dueAt - b.dueAt)
+            .map(toReminderSummary);
+          this.options.emit({
+            type: 'session-reminders-changed',
+            sessionId: rootId,
+            reminders,
+          });
+        }
+      }
     );
     this.bgTasks = new BackgroundTaskManager(
       {
@@ -2422,9 +2436,15 @@ export class SessionSupervisor {
         return;
       }
       case 'memory-result': {
-        const managed = this.must(command.identity);
-        if (!managed.memory?.resolve(command)) {
-          console.warn(`[memory] dropped result for unknown request ${command.requestId}`);
+        const memory = this.must(command.identity).memory;
+        if (!memory?.resolve(command)) {
+          if (memory?.wasCancelled(command.requestId)) {
+            console.debug(
+              `[memory] dropped late result for cancelled request ${command.requestId}`
+            );
+          } else {
+            console.warn(`[memory] dropped result for unknown request ${command.requestId}`);
+          }
         }
         return;
       }

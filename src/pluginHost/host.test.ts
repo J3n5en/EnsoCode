@@ -137,6 +137,59 @@ describe('runPluginHost', () => {
     });
   });
 
+  it('contact.call 抛出带 code 与 userMessage 的结构化错误时原样透传；普通 Error 向后兼容', async () => {
+    const h = harness(`export function activate(enso) {
+      void enso.contact.register('wechat', {
+        caps: {},
+        sendText: async (_peerId, msg) => {
+          if (msg.text === 'structured') {
+            throw Object.assign(new Error('sendmessage ret=-2 prepare failed'), {
+              code: 'SESSION_EXPIRED',
+              userMessage: '微信会话已过期，请在微信里给机器人发任意一条消息',
+            });
+          }
+          throw new Error('legacy failure');
+        },
+      });
+    }`);
+    const register = await h.next((m) => m.t === 'call' && m.api === 'contact.register');
+    if (register.t !== 'call') return;
+    h.deliver({ t: 'res', id: register.id, ok: true, value: null });
+    await h.next((m) => m.t === 'ready');
+    const contactCall = (id: string, text: string) =>
+      ({
+        t: 'call',
+        id,
+        method: 'contact.call',
+        payload: { channelId: 'wechat', op: 'sendText', peerId: 'wx-me', text },
+        invocationId: `inv-${id}`,
+        sessionId: null,
+        projectRoot: null,
+      }) as unknown as MainToPluginHost;
+    await new Promise((r) => setTimeout(r, 10));
+    h.deliver(contactCall('e1', 'structured'));
+    expect(await h.next((m) => m.t === 'res' && m.id === 'e1')).toEqual({
+      t: 'res',
+      id: 'e1',
+      ok: false,
+      error: {
+        code: 'SESSION_EXPIRED',
+        message: 'sendmessage ret=-2 prepare failed',
+        userMessage: '微信会话已过期，请在微信里给机器人发任意一条消息',
+      },
+    });
+    h.deliver(contactCall('e2', 'legacy'));
+    expect(await h.next((m) => m.t === 'res' && m.id === 'e2')).toEqual({
+      t: 'res',
+      id: 'e2',
+      ok: false,
+      error: {
+        code: 'PLUGIN_ERROR',
+        message: 'legacy failure',
+      },
+    });
+  });
+
   it('执行工具并把字符串结果规整成 { content }', async () => {
     const h = harness(
       `export function activate(enso) { enso.tools.register('lookup', async (args, ctx) => 'hi ' + args.q + ' ' + ctx.sessionId); }`

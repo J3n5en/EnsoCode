@@ -1,6 +1,8 @@
+import type { PendingReminderView } from '../reminders';
 import type { GoalResultView } from '../secretary/goalResult';
 import type { GoalUpstreamRetry } from '../upstreamRecovery';
 import type { ModelRef, ThinkingLevel } from './agent';
+import type { DemandMilestoneKind, DemandThreadStatus } from './demandThreads';
 
 /**
  * 秘书可以接管的会话范围：逐个授权（确认卡）、勾选的项目、所有可见项目。
@@ -539,6 +541,8 @@ export interface SecretaryBoardTodo extends SecretaryTodo {
   projectName?: string;
   sessionTitle?: string;
   sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone' | 'queued';
+  /** 关联会话空闲且挂着未到点提醒：工作台待办显示「等提醒 · HH:MM」，不显示「运行中」 */
+  pendingReminder?: PendingReminderView;
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，直接派发 */
@@ -634,6 +638,8 @@ export type SecretaryCard =
       needsUser?: readonly string[];
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
+      /** 会话空闲但挂着未到点的 remind_me 提醒：看板与工作台标「等提醒 · HH:MM」，不标「续跑中」 */
+      pendingReminder?: PendingReminderView;
       /** 目标因上游瞬态/配额故障等待自动恢复 */
       upstreamRetry?: GoalUpstreamRetry;
       /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
@@ -669,6 +675,28 @@ export interface SecretaryBoard {
   done: SecretaryCard[];
   activity?: SecretaryActivity[];
   claims?: SecretaryClaimView[];
+  threads?: SecretaryDemandThreadView[];
+}
+
+/** 一条需求从群消息到负责会话和 PR 的关联 */
+export interface SecretaryDemandThreadView {
+  id: string;
+  channel: string;
+  chatId: string;
+  messageId: string;
+  topicId?: string;
+  senderName?: string;
+  summary?: string;
+  requesterIsOwner: boolean;
+  sessionId: string;
+  sessionTitle: string;
+  subagentId?: string;
+  pr?: { repo: string; number: number; url?: string; title?: string };
+  status: DemandThreadStatus;
+  milestones: DemandMilestoneKind[];
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
 }
 
 /** 一个外部对象当前被哪个会话认领 */
@@ -780,6 +808,8 @@ export interface SecretaryDailyItem {
   leftover?: { count: number };
   /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
   persistent?: true;
+  /** 空闲且挂着未到点的 remind_me 提醒：每日看板卡片标「等提醒 · HH:MM」 */
+  pendingReminder?: PendingReminderView;
   goalResult?: GoalResultView;
   /** 结构化结果里待用户处理的条目（未清除时在需要你列直接展示） */
   needsUser?: readonly string[];
@@ -1042,4 +1072,24 @@ export interface SecretaryContactChannelView {
   detail?: string;
   caps: SecretaryContactCaps;
   prefs: SecretaryContactChannelPrefs;
+  /** 出站发送连续失败的情况；最近一次发送成功就没有 */
+  outbound?: SecretaryContactOutboundHealth;
+}
+
+/** 插件渠道出站失败：degraded 还在照常发，paused 已暂停推送，冷却到期、入站或手动重试后再发 */
+export interface SecretaryContactOutboundHealth {
+  state: 'degraded' | 'paused';
+  consecutiveFailures: number;
+  lastErrorAt: number;
+  lastErrorCode: string;
+  /** 插件给的原因，已脱敏截断 */
+  detail?: string;
+  /** 插件抛错时带的 code */
+  pluginCode?: string;
+  /** 插件给用户看的提示，原样展示 */
+  userMessage?: string;
+  /** 暂停到什么时候；到点后下一条推送试一次 */
+  pausedUntil?: number;
+  /** 暂停期间没发出去的推送条数 */
+  suppressedCount: number;
 }

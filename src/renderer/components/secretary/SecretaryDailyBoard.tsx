@@ -1,3 +1,4 @@
+import { formatReminderClock, formatReminderTooltip } from '@shared/reminders';
 import { dayKey, shiftDay } from '@shared/secretary/daily';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
 import type {
@@ -10,6 +11,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Inbox,
   Link2,
   Undo2,
@@ -356,6 +358,21 @@ function DailyCard({
         {item.persistent && (
           <span data-enso="secretary-daily-persistent" className={cn(CHIP_CLASS, 'text-warning')}>
             {t('Service running')}
+          </span>
+        )}
+        {item.pendingReminder && (
+          <span
+            data-enso="secretary-daily-reminder"
+            title={formatReminderTooltip(item.pendingReminder, Date.now(), t)}
+            className={cn(CHIP_CLASS, 'bg-sky-500/15 text-sky-600 tabular-nums dark:text-sky-400')}
+          >
+            <Clock className="size-[11px] shrink-0" aria-hidden />
+            <span className="truncate">
+              {t('Waiting for reminder · {{time}}', {
+                time: formatReminderClock(item.pendingReminder.dueAt),
+              })}
+              {item.pendingReminder.label ? ` · ${item.pendingReminder.label}` : ''}
+            </span>
           </span>
         )}
         {item.branch && (

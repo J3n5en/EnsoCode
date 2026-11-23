@@ -1110,4 +1110,49 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
       'c-old',
     ]);
   });
+
+  it('空闲但挂着未到点提醒的会话留在进行中列并标 pendingReminder，切回运行中后不标', () => {
+    const dueAt = at(15, 25);
+    const reminderItem = {
+      id: 'r00000001',
+      sessionId: 'c-rem',
+      dueAt,
+      createdAt: at(15, 20),
+      prompt: '检查构建',
+      label: '检查 Beta #153',
+      ifIdle: true,
+      chain: 1,
+    };
+    const waiting = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [dispatch({ conversationId: 'c-rem', lastState: 'idle' })],
+      reminders: (id) => (id === 'c-rem' ? [reminderItem] : []),
+      todos: [],
+      audit: [],
+    });
+    const runningItems = waiting.groups.find((g) => g.key === 'running')?.items ?? [];
+    expect(runningItems).toHaveLength(1);
+    expect(runningItems[0]).toMatchObject({
+      conversationId: 'c-rem',
+      pendingReminder: {
+        id: 'r00000001',
+        dueAt,
+        label: '检查 Beta #153',
+        count: 1,
+      },
+    });
+
+    const runningAgain = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [dispatch({ conversationId: 'c-rem', lastState: 'running' })],
+      reminders: () => [],
+      todos: [],
+      audit: [],
+    });
+    expect(
+      runningAgain.groups.find((g) => g.key === 'running')?.items[0]?.pendingReminder
+    ).toBeUndefined();
+  });
 });

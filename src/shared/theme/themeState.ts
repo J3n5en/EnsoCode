@@ -47,7 +47,11 @@ export function conversationThemeState(
       userAskCount(conversation.pendingAsks) + (conversation.pendingApprovals?.length ?? 0),
     hasRunningChild: conversation.hasRunningChild,
   });
-  return tone === 'failed' ? 'error' : tone === 'unread' || tone === 'queued' ? 'idle' : tone;
+  return tone === 'failed'
+    ? 'error'
+    : tone === 'unread' || tone === 'queued' || tone === 'reminder'
+      ? 'idle'
+      : tone;
 }
 
 export function appActivityState(conversations: Conversations): ThemeState {
