@@ -19,6 +19,7 @@ import {
   planPhase,
   splitPlanPrefix,
 } from '@shared/planMode';
+import { unwrapUntrustedForDisplay } from '@shared/secretary/transcript';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
   AgentActionResult,
@@ -646,15 +647,13 @@ function withdrawnDraftPatch(
 
 function userMessageRawText(message: ProjectedMessage): string {
   if (message.role !== 'user' && !message.pluginSource) return '';
-  return splitPlanPrefix(
-    splitUnattendedPrefix(
-      message.content
-        .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-        .map((part) => part.text)
-        .join(' ')
-        .trim()
-    ).rest
-  ).rest;
+  const text = message.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join(' ')
+    .trim();
+  const shown = message.pluginSource ? unwrapUntrustedForDisplay(text) : text;
+  return splitPlanPrefix(splitUnattendedPrefix(shown).rest).rest;
 }
 
 function truncateTitle(text: string): string {

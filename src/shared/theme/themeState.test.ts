@@ -10,6 +10,8 @@ describe('sessionThemeState', () => {
     expect(sessionThemeState({ status: 'running', pendingAsks: [{}] }, {})).toBe('waiting');
     expect(sessionThemeState({ status: 'idle', pendingApprovals: [{}] }, {})).toBe('waiting');
     expect(sessionThemeState({ status: 'failed', pendingAsks: [{}] }, {})).toBe('error');
+    const relay = { name: '小秘' };
+    expect(sessionThemeState({ status: 'running', pendingAsks: [{ relay }] }, {})).toBe('running');
   });
 
   it('未读不算状态，子代理或 coworker 在跑算 running', () => {

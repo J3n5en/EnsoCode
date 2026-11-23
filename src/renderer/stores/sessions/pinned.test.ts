@@ -46,7 +46,7 @@ type Minimal = {
   status?: string;
   spawning?: boolean;
   unread?: boolean;
-  pendingAsks?: { requestId: string }[];
+  pendingAsks?: { requestId: string; relay?: { name: string }; answered?: { by: 'relay' } }[];
   pendingApprovals?: unknown[];
   coworkerIds?: string[];
   worktree?: { path: string };
@@ -804,5 +804,20 @@ describe('等你处理优先', () => {
     expect(projectConversationIds(order, live, 'p1')).toEqual(['a', 'd', 'e', 'b']);
     expect(live.a?.unread).toBe(true);
     expect(waitingConversationCount(order, live)).toBe(1);
+  });
+
+  it('转给秘书的提问不算等你处理，秘书答完也不留角标；普通提问与审批照算', () => {
+    const relay = { name: '小秘' };
+    const relayed = { pendingAsks: [{ requestId: 'r1', relay }] };
+    const answered = {
+      pendingAsks: [{ requestId: 'r1', relay, answered: { by: 'relay' as const } }],
+    };
+    expect(waitingConversationCount(order, withWaiting({ a: relayed, d: answered }))).toBe(0);
+    expect(projectConversationIds(order, withWaiting({ d: relayed }), 'p1')).toEqual(
+      projectConversationIds(order, conversations, 'p1')
+    );
+    expect(waitingConversationCount(order, withWaiting({ a: relayed, d: ask }))).toBe(1);
+    const approval = { pendingApprovals: [{ requestId: 'x' }] };
+    expect(waitingConversationCount(order, withWaiting({ a: relayed, d: approval }))).toBe(1);
   });
 });

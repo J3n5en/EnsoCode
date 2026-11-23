@@ -1,4 +1,4 @@
-import { conversationDotTone } from '@shared/conversationDotTone';
+import { conversationDotTone, userAskCount } from '@shared/conversationDotTone';
 import { secretaryAvatarUrl } from '@shared/localImage';
 import { MessageSquare, Plus, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -145,7 +145,7 @@ function SessionTab({
           status: conversation.status,
           spawning: conversation.spawning,
           unread: conversation.unread,
-          pendingAskCount: conversation.pendingAsks?.length ?? 0,
+          pendingAskCount: userAskCount(conversation.pendingAsks),
           hasRunningChild: conversation.hasRunningChild,
         });
   const title = conversation.title || untitled;

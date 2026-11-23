@@ -1,5 +1,18 @@
 export type ConversationDotTone = 'running' | 'failed' | 'waiting' | 'unread' | 'idle';
 
+export interface PendingAskMark {
+  requestId: string;
+  relay?: unknown;
+  answered?: unknown;
+}
+
+/** 等用户亲自回答的提问数：转给秘书的由秘书处理，收尾后留下的状态行也不算 */
+export function userAskCount(
+  asks: readonly { relay?: unknown; answered?: unknown }[] | undefined
+): number {
+  return asks?.filter((ask) => !ask.relay && !ask.answered).length ?? 0;
+}
+
 type ChildActivityConversation = {
   status?: string;
   spawning?: boolean;

@@ -1,5 +1,6 @@
 import type { SecretaryResultKind } from '../types/secretary';
 import { RESULT_KINDS } from './parse';
+import { unescapeUntrusted } from './transcript';
 
 export type SecretaryUpdateLine =
   | { kind: SecretaryResultKind; text: string; conversationId?: string; detail?: string }
@@ -47,10 +48,7 @@ function parseBody(tag: string, body: string): SecretaryUpdateLine[] | null {
       // 正文里的结束标签在注入时已转义，第一个未转义的才是包裹的结尾
       const end = rest.indexOf(END_TAG);
       if (end < 0) return null;
-      line.detail = rest
-        .slice(open[0].length, end)
-        .split('<\\/untrusted-content')
-        .join('</untrusted-content');
+      line.detail = unescapeUntrusted(rest.slice(open[0].length, end));
       rest = rest.slice(end + END_TAG.length);
       if (rest.startsWith('\n')) rest = rest.slice(1);
       else if (rest) return null;

@@ -115,6 +115,7 @@
 | `agent.observe` | 有通知型 `events` | 收到会话事件 |
 | `agent.intercept` | 有拦截型 `events` | 拦截并改写工具调用、工具结果和用户输入 |
 | `agent.inject` | 要向会话发消息 | `enso.session.inject` / `enso.session.abort`：向会话发送消息（可带图片）、触发或中止该会话的执行。默认只能发到发起调用的会话；用户单独允许后可发到任意运行中的会话 |
+| `agent.injectTrusted` | 投递的是用户自己定的任务 | `enso.session.inject` 带 `trusted: true` 时，普通会话里不包不可信包裹，见「向会话发消息」。要和 `agent.inject` 一起声明 |
 | `process.background` | `resident` 或有 `schedules` | 常驻进程、定时任务 |
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
 | `ui.clipboard` | 要写剪贴板 | `enso.ui.clipboard.writeText` |
@@ -362,7 +363,12 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 
 ### 向会话发消息
 
-`session.inject({ text, images?, sessionId?, deliverAs?, triggerTurn? })` 把一条消息加进会话。需要 `agent.inject`。消息在会话里单独成行，标明「来自插件 <名称>」和插件 id，样式与用户消息、模型回复都不同。模型侧按用户角色收到原文，不带来源标记；需要模型知道来源时请在文本里自己写明。
+`session.inject({ text, images?, sessionId?, deliverAs?, triggerTurn?, trusted? })` 把一条消息加进会话。需要 `agent.inject`。消息在会话里单独成行，标明「来自插件 <名称>」和插件 id，样式与用户消息、模型回复都不同，正文按 markdown 显示，不显示包裹标签。
+
+模型侧按用户角色收到，整段包在 `<untrusted-content source="plugin:<插件 id>">…</untrusted-content>` 里。正文里的开始、结束标签会被转义，不能提前闭合，也不能伪造新的一层。插件不用自己再包。旧版插件已经把整段包成同来源的一层时，宿主不会再叠一层。
+
+- `trusted: true`：声明了 `agent.injectTrusted` 的插件，可以给普通会话发不包裹的消息，用于转达用户自己定的任务（定时任务、看板任务等）。秘书会话不认这个参数，一律包裹。没有声明这项权限时传了也不生效，照常包裹，插件日志里记一行。
+- 过渡：`enso.scheduler`、`enso.kanban`、`enso.bridge` 三个从市场安装的旧版本，没有声明这项权限时也按 `trusted` 处理。它们发了声明这项权限的新版以后，宿主会删掉这条过渡。
 
 - `sessionId` 缺省取当前调用所属的会话，都没有则返回 `NO_SESSION`。会话必须正在运行，否则返回 `INJECT_FAILED`。
 - 常驻进程在宿主调用之外（如自己的轮询循环）也能用 `session.inject` / `session.abort`，但必须指明 `sessionId`，并且同样要用户打开下面的跨会话开关。调用里排下的定时器、回调在这次调用结束后才触发时也按调用之外处理；只能在调用内用的接口这时照样返回 `NO_INVOCATION`。

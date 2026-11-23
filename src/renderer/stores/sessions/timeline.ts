@@ -7,6 +7,7 @@ import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
 import type { RtkToolStats } from '@shared/rtk';
 import { isPureSessionUpdate, isSilentMarker, SILENCE_TURN_TOOL } from '@shared/secretary/silence';
+import { unwrapUntrustedForDisplay } from '@shared/secretary/transcript';
 import { splitSkillBlocks } from '@shared/skillCommands';
 import { nestedToolCallParent } from '@shared/toolCallId';
 import { leadingTaskWrapUp, TASK_WRAP_UP_TAG } from '@shared/turnNotes';
@@ -1080,7 +1081,7 @@ function buildMessageTimeline(
         items.push({
           kind: 'plugin-message',
           key: `${absIndex}`,
-          text: partText(message),
+          text: unwrapUntrustedForDisplay(partText(message)),
           ...message.pluginSource,
         });
       }

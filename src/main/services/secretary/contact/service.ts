@@ -165,14 +165,6 @@ export interface ContactCardWaitingInput {
   conversationId?: string;
 }
 
-export interface ContactRelayAskInput {
-  conversationId: string;
-  question: string;
-  options?: readonly string[];
-  /** 会话的一句话标签 */
-  label: string;
-}
-
 /** 手机关注里的定时到点了：推一次就结束关注 */
 export interface ContactScheduleFiredInput {
   scheduleId: string;
@@ -191,7 +183,6 @@ export interface SecretaryContactPort {
   onMilestone(input: ContactMilestoneInput): void;
   /** 手机关注里的定时触发：与里程碑同一个出口，推一次就结束关注 */
   onScheduleFired(input: ContactScheduleFiredInput): void;
-  onRelayAsk(input: ContactRelayAskInput): void;
   onAskRequest(conversationId: string, ask: AskRequestInfo): void;
   /** 提问收尾（应用里答了、超时、作废）：手机那条消息跟着标成已回答或已过期 */
   onAskResolved(conversationId: string, requestId: string, resolution?: AskResolvedInfo): void;
@@ -1121,21 +1112,6 @@ export class ContactService implements SecretaryContactPort {
       this.ports.following?.take('schedule', input.scheduleId);
       this.audit('contact_follow_done', true, `schedule ${follow.summary}`);
     });
-  }
-
-  /** 派出会话转给秘书的提问：手机只提示，J 哥回话即进秘书会话 */
-  onRelayAsk(input: ContactRelayAskInput): void {
-    for (const peer of this.pushTargets()) {
-      const text = formatAskMessage(this.ports.lang(), {
-        question: input.question,
-        ...(input.options ? { options: input.options } : {}),
-        title: input.label,
-        ...(this.hasButtons(peer) ? {} : { plain: true }),
-      });
-      void this.post(peer, 'sendText', { text }).then((sent) => {
-        this.audit('contact_relay_ask', sent.ok, sent.ok ? undefined : sent.error);
-      });
-    }
   }
 
   /** 秘书自己用 ask_user 问 J 哥：所有推送渠道都发，谁先答算谁的 */

@@ -532,13 +532,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       });
       if (!update) return false;
       file.outbox = enqueueUpdate(file.outbox, update);
-      // 手机上也提示一条：J 哥不在电脑前时，回一句话就进秘书会话
-      ports.contact?.onRelayAsk({
-        conversationId,
-        question: event.ask.question,
-        ...(event.ask.options ? { options: event.ask.options } : {}),
-        label: labelOf(file, conversationId),
-      });
       return true;
     }
     if (event.type !== 'ask-resolved') return false;
@@ -879,7 +872,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
   /**
    * 联系方式：秘书自己会话里的提问、回复与审批同步到手机。
-   * 派出会话的提问走 ask-relay，在 applyRelayEvent 里另发一条，不在这里重复。
+   * 派出会话的提问走 ask-relay 只交给秘书，不发手机；秘书定不了会用自己的 ask_user 再问。
    */
   function forwardToContact(event: RendererAgentEvent, conversationId: string): void {
     const contact = ports.contact;
