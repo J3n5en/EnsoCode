@@ -34,6 +34,8 @@ export interface ChannelMessage {
   /** 缺省 markdown；html 只给自带 HTML 的只读命令回复 */
   format?: 'markdown' | 'html';
   buttons?: ChannelButton[][];
+  /** 回复原消息；多条分片只挂在第一条 */
+  replyToMessageId?: string;
 }
 
 export type ChannelErrorCode = 'token-required' | 'network' | 'unauthorized' | 'api';

@@ -1000,8 +1000,17 @@ export class ContactService implements SecretaryContactPort {
       const extra = plainButtonsText(message.buttons);
       const text = extra ? `${base}\n${extra}` : base;
       sent = { ok: true };
-      for (const chunk of splitPlain(text, caps.maxChars)) {
-        sent = await channel[kind](peer.peerId, { text: chunk }, peer.topicId);
+      for (const [index, chunk] of splitPlain(text, caps.maxChars).entries()) {
+        sent = await channel[kind](
+          peer.peerId,
+          {
+            text: chunk,
+            ...(index === 0 && message.replyToMessageId
+              ? { replyToMessageId: message.replyToMessageId }
+              : {}),
+          },
+          peer.topicId
+        );
         if (!sent.ok) break;
       }
     }
@@ -1036,6 +1045,41 @@ export class ContactService implements SecretaryContactPort {
     const outcomes: ContactMediaOutcome[] = [];
     for (const peer of peers) outcomes.push(await this.sendMediaTo(peer, media, conversationId));
     return { ok: true, outcomes };
+  }
+
+  canReplyToOrigin(channelId: string, peerId: string): boolean {
+    if (channelId === TELEGRAM_CHANNEL_ID) {
+      return this.active(channelId) !== null && this.telegram.canReplyTo(peerId);
+    }
+    const entry = this.registry.get(channelId);
+    if (!entry || !this.active(channelId)) return false;
+    return this.connectedPeers(entry).some((peer) => peer.peerId === peerId);
+  }
+
+  async replyToOrigin(input: {
+    channelId: string;
+    peerId: string;
+    topicId?: string;
+    replyToMessageId?: string;
+    text: string;
+  }): Promise<{ ok: true; messageId?: string } | { ok: false; error: string }> {
+    if (!this.canReplyToOrigin(input.channelId, input.peerId)) {
+      return { ok: false, error: '渠道未启用或未绑定这个会话' };
+    }
+    const sent = await this.post(
+      {
+        channelId: input.channelId,
+        peerId: input.peerId,
+        ...(input.topicId ? { topicId: input.topicId } : {}),
+      },
+      'sendText',
+      {
+        text: input.text,
+        ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+      }
+    );
+    if (!sent.ok) return { ok: false, error: sent.error };
+    return { ok: true, ...(sent.messageId ? { messageId: sent.messageId } : {}) };
   }
 
   private async sendMediaTo(

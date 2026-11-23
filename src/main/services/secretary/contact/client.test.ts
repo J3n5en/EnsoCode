@@ -57,4 +57,17 @@ describe('Telegram 上传', () => {
     expect(form.has('caption')).toBe(false);
     expect((form.get('document') as File).name).toBe('report.pdf');
   });
+
+  it('sendMessage 带 reply_to_message_id，缺省则不带', async () => {
+    const calls = stubFetch();
+    const api = createTelegramApi('T', 'https://tg.test');
+    await api.sendMessage({ chatId: 777, text: '里程碑', replyToMessageId: 42 });
+    await api.sendMessage({ chatId: 777, text: '普通' });
+    const first = JSON.parse(String(calls[0]?.init.body)) as Record<string, unknown>;
+    const second = JSON.parse(String(calls[1]?.init.body)) as Record<string, unknown>;
+    expect(first.reply_to_message_id).toBe(42);
+    expect(first.allow_sending_without_reply).toBe(true);
+    expect(second.reply_to_message_id).toBeUndefined();
+    expect(second.allow_sending_without_reply).toBeUndefined();
+  });
 });

@@ -27,6 +27,17 @@ import {
 import { parseStatusPatch, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import type { SpawnModelConfig } from '@shared/types/agent';
 import {
+  type DemandPrEventInput,
+  type DemandPrRouteResult,
+  type DemandThreadPr,
+  type DemandThreadStatus,
+  type DemandThreadView,
+  parseDemandPr,
+  parseDemandPrEvent,
+  parseDemandSource,
+  parseDemandStatus,
+} from '@shared/types/demandThreads';
+import {
   type EventClaimAcquireResult,
   type EventClaimCandidate,
   type EventClaimView,
@@ -264,6 +275,31 @@ export interface GateDeps {
     release(key: string, sessionId: string): boolean;
     list(filter?: { prefix?: string; sessionId?: string; pluginId?: string }): EventClaimView[];
     releaseSession?(sessionId: string): number;
+  };
+  threads?: {
+    open(input: {
+      source: DemandThreadView['source'];
+      sessionId: string;
+      pluginId?: string;
+      subagentId?: string;
+      secretaryId?: string;
+      pr?: DemandThreadPr;
+    }): DemandThreadView;
+    bindPr(
+      target: { threadId?: string; sessionId?: string },
+      pr: DemandThreadPr
+    ): DemandThreadView | null;
+    routePrEvent(pluginId: string, event: DemandPrEventInput): Promise<DemandPrRouteResult>;
+    list(filter?: {
+      status?: DemandThreadStatus;
+      sessionId?: string;
+      repo?: string;
+      activeOnly?: boolean;
+    }): DemandThreadView[];
+    findById(id: string): DemandThreadView | null;
+    findBySource(channel: string, chatId: string, messageId: string): DemandThreadView | null;
+    findByPr(repo: string, number: number): DemandThreadView | null;
+    findActiveBySession(sessionId: string): DemandThreadView[];
   };
   callPlugin?(
     callerId: string,
@@ -895,6 +931,11 @@ export class PluginHostGate {
       case 'claims.release':
       case 'claims.list':
         return this.claims(pluginId, api, a, optionalInvocation());
+      case 'threads.open':
+      case 'threads.bindPr':
+      case 'threads.routePrEvent':
+      case 'threads.list':
+        return this.threadsApi(pluginId, api, a, optionalInvocation());
       case 'plugin.call': {
         permit('plugin.call');
         const inv = invocation();
@@ -1278,6 +1319,100 @@ export class PluginHostGate {
     const parsed = parseClaimKey(raw);
     if (!parsed) throw pluginError('INVALID_ARGS', `${name} 不合法`);
     return parsed;
+  }
+
+  private threadsApi(
+    pluginId: string,
+    api: 'threads.open' | 'threads.bindPr' | 'threads.routePrEvent' | 'threads.list',
+    args: Record<string, unknown>,
+    inv: Invocation | null
+  ):
+    | DemandThreadView
+    | DemandThreadView[]
+    | DemandPrRouteResult
+    | Promise<DemandPrRouteResult>
+    | null {
+    if (!this.deps.manifest(pluginId)?.permissions.includes('agent.inject')) {
+      throw pluginError('PERMISSION_DENIED', '插件未获授权：agent.inject');
+    }
+    const threads = this.deps.threads;
+    if (!threads) throw pluginError('UNSUPPORTED', '当前环境没有需求线程');
+    if (api === 'threads.list') return threads.list(this.threadFilter(args));
+    if (api === 'threads.routePrEvent') {
+      const event = parseDemandPrEvent(args);
+      if (!event) throw pluginError('INVALID_ARGS', 'PR 事件不合法');
+      const thread = threads.findByPr(event.repo, event.number);
+      if (thread) this.targetSession(pluginId, { sessionId: thread.sessionId }, inv);
+      return threads.routePrEvent(pluginId, event);
+    }
+    if (api === 'threads.bindPr') {
+      const pr = parseDemandPr(args.pr);
+      if (!pr) throw pluginError('INVALID_ARGS', 'pr 不合法');
+      const threadId = this.optionalId(args.threadId, 'threadId');
+      const sessionId = this.optionalId(args.sessionId, 'sessionId');
+      if (!threadId && !sessionId) throw pluginError('INVALID_ARGS', '需要 threadId 或 sessionId');
+      const thread = threadId
+        ? threads.findById(threadId)
+        : threads.findActiveBySession(sessionId ?? '')[0];
+      if (thread?.pluginId && thread.pluginId !== pluginId) {
+        throw pluginError('PERMISSION_DENIED', '线程归属其他插件');
+      }
+      if (thread) this.targetSession(pluginId, { sessionId: thread.sessionId }, inv);
+      return threads.bindPr(
+        { ...(threadId ? { threadId } : {}), ...(sessionId ? { sessionId } : {}) },
+        pr
+      );
+    }
+    const source = parseDemandSource(args.source);
+    if (!source) throw pluginError('INVALID_ARGS', 'source 不合法');
+    const sessionId = this.optionalId(args.sessionId, 'sessionId');
+    if (!sessionId) throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+    const existing = threads.findBySource(source.channel, source.chatId, source.messageId);
+    if (existing?.pluginId && existing.pluginId !== pluginId) {
+      throw pluginError('PERMISSION_DENIED', '线程归属其他插件');
+    }
+    this.targetSession(pluginId, { sessionId }, inv);
+    const subagentId = this.optionalId(args.subagentId, 'subagentId');
+    const secretaryId = this.optionalId(args.secretaryId, 'secretaryId');
+    const pr = args.pr === undefined ? undefined : parseDemandPr(args.pr);
+    if (args.pr !== undefined && !pr) throw pluginError('INVALID_ARGS', 'pr 不合法');
+    return threads.open({
+      source,
+      sessionId,
+      pluginId,
+      ...(subagentId ? { subagentId } : {}),
+      ...(secretaryId ? { secretaryId } : {}),
+      ...(pr ? { pr } : {}),
+    });
+  }
+
+  private threadFilter(args: Record<string, unknown>): {
+    status?: DemandThreadStatus;
+    sessionId?: string;
+    repo?: string;
+    activeOnly?: boolean;
+  } {
+    const status = args.status === undefined ? undefined : parseDemandStatus(args.status);
+    if (args.status !== undefined && !status) throw pluginError('INVALID_ARGS', 'status 不合法');
+    const sessionId = this.optionalId(args.sessionId, 'sessionId');
+    const repo = this.optionalId(args.repo, 'repo');
+    if (args.activeOnly !== undefined && typeof args.activeOnly !== 'boolean') {
+      throw pluginError('INVALID_ARGS', 'activeOnly 必须是布尔值');
+    }
+    return {
+      ...(status ? { status } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(repo ? { repo } : {}),
+      ...(args.activeOnly === true ? { activeOnly: true } : {}),
+    };
+  }
+
+  private optionalId(raw: unknown, name: string): string | undefined {
+    if (raw === undefined) return undefined;
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > 256) {
+      throw pluginError('INVALID_ARGS', `${name} 不合法`);
+    }
+    return raw;
   }
 
   /** 相对项目根解析；先 realpath，再确认仍在授权范围内，不能借符号链接逃出 */

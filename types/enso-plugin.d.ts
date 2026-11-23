@@ -258,6 +258,96 @@ export interface EnsoContactStatus {
   peers?: string[];
 }
 
+export interface EnsoDemandThreadSource {
+  channel: string;
+  chatId: string;
+  messageId: string;
+  topicId?: string;
+  senderId?: string;
+  senderName?: string;
+  summary?: string;
+}
+
+export interface EnsoDemandThreadPr {
+  repo: string;
+  number: number;
+  url?: string;
+  title?: string;
+  headSha?: string;
+}
+
+export interface EnsoDemandMilestoneRecord {
+  kind: 'pr_opened' | 'ci_failed' | 'needs_human' | 'merged';
+  dedupeKey?: string;
+  sentAt: number;
+  summary?: string;
+  replyMessageId?: string;
+}
+
+export interface EnsoDemandThreadView {
+  id: string;
+  source: EnsoDemandThreadSource;
+  requesterIsOwner: boolean;
+  sessionId: string;
+  pluginId?: string;
+  subagentId?: string;
+  secretaryId?: string;
+  pr?: EnsoDemandThreadPr;
+  status: 'open' | 'in_progress' | 'pr_opened' | 'ci_failed' | 'needs_human' | 'merged' | 'closed';
+  milestonesSent: EnsoDemandMilestoneRecord[];
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+}
+
+export interface EnsoDemandThreadOpen {
+  source: EnsoDemandThreadSource;
+  sessionId: string;
+  subagentId?: string;
+  secretaryId?: string;
+  pr?: EnsoDemandThreadPr;
+}
+
+export interface EnsoDemandThreadFilter {
+  status?: EnsoDemandThreadView['status'];
+  sessionId?: string;
+  repo?: string;
+  activeOnly?: boolean;
+}
+
+export interface EnsoDemandPrEventInput {
+  repo: string;
+  number: number;
+  kind:
+    | 'pr_opened'
+    | 'comment'
+    | 'review'
+    | 'ci_failed'
+    | 'ci_passed'
+    | 'needs_human'
+    | 'merged'
+    | 'closed';
+  text: string;
+  url?: string;
+  title?: string;
+  headSha?: string;
+  summary?: string;
+  sender?: { channel: string; chatId?: string; userId?: string; displayName?: string };
+}
+
+export type EnsoDemandPrRouteResult =
+  | { routed: false; reason: 'no-thread' }
+  | {
+      routed: true;
+      threadId: string;
+      sessionId: string;
+      delivered: boolean;
+      milestonePushed: boolean;
+      milestoneKind?: 'pr_opened' | 'ci_failed' | 'needs_human' | 'merged';
+      replyMessageId?: string;
+      error?: string;
+    };
+
 /** 每个 `PluginHostApi` 在作者侧的对应函数。动态注册走 contrib.*，进度走 `ctx.progress`。 */
 export interface EnsoHostApi {
   'fs.readText': (path: string) => Promise<string>;
@@ -292,6 +382,13 @@ export interface EnsoHostApi {
     sessionId?: string;
     pluginId?: string;
   }) => Promise<EnsoClaimView[]>;
+  'threads.open': (input: EnsoDemandThreadOpen) => Promise<EnsoDemandThreadView>;
+  'threads.bindPr': (
+    target: { threadId?: string; sessionId?: string },
+    pr: EnsoDemandThreadPr
+  ) => Promise<EnsoDemandThreadView | null>;
+  'threads.routePrEvent': (event: EnsoDemandPrEventInput) => Promise<EnsoDemandPrRouteResult>;
+  'threads.list': (filter?: EnsoDemandThreadFilter) => Promise<EnsoDemandThreadView[]>;
   'session.abort': (sessionId?: string) => Promise<void>;
   'plugin.call': (pluginId: string, name: string, args?: unknown) => Promise<unknown>;
   'ui.clipboard': (text: string) => Promise<void>;
@@ -467,6 +564,12 @@ export interface EnsoMain {
     renew: EnsoHostApi['claims.renew'];
     release: EnsoHostApi['claims.release'];
     list: EnsoHostApi['claims.list'];
+  };
+  threads: {
+    open: EnsoHostApi['threads.open'];
+    bindPr: EnsoHostApi['threads.bindPr'];
+    routePrEvent: EnsoHostApi['threads.routePrEvent'];
+    list: EnsoHostApi['threads.list'];
   };
   host: { capabilities: EnsoHostApi['host.capabilities'] };
   /** 秘书联系方式渠道：register 交出收发实现，inbound 把对方的话交给秘书，setStatus 报登录状态 */

@@ -2,6 +2,7 @@ import type { PendingReminderView } from '../reminders';
 import type { GoalResultView } from '../secretary/goalResult';
 import type { GoalUpstreamRetry } from '../upstreamRecovery';
 import type { ModelRef, ThinkingLevel } from './agent';
+import type { DemandMilestoneKind, DemandThreadStatus } from './demandThreads';
 
 /**
  * 秘书可以接管的会话范围：逐个授权（确认卡）、勾选的项目、所有可见项目。
@@ -672,6 +673,28 @@ export interface SecretaryBoard {
   done: SecretaryCard[];
   activity?: SecretaryActivity[];
   claims?: SecretaryClaimView[];
+  threads?: SecretaryDemandThreadView[];
+}
+
+/** 一条需求从群消息到负责会话和 PR 的关联 */
+export interface SecretaryDemandThreadView {
+  id: string;
+  channel: string;
+  chatId: string;
+  messageId: string;
+  topicId?: string;
+  senderName?: string;
+  summary?: string;
+  requesterIsOwner: boolean;
+  sessionId: string;
+  sessionTitle: string;
+  subagentId?: string;
+  pr?: { repo: string; number: number; url?: string; title?: string };
+  status: DemandThreadStatus;
+  milestones: DemandMilestoneKind[];
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
 }
 
 /** 一个外部对象当前被哪个会话认领 */

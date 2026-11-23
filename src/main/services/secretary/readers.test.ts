@@ -497,6 +497,41 @@ describe('session_list', () => {
     expect((await run(handlers.claims_list, { prefix: 'github:' })).claims).toEqual([claim]);
     expect((await run(handlers.claims_list, { prefix: 'tg:' })).claims).toEqual([]);
   });
+
+  it('threads_list 按状态和仓库过滤，activeOnly 去掉终态', async () => {
+    const open = {
+      id: 'dt-1',
+      channel: 'telegram',
+      chatId: '-100',
+      messageId: '7',
+      summary: '修登录',
+      requesterIsOwner: true,
+      sessionId: 's1',
+      sessionTitle: '审查',
+      pr: { repo: 'Enso/App', number: 4 },
+      status: 'pr_opened' as const,
+      milestones: ['pr_opened' as const],
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const done = {
+      ...open,
+      id: 'dt-2',
+      status: 'merged' as const,
+      milestones: ['merged' as const],
+    };
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row({ title: '审查' }) }),
+        conversations: () => [conversation('s1', 'p1')],
+        threads: () => [open, done],
+      })
+    );
+    expect((await run(handlers.threads_list, { repo: 'enso/app' })).threads).toEqual([open, done]);
+    expect((await run(handlers.threads_list, { status: 'merged' })).threads).toEqual([done]);
+    expect((await run(handlers.threads_list, { activeOnly: true })).threads).toEqual([open]);
+  });
 });
 
 describe('session_read', () => {

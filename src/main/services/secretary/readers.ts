@@ -15,8 +15,14 @@ import type {
   ProjectAuthority,
   ProjectedMessage,
 } from '@shared/types/agent';
-import type { SecretaryClaimView, SecretaryProfile } from '@shared/types/secretary';
+import { parseDemandStatus } from '@shared/types/demandThreads';
+import type {
+  SecretaryClaimView,
+  SecretaryDemandThreadView,
+  SecretaryProfile,
+} from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
+import { secretaryDemandThreadViews } from '../demandThreads';
 import { peekEventClaimStore } from '../eventClaims';
 import { redactSecrets } from '../memory/distill';
 import {
@@ -100,6 +106,8 @@ export interface SecretaryReadPorts {
   repo: RepoStatusDeps;
   /** 当前未过期的对象认领；缺省表示没有 */
   claims?(): MaybePromise<readonly SecretaryClaimView[]>;
+  /** 需求线程；缺省表示没有 */
+  threads?(): MaybePromise<readonly SecretaryDemandThreadView[]>;
 }
 
 export interface SecretaryReadHandlers {
@@ -108,6 +116,7 @@ export interface SecretaryReadHandlers {
   repo_status: SecretaryOpHandler;
   session_list: SecretaryOpHandler;
   claims_list: SecretaryOpHandler;
+  threads_list: SecretaryOpHandler;
   session_read: SecretaryOpHandler;
   session_tasks: SecretaryOpHandler;
   session_activity: SecretaryOpHandler;
@@ -476,6 +485,30 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       return { ok: true, result: { claims } };
     },
 
+    async threads_list(params) {
+      const status = optionalFilter(params, 'status');
+      const sessionId = optionalFilter(params, 'sessionId');
+      const repo = optionalFilter(params, 'repo');
+      if (status === null || sessionId === null || repo === null) return invalidArguments;
+      if (status !== undefined && !parseDemandStatus(status)) return invalidArguments;
+      if (params.activeOnly !== undefined && typeof params.activeOnly !== 'boolean') {
+        return invalidArguments;
+      }
+      const threads = ((await ports.threads?.()) ?? []).filter((thread) => {
+        if (status && thread.status !== status) return false;
+        if (sessionId && thread.sessionId !== sessionId) return false;
+        if (repo && thread.pr?.repo.toLowerCase() !== repo.toLowerCase()) return false;
+        if (
+          params.activeOnly === true &&
+          (thread.status === 'merged' || thread.status === 'closed')
+        ) {
+          return false;
+        }
+        return true;
+      });
+      return { ok: true, result: { threads } };
+    },
+
     async session_read(params) {
       const conversationId = stringParam(params, 'conversationId');
       if (!conversationId) return invalidArguments;
@@ -768,6 +801,10 @@ export function readPortsFor(
         lastHeartbeatAt: claim.lastHeartbeatAt,
         active: claim.active,
       }));
+    },
+    async threads() {
+      const rows = await (await import('../../ipc/settings')).readPersistedConversations();
+      return secretaryDemandThreadViews(rows);
     },
   };
 }
