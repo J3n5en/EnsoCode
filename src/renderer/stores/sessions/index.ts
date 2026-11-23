@@ -4657,15 +4657,19 @@ useSessionsStore.subscribe((state) => {
 /**
  * 不切换会话地旁观一条会话（秘书弹窗）：期间正文保热、实时事件照常落地，
  * 打开时按「切进来」的口径补历史与快照。返回释放函数，释放时按离开盖章。
+ * readOnly（已归档）只读 jsonl 历史，不向 worker 要快照。
  */
-export function peekConversation(conversationId: string): () => void {
+export function peekConversation(
+  conversationId: string,
+  options?: { readOnly?: boolean }
+): () => void {
   peekedIds.set(conversationId, (peekedIds.get(conversationId) ?? 0) + 1);
   const state = useSessionsStore.getState();
   const conversation = state.conversations[conversationId];
   if (conversation && viewedFromState(state) !== conversationId) {
     if (conversation.parentId) loadViewedChildHistory(conversationId);
     else if (needsHistoryHydration(conversation)) void hydrateParentHistoryTail(conversationId);
-    if (needsWorkerSnapshot(conversation))
+    if (!options?.readOnly && needsWorkerSnapshot(conversation))
       void window.electronAPI.agent.requestSnapshot(conversationId);
   }
   let released = false;
