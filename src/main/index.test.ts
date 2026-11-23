@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   order: [] as string[],
@@ -164,9 +164,29 @@ vi.mock('./services/trayToggleShortcut', () => ({
   syncTrayToggleShortcut: vi.fn(),
   stopTrayToggleShortcut: vi.fn(),
 }));
+// 下面几个只被入口接线调用，真实加载占冷启动大头（会话历史连带整个 pi-coding-agent、浏览器宿主、配置 CLI 服务）
+vi.mock('./services/exitInterruptHost', () => ({
+  recordRunningSessionsAtExit: vi.fn(),
+  startExitInterruptRecovery: vi.fn(),
+  startRunningSessionsHeartbeat: vi.fn(),
+}));
+vi.mock('./services/browserHost', () => ({
+  browserHost: { setHostWindow: vi.fn(), dispose: vi.fn(async () => undefined) },
+}));
+vi.mock('./services/configCli', () => ({
+  startDesktopConfigCli: vi.fn(async () => undefined),
+  stopDesktopConfigCli: vi.fn(),
+}));
+vi.mock('./desktop/revealExternalConfirm', () => ({ confirmRevealExternal: vi.fn() }));
 
 const originalUserDataOverride = process.env.ENSO_USER_DATA_DIR;
 const originalVerify = process.env.ENSO_VERIFY;
+
+// 首次加载入口要 transform 约 125 个模块，耗时随机器负载线性放大；在这里一次付清，用例只计重新求值
+beforeAll(async () => {
+  await import('./index');
+  for (let i = 0; i < 2; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+}, 60_000);
 
 beforeEach(() => {
   vi.resetModules();

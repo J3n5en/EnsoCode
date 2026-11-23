@@ -114,7 +114,7 @@ async function removeLowPriority(target: string): Promise<void> {
   await rm(target, { recursive: true, force: true, maxRetries: 2 });
 }
 
-const realFs: TrashFs = {
+export const realTrashFs: TrashFs = {
   mkdir: async (dir) => {
     await mkdir(dir, { recursive: true });
   },
@@ -146,7 +146,7 @@ export class WorktreeTrash {
   private waiters: Array<() => void> = [];
 
   constructor(options: WorktreeTrashOptions = {}) {
-    this.fs = options.fs ?? realFs;
+    this.fs = options.fs ?? realTrashFs;
     this.git = options.git ?? gitRunner(30_000);
     this.backgroundGit = options.backgroundGit ?? gitRunner(0);
     this.concurrency = options.concurrency ?? 1;
