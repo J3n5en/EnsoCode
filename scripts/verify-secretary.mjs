@@ -6412,6 +6412,10 @@ async function verifyQueuedSessions(cdp, setup) {
   const board = await page(`
     S().selectConversation(${JSON.stringify(setup.secretaryId)});
     await sleep(300);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
     if (!visiblePanel()) {
       const toggles = [...document.querySelectorAll('button')].filter(
         (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
@@ -6420,11 +6424,11 @@ async function verifyQueuedSessions(cdp, setup) {
       const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
       item?.click();
       await sleep(800);
-      if (!visiblePanel())
-        [...document.querySelectorAll('button')]
-          .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
-          ?.click();
     }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
     const panel = await until(() => visiblePanel(), 15000);
     panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
     await sleep(300);
@@ -6435,9 +6439,22 @@ async function verifyQueuedSessions(cdp, setup) {
       return nodes.length >= 2 ? nodes : null;
     }, 20000);
     cards?.[0]?.scrollIntoView({ block: 'center' });
-    return JSON.stringify({ panel: Boolean(panel), labels: (cards ?? []).map((n) => n.innerText) });
+    // 右侧面板滑入有动画：等它整块进到视口里再截
+    await until(() => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return box && box.x + box.width <= innerWidth + 1 && box.x < innerWidth - box.width + 1;
+    }, 5000);
+    const rect = visiblePanel()?.getBoundingClientRect();
+    return JSON.stringify({
+      panel: Boolean(panel),
+      rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+      viewport: { width: innerWidth, height: innerHeight },
+      labels: (cards ?? []).map((n) => n.innerText),
+    });
   `);
   assert(board.labels.length >= 2, '排队: 秘书看板显示两条排队', board);
+  log(`  board ${JSON.stringify({ rect: board.rect, viewport: board.viewport })}`);
+  await sleep(500);
   await cdp.shot(QUEUED_SHOT('board'));
 
   log('== 排队会话：取消一条、停掉在跑的，队头自动开始');
