@@ -1,3 +1,4 @@
+import { translate } from '@shared/i18n';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { parseHTML } from 'linkedom';
 import { act, createElement } from 'react';
@@ -6,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyHistoryPage, emptyProjection } from '@/stores/sessions/reducer';
 import { buildTimeline, type TimelineItem } from '@/stores/sessions/timeline';
+import { quoteButtonPosition } from './quoteSelection';
 import { TimelineRow } from './TimelineRow';
 
 vi.mock('@/i18n', () => ({
@@ -135,5 +137,103 @@ describe('思考块底部收起入口', () => {
     } finally {
       await view.unmount();
     }
+  });
+
+  it('用户手动展开过的思考块，在流式更新期间不会被强行收起', async () => {
+    const view = mount();
+    try {
+      await view.render(thinking(true));
+      await act(async () => view.head().click());
+      await act(async () => view.head().click());
+      expect(view.container.textContent).toContain(BODY);
+      await view.render({ ...thinking(true), text: `${BODY}\n第二步继续推导` });
+      expect(view.container.textContent).toContain('第二步继续推导');
+      await view.render({ ...thinking(false), text: `${BODY}\n第二步继续推导` });
+      expect(view.container.textContent).toContain('第二步继续推导');
+      expect(view.collapse()).toBeDefined();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('顶部与底部收起按钮标记 data-quote-skip，避免被 #410 引用按钮遮挡或带入引用文本', async () => {
+    const view = mount();
+    try {
+      await view.render(thinking(false));
+      await act(async () => view.head().click());
+      const head = view.head();
+      const bottom = view.collapse();
+      expect(head.hasAttribute('data-quote-skip')).toBe(true);
+      expect(bottom?.hasAttribute('data-quote-skip')).toBe(true);
+      expect(bottom?.className).toContain('select-none');
+
+      // 窄屏（390px）移动端选区紧贴思考块底部：引用按钮优先放下方，
+      // 底部收起按钮作为 obstacle 时应避让而不压在按钮上
+      const selectionRect = { top: 200, bottom: 220, left: 40, right: 200 };
+      const collapseObstacle = { top: 224, bottom: 248, left: 47, right: 160 };
+      const pos = quoteButtonPosition(
+        selectionRect,
+        { width: 390, height: 844 },
+        { width: 72, height: 28 },
+        true,
+        [collapseObstacle]
+      );
+      const overlaps =
+        pos.left < collapseObstacle.right &&
+        pos.left + 72 > collapseObstacle.left &&
+        pos.top < collapseObstacle.bottom &&
+        pos.top + 28 > collapseObstacle.top;
+      expect(overlaps).toBe(false);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('长思考块顶部滚出视口上方时，点底部收起会把滚动位置拉回思考行顶部附近；短思考块不乱滚', async () => {
+    const dom = parseHTML(
+      '<html><body><div id="scroller" data-virtuoso-scroller="true" style="overflow-y:auto"><div id="root"></div></div></body></html>'
+    );
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const scroller = dom.document.getElementById('scroller') as unknown as HTMLElement;
+    const container = dom.document.getElementById('root') as unknown as HTMLElement;
+    scroller.scrollTop = 1500;
+    Object.defineProperty(scroller, 'getBoundingClientRect', {
+      value: () => ({ top: 0, bottom: 600, left: 0, right: 390, width: 390, height: 600 }),
+    });
+    const root = createRoot(container);
+    const buttons = () => [...container.querySelectorAll('button')] as HTMLButtonElement[];
+    try {
+      await act(async () => root.render(createElement(TimelineRow, { item: thinking(false) })));
+      await act(async () => buttons()[0].click());
+      const row = container.querySelector('[data-enso="thinking"]') as HTMLElement;
+      // 模拟长思考块：用户滚到底部，行头已滚出视口上方 900px
+      Object.defineProperty(row, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ top: -900, bottom: -876, left: 16, right: 374, width: 358, height: 24 }),
+      });
+      const bottom = buttons().find((b) => b.textContent?.includes(COLLAPSE));
+      await act(async () => bottom?.click());
+      expect(scroller.scrollTop).toBe(584);
+
+      // 短思考块：行头仍在视口内，点底部收起不动 scrollTop
+      await act(async () => buttons()[0].click());
+      scroller.scrollTop = 300;
+      Object.defineProperty(row, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ top: 120, bottom: 144, left: 16, right: 374, width: 358, height: 24 }),
+      });
+      const bottom2 = buttons().find((b) => b.textContent?.includes(COLLAPSE));
+      await act(async () => bottom2?.click());
+      expect(scroller.scrollTop).toBe(300);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it('底部收起文案在中英文环境下均有对应文本', () => {
+    expect(translate('en', 'Collapse thinking')).toBe('Collapse thinking');
+    expect(translate('zh', 'Collapse thinking')).toBe('收起思考过程');
   });
 });
