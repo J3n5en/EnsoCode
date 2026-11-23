@@ -741,13 +741,17 @@ export class AgentService implements AgentServiceContract {
         const active = agent.activeRunId ? this.runs.get(agent.activeRunId) : undefined;
         const interrupted = Boolean(active && !TERMINAL_RUN_STATUSES.has(active.status));
         const park = interrupted && this.mayPark(agent);
-        if (active && interrupted) {
-          // 父会话随 worker 一起没了，此刻无人可通知：父会话重新就绪时由 recoverOwner 补通知
-          active.delivered = true;
-          active.parentUnaware = true;
-          this.finishRun(active, 'interrupted', 'Agent worker exited.');
+        // 父会话随 worker 一起没了，此刻无人可通知：父会话重新就绪时由 recoverOwner 补通知；
+        // 排队的 Run 也一样，停放后不会再有人启动它们
+        for (const runId of [agent.activeRunId, ...agent.queuedRunIds]) {
+          const run = runId ? this.runs.get(runId) : undefined;
+          if (!run || TERMINAL_RUN_STATUSES.has(run.status)) continue;
+          run.delivered = true;
+          run.parentUnaware = true;
+          this.finishRun(run, 'interrupted', 'Agent worker exited.');
         }
         agent.activeRunId = undefined;
+        agent.queuedRunIds = [];
         // 中断的 task 停放待 resume；子会话已随 worker 没了，无需回收
         agent.status =
           agent.mode === 'coworker' || park || agent.status === 'parked' ? 'parked' : 'closed';

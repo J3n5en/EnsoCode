@@ -1770,6 +1770,27 @@ describe('AgentService 找不到 Run / Agent 时说明原因', () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  it('worker 退出时 coworker 排队的 Run 随在跑的一起中断，父会话就绪时一并补通知', async () => {
+    const notify = vi.fn();
+    const { service } = setup({ notify });
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    const queued = await service.send({
+      context,
+      requestId: 'queued',
+      agentId: spawned.value.agentId,
+      message: 'after that',
+      delivery: 'next',
+    });
+    if (!queued.ok) throw new Error(queued.error);
+    service.observe({ type: 'worker-exited' });
+    expect(service.progress(owner.ownerId)).toEqual([]);
+    service.recoverOwner(context);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toContain(`runId ${spawned.value.runId}`);
+    expect(notify.mock.calls[0][1]).toContain(`runId ${queued.value.runId}`);
+  });
+
   it('resume 换了新 runId 后，旧 runId 仍可 report / stop，不报 not-found', async () => {
     const { service, runtime, children } = setup();
     runtime.resume = vi.fn(async ({ identity }) => ({
