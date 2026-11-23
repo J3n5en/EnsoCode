@@ -54,30 +54,23 @@ export function wrapPluginDelivery(pluginId: string, text: string): string {
 }
 
 const HOST_WRAP = /^<untrusted-content(?:\s[^<>\n]*)?>([\s\S]*)<\/untrusted-content>$/u;
-const TAG = /<\\?untrusted-content(?:\s[^<>\n]*)?>|<\\?\/untrusted-content>/gu;
+const PLUGIN_OPEN = /<\\?untrusted-content source="plugin:[^"<>\n]*"[^<>\n]*>/u;
+const TRAILING_CLOSE = /<\\?\/untrusted-content>\s*$/u;
 
 /**
  * 显示用：剥掉包裹，来源由卡片标题表达。只给界面用，送给模型的仍是原文。
- * 宿主包裹里的结束标签都转义过，唯一的字面结束标签就是它自己的；
- * 内层只剥最外一级成对的标签，不成对就原样显示，第三方写的标签不动。
+ * 宿主包裹里的标签都转义过，唯一的字面结束标签就是它自己的；旧版插件自己包的一层
+ * 是第一个插件来源的开始标签加正文末尾的结束标签。其余标签是第三方打的字，还原转义后照显示。
  */
 export function unwrapUntrustedForDisplay(text: string): string {
   const host = HOST_WRAP.exec(text.trim());
-  const body = host && !host[1].includes(END_TAG) ? host[1] : text;
-  let cuts: [number, number][] = [];
-  let depth = 0;
-  for (const match of body.matchAll(TAG)) {
-    const opening = !match[0].includes('/untrusted');
-    if (opening ? depth === 0 : depth === 1)
-      cuts.push([match.index, match.index + match[0].length]);
-    depth += opening ? 1 : -1;
-    if (depth < 0) break;
-  }
-  if (depth !== 0) cuts = [];
-  const out = cuts.reduceRight(
-    (rest, [start, end]) => rest.slice(0, start) + rest.slice(end),
-    body
-  );
+  const hosted = Boolean(host && !host[1].includes(END_TAG));
+  let out = hosted && host ? host[1] : text;
+  const open = PLUGIN_OPEN.exec(out);
+  const close = TRAILING_CLOSE.exec(out);
+  if (open && close && close.index >= open.index + open[0].length)
+    out = out.slice(0, open.index) + out.slice(open.index + open[0].length, close.index);
+  if (hosted) out = unescapeUntrusted(out);
   return out === text ? text : out.trim();
 }
 
