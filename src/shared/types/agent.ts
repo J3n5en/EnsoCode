@@ -2094,6 +2094,9 @@ export type RendererAgentEvent =
 /** detail：Main 汇总的退出原因（退出码 / worker 致命异常首行） */
 export type WorkerExitedEvent = { type: 'worker-exited'; detail?: string };
 
+/** 优雅重启换代（Main 不退）：旧 worker 已按断点退出，会话由下一代接着跑；只给 Main 内部，不进会话广播 */
+export type WorkerSwappedEvent = { type: 'worker-swapped' };
+
 export function workspaceBranchChangedNote(branch: string): string {
   return `<workspace-branch-changed>\nThe current workspace is now on Git branch ${JSON.stringify(branch)}. The directory is unchanged, but file contents may differ. Re-read relevant files before relying on earlier observations or edits. This is background information only, not a task or goal.\n</workspace-branch-changed>`;
 }

@@ -2024,6 +2024,11 @@ export function registerAgentHandlers(): void {
   powerMonitor.on('resume', () => humanTimeouts.check());
 
   setAgentEventListener((incomingEvent) => {
+    // 换代（Main 不退）：会话不算失败、不进会话广播；只有子代理服务按断点把被打断的 Run 接着跑
+    if (incomingEvent.type === 'worker-swapped') {
+      agentService?.observe({ type: 'worker-exited' });
+      return;
+    }
     const workerEvent = markExitInterrupted(incomingEvent);
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
