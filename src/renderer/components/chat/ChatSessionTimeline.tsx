@@ -43,6 +43,7 @@ export function ChatSessionTimeline({
   onSuggestion,
   timelineRef,
   peek = false,
+  readOnly = false,
 }: {
   conversationId: string;
   cwd?: string;
@@ -51,6 +52,8 @@ export function ChatSessionTimeline({
   timelineRef: RefObject<MessageTimelineHandle | null>;
   /** 弹窗旁观：不接全局查找、不因新编辑自动开 Changes */
   peek?: boolean;
+  /** 只读（已归档）：不给会拉起 worker 或要快照的重试 */
+  readOnly?: boolean;
 }) {
   const projectId = useSessionsStore((state) => state.conversations[conversationId]?.projectId);
   const secretarySession = useSettingsStore((state) =>
@@ -326,12 +329,12 @@ export function ChatSessionTimeline({
         emptyTitle={emptyTitle}
         onSuggestion={onSuggestion}
         onRetryResume={
-          !started && sessionFile && status === 'failed'
+          !readOnly && !started && sessionFile && status === 'failed'
             ? () => void useSessionsStore.getState().resumeConversation(conversationId)
             : undefined
         }
         onRetrySync={
-          syncStalled && !running
+          !readOnly && syncStalled && !running
             ? () => useSessionsStore.getState().retrySessionSync(conversationId)
             : undefined
         }

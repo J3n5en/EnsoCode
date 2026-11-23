@@ -46,6 +46,7 @@ import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { deleteSystemPrompt } from '../services/systemPromptStore';
 import { localUi } from '../services/uiHost';
+import type { ConversationsMovePorts, ImportProjectSessionsPorts } from './conversationsMove';
 
 function getSettingsPath(): string {
   return join(app.getPath('userData'), 'settings.json');
@@ -1094,17 +1095,51 @@ export function registerSettingsHandlers(): void {
     }, event.sender.id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {
-    const { handleConversationsMove } = await import('./conversationsMove');
+  const conversationsMovePorts = async (): Promise<
+    (ConversationsMovePorts & ImportProjectSessionsPorts) | null
+  > => {
+    const { projectRootConversationIds } = await import('./conversationsMove');
     const { getSourceAuthorityRegistry, releaseRootFromMain } = await import('./agent');
     const { agentSessionIndex } = await import('./sessionIndex');
     const { sessionWorktreeInUse, unbindSessionWorktree } = await import('./worktree');
     const { removeScratchWorkspace } = await import('../services/sessionFileCleanup');
     const registry = getSourceAuthorityRegistry();
-    if (!registry) return { ok: false, error: 'unavailable' };
-    return handleConversationsMove(input, {
+    if (!registry) return null;
+    const persistedRows = readPersistedConversations;
+    return {
+      sessionDir: join(app.getPath('userData'), 'agent', 'sessions'),
+      project: (projectId) => registry.project(projectId),
+      projectKind: (projectId) => registry.project(projectId)?.kind,
+      conversation: (conversationId) => registry.conversation(conversationId),
+      projectHasConversations: (projectId) =>
+        registry
+          .projection()
+          .conversations.some(
+            (conversation) =>
+              conversation.projectId === projectId && conversation.lifecycle !== 'ended'
+          ) ||
+        Object.values(persistedRows()).some(
+          (row) => row.projectId === projectId && !row.parentId && !row.btwParentId
+        ),
+      insertConversations: (targetProjectId, records) =>
+        registry.insertConversations(targetProjectId, records),
+      discardConversations: (conversationIds) => registry.discardConversations(conversationIds),
+      removeProject: (request) => registry.removeProject(request),
+      randomUuid: () => randomUUID(),
+      addConversations: (rows, placeBefore) =>
+        patchConversationsState((state) => {
+          Object.assign(state.conversations, rows);
+          for (const [id, before] of Object.entries(placeBefore)) {
+            const at = state.order.indexOf(before);
+            state.order.splice(at < 0 ? 0 : at, 0, id);
+          }
+        }),
+      rootConversationIds: (projectId) =>
+        projectRootConversationIds(registry.rendererProjection().conversations, projectId),
       moveConversation: (conversationId, targetProjectId, options) =>
         registry.moveConversation(conversationId, targetProjectId, options),
+      moveConversations: (requests, targetProjectId) =>
+        registry.moveConversations(requests, targetProjectId),
       isRunning: (conversationId) =>
         agentSessionIndex.workspaceTreeRunning(conversationId) ||
         agentSessionIndex.btwTreeRunning(conversationId),
@@ -1118,17 +1153,19 @@ export function registerSettingsHandlers(): void {
           ...(project?.kind === 'scratch' ? { scratchRoot: project.canonicalPath } : {}),
         };
       },
-      readConversations: readPersistedConversations,
-      patchProjectIds: (ids, targetProjectId, rootId) => {
+      readConversations: persistedRows,
+      patchProjectIds: (ids, targetProjectId, rootIds) => {
         patchConversationsState((state) => {
           for (const id of ids) {
             const row = state.conversations[id];
             if (row) row.projectId = targetProjectId;
           }
-          const root = state.conversations[rootId];
-          if (root) {
-            delete root.worktree;
-            delete root.worktreeMissing;
+          for (const rootId of rootIds) {
+            const root = state.conversations[rootId];
+            if (root) {
+              delete root.worktree;
+              delete root.worktreeMissing;
+            }
           }
         });
       },
@@ -1141,7 +1178,39 @@ export function registerSettingsHandlers(): void {
         return results.every((result) => result.ok);
       },
       removeScratchWorkspace,
-    });
+    };
+  };
+
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {
+    const { handleConversationsMove } = await import('./conversationsMove');
+    const ports = await conversationsMovePorts();
+    if (!ports) return { ok: false, error: 'unavailable' };
+    return handleConversationsMove(input, ports);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_IMPORT_PROJECT, async (_event, input: unknown) => {
+    const { handleImportProjectSessions } = await import('./conversationsMove');
+    const ports = await conversationsMovePorts();
+    if (!ports) return { ok: false, error: 'unavailable' };
+    return handleImportProjectSessions(input, ports);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.CONVERSATIONS_IMPORT_PROJECT_PREVIEW,
+    async (_event, input: unknown) => {
+      const { handleImportProjectSessionsPreview } = await import('./conversationsMove');
+      const ports = await conversationsMovePorts();
+      if (!ports) return { ok: false, error: 'unavailable' };
+      return handleImportProjectSessionsPreview(input, ports);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_REMOVE_EMPTY, async (event, input: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid' };
+    const { handleRemoveEmptyProject } = await import('./conversationsMove');
+    const ports = await conversationsMovePorts();
+    if (!ports) return { ok: false, error: 'unavailable' };
+    return handleRemoveEmptyProject(input, ports);
   });
 
   // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖

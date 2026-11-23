@@ -495,6 +495,13 @@ export const IPC_PRODUCT_COVERAGE = {
   CONVERSATIONS_REMOVE: excluded('Conversation persistence delete transport for user removal.'),
   CONVERSATIONS_REGISTER: excluded('Conversation persistence insert for a newly created root.'),
   CONVERSATIONS_MOVE: excluded('Conversation persistence move between projects.'),
+  CONVERSATIONS_IMPORT_PROJECT: excluded(
+    'Conversation persistence move or copy of a whole project into another.'
+  ),
+  CONVERSATIONS_IMPORT_PROJECT_PREVIEW: excluded(
+    'Read-only preview for the whole-project conversation import dialog.'
+  ),
+  PROJECT_REMOVE_EMPTY: excluded('Drops an emptied project from the list after a move.'),
   CONVERSATIONS_RESYNC: excluded('Conversation persistence resync notification transport.'),
   SECRETARY_GET_STATE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_STATE_CHANGED: excluded('Experimental secretary agent; not an Enso capability.'),

@@ -1,5 +1,23 @@
-import { conversationIdsToMove, parseMoveConversationInput } from '@shared/moveConversation';
-import type { AuthorityMutationResult, ConversationAuthorityProjection } from '@shared/types/agent';
+import { statSync } from 'node:fs';
+import {
+  conversationIdsToMove,
+  type ImportProjectSessionsPreview,
+  type ImportProjectSessionsResult,
+  importCopyCount,
+  type ProjectPairInput,
+  parseImportProjectSessionsInput,
+  parseMoveConversationInput,
+  parseProjectPairInput,
+  parseRemoveEmptyProjectInput,
+  type RemoveEmptyProjectResult,
+} from '@shared/moveConversation';
+import type {
+  AuthorityMutationResult,
+  ConversationAuthorityProjection,
+  ProjectAuthorityProjection,
+  RemoveProjectAuthorityRequest,
+} from '@shared/types/agent';
+import { type CopyProjectSessionsPorts, copyProjectSessions } from './conversationsCopy';
 
 export { conversationIdsToMove, parseMoveConversationInput };
 
@@ -20,7 +38,12 @@ export interface ConversationsMovePorts {
   /** 移动前的归属；scratch 来源带上 scratch 根，移动后清理 `<根>/<会话 id>` */
   source: (conversationId: string) => { projectId: string; scratchRoot?: string } | undefined;
   readConversations: () => Record<string, Record<string, unknown>>;
-  patchProjectIds: (ids: readonly string[], targetProjectId: string, rootId: string) => void;
+  /** 会话行改挂目标项目，并清掉 rootIds 根会话行上的 worktree 绑定 */
+  patchProjectIds: (
+    ids: readonly string[],
+    targetProjectId: string,
+    rootIds: readonly string[]
+  ) => void;
   /** 只解除登记，不删 worktree 目录 */
   unbindWorktree: (conversationId: string) => void;
   /** 释放 worker 里挂着的根会话与 btw 旁路，下次 spawn 按新项目推导 cwd；全部释放成功返回 true */
@@ -50,10 +73,167 @@ export async function handleConversationsMove(
   ports.patchProjectIds(
     conversationIdsToMove(ports.readConversations(), conversationId),
     targetProjectId,
-    conversationId
+    [conversationId]
   );
   const released = await ports.releaseSessions(conversationId).catch(() => false);
   if (released && source.scratchRoot)
     ports.removeScratchWorkspace(source.scratchRoot, conversationId);
   return { ok: true, value: result.value };
+}
+
+export type ImportProjectSessionsPorts = Pick<
+  ConversationsMovePorts,
+  | 'isRunning'
+  | 'worktreeBusy'
+  | 'readConversations'
+  | 'patchProjectIds'
+  | 'unbindWorktree'
+  | 'releaseSessions'
+> &
+  CopyProjectSessionsPorts & {
+    project: (projectId: string) => ProjectAuthorityProjection | undefined;
+    projectKind: (projectId: string) => string | undefined;
+    /** 项目下还有没有会话（含归档、Bot 会话）；已结束的不算 */
+    projectHasConversations: (projectId: string) => boolean;
+    moveConversations: (
+      requests: { conversationId: string; running: boolean; worktreeBusy: boolean }[],
+      targetProjectId: string
+    ) => AuthorityMutationResult<{
+      moved: string[];
+      skipped: { conversationId: string; error: string }[];
+    }>;
+    /** 只改权威表的项目状态，不删任何文件 */
+    removeProject: (
+      request: RemoveProjectAuthorityRequest
+    ) => AuthorityMutationResult<ProjectAuthorityProjection>;
+  };
+
+/** 源项目下仍有效的根会话；子会话不在权威表里，随根会话一起改归属 */
+export function projectRootConversationIds(
+  conversations: readonly ConversationAuthorityProjection[],
+  projectId: string
+): string[] {
+  return conversations
+    .filter(
+      (conversation) =>
+        conversation.projectId === projectId &&
+        conversation.kind === 'root' &&
+        conversation.lifecycle !== 'ended' &&
+        !conversation.bot
+    )
+    .map((conversation) => conversation.conversationId);
+}
+
+/**
+ * 整项目导入，移动或复制。临时会话、秘书来源一律拒绝：单条移出 scratch 会清理其工作区，
+ * 整批导入不能顺带删文件；秘书会话固定在秘书里。
+ */
+export async function handleImportProjectSessions(
+  input: unknown,
+  ports: ImportProjectSessionsPorts
+): Promise<ImportProjectSessionsResult> {
+  const parsed = parseImportProjectSessionsInput(input);
+  if (!parsed) return { ok: false, error: 'invalid' };
+  const sourceKind = ports.projectKind(parsed.sourceProjectId);
+  if (sourceKind === 'scratch' || sourceKind === 'secretary') {
+    return { ok: false, error: `source-${sourceKind}` };
+  }
+  const result =
+    parsed.mode === 'move'
+      ? await moveProjectSessions(parsed, ports)
+      : await copyProjectSessions(parsed, ports);
+  return result.ok
+    ? { ...result, sourceEmpty: !ports.projectHasConversations(parsed.sourceProjectId) }
+    : result;
+}
+
+/** 移动：权威归属一次提交、会话行一次补丁，运行中等会话级拒绝跳过并回报 */
+async function moveProjectSessions(
+  { sourceProjectId, targetProjectId }: ProjectPairInput,
+  ports: ImportProjectSessionsPorts
+): Promise<ImportProjectSessionsResult> {
+  const result = ports.moveConversations(
+    ports.rootConversationIds(sourceProjectId).map((conversationId) => ({
+      conversationId,
+      running: ports.isRunning(conversationId),
+      worktreeBusy: ports.worktreeBusy(conversationId),
+    })),
+    targetProjectId
+  );
+  if (!result.accepted) return { ok: false, error: result.error };
+  const { moved, skipped } = result.value;
+  const done: ImportProjectSessionsResult = {
+    ok: true,
+    mode: 'move',
+    imported: moved,
+    skipped,
+    sourceEmpty: false,
+  };
+  if (moved.length === 0) return done;
+  for (const conversationId of moved) {
+    try {
+      ports.unbindWorktree(conversationId);
+    } catch {}
+  }
+  ports.patchProjectIds(
+    conversationIdsToMove(ports.readConversations(), moved),
+    targetProjectId,
+    moved
+  );
+  await Promise.all(
+    moved.map((conversationId) => ports.releaseSessions(conversationId).catch(() => false))
+  );
+  return done;
+}
+
+/** 弹窗用：源目录还在不在（决定默认移动还是复制），以及目标里已有几份副本 */
+export function handleImportProjectSessionsPreview(
+  input: unknown,
+  ports: Pick<ImportProjectSessionsPorts, 'project' | 'readConversations'>
+): ImportProjectSessionsPreview {
+  const parsed = parseProjectPairInput(input);
+  if (!parsed) return { ok: false, error: 'invalid' };
+  const source = ports.project(parsed.sourceProjectId);
+  if (source?.state !== 'active') return { ok: false, error: 'unavailable' };
+  let sourceExists = true;
+  if (source.kind !== 'ssh') {
+    try {
+      sourceExists = statSync(source.canonicalPath).isDirectory();
+    } catch {
+      sourceExists = false;
+    }
+  }
+  return {
+    ok: true,
+    sourceExists,
+    copies: importCopyCount(
+      ports.readConversations(),
+      parsed.sourceProjectId,
+      parsed.targetProjectId
+    ),
+  };
+}
+
+/**
+ * 移动后清理空的旧项目：只把项目从列表里去掉。与「移除项目」不同，不清理任何会话文件，
+ * 不碰项目目录与 worktree；项目里还有会话时拒绝。
+ */
+export function handleRemoveEmptyProject(
+  input: unknown,
+  ports: Pick<ImportProjectSessionsPorts, 'project' | 'projectHasConversations' | 'removeProject'>
+): RemoveEmptyProjectResult {
+  const parsed = parseRemoveEmptyProjectInput(input);
+  if (!parsed) return { ok: false, error: 'invalid' };
+  const project = ports.project(parsed.projectId);
+  if (project?.state !== 'active') return { ok: false, error: 'unavailable' };
+  if (project.kind === 'scratch' || project.kind === 'secretary' || project.kind === 'bot-home') {
+    return { ok: false, error: 'reserved' };
+  }
+  if (ports.projectHasConversations(project.projectId)) return { ok: false, error: 'not-empty' };
+  const removed = ports.removeProject({
+    requestId: crypto.randomUUID(),
+    projectId: project.projectId,
+    version: project.version,
+  });
+  return removed.accepted ? { ok: true } : { ok: false, error: removed.error };
 }

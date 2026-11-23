@@ -1444,6 +1444,39 @@ export const zhTranslations: Record<string, string> = {
   'Cannot move a running conversation': '运行中的会话不能移动',
   'Cannot move while its worktree is in use': '会话的 worktree 正在使用，暂不能移动',
   'Secretary conversations cannot be moved': '秘书会话不能移出秘书',
+  'Import conversations from another project…': '导入其他项目的会话…',
+  'Import conversations from another project': '导入其他项目的会话',
+  'Pick a project. All of its conversations, archived ones included, are brought into {{name}}.':
+    '选择一个项目，它的全部会话（含已归档）将导入到 {{name}}。',
+  'Move to this project': '移动到此项目',
+  'Copy to this project': '复制到此项目',
+  'The conversations leave the original project and show up only here. Session files stay as they are; nothing is copied or deleted.':
+    '会话从原项目移到这里，原项目中不再显示。会话记录文件原样保留，不复制也不删除。',
+  'The original project keeps its conversations unchanged; this project gets an independent copy.':
+    '原项目中的会话原样保留，此项目得到一份独立的副本。',
+  'The source project folder no longer exists, so moving is preselected.':
+    '源项目的目录已不存在，默认选择移动。',
+  'Already copied here {{count}} times. Copying again adds another independent copy.':
+    '已复制到此项目 {{count}} 次，再次复制会再生成一份独立副本。',
+  'Copy here': '复制到此项目',
+  'Moving…': '正在移动…',
+  'Copying…': '正在复制…',
+  'Copied {{count}} conversations': '已复制 {{count}} 个会话',
+  'Copied {{moved}} conversations; {{count}} running ones were not copied':
+    '已复制 {{moved}} 个会话，{{count}} 个运行中的会话未复制',
+  'Failed to remove project': '移除项目失败',
+  'The old project has no conversations left. Remove it from the list?':
+    '旧项目已经没有会话了，要从列表中移除吗？',
+  '"{{name}}" is only removed from the EnsoCode list. Its folder and files on disk are not deleted.':
+    '只会把「{{name}}」从 EnsoCode 列表中移除，磁盘上的目录和文件不会被删除。',
+  'Move here': '移动到此项目',
+  'No other projects': '没有其他项目',
+  '{{count}} conversations': '{{count}} 个会话',
+  'Failed to import conversations': '导入会话失败',
+  'Imported {{count}} conversations': '已导入 {{count}} 个会话',
+  'No conversations to import': '没有可导入的会话',
+  'Imported {{moved}} conversations; {{count}} running or busy ones stay in the original project':
+    '已导入 {{moved}} 个会话，{{count}} 个运行中或占用中的会话留在原项目',
   'Main working tree has uncommitted changes': '主工作树有未提交改动',
   'The new worktree branches off HEAD, so those changes stay in the main working tree and will not follow this session.':
     '新 worktree 从 HEAD 切出，这些改动会留在主工作树，不会跟随本会话。',
@@ -4094,8 +4127,8 @@ export const zhTranslations: Record<string, string> = {
   'Done ({{count}} kept tasks)': '已完成（保留 {{count}} 个任务）',
   'This session no longer exists, or you do not have access to it':
     '这条会话已不存在，或你没有权限查看',
-  'This session is archived. Restore it from the archive to view it.':
-    '这条会话已归档，从归档里恢复后才能查看',
+  'Archived · read-only': '已归档 · 只读',
+  'Restore and open': '恢复并打开',
   'Needs your approval or answer': '等你审批或回答',
   'Back to secretary': '返回秘书',
   'PR open': '未合并',
