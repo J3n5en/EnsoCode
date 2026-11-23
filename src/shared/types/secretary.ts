@@ -656,6 +656,20 @@ export interface SecretaryBoard {
   todos: SecretaryBoardTodo[];
   done: SecretaryCard[];
   activity?: SecretaryActivity[];
+  claims?: SecretaryClaimView[];
+}
+
+/** 一个外部对象当前被哪个会话认领 */
+export interface SecretaryClaimView {
+  key: string;
+  sessionId: string;
+  sessionTitle: string;
+  pluginId: string;
+  label?: string;
+  group?: string;
+  claimedAt: number;
+  lastHeartbeatAt: number;
+  active: boolean;
 }
 
 /** 会话界面、侧栏与设置页共用的接管清单 */

@@ -4,6 +4,7 @@ import {
   type PendingDispatch,
   type SecretaryBoard,
   type SecretaryBoardTodo,
+  type SecretaryClaimView,
   type SecretaryTodoMutate,
   type TodoProblemCode,
 } from '@shared/types/secretary';
@@ -109,6 +110,35 @@ function Stat({ value, label, warn }: { value: number; label: string; warn?: boo
       <div className="text-[18px] font-semibold tabular-nums">{value}</div>
       <div className="text-[11.5px] text-muted-foreground">{label}</div>
     </div>
+  );
+}
+
+function ClaimList({ claims }: { claims: readonly SecretaryClaimView[] }) {
+  const { t, locale } = useI18n();
+  const now = Date.now();
+  return (
+    <section data-enso="secretary-claims" className="flex flex-col gap-1.5">
+      <p className="text-[12px] font-medium text-muted-foreground">{t('Object claims')}</p>
+      {claims.map((claim) => (
+        <button
+          key={claim.key}
+          type="button"
+          data-enso="secretary-claim"
+          onClick={() => openSessionFromSecretary(claim.sessionId)}
+          className="flex flex-col items-start rounded-lg border border-border px-2.5 py-2 text-left"
+        >
+          <span className="text-[13px] font-medium">{claim.label || claim.key}</span>
+          <span className="text-[11.5px] text-muted-foreground">{claim.key}</span>
+          <span className="text-[11.5px] text-muted-foreground">
+            {t('Claimed by {{session}}', { session: claim.sessionTitle })}
+            {' · '}
+            {claim.pluginId}
+            {' · '}
+            {formatRelativeTime(claim.lastHeartbeatAt, locale, now)}
+          </span>
+        </button>
+      ))}
+    </section>
   );
 }
 
@@ -600,6 +630,7 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
       running: picked.flatMap((entry) => entry.board.running),
       todos: picked.flatMap((entry) => entry.board.todos),
       done: picked.flatMap((entry) => entry.board.done),
+      ...(ownBoard.claims && ownBoard.claims.length > 0 ? { claims: ownBoard.claims } : {}),
     };
   }, [scope, overviewBoards, filterId, ownBoard]);
   const focusProposal = useSecretaryStore((s) => s.focusProposal);
@@ -609,7 +640,12 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
   const digest = secretaryDigest(board, Date.now());
   const feed = useSecretaryFeed(secretaryId);
   const empty =
-    board.needsYou.length + board.running.length + board.todos.length + board.done.length === 0;
+    board.needsYou.length +
+      board.running.length +
+      board.todos.length +
+      board.done.length +
+      (board.claims?.length ?? 0) ===
+    0;
 
   useEffect(() => {
     if (!focusProposal) return;
@@ -723,6 +759,7 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
         <Stat value={digest.counts.running} label={t('In progress')} />
         <Stat value={digest.counts.todos} label={t('To do')} />
       </div>
+      {board.claims && board.claims.length > 0 && <ClaimList claims={board.claims} />}
       {board.needsYou.length > 0 && (
         <section data-enso="secretary-needs-you" className="flex flex-col gap-1.5">
           {board.needsYou.map((card) =>

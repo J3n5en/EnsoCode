@@ -1,4 +1,7 @@
 import type {
+  EnsoClaimAcquireResult,
+  EnsoClaimCandidate,
+  EnsoClaimView,
   EnsoEventData,
   EnsoHostApi,
   EnsoMcpTool,
@@ -9,6 +12,11 @@ import type {
 } from '../../../types/enso-plugin';
 import type { McpToolInfo, PluginSessionInfo } from '../../main/services/extensionPlugins/gate';
 import type { PluginSlotName } from '../../renderer/plugins/registry';
+import type {
+  EventClaimAcquireResult,
+  EventClaimCandidate,
+  EventClaimView,
+} from '../types/eventClaims';
 import type { ToolCallPayload, ToolResultPayload } from './events';
 import type { ExtensionPluginManifest } from './manifest';
 import type { PluginHostApi, PluginHostCapabilities } from './protocol';
@@ -28,6 +36,9 @@ const checks = [
   >,
   true as Assert<Equals<EnsoSlotRegistration['slot'], PluginSlotName>>,
   true as Assert<Equals<EnsoSessionInfo, PluginSessionInfo>>,
+  true as Assert<Equals<EnsoClaimView, EventClaimView>>,
+  true as Assert<Equals<EnsoClaimCandidate, EventClaimCandidate>>,
+  true as Assert<Equals<EnsoClaimAcquireResult, EventClaimAcquireResult>>,
   true as Assert<Equals<EnsoMcpTool, McpToolInfo>>,
   true as Assert<Equals<EnsoEventData['tool_call'], ToolCallPayload>>,
   true as Assert<Equals<EnsoEventData['tool_result'], ToolResultPayload>>,
