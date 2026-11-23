@@ -769,6 +769,40 @@ describe('typed Agent child projection', () => {
         noProgressRuns: 3,
       });
     });
+
+    it('这一轮挂着自定提醒：不续跑、不计无进展，目标保持 active；下一轮收束照常续跑', async () => {
+      seedGoal();
+      const digest = { firstUserText: 'ship it', userText: 'ship it', assistantText: 'wait CI' };
+      onAgentEvent?.({
+        type: 'turn-completed',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 2,
+        turnId: 't1',
+        digest,
+        awaitingReminder: true,
+      });
+      expect(agentPrompt).not.toHaveBeenCalled();
+      expect(sessionsModule.useSessionsStore.getState().conversations.parent.goal).toMatchObject({
+        status: 'active',
+        autoTurns: 0,
+        noProgressRuns: 2,
+      });
+      onAgentEvent?.({
+        type: 'turn-completed',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 3,
+        turnId: 't2',
+        digest: { ...digest, assistantText: 'CI passed' },
+      });
+      await vi.waitFor(() =>
+        expect(agentPrompt).toHaveBeenCalledWith(
+          'parent',
+          expect.stringContaining('<goal-continuation>'),
+          undefined,
+          expect.any(String)
+        )
+      );
+    });
   });
 
   describe('放弃排队压缩：清进度但不重钉锚点', () => {

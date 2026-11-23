@@ -921,6 +921,38 @@ describe('session_tasks', () => {
     expect(rows[2]?.stalled).toBe(true);
   });
 
+  it('挂着的自定提醒一并给出：到点时间、还剩多久、标签、属于哪个子代理；session_read 带简表', async () => {
+    const now = Date.now();
+    const base = { createdAt: 0, prompt: 'secret prompt', ifIdle: true, chain: 1 };
+    const ports = makePorts({
+      projects: () => [project()],
+      rows: () => ({ s1: row() }),
+      conversations: () => [conversation('s1', 'p1')],
+      reminders: () => [
+        { ...base, id: 'r00000001', sessionId: 's1::cw-a', dueAt: now + 60_000 },
+        { ...base, id: 'r00000002', sessionId: 's1', dueAt: now + 120_000, label: 'ci' },
+      ],
+    });
+    const handlers = createSecretaryReadHandlers(ports);
+    const tasks = await run(handlers.session_tasks, { conversationId: 's1' });
+    const reminders = tasks.reminders as Record<string, unknown>[];
+    expect(reminders).toHaveLength(2);
+    expect(reminders[0]).toMatchObject({ id: 'r00000001', subagent: 's1::cw-a' });
+    expect(reminders[0]?.inMs as number).toBeGreaterThan(50_000);
+    expect(reminders[1]).toMatchObject({ id: 'r00000002', label: 'ci', dueAt: now + 120_000 });
+    expect(reminders[1]).not.toHaveProperty('subagent');
+    expect(JSON.stringify(tasks)).not.toContain('secret prompt');
+
+    const read = await run(handlers.session_read, { conversationId: 's1' });
+    expect(read.reminders).toEqual([{ dueAt: now + 60_000 }, { dueAt: now + 120_000, label: 'ci' }]);
+
+    const none = await run(
+      createSecretaryReadHandlers({ ...ports, reminders: () => [] }).session_tasks,
+      { conversationId: 's1' }
+    );
+    expect(none).not.toHaveProperty('reminders');
+  });
+
   it('不可见会话一律 not-found', async () => {
     const handlers = createSecretaryReadHandlers(makePorts());
     expect(
