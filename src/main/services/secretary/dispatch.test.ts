@@ -3435,6 +3435,42 @@ describe('派发先后依赖', () => {
     }
   });
 
+  it('两次判定并发都看到依赖失败：用户在两次之间忽略了它，第二次不会把它写回来', async () => {
+    const h = direct({
+      rows: { c1: depRow('c1') },
+      statuses: { c1: idle },
+      file: {
+        ...emptyFile(),
+        dispatched: { c1: { ...finished('c1'), lastResult: { kind: 'failed', turn: 1, at: 1 } } },
+      },
+    });
+    const { pendingId } = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    const rows = h.ports.rows;
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.ports.rows = async () => {
+      const value = await rows();
+      if (++calls === 2) await gate;
+      return value;
+    };
+    const first = startPendingDispatches(h.ports, [pendingId], NOW);
+    const second = startPendingDispatches(h.ports, [pendingId], NOW);
+    await first;
+    expect(dismissPending(h.ports, pendingId)).toEqual({ ok: true });
+    release();
+    await second;
+    expect(h.file.pending).toBeUndefined();
+    expect(h.file.outbox).toHaveLength(1);
+    expect(h.audits.filter((entry) => entry.op === 'dispatch_pending' && !entry.ok)).toHaveLength(
+      1
+    );
+  });
+
   it('重启后等待中的派发还在，依赖结束后照样开始', async () => {
     const h = direct({
       rows: { c1: depRow('c1') },

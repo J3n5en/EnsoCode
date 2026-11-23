@@ -1236,6 +1236,8 @@ export async function startPendingDispatches(
     const outcome = pendingOutcome(await dependencyFacts(ports, file, pending.after));
     if (outcome.kind === 'wait') continue;
     if (outcome.kind === 'failed') {
+      // 上面等过：并发的另一次判定可能已标过、用户已忽略或秘书已取消，别用旧副本写回
+      if (ports.dispatchFile().pending?.[pendingId]?.status !== 'waiting') continue;
       await failPending(ports, pending, outcome.problem, outcome.conversationId);
       continue;
     }
