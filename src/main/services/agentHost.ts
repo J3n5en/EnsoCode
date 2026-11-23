@@ -1088,7 +1088,7 @@ function describeCheckpoint(checkpoint: RestartCheckpoint, resumable: ReadonlySe
   return checkpoint.sessions
     .map(
       (entry) =>
-        `${entry.sessionId.slice(0, 8)}=${
+        `${deferredSessionLabel(entry.sessionId)}=${
           !resumable.has(entry.sessionId)
             ? '不进清单'
             : entry.nextStep === 'model-request'

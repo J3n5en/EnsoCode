@@ -141,7 +141,13 @@ import {
 } from '../services/browserFileRoot';
 import type { BrowserActor } from '../services/browserTabClaims';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
-import { coldResumeReady, failColdResume, wakeColdRestartSession } from '../services/coldRestart';
+import {
+  type ColdRestartPlan,
+  coldResumeReady,
+  failColdResume,
+  wakeColdRestartOwners,
+  wakeColdRestartSession,
+} from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
@@ -781,6 +787,15 @@ export async function resumeRootFromRestartManifest(
     return { ok: false, error: 'model credentials unavailable' };
   }
   return spawnBoundSession(identity, { ...parsed, resumeFile: resume.file }, credentialKeys);
+}
+
+/** 冷启动：叫醒子代理 Run 被重启打断、却不在续跑名单里的父会话，就绪后由 recoverOwner 补通知 */
+export function wakeInterruptedRunOwners(current: ColdRestartPlan): Promise<void> {
+  return wakeColdRestartOwners(
+    agentService?.restartInterruptedOwners() ?? [],
+    resumeRootFromRestartManifest,
+    current
+  );
 }
 
 /** Main 侧给根会话发消息：deliveryId 由 Main 生成，供回执去重 */
