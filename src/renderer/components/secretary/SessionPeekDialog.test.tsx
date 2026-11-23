@@ -26,8 +26,8 @@ vi.mock('@/stores/sessions', () => {
   useSessionsStore.subscribe = () => () => undefined;
   return {
     useSessionsStore,
-    peekConversation: (id: string) => {
-      h.calls.push({ name: 'peek', args: id });
+    peekConversation: (id: string, options?: { readOnly?: boolean }) => {
+      h.calls.push({ name: options?.readOnly ? 'peek-readonly' : 'peek', args: id });
       return () => h.calls.push({ name: 'release', args: id });
     },
   };
@@ -37,8 +37,16 @@ vi.mock('@/stores/bots', () => ({
 }));
 vi.mock('@/stores/bots/delegations', () => ({ delegationRunMarks: () => [] }));
 vi.mock('@/components/chat/ChatSessionTimeline', () => ({
-  ChatSessionTimeline: ({ conversationId }: { conversationId: string }) => (
-    <div data-enso="peek-timeline">{conversationId}</div>
+  ChatSessionTimeline: ({
+    conversationId,
+    readOnly,
+  }: {
+    conversationId: string;
+    readOnly?: boolean;
+  }) => (
+    <div data-enso="peek-timeline" data-readonly={readOnly ? 'true' : undefined}>
+      {conversationId}
+    </div>
   ),
 }));
 vi.mock('@/components/chat/ApprovalBar', () => ({
@@ -143,11 +151,30 @@ beforeEach(() => {
         pendingApprovals: [{ requestId: 'a1' }],
         pendingAsks: [{ requestId: 'q1' }],
       }),
-      old: conversation('old', { archived: true }),
+      old: conversation('old', {
+        status: 'idle',
+        archived: true,
+        archivedAt: 900,
+        pendingApprovals: [{ requestId: 'stale' }],
+      }),
     },
     selectConversation: (id: string) => {
       h.calls.push({ name: 'selectConversation', args: id });
       h.state = { ...h.state, activeId: id };
+    },
+    toggleArchiveConversation: (id: string) => {
+      h.calls.push({ name: 'toggleArchive', args: id });
+      const conversations = h.state.conversations as Record<string, Record<string, unknown>>;
+      const target = conversations[id];
+      h.state = {
+        ...h.state,
+        conversations: {
+          ...conversations,
+          [id]: target.archived
+            ? { ...target, archived: undefined, archivedAt: undefined }
+            : { ...target, archived: true },
+        },
+      };
     },
   };
   useSessionPeek.setState({ conversationId: null, result: null, tab: 'session', from: null });
@@ -285,14 +312,46 @@ describe('SessionPeekDialog', () => {
     expect(h.calls.some((call) => call.name === 'peek')).toBe(false);
   });
 
-  it('已归档的会话写明原因，标题栏仍给打开会话', async () => {
+  it('已归档的会话只读可看：照常渲染时间线、标「已归档 · 只读」，不挂审批也不要 worker', async () => {
     act(() => useSessionPeek.getState().open('old'));
     await rerender();
-    expect(q('[data-enso="session-peek-unavailable"]')?.textContent).toBe(
-      '[This session is archived. Restore it from the archive to view it.]'
+    expect(q('[data-enso="session-peek-unavailable"]')).toBeNull();
+    expect(q('[data-enso="peek-timeline"]')?.textContent).toBe('old');
+    expect(q('[data-enso="peek-timeline"]')?.getAttribute('data-readonly')).toBe('true');
+    expect(q('[data-enso="session-peek-archived"]')?.textContent).toBe('[Archived · read-only]');
+    expect(q('[data-enso="session-peek-pending"]')).toBeNull();
+    expect(h.calls).toContainEqual({ name: 'peek-readonly', args: 'old' });
+    expect(h.calls.some((call) => call.name === 'peek')).toBe(false);
+    const conversations = h.state.conversations as Record<string, Record<string, unknown>>;
+    expect(conversations.old.archived).toBe(true);
+    expect(h.state.activeId).toBe('secretary-chat');
+  });
+
+  it('「恢复并打开」先取消归档再跳过去，并给返回秘书', async () => {
+    act(() => useSessionPeek.getState().open('old'));
+    await rerender();
+    const open = q('[data-enso="session-peek-actions"] [data-enso="session-peek-open"]');
+    expect(open?.textContent).toBe('[Restore and open]');
+    act(() => open?.click());
+    const conversations = h.state.conversations as Record<string, Record<string, unknown>>;
+    expect(conversations.old.archived).toBeUndefined();
+    expect(h.calls.map((call) => call.name)).toEqual(
+      expect.arrayContaining(['toggleArchive', 'selectConversation'])
     );
-    expect(q('[data-enso="peek-timeline"]')).toBeNull();
-    expect(q('[data-enso="session-peek-actions"] [data-enso="session-peek-open"]')).not.toBeNull();
+    expect(h.calls.findIndex((call) => call.name === 'toggleArchive')).toBeLessThan(
+      h.calls.findIndex((call) => call.name === 'selectConversation')
+    );
+    expect(useSessionPeek.getState().conversationId).toBeNull();
+    expect(useSecretaryReturn.getState().back).toEqual({ from: 'secretary-chat', to: 'old' });
+  });
+
+  it('未归档会话的打开会话不动归档状态', async () => {
+    act(() => useSessionPeek.getState().open('c1'));
+    await rerender();
+    expect(q('[data-enso="session-peek-archived"]')).toBeNull();
+    expect(q('[data-enso="peek-timeline"]')?.getAttribute('data-readonly')).toBeNull();
+    act(() => q('[data-enso="session-peek-open"]')?.click());
+    expect(h.calls.some((call) => call.name === 'toggleArchive')).toBe(false);
   });
 });
 
@@ -334,17 +393,21 @@ describe('SessionPeekDialog 结果视图', () => {
     expect(q('[data-enso="session-peek-result"]')).not.toBeNull();
   });
 
-  it('桌面宽度下结果页和会话页的标题栏右上角都有打开会话（含已自动归档的已完成会话）', async () => {
+  it('桌面宽度下结果页和会话页的标题栏右上角都有打开入口，已自动归档的写明会先恢复', async () => {
     vi.stubGlobal('innerWidth', 1440);
     const headerOpen = () =>
       q('[data-enso="session-peek-actions"] [data-enso="session-peek-open"]');
-    for (const id of ['c1', 'old']) {
+    for (const [id, label] of [
+      ['c1', '[Open session]'],
+      ['old', '[Restore and open]'],
+    ]) {
       await openResult(id);
       expect(q('[data-enso="session-peek-result"]')).not.toBeNull();
-      expect(headerOpen()?.textContent).toBe('[Open session]');
+      expect(headerOpen()?.textContent).toBe(label);
       act(() => q('[data-enso="session-peek-tab-session"]')?.click());
       expect(q('[data-enso="session-peek-result"]')).toBeNull();
-      expect(headerOpen()?.textContent).toBe('[Open session]');
+      expect(headerOpen()?.textContent).toBe(label);
+      expect(q('[data-enso="peek-timeline"]')?.textContent).toBe(id);
       act(() => useSessionPeek.getState().close());
     }
     await openResult('old');

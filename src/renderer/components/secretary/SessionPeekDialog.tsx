@@ -1,5 +1,5 @@
 import { projectDisplayName } from '@shared/projectName';
-import { ArrowUpRight, GitBranch, ShieldAlert } from 'lucide-react';
+import { Archive, ArrowUpRight, GitBranch, ShieldAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { LiveSessionDialog } from '@/components/bots/LiveSessionTimeline';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
@@ -67,10 +67,15 @@ export function SessionPeekDialog() {
   const project = useSettingsStore((state) =>
     conversation ? state.projects.find((entry) => entry.id === conversation.projectId) : undefined
   );
-  const viewable = Boolean(conversation && !conversation.archived);
+  const exists = Boolean(conversation);
+  // 已归档（派活完成多半会自动归档）只读看：只读 jsonl 历史，不动归档 / 未读 / 侧栏，不要 worker
+  const archived = conversation?.archived === true;
   useEffect(
-    () => (conversationId && viewable ? peekConversation(conversationId) : undefined),
-    [conversationId, viewable]
+    () =>
+      conversationId && exists
+        ? peekConversation(conversationId, { readOnly: archived })
+        : undefined,
+    [conversationId, exists, archived]
   );
   const timelineRef = useRef<MessageTimelineHandle>(null);
   const host = useMemo(
@@ -80,20 +85,21 @@ export function SessionPeekDialog() {
 
   const from = useSessionPeek((state) => state.from);
   const openSession = () => {
-    if (conversationId) openSessionFromSecretary(conversationId, from ?? undefined);
+    if (!conversationId) return;
+    if (archived) useSessionsStore.getState().toggleArchiveConversation(conversationId);
+    openSessionFromSecretary(conversationId, from ?? undefined);
   };
 
   const unavailable = !conversation
     ? t('This session no longer exists, or you do not have access to it')
-    : conversation.archived
-      ? t('This session is archived. Restore it from the archive to view it.')
-      : null;
+    : null;
   const status = conversation ? STATUS_STYLE[peekStatus(conversation)] : null;
   const branch = conversation?.worktree?.name || conversation?.worktree?.branch;
   const goal = conversation?.goal;
   const approvals = conversation?.pendingApprovals ?? [];
   const asks = conversation?.pendingAsks ?? [];
-  const pending = viewable && conversationId && (approvals.length > 0 || asks.length > 0);
+  const pending =
+    exists && !archived && conversationId && (approvals.length > 0 || asks.length > 0);
 
   const tabs = result && (
     <div
@@ -157,9 +163,12 @@ export function SessionPeekDialog() {
     </div>
   );
 
-  // 已完成的会话多半已被自动归档：归档的照样能打开，只有会话不在时不给
+  // 归档的打开即恢复，按钮直接写「恢复并打开」；只有会话不在时不给
   const actions = conversation && (
-    <div data-enso="session-peek-actions" className="flex shrink-0 items-center">
+    <div
+      data-enso="session-peek-actions"
+      className="flex shrink-0 flex-col items-end gap-1 sm:flex-row-reverse sm:items-center sm:gap-2"
+    >
       <button
         type="button"
         data-enso="session-peek-open"
@@ -167,8 +176,20 @@ export function SessionPeekDialog() {
         className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
       >
         <ArrowUpRight className="size-3.5" />
-        {t('Open session')}
+        {archived ? t('Restore and open') : t('Open session')}
       </button>
+      {archived && (
+        <span
+          data-enso="session-peek-archived"
+          className={cn(
+            CHIP_CLASS,
+            'inline-flex items-center gap-1 bg-muted text-muted-foreground'
+          )}
+        >
+          <Archive className="size-3" />
+          {t('Archived · read-only')}
+        </span>
+      )}
     </div>
   );
 
@@ -219,6 +240,7 @@ export function SessionPeekDialog() {
           <div className="@container flex min-h-0 flex-1 flex-col border-t">
             <ChatSessionTimeline
               peek
+              readOnly={archived}
               conversationId={conversationId}
               cwd={conversation?.worktree?.path ?? project?.path}
               emptyTitle={conversation?.title || t('Unnamed')}
