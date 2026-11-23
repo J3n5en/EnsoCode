@@ -3891,6 +3891,7 @@ export const zhTranslations: Record<string, string> = {
   'Previous day': '前一天',
   'Next day': '后一天',
   Dispatched: '派出',
+  'With secretary': '秘书处理中',
   'Needed you': '需要你',
   'To-dos done': '待办完成',
   Merged: '合并',
