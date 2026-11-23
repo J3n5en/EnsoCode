@@ -383,6 +383,7 @@ export function ChatView() {
         emptyTitle={project ? projectDisplayName(project) : 'EnsoCode'}
         onSuggestion={project ? pickSuggestion : undefined}
         timelineRef={timelineRef}
+        quotable
       />
 
       <div className="@container pt-1">

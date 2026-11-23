@@ -96,6 +96,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `recentModels` 是模型选择器「最近使用」列表：`{ providerId, modelId }` 数组，最近的在前，最多 10 条且不重复；不符合的整体写入会被拒绝。它只存 id，不是密钥、路径或执行入口，热生效，不参与配置同步（引用本机 provider id）。
 
+`quoteSelectionButton`（布尔，默认 `true`）控制会话里选中文字时是否浮出「引用」按钮，只接受布尔值，热生效，无需重启。
+
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
 - `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`

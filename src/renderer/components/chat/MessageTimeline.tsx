@@ -31,6 +31,7 @@ import { diffFoldMotion, EMPTY_FOLD_MOTION } from './foldMotion';
 import { generationElapsedOrigin } from './generationElapsed';
 import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
+import { QuoteSelectionButton } from './QuoteSelectionButton';
 import {
   isCompactRow,
   isToolStepRow,
@@ -151,6 +152,8 @@ interface MessageTimelineProps {
   secretarySession?: boolean;
   /** 这条时间线所属秘书的脸；不传就用当前聚焦的秘书 */
   secretaryFace?: SecretaryFaceModel;
+  /** 选中文字可引用到主输入框（只有带主 Composer 的会话视图开） */
+  quotable?: boolean;
 }
 
 /**
@@ -180,6 +183,7 @@ export function MessageTimeline({
   activeHit = null,
   secretarySession = false,
   secretaryFace,
+  quotable = false,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const host = useChatHost();
@@ -193,6 +197,7 @@ export function MessageTimeline({
   // ref 镜像：imperative handle 里读，避免闭包拿到旧值
   const atBottomRef = useRef(true);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const settleRef = useRef(0);
   const followSettleRef = useRef(0);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -647,6 +652,7 @@ export function MessageTimeline({
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
       <ToolHoldProvider value={toolHold.current}>
         <div
+          ref={rootRef}
           data-enso="timeline"
           className="@container relative min-h-0 flex-1"
           onWheel={markUserScroll}
@@ -664,6 +670,7 @@ export function MessageTimeline({
           }}
         >
           <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
+          {quotable && <QuoteSelectionButton containerRef={rootRef} />}
           {items.length === 0 && !busy ? (
             <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
               <span className="t-stagger-line t-stagger-line--1 mb-3">

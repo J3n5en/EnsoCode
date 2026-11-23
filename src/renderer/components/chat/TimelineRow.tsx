@@ -7,6 +7,7 @@ import { interruptNotice } from '@shared/exitInterrupt';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { quotesAsMarkdown } from '@shared/quoteBlock';
 import { parseInboundMessage } from '@shared/secretary/inbound';
 import { splitInboundImageBlock } from '@shared/secretary/inboundImages';
 import {
@@ -157,6 +158,7 @@ import { mentionChipClass } from './MentionChip';
 import { parseMemoryCapture, parseMemorySearchHits } from './memorySearchHits';
 import { fileMentionBasename, splitInlineMentions, splitMentionRefs } from './mentionComposer';
 import { PrivacyMaskBadge } from './PrivacyMaskBadge';
+import { splitQuoteFences } from './quoteSelection';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
 import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
@@ -830,7 +832,9 @@ function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
     <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-1">{chip}</div>
       {extra ? (
-        <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">{extra}</div>
+        <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">
+          <InlineMentionText text={extra} />
+        </div>
       ) : null}
     </div>
   );
@@ -973,6 +977,38 @@ function ChatRefCard({ label, sessionFile }: { label: string; sessionFile: strin
   );
 }
 
+/** 选中文本引用块：左边框引用样式，代码围栏渲染为代码块，截断时标注原文行数 */
+function QuoteBlock({ text, originalLines }: { text: string; originalLines?: number }) {
+  const { t } = useI18n();
+  return (
+    <span
+      data-enso="quote-block"
+      className="my-1 block max-h-60 overflow-y-auto border-l-2 border-brand/40 pl-2.5 text-muted-foreground"
+    >
+      {originalLines ? (
+        <span data-quote-truncated="" className="mb-0.5 block text-[11px] text-warning">
+          {t('Truncated · original {{count}} lines', { count: originalLines })}
+        </span>
+      ) : null}
+      {splitQuoteFences(text).map((part, index) =>
+        part.type === 'code' ? (
+          <span
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            key={index}
+            data-quote-code=""
+            className="my-1 block overflow-x-auto whitespace-pre rounded-md bg-background/60 px-2 py-1 font-mono text-xs"
+          >
+            {part.code}
+          </span>
+        ) : (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+          <span key={index}>{part.text}</span>
+        )
+      )}
+    </span>
+  );
+}
+
 /** 正文里的 @path / chat 引用块原位渲染成卡片，其余文本原样 */
 function InlineMentionText({
   text,
@@ -1011,6 +1047,13 @@ function InlineMentionText({
             kind="ui-element"
             label={segment.label}
             title={`${segment.path}${segment.text ? ` · ${segment.text}` : ''}`}
+          />
+        ) : segment.type === 'quote' ? (
+          <QuoteBlock
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            key={index}
+            text={segment.text}
+            originalLines={segment.originalLines}
           />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
@@ -2166,7 +2209,7 @@ function UserPromptCopy({ text }: { text: string }) {
   return (
     <span data-enso="copy-user-prompt" className="inline-flex">
       <CopyButton
-        text={text}
+        text={quotesAsMarkdown(text)}
         className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-visible:opacity-100"
       />
     </span>

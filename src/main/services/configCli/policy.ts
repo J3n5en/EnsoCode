@@ -269,6 +269,8 @@ function validateField(field: string, value: unknown): string | null {
   if (field === 'language' && value !== 'en' && value !== 'zh') return 'language must be en or zh';
   if (field === 'longCacheRetention' && typeof value !== 'boolean')
     return 'longCacheRetention must be a boolean';
+  if (field === 'quoteSelectionButton' && typeof value !== 'boolean')
+    return 'quoteSelectionButton must be a boolean';
   if (field === 'recentModels' && !isRecentModelList(value))
     return `recentModels must be at most ${MAX_RECENT_MODELS} unique { providerId, modelId } entries`;
   if (

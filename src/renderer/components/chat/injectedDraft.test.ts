@@ -1,3 +1,4 @@
+import { formatQuoteBlock } from '@shared/quoteBlock';
 import { describe, expect, it } from 'vitest';
 import { applyInjectedDraft } from './injectedDraft';
 
@@ -53,5 +54,25 @@ describe('applyInjectedDraft', () => {
       images: [],
       slashes: ['/skill:a', '/skill:b'],
     });
+  });
+
+  it('回退 / 撤回带引用块的消息：引用恢复成引用卡片，不把原始标签放进输入框', () => {
+    const wire = `看这段\n${formatQuoteBlock({ text: 'a\nb', originalLines: 300 })}\n为什么`;
+    const quote = { type: 'quote', text: 'a\nb', originalLines: 300 };
+    expect(applyInjectedDraft(current, { text: wire }).segments).toEqual([
+      { type: 'text', text: '看这段' },
+      quote,
+      { type: 'text', text: '为什么' },
+    ]);
+    const appended = applyInjectedDraft(current, { text: formatQuoteBlock({ text: 'x' }) }, true);
+    expect(appended.segments).toEqual([
+      { type: 'text', text: 'editing' },
+      { type: 'text', text: '\n' },
+      { type: 'quote', text: 'x' },
+      { type: 'text', text: '\u00a0' },
+    ]);
+    for (const segment of appended.segments) {
+      if (segment.type === 'text') expect(segment.text).not.toMatch(/<\/?quote/);
+    }
   });
 });

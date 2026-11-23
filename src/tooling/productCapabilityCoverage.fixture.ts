@@ -116,6 +116,9 @@ export const SETTINGS_DATA_COVERAGE = {
     'Renderer timeline reasoning expansion preference; not an Enso capability.'
   ),
   autoCollapseTurns: excluded('Renderer timeline collapse preference; not an Enso capability.'),
+  quoteSelectionButton: excluded(
+    'Renderer floating quote button preference; not an Enso capability.'
+  ),
   collapseCompletedActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
   ),
@@ -312,6 +315,9 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Renderer timeline reasoning expansion preference; not an Enso capability.'
   ),
   setAutoCollapseTurns: excluded('Renderer timeline collapse preference; not an Enso capability.'),
+  setQuoteSelectionButton: excluded(
+    'Renderer floating quote button preference; not an Enso capability.'
+  ),
   setCollapseCompletedActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
   ),
