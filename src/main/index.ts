@@ -51,7 +51,11 @@ import { allowAppQuit, setBeforeConfirmedQuit } from './services/appCloseConfirm
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { setUserDataDir } from './services/appPaths';
 import { attachAppQuitDrain } from './services/appQuitDrain';
-import { configureQuitWatchdog, quitWatchdog } from './services/appQuitWatchdog';
+import {
+  agentWorkerQuitDrain,
+  configureQuitWatchdog,
+  quitWatchdog,
+} from './services/appQuitWatchdog';
 import { createAppRestart, restartOverlayFor } from './services/appRestart';
 import {
   ensureTray,
@@ -448,6 +452,13 @@ if (!gotTheLock) {
   });
   // node-pty TSFN / 记忆服务子进程（llama/sqlite 在里面）的收尾都要赶在退出前完成；
   // 三步共用一次 preventDefault，谁先 app.quit 都会拆掉其他两边的环境。
+  // 先等 worker 到安全点、断点与恢复清单落盘（有超时兜底），再照常收尾
+  const agentQuit = agentWorkerQuitDrain(quitWatchdog, {
+    alive: agentWorkerAlive,
+    prepare: () =>
+      prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: needsQuitCheckpoint }),
+    stop: () => stopAgentWorkerForQuit(3_000),
+  });
   attachAppQuitDrain(
     app,
     [
@@ -464,24 +475,10 @@ if (!gotTheLock) {
         shouldWait: memoryServiceActive,
         wait: () => shutdownMemoryService(),
       },
-      {
-        name: 'agent worker',
-        shouldWait: agentWorkerAlive,
-        // 先等 worker 到安全点、断点与恢复清单落盘（有超时兜底），再照常收尾
-        wait: async () => {
-          await prepareAgentWorkerForQuit({
-            reason: 'quit',
-            hasRunningSessions: needsQuitCheckpoint,
-          });
-          await stopAgentWorkerForQuit(3_000);
-        },
-      },
+      agentQuit.step,
     ],
-    // 窗口已关、退出不可撤回：之后卡住由看门狗限时强退
-    (pending) =>
-      quitWatchdog.step(pending.length ? `will-quit 收尾：${pending.join('、')}` : 'will-quit', {
-        finishing: true,
-      })
+    // 窗口已关、退出不可撤回：过了安全点之后卡住由看门狗限时强退
+    agentQuit.onProgress
   );
 }
 
