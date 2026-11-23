@@ -351,10 +351,20 @@ describe('插件市场安装', () => {
     await act(async () => byText('Marketplace').click());
     await act(async () => byLabel('market-install').click());
   };
+  /** 确认按钮出现后要等一小会儿才可点，防止连点/按住回车误确认 */
+  const armConfirm = () =>
+    act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     harness.marketStage.mockResolvedValue({ ok: true, preview: stagedPreview });
     harness.commit.mockResolvedValue({ ok: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('点安装后市场仍开着，权限确认就地显示在市场里', async () => {
@@ -380,6 +390,7 @@ describe('插件市场安装', () => {
       plugin,
       { ...plugin, id: 'market.a', name: 'Market A', version: '1.0.0' },
     ]);
+    await armConfirm();
     await act(async () => dialogButton('Install').click());
     expect(harness.commit).toHaveBeenCalledWith('tok-1');
     expect(harness.setEnabled).toHaveBeenCalledWith('market.a', true);
@@ -394,9 +405,61 @@ describe('插件市场安装', () => {
   it('提交失败时错误留在市场里', async () => {
     harness.commit.mockResolvedValue({ ok: false, error: '试载失败' });
     await openAndInstall();
+    await armConfirm();
     await act(async () => dialogButton('Install').click());
     expect(marketDialog()?.textContent).toContain('试载失败');
     expect(marketList()?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('确认按钮刚出现时点不动，连点或按住回车不会直接装上；取消随时可点', async () => {
+    await openAndInstall();
+    const install = dialogButton('Install');
+    expect(install.hasAttribute('disabled')).toBe(true);
+    await act(async () => install.click());
+    expect(harness.commit).not.toHaveBeenCalled();
+    expect(dialogButton('Cancel').hasAttribute('disabled')).toBe(false);
+    await armConfirm();
+    await act(async () => dialogButton('Install').click());
+    expect(harness.commit).toHaveBeenCalledWith('tok-1');
+  });
+
+  it('升级确认里标出新增的权限，并说明扩大授权要再允许一次', async () => {
+    harness.marketStage.mockResolvedValue({
+      ok: true,
+      preview: {
+        ...stagedPreview,
+        version: '2.0.0',
+        existingVersion: '1.0.0',
+        expands: true,
+        permissions: ['agent.tool', 'session.readAll'],
+        addedPermissions: ['session.readAll'],
+      },
+    });
+    await openAndInstall();
+    const items = [...(marketDialog()?.querySelectorAll('li') ?? [])];
+    const line = (permission: string) =>
+      items.find((item) => item.textContent?.includes(permission))?.textContent;
+    expect(line('session.readAll')).toContain('Added');
+    expect(line('agent.tool')).not.toContain('Added');
+    expect(marketDialog()?.textContent).toContain('This update asks for more than');
+  });
+
+  it('扩大授权的升级确认后进入待授权，市场按待授权状态刷新', async () => {
+    harness.marketStage.mockResolvedValue({
+      ok: true,
+      preview: { ...stagedPreview, version: '2.0.0', existingVersion: '1.0.0', expands: true },
+    });
+    await openAndInstall();
+    harness.list.mockResolvedValue([
+      plugin,
+      { ...plugin, id: 'market.a', version: '1.0.0', pendingVersion: '2.0.0' },
+    ]);
+    await armConfirm();
+    await act(async () => dialogButton('Install').click());
+    expect(harness.setEnabled).not.toHaveBeenCalled();
+    expect(
+      marketDialog()?.querySelector('[data-market]')?.getAttribute('data-installed')
+    ).toContain('market.a@1.0.0>2.0.0');
   });
 
   it('取消确认丢弃暂存并回到市场列表', async () => {

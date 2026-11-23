@@ -293,20 +293,37 @@ function PluginErrorText({ message }: { message: string }) {
 function PermissionLines({
   permissions,
   styles = false,
+  added = [],
 }: {
   permissions: readonly string[];
   styles?: boolean;
+  /** 更新时新增的权限：单独标出 */
+  added?: readonly string[];
 }) {
+  const { t } = useI18n();
   if (permissions.length === 0)
     return styles ? null : <p className="text-muted-foreground text-xs">无特殊权限</p>;
   return (
     <ul className="space-y-0.5">
-      {permissions.map((permission) => (
-        <li key={permission} className="text-xs">
-          <span className="font-mono text-muted-foreground">{permission}</span>
-          <span className="ml-2">{pluginPermissionLabel(permission)}</span>
-        </li>
-      ))}
+      {permissions.map((permission) => {
+        const isAdded = added.includes(permission);
+        return (
+          <li
+            key={permission}
+            className={cn('text-xs', isAdded && 'font-medium text-amber-700 dark:text-amber-400')}
+          >
+            {isAdded && (
+              <Badge variant="warning" className="mr-1.5 text-[11px]">
+                {t('Added')}
+              </Badge>
+            )}
+            <span className={cn('font-mono', !isAdded && 'text-muted-foreground')}>
+              {permission}
+            </span>
+            <span className="ml-2">{pluginPermissionLabel(permission)}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -340,6 +357,7 @@ function capabilitySummary(plugin: ExtensionPluginSummary): string {
 
 function PluginCapabilityBlock({
   permissions,
+  addedPermissions,
   env,
   interop,
   resident,
@@ -350,6 +368,7 @@ function PluginCapabilityBlock({
   schedules,
 }: {
   permissions: readonly string[];
+  addedPermissions?: readonly string[];
   env?: readonly string[];
   interop?: readonly string[];
   resident?: boolean;
@@ -367,7 +386,11 @@ function PluginCapabilityBlock({
 }) {
   return (
     <div className="space-y-1">
-      <PermissionLines permissions={permissions} styles={styles || trustedUi} />
+      <PermissionLines
+        permissions={permissions}
+        styles={styles || trustedUi}
+        added={addedPermissions}
+      />
       {trustedUi && <TrustedUiLine />}
       {resident && (
         <p className="text-xs">
@@ -427,8 +450,17 @@ function InstallPreviewDetails({ preview }: { preview: ExtensionPluginInstallPre
   const { t } = useI18n();
   return (
     <>
+      {preview.existingVersion && preview.expands && (
+        <p className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
+          {t(
+            'This update asks for more than {{version}}. {{version}} keeps running until you allow the update in the plugin list.',
+            { version: preview.existingVersion }
+          )}
+        </p>
+      )}
       <PluginCapabilityBlock
         permissions={preview.permissions}
+        addedPermissions={preview.addedPermissions}
         env={preview.env}
         interop={preview.interop}
         resident={preview.resident}
@@ -454,6 +486,31 @@ function InstallPreviewDetails({ preview }: { preview: ExtensionPluginInstallPre
         </p>
       ))}
     </>
+  );
+}
+
+/** 确认按钮出现后稍等才可点：防止连点或按住回车把刚弹出的权限确认直接点掉 */
+const CONFIRM_ARM_MS = 1000;
+
+function ConfirmInstallButton({
+  token,
+  busy,
+  onConfirm,
+}: {
+  token: string;
+  busy: boolean;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  const [armed, setArmed] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setArmed(token), CONFIRM_ARM_MS);
+    return () => clearTimeout(timer);
+  }, [token]);
+  return (
+    <Button size="sm" disabled={busy || armed !== token} onClick={onConfirm}>
+      {busy ? <Spinner /> : t('Install')}
+    </Button>
   );
 }
 
@@ -818,9 +875,11 @@ export function EnsoPluginsSettings({
                   <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
                     {t('Cancel')}
                   </Button>
-                  <Button size="sm" disabled={busy} onClick={() => void commit()}>
-                    {busy ? <Spinner /> : t('Install')}
-                  </Button>
+                  <ConfirmInstallButton
+                    token={marketPreview.token}
+                    busy={busy}
+                    onConfirm={() => void commit()}
+                  />
                 </div>
               </div>
             )}
@@ -830,7 +889,11 @@ export function EnsoPluginsSettings({
                 key={marketQuery}
                 initialQuery={marketQuery}
                 disabled={busy || downloading}
-                installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
+                installedKey={plugins
+                  .map(
+                    (p) => `${p.id}@${p.version}${p.pendingVersion ? `>${p.pendingVersion}` : ''}`
+                  )
+                  .join(',')}
                 onInstall={(id) => void restage(id, true, true)}
               />
             </div>
@@ -869,9 +932,11 @@ export function EnsoPluginsSettings({
                 <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
                   {t('Cancel')}
                 </Button>
-                <Button size="sm" disabled={busy} onClick={() => void commit()}>
-                  {busy ? <Spinner /> : t('Install')}
-                </Button>
+                <ConfirmInstallButton
+                  token={preview.token}
+                  busy={busy}
+                  onConfirm={() => void commit()}
+                />
               </DialogFooter>
             </>
           )}
