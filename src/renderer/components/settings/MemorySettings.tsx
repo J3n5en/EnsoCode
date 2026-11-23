@@ -90,6 +90,20 @@ export function needsBulkPrompt(scope: readonly { distilled: boolean }[]): boole
   return scope.some((session) => session.distilled);
 }
 
+/**
+ * 正在提炼的会话以 Main 的任务快照为准：本地 state 随组件卸载丢失，快照不会。
+ * 只认 running：暂时失败的任务以 pending 停到下次重试，算进来按钮会一直卡在「提炼中」。
+ */
+export function runningDistillSessions(jobs: MemoryJobsSnapshot): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const job of jobs.distill) {
+    if (job.status !== 'running') continue;
+    ids.add(job.sessionId);
+    for (const id of job.sessionIds ?? []) ids.add(id);
+  }
+  return ids;
+}
+
 interface BulkPrompt {
   token: string;
   label: string;
@@ -352,6 +366,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const [chatModels, setChatModels] = React.useState<ChatModelDto[]>([]);
   const [chatProgress, setChatProgress] = React.useState<EmbeddingDownloadProgressDto | null>(null);
   const [sessions, setSessions] = React.useState<DistillableSessionDto[]>([]);
+  // 本页发起的批次标记（哪个按钮 + 快照跟上前的空窗），卸载即丢；是否在提炼以任务快照为准
   const [distilling, setDistilling] = React.useState<string | null>(null);
   const [sessionsOf, setSessionsOf] = React.useState<SessionGroup | null>(null);
   const [batch, setBatch] = React.useState<BatchProgress | null>(null);
@@ -551,6 +566,8 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const showRemotePicker =
     isRemoteEmbeddingId(embeddingModel) || selectedModel?.runtime === 'openai-compatible';
   const jobRows = React.useMemo(() => toJobRows(jobs), [jobs]);
+  const runningSessions = React.useMemo(() => runningDistillSessions(jobs), [jobs]);
+  const distillBusy = distilling !== null || runningSessions.size > 0;
 
   return (
     <div className="space-y-6" data-settings-row="memory.root">
@@ -1229,10 +1246,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
             <Button
               size="sm"
               variant="outline"
-              disabled={!memoryEnabled || distilling !== null || chatBlocked !== null}
+              disabled={!memoryEnabled || distillBusy || chatBlocked !== null}
               onClick={() => requestBulkDistill(sessions, 'all', t('All sessions'))}
             >
-              {distilling === 'all'
+              {distillBusy
                 ? t('Distilling…')
                 : t('Distill all ({{count}})', { count: String(pendingSessions.length) })}
             </Button>
@@ -1283,13 +1300,16 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                       variant="outline"
                       disabled={
                         !memoryEnabled ||
-                        distilling !== null ||
+                        distillBusy ||
                         group.sessions.length === 0 ||
                         chatBlocked !== null
                       }
                       onClick={() => requestBulkDistill(group.sessions, group.key, group.name)}
                     >
-                      {distilling === group.key ? t('Distilling…') : t('Distill project')}
+                      {distilling === group.key ||
+                      group.sessions.some((s) => runningSessions.has(s.sessionId))
+                        ? t('Distilling…')
+                        : t('Distill project')}
                     </Button>
                   </div>
                 </li>
@@ -1330,12 +1350,12 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                         size="sm"
                         variant="ghost"
                         className="shrink-0"
-                        disabled={!memoryEnabled || distilling !== null || chatBlocked !== null}
+                        disabled={!memoryEnabled || distillBusy || chatBlocked !== null}
                         onClick={() =>
                           void runDistill([session], session.sessionId, session.distilled)
                         }
                       >
-                        {distilling === session.sessionId
+                        {distilling === session.sessionId || runningSessions.has(session.sessionId)
                           ? t('Distilling…')
                           : session.distilled
                             ? t('Distill again')
