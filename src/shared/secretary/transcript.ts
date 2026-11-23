@@ -1,3 +1,4 @@
+import type { PluginInjectOrigin, PluginInjectSender } from '../extensionPlugins/protocol';
 import type { ProjectedMessage } from '../types/agent';
 
 /** 单条正文上限：秘书只需要判断"最后说了什么"，细节让用户自己打开会话看 */
@@ -42,7 +43,31 @@ export function unescapeUntrusted(text: string): string {
 }
 
 /** 插件投递送给模型前的包裹。旧版插件自己包好的同来源完整一层原样保留，不叠第二层 */
-export function wrapPluginDelivery(pluginId: string, text: string): string {
+function attrValue(value: string): string {
+  return value.replace(/["<>\r\n]/g, '');
+}
+
+function senderOpenTag(
+  source: string,
+  sender: PluginInjectSender,
+  role: PluginInjectOrigin
+): string {
+  const attrs = [
+    `source="${source}"`,
+    `channel="${attrValue(sender.channel)}"`,
+    sender.userId ? `sender-id="${attrValue(sender.userId)}"` : '',
+    sender.chatId ? `chat-id="${attrValue(sender.chatId)}"` : '',
+    sender.displayName ? `sender="${attrValue(sender.displayName)}"` : '',
+    `role="${role}"`,
+  ].filter(Boolean);
+  return `<untrusted-content ${attrs.join(' ')}>`;
+}
+
+export function wrapPluginDelivery(
+  pluginId: string,
+  text: string,
+  meta?: { sender?: PluginInjectSender; role?: PluginInjectOrigin }
+): string {
   const source = `plugin:${pluginId}`;
   const head = `<untrusted-content source="${source}">`;
   const tail = '</untrusted-content>';
@@ -50,7 +75,14 @@ export function wrapPluginDelivery(pluginId: string, text: string): string {
     text.startsWith(head) && text.endsWith(tail)
       ? text.slice(head.length, text.length - tail.length)
       : null;
-  return wrapUntrusted(source, inner !== null && !inner.includes(END_TAG) ? inner : text);
+  const body = inner !== null && !inner.includes(END_TAG) ? inner : text;
+  if (!meta?.sender) return wrapUntrusted(source, body);
+  const escaped = body
+    .split(END_TAG)
+    .join('<\\/untrusted-content')
+    .split(OPEN_TAG)
+    .join('<\\untrusted-content');
+  return `${senderOpenTag(source, meta.sender, meta.role ?? 'external')}${escaped}</untrusted-content>`;
 }
 
 const HOST_WRAP = /^<untrusted-content(?:\s[^<>\n]*)?>([\s\S]*)<\/untrusted-content>$/u;

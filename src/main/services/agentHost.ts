@@ -158,6 +158,10 @@ import {
   setPluginSessionBridge,
 } from './extensionPlugins';
 import { PluginAgentRuns } from './extensionPlugins/agentRuns';
+import type {
+  PluginInjectDeliveryDecision,
+  PluginInjectPrepareInput,
+} from './extensionPlugins/injectTrust';
 import { PluginMcpRequests } from './extensionPlugins/mcpRequests';
 import {
   type GracefulRestartRequest,
@@ -2215,13 +2219,30 @@ export function sendPluginInterceptResultToSession(
 
 export function registerPluginSessionBridge(
   lookup: (sessionId: string) => SessionIdentity | undefined,
-  /** 投递前改写正文：包成不可信内容；trusted 只在普通会话免包 */
-  decorate?: (sessionId: string, pluginId: string, text: string, trusted: boolean) => string
+  /** 投递前统一判定来源和不可信包裹 */
+  prepare?: (sessionId: string, input: PluginInjectPrepareInput) => PluginInjectDeliveryDecision
 ): void {
   setPluginSessionBridge({
     inject(sessionId, message) {
-      const { images, trusted, ...rest } = message;
-      const text = decorate?.(sessionId, message.pluginId, message.text, trusted) ?? message.text;
+      const {
+        images,
+        text: rawText,
+        trusted: _trusted,
+        requestedTrusted,
+        permissions,
+        source,
+        sender,
+        ...rest
+      } = message;
+      const decision = prepare?.(sessionId, {
+        pluginId: message.pluginId,
+        text: rawText,
+        requestedTrusted,
+        permissions,
+        source,
+        sender,
+      });
+      const text = decision?.text ?? rawText;
       if (text.length > PLUGIN_INJECT_WIRE_MAX_CHARS) return { ok: false, error: '注入文本过长' };
       const identity = lookup(sessionId);
       if (!identity) return { ok: false, error: '会话不在运行', notRunning: true };
@@ -2230,9 +2251,16 @@ export function registerPluginSessionBridge(
         identity,
         ...rest,
         text,
+        ...(decision?.origin ? { origin: decision.origin } : {}),
+        ...(sender ? { sender } : {}),
         ...(images.length ? { images } : {}),
       });
-      return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法注入消息' };
+      if (!sent.ok) return { ok: false, error: sent.error ?? '无法注入消息' };
+      return {
+        ok: true,
+        ...(decision?.trustedIgnored ? { trustedIgnored: true } : {}),
+        ...(decision?.trustedOverriddenByExternal ? { trustedOverriddenByExternal: true } : {}),
+      };
     },
     abort(sessionId) {
       const identity = lookup(sessionId);

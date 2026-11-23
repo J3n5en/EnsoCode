@@ -399,6 +399,38 @@ describe('插件事件扩展', () => {
       ],
     });
   });
+
+  it('注入来源和发送者写进消息 details，缺省时不添空字段', () => {
+    const { invoker, sendMessage } = harness(plan({ inject: true }));
+    invoker.deliver({
+      pluginId: 'enso.tgclient',
+      pluginName: 'Telegram',
+      text: '群里的话',
+      deliverAs: 'followUp',
+      triggerTurn: true,
+      origin: 'external',
+      sender: { channel: 'telegram', userId: '9', displayName: '群友' },
+    });
+    expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
+      details: {
+        pluginId: 'enso.tgclient',
+        pluginName: 'Telegram',
+        origin: 'external',
+        sender: { channel: 'telegram', userId: '9', displayName: '群友' },
+      },
+    });
+    invoker.deliver({
+      pluginId: 'enso.scheduler',
+      pluginName: 'Scheduler',
+      text: '跑一遍测试',
+      deliverAs: 'followUp',
+      triggerTurn: true,
+    });
+    expect(sendMessage.mock.calls[1]?.[0].details).toEqual({
+      pluginId: 'enso.scheduler',
+      pluginName: 'Scheduler',
+    });
+  });
 });
 
 describe('子会话的插件事件', () => {

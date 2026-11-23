@@ -19,6 +19,7 @@ import { isSessionMuted } from '../sessionMuteGate';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps } from './gate';
+import type { OwnerBindings } from './injectTrust';
 import { envMarketSources, marketPublicKeys, PluginMarket } from './market';
 import { pluginError } from './process';
 import { ExtensionPluginService, type PluginSessionBridge } from './service';
@@ -34,12 +35,26 @@ let draftBroker: DraftBroker | null = null;
 let sessionBridge: PluginSessionBridge | null = null;
 let sessionDirectory: PluginSessionDirectory | null = null;
 let contactBridge: PluginContactBridge | null = null;
+let ownerBindingsProbe: (() => OwnerBindings) | null = null;
 
 /** 秘书联系方式由 secretary 模块接上；没接上时插件调 contact.* 报不支持 */
 export type PluginContactBridge = NonNullable<GateDeps['contact']>;
 
 export function setPluginContactBridge(bridge: PluginContactBridge | null): void {
   contactBridge = bridge;
+}
+
+export function setPluginOwnerBindingsProbe(probe: (() => OwnerBindings) | null): void {
+  ownerBindingsProbe = probe;
+}
+
+const EMPTY_OWNER_BINDINGS: OwnerBindings = {
+  telegramOwnerIds: new Set(),
+  telegramPrivateChatIds: new Set(),
+};
+
+export function pluginOwnerBindings(): OwnerBindings {
+  return ownerBindingsProbe?.() ?? EMPTY_OWNER_BINDINGS;
 }
 
 const noContact = () => pluginError('UNSUPPORTED', '秘书联系方式还没就绪');

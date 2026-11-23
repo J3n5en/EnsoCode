@@ -13,7 +13,12 @@ import type {
   SecretaryContactState,
   SecretaryProfile,
 } from '@shared/types/secretary';
-import { getExtensionPlugins, setPluginContactBridge } from '../services/extensionPlugins';
+import {
+  getExtensionPlugins,
+  setPluginContactBridge,
+  setPluginOwnerBindingsProbe,
+} from '../services/extensionPlugins';
+import type { OwnerBindings } from '../services/extensionPlugins/injectTrust';
 import { redactSecrets } from '../services/memory/distill';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
@@ -259,6 +264,34 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
     },
   });
   const services = new Map<string, ContactService>();
+
+  function publishOwnerBindings(): void {
+    setPluginOwnerBindingsProbe(() => {
+      const telegramOwnerIds = new Set<string>();
+      const telegramPrivateChatIds = new Set<string>();
+      const channelOwnerIds = new Map<string, Set<string>>();
+      for (const service of services.values()) {
+        const bindings = service.ownerBindings();
+        if (bindings.telegramOwnerId) telegramOwnerIds.add(bindings.telegramOwnerId);
+        if (bindings.telegramPrivateChatId)
+          telegramPrivateChatIds.add(bindings.telegramPrivateChatId);
+        for (const channel of bindings.channelPeers) {
+          const key = channel.channelId.toLowerCase();
+          const peers = channelOwnerIds.get(key) ?? new Set<string>();
+          for (const peer of channel.peers) peers.add(peer);
+          channelOwnerIds.set(key, peers);
+        }
+      }
+      const bindings: OwnerBindings = {
+        telegramOwnerIds,
+        telegramPrivateChatIds,
+        channelOwnerIds,
+      };
+      return bindings;
+    });
+  }
+
+  publishOwnerBindings();
   let plugins: { handlers: PluginContactBridgeHandlers; dispose(): void; resync(): void } | null =
     null;
 
@@ -419,6 +452,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
     },
 
     async start() {
+      publishOwnerBindings();
       // 插件渠道：清单声明的先出卡片，插件 register 后再收发；停用卸载时一起清掉
       if (!plugins) {
         const source = getExtensionPlugins();
@@ -435,6 +469,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
 
     async stop() {
       setPluginContactBridge(null);
+      setPluginOwnerBindingsProbe(null);
       plugins?.dispose();
       plugins = null;
       for (const service of services.values()) await service.stop();
