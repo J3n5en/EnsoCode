@@ -25,4 +25,24 @@ describe('electronShim 设置写入', () => {
     expect(args[0]).toBe('enso-conversations');
     expect(args[2]).toBe(7);
   });
+
+  it('高频大包读取走内容 hash 缓存', async () => {
+    const { ipcRenderer } = await import('./electronShim');
+    const channels = [
+      IPC_CHANNELS.WORKTREE_LIST,
+      IPC_CHANNELS.WORKTREE_STATUSES,
+      IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
+      IPC_CHANNELS.SECRETARY_GET_STATE,
+    ] as const;
+    for (const ch of channels) {
+      invoke.mockResolvedValueOnce(
+        JSON.stringify({ __ensoCached: { h: `h-${ch}`, v: [{ id: ch }] } })
+      );
+      expect(await ipcRenderer.invoke(ch)).toEqual([{ id: ch }]);
+      invoke.mockResolvedValueOnce(JSON.stringify({ __ensoCached: { h: `h-${ch}`, same: 1 } }));
+      expect(await ipcRenderer.invoke(ch)).toEqual([{ id: ch }]);
+      const [, secondPayload] = invoke.mock.calls.at(-1) ?? [];
+      expect(JSON.parse(secondPayload ?? '[]')).toEqual([{ __ensoIfNone: `h-${ch}` }]);
+    }
+  });
 });

@@ -104,6 +104,8 @@ export class DeskTunnel {
   private online = false;
   private seq = 0;
   private slots = new Map<string, Slot>();
+  /** 离线期间关闭的 slot：重连上线后补发 rpc-bye，避免宿主残留幽灵 slot */
+  private pendingByes = new Set<string>();
   /** 在途资源请求：断线重连后整批重发（应答丢了也能补回） */
   private assets = new Map<
     number,
@@ -221,6 +223,7 @@ export class DeskTunnel {
     this.online = state === 'online';
     if (this.online && was) {
       // 已在线又收到 host-online：桌面到中继的连接重建过，之前发过去的请求、发过来的帧可能都丢在旧连接上。
+      this.flushByes();
       this.resync();
       return;
     }
@@ -230,6 +233,7 @@ export class DeskTunnel {
         this.linkAt = Date.now();
         // 先声明会回报进度，宿主随即对大帧限流
         this.ack();
+        this.flushByes();
         for (const slot of this.slots.values()) this.hello(slot);
         for (const { message } of this.assets.values()) this.post(message);
       }
@@ -296,6 +300,12 @@ export class DeskTunnel {
 
   private hello(slot: Slot): void {
     slot.helloAt = Date.now();
+    // 外部路径（resync / watch / online）已发补发请求时，推迟正在计时的缺口重发，避免 1 秒内叠发两遍
+    if (slot.gapTimer) {
+      clearTimeout(slot.gapTimer);
+      slot.gapTimer = null;
+      this.watchGap(slot, slot.helloAt, false);
+    }
     this.post({
       type: 'rpc-hello',
       cid: slot.cid,
@@ -338,18 +348,20 @@ export class DeskTunnel {
   }
 
   /** 缺口持续且这段时间没收到大帧才判丢帧、重新 hello；大帧还在传时继续等，但有上限 */
-  private watchGap(slot: Slot, since: number): void {
-    const delay = gapResyncDelay(Date.now(), since, this.lastBulk, this.linkAt);
+  private watchGap(slot: Slot, since: number, fast = true): void {
+    const linkAt = fast ? this.linkAt : Number.NEGATIVE_INFINITY;
+    const delay = gapResyncDelay(Date.now(), since, this.lastBulk, linkAt);
     slot.gapTimer = setTimeout(() => {
       slot.gapTimer = null;
       if (!slot.stream.gap || !this.slots.has(slot.cid)) return;
-      if (gapResyncDelay(Date.now(), since, this.lastBulk, this.linkAt) > 0) {
-        this.watchGap(slot, since);
+      if (gapResyncDelay(Date.now(), since, this.lastBulk, linkAt) > 0) {
+        this.watchGap(slot, since, fast);
         return;
       }
       this.note(`rehello-gap ${slot.cid.slice(0, 4)} applied=${slot.stream.applied}`);
       if (this.online) this.hello(slot);
-      this.watchGap(slot, Date.now());
+      // 链路切换后的 1.5s 快速补发只触发一次，之后退回常规窗口，免得反复灌入重放帧
+      this.watchGap(slot, Date.now(), false);
     }, delay);
   }
 
@@ -358,8 +370,19 @@ export class DeskTunnel {
     this.note(`reset ${slot.cid.slice(0, 4)}`);
     this.drop(slot, 'remote-session-lost');
     this.slots.delete(slot.cid);
-    if (this.online) this.post({ type: 'rpc-bye', cid: slot.cid });
+    this.sendBye(slot.cid);
     slot.onReset();
+  }
+
+  private sendBye(cid: string): void {
+    if (this.online) this.post({ type: 'rpc-bye', cid });
+    else this.pendingByes.add(cid);
+  }
+
+  private flushByes(): void {
+    if (this.pendingByes.size === 0) return;
+    for (const cid of this.pendingByes) this.post({ type: 'rpc-bye', cid });
+    this.pendingByes.clear();
   }
 
   private apply(slot: Slot, frame: Sequenced): void {
@@ -544,7 +567,8 @@ export class DeskTunnel {
         if (!this.slots.has(slot.cid)) return;
         this.slots.delete(slot.cid);
         this.drop(slot, 'remote-frame-closed');
-        if (this.online) this.post({ type: 'rpc-bye', cid: slot.cid });
+        this.sendBye(slot.cid);
+        this.reportResuming();
       },
     };
   }

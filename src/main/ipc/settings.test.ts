@@ -490,7 +490,7 @@ describe('settings广播策略', () => {
     }
   });
 
-  it('会话写入对远端主界面只推补丁，不再触发整份 settings 重读', async () => {
+  it('会话写入对远端不再触发整份 settings 重读（主界面走补丁，设置页不消费会话）', async () => {
     const { registerSettingsHandlers } = await import('./settings');
     const { addRemoteSender, RemoteSender } = await import('../services/remoteRenderer/senders');
     registerSettingsHandlers();
@@ -509,11 +509,13 @@ describe('settings广播策略', () => {
     });
     const mainChannels = mainSends.mock.calls.map(([channel]) => channel);
     expect(mainChannels).not.toContain(IPC_CHANNELS.SETTINGS_CHANGED);
-    expect(settingsSends).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+    expect(settingsSends).not.toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
 
     mainSends.mockClear();
+    settingsSends.mockClear();
     await handler({ sender: owner.webContents }, 'enso-settings', { state: { theme: 'dark' } });
     expect(mainSends).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+    expect(settingsSends).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
     remote.destroy();
     remoteSettings.destroy();
   });

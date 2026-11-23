@@ -1118,7 +1118,14 @@ async function handleFrame(
         .catch((error) => console.warn('[pair] project command failed', error));
       break;
     case 'rpc-hello':
+      if (command.seq !== undefined) conn.remoteWindow.dropPrefix(`rpc:${command.cid}:`);
+      conn.remoteWindow.unblock();
+      await handleRemoteCommand(remoteLink(conn.device.pairId), command);
+      return;
     case 'rpc-bye':
+      conn.remoteWindow.dropPrefix(`rpc:${command.cid}:`);
+      await handleRemoteCommand(remoteLink(conn.device.pairId), command);
+      return;
     case 'rpc-invoke':
     case 'rpc-send':
     case 'asset-get':
@@ -1271,22 +1278,38 @@ function remoteLink(pairId: string): RemoteLink {
         return;
       }
       const json = JSON.stringify(message);
+      const group = bulkGroupOf(message);
       // 压缩是异步的，可能与后续小帧换序：rpc 帧浏览器按 seq 重排，资源按 id 对应
       if (conn.remoteGzip && json.length >= REMOTE_GZIP_MIN_CHARS) {
         void gzipRemoteJson(json)
-          .then((packed) => sendRemoteMessage(conn, packed))
+          .then((packed) => sendRemoteMessage(conn, packed, group))
           .catch((error) => console.warn('[pair] remote frame dropped', error));
       } else {
-        sendRemoteMessage(conn, message);
+        sendRemoteMessage(conn, message, group);
       }
     },
   };
 }
 
-function sendRemoteMessage(conn: Connection, message: HostToPhone): void {
+function bulkGroupOf(message: HostToPhone): string | undefined {
+  if (
+    (message.type === 'rpc-event' || message.type === 'rpc-result') &&
+    typeof message.seq === 'number'
+  ) {
+    return `rpc:${message.cid}:${message.seq}`;
+  }
+  if (message.type === 'asset') return `asset:${message.id}`;
+  return undefined;
+}
+
+function sendRemoteMessage(conn: Connection, message: HostToPhone, group?: string): void {
   try {
-    for (const frame of splitRemoteFrame(message, randomUUID)) {
-      if (frame.type === 'part') conn.remoteWindow.push(frame, frame.data.length);
+    const frames = splitRemoteFrame(message, randomUUID);
+    if (group && frames.some((frame) => frame.type === 'part')) {
+      conn.remoteWindow.dropGroup(group);
+    }
+    for (const frame of frames) {
+      if (frame.type === 'part') conn.remoteWindow.push(frame, frame.data.length, group);
       else sendRemoteFrame(conn, frame);
     }
   } catch (error) {

@@ -9,7 +9,8 @@ export class BulkWindow<T> {
   private enabled = false;
   private inflight = 0;
   private acked = 0;
-  private queue: { item: T; bytes: number }[] = [];
+  private lastProgressAt = 0;
+  private queue: { item: T; bytes: number; group?: string }[] = [];
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly windowBytes: number;
   private readonly stallMs: number;
@@ -22,13 +23,27 @@ export class BulkWindow<T> {
     this.stallMs = options.stallMs ?? 15_000;
   }
 
-  push(item: T, bytes: number): void {
+  push(item: T, bytes: number, group?: string): void {
     if (!this.enabled) {
       this.send(item);
       return;
     }
-    this.queue.push({ item, bytes });
+    this.queue.push({ item, bytes, group });
     this.pump();
+  }
+
+  /** 同一逻辑帧补发前清掉队里尚未发出的旧分片，避免重发堆积或新旧分片混用 id */
+  dropGroup(group: string): void {
+    if (this.queue.length === 0) return;
+    this.queue = this.queue.filter((entry) => entry.group !== group);
+    if (this.queue.length === 0) this.clearStall();
+  }
+
+  /** slot 重同步或关闭时，清掉队里尚未发出的该 slot 旧分片，避免解锁后抢占窗口 */
+  dropPrefix(prefix: string): void {
+    if (this.queue.length === 0) return;
+    this.queue = this.queue.filter((entry) => !entry.group?.startsWith(prefix));
+    if (this.queue.length === 0) this.clearStall();
   }
 
   /** bytes：浏览器本页累计收到的分片字节；比上次小说明换了新页面 */
@@ -36,7 +51,22 @@ export class BulkWindow<T> {
     this.enabled = true;
     const delta = bytes >= this.acked ? bytes - this.acked : bytes;
     this.acked = bytes;
-    this.inflight = Math.max(0, this.inflight - delta);
+    if (delta > 0) {
+      this.lastProgressAt = Date.now();
+      this.inflight = Math.max(0, this.inflight - delta);
+      this.clearStall();
+    }
+    this.pump();
+  }
+
+  /**
+   * 浏览器发 rpc-hello 催补发时，若窗口已满且这段时间没有真正收到新字节，说明在途分片已丢，
+   * 立即释放窗口而不是硬等 stallMs；正在正常收数据时不打断。
+   */
+  unblock(minStaleMs = 2_000): void {
+    if (!this.enabled || this.inflight === 0) return;
+    if (Date.now() - this.lastProgressAt < minStaleMs) return;
+    this.inflight = 0;
     this.clearStall();
     this.pump();
   }
@@ -45,12 +75,14 @@ export class BulkWindow<T> {
   reset(): void {
     this.queue = [];
     this.inflight = 0;
+    this.lastProgressAt = 0;
     this.clearStall();
   }
 
   private pump(): void {
     while (this.queue.length > 0 && this.inflight < this.windowBytes) {
-      const next = this.queue.shift() as { item: T; bytes: number };
+      const next = this.queue.shift() as { item: T; bytes: number; group?: string };
+      this.lastProgressAt = Date.now();
       this.inflight += next.bytes;
       this.send(next.item);
     }

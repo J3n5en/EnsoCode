@@ -318,6 +318,9 @@ async function main(): Promise<void> {
   };
 
   const closeSettings = () => {
+    // iOS WebKit 移除 iframe 时 pagehide 不可靠，必须显式通知隧道关闭旧 slot
+    attached.settings?.close();
+    delete attached.settings;
     iframes.settings?.remove();
     delete iframes.settings;
     frames.querySelector('.settings-backdrop')?.remove();
@@ -375,6 +378,7 @@ async function main(): Promise<void> {
   const bridge: RemoteBridge = {
     platform: 'linux',
     attach(kind) {
+      attached[kind]?.close();
       const frame = tunnel.attach(kind, () => {
         const iframe = iframes[kind];
         if (kind === 'main') {
@@ -784,6 +788,8 @@ async function main(): Promise<void> {
   dropSnapshot();
   settingsLoaded = false;
   closeSettings();
+  attached.main?.close();
+  delete attached.main;
   iframes.main?.remove();
   delete iframes.main;
   if (await cachedBuild(current)) {
