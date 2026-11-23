@@ -534,6 +534,18 @@ export const zhTranslations: Record<string, string> = {
   'dcg required confirmation without details.': 'dcg 要求人工确认（未提供规则详情）。',
   'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.':
     '在系统共用的 Temp 根目录里删除，那里有其他程序的文件；只应在会话专属临时目录内删除。',
+  'Safety floor rule — still requires confirmation in full-access mode. Click Adjust to target a specific subdirectory or session temp folder, or Allow once.':
+    '属于安全底线规则，即使在完全放行模式下也会拦截。可点「调整」改用具体子目录或会话专属临时目录，或确认无误后单次放行。',
+  'Blocked by built-in guard — still requires confirmation in full-access mode. Review the command, click Adjust, or Allow once.':
+    '由内置守卫拦截，即使在完全放行模式下也会确认。请核对命令内容，可点「调整」或确认无误后单次放行。',
+  'Command guard could not finish rechecking the remaining command; confirm before running.':
+    '命令守卫未能完成其余语句的复检，执行前请人工确认。',
+  'High-risk safety floor (cannot be exempted) — still requires confirmation in full-access mode. Click Adjust for a safer command or path, or Allow once.':
+    '属于高危安全底线（不可豁免），即使在完全放行模式下也会拦截。可点「调整」更换更安全的命令或路径，或确认无误后单次放行。',
+  'Guard rule requires confirmation each time — still prompts in full-access mode. Click Adjust for a safer command, or Allow once.':
+    '该守卫规则要求每次确认，即使在完全放行模式下也会拦截。可点「调整」换用更安全的命令，或确认无误后单次放行。',
+  'Triggered by command guard — still prompts in full-access mode. Click Adjust to change the command or path, or manage exemptions in Settings (auto-suggested after 5 allows).':
+    '由命令守卫拦截，即使在完全放行模式下也会确认。可点「调整」更换命令或路径，或在设置中管理豁免（单次放行 5 次后也可在此直接豁免）。',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',
   'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.':
     '执行 bash 和 PowerShell 命令前先用 dcg 检查。命中 git reset --hard、递归删除等危险命令时，即使在完全放行模式下也必须由你确认。新会话生效。',
