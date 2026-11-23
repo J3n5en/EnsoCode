@@ -17,6 +17,15 @@ const STATUS_CLASS = {
   unverifiable: 'text-warning',
 } as const;
 
+const KIND_TAG: Record<GoalResultCheck['kind'], string> = {
+  'pr-state': 'PR',
+  'pr-squash': 'squash',
+  'pr-branch': 'branch',
+  commit: 'sha',
+  screenshot: 'img',
+  ci: 'CI',
+};
+
 function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
@@ -67,9 +76,9 @@ export function GoalResultFacts({
             data-enso="secretary-goal-check"
             data-status={check.status}
             className={cn(CHIP, STATUS_CLASS[check.status])}
-            title={check.detail}
+            title={[check.ref, check.detail].filter(Boolean).join(' · ')}
           >
-            {t(STATUS_LABEL[check.status])}
+            {KIND_TAG[check.kind]} {t(STATUS_LABEL[check.status])}
           </span>
         ))}
       </div>
