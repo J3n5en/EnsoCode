@@ -768,6 +768,33 @@ describe('插件能力', () => {
     expect(service.list()[0]?.crossSessionInject).toBeUndefined();
   });
 
+  it.each([
+    [['agent.tool', 'agent.inject', 'agent.injectTrusted'], true],
+    [['agent.tool', 'agent.inject'], false],
+  ])('trusted 投递：权限 %j 时交给会话的 trusted=%s', async (permissions, trusted) => {
+    const { service, bridge } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest({ permissions }),
+      'main.mjs': `export function activate(enso) {
+        enso.tools.register('lookup', async () => {
+          await enso.session.inject({ text: '跑一遍测试', trusted: true });
+          return 'ok';
+        });
+      }`,
+    });
+    await service.setEnabled('example.demo', true);
+    await service.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's1',
+      projectRoot: null,
+    });
+    expect(bridge).toHaveBeenCalledWith('s1', expect.objectContaining({ trusted }));
+    await vi.waitFor(async () =>
+      expect((await service.logs('example.demo')).includes('agent.injectTrusted')).toBe(!trusted)
+    );
+  });
+
   describe('调用结束后，调用里排下的定时器再调 enso.*', () => {
     /** arm 在会话 s1 的调用里排定时器；collect 在 s2 的调用里放行它并取回结果，此时 arm 早已结束 */
     const lateCallPlugin = `export function activate(enso) {

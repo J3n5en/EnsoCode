@@ -1,5 +1,5 @@
 import { agentTypeDisplayName } from '@shared/builtinAgents';
-import { conversationDotTone } from '@shared/conversationDotTone';
+import { conversationDotTone, userAskCount } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
@@ -344,7 +344,7 @@ export function ChatView() {
   const statusDot = (
     <StatusDot
       status={chrome.spawning ? 'running' : chrome.status}
-      pendingAskCount={(chrome.pendingAsks ?? []).length}
+      pendingAskCount={userAskCount(chrome.pendingAsks)}
       hasRunningChild={chrome.id === chrome.parentId && chrome.parentHasRunningChild}
     />
   );
