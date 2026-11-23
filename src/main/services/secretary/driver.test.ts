@@ -223,6 +223,15 @@ describe('派出会话的目标续跑', () => {
     expect(waiting.prompts).toHaveLength(0);
   });
 
+  it('挂着自定提醒的一轮不续跑，目标保持 active；提醒叫醒的那一轮结束后照常续跑', () => {
+    h.driver.observe(turnCompleted({ ...digest('等 CI，5 分钟后看'), awaitingReminder: true }));
+    expect(h.prompts).toHaveLength(0);
+    expect(goalOf(h)).toMatchObject({ status: 'active', autoTurns: 0 });
+    h.driver.observe(turnCompleted(digest('CI 过了')));
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0].delivery.text).toContain('<goal-continuation>');
+  });
+
   it('同一轮空闲只续跑一次，压缩结束不再投第二遍', () => {
     h.driver.observe(turnCompleted(digest('step one')));
     expect(h.prompts).toHaveLength(1);

@@ -1311,6 +1311,29 @@ describe('自动巡检', () => {
     expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
   });
 
+  it('goal 会话空闲、没有后台任务但挂着没到点的提醒：不报停住；到点 2 分钟后还没被叫醒才照报', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    const due = 30 * MINUTE;
+    h.ports.reminders = () => [
+      {
+        id: 'r00000001',
+        sessionId: 'c1',
+        dueAt: due,
+        createdAt: 0,
+        prompt: 'check CI',
+        ifIdle: true,
+        chain: 1,
+      },
+    ];
+    h.host.tick(3 * MINUTE + 1);
+    h.host.tick(25 * MINUTE);
+    h.host.tick(due + 1 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toEqual([]);
+    h.host.tick(due + 5 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
   it('有存活后台任务的 idle 会话不走 3 分钟规则，20 分钟才兜底报', () => {
     const h = harness({});
     idleWithGoal(h);
@@ -2565,6 +2588,27 @@ describe('派出会话的流式事件', () => {
     expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000 + MINUTE);
     expect(h.state.file.dispatched.c2?.lastEventAt).toBe(20_000);
   });
+
+  it('与派出、在途投递都无关的会话流式事件不读派发记录（整份近 1MB）', () => {
+    const h = harness();
+    let reads = 0;
+    const file = h.ports.file;
+    h.ports.file = () => {
+      reads += 1;
+      return file();
+    };
+    h.ports.peekFile = () => h.state.file;
+    const other = (type: string) =>
+      ({ type, identity: { sessionId: 'zz', generation: 'g9' }, seq: 1, turnId: 't9' }) as never;
+    h.state.now = 1_000;
+    for (const type of ['message-upsert', 'message-update', 'tool-output', 'session-meta'])
+      h.host.onAgentEvent(other(type), []);
+    expect(reads).toBe(0);
+    // 派出会话的流式事件照常处理
+    h.host.onAgentEvent(event('message-update'), []);
+    expect(reads).toBeGreaterThan(0);
+    expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000);
+  });
 });
 
 describe('优雅重启续跑的会话', () => {
@@ -2694,6 +2738,26 @@ describe('派出会话完成后自动归档', () => {
     complete(h, 1000);
     expect(h.state.rows.c1.archived).toBeUndefined();
     h.state.tasks.c1 = [];
+    h.host.tick(2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
+  });
+
+  it('挂着没触发的自定提醒时先不归档，提醒没了再归档', () => {
+    const h = archiving();
+    h.ports.reminders = () => [
+      {
+        id: 'r00000001',
+        sessionId: 'c1',
+        dueAt: 10 * MINUTE,
+        createdAt: 0,
+        prompt: 'check deploy',
+        ifIdle: true,
+        chain: 1,
+      },
+    ];
+    complete(h, 1000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    h.ports.reminders = () => [];
     h.host.tick(2000);
     expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
   });
@@ -3022,5 +3086,83 @@ describe('排队会话', () => {
     h.state.statuses.c1 = idle;
     h.host.tick(MINUTE);
     expect(archived).toEqual([]);
+  });
+});
+
+describe('结构化目标结果', () => {
+  const result = { summary: 'shipped', commits: ['abc1234'] };
+  const checks = [{ kind: 'commit' as const, ref: 'abc1234', status: 'verified' as const }];
+
+  it('核验先完成时，完成回传带上 result 和 checks', async () => {
+    const h = harness({});
+    const daily: unknown[] = [];
+    const archived: unknown[][] = [];
+    h.ports.verifyGoalResult = async () => checks;
+    h.ports.recordDaily = (entry) => {
+      daily.push(entry);
+    };
+    h.ports.archiveReport = (...args) => {
+      archived.push(args);
+    };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
+    await Promise.resolve();
+    await Promise.resolve();
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox[0]).toMatchObject({
+      kind: 'goal-complete',
+      goalResult: { result, checks, at: 0 },
+    });
+    expect(h.state.file.dispatched.c1.goalResult).toMatchObject({ result, checks });
+    expect(daily[0]).toMatchObject({ kind: 'goal-complete', goalResult: { result, checks } });
+    expect(archived[0]?.[3]).toMatchObject({ goalResult: { result, checks } });
+  });
+
+  it('核验一直不返回时，到点仍记完成并标核验超时', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness({});
+      h.ports.verifyGoalResult = () => new Promise(() => {});
+      h.state.statuses.c1 = idle;
+      h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'complete' } };
+      h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
+      h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+      expect(h.state.file.outbox).toEqual([]);
+      expect((h.state.file.activity ?? []).map((entry) => entry.kind)).not.toContain('turn-ended');
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(h.state.file.outbox[0]).toMatchObject({
+        kind: 'goal-complete',
+        goalResult: {
+          result,
+          checks: [{ kind: 'commit', ref: 'abc1234', status: 'unverifiable', detail: '核验超时' }],
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('没有 result 时完成回传不带 goalResult', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete' });
+    expect(h.state.file.outbox[0]).not.toHaveProperty('goalResult');
+  });
+
+  it('轮次被中止后，迟到的核验不再记完成', async () => {
+    const h = harness({});
+    let resolveVerify: (value: typeof checks) => void = () => {};
+    h.ports.verifyGoalResult = () =>
+      new Promise((resolve) => {
+        resolveVerify = resolve;
+      });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
+    h.host.onAgentEvent(event('turn-completed', { aborted: true }), change('idle', 'running'));
+    resolveVerify(checks);
+    await Promise.resolve();
+    expect(h.state.file.outbox.map((update) => update.kind)).not.toContain('goal-complete');
   });
 });

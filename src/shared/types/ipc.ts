@@ -364,6 +364,7 @@ export const IPC_CHANNELS = {
   WORKTREE_GET: 'worktree:get',
   WORKTREE_LIST: 'worktree:list',
   WORKTREE_STATUS: 'worktree:status',
+  WORKTREE_STATUSES: 'worktree:statuses',
   WORKTREE_REMOVE: 'worktree:remove',
   WORKTREE_REBUILD: 'worktree:rebuild',
   WORKTREE_REPO_CLEAN: 'worktree:repo-clean',

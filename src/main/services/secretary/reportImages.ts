@@ -14,6 +14,7 @@ import path from 'node:path';
 import { isMediaId } from '@shared/bots/sendImage';
 import { SECRETARY_REPORTS_REL } from '@shared/resources';
 import { extractReportImagePaths } from '@shared/secretary/doneReport';
+import { type GoalResultView, parseGoalResultView } from '@shared/secretary/goalResult';
 import {
   IMAGE_VIEW_MAX_BYTES,
   inImageViewScope,
@@ -90,12 +91,14 @@ function parseReport(raw: string): SecretaryStoredReport | null {
   const gone =
     data.imagesGone === 'expired' || data.imagesGone === 'cleared' ? data.imagesGone : null;
   const goneAt = gone && typeof data.imagesGoneAt === 'number' ? data.imagesGoneAt : null;
+  const goalResult = parseGoalResultView(data.goalResult);
   return {
     at: data.at,
     text: data.text,
     images,
     ...(gone ? { imagesGone: gone } : {}),
     ...(goneAt !== null ? { imagesGoneAt: goneAt } : {}),
+    ...(goalResult ? { goalResult } : {}),
   };
 }
 
@@ -129,7 +132,8 @@ export class SecretaryReportStore {
   async archive(
     conversationId: string,
     at: number,
-    text: string
+    text: string,
+    extra?: { shots?: { path: string; label?: string }[]; goalResult?: GoalResultView }
   ): Promise<SecretaryStoredReport | null> {
     const dir = this.dir(conversationId);
     if (!dir) return null;
@@ -138,10 +142,19 @@ export class SecretaryReportStore {
       const images: SecretaryReportImage[] = [];
       let stored = 0;
       let total = 0;
-      for (const source of extractReportImagePaths(text).slice(0, REPORT_IMAGE_MAX_ENTRIES)) {
-        const label = path.basename(source);
+      const listed = extractReportImagePaths(text).map((source) => ({
+        path: source,
+        label: path.basename(source),
+      }));
+      for (const shot of extra?.shots ?? []) {
+        if (!listed.some((item) => item.path === shot.path)) {
+          listed.push({ path: shot.path, label: shot.label || path.basename(shot.path) });
+        }
+      }
+      for (const source of listed.slice(0, REPORT_IMAGE_MAX_ENTRIES)) {
+        const label = source.label;
         const copied =
-          stored < REPORT_IMAGE_MAX_COUNT ? await this.copy(dir, source, roots, total) : null;
+          stored < REPORT_IMAGE_MAX_COUNT ? await this.copy(dir, source.path, roots, total) : null;
         if (!copied) {
           images.push({ label, missing: true });
           continue;
@@ -155,6 +168,7 @@ export class SecretaryReportStore {
         at,
         text: text.length > REPORT_TEXT_MAX_CHARS ? text.slice(-REPORT_TEXT_MAX_CHARS) : text,
         images,
+        ...(extra?.goalResult ? { goalResult: extra.goalResult } : {}),
       };
       this.write(dir, report);
       const keep = new Set(images.flatMap((image) => ('name' in image ? [image.name] : [])));

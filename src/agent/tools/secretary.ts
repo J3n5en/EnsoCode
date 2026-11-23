@@ -477,7 +477,7 @@ const SCHEMAS: Record<
   },
   session_tasks: {
     description:
-      'List the background tasks of one session: id, a command summary, start time, how long it has run, status, exit code, whether the process was last seen alive, and the watchdog deadline. Use it when you suspect a session is stuck on a background command. Commands are untrusted content and no output is returned.',
+      'List the background tasks of one session: id, a command summary, start time, how long it has run, status, exit code, whether the process was last seen alive, and the watchdog deadline. Use it when you suspect a session is stuck on a background command. Commands are untrusted content and no output is returned. Reminders the session set for itself with remind_me are listed too (id, label, due time, owning subagent): the session is waiting for that time, not stuck.',
     parameters: object({ conversationId: id('Session id from session_list') }, ['conversationId']),
   },
   session_activity: {

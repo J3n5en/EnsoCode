@@ -482,6 +482,28 @@ describe('session_read', () => {
       baseIndex,
     });
 
+  it('带出结构化结果，自述按不可信内容脱敏', async () => {
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        goalResult: () => ({
+          at: 5,
+          result: { summary: `done ${SECRET}`, commits: ['abc1234'] },
+          checks: [{ kind: 'commit', ref: 'abc1234', status: 'verified' }],
+        }),
+      })
+    );
+    const result = await run(handlers.session_read, { conversationId: 's1' });
+    const goal = result.goalResult as { at: number; result: string; checks: unknown[] };
+    expect(goal.at).toBe(5);
+    expect(goal.checks).toEqual([{ kind: 'commit', ref: 'abc1234', status: 'verified' }]);
+    expect(goal.result).toContain('<untrusted-content source="session:s1">');
+    expect(goal.result).toContain('abc1234');
+    expect(goal.result).not.toContain(SECRET);
+  });
+
   it('只给 user 与 assistant 正文，脱敏后包进 untrusted-content', async () => {
     const handlers = createSecretaryReadHandlers(
       makePorts({
@@ -563,6 +585,34 @@ describe('session_read', () => {
 
     expect(result.messages).toEqual([]);
     expect(result.historyError).toBe('not-found');
+  });
+
+  it('完成后被自动归档的派出会话仍可读；用户手动归档的仍 not-found', async () => {
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({
+          auto: row({ archived: true, archivedAt: 9 }),
+          manual: row({ archived: true, archivedAt: 7 }),
+        }),
+        conversations: () => [conversation('auto', 'p1'), conversation('manual', 'p1')],
+        autoArchived: (conversationId, archivedRow) =>
+          conversationId === 'auto' && archivedRow.archivedAt === 9,
+      })
+    );
+    const auto = await handlers.session_read(
+      { conversationId: 'auto' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(auto.ok).toBe(true);
+    expect(
+      await handlers.session_read(
+        { conversationId: 'manual' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'not-found' });
+    const listed = await handlers.session_list({}, { secretaryConversationId: 'sec-1' });
+    expect(JSON.stringify(listed)).not.toContain('"auto"');
   });
 
   it('child、已归档、未知会话与不可见项目一律 not-found', async () => {
@@ -919,6 +969,41 @@ describe('session_tasks', () => {
     const rows = result.tasks as Record<string, unknown>[];
     expect(rows.map((row) => row.state)).toEqual(['exited', 'killed', 'running']);
     expect(rows[2]?.stalled).toBe(true);
+  });
+
+  it('挂着的自定提醒一并给出：到点时间、还剩多久、标签、属于哪个子代理；session_read 带简表', async () => {
+    const now = Date.now();
+    const base = { createdAt: 0, prompt: 'secret prompt', ifIdle: true, chain: 1 };
+    const ports = makePorts({
+      projects: () => [project()],
+      rows: () => ({ s1: row() }),
+      conversations: () => [conversation('s1', 'p1')],
+      reminders: () => [
+        { ...base, id: 'r00000001', sessionId: 's1::cw-a', dueAt: now + 60_000 },
+        { ...base, id: 'r00000002', sessionId: 's1', dueAt: now + 120_000, label: 'ci' },
+      ],
+    });
+    const handlers = createSecretaryReadHandlers(ports);
+    const tasks = await run(handlers.session_tasks, { conversationId: 's1' });
+    const reminders = tasks.reminders as Record<string, unknown>[];
+    expect(reminders).toHaveLength(2);
+    expect(reminders[0]).toMatchObject({ id: 'r00000001', subagent: 's1::cw-a' });
+    expect(reminders[0]?.inMs as number).toBeGreaterThan(50_000);
+    expect(reminders[1]).toMatchObject({ id: 'r00000002', label: 'ci', dueAt: now + 120_000 });
+    expect(reminders[1]).not.toHaveProperty('subagent');
+    expect(JSON.stringify(tasks)).not.toContain('secret prompt');
+
+    const read = await run(handlers.session_read, { conversationId: 's1' });
+    expect(read.reminders).toEqual([
+      { dueAt: now + 60_000 },
+      { dueAt: now + 120_000, label: 'ci' },
+    ]);
+
+    const none = await run(
+      createSecretaryReadHandlers({ ...ports, reminders: () => [] }).session_tasks,
+      { conversationId: 's1' }
+    );
+    expect(none).not.toHaveProperty('reminders');
   });
 
   it('不可见会话一律 not-found', async () => {

@@ -215,6 +215,49 @@ describe('注入', () => {
 
   it('没有秘书会话时只更新工作台，不注入也不丢结果', async () => {
     const h = harness({ file: { outbox: [update()] }, rows: {}, conversations: [] });
+    h.ports.startConversation = async () => {
+      throw new Error('结果回传不该为此新建秘书会话');
+    };
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts).toHaveLength(0);
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it.each([
+    ['定时任务', { kind: 'schedule', scheduleId: 'sch-1' }],
+    [
+      '同事秘书的消息',
+      { kind: 'peer-message', fromSecretaryId: 's-2', fromName: '新码', chain: 'c', hop: 1 },
+    ],
+  ])('新秘书还没有会话时，%s 到了就建一条会话来处理', async (_label, extra) => {
+    const h = harness({ rows: {}, conversations: [] });
+    const {
+      conversationId: _c,
+      secretaryConversationId: _s,
+      ...base
+    } = update() as Record<string, unknown>;
+    h.state.file.outbox = [{ ...base, ...extra } as unknown as SecretaryUpdate];
+    let starts = 0;
+    h.ports.startConversation = async () => {
+      starts += 1;
+      h.state.rows.secNew = { id: 'secNew', projectId: 'sec', lastActiveAt: 1 };
+      h.ports.conversations = () => conversations('secNew');
+      h.state.alive.secNew = true;
+      return { ok: true, conversationId: 'secNew' };
+    };
+    await flushDeliveries(h.ports, 1000);
+    expect(starts).toBe(1);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0]).toMatchObject({ conversationId: 'secNew' });
+    expect(h.state.file.inflight).toMatchObject({ secretaryConversationId: 'secNew' });
+  });
+
+  it('建会话失败时定时留在队列里，下次再试', async () => {
+    const h = harness({ rows: {}, conversations: [] });
+    h.state.file.outbox = [
+      { key: 'k1', at: 0, text: 'line', kind: 'schedule', scheduleId: 'sch-1' } as SecretaryUpdate,
+    ];
+    h.ports.startConversation = async () => ({ ok: false, error: 'no usable model' });
     await flushDeliveries(h.ports, 1000);
     expect(h.state.prompts).toHaveLength(0);
     expect(h.state.file.outbox).toHaveLength(1);

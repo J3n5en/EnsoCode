@@ -282,6 +282,64 @@ export async function createSessionFromMain(
   return { ok: true, conversationId: id };
 }
 
+/**
+ * 秘书自己的会话：只建会话并拉起，不发消息，消息由调用方照常投。
+ * 秘书项目没有 worktree，cwd 就是它的隐藏项目目录。
+ */
+export async function createSecretaryConversationFromMain(
+  ports: SessionFactoryPorts,
+  request: { projectId: string; title: string }
+): Promise<MainSessionResult> {
+  const project = ports.project(request.projectId);
+  if (project?.state !== 'active' || project.kind !== 'secretary') {
+    return { ok: false, error: 'not an active secretary project' };
+  }
+  const defaults = ports.defaults(request.projectId);
+  if (!defaults) return { ok: false, error: 'no usable model' };
+  const conversation = ports.createConversation(request.projectId, project.version);
+  if (!conversation) return { ok: false, error: 'conversation authority unavailable' };
+  const id = conversation.conversationId;
+  const createdAt = ports.now();
+  ports.writeRow({
+    id,
+    projectId: request.projectId,
+    title: request.title.slice(0, 80),
+    createdAt,
+    lastActiveAt: createdAt,
+    messages: [],
+    commands: [],
+    customEntries: [],
+    dispatchMainEvents: {},
+    lastSeq: 0,
+    spawning: false,
+    status: 'idle',
+    started: false,
+    reasoningEnabled: defaults.reasoningEnabled,
+    thinkingLevel: defaults.thinkingLevel,
+    lastProviderId: defaults.providerId,
+    lastModelId: defaults.modelId,
+    ...(defaults.presetId ? { presetId: defaults.presetId } : {}),
+    approvalMode: defaults.approvalMode,
+    driver: 'main',
+  });
+  const spawned = await ports.spawn({
+    sessionId: id,
+    providerId: defaults.providerId,
+    modelId: defaults.modelId,
+    cwd: project.canonicalPath,
+    reasoningEnabled: defaults.reasoningEnabled,
+    thinkingLevel: defaults.thinkingLevel,
+    ...(defaults.presetId ? { presetId: defaults.presetId } : {}),
+    approvalMode: defaults.approvalMode,
+  });
+  if (!spawned.ok) {
+    ports.removeRow(id);
+    ports.removeConversation(id);
+    return { ok: false, error: spawned.error ?? 'spawn failed' };
+  }
+  return { ok: true, conversationId: id };
+}
+
 export interface MainSessionDefaultsInput {
   project?: ({ groupId?: string } & ScopedReasoningSource) | null;
   groups: readonly ({ id: string } & ScopedReasoningSource)[];

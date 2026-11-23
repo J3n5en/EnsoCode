@@ -78,6 +78,10 @@ const MEMORY_ONLY = process.argv.includes('--memory-only');
 const FORWARD_IMAGES_ONLY = process.argv.includes('--forward-images-only');
 // 只跑排队会话：上限改成 1，造出 1 个在跑、2 个排队，截侧栏、排队卡与看板
 const QUEUED_ONLY = process.argv.includes('--queued-only');
+// 只跑「新秘书没开过会话，第一条联系消息」这一段
+const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contact-only');
+// 只跑 setup + 结构化完成结果段：goal_complete 带 result → 宿主核验 → 回传、看板与结果弹窗
+const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -734,6 +738,14 @@ async function run(cdp, pluginZipUrl) {
   }
   if (QUEUED_ONLY) {
     await verifyQueuedSessions(cdp, setup);
+    return;
+  }
+  if (NEW_SECRETARY_CONTACT_ONLY) {
+    await verifyNewSecretaryFirstContact(cdp);
+    return;
+  }
+  if (GOAL_RESULT_ONLY) {
+    await verifyGoalResult(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -3174,6 +3186,213 @@ async function shotTelegramCard(cdp, message, file) {
   `);
   await cdp.shotClip(file, rect);
   await cdp.evaluate(`document.getElementById('tg-card-preview')?.remove(); 'ok'`);
+}
+
+/**
+ * 新秘书还没开过会话：不打开它，直接从假 Telegram 发第一条消息，要能自动建会话并回复。
+ * 两个新秘书各用一个 bot，同一时刻一起收到消息（其中一个连收两条），各自只建一条会话。
+ */
+async function verifyNewSecretaryFirstContact(cdp) {
+  const page = cdp.json.bind(cdp);
+  const tg = telegram.state;
+  const push = telegram.push;
+  const t0 = Date.now();
+  const timeline = [];
+  const mark = (event) => {
+    timeline.push({ ms: Date.now() - t0, event });
+    log(`  [+${Date.now() - t0}ms] ${event}`);
+  };
+  const tokens = { xm: tg.token, xk: '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw' };
+  const chats = { xm: 777009, xk: 777010 };
+
+  log('== 新秘书首条联系消息：建两个秘书，不打开、不建会话');
+  const created = await page(`
+    const api = window.electronAPI.secretary;
+    const make = async (name) => {
+      const result = await api.create();
+      if (!result.ok) return { error: result.error };
+      const saved = await api.saveProfile(
+        {
+          name,
+          avatar: { color: '#22c55e' },
+          visibleProjectIds: 'all',
+          maxRunningDispatches: 3,
+          patrolEnabled: false,
+          replyLanguage: 'ui',
+          style: 'concise',
+          notify: 'off',
+          addressAs: null,
+          dailyBriefAt: null,
+        },
+        result.secretaryId
+      );
+      return saved.ok ? { id: result.secretaryId, projectId: result.projectId } : { error: saved.error };
+    };
+    const xm = await make('小幂');
+    const xk = await make('小葵');
+    const projection = await window.electronAPI.sourceAuthority.read();
+    const count = (projectId) =>
+      projection.conversations.filter((c) => c.projectId === projectId && c.kind === 'root').length;
+    return JSON.stringify({
+      ok: Boolean(xm.id && xk.id),
+      xm,
+      xk,
+      conversations: { xm: count(xm.projectId), xk: count(xk.projectId) },
+    });
+  `);
+  assert(
+    created.ok && created.conversations.xm === 0 && created.conversations.xk === 0,
+    '新秘书: 两个秘书建好，都还没有会话',
+    created
+  );
+  mark('两个新秘书建好（0 条会话）');
+
+  log('== 新秘书首条联系消息：各自绑一个 bot');
+  const codes = await page(`
+    const api = window.electronAPI.secretary;
+    const bind = async (token, secretaryId) => {
+      const result = await api.contactBind(token, secretaryId);
+      if (!result.ok) return null;
+      return (await api.contactState(secretaryId)).telegram.bind?.code ?? null;
+    };
+    return JSON.stringify({
+      xm: await bind(${JSON.stringify(tokens.xm)}, ${JSON.stringify(created.xm.id)}),
+      xk: await bind(${JSON.stringify(tokens.xk)}, ${JSON.stringify(created.xk.id)}),
+    });
+  `);
+  assert(codes.xm && codes.xk, '新秘书: 两个 bot 都拿到绑定码', codes);
+  const startUpdate = (key, text, id) => ({
+    update_id: id,
+    message: {
+      message_id: id,
+      chat: { id: chats[key], type: 'private' },
+      from: { id: chats[key], username: `u${chats[key]}`, first_name: 'J' },
+      text,
+    },
+  });
+  push(startUpdate('xm', `/start ${codes.xm}`, 101), tokens.xm);
+  push(startUpdate('xk', `/start ${codes.xk}`, 201), tokens.xk);
+  await waitFor(
+    async () => {
+      const probe = await page(`
+        const api = window.electronAPI.secretary;
+        const a = await api.contactState(${JSON.stringify(created.xm.id)});
+        const b = await api.contactState(${JSON.stringify(created.xk.id)});
+        return JSON.stringify({ a: a.telegram?.status, b: b.telegram?.status });
+      `);
+      return probe.a === 'bound' && probe.b === 'bound' ? probe : null;
+    },
+    'both bound',
+    20_000,
+    300
+  );
+  mark('两个 bot 绑定完成');
+
+  log('== 新秘书首条联系消息：同一刻发消息（小幂连收两条）');
+  const since = tg.sent.length;
+  push(startUpdate('xm', '目前有什么项目在跑 [[reply:小幂收到了]]', 102), tokens.xm);
+  push(startUpdate('xm', '还有别的吗 [[reply:小幂第二条]]', 103), tokens.xm);
+  push(startUpdate('xk', '在吗 [[reply:小葵收到了]]', 202), tokens.xk);
+  mark('假 TG 推入 3 条消息');
+  const replied = (chat, text) =>
+    tg.sent.slice(since).find((m) => m.chat_id === chat && String(m.text ?? '').includes(text));
+  const seen = new Set();
+  await waitFor(
+    async () => {
+      const failed = tg.sent.slice(since).find((m) => String(m.text ?? '').includes('没送到'));
+      if (failed) throw new Error(`新秘书: 收到失败回复「${failed.text}」`);
+      for (const [key, text] of [
+        ['xm', '小幂'],
+        ['xk', '小葵收到了'],
+      ]) {
+        if (!seen.has(text) && replied(chats[key], text)) {
+          seen.add(text);
+          mark(`假 TG 收到回复「${text}」`);
+        }
+      }
+      return seen.size === 2;
+    },
+    'replies from new secretaries',
+    90_000,
+    200
+  );
+  const failures = tg.sent.slice(since).filter((m) => String(m.text ?? '').includes('没送到'));
+  assert(failures.length === 0, '新秘书: 没有「没送到」的失败回复', failures);
+  assert(seen.size === 2, '新秘书: 两个秘书都在 Telegram 上回了话', [...seen]);
+
+  const after = await page(`
+    const projection = await window.electronAPI.sourceAuthority.read();
+    const ids = (projectId) =>
+      projection.conversations
+        .filter((c) => c.projectId === projectId && c.kind === 'root')
+        .map((c) => c.conversationId);
+    return JSON.stringify({
+      xm: ids(${JSON.stringify(created.xm.projectId)}),
+      xk: ids(${JSON.stringify(created.xk.projectId)}),
+      focused: (await SEC()).getState().focusedId,
+    });
+  `);
+  assert(
+    after.xm.length === 1 && after.xk.length === 1,
+    '新秘书: 每个秘书只建了一条会话，没有重复',
+    after
+  );
+  // 连发的两条都进了小幂的会话、各答了一轮：消息不丢（手机上的回复按现有规则合并）
+  const turns = await waitFor(
+    () => {
+      const file = readdirSync(sessionsDir)
+        .map((name) => path.join(sessionsDir, name))
+        .find((candidate) => readFileSync(candidate, 'utf8').includes(`chatId=${chats.xm}`));
+      if (!file) return null;
+      const roles = readFileSync(file, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line).message)
+        .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+        .map((message) => {
+          const content = message.content;
+          const text =
+            typeof content === 'string' ? content : content.map((part) => part.text ?? '').join('');
+          return `${message.role}:${text.includes('目前有什么项目在跑') ? 'q1' : text.includes('还有别的吗') ? 'q2' : text.slice(0, 12)}`;
+        });
+      return roles.length >= 4 ? roles : null;
+    },
+    'xm session turns',
+    30_000,
+    300
+  );
+  assert(
+    turns.includes('user:q1') &&
+      turns.includes('user:q2') &&
+      turns.filter((r) => r.startsWith('assistant:')).length >= 2,
+    '新秘书: 连发的两条都进了会话并各答一轮，消息不丢',
+    turns
+  );
+  mark(`小幂会话轮次 ${JSON.stringify(turns)}`);
+  const audit = (id) =>
+    readFileSync(path.join(ENV, 'secretary', 'members', id, 'audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((entry) => /^(secretary_conversation_start|contact_inbound)/.test(entry.op))
+      .map((entry) => ({
+        at: entry.at - t0,
+        op: entry.op,
+        ok: entry.ok,
+        conversation: entry.secretaryConversationId,
+        ...(entry.ok ? {} : { detail: entry.detail }),
+      }));
+  const audits = { xm: audit(created.xm.id), xk: audit(created.xk.id) };
+  assert(
+    audits.xm.filter((entry) => entry.op === 'secretary_conversation_start').length === 1 &&
+      audits.xk.filter((entry) => entry.op === 'secretary_conversation_start').length === 1 &&
+      [...audits.xm, ...audits.xk].every((entry) => entry.ok),
+    '新秘书: 审计里各一次建会话，入站全部成功',
+    audits
+  );
+  log(`  audit: ${JSON.stringify(audits)}`);
+  log(`  timeline: ${JSON.stringify(timeline)}`);
+  await cdp.shot(path.join(ART, '20-new-secretary-first-contact.png'));
 }
 
 /** 联系方式：绑定向导、里程碑出站、手机发话、按钮回答，全程打假 Telegram */
@@ -6271,10 +6490,6 @@ async function verifyImageViewAndCleanup(cdp, setup) {
   rmSync(imageFile, { force: true });
 }
 
-/**
- * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
- * session_send attachments 交过去，目标会话时间线上出现图片引用。
- */
 /** 秘书派活：派出会话的 prompt 里还带一条 fake provider 指令，内层 `]]` 先转义 */
 async function queuedDispatch(cdp, setup, args, ask) {
   const prompt = `${ask} ${toolDirective('session_create', args)}`;
@@ -6484,6 +6699,173 @@ async function verifyQueuedSessions(cdp, setup) {
   assert(Boolean(started), '排队: 空出位置后队头自动开始，目标生效', started?.goal);
 }
 
+async function verifyGoalResult(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 结构化完成结果：goal_complete result → 宿主核验 → 回传、看板、结果弹窗');
+  const shot = path.join('/tmp', `sec-verify-goal-${process.pid}-${Date.now()}.png`);
+  writePngFixture(shot, 320, 200);
+  const missing = path.join('/tmp', `sec-verify-goal-missing-${process.pid}.png`);
+  const result = {
+    summary: '结构化结果验收',
+    prs: [
+      {
+        repo: 'J3n5en/EnsoCode',
+        number: 349,
+        state: 'merged',
+        squashSha: '0000000',
+        remoteBranchDeleted: true,
+      },
+    ],
+    commits: ['b7bc4a8b6'],
+    checks: { typecheck: 'pass', lint: 'pass', tests: { passed: 42, failed: 0 } },
+    screenshots: [
+      { path: shot, caption: '首页' },
+      { path: missing, caption: '不存在' },
+    ],
+    followUps: ['补文档'],
+    deploy: { needed: false },
+  };
+  const dispatch = directDispatcher(page, setup);
+  const created = await dispatch('session_create', {
+    projectId: setup.projectId,
+    prompt: '做完就收尾',
+    title: '结构化结果',
+    goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了', result })}]]`,
+  });
+  assert(created.ok, '结构化结果: 会调用 goal_complete 的会话建成', created);
+  const id = created.conversationId;
+  const record = await waitFor(
+    () => {
+      const found = readJson(dispatchFile).dispatched[id];
+      return found?.lastResult?.kind === 'goal-complete' && found.goalResult ? found : null;
+    },
+    'goal-complete with goalResult',
+    60_000,
+    300
+  ).catch(() => readJson(dispatchFile).dispatched[id]);
+  const checks = record?.goalResult?.checks ?? [];
+  const statusOf = (kind, ref) => checks.find((c) => c.kind === kind && c.ref === ref)?.status;
+  assert(
+    record?.goalResult?.result?.summary === result.summary,
+    '结构化结果: 派发记录带上 goalResult',
+    record
+  );
+  assert(
+    statusOf('screenshot', shot) === 'verified' && statusOf('screenshot', missing) === 'mismatch',
+    '结构化结果: 截图存在记已核验，不存在记不一致',
+    checks
+  );
+  assert(
+    statusOf('commit', 'b7bc4a8b6') === 'unverifiable',
+    '结构化结果: 项目不是 git 仓库时 sha 记未能核验',
+    checks
+  );
+  log(`  checks ${JSON.stringify(checks)}`);
+
+  const seen = await waitFor(
+    () =>
+      page(`
+    return JSON.stringify(texts(${JSON.stringify(created.secretaryId)}).find((text) =>
+      text.includes(${JSON.stringify(`[goal-complete session:${id}]`)})) ?? null);
+  `),
+    'secretary saw goal-complete',
+    30_000,
+    300
+  ).catch(() => null);
+  assert(
+    typeof seen === 'string' && seen.includes('核验：') && seen.includes('截图'),
+    '结构化结果: 秘书收到的 goal-complete 行带宿主核验摘要',
+    seen
+  );
+  const claimsInside = /<untrusted[^>]*>[\s\S]*结构化结果验收[\s\S]*<\/untrusted/.test(seen);
+  assert(claimsInside, '结构化结果: 会话自述在 untrusted 包裹内', seen);
+
+  const read = await secretaryTool(cdp, setup, 'session_read', { conversationId: id }, '看看结果');
+  assert(
+    String(read.text).includes('goalResult') && String(read.text).includes('"checks"'),
+    '结构化结果: session_read 带出 goalResult 与 checks',
+    read.text?.slice(0, 400)
+  );
+
+  const opened = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    const toggles = [...document.querySelectorAll('button')].filter(
+      (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+    );
+    toggles.at(-1)?.click();
+    const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+    if (!item) return JSON.stringify({ ok: false, step: 'panel-open' });
+    item.click();
+    await sleep(800);
+    [...document.querySelectorAll('button')]
+      .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+      ?.click();
+    await sleep(1200);
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=daily]')?.click();
+    const card = await until(
+      () =>
+        visible('[data-enso=secretary-daily-card]').find((node) =>
+          node.querySelector('[data-enso=secretary-goal-result]')
+        ) ?? null,
+      15000
+    );
+    card?.scrollIntoView({ block: 'center' });
+    await sleep(400);
+    const rect = card?.getBoundingClientRect();
+    return JSON.stringify({
+      ok: Boolean(card),
+      text: card?.innerText ?? null,
+      statuses: card
+        ? [...card.querySelectorAll('[data-enso=secretary-goal-check]')].map((n) => n.dataset.status)
+        : [],
+      rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+    });
+  `);
+  assert(
+    opened.ok &&
+      opened.statuses.includes('verified') &&
+      opened.statuses.includes('mismatch') &&
+      opened.statuses.includes('unverifiable'),
+    '结构化结果: 看板卡片显示 PR、sha 与三种核验状态',
+    opened
+  );
+  await cdp.shot(path.join(ART, 'structured-result-board.png'));
+  copyFileSync(path.join(ART, 'structured-result-board.png'), '/tmp/structured-result-board.png');
+  if (opened.rect) {
+    const pad = 12;
+    await cdp.shotClip('/tmp/structured-result-card.png', {
+      x: Math.max(0, opened.rect.x - pad),
+      y: Math.max(0, opened.rect.y - pad),
+      width: opened.rect.width + pad * 2,
+      height: opened.rect.height + pad * 2,
+    });
+  }
+
+  const dialog = await page(`
+    const card = visible('[data-enso=secretary-daily-card]').find((node) =>
+      node.querySelector('[data-enso=secretary-goal-result]')
+    );
+    card?.querySelector('[data-enso=secretary-daily-open]')?.click();
+    const view = await until(() => visible('[data-enso=session-peek-result]')[0] ?? null, 15000);
+    await until(() => view?.querySelector('[data-enso=secretary-goal-result]'), 10000);
+    await sleep(800);
+    return JSON.stringify({
+      ok: Boolean(view?.querySelector('[data-enso=secretary-goal-result]')),
+      images: view?.querySelectorAll('[data-enso=done-report-images] img').length ?? 0,
+      text: view?.innerText?.slice(0, 600) ?? null,
+    });
+  `);
+  assert(dialog.ok, '结构化结果: 结果弹窗显示结构化区块', dialog);
+  assert(dialog.images >= 1, '结构化结果: 结构化截图进了报告存档并显示缩略图', dialog);
+  await cdp.shot('/tmp/structured-result-dialog.png');
+  log('  shots /tmp/structured-result-{board,card,dialog}.png');
+}
+
+/**
+ * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
+ * session_send attachments 交过去，目标会话时间线上出现图片引用。
+ */
 async function verifyForwardImages(cdp, setup) {
   const page = cdp.json.bind(cdp);
   log('== 转发图片：编码会话看图 + session_send attachments');

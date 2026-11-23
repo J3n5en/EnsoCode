@@ -77,10 +77,12 @@ import {
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
   backgroundForegroundTool,
+  clearSessionReminders,
   compactSession,
   completeText,
   dismissChildSession,
   dismissCoworkerSession,
+  fireSessionReminders,
   forgetParentToolProfile,
   forkSession,
   isAgentWorkerReady,
@@ -181,6 +183,7 @@ import {
   configurePairSessionHost,
   handlePairHeadlessAgentEvent,
 } from '../services/pairSessionHost';
+import { planReminderWake } from '../services/reminderWake';
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
@@ -891,6 +894,8 @@ export function setAskRelayFromMain(
 }
 
 export function abortRootFromMain(sessionId: string): void {
+  // 秘书 session_stop 是叫停：会话自己定的提醒一并取消
+  clearSessionReminders(sessionId);
   const identity = exactIdentity(sessionId);
   if (identity) stopWithSubagents(identity);
 }
@@ -900,6 +905,30 @@ function stopWithSubagents(identity: SessionIdentity): AgentActionResult {
   const result = abortSession(identity);
   if (!('parent' in identity)) void agentService?.cancelOwner(identity.sessionId);
   return result;
+}
+
+/** 根会话的自定提醒到点：会话不在了就清掉，活着就触发，冷会话先打开，就绪后 worker 自己补发 */
+async function wakeForReminder(sessionId: string): Promise<void> {
+  const plan = planReminderWake({
+    row: readPersistedConversation(sessionId),
+    alive: agentSessionIndex.isAlive(sessionId),
+    lifecycle: sourceAuthority?.conversation(sessionId)?.lifecycle,
+  });
+  const tag = `[reminder] due ${sessionId.slice(0, 8)}`;
+  if (plan === 'clear') {
+    clearSessionReminders(sessionId);
+    console.log(`${tag}: conversation gone or archived, reminders cleared`);
+    return;
+  }
+  if (plan === 'fire') {
+    fireSessionReminders(sessionId);
+    return;
+  }
+  // 在重启清单里的按清单打开，保住 generation；不在清单里的按持久化元数据恢复
+  let result = await wakeColdRestartSession(sessionId, resumeRootFromRestartManifest);
+  if (result.error === 'not in restart manifest' || result.error === 'already woken')
+    result = await resumeRootFromMain(sessionId);
+  console.log(`${tag}: resume ${result.ok ? 'ok' : `skipped: ${result.error}`}`);
 }
 
 /** 秘书停后台任务：身份由 Main 按会话 id 解析，模型只能给任务 id */
@@ -1490,6 +1519,8 @@ function wirePairAgentBridge(): void {
       if (identity) steerSession(identity, text, images);
     },
     abort: (sessionId) => {
+      // 手机端停止：会话自己定的提醒一并取消
+      clearSessionReminders(sessionId);
       const identity = exactIdentity(sessionId);
       if (identity) stopWithSubagents(identity);
     },
@@ -2024,6 +2055,11 @@ export function registerAgentHandlers(): void {
   powerMonitor.on('resume', () => humanTimeouts.check());
 
   setAgentEventListener((incomingEvent) => {
+    // 换代（Main 不退）：会话不算失败、不进会话广播；只有子代理服务按断点把被打断的 Run 接着跑
+    if (incomingEvent.type === 'worker-swapped') {
+      agentService?.observe({ type: 'worker-exited' });
+      return;
+    }
     const workerEvent = markExitInterrupted(incomingEvent);
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
@@ -2057,6 +2093,12 @@ export function registerAgentHandlers(): void {
           console.log(
             `[graceful-restart] wake ${workerEvent.sessionId.slice(0, 8)} ${result.ok ? 'ok' : `skipped: ${result.error}`}`
           )
+      );
+      return;
+    }
+    if (workerEvent.type === 'session-reminder-due') {
+      void wakeForReminder(workerEvent.sessionId).catch((error: unknown) =>
+        console.warn('[reminder] wake failed:', error instanceof Error ? error.message : error)
       );
       return;
     }
@@ -2642,6 +2684,8 @@ export function registerAgentHandlers(): void {
     if (result.accepted) {
       sourceBindings!.invalidateConversation(parsed.conversationId);
       removeConversationFiles(result.value);
+      // 会话删了就不会再有人等它定的提醒
+      clearSessionReminders(parsed.conversationId);
       // 会话删了就不会再有结果：手机关注里的这一条一并移除
       void unfollowTargetEverywhere(parsed.conversationId);
     }
@@ -2938,11 +2982,11 @@ export function registerAgentHandlers(): void {
     (_event, sessionId: unknown, options: unknown): AgentActionResult => {
       const identity = exactIdentity(sessionId);
       if (!identity) return { ok: false, error: 'invalid abort or stale session generation' };
-      const stopSubagents =
-        typeof options === 'object' &&
-        options !== null &&
-        'stopSubagents' in options &&
-        options.stopSubagents === true;
+      const flag = (key: 'stopSubagents' | 'cancelReminders') =>
+        typeof options === 'object' && options !== null && Reflect.get(options, key) === true;
+      // 用户停止才带 cancelReminders；卡死重试、插话立即发送不带，提醒照留
+      if (flag('cancelReminders')) clearSessionReminders(identity.sessionId);
+      const stopSubagents = flag('stopSubagents');
       return stopSubagents ? stopWithSubagents(identity) : abortSession(identity);
     }
   );

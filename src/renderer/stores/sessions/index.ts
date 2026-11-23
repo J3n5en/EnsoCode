@@ -1,5 +1,5 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
-import { coalesceRuns, mapLimited } from '@shared/coalesceRuns';
+import { coalesceRuns } from '@shared/coalesceRuns';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { conversationCwd } from '@shared/conversationCwd';
 import { diffConversations } from '@shared/conversationsPatch';
@@ -185,7 +185,6 @@ function hotSessionIds(
   for (const id of peekedIds.keys()) ids.add(id);
   return ids;
 }
-const WORKTREE_STATUS_CONCURRENCY = 6;
 const parentTailInFlight = new Set<string>();
 const olderHistoryInFlight = new Set<string>();
 /** 冷缓存清掉的 child 再被看到时补历史。实现在 store 创建后赋值。 */
@@ -1254,6 +1253,8 @@ export const useSessionsStore = create<SessionsState>()(
         });
       });
 
+      /** 上一轮收束时会话还挂着自定提醒：goal 先不续跑，等提醒叫醒的那一轮收束再刷新 */
+      const awaitingReminder = new Set<string>();
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
           set((state) => {
@@ -2022,6 +2023,8 @@ export const useSessionsStore = create<SessionsState>()(
           void recoverStaleSession(id, event.reason, event.identity.generation);
         }
         if (event.type === 'turn-completed' || event.type === 'turn-failed') {
+          if (event.type === 'turn-completed' && event.awaitingReminder) awaitingReminder.add(id);
+          else awaitingReminder.delete(id);
           // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口。
           // 中断标记只在发起窗口本地，别的窗口（如 PWA 完整模式）发起的中断靠 worker 的 aborted 认出
           const aborted = event.type === 'turn-completed' && event.aborted === true;
@@ -2207,6 +2210,7 @@ export const useSessionsStore = create<SessionsState>()(
         )
           return;
         if (goal?.status !== 'active') return;
+        if (awaitingReminder.has(id)) return;
         if ((conversation.queuedMessages ?? []).length > 0) return;
         // 规划与待审期间不自动推进：计划需要用户审批
         const phase = planPhase(conversation.planState);
@@ -2648,18 +2652,16 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        // 启动、侧栏挂载、回焦会同时触发：合并成一次尾随刷新；每个状态要跑几次 git，限并发免得压垮宿主
+        // 启动、侧栏挂载、回焦会同时触发：合并成一次尾随刷新；状态一次批量取（宿主限并发跑 git）
         refreshWorktreeStatuses: coalesceRuns(async () => {
           const targets = get().conversations;
-          const records = await window.electronAPI.worktree.list();
-          const entries = await mapLimited(
-            records.filter((record) => targets[record.conversationId]),
-            WORKTREE_STATUS_CONCURRENCY,
-            async (record) => {
-              const result = await window.electronAPI.worktree.status(record.conversationId);
-              return { record, status: result.ok ? result.value : undefined };
-            }
-          );
+          const [records, statuses] = await Promise.all([
+            window.electronAPI.worktree.list(),
+            window.electronAPI.worktree.statuses(),
+          ]);
+          const entries = records
+            .filter((record) => targets[record.conversationId])
+            .map((record) => ({ record, status: statuses[record.conversationId] }));
           set((state) => {
             const conversations = { ...state.conversations };
             const worktreeStatuses = { ...state.worktreeStatuses };
@@ -3954,7 +3956,8 @@ export const useSessionsStore = create<SessionsState>()(
                 : {}),
             })
           );
-          await window.electronAPI.agent.abort(id, { stopSubagents: true });
+          // 用户停止：一并停子代理、取消会话自己定的提醒
+          await window.electronAPI.agent.abort(id, { stopSubagents: true, cancelReminders: true });
         },
 
         setGoal(conversationId, text) {

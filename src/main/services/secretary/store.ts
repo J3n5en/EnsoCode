@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   parseDispatchFile,
@@ -24,6 +24,21 @@ export function imageHash(bytes: Uint8Array): string {
 function readAvatarBytes(file: string): Uint8Array | null {
   try {
     return readFileSync(file);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * dispatch.json 动辄近 1MB，秘书每个流式事件要读好几次：按文件签名复用解析结果。
+ * 写入都是原子改名（inode 必变），别处改写也能按签名认出来。
+ */
+const dispatchCache = new Map<string, { sig: string; file: SecretaryDispatchFile }>();
+
+function fileSignature(path: string): string | null {
+  try {
+    const stat = statSync(path);
+    return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
   } catch {
     return null;
   }
@@ -103,12 +118,29 @@ export class SecretaryStore {
   }
 
   dispatch(): SecretaryDispatchFile {
-    return parseDispatchFile(readJson(this.file('dispatch.json')));
+    return structuredClone(this.dispatchView());
+  }
+
+  /** 只读视图，与缓存共用同一个对象：调用方不得修改，要改用 dispatch() */
+  dispatchView(): Readonly<SecretaryDispatchFile> {
+    const path = this.file('dispatch.json');
+    const sig = fileSignature(path);
+    const hit = dispatchCache.get(path);
+    if (sig && hit?.sig === sig) return hit.file;
+    const file = parseDispatchFile(readJson(path));
+    if (sig) dispatchCache.set(path, { sig, file });
+    else dispatchCache.delete(path);
+    return file;
   }
 
   saveDispatch(file: SecretaryDispatchFile): SecretaryDispatchFile {
     const parsed = parseDispatchFile(file);
-    writeJsonAtomic(this.file('dispatch.json'), parsed);
+    const path = this.file('dispatch.json');
+    writeJsonAtomic(path, parsed);
+    const sig = fileSignature(path);
+    // 按 JSON 往返存：与重新读盘得到的完全一致（undefined 字段一并去掉）
+    if (sig) dispatchCache.set(path, { sig, file: JSON.parse(JSON.stringify(parsed)) });
+    else dispatchCache.delete(path);
     return parsed;
   }
 
