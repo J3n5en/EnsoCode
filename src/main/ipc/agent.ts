@@ -216,12 +216,13 @@ import {
   type SessionToolActivity,
 } from '../services/sessionActivity';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
+import { createFileMemo } from '../services/sessionHistoryCache';
 import {
+  displayMessages,
   findHistoryMessage,
   type HistoryProjectionOptions,
-  projectParentHistoryAll,
-  projectParentHistoryPage,
-  projectParentHistoryTail,
+  projectAll,
+  projectWindow,
   resolveParentHistoryFile,
 } from '../services/sessionHistoryTail';
 import {
@@ -1283,6 +1284,29 @@ async function readParentHistoryTail(
   return readSessionHistoryFile(sessionFile, beforeIndex);
 }
 
+const historyMemo = createFileMemo<unknown[]>({
+  stat: (file) => {
+    try {
+      const { mtimeMs, size } = statSync(file);
+      return { mtimeMs, size };
+    } catch {
+      return null;
+    }
+  },
+});
+
+/** 整文件解析结果按文件签名复用：远端上翻分页、秘书逐条读不再每次重新解析几十 MB */
+async function displayHistory(
+  file: string,
+  sessionDir: string,
+  options?: HistoryProjectionOptions
+): Promise<unknown[]> {
+  const { SessionManager } = await import('@earendil-works/pi-coding-agent');
+  return historyMemo.get(file, options?.messageIds ? 'ids' : 'plain', () =>
+    displayMessages(SessionManager.open(file, sessionDir).getBranch(), options)
+  );
+}
+
 /** 根会话 pi jsonl 的尾窗 / 分页投影；路径须落在 sessions 目录内 */
 export async function readSessionHistoryFile(
   sessionFile: string | undefined,
@@ -1302,15 +1326,8 @@ export async function readSessionHistoryFile(
     return { ok: false, code: 'not-found', error: 'History file is missing.' };
   }
   try {
-    const { SessionManager } = await import('@earendil-works/pi-coding-agent');
-    const manager = SessionManager.open(resolved, sessionDir);
-    const branch = manager.getBranch();
-    return {
-      ok: true,
-      ...(beforeIndex === undefined
-        ? projectParentHistoryTail(branch, options)
-        : projectParentHistoryPage(branch, beforeIndex, options)),
-    };
+    const raw = await displayHistory(resolved, sessionDir, options);
+    return { ok: true, ...projectWindow(raw, beforeIndex ?? raw.length) };
   } catch (error) {
     return {
       ok: false,
@@ -1332,9 +1349,7 @@ async function readFullSessionHistory(
   const resolved = resolveParentHistoryFile(sessionDir, sessionFile);
   if (!resolved || !existsSync(resolved)) return [];
   try {
-    const { SessionManager } = await import('@earendil-works/pi-coding-agent');
-    const manager = SessionManager.open(resolved, sessionDir);
-    return projectParentHistoryAll(manager.getBranch(), options);
+    return projectAll(await displayHistory(resolved, sessionDir, options));
   } catch {
     return [];
   }
