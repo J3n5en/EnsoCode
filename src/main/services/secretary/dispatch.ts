@@ -34,13 +34,13 @@ import {
   type SecretarySendMode,
 } from '@shared/secretary/tools';
 import { wrapUntrusted } from '@shared/secretary/transcript';
-import {
-  type AttachedImage,
-  type ConversationAuthority,
-  type ProjectAuthority,
-  THINKING_LEVELS,
-  type ThinkingLevel,
+import type {
+  AttachedImage,
+  ConversationAuthority,
+  ProjectAuthority,
+  ThinkingLevel,
 } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   type CleanupItem,
   type ClosedGoal,

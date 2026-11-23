@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { parseTemplateLibrary } from '@shared/bots/templateLibrary';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { readJson, writeJsonAtomic } from '../services/bots/files';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 

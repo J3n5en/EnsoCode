@@ -1,11 +1,13 @@
 import { supportedProjectThinkingLevels } from './modelThinking';
-import { THINKING_LEVELS, type ThinkingLevel } from './types/agent';
-import type {
-  ModelCapabilityOverrides,
-  ModelReasoningOverride,
-  ModelThinkingLevelOverride,
+import type { ThinkingLevel } from './types/agent';
+import { THINKING_LEVELS } from './types/agentConstants';
+import {
+  MODEL_REASONING_OVERRIDES,
+  MODEL_THINKING_LEVEL_OVERRIDES,
+  type ModelCapabilityOverrides,
+  type ModelReasoningOverride,
+  type ModelThinkingLevelOverride,
 } from './types/llm';
-import { MODEL_REASONING_OVERRIDES, MODEL_THINKING_LEVEL_OVERRIDES } from './types/llm';
 import type { ModelMeta } from './types/modelMeta';
 
 /** 能力解析与 ModelMeta 共用的目录条目。 */

@@ -1,5 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -26,13 +25,9 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
+const settings = await import('./index');
 
 describe('RTK setting', () => {
-  beforeAll(async () => {
-    settings = await import('./index');
-  });
-
   it('默认开启，并可显式关闭', () => {
     expect(settings.useSettingsStore.getState().rtkEnabled).toBe(true);
     settings.useSettingsStore.getState().setRtkEnabled(false);

@@ -11,8 +11,8 @@ import {
 } from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
-import { effectiveDisabledBuiltinTools } from '@shared/types';
 import type { MemoryOp } from '@shared/types/agent';
+import { effectiveDisabledBuiltinTools } from '@shared/types/builtinTools';
 import type { ModelProvider } from '@shared/types/llm';
 import type Database from 'better-sqlite3';
 import { inferUserDataFromMemoryRoot, setUserDataDir } from './appPaths';

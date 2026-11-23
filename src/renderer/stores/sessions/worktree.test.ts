@@ -9,9 +9,7 @@ import type {
   WorkspaceBranchSwitchResult,
   WorktreeStatus,
 } from '@shared/types/worktree';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from '../settings';
-import type * as SessionsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as worktree from './worktree';
 import {
   DIRTY_MAIN_TREE,
@@ -174,13 +172,8 @@ vi.stubGlobal('window', {
   },
 });
 
-let sessions: typeof SessionsModule;
-let settings: typeof SettingsModule;
-
-beforeAll(async () => {
-  settings = await import('../settings');
-  sessions = await import('./index');
-});
+const settings = await import('../settings');
+const sessions = await import('./index');
 
 beforeEach(() => {
   vi.clearAllMocks();

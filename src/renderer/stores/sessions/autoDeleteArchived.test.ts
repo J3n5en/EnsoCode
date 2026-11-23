@@ -5,9 +5,7 @@
  * days<=0 为从不，跳过 activeId，不二次确认。
  */
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from '../settings';
-import type * as SessionsModule from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const agentRelease = vi.fn(async () => ({ ok: true }));
 const wtRemove = vi.fn(async () => ({ ok: true as const, value: null }));
@@ -75,13 +73,8 @@ vi.stubGlobal('window', {
   },
 });
 
-let sessions: typeof SessionsModule;
-let settings: typeof SettingsModule;
-
-beforeAll(async () => {
-  settings = await import('../settings');
-  sessions = await import('./index');
-});
+const settings = await import('../settings');
+const sessions = await import('./index');
 
 const DAY = 86_400_000;
 const NOW = 1_800_000_000_000;

@@ -1,4 +1,5 @@
-import { APPROVAL_MODES, type ApprovalMode } from '../types/agent';
+import type { ApprovalMode } from '../types/agent';
+import { APPROVAL_MODES } from '../types/agentConstants';
 import type { BotList, BotProfile } from '../types/bot';
 
 /** 「自动设置能力」：便宜模型按成员描述推荐能力配置；结果只做建议，由用户逐项确认后写入表单 */

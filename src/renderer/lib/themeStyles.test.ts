@@ -1,11 +1,8 @@
 import { ACCENT_PRESETS } from '@shared/accentColor';
 import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import { BUILTIN_THEMES } from '@shared/theme/builtinThemes';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type * as PluginThemesModule from '@/stores/pluginThemes';
-import type * as SettingsModule from '@/stores/settings';
+import { describe, expect, it, vi } from 'vitest';
 import { mergeSettingsState } from '@/stores/settings/migrate';
-import type * as ThemeStylesModule from './themeStyles';
 
 type FakeStyle = { id: string; textContent: string };
 const head: FakeStyle[] = [];
@@ -83,21 +80,15 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
-let themeStyles: typeof ThemeStylesModule;
-let pluginThemes: typeof PluginThemesModule;
+const settings = await import('@/stores/settings');
+const themeStyles = await import('./themeStyles');
+const pluginThemes = await import('@/stores/pluginThemes');
 const tokens = () => head.find((style) => style.id === 'enso-theme-tokens')?.textContent ?? '';
 const themeCssSlot = () => head.find((style) => style.id === 'enso-theme-css')?.textContent ?? '';
 const userCssSlot = () => head.find((style) => style.id === 'enso-user-css')?.textContent ?? '';
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe('theme styles', () => {
-  beforeAll(async () => {
-    settings = await import('@/stores/settings');
-    themeStyles = await import('./themeStyles');
-    pluginThemes = await import('@/stores/pluginThemes');
-  });
-
   it('安装时同步写入 Enso 主题 token，并按顺序预留主题 CSS 与用户 CSS', async () => {
     expect(settings.useSettingsStore.getState()).toMatchObject({
       themeId: 'enso',

@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 const userData = mkdtempSync(path.join(tmpdir(), 'enso-settings-backup-'));
 
@@ -17,13 +17,9 @@ const withProviders = (providers: unknown[], extra: Record<string, unknown> = {}
 });
 const backups = () => readdirSync(userData).filter((f) => f.startsWith('settings.backup-'));
 
-let settings: typeof import('./settings');
 const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-beforeAll(async () => {
-  writeFileSync(settingsPath, JSON.stringify(withProviders([{ id: 'a' }])));
-  settings = await import('./settings');
-});
+writeFileSync(settingsPath, JSON.stringify(withProviders([{ id: 'a' }])));
+const settings = await import('./settings');
 afterEach(() => warn.mockClear());
 afterAll(() => {
   settings.flushSettings();

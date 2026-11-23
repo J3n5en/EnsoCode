@@ -4,9 +4,9 @@ import {
   parseAgentWorkerEvent,
   parseResolvedChildProfileProof,
   parseTitleSummaryInput,
-  TURN_REPORT_MAX_CHARS,
 } from './agent';
 import { child, model, parent, proof, RECEIPT_ID } from './agent.testUtils';
+import { TURN_REPORT_MAX_CHARS } from './agentConstants';
 
 describe('removed project memory protocol', () => {
   it('拒绝旧记忆管线命令与进度事件', () => {

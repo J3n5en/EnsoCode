@@ -1,4 +1,4 @@
-import { BUILTIN_TOOLS, DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
+import { BUILTIN_TOOLS, DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { describe, expect, it } from 'vitest';
 import type { SettingsCategory } from './constants';
 import { resolveActiveCategory, visibleCategories } from './settingsCategories';

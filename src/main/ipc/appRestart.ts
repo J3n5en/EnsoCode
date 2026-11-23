@@ -1,10 +1,10 @@
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
-import type {
-  AppExitReason,
-  RestartBlocker,
-  RestartOverlayState,
-  RestartWaitReason,
+import {
+  type AppExitReason,
+  IPC_CHANNELS,
+  type RestartBlocker,
+  type RestartOverlayState,
+  type RestartWaitReason,
 } from '@shared/types/ipc';
 import { switchNode } from '../services/nodeRemote';
 import { anyRendererFocused, isMainRenderer, localMainContents } from '../services/renderers';

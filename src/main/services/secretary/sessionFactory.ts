@@ -15,16 +15,16 @@ import {
 } from '@shared/secretary/attachments';
 import type { QueuedStart } from '@shared/secretary/queuedSession';
 import { extractRepresentativeTitle } from '@shared/titleSource';
-import {
-  type AgentSpawnRequest,
-  type ApprovalMode,
-  type AttachedImage,
-  type ConversationAuthority,
-  type ModelRef,
-  type ProjectAuthority,
-  THINKING_LEVELS,
-  type ThinkingLevel,
+import type {
+  AgentSpawnRequest,
+  ApprovalMode,
+  AttachedImage,
+  ConversationAuthority,
+  ModelRef,
+  ProjectAuthority,
+  ThinkingLevel,
 } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import type { ModelProvider } from '@shared/types/llm';
 import type { SessionWorktree } from '@shared/types/worktree';
 import type { VirtualModelEntry } from '@shared/virtualModels';

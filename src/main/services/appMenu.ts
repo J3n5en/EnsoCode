@@ -4,7 +4,7 @@ import {
   type ShellIntegration,
   shellIntegrationMenuLabel,
 } from '@shared/shellIntegration';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
 import type { AppRestartState } from './appRestart';
