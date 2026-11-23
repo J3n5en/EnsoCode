@@ -108,6 +108,30 @@ export async function verifyGoalResult(
   return groups.flat();
 }
 
+/** 截止时还没核完的项：只列本来会去核的字段。 */
+export function unverifiableGoalChecks(result: GoalResult, detail: string): GoalResultCheck[] {
+  const checks: GoalResultCheck[] = [];
+  for (const pr of result.prs ?? []) {
+    const ref = `${pr.repo}#${pr.number}`;
+    if (pr.state) checks.push({ kind: 'pr-state', ref, status: 'unverifiable', detail });
+    if (pr.squashSha) checks.push({ kind: 'pr-squash', ref, status: 'unverifiable', detail });
+    if (pr.remoteBranchDeleted !== undefined) {
+      checks.push({ kind: 'pr-branch', ref, status: 'unverifiable', detail });
+    }
+  }
+  for (const sha of result.commits ?? []) {
+    checks.push({ kind: 'commit', ref: sha, status: 'unverifiable', detail });
+  }
+  for (const shot of result.screenshots ?? []) {
+    checks.push({ kind: 'screenshot', ref: shot.path, status: 'unverifiable', detail });
+  }
+  const ci = result.checks?.ci;
+  if (ci?.runId && ci.repo) {
+    checks.push({ kind: 'ci', ref: String(ci.runId), status: 'unverifiable', detail });
+  }
+  return checks;
+}
+
 async function verifyPull(
   pr: NonNullable<GoalResult['prs']>[number],
   gh: (args: readonly string[]) => Promise<GoalResultCommandResult | null>

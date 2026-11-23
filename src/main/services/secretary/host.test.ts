@@ -2930,3 +2930,79 @@ describe('派出会话完成后自动归档', () => {
     expect(held(h)).toHaveLength(1);
   });
 });
+
+describe('结构化目标结果', () => {
+  const result = { summary: 'shipped', commits: ['abc1234'] };
+  const checks = [{ kind: 'commit' as const, ref: 'abc1234', status: 'verified' as const }];
+
+  it('核验先完成时，完成回传带上 result 和 checks', async () => {
+    const h = harness({});
+    const daily: unknown[] = [];
+    const archived: unknown[][] = [];
+    h.ports.verifyGoalResult = async () => checks;
+    h.ports.recordDaily = (entry) => {
+      daily.push(entry);
+    };
+    h.ports.archiveReport = (...args) => {
+      archived.push(args);
+    };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
+    await Promise.resolve();
+    await Promise.resolve();
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox[0]).toMatchObject({
+      kind: 'goal-complete',
+      goalResult: { result, checks, at: 0 },
+    });
+    expect(h.state.file.dispatched.c1.goalResult).toMatchObject({ result, checks });
+    expect(daily[0]).toMatchObject({ kind: 'goal-complete', goalResult: { result, checks } });
+    expect(archived[0]?.[3]).toMatchObject({ goalResult: { result, checks } });
+  });
+
+  it('核验一直不返回时，到点仍记完成并标核验超时', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness({});
+      h.ports.verifyGoalResult = () => new Promise(() => {});
+      h.state.statuses.c1 = idle;
+      h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
+      h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+      expect(h.state.file.outbox).toEqual([]);
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(h.state.file.outbox[0]).toMatchObject({
+        kind: 'goal-complete',
+        goalResult: {
+          result,
+          checks: [{ kind: 'commit', ref: 'abc1234', status: 'unverifiable', detail: '核验超时' }],
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('没有 result 时完成回传不带 goalResult', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete' });
+    expect(h.state.file.outbox[0]).not.toHaveProperty('goalResult');
+  });
+
+  it('轮次被中止后，迟到的核验不再记完成', async () => {
+    const h = harness({});
+    let resolveVerify: (value: typeof checks) => void = () => {};
+    h.ports.verifyGoalResult = () =>
+      new Promise((resolve) => {
+        resolveVerify = resolve;
+      });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
+    h.host.onAgentEvent(event('turn-completed', { aborted: true }), change('idle', 'running'));
+    resolveVerify(checks);
+    await Promise.resolve();
+    expect(h.state.file.outbox.map((update) => update.kind)).not.toContain('goal-complete');
+  });
+});
