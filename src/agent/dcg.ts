@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { isDcgRuleExemptible } from '@shared/dcgRuleMemory';
 
 export interface CommandGuardHit {
   ruleId: string;
@@ -32,6 +33,20 @@ export function parseDcgVerdict(exitCode: number | null, stdout: string): Comman
 }
 
 const MAX_OUTPUT = 64 * 1024;
+
+/** 用户按规则记忆的豁免：命中豁免规则视同未命中，交回原审批逻辑 */
+export function withDcgExemptions(
+  guard: CommandGuard,
+  exemptRules: readonly string[]
+): CommandGuard {
+  const allowed = exemptRules.filter(isDcgRuleExemptible);
+  if (allowed.length === 0) return guard;
+  const exempt = new Set(allowed);
+  return async (tool, command, signal) => {
+    const hit = await guard(tool, command, signal);
+    return hit && exempt.has(hit.ruleId) ? null : hit;
+  };
+}
 
 export const TEMP_ROOT_RULE_ID = 'enso.windows:temp-root-delete';
 export const TEMP_ROOT_REASON =

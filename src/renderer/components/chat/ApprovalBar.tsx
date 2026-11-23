@@ -1,6 +1,8 @@
 import type { ApprovalReviewFallback } from '@shared/approvalReviewRecord';
+import { explainDcgGuard } from '@shared/dcgRuleHints';
 import { isNestedToolCallId } from '@shared/toolCallId';
 import type { ApprovalDecision, ApprovalKind, ApprovalRequestInfo } from '@shared/types/agent';
+import type { DcgRuleState } from '@shared/types/dcg';
 import { FileEdit, FilePlus, Plug, ShieldAlert, TerminalSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
@@ -82,6 +84,111 @@ const REVIEW_FALLBACK_LABELS: Record<ApprovalReviewFallback, string> = {
   invalid: 'Auto-managed review returned no valid decision. Please decide.',
 };
 
+/** 规则记忆只走桌面端本机 IPC；手机伴侣没有 */
+const dcgApi = () =>
+  typeof window === 'undefined' || window.electronAPI?.remote ? undefined : window.electronAPI?.dcg;
+
+function DcgGuardDetail({ guard }: { guard: { ruleId: string; reason: string } }) {
+  const { t, locale } = useI18n();
+  const [rule, setRule] = useState<{ ruleId: string; state: DcgRuleState } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setConfirming(false);
+    void dcgApi()
+      ?.ruleState(guard.ruleId)
+      .then((state) => {
+        if (alive && state) setRule({ ruleId: guard.ruleId, state });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [guard.ruleId]);
+  const state = rule?.ruleId === guard.ruleId ? rule.state : null;
+  const explained = locale === 'zh' ? explainDcgGuard(guard) : { what: guard.reason };
+  const exempt = () => {
+    setConfirming(false);
+    void dcgApi()
+      ?.ruleExempt(guard.ruleId)
+      .then((next) => {
+        if (next) setRule({ ruleId: guard.ruleId, state: next });
+      })
+      .catch(() => {});
+  };
+
+  return (
+    <div className="mt-1 space-y-0.5 text-[11px]">
+      <p className="text-destructive" title={guard.ruleId}>
+        {t('dcg: {{reason}}', { reason: explained.what })}
+      </p>
+      {explained.why && (
+        <p className="text-muted-foreground">
+          {t('Why it is dangerous')}: {explained.why}
+        </p>
+      )}
+      {explained.alt && (
+        <div className="flex items-center gap-1 text-muted-foreground">
+          <span>{t('Safer alternative')}:</span>
+          <code className="rounded bg-muted/60 px-1 font-mono">{explained.alt}</code>
+          <CopyButton text={explained.alt} className="p-0.5" />
+        </div>
+      )}
+      {state?.suggestExempt && (
+        <div className="flex flex-wrap items-center gap-2 text-amber-600 dark:text-amber-400">
+          {confirming ? (
+            <>
+              <span>
+                {t(
+                  'Allow "{{rule}}" automatically in new conversations? You can revoke this anytime in Settings.',
+                  { rule: guard.ruleId }
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={exempt}
+                className="font-medium underline underline-offset-2"
+              >
+                {t('Confirm exemption')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="text-muted-foreground underline underline-offset-2"
+              >
+                {t('Cancel')}
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {t(
+                  'You have allowed this rule {{count}} times. Allow it automatically from now on?',
+                  {
+                    count: state.allowCount,
+                  }
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="underline underline-offset-2"
+              >
+                {t('Always allow this rule')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {state?.exempt && (
+        <p className="text-muted-foreground">
+          {t('This rule is allowed automatically in new conversations until dcg is updated.')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** 队首换成新请求后的锁定时长：批完一条，下一条几十毫秒内出现在原位，双击的第二下会落在它上面 */
 const ARM_DELAY_MS = 400;
 
@@ -117,6 +224,10 @@ export function ApprovalBar({
   const respond = (decision: ApprovalDecision) => {
     // 代审可能原卡退回，不能把按钮锁死
     if (decision !== 'review') setResponding(active.requestId);
+    if (decision === 'allow' && active.guard && !active.guard.ruleId.startsWith('enso.'))
+      void dcgApi()
+        ?.ruleAllowed(active.guard.ruleId)
+        .catch(() => {});
     onRespond(active.requestId, decision);
   };
 
@@ -157,13 +268,14 @@ export function ApprovalBar({
           {t(REVIEW_FALLBACK_LABELS[active.reviewFallback])}
         </p>
       )}
-      {active.guard && (
-        <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
-          {active.guard.ruleId.startsWith('enso.')
-            ? t(active.guard.reason)
-            : t('dcg: {{reason}}', { reason: active.guard.reason })}
-        </p>
-      )}
+      {active.guard &&
+        (active.guard.ruleId.startsWith('enso.') ? (
+          <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
+            {t(active.guard.reason)}
+          </p>
+        ) : (
+          <DcgGuardDetail guard={active.guard} />
+        ))}
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       {!reviewing && (
         <div className="mt-2 flex items-center justify-end gap-1.5">

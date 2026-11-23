@@ -680,6 +680,11 @@ describe('受保护动作底线协议', () => {
     expect(parseAgentCommand({ ...base, dcgPath: '/data/dcg/dcg' })).not.toBeNull();
     expect(parseAgentCommand({ ...base, dcgPath: '' })).toBeNull();
     expect(parseAgentCommand({ ...base, dcgPath: 1 })).toBeNull();
+    expect(
+      parseAgentCommand({ ...base, dcgPath: '/d', dcgExemptRules: ['core.git:reset-hard'] })
+    ).not.toBeNull();
+    for (const dcgExemptRules of ['core.git:reset-hard', [''], ['no-colon'], [1]])
+      expect(parseAgentCommand({ ...base, dcgExemptRules })).toBeNull();
   });
 
   it('spawn-parent 携真尾 / boost / 拒答正文：非空字符串通过,脏值拒绝', () => {

@@ -27,6 +27,7 @@ import {
   parseCapabilityResult,
 } from '../capabilities/types';
 import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
+import { isDcgRuleId } from '../dcgRuleMemory';
 import type { DefaultModelRef } from '../defaultModel';
 import type { ExitKind } from '../exitInterrupt';
 import { parsePluginArtifactInfo } from '../extensionPlugins/artifacts';
@@ -1391,6 +1392,8 @@ export type AgentCommand =
       rtkEnabled?: boolean;
       /** dcg 命令守卫二进制；Main 仅在启用且已安装时下发 */
       dcgPath?: string;
+      /** 用户按规则记忆豁免的 dcg rule_id（仅当前 dcg 版本有效） */
+      dcgExemptRules?: string[];
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
       /** 旁路会话：首条 prompt 前缀注入，消费一次 */
@@ -4036,6 +4039,7 @@ const agentCommandParsers = {
         'windowsLocalShell',
         'rtkEnabled',
         'dcgPath',
+        'dcgExemptRules',
         'remote',
         'rolePrompt',
         'systemPrompt',
@@ -4080,6 +4084,12 @@ const agentCommandParsers = {
       (value.pluginEvents !== undefined && !isPluginEventPlan(value.pluginEvents)) ||
       (value.rtkEnabled !== undefined && typeof value.rtkEnabled !== 'boolean') ||
       (value.dcgPath !== undefined && !isNonEmptyString(value.dcgPath)) ||
+      (value.dcgExemptRules !== undefined &&
+        !(
+          Array.isArray(value.dcgExemptRules) &&
+          value.dcgExemptRules.length <= 500 &&
+          value.dcgExemptRules.every(isDcgRuleId)
+        )) ||
       (value.planMode !== undefined && typeof value.planMode !== 'boolean') ||
       (value.windowsLocalShell !== undefined &&
         !(WINDOWS_LOCAL_SHELLS as readonly string[]).includes(value.windowsLocalShell as string)) ||

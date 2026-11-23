@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalBar } from './ApprovalBar';
 
 const highlight = vi.hoisted(() => ({ codeToHtml: vi.fn() }));
-vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, string>) =>
+      key.replace(/\{\{(\w+)\}\}/g, (_, name: string) => params?.[name] ?? ''),
+    locale: 'zh',
+  }),
+}));
 vi.mock('./snippetHighlighter', () => ({ codeToHtml: highlight.codeToHtml }));
 
 const request = { requestId: 'r', tool: 'bash', kind: 'command' as const, summary: 'ls' };
@@ -31,16 +37,45 @@ describe('ApprovalBar 托管判定退回人工', () => {
   });
 });
 
-describe('ApprovalBar 命令守卫', () => {
+describe('ApprovalBar dcg 规则解释', () => {
+  const guarded = (ruleId: string, reason = 'english reason') => ({
+    ...request,
+    summary: 'git push --force',
+    protected: 'destructive',
+    guard: { ruleId, reason },
+  });
+
+  it('命中对照表：展示会做什么、为什么危险和可复制的安全替代', () => {
+    const html = render([guarded('core.git:push-force-long')]);
+    expect(html).toContain('强制推送');
+    expect(html).toContain('Why it is dangerous');
+    expect(html).toContain('Safer alternative');
+    expect(html).toContain('git push --force-with-lease');
+    expect(html.match(/title="Copy"/g)?.length).toBe(2);
+    expect(html).not.toContain('english reason');
+  });
+
+  it('对照表没有替代时不显示替代区块', () => {
+    const html = render([guarded('core.filesystem:rm-rf-general')]);
+    expect(html).toContain('Why it is dangerous');
+    expect(html).not.toContain('Safer alternative');
+  });
+
+  it('查不到规则回退 dcg 英文原因', () => {
+    const html = render([guarded('system.disk:nwipe', 'nwipe overwrites the disk')]);
+    expect(html).toContain('nwipe overwrites the disk');
+    expect(html).not.toContain('Why it is dangerous');
+  });
+
   it('内置守卫规则直接显示原因，dcg 规则保留 dcg 前缀', () => {
     const reason = 'Deletes in the shared system Temp folder root.';
     const enso = render([
       { ...request, guard: { ruleId: 'enso.windows:temp-root-delete', reason } },
     ]);
     expect(enso).toContain(reason);
-    expect(enso).not.toContain('dcg: {{reason}}');
+    expect(enso).not.toContain('dcg: ');
     const dcg = render([{ ...request, guard: { ruleId: 'core.git:reset-hard', reason: 'x' } }]);
-    expect(dcg).toContain('dcg: {{reason}}');
+    expect(dcg).toContain('dcg: ');
   });
 });
 
@@ -143,5 +178,39 @@ describe('ApprovalBar 队首切换', () => {
     await mount([next]);
     expect(container.querySelector('.shiki')).toBeNull();
     expect(container.querySelector('pre')?.textContent).toBe('rm -rf build');
+  });
+
+  it('记忆豁免需要用户二次确认才生效，单击提示不会直接豁免', async () => {
+    const ruleState = vi
+      .fn()
+      .mockResolvedValue({ allowCount: 5, exempt: false, suggestExempt: true });
+    const ruleExempt = vi
+      .fn()
+      .mockResolvedValue({ allowCount: 5, exempt: true, suggestExempt: false });
+    Object.assign(window, {
+      electronAPI: {
+        dcg: { ruleState, ruleExempt, ruleAllowed: vi.fn().mockResolvedValue(null) },
+      },
+    });
+    await mount([
+      {
+        ...request,
+        summary: 'git reset --hard',
+        protected: 'destructive',
+        guard: { ruleId: 'core.git:reset-hard', reason: 'r' },
+      },
+    ]);
+    const askBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Always allow this rule')
+    );
+    expect(askBtn).toBeDefined();
+    await act(async () => askBtn?.click());
+    expect(ruleExempt).not.toHaveBeenCalled();
+    const confirmBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Confirm exemption')
+    );
+    expect(confirmBtn).toBeDefined();
+    await act(async () => confirmBtn?.click());
+    expect(ruleExempt).toHaveBeenCalledWith('core.git:reset-hard');
   });
 });

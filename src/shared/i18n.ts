@@ -559,6 +559,26 @@ export const zhTranslations: Record<string, string> = {
   'dcg is licensed under MIT with an additional rider: no rights are granted to OpenAI, Anthropic, their affiliates, or anyone acting on their behalf. Install only if this restriction does not apply to you.':
     'dcg 使用附加限制条款的 MIT 许可证：不授予 OpenAI、Anthropic 及其关联方或代表它们行事的任何人任何权利。仅在该限制不适用于你时安装。',
   'Agree and install': '同意并安装',
+  'Up to date (latest v{{latest}})': '已是最新（最新版 v{{latest}}）',
+  'dcg v{{latest}} is available (built-in v{{current}}). It can be installed after an EnsoCode update ships its checksum.':
+    '发现 dcg 新版 v{{latest}}（内置 v{{current}}）。需等 EnsoCode 更新内置校验值后才能安装。',
+  'GitHub rate limit reached. Try again in an hour.': 'GitHub 接口请求已达上限，请一小时后再试。',
+  'Could not read the latest dcg release.': '无法读取 dcg 最新版本信息。',
+  'Could not reach GitHub. Check your network.': '无法连接 GitHub，请检查网络。',
+  'Clear rule exemptions': '清除规则豁免',
+  'Rule exemptions cleared.': '已清除规则豁免与放过记录。',
+  'Why it is dangerous': '为什么危险',
+  'Safer alternative': '安全替代',
+  'You have allowed this rule {{count}} times. Allow it automatically from now on?':
+    '这条规则你已经放过 {{count}} 次，要不要以后直接通过？',
+  'Always allow this rule': '以后直接通过',
+  'Confirm exemption': '确认豁免',
+  'Allow "{{rule}}" automatically in new conversations? You can revoke this anytime in Settings.':
+    '确认在新会话中自动放行「{{rule}}」？随时可在设置中撤销。',
+  'Exempted rules': '已豁免规则',
+  'No rule exemptions.': '暂无规则豁免。',
+  'This rule is allowed automatically in new conversations until dcg is updated.':
+    '新会话中这条规则将直接通过，dcg 版本更新后失效。',
   'Memory write': '记忆写入',
   'Secrets redacted': '已脱敏密钥',
   'Memory writes awaiting approval': '待批准的记忆写入',

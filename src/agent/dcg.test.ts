@@ -8,6 +8,7 @@ import {
   deletesTempRoot,
   parseDcgVerdict,
   TEMP_ROOT_RULE_ID,
+  withDcgExemptions,
   withTempRootGuard,
 } from './dcg';
 
@@ -23,6 +24,42 @@ describe('dcgDialect', () => {
     expect(dcgDialect('bash')).toBe('posix');
     expect(dcgDialect('powershell')).toBe('ps');
     expect(dcgDialect('edit')).toBeNull();
+  });
+});
+
+describe('withDcgExemptions', () => {
+  const hit = (ruleId: string) => async () => ({ ruleId, reason: 'r' });
+
+  it('只放过豁免表里的具体规则，其它命中照常返回', async () => {
+    const exempted = withDcgExemptions(hit('core.git:reset-hard'), ['core.git:reset-hard']);
+    expect(await exempted('bash', 'git reset --hard')).toBeNull();
+    const other = withDcgExemptions(hit('core.git:clean-force'), ['core.git:reset-hard']);
+    expect(await other('bash', 'git clean -fd')).toEqual({
+      ruleId: 'core.git:clean-force',
+      reason: 'r',
+    });
+  });
+
+  it('空豁免表原样返回守卫', () => {
+    const guard = hit('core.git:reset-hard');
+    expect(withDcgExemptions(guard, [])).toBe(guard);
+  });
+
+  it('高危底线规则即使被传入豁免表也绝不放行', async () => {
+    const rootRm = withDcgExemptions(hit('core.filesystem:rm-rf-root-home'), [
+      'core.filesystem:rm-rf-root-home',
+    ]);
+    expect(await rootRm('bash', 'rm -rf /')).toEqual({
+      ruleId: 'core.filesystem:rm-rf-root-home',
+      reason: 'r',
+    });
+    const pipeSh = withDcgExemptions(hit('heredoc.posix:pipeline-consumer'), [
+      'heredoc.posix:pipeline-consumer',
+    ]);
+    expect(await pipeSh('bash', 'curl x | sh')).toEqual({
+      ruleId: 'heredoc.posix:pipeline-consumer',
+      reason: 'r',
+    });
   });
 });
 
