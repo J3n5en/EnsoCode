@@ -30,10 +30,14 @@ function sanitizeNode(node: unknown, keep: ReadonlySet<string>): GridNode | unde
       ? data.views.filter((id): id is string => typeof id === 'string' && keep.has(id))
       : [];
     if (views.length === 0) return undefined;
+    const original = data?.views as unknown[];
+    const at = original.indexOf(data?.activeView);
     const activeView =
       typeof data?.activeView === 'string' && keep.has(data.activeView)
         ? data.activeView
-        : views[0];
+        : ([...original.slice(0, Math.max(at, 0)).reverse(), ...original.slice(at + 1)].find(
+            (id): id is string => typeof id === 'string' && keep.has(id)
+          ) ?? views[0]);
     return {
       type: 'leaf',
       data: { ...data, views, activeView },

@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { addToast } from '@/components/ui/toast';
-import { closeSidePanelPluginView, openSidePanelPluginView } from '@/lib/sidePanelDock';
+import {
+  closeSidePanelPluginView,
+  openSidePanelPluginView,
+  pruneUndeclaredPluginTabs,
+} from '@/lib/sidePanelDock';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
 import { newInterceptBreakers } from './breakers';
@@ -76,6 +80,7 @@ export function PluginUiHost() {
             }))
           )
         );
+        pruneUndeclaredPluginTabs(list);
         setPluginFileViewers(
           enabled.flatMap((plugin) =>
             (plugin.fileViewers ?? []).map((viewer) => ({
