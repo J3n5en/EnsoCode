@@ -109,6 +109,7 @@ type Tool = {
 };
 type FakeSession = {
   prompt: ReturnType<typeof vi.fn>;
+  abort: ReturnType<typeof vi.fn>;
   messages: unknown[];
   emit(event: { type: string; [key: string]: unknown }): void;
 };
@@ -514,6 +515,39 @@ describe('会话自定提醒', () => {
     expect(ctx.disk().reminders).toEqual([]);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(promptTexts(ctx.childSession).some((text) => text.includes('CHILD-PING'))).toBe(false);
+  });
+
+  it('退出收尾打断子代理的回合：Run 重启后续跑，它的提醒留着', async () => {
+    const ctx = await setup(true);
+    ctx.supervisor.handleCommand({
+      type: 'prompt-child',
+      identity: child,
+      requestId: 'run-1',
+      requestBudget: true,
+      task: { text: 'wait for deploy', images: [], fileMentions: [] },
+    });
+    await until(() => ctx.childSession.prompt.mock.calls.length > 0);
+    ctx.childSession.emit({ type: 'agent_start' });
+    await ctx.childRemind.execute('c2', { in: '5m', prompt: 'CHILD-PING' });
+    ctx.supervisor.handleCommand({ type: 'graceful-restart' });
+    // 收尾中止落成错误回合（走 failTurn）
+    ctx.childSession.abort.mockImplementation(async () => {
+      const message = {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'This operation was aborted',
+      };
+      ctx.childSession.messages.push(message);
+      ctx.childSession.emit({ type: 'message_start', message });
+      ctx.childSession.emit({ type: 'message_end', message });
+      ctx.childSession.emit({ type: 'agent_end', willRetry: false });
+      ctx.childSession.emit({ type: 'agent_settled' });
+    });
+    await ctx.supervisor.shutdown();
+    await settle();
+    expect(ofType(ctx.events, 'turn-completed').some((e) => e.identity === child)).toBe(false);
+    expect(ctx.disk().reminders).toEqual([expect.objectContaining({ sessionId: child.sessionId })]);
   });
 
   it('不在 Run 里的子代理不能定提醒', async () => {
