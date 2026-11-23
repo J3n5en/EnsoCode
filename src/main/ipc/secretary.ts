@@ -288,6 +288,7 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
   return {
     enabled: () => secretaryEnabled(),
     file: () => store().dispatch(),
+    peekFile: () => store().dispatchView(),
     save: (file) => {
       store().saveDispatch(file);
     },

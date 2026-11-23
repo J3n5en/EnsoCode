@@ -770,6 +770,7 @@ export const IPC_PRODUCT_COVERAGE = {
   WORKTREE_GET: surfaces('conversations.worktree.status'),
   WORKTREE_LIST: surfaces('conversations.worktree.status'),
   WORKTREE_STATUS: surfaces('conversations.worktree.status'),
+  WORKTREE_STATUSES: surfaces('conversations.worktree.status'),
   WORKTREE_REMOVE: surfaces('conversations.worktree.remove'),
   WORKTREE_REBUILD: surfaces('conversations.worktree.rebuild'),
   WORKTREE_REPO_CLEAN: surfaces('conversations.worktree.status'),
