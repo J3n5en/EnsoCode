@@ -183,7 +183,16 @@ function boot(): World {
     saved: [],
     children: [],
     parentUp: true,
-    used: { spawns: 0, sends: 0, stops: 0, dismisses: 0, resumes: 0, faults: 0, crashes: 0 },
+    used: {
+      spawns: 0,
+      sends: 0,
+      stops: 0,
+      dismisses: 0,
+      resumes: 0,
+      faults: 0,
+      crashes: 0,
+      holds: 0,
+    },
     runIds: [],
     notified: new Map(),
     notifiedStatus: new Map(),
@@ -248,8 +257,8 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
     }
     const turn = c.turn;
     for (const outcome of turn && c.live ? (['ok', 'bg', 'abort', 'fail'] as const) : []) {
-      if (outcome !== 'ok' && u.faults >= cfg.faults) continue;
-      if (outcome === 'bg' && u.holds >= cfg.holds) continue;
+      if (outcome === 'bg' ? u.holds >= cfg.holds : outcome !== 'ok' && u.faults >= cfg.faults)
+        continue;
       out.push([
         `turn:${i}:${outcome}`,
         () => {
@@ -387,7 +396,8 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         () => {
           u.crashes++;
           w.parentUp = false;
-          for (const c of w.children) Object.assign(c, { ...kill, ready: false, ending: undefined });
+          for (const c of w.children)
+            Object.assign(c, { ...kill, ready: false, ending: undefined });
           if (kind === 'exit') w.service.observe({ type: 'worker-exited' });
           else w.service = newService(w);
         },
@@ -511,12 +521,12 @@ const configs = [
   {
     name: 'coworker：排队、stop、dismiss、用户中止 / 失败、worker 退出与重启',
     cfg: { ...none, modes: ['coworker'] as Mode[], sends: FULL ? 2 : 1 },
-    min: FULL ? 14_000 : 800,
+    min: FULL ? 14_000 : 2_000,
   },
   {
     name: 'task：stop、停放与 resume、worker 退出与重启',
     cfg: { ...none, modes: ['task'] as Mode[], resumes: 1 },
-    min: FULL ? 250 : 100,
+    min: 300,
   },
   ...(FULL
     ? [

@@ -535,6 +535,9 @@ interface ManagedSession {
   pendingTaskReminders: string[];
   /** 子会话自己起的后台任务的完成通知：只搭它的下一条工具结果，不为此唤起新回合 */
   childTaskNotices?: string[];
+  /** AgentService 子代理 Run 的 turnId：从 prompt-child / retry 起，到这次 Run 的终态那一轮为止。
+   *  回合结束时还有自己的后台任务就继续持有，任务完成时唤醒子代理接着这次 Run 跑 */
+  agentRunId?: string;
   /** 通知队列溢出只报一次 */
   reminderEvictionReported?: boolean;
   /** 忙碌时收到的手动压缩请求：本轮收束后自动执行（用户选择「排队」而非打断） */
@@ -1301,11 +1304,13 @@ export class SessionSupervisor {
         },
         // 完成通知走合并投递:多任务同时完成合并成一条,失败在 manager 文本里自带标注
         onCompletionNotify: (sessionId, text, notifyOptions) => {
-          // 子代理起的任务只通知子代理本身：不唤醒它（task 的 Run 可能已收口），更不打扰父会话。
+          // 子代理起的任务只通知子代理本身，不打扰父会话：它持有 Run 且空闲时唤醒它，否则搭下一条工具结果。
           // 子代理已不在时丢弃：父会话从子代理结果里得知它起过哪些任务，可用 task_output 查看
           if (sessionId.includes('::')) {
             const child = this.sessions.get(sessionId);
-            if (child) {
+            if (child?.agentRunId && child.status !== 'running') {
+              this.deliverNotification(sessionId, text);
+            } else if (child) {
               child.childTaskNotices ??= [];
               enqueueReminder(child.childTaskNotices, text);
             }
@@ -1758,6 +1763,12 @@ export class SessionSupervisor {
       if (!this.bgTasks.owns(command.taskId, command.sessionId)) return;
       if (command.reason === null) this.bgTasks.unkeep(command.taskId);
       else this.bgTasks.keep(command.taskId, { by: 'user', reason: command.reason });
+      const held = this.sessions.get(command.sessionId);
+      if (held?.agentRunId && held.status !== 'running' && !this.awaitsOwnTasks(held))
+        this.deliverNotification(
+          command.sessionId,
+          `The user kept background task ${command.taskId} running; you no longer need to wait for it before reporting.`
+        );
       return;
     }
     const identity =
@@ -2008,6 +2019,7 @@ export class SessionSupervisor {
         }
         managed.promptedRequestIds.add(command.requestId);
         managed.currentTurnId = command.requestId;
+        managed.agentRunId = command.requestBudget ? command.requestId : undefined;
         managed.turnAborted = false;
         // 只有子代理 Run（Main 带 requestBudget 标记）计数；Bot 成员等不 arm，不计数
         if (command.requestBudget) managed.requestBudget?.arm();
@@ -2114,6 +2126,7 @@ export class SessionSupervisor {
         }
         ensureAssistantUsage(agent.state.messages as unknown[]);
         managed.currentTurnId = command.turnId ?? randomUUID();
+        managed.agentRunId = command.requestBudget ? managed.currentTurnId : undefined;
         if (command.requestBudget) managed.requestBudget?.arm(command.requestsUsed);
         resetOauthPoolActivity(managed.session);
         void continueSessionActivity(managed.session).catch((error) =>
@@ -2513,7 +2526,7 @@ export class SessionSupervisor {
           if (managed.status === 'running') {
             managed.turnAborted = true;
             managed.abortedTurnId = abortedTurnId;
-          }
+          } else managed.agentRunId = undefined;
           managed.turnRetried = false;
           managed.status = 'idle';
           this.emitStatus(managed);
@@ -5025,12 +5038,17 @@ export class SessionSupervisor {
   private completeTurn(managed: ManagedSession, budget?: { error?: string }): void {
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
+    const runId = managed.agentRunId;
+    const continues = runId !== turnId ? runId : undefined;
+    const awaitingTasks =
+      runId !== undefined && !aborted && !budget && this.awaitsOwnTasks(managed);
+    if (!awaitingTasks) managed.agentRunId = undefined;
     managed.currentTurnId = undefined;
     managed.abortedTurnId = undefined;
     managed.turnAborted = false;
     managed.turnRetried = false;
-    // 预算只管一次 Run：收口即清零，之后用户自己发起的回合不计数
-    managed.requestBudget?.disarm();
+    // 预算只管一次 Run：收口即清零，之后用户自己发起的回合不计数；持有中的 Run 还没收口
+    if (!awaitingTasks) managed.requestBudget?.disarm();
     managed.status = 'idle';
     this.emitStatus(managed);
     this.flushPendingBuiltinTools(managed);
@@ -5055,13 +5073,28 @@ export class SessionSupervisor {
       ...(aborted ? { aborted: true as const } : {}),
       ...(budget ? { requestBudgetStop: true } : {}),
       ...(budget?.error ? { requestBudgetError: budget.error } : {}),
+      ...(continues ? { continues } : {}),
+      ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
     });
+    // 忙时攒下、没等到工具结果的完成通知：持有中就开新一轮交给它
+    if (awaitingTasks && managed.childTaskNotices?.length) {
+      for (const text of managed.childTaskNotices.splice(0)) this.queueReminder(managed, text);
+    }
     if (managed.pendingCompact) {
       const queued = managed.pendingCompact;
       managed.pendingCompact = undefined;
       void this.runCompaction(managed, queued.instructions);
     }
     this.flushPendingReminders(managed);
+  }
+
+  /** 子代理还有自己起的、在跑、没表态的后台任务，或还有没交给它的完成通知 */
+  private awaitsOwnTasks(managed: ManagedSession): boolean {
+    return (
+      this.bgTasks.undeclared(managed.identity.sessionId).length > 0 ||
+      (managed.childTaskNotices?.length ?? 0) > 0 ||
+      managed.pendingTaskReminders.length > 0
+    );
   }
 
   /** 收尾清单：根会话自己起的、还在跑、没表态的后台任务（子代理起的归子代理，不要求父会话表态） */
@@ -5608,6 +5641,8 @@ export class SessionSupervisor {
   private failTurn(managed: ManagedSession, error: string, retryExhausted = false): void {
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
+    const continues = managed.agentRunId !== turnId ? managed.agentRunId : undefined;
+    managed.agentRunId = undefined;
     managed.currentTurnId = undefined;
     managed.abortedTurnId = undefined;
     managed.turnRetried = false;
@@ -5642,6 +5677,7 @@ export class SessionSupervisor {
       error,
       ...(retryExhausted ? { retryExhausted: true } : {}),
       ...(aborted ? { aborted: true as const } : {}),
+      ...(continues ? { continues } : {}),
     });
     this.flushPendingReminders(managed);
   }

@@ -301,6 +301,7 @@ describe('子代理起的后台任务归属子代理', () => {
       type: 'prompt-child',
       identity: child,
       requestId: 'run-1',
+      requestBudget: true,
       task: { text: 'start the server', images: [], fileMentions: [] },
     });
     await round(ctx.childSession, '服务已起，等它跑完', () =>
