@@ -344,10 +344,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       result !== undefined &&
       running &&
       !result.manual &&
-      result.kind !== 'goal-complete' &&
-      ((record.stateSince ?? 0) > result.at ||
-        (record.reopenedAt ?? 0) > result.at ||
-        record.lastResult === undefined);
+      (result.kind !== 'goal-complete' || hasNeedsUser(effectiveGoalResult));
     const recoveredTurnEnded =
       result !== undefined &&
       !result.manual &&
