@@ -1,3 +1,4 @@
+import { parseHTML } from 'linkedom';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -66,5 +67,38 @@ describe('AskBar', () => {
 
   it('多于一个提问时显示 1/N', () => {
     expect(render([ask, { ...ask, requestId: 'q2' }])).toContain('>1/2<');
+  });
+
+  it('长正文限高并在自身内部滚动，标题行、选项、输入框不在正文滚动区里', () => {
+    const question = Array.from({ length: 30 }, (_, i) => `第 ${i + 1} 行`).join('\n');
+    const options = ['甲', '乙', '丙'];
+    const { document } = parseHTML(
+      render([{ ...ask, question, options, relay: { name: '爱酱' } }])
+    );
+    const card = document.querySelector('[data-enso="ask"]');
+    const body = document.querySelector('[data-enso="ask-question"]');
+    const optionList = document.querySelector('[data-enso="ask-options"]');
+    expect(card?.className).toMatch(/(^|\s)max-h-\[/);
+    expect(body?.textContent).toBe(question);
+    expect(body?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['overflow-y-auto', 'overscroll-contain', 'min-w-0'])
+    );
+    expect(optionList?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['shrink-0', 'overflow-y-auto', 'overscroll-contain'])
+    );
+    expect(optionList?.className).toMatch(/(^|\s)max-h-\[/);
+    const optionButtons = [...(optionList?.querySelectorAll('button') ?? [])];
+    expect(optionButtons.map((button) => button.textContent)).toEqual(['1甲', '2乙', '3丙']);
+    const input = card?.querySelector('input');
+    expect(input).toBeTruthy();
+    expect(input?.parentElement?.className.split(/\s+/)).toContain('shrink-0');
+    for (const kept of [
+      input,
+      optionList,
+      document.querySelector('[data-enso="ask-relay"]'),
+      ...optionButtons,
+    ]) {
+      expect(kept && body?.contains(kept)).toBe(false);
+    }
   });
 });
