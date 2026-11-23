@@ -1,3 +1,4 @@
+import { formatGoalResultClaims, type GoalResultView } from '@shared/secretary/goalResult';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   chunkMessageText,
@@ -76,6 +77,8 @@ export interface SecretaryReadPorts {
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
+  /** 派发记录上的结构化结果；缺省表示没有 */
+  goalResult?(conversationId: string): MaybePromise<GoalResultView | undefined>;
   /** 只读 git；路径越界校验与采集都在 repoStatus 里 */
   repo: RepoStatusDeps;
 }
@@ -281,6 +284,24 @@ function presentRepoStatus(
 }
 
 export function createSecretaryReadHandlers(ports: SecretaryReadPorts): SecretaryReadHandlers {
+  async function goalResultOf(
+    source: string,
+    conversationId: string
+  ): Promise<
+    | { goalResult: { at: number; result: string; checks?: GoalResultView['checks'] } }
+    | Record<string, never>
+  > {
+    const view = await ports.goalResult?.(conversationId);
+    if (!view) return {};
+    return {
+      goalResult: {
+        at: view.at,
+        ...(view.checks ? { checks: view.checks } : {}),
+        result: wrapUntrusted(source, redactSecrets(formatGoalResultClaims(view.result))),
+      },
+    };
+  }
+
   return {
     async project_list() {
       const { projects, sessions } = await collect(ports);
@@ -402,6 +423,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ? projectReadableMessages(page.messages, { limit, baseIndex: page.baseIndex })
         : { messages: [], hasMore: false };
       const source = `session:${conversationId}`;
+      const goal = await goalResultOf(source, conversationId);
       const messages = readable.messages.map((message) => ({
         index: message.index,
         ...(message.entryId ? { entryId: message.entryId } : {}),
@@ -423,6 +445,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           hasMore: readable.hasMore,
           ...(readable.hasMore ? { nextBefore } : {}),
           ...(page.ok ? {} : { historyError: page.code }),
+          ...goal,
         },
       };
     },
@@ -576,6 +599,9 @@ export function readPortsFor(
     },
     async tasks(conversationId) {
       return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
+    },
+    goalResult(conversationId) {
+      return new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId]?.goalResult;
     },
     repo: realRepoDeps,
   };
