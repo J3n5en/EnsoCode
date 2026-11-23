@@ -630,6 +630,8 @@ export type SecretaryCard =
       result?: SecretaryResultKind;
       /** 与 result 同时出现：结果发生的时间 */
       resultAt?: number;
+      /** 结构化结果里待用户处理的条目（已脱敏，未清除时展示） */
+      needsUser?: readonly string[];
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
       /** 目标因上游瞬态/配额故障等待自动恢复 */
@@ -779,6 +781,8 @@ export interface SecretaryDailyItem {
   /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
   persistent?: true;
   goalResult?: GoalResultView;
+  /** 结构化结果里待用户处理的条目（未清除时在需要你列直接展示） */
+  needsUser?: readonly string[];
 }
 
 export interface SecretaryDailyCounts {

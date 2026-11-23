@@ -11,6 +11,7 @@ import {
 import { formatRetryClock } from '@shared/upstreamRecovery';
 import {
   ArrowUpRight,
+  CheckCircle2,
   Coffee,
   Pencil,
   Plus,
@@ -207,14 +208,30 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
       card.result === 'goal-complete' ||
       card.result === 'goal-blocked');
   const feed = sessionFeed(card);
+  const decisionNeeds =
+    card.state !== 'waiting' &&
+    card.result === 'goal-complete' &&
+    card.needsUser &&
+    card.needsUser.length > 0
+      ? card.needsUser
+      : undefined;
   return (
     <div
       data-enso="secretary-card"
       data-kind="session"
       data-state={card.state}
-      className="rounded-xl border border-warning/40 bg-warning/5 px-3 py-2.5"
+      data-tone={decisionNeeds ? 'decision' : undefined}
+      className={cn(
+        'rounded-xl border px-3 py-2.5',
+        decisionNeeds ? 'border-brand/30 bg-brand/[0.04]' : 'border-warning/40 bg-warning/5'
+      )}
     >
-      <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-warning">
+      <div
+        className={cn(
+          'flex items-center gap-1.5 text-[11.5px] font-medium',
+          decisionNeeds ? 'text-foreground' : 'text-warning'
+        )}
+      >
         {face && (
           <SecretaryFace
             name={face.name}
@@ -224,17 +241,52 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
             className="size-4 rounded-[5px] text-[9px]"
           />
         )}
-        <ShieldAlert className="size-3.5 shrink-0" />
+        {decisionNeeds ? (
+          <CheckCircle2 className="size-3.5 shrink-0 text-success" />
+        ) : (
+          <ShieldAlert className="size-3.5 shrink-0" />
+        )}
         <span className="min-w-0 flex-1 truncate">{t(feed.label)}</span>
         <span className="shrink-0 font-normal text-subtle-foreground">
           {formatRelativeTime(feed.at, locale)}
         </span>
       </div>
       <p className="mt-1 text-[13px] font-medium">{card.title}</p>
-      <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-        <span className="shrink-0 rounded bg-muted px-1.5 text-[11px]">{card.projectName}</span>
-        {card.lastText && <span className="line-clamp-1">{card.lastText}</span>}
-      </div>
+      {decisionNeeds ? (
+        <div className="mt-1 flex flex-col gap-1 text-[12px]">
+          {card.projectName && (
+            <div>
+              <span className="inline-block rounded bg-muted px-1.5 text-[11px] text-muted-foreground">
+                {card.projectName}
+              </span>
+            </div>
+          )}
+          <ul
+            data-enso="secretary-card-needs-user"
+            className="flex flex-col gap-0.5 text-foreground/90"
+          >
+            {decisionNeeds.map((item) => (
+              <li
+                key={item}
+                data-enso="secretary-card-needs-user-item"
+                title={item}
+                className={cn(
+                  'line-clamp-2 break-words',
+                  decisionNeeds.length > 1 &&
+                    'relative pl-3 before:absolute before:left-1 before:content-["·"] before:text-muted-foreground'
+                )}
+              >
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted px-1.5 text-[11px]">{card.projectName}</span>
+          {card.lastText && <span className="line-clamp-1">{card.lastText}</span>}
+        </div>
+      )}
       {(card.state === 'queued' || card.queueFailed) && (
         <div className="mt-2 flex flex-col gap-1.5">
           <p data-enso="secretary-queued-card" className="text-[12.5px] text-orange-600">
@@ -612,11 +664,16 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
   useEffect(() => {
     if (scope !== 'all') return;
     let alive = true;
-    void window.electronAPI.secretary.overview().then((result) => {
-      if (alive && result.ok) setOverviewBoards(result.boards);
-    });
+    const load = () => {
+      void window.electronAPI.secretary.overview().then((result) => {
+        if (alive && result.ok) setOverviewBoards(result.boards);
+      });
+    };
+    load();
+    const off = window.electronAPI.secretary.onStateChanged(load);
     return () => {
       alive = false;
+      off();
     };
   }, [scope]);
   const board = useMemo(() => {

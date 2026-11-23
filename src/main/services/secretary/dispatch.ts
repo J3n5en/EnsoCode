@@ -7,7 +7,7 @@ import {
   type UnavailableImage,
 } from '@shared/secretary/attachments';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
-import { hasNeedsUser } from '@shared/secretary/goalResult';
+import { hasNeedsUser, stripGoalResultNeedsUser } from '@shared/secretary/goalResult';
 import { probeImageView, readImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
@@ -750,6 +750,7 @@ async function noteDispatchResumed(
   // 不会被旧终态或旧的停滞标记去重掉。收掉的旧目标也随手动标记一起作废
   record.reopenedAt = now;
   delete record.lastResult;
+  delete record.goalResult;
   delete record.manualUndoneAt;
   delete record.closedGoal;
   delete record.stalledTurn;
@@ -2805,6 +2806,9 @@ export async function markResult(
         : 'result_dismiss_board';
   if (action === 'done') {
     record.lastResult = { kind: 'goal-complete', turn: record.turn, at: now, manual: true };
+    const cleanedGoalResult = stripGoalResultNeedsUser(record.goalResult);
+    if (cleanedGoalResult) record.goalResult = cleanedGoalResult;
+    else delete record.goalResult;
     if (record.lastState !== 'idle') record.stateSince = now;
     record.lastState = 'idle';
     delete record.stoppedAt;

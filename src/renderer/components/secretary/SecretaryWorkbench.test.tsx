@@ -152,6 +152,40 @@ describe('SecretaryWorkbench 结果卡', () => {
     await render(<SecretaryWorkbench name="小安" />);
     expect(container.querySelector('[data-enso="secretary-needs-you"]')).not.toBeNull();
     expect(dismissButton()).toBeNull();
+    const cardEl = container.querySelector('[data-enso="secretary-card"]');
+    expect(cardEl?.getAttribute('data-tone')).not.toBe('decision');
+    expect(cardEl?.textContent).toContain('[Waiting for you]');
+  });
+
+  it('goal-complete 且带 needsUser 的卡显示 needsUser 条目与非警示标签，不显示「目标完成」和正文噪声', async () => {
+    const longNeed = '请确认是否在宿主发版后合并并上架插件 #62，并同步更新仓库发布说明';
+    h.board = board([
+      sessionCard({
+        state: 'idle',
+        result: 'goal-complete',
+        lastText: '- | | PR 拆分方式 | 合并为 1 个 PR，内部按插件拆成 ...',
+        needsUser: ['是否合并上架 #62', longNeed],
+      }),
+    ]);
+    await render(<SecretaryWorkbench name="小安" />);
+    const cardEl = container.querySelector('[data-enso="secretary-card"]');
+    expect(cardEl).not.toBeNull();
+    expect(cardEl?.getAttribute('data-tone')).toBe('decision');
+    expect(cardEl?.className).not.toContain('border-warning');
+    expect(cardEl?.textContent).toContain('[Done · needs your decision]');
+    expect(cardEl?.textContent).not.toContain('[Goal complete]');
+    expect(cardEl?.textContent).not.toContain('PR 拆分方式');
+    const needItems = Array.from(
+      container.querySelectorAll('[data-enso="secretary-card-needs-user-item"]')
+    );
+    expect(needItems.map((el) => el.textContent)).toEqual(['是否合并上架 #62', longNeed]);
+    expect(needItems[1]?.getAttribute('title')).toBe(longNeed);
+    const button = dismissButton();
+    expect(button?.textContent).toBe('[Got it]');
+    act(() => {
+      (button as unknown as HTMLElement).click();
+    });
+    expect(h.calls).toContainEqual({ name: 'dismissResult', args: 'c1' });
   });
 
   it('「打开会话」跳过去后，目标会话给返回秘书', async () => {

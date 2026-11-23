@@ -46,6 +46,9 @@ type Feed = { tone: FeedTone; label: string };
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
+/** 目标已完成但结构化结果里仍有待用户拍板事项的卡片标签（i18n key） */
+export const DONE_NEEDS_USER_LABEL = 'Done · needs your decision';
+
 const RESULT_FEED: Record<SecretaryResultKind, Feed> = {
   'goal-complete': { tone: 'ok', label: 'Goal complete' },
   'turn-ended': { tone: 'ok', label: 'Turn ended' },
@@ -68,6 +71,13 @@ const STATE_FEED: Record<SessionCard['state'], Feed> = {
 /** 会话卡片对应的动态说明与发生时间：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */
 export function sessionFeed(card: SessionCard): Feed & { at: number } {
   if (card.continuing) return { tone: 'run', label: 'In progress', at: card.stateSince };
+  if (
+    card.result === 'goal-complete' &&
+    card.state !== 'running' &&
+    (card.needsUser?.length ?? 0) > 0
+  ) {
+    return { tone: 'ok', label: DONE_NEEDS_USER_LABEL, at: card.resultAt ?? card.stateSince };
+  }
   return card.result && card.state !== 'running'
     ? { ...RESULT_FEED[card.result], at: card.resultAt ?? card.stateSince }
     : { ...STATE_FEED[card.state], at: card.stateSince };
@@ -75,6 +85,8 @@ export function sessionFeed(card: SessionCard): Feed & { at: number } {
 
 function sessionEvent(card: SessionCard): FeedEvent {
   const feed = sessionFeed(card);
+  const detail =
+    card.needsUser && card.needsUser.length > 0 ? card.needsUser.join('；') : card.lastText;
   return {
     id: `session:${card.conversationId}`,
     at: feed.at,
@@ -82,7 +94,7 @@ function sessionEvent(card: SessionCard): FeedEvent {
     projectName: card.projectName,
     title: card.title,
     label: feed.label,
-    ...(card.lastText ? { detail: card.lastText } : {}),
+    ...(detail ? { detail } : {}),
     conversationId: card.conversationId,
     ...(card.state === 'running' ? { running: true } : {}),
   };
