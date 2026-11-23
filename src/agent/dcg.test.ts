@@ -324,11 +324,13 @@ describe('stripSafeTempSubpathDeletes 与 isTempSubpathExemptibleHit', () => {
     expect(stripSafeTempSubpathDeletes('bash', 'rm -rf /tmp/enso-verify-123')).toEqual({
       remaining: '',
     });
-    expect(stripSafeTempSubpathDeletes('bash', 'rm -rf "$TMPDIR/foo" && git reset --hard')).toEqual(
-      {
-        remaining: 'git reset --hard',
-      }
-    );
+    expect(
+      stripSafeTempSubpathDeletes('bash', 'rm -rf "$TMPDIR/foo" && git reset --hard', {
+        envTmpDir: '/var/folders/aa/bb/T',
+      })
+    ).toEqual({
+      remaining: 'git reset --hard',
+    });
     expect(
       stripSafeTempSubpathDeletes('powershell', 'Remove-Item "$env:TEMP\\my-dir" -Recurse -Force')
     ).toEqual({

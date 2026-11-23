@@ -1124,9 +1124,6 @@ describe('完全放行与临时目录守卫边界', () => {
     for (const command of [
       'rm -rf /tmp/enso-verify-123',
       'rm -rf /tmp/ohg-old && mkdir -p /tmp/ohg-old/dist\ncd /tmp && node probe-old.mjs',
-      'rm -rf "$TMPDIR/enso-verify-123"',
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 写法
-      'rm -rf "${TMPDIR}/sub/dir"',
     ]) {
       const { infos, execute, promise } = await runWith({
         mode: 'full',
@@ -1136,6 +1133,27 @@ describe('完全放行与临时目录守卫边界', () => {
       await promise;
       expect(infos, command).toHaveLength(0);
       expect(execute, command).toHaveBeenCalledOnce();
+    }
+
+    // 当运行环境设置了合法 TMPDIR 时，$TMPDIR/<具体子目录> 与 ${TMPDIR}/<具体子目录> 放行
+    vi.stubEnv('TMPDIR', '/var/folders/aa/bb/T');
+    try {
+      for (const command of [
+        'rm -rf "$TMPDIR/enso-verify-123"',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 写法
+        'rm -rf "${TMPDIR}/sub/dir"',
+      ]) {
+        const { infos, execute, promise } = await runWith({
+          mode: 'full',
+          command,
+          innerGuard: dcgRmGeneral,
+        });
+        await promise;
+        expect(infos, command).toHaveLength(0);
+        expect(execute, command).toHaveBeenCalledOnce();
+      }
+    } finally {
+      vi.unstubAllEnvs();
     }
 
     const sessionDir = '/var/folders/aa/bb/T/enso-session-temp-501/sess-1';
