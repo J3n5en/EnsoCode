@@ -8,7 +8,7 @@ export type ForkBranchEntry = {
   message?: { role: string };
 };
 
-/** 分叉叶子：从锚点扩到下一轮 user 之前（含本轮 assistant）。压缩点不扩。 */
+/** 分叉叶子：从锚点扩到下一轮 user 之前（含本轮 assistant），不带本轮末条之后才发生的压缩。压缩点不扩。 */
 export function resolveForkLeafId(
   branch: readonly ForkBranchEntry[],
   anchor: { entryId: string } | { userIndexFromEnd: number }
@@ -31,9 +31,18 @@ export function resolveForkLeafId(
   for (let i = start + 1; i < branch.length; i++) {
     const entry = branch[i];
     if (entry.type === 'message' && entry.message?.role === 'user') break;
+    if (entry.type === 'compaction' && !hasMessageBeforeUser(branch, i + 1)) break;
     leaf = i;
   }
   return branch[leaf]?.id;
+}
+
+function hasMessageBeforeUser(branch: readonly ForkBranchEntry[], from: number): boolean {
+  for (let i = from; i < branch.length; i++) {
+    if (branch[i].type !== 'message') continue;
+    return branch[i].message?.role !== 'user';
+  }
+  return false;
 }
 
 export function branchSessionAtLeaf(

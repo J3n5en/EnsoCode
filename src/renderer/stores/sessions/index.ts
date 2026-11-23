@@ -87,6 +87,7 @@ import { shouldFocusChildReservation } from './childReservationFocus';
 import {
   canWakeConversationForRewind,
   extractRewindDraft,
+  forkAnchorForTurnKey,
   forkDepth,
   MAX_FORK_DEPTH,
   resolveRewindTarget,
@@ -570,6 +571,8 @@ interface SessionsState {
   clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
   forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
+  /** 时间线轮末行分叉：按本轮 user entryId 定位（压缩前的早期轮次也可用） */
+  forkFromTurn(conversationId: string, turnKey: number): Promise<string | null>;
   /** 终态失败后不新增 user 消息，从当前上下文续跑 */
   retry(conversationId: string): void;
   /** 被应用退出打断的一轮：冷会话先唤醒，再从断点续跑（只续未完成的回合） */
@@ -4188,6 +4191,13 @@ export const useSessionsStore = create<SessionsState>()(
         async forkFromEntry(conversationId, entryId) {
           if (!(await wakeForFork(conversationId))) return null;
           return forkConversation(get, set, conversationId, { entryId });
+        },
+
+        async forkFromTurn(conversationId, turnKey) {
+          const conversation = get().conversations[conversationId];
+          const anchor = conversation && forkAnchorForTurnKey(conversation, turnKey);
+          if (!anchor || !(await wakeForFork(conversationId))) return null;
+          return forkConversation(get, set, conversationId, anchor);
         },
 
         retry(conversationId) {

@@ -121,7 +121,6 @@ import {
   canShowConversationRewind,
   forkDepth,
   resolveRewindConfirm,
-  userIndexFromEndForTurnKey,
 } from '@/stores/sessions/conversationRewind';
 import { canRequestWithdraw, canWithdrawMessage } from '@/stores/sessions/reducer';
 import { formatDuration, formatTokens } from '@/stores/sessions/stats';
@@ -1903,9 +1902,7 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
         const state = useSessionsStore.getState();
         const conversation = displayedConversation(state);
         if (!conversation) return;
-        const userIndexFromEnd = userIndexFromEndForTurnKey(conversation, messageIndex);
-        if (userIndexFromEnd === null) return;
-        void state.forkFromMessage(conversation.id, userIndexFromEnd);
+        void state.forkFromTurn(conversation.id, messageIndex);
       }}
     >
       <GitBranch className="h-3 w-3" />

@@ -173,19 +173,32 @@ export function userIndexFromEndForTimelineKey(
     .length;
 }
 
-/** 轮末行 key（绝对下标）回溯到本轮 user，再从末尾计数 */
-export function userIndexFromEndForTurnKey(
-  conversation: { messages: readonly { role: string }[]; historyBaseIndex?: number },
+/**
+ * 轮末行 key（绝对下标）→ 分叉锚点：优先本轮 user 的 entryId，压缩前的早期轮次与 worker 计数口径无关。
+ * user 无 entryId 或在未加载的更早页时，按其后 user 数从末尾定位，由 worker 校验。
+ */
+export function forkAnchorForTurnKey(
+  conversation: {
+    messages: readonly { role: string; entryId?: string; optimistic?: boolean }[];
+    historyBaseIndex?: number;
+  },
   absIndex: number
-): number | null {
+): { entryId: string } | { userIndexFromEnd: number } | null {
   if (!Number.isInteger(absIndex)) return null;
   const base = conversation.historyBaseIndex ?? 0;
-  for (let i = absIndex; i >= base; i--) {
-    if (conversation.messages[i - base]?.role === 'user') {
-      return userIndexFromEndForTimelineKey(conversation, i);
-    }
+  const local = absIndex - base;
+  if (local < 0 || local >= conversation.messages.length) return null;
+  const userIndexFromEnd = conversation.messages
+    .slice(local + 1)
+    .filter((message) => message.role === 'user').length;
+  for (let i = local; i >= 0; i--) {
+    const message = conversation.messages[i];
+    if (message.role !== 'user') continue;
+    return !message.optimistic && message.entryId
+      ? { entryId: message.entryId }
+      : { userIndexFromEnd };
   }
-  return null;
+  return base > 0 ? { userIndexFromEnd } : null;
 }
 
 /** 回退到倒数第 N+1 条 user：保留它之前的消息（不含该 user）。对不上返回 null。 */

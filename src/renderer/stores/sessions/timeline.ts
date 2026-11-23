@@ -995,11 +995,13 @@ function buildMessageTimeline(
   const items: TimelineItem[] = [];
   const spawnedAgents = new Map<string, string>();
   const subagentRuns = new Map<string, string>();
-  // 每条消息之后的首个非 toolResult 角色（反向一次扫完）：用于判定「本轮末 step」
+  // 每条消息之后的首个非 toolResult / 压缩摘要角色（反向一次扫完）：用于判定「本轮末 step」
   const nextTurnRole: (string | undefined)[] = new Array(messages.length);
   for (let i = messages.length - 1, seen: string | undefined; i >= 0; i--) {
     nextTurnRole[i] = seen;
-    if (!messages[i].optimistic && messages[i].role !== 'toolResult') seen = messages[i].role;
+    const role = messages[i].role;
+    if (!messages[i].optimistic && role !== 'toolResult' && role !== 'compactionSummary')
+      seen = role;
   }
   const lastUserMessageIndex = messages.findLastIndex((m) => m.role === 'user' && !m.optimistic);
   const lastMessageIndex = messages.findLastIndex((m) => !m.optimistic);

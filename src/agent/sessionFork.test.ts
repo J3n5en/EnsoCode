@@ -93,4 +93,25 @@ describe('resolveForkLeafId', () => {
     ];
     expect(resolveForkLeafId(branch(compacted), { entryId: 'c1' })).toBe('c1');
   });
+
+  it('多次压缩后从早期轮次分叉：止于该轮末条，不带上之后才发生的压缩', () => {
+    const history: ForkEntry[] = [
+      { id: 'u1', type: 'message', message: { role: 'user' } },
+      { id: 'a1', type: 'message', message: { role: 'assistant' } },
+      { id: 'c1', type: 'compaction' },
+      { id: 'u2', type: 'message', message: { role: 'user' } },
+      { id: 'a2', type: 'message', message: { role: 'assistant' } },
+      { id: 'c2', type: 'compaction' },
+      { id: 'a2-tail', type: 'message', message: { role: 'assistant' } },
+      { id: 'c3', type: 'compaction' },
+      { id: 'u3', type: 'message', message: { role: 'user' } },
+      { id: 'a3', type: 'message', message: { role: 'assistant' } },
+    ];
+    expect(resolveForkLeafId(branch(history), { entryId: 'u1' })).toBe('a1');
+    expect(resolveForkLeafId(branch(history), { userIndexFromEnd: 2 })).toBe('a1');
+    // 压缩切在轮中：该轮后半段仍属本轮，止于后半段末条
+    expect(resolveForkLeafId(branch(history), { entryId: 'u2' })).toBe('a2-tail');
+    expect(resolveForkLeafId(branch(history), { entryId: 'u3' })).toBe('a3');
+    expect(resolveForkLeafId(branch(history), { entryId: 'c1' })).toBe('c1');
+  });
 });
