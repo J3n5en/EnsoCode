@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
+import { installConsoleLog } from '@shared/appLogFile';
 import type { AppExitReason } from '@shared/types/ipc';
 import { DEFAULT_UPDATE_CHANNEL, isUpdateChannel } from '@shared/updater/channel';
 import { resolveAutoRestartMode } from '@shared/updater/idleRestart';
@@ -48,6 +49,7 @@ import {
 } from './services/agentHost';
 import { appendAgentWorkerExitLog } from './services/agentWorkerExit';
 import { allowAppQuit, setBeforeConfirmedQuit } from './services/appCloseConfirm';
+import { appLogFile } from './services/appLogs';
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { setUserDataDir } from './services/appPaths';
 import { attachAppQuitDrain } from './services/appQuitDrain';
@@ -143,6 +145,8 @@ app.setPath(
 );
 // 服务侧路径解析（模型目录等）不直接碰 Electron，统一从注入口取
 setUserDataDir(app.getPath('userData'));
+// 打包版 stdout 无人接收：console 同步落结构化滚动日志，供设置 → 日志汇总与导出
+installConsoleLog(appLogFile(app.getPath('userData'), 'main'), 'main');
 
 // 未启动 crashpad 时子进程 native 崩溃只剩 0xFFFF7003，真实异常码与现场全丢。
 // 只落本地 minidump（userData/Crashpad），不上传。

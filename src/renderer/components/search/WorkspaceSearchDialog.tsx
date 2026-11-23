@@ -88,6 +88,7 @@ const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   ssh: 'SSH',
   usage: 'Usage',
   resources: 'Resources',
+  logs: 'Logs',
   experimental: 'Experimental',
   bots: 'Bot mode',
   botTemplates: 'Bot templates',

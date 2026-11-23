@@ -1,3 +1,4 @@
+import type { AppLogEntry, LogExportResult, LogSummaryLevel } from '@shared/appLog';
 import type { BotTemplateLibrary } from '@shared/bots/templateLibrary';
 import type {
   BtwAbortRequest,
@@ -802,6 +803,14 @@ const electronAPI = {
     },
     sessionsCleanDone: (requestId: string, removed: number): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.RESOURCES_SESSIONS_CLEAN_DONE, requestId, removed),
+  },
+
+  logs: {
+    errors: (minLevel: LogSummaryLevel): Promise<AppLogEntry[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.LOGS_ERRORS, minLevel),
+    export: (hours: number): Promise<LogExportResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.LOGS_EXPORT, hours),
+    revealExport: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.LOGS_REVEAL_EXPORT),
   },
 
   memory: {
