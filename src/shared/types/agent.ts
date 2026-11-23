@@ -51,7 +51,7 @@ import {
   PLUGIN_AGENT_MAX_TIMEOUT_MS,
   PLUGIN_AGENT_PROMPT_MAX_CHARS,
   PLUGIN_AGENT_SYSTEM_MAX_CHARS,
-  PLUGIN_INJECT_MAX_CHARS,
+  PLUGIN_INJECT_WIRE_MAX_CHARS,
   PLUGIN_PROGRESS_MAX_CHARS,
   type PluginAgentRunEvent,
   type PluginAgentSource,
@@ -4490,7 +4490,7 @@ const agentCommandParsers = {
       isNonEmptyString(value.pluginName) &&
       value.pluginName.length <= 256 &&
       isNonEmptyString(value.text) &&
-      isBoundedText(value.text, PLUGIN_INJECT_MAX_CHARS) &&
+      isBoundedText(value.text, PLUGIN_INJECT_WIRE_MAX_CHARS) &&
       (value.deliverAs === 'steer' ||
         value.deliverAs === 'followUp' ||
         value.deliverAs === 'nextTurn') &&

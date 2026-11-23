@@ -35,7 +35,7 @@ export function buildPushPayload(
     sessionId?: string;
     identity?: { sessionId?: string };
     request?: Partial<ApprovalRequestInfo>;
-    ask?: { question?: string };
+    ask?: { question?: string; relay?: unknown };
   },
   sessionTitle: string | undefined,
   notifyMainAgentOnly = true,
@@ -45,6 +45,8 @@ export function buildPushPayload(
   // 代审中（reviewing）的审批可能由代审模型直接放行，不打扰真人；
   // 升级为等人决策时会以无 phase 的 approval-request 再发一次
   if (event.type === 'approval-request' && event.request?.phase === 'reviewing') return null;
+  // 转给秘书的提问由秘书处理，不打扰真人
+  if (event.type === 'ask-request' && event.ask?.relay) return null;
   const title = PUSH_TITLES[event.type];
   if (!title) return null;
   const sessionId = event.identity?.sessionId ?? event.sessionId;

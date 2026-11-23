@@ -7,7 +7,7 @@ import {
   parseInboundImageEntries,
   parseInboundImagePaths,
 } from './inboundImages';
-import { wrapUntrusted } from './transcript';
+import { unescapeUntrusted, wrapUntrusted } from './transcript';
 
 /**
  * 所有入站渠道只从这里包一次：手机发来的话进秘书会话前统一成
@@ -172,7 +172,7 @@ function unwrapOnce(text: string): string {
   if (close !== -1) {
     body = `${body.slice(0, close)}${body.slice(close + '</untrusted-content>'.length)}`;
   }
-  return body.split('<\\/untrusted-content').join('</untrusted-content');
+  return unescapeUntrusted(body);
 }
 
 export function wrapInboundMessage(
@@ -237,7 +237,7 @@ export function parseInboundMessage(text: string): InboundMessage | null {
     ...(username ? { username } : {}),
     ...(hours && minutes ? { time: `${hours}:${minutes}` } : {}),
     // 包裹时把闭合标签转义过，展示时还原成用户真正打的字
-    body: body.split('<\\/untrusted-content').join('</untrusted-content'),
+    body: unescapeUntrusted(body),
     ...(images.length ? { images } : {}),
     ...(entries?.length ? { imageLines: entries } : {}),
   };

@@ -1,7 +1,8 @@
 import type { AskRequestInfo } from '@shared/types/agent';
 import { ChevronRight, MessageCircleQuestion, Send } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { askFocusMove, askFocusStart, askOptionShortcut } from './askOptions';
 import { RequestCountdown, useRemainingMs } from './RequestCountdown';
 
@@ -18,8 +19,11 @@ interface AskBarProps {
 export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBarProps) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
+  const questionRef = useRef<HTMLSpanElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [text, setText] = useState('');
+  // 正文没滚到底时底部渐隐，提示还有内容
+  const [moreBelow, setMoreBelow] = useState(false);
   const [responding, setResponding] = useState<string | null>(null);
   const [later, setLater] = useState<ReadonlySet<string>>(() => new Set());
   // 已收尾的转交提问只留一行状态，不再占提问条
@@ -44,6 +48,20 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
     if (options && start < options.length && option) option.focus();
     else inputRef.current?.focus();
   }, [autoFocus, requestId, folded]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 正文节点随换提问或展开重挂
+  useLayoutEffect(() => {
+    const body = questionRef.current;
+    if (!body) return;
+    const update = () => setMoreBelow(body.scrollHeight - body.scrollTop - body.clientHeight > 1);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(body);
+    body.addEventListener('scroll', update, { passive: true });
+    return () => {
+      observer.disconnect();
+      body.removeEventListener('scroll', update);
+    };
+  }, [requestId, folded]);
   if (!active) return settled.length > 0 ? <SettledAsks asks={settled} /> : null;
   const disabled =
     responding === active.requestId || (remainingMs !== undefined && remainingMs <= 0);
@@ -88,7 +106,7 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
       <SettledAsks asks={settled} />
       <div
         data-enso="ask"
-        className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2"
+        className="mb-1 flex max-h-[60dvh] min-h-0 flex-col rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2"
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || disabled) return;
           if (event.key === 'Escape') {
@@ -139,9 +157,17 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
           }
         }}
       >
-        <div className="flex items-start gap-2">
+        <div className="flex min-h-5 items-start gap-2">
           <MessageCircleQuestion className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
-          <span className="min-w-0 flex-1 text-xs leading-relaxed whitespace-pre-wrap">
+          <span
+            ref={questionRef}
+            data-enso="ask-question"
+            className={cn(
+              'min-w-0 flex-1 self-stretch overflow-y-auto overscroll-contain text-xs leading-relaxed whitespace-pre-wrap',
+              moreBelow &&
+                '[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)]'
+            )}
+          >
             {active.question}
           </span>
           {active.relay && (
@@ -167,7 +193,10 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
           )}
         </div>
         {options && options.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1.5">
+          <div
+            data-enso="ask-options"
+            className="mt-2 flex max-h-[30dvh] shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain"
+          >
             {options.map((option, index) => {
               const shortcut = askOptionShortcut(index);
               return (
@@ -197,7 +226,7 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
             })}
           </div>
         )}
-        <div className="mt-2 flex items-center gap-1.5">
+        <div className="mt-2 flex shrink-0 items-center gap-1.5">
           <input
             ref={inputRef}
             value={text}

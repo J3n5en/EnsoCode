@@ -4,6 +4,8 @@ import type { PluginEventName } from './events';
 
 /** 注入消息与工具进度的字符上限；gate、Main、worker 共用 */
 export const PLUGIN_INJECT_MAX_CHARS = 32 * 1024;
+/** 宿主包上不可信包裹（含转义）后送进 worker 的上限：正文上限再留出余量 */
+export const PLUGIN_INJECT_WIRE_MAX_CHARS = PLUGIN_INJECT_MAX_CHARS + 4 * 1024;
 export const PLUGIN_PROGRESS_MAX_CHARS = 16 * 1024;
 /** 注入消息可附带的图片：数量与单张 base64 长度上限 */
 export const PLUGIN_INJECT_MAX_IMAGES = 4;
@@ -223,7 +225,7 @@ export const PLUGIN_HOST_APIS = [
   'tool.progress',
   /** 写一份产出文件；args { name, text | base64, mime? }，返回 { id, name, size, mime } */
   'artifact.write',
-  /** 向会话注入消息；args { sessionId?, text, images?, deliverAs?, triggerTurn? } */
+  /** 向会话注入消息；args { sessionId?, text, images?, deliverAs?, triggerTurn?, trusted? } */
   'session.inject',
   /** 中止会话当前一轮；args { sessionId? }，权限同 session.inject */
   'session.abort',

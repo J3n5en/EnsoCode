@@ -648,7 +648,7 @@ export function MessageTimeline({
       <ToolHoldProvider value={toolHold.current}>
         <div
           data-enso="timeline"
-          className="@container relative min-h-0 flex-1"
+          className="@container relative min-h-24 flex-1"
           onWheel={markUserScroll}
           onKeyDown={markUserScroll}
           onTouchStart={(e) => {
