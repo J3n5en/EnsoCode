@@ -1,6 +1,7 @@
 import { readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { conversationCwd } from '@shared/conversationCwd';
+import { removeSessionTempDir } from '../../agent/sessionTempDir';
 import { removeChildRuns } from './childRunCatalog';
 import { removePastedTextFiles } from './pastedTextFiles';
 
@@ -10,6 +11,8 @@ export interface RemoveConversationSessionFilesOptions {
   sessionFile?: string;
   /** scratch 会话的根目录；只删除其中 `<id>` 这一层，非法 id 或越界不删 */
   scratchRoot?: string;
+  /** 系统 Temp 目录（默认 os.tmpdir()）；只删其下 `enso/<id>` 会话临时目录 */
+  systemTemp?: string;
 }
 
 /**
@@ -82,6 +85,7 @@ export function removeConversationSessionFiles(
     } catch {}
   }
   if (options.scratchRoot) removeScratchWorkspace(options.scratchRoot, options.conversationId);
+  removeSessionTempDir(id, options.systemTemp);
 }
 
 /** 只删 scratch 根下 `<会话 id>` 这一层；id 非法时什么都不删 */

@@ -90,6 +90,8 @@ export interface ExtensionPluginMarketEntry {
   latest: string;
   permissions: string[];
   installedVersion?: string;
+  /** 等用户同意的更新版本（扩大授权的更新已暂存） */
+  pendingVersion?: string;
   updateAvailable: boolean;
 }
 
@@ -139,6 +141,8 @@ export interface ExtensionPluginInstallPreview {
   hasRenderer: boolean;
   warnings: string[];
   existingVersion?: string;
+  /** 更新时：相对已同意授权新增的权限 */
+  addedPermissions?: ExtensionPluginPermission[];
   /** 相对已同意的授权是否扩大；新安装恒为 true */
   expands: boolean;
 }

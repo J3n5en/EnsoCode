@@ -22,6 +22,12 @@ export interface DcgRuleState {
   suggestExempt: boolean;
 }
 
+export interface DcgRuleExemption {
+  ruleId: string;
+  dcgVersion: string;
+  at: number;
+}
+
 /** deny / ask 进审批链；warn 只提示不拦 */
 export const DCG_GUARD_DECISIONS = ['deny', 'ask', 'warn'] as const;
 export type DcgGuardDecision = (typeof DCG_GUARD_DECISIONS)[number];

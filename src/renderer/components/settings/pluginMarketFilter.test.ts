@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterMarketPlugins, marketSections } from './pluginMarketFilter';
+import { filterMarketPlugins, marketInstallAction, marketSections } from './pluginMarketFilter';
 
 const item = (over: Record<string, unknown>) => ({
   id: 'x.y',
@@ -71,5 +71,33 @@ describe('filterMarketPlugins', () => {
       filterMarketPlugins(plugins, { query: '', section: 'updates' }).map((p) => p.id)
     ).toEqual(['a.theme']);
     expect(filterMarketPlugins(plugins, { query: 'notes', section: 'themes' })).toEqual([]);
+  });
+});
+
+describe('marketInstallAction', () => {
+  const entry = (over: Record<string, unknown>) => ({
+    latest: '2.0.0',
+    updateAvailable: false,
+    ...over,
+  });
+  it('未装可装、已是最新、有新版可更新', () => {
+    expect(marketInstallAction(entry({}))).toBe('install');
+    expect(marketInstallAction(entry({ installedVersion: '2.0.0' }))).toBe('installed');
+    expect(marketInstallAction(entry({ installedVersion: '1.0.0', updateAvailable: true }))).toBe(
+      'update'
+    );
+  });
+
+  it('最新版已在等授权时不再给更新按钮；更新的版本出来后照常可更新', () => {
+    expect(
+      marketInstallAction(
+        entry({ installedVersion: '1.0.0', updateAvailable: true, pendingVersion: '2.0.0' })
+      )
+    ).toBe('pending');
+    expect(
+      marketInstallAction(
+        entry({ installedVersion: '1.0.0', updateAvailable: true, pendingVersion: '1.5.0' })
+      )
+    ).toBe('update');
   });
 });

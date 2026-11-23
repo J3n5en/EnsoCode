@@ -99,9 +99,11 @@ function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
   const { t, locale } = useI18n();
   const [rule, setRule] = useState<{ ruleId: string; state: DcgRuleState } | null>(null);
   const warn = guard.decision === 'warn';
+  const [confirming, setConfirming] = useState(false);
   useEffect(() => {
     if (warn) return;
     let alive = true;
+    setConfirming(false);
     void dcgApi()
       ?.ruleState(guard.ruleId)
       .then((state) => {
@@ -115,6 +117,7 @@ function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
   const state = rule?.ruleId === guard.ruleId ? rule.state : null;
   const explained = locale === 'zh' ? explainDcgGuard(guard) : { what: guard.reason };
   const exempt = () => {
+    setConfirming(false);
     void dcgApi()
       ?.ruleExempt(guard.ruleId)
       .then((next) => {
@@ -158,15 +161,49 @@ function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
         </details>
       )}
       {state?.suggestExempt && (
-        <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-          <span>
-            {t('You have allowed this rule {{count}} times. Allow it automatically from now on?', {
-              count: state.allowCount,
-            })}
-          </span>
-          <button type="button" onClick={exempt} className="underline underline-offset-2">
-            {t('Always allow this rule')}
-          </button>
+        <div className="flex flex-wrap items-center gap-2 text-amber-600 dark:text-amber-400">
+          {confirming ? (
+            <>
+              <span>
+                {t(
+                  'Allow "{{rule}}" automatically in new conversations? You can revoke this anytime in Settings.',
+                  { rule: guard.ruleId }
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={exempt}
+                className="font-medium underline underline-offset-2"
+              >
+                {t('Confirm exemption')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="text-muted-foreground underline underline-offset-2"
+              >
+                {t('Cancel')}
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {t(
+                  'You have allowed this rule {{count}} times. Allow it automatically from now on?',
+                  {
+                    count: state.allowCount,
+                  }
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="underline underline-offset-2"
+              >
+                {t('Always allow this rule')}
+              </button>
+            </>
+          )}
         </div>
       )}
       {state?.exempt && (
@@ -213,7 +250,12 @@ export function ApprovalBar({
   const respond = (decision: ApprovalDecision) => {
     // 代审可能原卡退回，不能把按钮锁死
     if (decision !== 'review') setResponding(active.requestId);
-    if (decision === 'allow' && active.guard && active.guard.decision !== 'warn')
+    if (
+      decision === 'allow' &&
+      active.guard &&
+      active.guard.decision !== 'warn' &&
+      !active.guard.ruleId.startsWith('enso.')
+    )
       void dcgApi()
         ?.ruleAllowed(active.guard.ruleId)
         .catch(() => {});
@@ -257,7 +299,14 @@ export function ApprovalBar({
           {t(REVIEW_FALLBACK_LABELS[active.reviewFallback])}
         </p>
       )}
-      {active.guard && <DcgGuardDetail guard={active.guard} />}
+      {active.guard &&
+        (active.guard.ruleId.startsWith('enso.') ? (
+          <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
+            {t(active.guard.reason)}
+          </p>
+        ) : (
+          <DcgGuardDetail guard={active.guard} />
+        ))}
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       {!reviewing && (
         <div className="mt-2 flex items-center justify-end gap-1.5">

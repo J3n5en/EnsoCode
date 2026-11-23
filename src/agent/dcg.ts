@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { isDcgRuleExemptible } from '@shared/dcgRuleMemory';
 import {
   DCG_EXPLANATION_MAX,
   DCG_GUARD_DECISIONS,
@@ -73,11 +74,52 @@ export function withDcgExemptions(
   guard: CommandGuard,
   exemptRules: readonly string[]
 ): CommandGuard {
-  if (exemptRules.length === 0) return guard;
-  const exempt = new Set(exemptRules);
+  const allowed = exemptRules.filter(isDcgRuleExemptible);
+  if (allowed.length === 0) return guard;
+  const exempt = new Set(allowed);
   return async (tool, command, signal) => {
     const hit = await guard(tool, command, signal);
     return hit && exempt.has(hit.ruleId) ? null : hit;
+  };
+}
+
+export const TEMP_ROOT_RULE_ID = 'enso.windows:temp-root-delete';
+export const TEMP_ROOT_REASON =
+  'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.';
+
+const TEMP_TOKEN = [
+  String.raw`\$env:(?:TEMP|TMP)`,
+  String.raw`\$\{env:(?:TEMP|TMP)\}`,
+  '%(?:TEMP|TMP)%',
+  String.raw`(?:\$env:LOCALAPPDATA|\$\{env:LOCALAPPDATA\}|%LOCALAPPDATA%)[\\/]+Temp`,
+  String.raw`(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|[A-Z]:[\\/]+Users[\\/]+[^\\/\s'"]+)[\\/]+AppData[\\/]+Local[\\/]+Temp`,
+  String.raw`[A-Z]:[\\/]+Windows[\\/]+Temp`,
+  String.raw`\[(?:System\.)?IO\.Path\]::GetTempPath\(\)`,
+  // macOS / Linux：/tmp、/var/tmp、/private/tmp 与 $TMPDIR；./tmp、build/tmp 这类项目内路径不算
+  String.raw`(?<![\w.~$/-])(?:/private)?(?:/var)?/tmp`,
+  String.raw`\$\{?TMPDIR\}?`,
+].join('|');
+const PATH_STOP = String.raw`\s'"\x60;|,)&}`;
+/** Temp 根本身或根下带通配的一层（`\*`、`\*.tmp`、`tmp*`）；后面跟具体子目录名的不算 */
+const TEMP_ROOT_REF = new RegExp(
+  String.raw`(?:${TEMP_TOKEN})(?:[\\/]+(?:[^\\/${PATH_STOP}]*[*?][^\\/${PATH_STOP}]*)?)?(?=$|[${PATH_STOP}*])`,
+  'i'
+);
+const DELETE_VERB =
+  /(?:^|[\s;|&({'"])(?:Remove-Item|ri|rm|rmdir|rd|del|erase)(?=\s|$)|\.Delete\s*\(/i;
+
+/** 命令里有删除动作且引用了系统 Temp 根：全系统共用目录，误删会伤到别的程序 */
+export function deletesTempRoot(command: string): boolean {
+  return DELETE_VERB.test(command) && TEMP_ROOT_REF.test(command);
+}
+
+/** 内置 Temp 根删除规则先于 dcg 判定；未安装 dcg 时同样生效 */
+export function withTempRootGuard(inner: CommandGuard | undefined): CommandGuard {
+  return (tool, command, signal) => {
+    if (dcgDialect(tool) && deletesTempRoot(command)) {
+      return Promise.resolve({ ruleId: TEMP_ROOT_RULE_ID, reason: TEMP_ROOT_REASON });
+    }
+    return inner ? inner(tool, command, signal) : Promise.resolve(null);
   };
 }
 

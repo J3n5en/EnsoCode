@@ -230,9 +230,20 @@ import type {
   DesignTopLeftRect,
   DesignXyRect,
 } from '@shared/types/browser';
-import type { DcgActionResult, DcgRuleState, DcgStatus, DcgUpdateCheck } from '@shared/types/dcg';
+import type {
+  DcgActionResult,
+  DcgRuleExemption,
+  DcgRuleState,
+  DcgStatus,
+  DcgUpdateCheck,
+} from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
-import { IPC_CHANNELS, type RestartBlocker, type RestartOverlayState } from '@shared/types/ipc';
+import {
+  IPC_CHANNELS,
+  type OpenDevToolsResult,
+  type RestartBlocker,
+  type RestartOverlayState,
+} from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -907,6 +918,10 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_ALLOWED, ruleId),
     ruleExempt: (ruleId: string): Promise<DcgRuleState | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_EXEMPT, ruleId),
+    ruleRevoke: (ruleId: string): Promise<DcgRuleExemption[] | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_RULE_REVOKE, ruleId),
+    listExemptions: (): Promise<DcgRuleExemption[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_LIST),
     clearExemptions: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.DCG_EXEMPTIONS_CLEAR),
   },
 
@@ -1766,6 +1781,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_REFRESH_DRAG_REGIONS),
     openSettings: (link?: SettingsDeepLink): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, link),
+    openDevTools: (): Promise<OpenDevToolsResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_DEV_TOOLS),
     onToggleSidebar: (callback: () => void): (() => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);

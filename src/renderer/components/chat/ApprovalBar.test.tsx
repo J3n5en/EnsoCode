@@ -90,6 +90,17 @@ describe('ApprovalBar dcg 规则解释', () => {
     expect(warn).toContain('dcg notice: ');
     expect(warn).not.toContain('dcg: ');
   });
+
+  it('内置守卫规则直接显示原因，dcg 规则保留 dcg 前缀', () => {
+    const reason = 'Deletes in the shared system Temp folder root.';
+    const enso = render([
+      { ...request, guard: { ruleId: 'enso.windows:temp-root-delete', reason } },
+    ]);
+    expect(enso).toContain(reason);
+    expect(enso).not.toContain('dcg: ');
+    const dcg = render([{ ...request, guard: { ruleId: 'core.git:reset-hard', reason: 'x' } }]);
+    expect(dcg).toContain('dcg: ');
+  });
 });
 
 describe('ApprovalBar 复制详情', () => {
@@ -191,5 +202,39 @@ describe('ApprovalBar 队首切换', () => {
     await mount([next]);
     expect(container.querySelector('.shiki')).toBeNull();
     expect(container.querySelector('pre')?.textContent).toBe('rm -rf build');
+  });
+
+  it('记忆豁免需要用户二次确认才生效，单击提示不会直接豁免', async () => {
+    const ruleState = vi
+      .fn()
+      .mockResolvedValue({ allowCount: 5, exempt: false, suggestExempt: true });
+    const ruleExempt = vi
+      .fn()
+      .mockResolvedValue({ allowCount: 5, exempt: true, suggestExempt: false });
+    Object.assign(window, {
+      electronAPI: {
+        dcg: { ruleState, ruleExempt, ruleAllowed: vi.fn().mockResolvedValue(null) },
+      },
+    });
+    await mount([
+      {
+        ...request,
+        summary: 'git reset --hard',
+        protected: 'destructive',
+        guard: { ruleId: 'core.git:reset-hard', reason: 'r' },
+      },
+    ]);
+    const askBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Always allow this rule')
+    );
+    expect(askBtn).toBeDefined();
+    await act(async () => askBtn?.click());
+    expect(ruleExempt).not.toHaveBeenCalled();
+    const confirmBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Confirm exemption')
+    );
+    expect(confirmBtn).toBeDefined();
+    await act(async () => confirmBtn?.click());
+    expect(ruleExempt).toHaveBeenCalledWith('core.git:reset-hard');
   });
 });
