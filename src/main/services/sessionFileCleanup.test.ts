@@ -164,6 +164,21 @@ describe('removeConversationSessionFiles', () => {
     expect(existsSync(path.join(scratchRoot, 'keep.txt'))).toBe(true);
   });
 
+  it('删除会话时连带删除系统 Temp 下的会话专属临时目录，不碰 Temp 根与其他会话', () => {
+    const systemTemp = path.join(root, 'Temp');
+    const own = path.join(systemTemp, 'enso', CONVERSATION_ID);
+    const other = path.join(systemTemp, 'enso', '22222222-2222-4222-8222-222222222222');
+    mkdirSync(path.join(own, 'cw-a'), { recursive: true });
+    mkdirSync(other, { recursive: true });
+    writeFileSync(path.join(systemTemp, 'foreign.txt'), 'x');
+
+    removeConversationSessionFiles({ sessionDir, conversationId: CONVERSATION_ID, systemTemp });
+
+    expect(existsSync(own)).toBe(false);
+    expect(existsSync(other)).toBe(true);
+    expect(existsSync(path.join(systemTemp, 'foreign.txt'))).toBe(true);
+  });
+
   it('删除父会话时连带删除 catalog 登记的普通子 pi jsonl', () => {
     const childFile = path.join(sessionDir, '2026-08-29T00-00-00-000Z_child.jsonl');
     const otherChild = path.join(sessionDir, '2026-08-29T00-00-00-000Z_other-child.jsonl');
