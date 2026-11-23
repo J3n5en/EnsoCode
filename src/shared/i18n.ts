@@ -2871,6 +2871,24 @@ export const zhTranslations: Record<string, string> = {
   'When off, this project uses its own explicit Agent mode permission mask.':
     '关闭后，此项目使用自己明确配置的 Agent 模式权限掩码。',
   Resources: '资源',
+  'Recent errors and log export. API keys, tokens and passwords are masked.':
+    '最近的错误与日志导出。API Key、Token、密码等已脱敏。',
+  'Recent errors': '最近错误',
+  'Errors only': '仅错误',
+  'Warnings and errors': '警告及以上',
+  'No errors recorded.': '暂无错误记录。',
+  'Agent worker': 'Agent 进程',
+  'Export logs': '导出日志',
+  'Pack logs from the selected period into a zip file for troubleshooting.':
+    '把所选时间段内的日志打包成 zip，便于排查问题。',
+  'Time range': '时间范围',
+  'Last hour': '最近 1 小时',
+  'Last 6 hours': '最近 6 小时',
+  'Last 24 hours': '最近 24 小时',
+  'Last 3 days': '最近 3 天',
+  'Exporting...': '导出中...',
+  'Logs exported': '日志已导出',
+  'Log export failed': '日志导出失败',
   'CPU, memory and disk usage of EnsoCode and the processes it started.':
     'EnsoCode 及其启动的进程占用的 CPU、内存和磁盘。',
   RAM: '内存',

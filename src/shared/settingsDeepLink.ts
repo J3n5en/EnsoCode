@@ -20,6 +20,7 @@ export const SETTINGS_CATEGORIES = [
   'ssh',
   'usage',
   'resources',
+  'logs',
   'experimental',
   'bots',
   'botTemplates',

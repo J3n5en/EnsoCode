@@ -210,6 +210,11 @@ export const IPC_CHANNELS = {
   RESOURCES_SESSIONS_CLEAN_REQUEST: 'resources:sessions-clean-request',
   RESOURCES_SESSIONS_CLEAN_DONE: 'resources:sessions-clean-done',
 
+  // 设置 → 日志
+  LOGS_ERRORS: 'logs:errors',
+  LOGS_EXPORT: 'logs:export',
+  LOGS_REVEAL_EXPORT: 'logs:reveal-export',
+
   // 记忆管理
   MEMORY_LIST: 'memory:list',
   MEMORY_DETAIL: 'memory:detail',
