@@ -93,6 +93,7 @@ import { parseProviderHeaders } from '../providers/providerHeaders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
 import { parseSecretaryToolDescriptors } from '../secretary/customTools';
+import { type GoalResult, parseGoalResult } from '../secretary/goalResult';
 import { SECRETARY_INTERNAL_OPS, SECRETARY_OPS, type SecretaryInvokeOp } from '../secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
@@ -2374,6 +2375,8 @@ export type AgentWorkerEvent =
       seq: number;
       kind: 'complete' | 'blocked' | 'wait';
       note: string;
+      /** goal_complete 的结构化结果；非法值在解析时丢掉，不拒事件 */
+      result?: GoalResult;
     }
   | { type: 'plan-state'; identity: SessionIdentity; seq: number; state: PlanState }
   | {
@@ -5436,10 +5439,20 @@ const agentWorkerEventParsers = {
   'goal-signal': requireEventIdentity(
     'any',
     (value: Record<string, unknown>): AgentWorkerEvent | null => {
-      return (value.kind === 'complete' || value.kind === 'blocked' || value.kind === 'wait') &&
-        typeof value.note === 'string'
-        ? (value as unknown as AgentWorkerEvent)
-        : null;
+      if (
+        (value.kind !== 'complete' && value.kind !== 'blocked' && value.kind !== 'wait') ||
+        typeof value.note !== 'string'
+      ) {
+        return null;
+      }
+      if (!('result' in value)) return value as unknown as AgentWorkerEvent;
+      const parsed = parseGoalResult(value.result);
+      if (!parsed.ok) {
+        const rest = { ...value };
+        delete rest.result;
+        return rest as unknown as AgentWorkerEvent;
+      }
+      return { ...value, result: parsed.value } as unknown as AgentWorkerEvent;
     }
   ),
   'plan-state': requireEventIdentity(

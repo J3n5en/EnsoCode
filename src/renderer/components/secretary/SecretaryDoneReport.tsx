@@ -10,6 +10,7 @@ import { Markdown } from '@/components/chat/Markdown';
 import { ZoomableImage } from '@/components/chat/ZoomableImage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { GoalResultFacts } from './GoalResultFacts';
 
 const PR_STATE = { OPEN: 'PR open', MERGED: 'PR merged', CLOSED: 'PR closed' } as const;
 const SECTION_TITLE = 'mb-1.5 text-[12px] font-medium text-muted-foreground';
@@ -132,6 +133,7 @@ export function SecretaryDoneReport({
               )}
             </div>
           )}
+          {report?.goalResult && <GoalResultFacts view={report.goalResult} detail />}
           {text ? (
             <div data-enso="done-report-text" className="min-w-0 text-[13px]">
               <Markdown text={reportTextForView(text)} />

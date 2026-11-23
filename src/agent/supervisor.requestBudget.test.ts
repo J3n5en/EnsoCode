@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { RESTART_CHECKPOINT_FILE } from '@shared/gracefulRestart';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -432,6 +433,37 @@ describe('SessionSupervisor 子代理请求预算', () => {
       expect.objectContaining({ turnId: 'run-1', aborted: true }),
     ]);
     await supervisor.shutdown();
+  });
+
+  it('等安全点超时、收尾中止子代理回复：不发这个 Run 的回合结局，断点照样记下子会话', async () => {
+    const restartDir = mkdtempSync(path.join(tmpdir(), 'enso-restart-child-abort-'));
+    try {
+      const { events, supervisor, worker } = await spawnChild(restartDir);
+      promptRun(supervisor, 'run-1');
+      await settle();
+      worker.emit({ type: 'agent_start' });
+      request(worker, toolCall(1));
+      supervisor.handleCommand({ type: 'graceful-restart' });
+      worker.abort.mockImplementation(async () => {
+        request(worker, { content: [], stopReason: 'aborted' });
+        endRound(worker);
+      });
+      await supervisor.shutdown();
+      await settle();
+      // 发了的话 Main 会把被打断的 Run 记成已完成，重启后既不续跑也认不出它（restart-lost）
+      const ofRun = events.filter(
+        (event) =>
+          (event.type === 'turn-completed' || event.type === 'turn-failed') &&
+          (event.turnId === 'run-1' || event.continues === 'run-1')
+      );
+      expect(ofRun).toEqual([]);
+      const checkpoint = JSON.parse(
+        readFileSync(path.join(restartDir, RESTART_CHECKPOINT_FILE), 'utf8')
+      ) as { sessions: Array<{ sessionId: string }> };
+      expect(checkpoint.sessions.map((entry) => entry.sessionId)).toContain(child.sessionId);
+    } finally {
+      rmSync(restartDir, { recursive: true, force: true });
+    }
   });
 
   it('Run 结束后用户自己在 coworker 里发起的回合不计数', async () => {
