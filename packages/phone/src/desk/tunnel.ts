@@ -57,6 +57,8 @@ interface Slot {
   /** 宿主帧按 seq 顺序应用；缺口久未补齐则重新 hello 让宿主补发 */
   stream: ReturnType<typeof createRemoteOrderedStream<Sequenced>>;
   gapTimer: ReturnType<typeof setTimeout> | null;
+  /** 当前缺口从何时开始（诊断） */
+  gapAt?: number;
   listeners: Map<string, Set<(payload: string) => void>>;
   /** 宿主已丢失该 renderer（重启/缓冲溢出/超时）：壳重载对应 iframe */
   onReset: () => void;
@@ -80,6 +82,8 @@ const MAX_RECENT_SENDS = 200;
 const WATCH_MS = 2_000;
 /** 每收这么多分片字节回报一次，宿主据此放行下一段（窗口 512KB） */
 const ACK_STEP = 128 * 1024;
+/** 请求超过这么久才回来记进诊断 */
+const SLOW_INVOKE_MS = 1_000;
 const CAN_GUNZIP = typeof DecompressionStream === 'function';
 
 /** 桌面模式不用手机版的会话缓存：连接前读 IndexedDB 里的全部会话正文只会拖慢启动 */
@@ -124,6 +128,14 @@ export class DeskTunnel {
   private readOnly = false;
   /** 本次页面加载：宿主据此回收旧页面遗留的 renderer */
   private readonly page = crypto.randomUUID();
+  /** 链路诊断：缺口、重新 hello、换链等关键时刻（壳挂到 window.__deskTrace，排查卡顿用） */
+  readonly trace: string[] = [];
+  readonly bornAt = Date.now();
+
+  note(text: string): void {
+    this.trace.push(`${Date.now() - this.bornAt} ${text}`);
+    if (this.trace.length > 300) this.trace.splice(0, this.trace.length - 300);
+  }
 
   constructor(
     device: PairedDevice,
@@ -141,6 +153,7 @@ export class DeskTunnel {
         onSession() {},
         onRemoteFrame: (frame) => this.receive(frame),
         onTransport: (transport) => {
+          this.note(`transport ${transport}`);
           this.link.onTransport?.(transport);
           // 切通道瞬间旧通道上的帧可能丢：立即按 seq 补，不等缺口或未决请求超时
           if (this.online) this.resync();
@@ -177,6 +190,7 @@ export class DeskTunnel {
     setInterval(() => this.watch(), WATCH_MS);
     const visible = () => document.visibilityState === 'visible';
     document.addEventListener('visibilitychange', () => {
+      this.note(document.visibilityState);
       if (visible()) client.nudge('visibility');
       else client.conceal();
       client.send({ type: 'presence', visible: visible() });
@@ -199,6 +213,7 @@ export class DeskTunnel {
   }
 
   private setState(state: ConnState): void {
+    this.note(`state ${state}`);
     this.onState(state);
     const was = this.online;
     this.online = state === 'online';
@@ -247,6 +262,7 @@ export class DeskTunnel {
           continue;
         if (!acked) this.ack();
         acked = true;
+        this.note(`rehello-watch ${slot.cid.slice(0, 4)} ready=${slot.ready}`);
         this.hello(slot);
       }
     }
@@ -303,9 +319,15 @@ export class DeskTunnel {
       return;
     }
     if (!slot.stream.gap) {
+      if (slot.gapAt !== undefined) {
+        this.note(`gap-closed ${slot.cid.slice(0, 4)} ${Date.now() - slot.gapAt}ms`);
+        slot.gapAt = undefined;
+      }
       if (slot.gapTimer) clearTimeout(slot.gapTimer);
       slot.gapTimer = null;
     } else if (!slot.gapTimer) {
+      slot.gapAt ??= Date.now();
+      this.note(`gap ${slot.cid.slice(0, 4)} applied=${slot.stream.applied} got=${frame.seq}`);
       this.watchGap(slot, Date.now());
     }
   }
@@ -320,6 +342,7 @@ export class DeskTunnel {
         this.watchGap(slot, since);
         return;
       }
+      this.note(`rehello-gap ${slot.cid.slice(0, 4)} applied=${slot.stream.applied}`);
       if (this.online) this.hello(slot);
       this.watchGap(slot, Date.now());
     }, delay);
@@ -327,6 +350,7 @@ export class DeskTunnel {
 
   /** 无法续上：通知宿主释放旧 renderer（否则它仍算在线主界面），重载 iframe 以新 cid 接入 */
   private reset(slot: Slot): void {
+    this.note(`reset ${slot.cid.slice(0, 4)}`);
     this.drop(slot, 'remote-session-lost');
     this.slots.delete(slot.cid);
     if (this.online) this.post({ type: 'rpc-bye', cid: slot.cid });
@@ -338,7 +362,13 @@ export class DeskTunnel {
       const pending = slot.pending.get(frame.id);
       if (!pending) return;
       slot.pending.delete(frame.id);
-      if (frame.ok) pending.resolve(JSON.stringify(frame.data ?? null));
+      const elapsed = Date.now() - pending.at;
+      const result = frame.ok ? JSON.stringify(frame.data ?? null) : '';
+      if (elapsed >= SLOW_INVOKE_MS) {
+        const sent = JSON.stringify(pending.message.args ?? null).length;
+        this.note(`slow ${pending.message.ch} ${elapsed}ms up=${sent} down=${result.length}`);
+      }
+      if (frame.ok) pending.resolve(result);
       else pending.reject(new Error(frame.error));
       return;
     }
@@ -403,6 +433,7 @@ export class DeskTunnel {
         if (this.link.onBuild?.(frame.version, frame.platform)) return;
         const lost = slot.everReady && !frame.resumed;
         const resumed = slot.everReady && frame.resumed;
+        this.note(`ready ${slot.cid.slice(0, 4)} resumed=${frame.resumed}`);
         slot.everReady = true;
         if (lost) {
           this.reset(slot);
@@ -459,6 +490,7 @@ export class DeskTunnel {
       onReset,
     };
     this.slots.set(slot.cid, slot);
+    this.note(`attach ${kind} ${slot.cid.slice(0, 4)}`);
     if (this.online) this.hello(slot);
     return {
       invoke: (channel, payload) =>
@@ -502,6 +534,15 @@ export class DeskTunnel {
         if (this.online) this.post({ type: 'rpc-bye', cid: slot.cid });
       },
     };
+  }
+
+  /** 该类 renderer 都已续上、没有在途请求、宿主帧没有缺口（启动遮罩据此判断数据到齐） */
+  idle(kind: RemoteKind): boolean {
+    if (!this.online) return false;
+    for (const slot of this.slots.values())
+      if (slot.kind === kind && (!slot.ready || slot.pending.size > 0 || slot.stream.gap))
+        return false;
+    return true;
   }
 
   fetchAsset(path: string): Promise<DeskAsset> {
