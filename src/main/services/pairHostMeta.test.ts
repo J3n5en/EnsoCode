@@ -214,4 +214,131 @@ describe('pairHost 目录下发', () => {
     expect(await sentTypes()).not.toContain('rpc-event');
     expect(linkDown).toHaveBeenCalledWith('pair-1');
   });
+
+  it('rpc-hello 催补发时先清掉该 slot 队列里的旧残片再解锁窗口，避免旧残片抢占带宽堵住新补发帧', async () => {
+    let link: RemoteLink | null = null;
+    const bigPayload = 'x'.repeat(240_000 * 5);
+    setRemoteHostHooks({
+      command: async (currentLink, command) => {
+        link = currentLink;
+        if (command.type === 'rpc-hello' && command.seq === 0) {
+          // 模拟停滞后的重放补发：给同一 seq 生成新一轮分片
+          currentLink.send({
+            type: 'rpc-result',
+            cid: command.cid,
+            id: 1,
+            ok: true,
+            data: bigPayload,
+            seq: 1,
+          } as never);
+        }
+      },
+      linkDown: vi.fn(),
+      linkRevoked: vi.fn(),
+    });
+    const deliverFromPhone = async (message: unknown) => {
+      const frame = await sealFrame(contentKey, message);
+      hostMocks.socket?.onmessage?.({
+        data: frame.buffer.slice(
+          frame.byteOffset,
+          frame.byteOffset + frame.byteLength
+        ) as ArrayBuffer,
+      });
+    };
+    control('peer-joined');
+    await deliverFromPhone({ type: 'remote-ack', bytes: 0 });
+    await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'main' });
+    await vi.waitFor(() => expect(link).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // 首次发送 6 片大帧：前 3 片立即在途（超过 512KB 窗口），后 3 片排在 BulkWindow 队列里
+    hostMocks.socket?.send.mockClear();
+    (link as unknown as RemoteLink).send({
+      type: 'rpc-result',
+      cid: 'c1',
+      id: 1,
+      ok: true,
+      data: bigPayload,
+      seq: 1,
+    } as never);
+    await vi.waitFor(async () =>
+      expect((await sentPayloads()).filter((p) => p.type === 'part')).toHaveLength(3)
+    );
+    const firstBatch = (await sentPayloads()).filter((p) => p.type === 'part');
+    const oldPid = firstBatch[0]?.pid as string;
+    expect(firstBatch.map((p) => p.index)).toEqual([0, 1, 2]);
+
+    // 推进时间超过 2s unblock 阈值，再发带 seq=0 的 rpc-hello 催补发
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_000);
+    try {
+      hostMocks.socket?.send.mockClear();
+      await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'main', seq: 0 });
+      await vi.waitFor(async () =>
+        expect((await sentPayloads()).filter((p) => p.type === 'part')).toHaveLength(3)
+      );
+      const replayBatch = (await sentPayloads()).filter((p) => p.type === 'part');
+      // 绝不能把旧 pid 的 index 3/4/5 残片先发出去重新堵死窗口
+      expect(replayBatch.every((p) => p.pid !== oldPid)).toBe(true);
+      expect(replayBatch.map((p) => p.index)).toEqual([0, 1, 2]);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('rpc-bye 清除该 slot 排队中的残留分片且不影响资源分片', async () => {
+    let link: RemoteLink | null = null;
+    setRemoteHostHooks({
+      command: async (currentLink) => {
+        link = currentLink;
+      },
+      linkDown: vi.fn(),
+      linkRevoked: vi.fn(),
+    });
+    const deliverFromPhone = async (message: unknown) => {
+      const frame = await sealFrame(contentKey, message);
+      hostMocks.socket?.onmessage?.({
+        data: frame.buffer.slice(
+          frame.byteOffset,
+          frame.byteOffset + frame.byteLength
+        ) as ArrayBuffer,
+      });
+    };
+    control('peer-joined');
+    await deliverFromPhone({ type: 'remote-ack', bytes: 0 });
+    await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'settings' });
+    await vi.waitFor(() => expect(link).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    hostMocks.socket?.send.mockClear();
+    const huge = 'y'.repeat(240_000 * 5);
+    (link as unknown as RemoteLink).send({
+      type: 'rpc-event',
+      cid: 'c1',
+      ch: 'big',
+      args: [huge],
+      seq: 1,
+    } as never);
+    (link as unknown as RemoteLink).send({
+      type: 'asset',
+      id: 42,
+      status: 200,
+      mime: 'image/png',
+      data: 'z'.repeat(240_000 * 2),
+    } as never);
+    await vi.waitFor(async () =>
+      expect((await sentPayloads()).filter((p) => p.type === 'part')).toHaveLength(3)
+    );
+    const oldPid = (await sentPayloads()).find((p) => p.type === 'part')?.pid as string;
+
+    hostMocks.socket?.send.mockClear();
+    await deliverFromPhone({ type: 'rpc-bye', cid: 'c1' });
+    await deliverFromPhone({ type: 'remote-ack', bytes: 1_000_000 });
+    await vi.waitFor(async () =>
+      expect((await sentPayloads()).filter((p) => p.type === 'part').length).toBeGreaterThanOrEqual(
+        2
+      )
+    );
+    const afterBye = (await sentPayloads()).filter((p) => p.type === 'part');
+    expect(afterBye.some((p) => p.pid === oldPid)).toBe(false);
+  });
 });

@@ -39,6 +39,13 @@ export class BulkWindow<T> {
     if (this.queue.length === 0) this.clearStall();
   }
 
+  /** slot 重同步或关闭时，清掉队里尚未发出的该 slot 旧分片，避免解锁后抢占窗口 */
+  dropPrefix(prefix: string): void {
+    if (this.queue.length === 0) return;
+    this.queue = this.queue.filter((entry) => !entry.group?.startsWith(prefix));
+    if (this.queue.length === 0) this.clearStall();
+  }
+
   /** bytes：浏览器本页累计收到的分片字节；比上次小说明换了新页面 */
   ack(bytes: number): void {
     this.enabled = true;
@@ -57,7 +64,7 @@ export class BulkWindow<T> {
    * 立即释放窗口而不是硬等 stallMs；正在正常收数据时不打断。
    */
   unblock(minStaleMs = 2_000): void {
-    if (!this.enabled || this.inflight < this.windowBytes) return;
+    if (!this.enabled || this.inflight === 0) return;
     if (Date.now() - this.lastProgressAt < minStaleMs) return;
     this.inflight = 0;
     this.clearStall();
@@ -75,7 +82,7 @@ export class BulkWindow<T> {
   private pump(): void {
     while (this.queue.length > 0 && this.inflight < this.windowBytes) {
       const next = this.queue.shift() as { item: T; bytes: number; group?: string };
-      if (this.inflight === 0) this.lastProgressAt = Date.now();
+      this.lastProgressAt = Date.now();
       this.inflight += next.bytes;
       this.send(next.item);
     }

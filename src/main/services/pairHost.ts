@@ -1118,10 +1118,14 @@ async function handleFrame(
         .catch((error) => console.warn('[pair] project command failed', error));
       break;
     case 'rpc-hello':
+      if (command.seq !== undefined) conn.remoteWindow.dropPrefix(`rpc:${command.cid}:`);
       conn.remoteWindow.unblock();
       await handleRemoteCommand(remoteLink(conn.device.pairId), command);
       return;
     case 'rpc-bye':
+      conn.remoteWindow.dropPrefix(`rpc:${command.cid}:`);
+      await handleRemoteCommand(remoteLink(conn.device.pairId), command);
+      return;
     case 'rpc-invoke':
     case 'rpc-send':
     case 'asset-get':

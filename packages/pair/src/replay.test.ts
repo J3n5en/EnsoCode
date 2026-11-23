@@ -92,6 +92,25 @@ describe('连接前缀与计数器', () => {
     expect(await phone.open(key, slow)).toBeUndefined();
   });
 
+  it('4096 滑动窗口边界：落后 4095 帧仍接受且防重放，落后 4096 帧拒绝', async () => {
+    const key = generateContentKey();
+    const host = createFrameReplay();
+    const phone = createFrameReplay();
+    await phone.open(key, await host.seal(key, { type: 'host-info' }));
+    await host.open(key, await phone.seal(key, { type: 'snapshot' }));
+
+    const tooOld = await host.seal(key, { type: 'part', id: 'too-old' });
+    const edge = await host.seal(key, { type: 'part', id: 'edge' });
+    let latest: Uint8Array | undefined;
+    for (let i = 0; i < 4095; i++) {
+      latest = await host.seal(key, { type: 'rpc-event', i });
+    }
+    expect(await phone.open(key, latest as Uint8Array)).toEqual({ type: 'rpc-event', i: 4094 });
+    expect(await phone.open(key, edge)).toEqual({ type: 'part', id: 'edge' });
+    expect(await phone.open(key, edge)).toBeUndefined();
+    expect(await phone.open(key, tooOld)).toBeUndefined();
+  });
+
   it('对端重连后发送计数不回头', async () => {
     const key = generateContentKey();
     const host = createFrameReplay();

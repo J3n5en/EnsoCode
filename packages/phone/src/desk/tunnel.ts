@@ -104,6 +104,8 @@ export class DeskTunnel {
   private online = false;
   private seq = 0;
   private slots = new Map<string, Slot>();
+  /** 离线期间关闭的 slot：重连上线后补发 rpc-bye，避免宿主残留幽灵 slot */
+  private pendingByes = new Set<string>();
   /** 在途资源请求：断线重连后整批重发（应答丢了也能补回） */
   private assets = new Map<
     number,
@@ -221,6 +223,7 @@ export class DeskTunnel {
     this.online = state === 'online';
     if (this.online && was) {
       // 已在线又收到 host-online：桌面到中继的连接重建过，之前发过去的请求、发过来的帧可能都丢在旧连接上。
+      this.flushByes();
       this.resync();
       return;
     }
@@ -230,6 +233,7 @@ export class DeskTunnel {
         this.linkAt = Date.now();
         // 先声明会回报进度，宿主随即对大帧限流
         this.ack();
+        this.flushByes();
         for (const slot of this.slots.values()) this.hello(slot);
         for (const { message } of this.assets.values()) this.post(message);
       }
@@ -366,8 +370,19 @@ export class DeskTunnel {
     this.note(`reset ${slot.cid.slice(0, 4)}`);
     this.drop(slot, 'remote-session-lost');
     this.slots.delete(slot.cid);
-    if (this.online) this.post({ type: 'rpc-bye', cid: slot.cid });
+    this.sendBye(slot.cid);
     slot.onReset();
+  }
+
+  private sendBye(cid: string): void {
+    if (this.online) this.post({ type: 'rpc-bye', cid });
+    else this.pendingByes.add(cid);
+  }
+
+  private flushByes(): void {
+    if (this.pendingByes.size === 0) return;
+    for (const cid of this.pendingByes) this.post({ type: 'rpc-bye', cid });
+    this.pendingByes.clear();
   }
 
   private apply(slot: Slot, frame: Sequenced): void {
@@ -552,7 +567,8 @@ export class DeskTunnel {
         if (!this.slots.has(slot.cid)) return;
         this.slots.delete(slot.cid);
         this.drop(slot, 'remote-frame-closed');
-        if (this.online) this.post({ type: 'rpc-bye', cid: slot.cid });
+        this.sendBye(slot.cid);
+        this.reportResuming();
       },
     };
   }
