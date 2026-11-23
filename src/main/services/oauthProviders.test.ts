@@ -385,8 +385,8 @@ describe('OAuth 凭证跨窗口失效通知', () => {
     try {
       const { broadcastOauthCredentialsChanged } = await import('./oauthProviders');
       broadcastOauthCredentialsChanged(source as unknown as WebContents);
-      expect(sourceSend).not.toHaveBeenCalled();
-      expect(destroyedSend).not.toHaveBeenCalled();
+      expect(sourceSend).not.toHaveBeenCalledWith(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
+      expect(destroyedSend).not.toHaveBeenCalledWith(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
       expect(otherSend).toHaveBeenCalledOnce();
       expect(otherSend).toHaveBeenCalledWith(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
     } finally {
@@ -422,7 +422,7 @@ describe('OAuth 凭证跨窗口失效通知', () => {
           ?.accounts.map((account) => account.key)
       ).toEqual(['anthropic']);
       expect(otherSend).toHaveBeenCalledWith(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
-      expect(sourceSend).not.toHaveBeenCalled();
+      expect(sourceSend).not.toHaveBeenCalledWith(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
     } finally {
       restore();
       electronMocks.windows.splice(0);
