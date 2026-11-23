@@ -257,7 +257,12 @@ import {
   sendImageTool,
 } from './bots';
 import { agentSessionIndex } from './sessionIndex';
-import { readPersistedConversation, readSettings, readSshTimeoutSeconds } from './settings';
+import {
+  onConversationsRemoved,
+  readPersistedConversation,
+  readSettings,
+  readSshTimeoutSeconds,
+} from './settings';
 import {
   removeRegisteredWorktree,
   sessionWorktree,
@@ -2043,6 +2048,9 @@ export function registerAgentHandlers(): void {
         });
       },
     },
+  });
+  onConversationsRemoved((ids) => {
+    for (const id of ids) agentService?.abandonOwner(id);
   });
 
   const humanTimeouts = new HumanRequestTimeouts({
