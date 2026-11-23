@@ -23,6 +23,7 @@ import { appendDailyRecord } from '../services/secretary/dailyLog';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
+  dismissPending,
   dismissResult,
   dispatchPortsFor,
   listTakeovers,
@@ -65,6 +66,7 @@ import { projectAliasesFromSettings } from '../services/secretary/projectLabel';
 import { getSecretaryReportStore } from '../services/secretary/reportImages';
 import {
   parseAvatarRequest,
+  parseDismissPendingRequest,
   parseDismissRequest,
   parseMarkResultRequest,
   parseReferenceRequest,
@@ -531,6 +533,15 @@ function secretaryOfProposal(proposalId: string): SecretaryContext | null {
   return null;
 }
 
+/** 等待表里有这条派发的秘书 */
+function secretaryOfPending(pendingId: string): SecretaryContext | null {
+  for (const ctx of secretaryContexts()) {
+    const pending = new SecretaryStore(ctx.dir).dispatch().pending;
+    if (pending && Object.hasOwn(pending, pendingId)) return ctx;
+  }
+  return null;
+}
+
 /** 管着这个会话的秘书：按派发 / 接管记录找；都没有时按请求里的秘书 */
 function secretaryOfRecord(conversationId: string, requested: unknown): SecretaryContext | null {
   for (const ctx of secretaryContexts()) {
@@ -860,6 +871,16 @@ export function registerSecretaryHandlers(): void {
       return dismissResult(dispatchPortsFor(ctx), parsed.conversationId);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DISMISS_PENDING, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseDismissPendingRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    const ctx = secretaryOfPending(parsed.pendingId);
+    if (!ctx) return { ok: false, error: 'not-found' };
+    return dismissPending(dispatchPortsFor(ctx), parsed.pendingId);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.SECRETARY_MARK_RESULT,

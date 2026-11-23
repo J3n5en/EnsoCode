@@ -870,7 +870,9 @@ describe('agent-tool task 中断后续跑', () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   async function interruptedTask(withSessionFile: boolean) {
-    const fixture = await setup();
+    // 渲染层持久化的会话记录：Main 重启后内存索引里没有子会话 metadata，只能从这里读
+    const conversations: Record<string, unknown> = {};
+    const fixture = await setup(undefined, { persistedState: () => ({ conversations }) });
     const parent = { sessionId: fixture.conversationId, generation: crypto.randomUUID() };
     fixture.index.prepareParent(parent);
     fixture.service.observe({
@@ -888,6 +890,10 @@ describe('agent-tool task 中断后续跑', () => {
       agentType: 'builtin:scout',
       mode: 'task',
     });
+    conversations[(child as ChildSessionIdentity).sessionId] = {
+      sessionFile: path.join(fixture.root, 'child.jsonl'),
+      child: fixture.index.childMetadata(child as ChildSessionIdentity),
+    };
     if (withSessionFile) writeFileSync(path.join(fixture.root, 'child.jsonl'), '{}\n');
     fixture.service.observe({
       type: 'child-ended',
@@ -925,6 +931,41 @@ describe('agent-tool task 中断后续跑', () => {
     await expect(
       fixture.service.resumeControlledAgent(fixture.conversationId, stranger)
     ).rejects.toThrow(/cannot be resumed/);
+    expect(fixture.spawnChildCalls).toHaveLength(1);
+  });
+
+  /** Main 重启后内存里的派发配置没了：只剩台账里的派发参数 */
+  const forgetSpawnConfigs = (service: AgentDispatchService) =>
+    (service as unknown as { resumableTasks: Map<string, unknown> }).resumableTasks.clear();
+
+  it('Main 重启后按台账里的派发参数重新解析同一套配置，用原会话文件重开', async () => {
+    const { fixture, child } = await interruptedTask(true);
+    forgetSpawnConfigs(fixture.service);
+    const resumed = await fixture.service.resumeControlledAgent(fixture.conversationId, child, {
+      description: 'research',
+      agentType: 'builtin:scout',
+      thinking: 'low',
+    });
+    expect(resumed).toMatchObject({ sessionId: child.sessionId, instanceId: child.instanceId });
+    const [original, again] = fixture.spawnChildCalls;
+    expect(again).toMatchObject({
+      resumeFile: path.join(fixture.root, 'child.jsonl'),
+      cwd: original!.cwd,
+      config: { typeKey: original!.config.typeKey, model: original!.config.model },
+    });
+    expect(again!.config.thinkingLevel).toBe('low');
+  });
+
+  it('Main 重启后会话文件损坏：明确报错且不 spawn', async () => {
+    const { fixture, child } = await interruptedTask(true);
+    writeFileSync(path.join(fixture.root, 'child.jsonl'), '{}\n{"type":"mess');
+    forgetSpawnConfigs(fixture.service);
+    await expect(
+      fixture.service.resumeControlledAgent(fixture.conversationId, child, {
+        description: 'research',
+        agentType: 'builtin:scout',
+      })
+    ).rejects.toThrow(/corrupted/);
     expect(fixture.spawnChildCalls).toHaveLength(1);
   });
 });

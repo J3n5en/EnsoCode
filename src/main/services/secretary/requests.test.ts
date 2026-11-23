@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAvatarRequest } from './requests';
+import { parseAvatarRequest, parseDismissPendingRequest } from './requests';
 
 const bytes = (text: string) => Uint8Array.from(text, (char) => char.charCodeAt(0));
 
@@ -27,6 +27,15 @@ describe('parseAvatarRequest', () => {
       { image: big },
     ]) {
       expect(parseAvatarRequest(request)).toBeNull();
+    }
+  });
+});
+
+describe('parseDismissPendingRequest', () => {
+  it('只收非空字符串 pendingId，坏输入一律拒绝', () => {
+    expect(parseDismissPendingRequest({ pendingId: 'pend-1' })).toEqual({ pendingId: 'pend-1' });
+    for (const request of [null, 'pend-1', [], {}, { pendingId: '' }, { pendingId: 1 }]) {
+      expect(parseDismissPendingRequest(request)).toBeNull();
     }
   });
 });

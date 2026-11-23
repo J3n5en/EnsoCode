@@ -801,6 +801,29 @@ describe('buildTimeline', () => {
     expect(timeline.filter((item) => item.kind === 'text' && item.turnEnd)).toHaveLength(1);
   });
 
+  it('压缩摘要不打断轮次：摘要前的轮末仍标 turnEnd（分叉入口挂在这里），切在轮中则不标', () => {
+    const summary: ProjectedMessage = {
+      role: 'compactionSummary',
+      content: [{ type: 'text', text: 'S' }],
+    };
+    const reply = (text: string): ProjectedMessage => ({
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+    });
+    const turnEnds = (messages: ProjectedMessage[]) =>
+      buildTimeline(messages, false)
+        .filter((item) => item.kind === 'text' && item.turnEnd)
+        .map((item) => (item.kind === 'text' ? item.text : ''));
+    expect(turnEnds([user('q1'), reply('a1'), summary, user('q2'), reply('a2')])).toEqual([
+      'a1',
+      'a2',
+    ]);
+    expect(turnEnds([user('q1'), reply('a1'), summary])).toEqual(['a1']);
+    expect(turnEnds([user('q1'), reply('a1-前半'), summary, reply('a1-后半')])).toEqual([
+      'a1-后半',
+    ]);
+  });
+
   it('整段 <thinking> 包裹的 text 变成 thinking 块，标签不入正文', () => {
     const timeline = buildTimeline(
       [

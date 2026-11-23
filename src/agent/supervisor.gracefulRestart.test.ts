@@ -1129,7 +1129,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       settingsOf: () => ({ providerId: 'p', modelId: 'm', cwd: '/workspace' }),
     });
     const resume = vi.fn(async () => ({ ok: true }));
-    const plan = { checkpointFile: '', manifest, resume: [] };
+    const plan = { checkpointFile: '', manifest, resume: [], children: [] };
     expect(await wakeColdRestartSession('other', resume, plan)).toEqual({ ok: true });
     expect(resume).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'other' }));
     await supervisor.shutdown();

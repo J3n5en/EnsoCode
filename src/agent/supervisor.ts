@@ -1328,7 +1328,7 @@ export class SessionSupervisor {
             } else if (child) {
               child.childTaskNotices ??= [];
               enqueueReminder(child.childTaskNotices, text);
-            }
+            } else if (notifyOptions?.durable) this.persistUnopenedNotification(sessionId, text);
             return;
           }
           if (notifyOptions?.durable && !this.sessions.has(sessionId)) {
@@ -2153,6 +2153,16 @@ export class SessionSupervisor {
           editUnfinishedAssistantForResume(managed.session);
         } else editLatestAssistantForRetry(managed.session);
         if (agent.state.messages.at(-1)?.role === 'assistant') {
+          // 重启前持有 Run 在等后台任务的子代理：任务的消息（含因重启中断）还没交给它，接着原 Run 继续等 / 交给它
+          if (managed.childIdentity && command.requestBudget && this.awaitsOwnTasks(managed)) {
+            this.releaseRun(managed);
+            const run: AgentRunHold = { id: command.turnId ?? randomUUID() };
+            managed.agentRun = run;
+            managed.requestBudget?.arm(command.requestsUsed);
+            this.holdRun(managed, run);
+            this.flushPendingReminders(managed);
+            return;
+          }
           this.emitRetrySkipped(managed, 'nothing-to-retry');
           return;
         }
@@ -6401,7 +6411,12 @@ export class SessionSupervisor {
    * 写不下就退回本代照常发完成通知（多半丢在退出路上，但不会重复）
    */
   private recordInterruptedTasks(): void {
-    const records = this.bgTasks.interruptedOnShutdown();
+    // 断点已落盘时，持有 Run 的子代理重启后会被续跑：它的任务记给它本身
+    const records = this.bgTasks.interruptedOnShutdown(
+      Date.now(),
+      (sessionId) =>
+        this.restart?.committed === true && this.sessions.get(sessionId)?.agentRun !== undefined
+    );
     if (records.length === 0) return;
     try {
       appendInterruptedTasks(path.join(this.restartDataDir(), INTERRUPTED_TASKS_FILE), records);

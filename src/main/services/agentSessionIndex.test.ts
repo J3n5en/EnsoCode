@@ -130,6 +130,28 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.runningRootSessionIds()).toEqual([]);
   });
 
+  it('hasRunningChild：父会话空闲、只有子代理在跑回合时也算在跑（退出要等它到安全点）', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/parent.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+    });
+    const reserved = sessions.reserveChild(parent, 'builtin:scout', 'Scout', 'request-1');
+    if (!reserved.ok) throw new Error('reservation failed');
+    const child = reserved.reservation.child;
+    sessions.observe(readyChild(child));
+    expect(sessions.hasRunningChild()).toBe(false);
+    sessions.observe({ type: 'status', identity: child, seq: 2, status: 'running' });
+    expect(sessions.runningRootSessionIds()).toEqual([]);
+    expect(sessions.hasRunningChild()).toBe(true);
+    sessions.observe({ type: 'status', identity: child, seq: 3, status: 'idle' });
+    expect(sessions.hasRunningChild()).toBe(false);
+  });
+
   it('runningTurnSnapshot 只列在跑的父会话，带回合 id、开始时刻与最后消息下标', () => {
     const sessions = new AgentSessionIndex({
       readSettings: () => null,

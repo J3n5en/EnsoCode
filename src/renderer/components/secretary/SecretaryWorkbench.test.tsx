@@ -112,6 +112,10 @@ beforeEach(() => {
         h.calls.push({ name: 'dismissResult', args: conversationId });
         return { ok: true };
       },
+      dismissPending: async (pendingId: string) => {
+        h.calls.push({ name: 'dismissPending', args: pendingId });
+        return { ok: true };
+      },
       feed: async () => ({ ok: true, events: h.feed, hasMore: false }),
       onStateChanged: () => () => {},
     },
@@ -164,6 +168,53 @@ describe('SecretaryWorkbench 结果卡', () => {
     h.board = board([sessionCard({ state: 'running' })]);
     await render(<SecretaryWorkbench name="小安" />);
     expect(dismissButton()).toBeNull();
+  });
+});
+
+describe('SecretaryWorkbench 等依赖的派发出问题', () => {
+  const pendingCard = (): SecretaryCard => ({
+    kind: 'pending',
+    projectName: 'enso-code',
+    pending: {
+      id: 'pend-1',
+      projectId: 'p1',
+      secretaryConversationId: 'sec',
+      createdAt: NOW - 60_000,
+      updatedAt: NOW - 1000,
+      status: 'failed',
+      problem: 'dependency-failed',
+      failedDependency: 'c1',
+      after: ['c1'],
+      draft: { projectId: 'p1', prompt: '接着改', worktree: false },
+    },
+  });
+  const ignoreButton = () =>
+    container.querySelector('[data-enso="secretary-dismiss-pending"]') as HTMLElement | null;
+
+  it('给「忽略」，点了按派发 id 交给 Main 移除', async () => {
+    h.board = board([pendingCard()]);
+    await render(<SecretaryWorkbench name="小安" />);
+    expect(ignoreButton()?.textContent).toBe('[Ignore]');
+    act(() => ignoreButton()?.click());
+    expect(h.calls).toContainEqual({ name: 'dismissPending', args: 'pend-1' });
+    expect(h.calls.some((call) => call.name === 'dismissResult')).toBe(false);
+  });
+
+  it('没有会话可开：不给「打开会话」「停止」「知道了」', async () => {
+    h.board = board([pendingCard()]);
+    await render(<SecretaryWorkbench name="小安" />);
+    expect(container.querySelector('[data-enso="secretary-card-open"]')).toBeNull();
+    expect(dismissButton()).toBeNull();
+    expect(container.textContent).not.toContain('[Stop]');
+    expect(container.textContent).not.toContain('[Open session]');
+  });
+
+  it('和会话结果卡并排时，结果卡的「知道了」照旧', async () => {
+    h.board = board([pendingCard(), sessionCard({ result: 'failed' })]);
+    await render(<SecretaryWorkbench name="小安" />);
+    act(() => (dismissButton() as unknown as HTMLElement).click());
+    expect(h.calls).toContainEqual({ name: 'dismissResult', args: 'c1' });
+    expect(ignoreButton()).not.toBeNull();
   });
 });
 
