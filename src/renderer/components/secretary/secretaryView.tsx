@@ -8,6 +8,8 @@ export interface SecretarySectionView {
   /** 「需要你处理」总数，折叠侧栏时也带着 */
   needsYou: number;
   running: number;
+  /** 超过派发上限、还在排队的会话：和在跑的分开数 */
+  queued: number;
   /** false = 未完成初次设置，点击进欢迎页 */
   configured: boolean;
   color?: string;
@@ -26,10 +28,14 @@ export function secretarySectionView(
   const imageVersion = profile?.avatar.imageVersion;
   // 多秘书时头像地址要带所属秘书；没显式给就用这份状态自己的 id
   const owner = secretaryId ?? secretary.secretaryId ?? undefined;
+  const queued = secretary.board.running.filter(
+    (card) => card.kind === 'session' && card.state === 'queued'
+  ).length;
   return {
     name: profile?.name.trim() || t('Secretary'),
     needsYou: secretary.board.needsYou.length,
-    running: secretary.board.running.length,
+    running: secretary.board.running.length - queued,
+    queued,
     configured: profile !== null,
     ...(profile ? { color: profile.avatar.color } : {}),
     ...(imageVersion
@@ -56,7 +62,12 @@ export function SecretarySummary({
 }) {
   const { t } = useI18n();
   if (!view.configured) return <>{t('Click to finish setup')}</>;
-  if (view.needsYou === 0 && view.running === 0) return <>{t('Nothing running')}</>;
+  const active = view.running + view.queued;
+  if (view.needsYou === 0 && active === 0) return <>{t('Nothing running')}</>;
+  const label = [
+    ...(view.running > 0 ? [t('{{n}} running', { n: view.running })] : []),
+    ...(view.queued > 0 ? [t('{{n}} queued', { n: view.queued })] : []),
+  ].join(' · ');
   return (
     <>
       {view.needsYou > 0 && (
@@ -64,8 +75,8 @@ export function SecretarySummary({
           {t('{{n}} waiting', { n: view.needsYou })}
         </span>
       )}
-      {view.needsYou > 0 && view.running > 0 && ' · '}
-      {view.running > 0 &&
+      {view.needsYou > 0 && active > 0 && ' · '}
+      {active > 0 &&
         (onToggleRunning ? (
           <button
             type="button"
@@ -74,15 +85,12 @@ export function SecretarySummary({
             onClick={onToggleRunning}
             className="shrink-0 rounded px-0.5 transition-colors hover:text-foreground"
           >
-            {t('{{n}} running', { n: view.running })}
+            {label}
           </button>
         ) : origins ? (
-          <SecretaryRunningOriginsCard
-            label={t('{{n}} running', { n: view.running })}
-            {...origins}
-          />
+          <SecretaryRunningOriginsCard label={label} {...origins} />
         ) : (
-          <span className="shrink-0">{t('{{n}} running', { n: view.running })}</span>
+          <span className="shrink-0">{label}</span>
         ))}
     </>
   );

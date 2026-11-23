@@ -60,6 +60,7 @@ export function isDrawerActive(
     unread: session.unread,
     pendingAskCount: session.pendingAskCount,
     hasRunningChild,
+    queued: session.status === 'queued',
   });
   return tone !== 'idle';
 }

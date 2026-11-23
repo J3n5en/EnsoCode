@@ -67,6 +67,7 @@ describe('isDrawerActive', () => {
     expect(isDrawerActive({ status: 'failed' }, false)).toBe(true);
     expect(isDrawerActive({ status: 'idle', pendingAskCount: 1 }, false)).toBe(true);
     expect(isDrawerActive({ status: 'idle' }, true)).toBe(true);
+    expect(isDrawerActive({ status: 'queued' }, false)).toBe(true);
   });
 
   it('空闲且已读不算活跃', () => {

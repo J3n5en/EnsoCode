@@ -753,6 +753,14 @@ describe('后台任务控制命令', () => {
     expect(parseAgentCommand({ type: 'task-keep', sessionId: 's1', taskId: 't1' })).toBeNull();
   });
 
+  it('提醒命令按会话 id 寻址', () => {
+    for (const type of ['reminders-fire', 'reminders-clear']) {
+      expect(parseAgentCommand({ type, sessionId: 's1' })).toEqual({ type, sessionId: 's1' });
+      expect(parseAgentCommand({ type, sessionId: '' })).toBeNull();
+      expect(parseAgentCommand({ type, sessionId: 's1', extra: 1 })).toBeNull();
+    }
+  });
+
   it('收尾提醒条目校验计数', () => {
     expect(parseAgentSessionCustomEntry({ kind: 'task-wrap-up-nudge', count: 2, at: 1 })).toEqual({
       kind: 'task-wrap-up-nudge',

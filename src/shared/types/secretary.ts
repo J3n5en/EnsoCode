@@ -297,6 +297,11 @@ export type SecretaryResultKind =
 /** 转交提问的收尾方式：秘书代答、用户在原会话里直接答、超时兜底 */
 export const RELAY_ASK_STATUSES = ['pending', 'answered', 'user-answered', 'timed-out'] as const;
 
+/** 排队会话给秘书的回传：启动失败、被取消 */
+export const QUEUED_UPDATE_STATUSES = ['failed', 'cancelled'] as const;
+
+export type QueuedUpdateStatus = (typeof QUEUED_UPDATE_STATUSES)[number];
+
 export type RelayAskStatus = (typeof RELAY_ASK_STATUSES)[number];
 
 /**
@@ -439,6 +444,8 @@ export type SecretaryUpdate = {
   | { kind: 'ask-relay'; conversationId: string; askId: string; status: RelayAskStatus }
   /** 遗留任务巡检：说明哪个会话、什么命令、跑了多久；不自动杀进程 */
   | { kind: 'leftover'; conversationId: string }
+  /** 排队会话：自动启动失败（等用户立即开始或取消）、被取消（会话已删除） */
+  | { kind: 'queued'; conversationId: string; status: QueuedUpdateStatus }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
   | {
@@ -524,7 +531,7 @@ export interface SecretaryBoardTodo extends SecretaryTodo {
   phase?: SecretaryTodoPhase;
   projectName?: string;
   sessionTitle?: string;
-  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone';
+  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone' | 'queued';
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，直接派发 */
@@ -595,7 +602,11 @@ export type SecretaryCard =
       projectId: string;
       projectName: string;
       title: string;
-      state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+      state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
+      /** 排队中：同一秘书内的位次（从 1 开始）；启动失败的不占位，改给 queueFailed */
+      queuePosition?: number;
+      /** 排队会话自动启动失败的原因：等用户立即开始重试或取消 */
+      queueFailed?: string;
       lastText?: string;
       /** 派出时间 */
       startedAt: number;

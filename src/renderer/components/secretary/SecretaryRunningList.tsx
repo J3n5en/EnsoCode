@@ -42,6 +42,14 @@ function RunningRow({ card }: { card: SessionCard }) {
   const [expanded, setExpanded] = useState(false);
   const badge = badgeOf(card);
   const model = modelLabel(providers, card.model);
+  const queuedLabel =
+    card.state === 'queued'
+      ? card.queueFailed
+        ? `${t('Queued')} · ${card.queueFailed}`
+        : card.queuePosition
+          ? t('Queued · #{{n}}', { n: card.queuePosition })
+          : t('Queued')
+      : null;
   return (
     <div
       data-enso="secretary-running-row"
@@ -57,8 +65,14 @@ function RunningRow({ card }: { card: SessionCard }) {
         className="min-w-0 flex-1 text-left"
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span data-enso="secretary-running-badge" className={cn(BADGE_CLASS, badge.className)}>
-            {t(badge.label)}
+          <span
+            data-enso={queuedLabel ? 'secretary-queued-card' : 'secretary-running-badge'}
+            className={cn(
+              BADGE_CLASS,
+              queuedLabel ? 'bg-orange-500/15 text-orange-600' : badge.className
+            )}
+          >
+            {queuedLabel ?? t(badge.label)}
           </span>
           {card.takeover && (
             <span

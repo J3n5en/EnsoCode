@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { decodeBundle, encodeBundle } from './codec';
 import type { ConfigSyncBundle } from './types';
 
@@ -20,9 +20,6 @@ vi.mock('electron', () => ({
   },
   ipcMain: { handle: vi.fn() },
 }));
-
-let service: typeof import('./index');
-let settings: typeof import('../../ipc/settings');
 
 const emptyState = () => ({
   providers: [],
@@ -43,16 +40,14 @@ const bundle = (state: Partial<ConfigSyncBundle['state']> = {}): ConfigSyncBundl
   secretsIncluded: false,
 });
 
-beforeAll(async () => {
-  writeFileSync(
-    settingsPath,
-    JSON.stringify({
-      'enso-settings': { version: 1, state: { theme: 'dark', ...emptyState() } },
-    })
-  );
-  service = await import('./index');
-  settings = await import('../../ipc/settings');
-});
+writeFileSync(
+  settingsPath,
+  JSON.stringify({
+    'enso-settings': { version: 1, state: { theme: 'dark', ...emptyState() } },
+  })
+);
+const service = await import('./index');
+const settings = await import('../../ipc/settings');
 
 afterAll(() => {
   service.clearConfigSyncTokens();

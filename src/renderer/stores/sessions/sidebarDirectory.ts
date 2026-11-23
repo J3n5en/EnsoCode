@@ -3,6 +3,7 @@ import {
   type PendingAskMark,
   userAskCount,
 } from '@shared/conversationDotTone';
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 
 export interface SidebarDirectoryEntry {
   id: string;
@@ -34,6 +35,10 @@ export interface SidebarDirectoryEntry {
   worktree?: { path?: string };
   /** 由秘书派出；只用于显示标记 */
   secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
+  /** 有 queuedStart 且尚未失败 */
+  queued?: boolean;
+  queuePosition?: number;
+  queueFailed?: string;
 }
 
 type Source = {
@@ -65,6 +70,7 @@ type Source = {
   reloading?: boolean;
   btwParentId?: string;
   secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
+  queuedStart?: unknown;
 };
 
 function lastActiveAt(conversation: Source): number | undefined {
@@ -72,6 +78,7 @@ function lastActiveAt(conversation: Source): number | undefined {
 }
 
 function project(conversation: Source, hasRunningChild: boolean): SidebarDirectoryEntry {
+  const queued = queuedStartOf(conversation);
   return {
     id: conversation.id ?? '',
     title: conversation.title,
@@ -100,6 +107,12 @@ function project(conversation: Source, hasRunningChild: boolean): SidebarDirecto
     sessionFile: conversation.sessionFile,
     worktree: conversation.worktree,
     secretaryOrigin: conversation.secretaryOrigin,
+    ...(queued
+      ? {
+          queued: !queued.failed,
+          ...(queued.failed ? { queueFailed: queued.failed.error } : {}),
+        }
+      : {}),
   };
 }
 
@@ -119,6 +132,7 @@ export function selectSidebarConversations(
   if (cached?.source === conversations) return cached.value;
   const next: Record<string, SidebarDirectoryEntry> = {};
   const prints: string[] = [];
+  const positions = queuePositions(conversations);
   for (const [id, conversation] of Object.entries(conversations)) {
     if (!conversation) continue;
     if (conversation.btwParentId) continue;
@@ -135,6 +149,8 @@ export function selectSidebarConversations(
         conversations
       )
     );
+    const position = entry.queued ? positions.get(id) : undefined;
+    if (position) entry.queuePosition = position;
     next[id] = entry;
     prints.push(`${id}:${fingerprint(entry)}`);
   }

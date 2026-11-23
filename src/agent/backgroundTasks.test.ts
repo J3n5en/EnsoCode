@@ -166,13 +166,15 @@ describe('withBackground promptSnippet 跟随工具名', () => {
     expect(wrapped.promptSnippet).toMatch(/tracked jobs/);
     expect(wrapped.promptSnippet).toMatch(/background=true/);
     expect(wrapped.promptSnippet).toMatch(/timeout only kills/i);
-    expect(wrapped.promptGuidelines).toHaveLength(4);
+    expect(wrapped.promptGuidelines).toHaveLength(5);
     expect(wrapped.promptGuidelines?.[0]).toContain('PI_*');
     expect(wrapped.promptGuidelines?.[1]).toMatch(/nohup/);
     expect(wrapped.promptGuidelines?.[2]).toMatch(/do not rerun/i);
     expect(wrapped.promptGuidelines?.[3]).toMatch(/timeout only kills/i);
     expect(wrapped.promptGuidelines?.[3]).toMatch(/background: true/);
     expect(wrapped.promptGuidelines?.[3]).toMatch(/sleep, ps, pgrep/);
+    expect(wrapped.promptGuidelines?.[4]).toMatch(/remind_me/);
+    expect(wrapped.promptGuidelines?.[4]).toMatch(/--watch/);
     expect(wrapped.description).toMatch(/fresh shell/i);
     expect(wrapped.description).toMatch(/Do not poll/);
     expect(wrapped.description).toMatch(/background: true/);

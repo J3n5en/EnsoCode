@@ -23,7 +23,8 @@ import {
 import { type Locale, normalizeLocale } from '@shared/i18n';
 import { collectPresetPromptIds } from '@shared/presetPrompts';
 import { normalizeSshTimeoutSeconds } from '@shared/sshTimeout';
-import { IPC_CHANNELS, isEditMode, resolveEditMode } from '@shared/types';
+import { isEditMode, resolveEditMode } from '@shared/types/editMode';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { appDesktop } from '../services/desktopHooks';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import {
@@ -906,6 +907,13 @@ export function consumeTrayReenterAfterUpdate(): boolean {
   return true;
 }
 
+let conversationsRemoved: ((ids: string[]) => void) | undefined;
+
+/** 用户明确删除会话时回调（子代理台账据此不再等它） */
+export function onConversationsRemoved(listener: (ids: string[]) => void): void {
+  conversationsRemoved = listener;
+}
+
 /** 无 renderer 时由 Main 改会话元数据；形状与 zustand persist 的 enso-conversations 一致。 */
 export function patchConversationsState(
   mutate: (state: {
@@ -1058,6 +1066,7 @@ export function registerSettingsHandlers(): void {
     if (!Array.isArray(ids)) return false;
     const targets = new Set(ids.filter((id): id is string => typeof id === 'string'));
     if (targets.size === 0) return true;
+    conversationsRemoved?.([...targets]);
     return patchConversationsState((state) => {
       for (const id of targets) delete state.conversations[id];
       state.order = state.order.filter((id) => !targets.has(id));

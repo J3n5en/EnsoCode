@@ -241,6 +241,11 @@ function parseCatalogEntry(value: unknown): CatalogEntry | null {
     out.pendingApprovalCount = value.pendingApprovalCount;
   if (typeof value.parentId === 'string') out.parentId = value.parentId;
   if (typeof value.updatedAt === 'number') out.updatedAt = value.updatedAt;
+  if (typeof value.queuePosition === 'number' && Number.isFinite(value.queuePosition)) {
+    out.queuePosition = value.queuePosition;
+  }
+  if (typeof value.queueFailed === 'string' && value.queueFailed)
+    out.queueFailed = value.queueFailed;
   if (typeof value.pinned === 'boolean') out.pinned = value.pinned;
   if (typeof value.archived === 'boolean') out.archived = value.archived;
   if (value.muted === true) out.muted = true;

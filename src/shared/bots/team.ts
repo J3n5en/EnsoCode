@@ -1,4 +1,5 @@
-import { APPROVAL_MODES, type ApprovalMode } from '../types/agent';
+import type { ApprovalMode } from '../types/agent';
+import { APPROVAL_MODES } from '../types/agentConstants';
 import {
   BOT_NAME_MAX,
   BOT_ROUTING_MODES,

@@ -11,12 +11,8 @@ import {
 import { supportedProjectThinkingLevels } from '@shared/modelThinking';
 import { expandOauthCatalog, mergeFetchedOauthModels } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
-import {
-  type ModelMeta,
-  type ModelMetaQuery,
-  type ModelMetaResult,
-  providerIdOfAccountKey,
-} from '@shared/types';
+import type { ModelMeta, ModelMetaQuery, ModelMetaResult } from '@shared/types';
+import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import { getModelsDevModels } from './modelsDevCatalog';
 import { ensureProviderModelsRefreshed, getRuntime, hasStoredAccount } from './oauthProviders';
 import { fetchXaiSubscriptionModels } from './xaiModels';

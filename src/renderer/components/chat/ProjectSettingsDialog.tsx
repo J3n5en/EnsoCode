@@ -1,7 +1,8 @@
 import { type DefaultModelRef, resolveChatReasoning } from '@shared/defaultModel';
 import { projectDisplayName } from '@shared/projectName';
-import { BUILTIN_TOOLS, type Project, type ThinkingLevel } from '@shared/types';
+import type { Project, ThinkingLevel } from '@shared/types';
 import type { AgentMode } from '@shared/types/agent';
+import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { FolderOpen, ShieldAlert, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CopyButton } from '@/components/chat/CopyButton';

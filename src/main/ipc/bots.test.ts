@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { HostToPhone } from '@enso/pair';
 import { botBrowserKey } from '@shared/bots/browser';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PairBotPort } from '../services/pairHost';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
@@ -93,6 +93,9 @@ vi.mock('./sessionIndex', () => ({
     isAlive: (id: string) => mocks.identities.has(id),
   },
 }));
+
+// 冷加载 bots 依赖图要几秒，放在收集阶段做一次；beforeEach 的 resetModules 之后只重新求值，不再受 hookTimeout 约束
+await import('./bots');
 
 const main = { sender: { id: 1 } };
 it('restricts queued interjection to the writable desktop Main renderer and validates identifiers', async () => {

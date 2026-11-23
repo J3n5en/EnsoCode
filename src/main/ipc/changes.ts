@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   liveConversationIds,
   pruneSnapshots,

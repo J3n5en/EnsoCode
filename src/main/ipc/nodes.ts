@@ -1,5 +1,5 @@
 import { ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
   getNodesStatus,
   pairNode,

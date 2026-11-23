@@ -1,12 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import {
-  isSecretarySkillName,
-  parseSecretarySkillDraft,
-  parseSecretarySkillFile,
-  renderSecretarySkillFile,
-} from '@shared/secretary/skills';
+import { parseSecretarySkillFile, renderSecretarySkillFile } from '@shared/secretary/skillFile';
+import { isSecretarySkillName, parseSecretarySkillDraft } from '@shared/secretary/skills';
 import type {
   SecretaryAuditEntry,
   SecretaryDispatchFile,

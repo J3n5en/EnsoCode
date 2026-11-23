@@ -346,6 +346,10 @@ export function ChatView() {
       status={chrome.spawning ? 'running' : chrome.status}
       pendingAskCount={userAskCount(chrome.pendingAsks)}
       hasRunningChild={chrome.id === chrome.parentId && chrome.parentHasRunningChild}
+      queued={chrome.queued}
+      queuePosition={chrome.queuePosition}
+      queueFailed={chrome.queueFailed}
+      conversationId={chrome.id}
     />
   );
 
@@ -631,11 +635,29 @@ function StatusDot({
   status,
   pendingAskCount = 0,
   hasRunningChild = false,
+  queued = false,
+  queuePosition,
+  queueFailed,
+  conversationId,
 }: {
   status: string;
   pendingAskCount?: number;
   hasRunningChild?: boolean;
+  queued?: boolean;
+  queuePosition?: number;
+  queueFailed?: string;
+  conversationId?: string;
 }) {
-  const tone = conversationDotTone({ status, pendingAskCount, hasRunningChild });
-  return <ConversationStatusIndicator tone={tone} title={status} />;
+  const { t } = useI18n();
+  const tone = queueFailed
+    ? 'failed'
+    : conversationDotTone({ status, pendingAskCount, hasRunningChild, queued });
+  const title = queueFailed
+    ? queueFailed
+    : queued
+      ? t('Queued · #{{n}}, starts automatically when a slot opens', {
+          n: queuePosition ?? 1,
+        })
+      : status;
+  return <ConversationStatusIndicator tone={tone} title={title} conversationId={conversationId} />;
 }

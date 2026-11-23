@@ -157,7 +157,8 @@ export function applyHeadlessGoalSignal(
 /** 轮次收束：先清中断标记，再投队列，最后续跑 goal。 */
 export function onHeadlessIdle(
   runtime: HeadlessSessionRuntime,
-  options?: { autoTurnLimit?: number }
+  /** awaitingReminder：会话挂着自定提醒，由提醒叫醒，goal 先不续跑 */
+  options?: { autoTurnLimit?: number; awaitingReminder?: boolean }
 ): {
   runtime: HeadlessSessionRuntime;
   deliver?: HeadlessDelivery;
@@ -170,7 +171,7 @@ export function onHeadlessIdle(
   };
   if (runtime.abortRequested) return { runtime: next };
   const queued = flushQueue(next);
-  if (queued.deliver) return queued;
+  if (queued.deliver || options?.awaitingReminder) return queued;
   return continueGoal(queued.runtime, options?.autoTurnLimit);
 }
 

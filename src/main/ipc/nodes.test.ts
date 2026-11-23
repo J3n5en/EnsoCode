@@ -1,5 +1,5 @@
 import type { RendererContents } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -42,6 +42,8 @@ vi.mock('../services/pairGuest', () => ({
     mocks.statusListener = listener;
   }),
 }));
+
+await import('./nodes');
 
 describe('registerNodesHandlers → renderer 推送目标', () => {
   beforeEach(async () => {

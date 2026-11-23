@@ -30,7 +30,7 @@ import {
   isTreeQuery,
   type MemoryGraphDto,
 } from '@shared/memory/graphDto';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { BotStore } from '../services/bots/botStore';
 import { BotChatStore } from '../services/bots/chatStore';
 import {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { DirectoryProvider } from '@shared/modelDirectory';
 import type { ModelProvider } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type DirectoryOAuthSource, synthesizeModelDirectory } from './modelDirectory';
 
@@ -41,6 +41,8 @@ vi.mock('../ipc/settings', () => ({
 vi.mock('./oauthProviders', () => ({
   getRuntime: () => mocks.getRuntime(),
 }));
+
+await import('./modelDirectory');
 
 const customProvider = (models: ModelProvider['models']): ModelProvider => ({
   id: 'custom-1',

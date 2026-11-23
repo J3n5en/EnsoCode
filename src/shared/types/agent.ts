@@ -30,11 +30,6 @@ import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
 import type { DefaultModelRef } from '../defaultModel';
 import type { ExitKind } from '../exitInterrupt';
 import { parsePluginArtifactInfo } from '../extensionPlugins/artifacts';
-import type {
-  InterceptPayload,
-  PluginEventName,
-  PluginInterceptEvent,
-} from '../extensionPlugins/events';
 import {
   AGENT_END_TEXT_MAX,
   BEFORE_AGENT_START_PROMPT_MAX,
@@ -42,10 +37,13 @@ import {
   CONTEXT_PART_KINDS,
   CONTEXT_USAGE_BUCKETS,
   type ContextPart,
+  type InterceptPayload,
   isChildInterceptEvent,
   isInterceptEvent,
   PLUGIN_EVENTS,
   PLUGIN_INTERCEPT_EVENTS,
+  type PluginEventName,
+  type PluginInterceptEvent,
 } from '../extensionPlugins/events';
 import {
   PLUGIN_AGENT_MAX_TIMEOUT_MS,
@@ -105,6 +103,13 @@ import {
   type WebSearchChainEntry,
 } from '../webSearchChain';
 import { WINDOWS_LOCAL_SHELLS, type WindowsLocalShell } from '../windowsLocalShell';
+import {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+  TURN_REPORT_MAX_CHARS,
+} from './agentConstants';
 import { type EditMode, isEditMode } from './editMode';
 import {
   PROJECTED_APPLY_PATCH_PATH_COUNT_LIMIT,
@@ -131,6 +136,13 @@ import { isWorkflowPresetId, parseWorkflowRunSnapshot, type WorkflowRunSnapshot 
 
 export type { ChildSessionIdentity, SessionIdentity } from '../builtinAgents';
 export { parseChildSessionIdentity, parseSessionIdentity } from '../builtinAgents';
+export {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+  TURN_REPORT_MAX_CHARS,
+};
 
 /**
  * Main → worker 的自定义 provider 注册信息。api 在 shared 侧保持 string，
@@ -163,9 +175,6 @@ export interface TurnDigest {
    */
   lastTool?: { name: string; ok: boolean };
 }
-
-/** 本轮汇报的硬上限：装得下一份正常汇报，又挡住异常长输出 */
-export const TURN_REPORT_MAX_CHARS = 8000;
 
 /** 本轮最后一条 assistant 结论原文，worker 侧截尾到 TURN_REPORT_MAX_CHARS；秘书终态回传用 */
 export interface TurnReport {
@@ -244,14 +253,6 @@ export interface VirtualSpawnConfig {
   fallbacks: SpawnModelConfig[];
   classifier?: VirtualSpawnClassifier;
 }
-
-/** 思考努力档位（reasoning 开启时有效），值域对齐 pi 的 ThinkingLevel。off 由 reasoningEnabled 表达 */
-export const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
-
-/** 审批档位：supervised 全审 / auto-edits 免文件 / assistant 助手代审 / full 全放行 */
-export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full', 'assistant'] as const;
-export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 /** 审批请求的操作类别 */
 export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';
@@ -1616,6 +1617,10 @@ export type AgentCommand =
   | { type: 'task-stop'; sessionId: string; taskId: string }
   /** 用户手动保留（可附理由）；reason 为 null 取消保留 */
   | { type: 'task-keep'; sessionId: string; taskId: string; reason: string | null }
+  /** 按会话 id 寻址：把已到点的自定提醒交给会话；会话没打开就不动，打开时补发 */
+  | { type: 'reminders-fire'; sessionId: string }
+  /** 清掉根会话及其子会话的自定提醒与链计数（用户停止、删除、归档） */
+  | { type: 'reminders-clear'; sessionId: string }
   | { type: 'tool-background'; identity: SessionIdentity; toolCallId: string }
   | { type: 'workflow-stop'; identity: SessionIdentity; runId: string }
   | { type: 'subagent-stop'; identity: SessionIdentity; agentId: string }
@@ -2072,6 +2077,7 @@ export type RendererAgentEvent =
       | { type: 'graceful-restart-ready' }
       | { type: 'background-tasks-detached' }
       | { type: 'session-wake-requested' }
+      | { type: 'session-reminder-due' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2093,6 +2099,9 @@ export type RendererAgentEvent =
 
 /** detail：Main 汇总的退出原因（退出码 / worker 致命异常首行） */
 export type WorkerExitedEvent = { type: 'worker-exited'; detail?: string };
+
+/** 优雅重启换代（Main 不退）：旧 worker 已按断点退出，会话由下一代接着跑；只给 Main 内部，不进会话广播 */
+export type WorkerSwappedEvent = { type: 'worker-swapped' };
 
 export function workspaceBranchChangedNote(branch: string): string {
   return `<workspace-branch-changed>\nThe current workspace is now on Git branch ${JSON.stringify(branch)}. The directory is unchanged, but file contents may differ. Re-read relevant files before relying on earlier observations or edits. This is background information only, not a task or goal.\n</workspace-branch-changed>`;
@@ -2192,6 +2201,8 @@ export type AgentWorkerEvent =
       continues?: string;
       /** 子代理还有自己起的、在跑、没表态的后台任务：Run 继续持有，等任务完成唤醒它 */
       awaitingTasks?: true;
+      /** 根会话还挂着自定提醒：在等自己定的时间点，goal 先不续跑 */
+      awaitingReminder?: true;
     }
   | {
       type: 'turn-failed';
@@ -2471,6 +2482,11 @@ export type AgentWorkerEvent =
        * 请 Main 按恢复清单打开它，worker 打开后把完成通知交给新一轮。旁路消费
        */
       type: 'session-wake-requested';
+      sessionId: string;
+    }
+  | {
+      /** 根会话的自定提醒到点：Main 判定会话还在（未删除、未归档）后回 reminders-fire，冷会话先打开。旁路消费 */
+      type: 'session-reminder-due';
       sessionId: string;
     }
   | {
@@ -4526,6 +4542,16 @@ const agentCommandParsers = {
       ? (value as unknown as AgentCommand)
       : null;
   },
+  'reminders-fire': (value: Record<string, unknown>): AgentCommand | null => {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentCommand)
+      : null;
+  },
+  'reminders-clear': (value: Record<string, unknown>): AgentCommand | null => {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentCommand)
+      : null;
+  },
   'tool-background': (value: Record<string, unknown>): AgentCommand | null => {
     return hasExactKeys(value, ['type', 'identity', 'toolCallId']) &&
       parseAnySessionIdentity(value.identity) &&
@@ -4955,6 +4981,11 @@ const agentWorkerEventParsers = {
       ? (value as unknown as AgentWorkerEvent)
       : null;
   },
+  'session-reminder-due': (value: Record<string, unknown>): AgentWorkerEvent | null => {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  },
   'unopened-background-tasks': (value: Record<string, unknown>): AgentWorkerEvent | null => {
     return hasExactKeys(value, ['type', 'sessionId', 'tasks']) &&
       isNonEmptyString(value.sessionId) &&
@@ -5258,7 +5289,8 @@ const agentWorkerEventParsers = {
         (value.requestBudgetError === undefined ||
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError))) &&
         (value.continues === undefined || isNonEmptyString(value.continues)) &&
-        (value.awaitingTasks === undefined || value.awaitingTasks === true)
+        (value.awaitingTasks === undefined || value.awaitingTasks === true) &&
+        (value.awaitingReminder === undefined || value.awaitingReminder === true)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }

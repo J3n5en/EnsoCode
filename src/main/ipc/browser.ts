@@ -1,7 +1,7 @@
 import type { BrowserAnnotationPinSpec, DesignXyRect } from '@shared/browser/designAnnotation';
 import { parseBrowserViewport, viewportToDip } from '@shared/browser/viewport';
-import { IPC_CHANNELS } from '@shared/types';
 import type { BrowserDesignMoveDirection } from '@shared/types/browser';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { ipcMain, type WebContents } from 'electron';
 import { browserHost } from '../services/browserHost';
 import { sendToAllWindows } from '../windows/createAppWindow';

@@ -1,5 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type * as SettingsModule from './index';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -26,13 +25,9 @@ vi.stubGlobal('window', {
   },
 });
 
-let settings: typeof SettingsModule;
+const settings = await import('./index');
 
 describe('Code 会话受保护动作底线设置', () => {
-  beforeAll(async () => {
-    settings = await import('./index');
-  });
-
   it('默认关闭（Code 行为不变），可显式开启', () => {
     expect(settings.useSettingsStore.getState().protectedActionsInCode).toBe(false);
     settings.useSettingsStore.getState().setProtectedActionsInCode(true);

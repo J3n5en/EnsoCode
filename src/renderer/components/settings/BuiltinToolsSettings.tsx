@@ -1,9 +1,11 @@
 import { computerPermissionGuideKind } from '@shared/computer/permissionGuide';
 import type { ComputerCapabilities } from '@shared/computer/types';
-import { BUILTIN_TOOLS, EDIT_MODES, type EditMode, isEditMode } from '@shared/types';
+import type { EditMode } from '@shared/types';
 import type { AgentMode } from '@shared/types/agent';
 import type { BrowserClearKind } from '@shared/types/browser';
+import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import type { DcgStatus } from '@shared/types/dcg';
+import { EDIT_MODES, isEditMode } from '@shared/types/editMode';
 import {
   WEB_SEARCH_CHAIN_MAX,
   type WebSearchChainEntry,
