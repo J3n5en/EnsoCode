@@ -94,6 +94,7 @@ import type { TelegramHub } from './hub';
 import {
   type ContactStore,
   channelPrefs,
+  contactOwnerId,
   TELEGRAM_CHANNEL_ID,
   withChannelPrefs,
   withTelegramGroupAdded,
@@ -440,6 +441,25 @@ export class ContactService implements SecretaryContactPort {
       enabled: file.enabled,
       channels: this.registry.list().map((entry) => this.channelView(entry)),
       telegram: { ...this.telegram.view(), following: followingViews(this.followingList()) },
+    };
+  }
+
+  /** 宿主核验插件投递发送者用：主人 id、私聊 id、已连接插件渠道的 peer */
+  ownerBindings(): {
+    telegramOwnerId?: string;
+    telegramPrivateChatId?: string;
+    channelPeers: Array<{ channelId: string; peers: string[] }>;
+  } {
+    const file = this.store.file();
+    const owner = contactOwnerId(file);
+    const privateChat = file.chat?.id;
+    return {
+      ...(owner !== undefined ? { telegramOwnerId: String(owner) } : {}),
+      ...(privateChat !== undefined ? { telegramPrivateChatId: String(privateChat) } : {}),
+      channelPeers: this.registry
+        .list()
+        .filter((entry) => entry.meta.id !== TELEGRAM_CHANNEL_ID && entry.status === 'connected')
+        .map((entry) => ({ channelId: entry.meta.id, peers: [...entry.peers] })),
     };
   }
 
