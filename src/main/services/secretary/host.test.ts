@@ -2966,9 +2966,11 @@ describe('结构化目标结果', () => {
       const h = harness({});
       h.ports.verifyGoalResult = () => new Promise(() => {});
       h.state.statuses.c1 = idle;
+      h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'complete' } };
       h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok', result }), []);
       h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
       expect(h.state.file.outbox).toEqual([]);
+      expect((h.state.file.activity ?? []).map((entry) => entry.kind)).not.toContain('turn-ended');
       await vi.advanceTimersByTimeAsync(8_000);
       expect(h.state.file.outbox[0]).toMatchObject({
         kind: 'goal-complete',

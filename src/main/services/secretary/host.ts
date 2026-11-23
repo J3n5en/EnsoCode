@@ -1336,6 +1336,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
         let readyGoal: GoalResultView | undefined;
+        let goalDeferred = false;
         if (kind === 'goal-complete') {
           const slot = goalVerifies.get(conversationId);
           if (slot && !slot.cancelled) {
@@ -1346,12 +1347,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
               slot.onDone = () =>
                 finishGoalResult(conversationId, slot, now, detail, report, turnReport);
               kind = null;
+              goalDeferred = true;
             }
           }
         }
         if (kind && !awaiting)
           recordResult(file, record, kind, now, detail, report, turnReport, readyGoal);
         else if (
+          !goalDeferred &&
           own &&
           event.type === 'turn-completed' &&
           !event.aborted &&
