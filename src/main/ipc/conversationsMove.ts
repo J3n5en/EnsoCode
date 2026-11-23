@@ -1,4 +1,9 @@
-import { conversationIdsToMove, parseMoveConversationInput } from '@shared/moveConversation';
+import {
+  conversationIdsToMove,
+  type ImportProjectSessionsResult,
+  parseImportProjectSessionsInput,
+  parseMoveConversationInput,
+} from '@shared/moveConversation';
 import type { AuthorityMutationResult, ConversationAuthorityProjection } from '@shared/types/agent';
 
 export { conversationIdsToMove, parseMoveConversationInput };
@@ -56,4 +61,46 @@ export async function handleConversationsMove(
   if (released && source.scratchRoot)
     ports.removeScratchWorkspace(source.scratchRoot, conversationId);
   return { ok: true, value: result.value };
+}
+
+export interface ImportProjectSessionsPorts extends ConversationsMovePorts {
+  rootConversationIds: (projectId: string) => string[];
+}
+
+/** 源项目下仍有效的根会话；子会话不在权威表里，随根会话一起改归属 */
+export function projectRootConversationIds(
+  conversations: readonly ConversationAuthorityProjection[],
+  projectId: string
+): string[] {
+  return conversations
+    .filter(
+      (conversation) =>
+        conversation.projectId === projectId &&
+        conversation.kind === 'root' &&
+        conversation.lifecycle !== 'ended' &&
+        !conversation.bot
+    )
+    .map((conversation) => conversation.conversationId);
+}
+
+/** 项目级错误：每条都会同样失败，直接中止 */
+const PROJECT_LEVEL_ERRORS = new Set(['target-unavailable', 'target-scratch', 'source-secretary']);
+
+/** 整项目导入：逐条复用单会话移动；运行中等会话级拒绝跳过并回报 */
+export async function handleImportProjectSessions(
+  input: unknown,
+  ports: ImportProjectSessionsPorts
+): Promise<ImportProjectSessionsResult> {
+  const parsed = parseImportProjectSessionsInput(input);
+  if (!parsed) return { ok: false, error: 'invalid' };
+  const { sourceProjectId, targetProjectId } = parsed;
+  const moved: string[] = [];
+  const skipped: { conversationId: string; error: string }[] = [];
+  for (const conversationId of ports.rootConversationIds(sourceProjectId)) {
+    const result = await handleConversationsMove({ conversationId, targetProjectId }, ports);
+    if (result.ok) moved.push(conversationId);
+    else if (PROJECT_LEVEL_ERRORS.has(result.error)) return { ok: false, error: result.error };
+    else skipped.push({ conversationId, error: result.error });
+  }
+  return { ok: true, moved, skipped };
 }

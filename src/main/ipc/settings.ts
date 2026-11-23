@@ -46,6 +46,7 @@ import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { deleteSystemPrompt } from '../services/systemPromptStore';
 import { localUi } from '../services/uiHost';
+import type { ImportProjectSessionsPorts } from './conversationsMove';
 
 function getSettingsPath(): string {
   return join(app.getPath('userData'), 'settings.json');
@@ -1092,15 +1093,17 @@ export function registerSettingsHandlers(): void {
     }, event.sender.id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {
-    const { handleConversationsMove } = await import('./conversationsMove');
+  const conversationsMovePorts = async (): Promise<ImportProjectSessionsPorts | null> => {
+    const { projectRootConversationIds } = await import('./conversationsMove');
     const { getSourceAuthorityRegistry, releaseRootFromMain } = await import('./agent');
     const { agentSessionIndex } = await import('./sessionIndex');
     const { sessionWorktreeInUse, unbindSessionWorktree } = await import('./worktree');
     const { removeScratchWorkspace } = await import('../services/sessionFileCleanup');
     const registry = getSourceAuthorityRegistry();
-    if (!registry) return { ok: false, error: 'unavailable' };
-    return handleConversationsMove(input, {
+    if (!registry) return null;
+    return {
+      rootConversationIds: (projectId) =>
+        projectRootConversationIds(registry.rendererProjection().conversations, projectId),
       moveConversation: (conversationId, targetProjectId, options) =>
         registry.moveConversation(conversationId, targetProjectId, options),
       isRunning: (conversationId) =>
@@ -1139,7 +1142,21 @@ export function registerSettingsHandlers(): void {
         return results.every((result) => result.ok);
       },
       removeScratchWorkspace,
-    });
+    };
+  };
+
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {
+    const { handleConversationsMove } = await import('./conversationsMove');
+    const ports = await conversationsMovePorts();
+    if (!ports) return { ok: false, error: 'unavailable' };
+    return handleConversationsMove(input, ports);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_IMPORT_PROJECT, async (_event, input: unknown) => {
+    const { handleImportProjectSessions } = await import('./conversationsMove');
+    const ports = await conversationsMovePorts();
+    if (!ports) return { ok: false, error: 'unavailable' };
+    return handleImportProjectSessions(input, ports);
   });
 
   // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖

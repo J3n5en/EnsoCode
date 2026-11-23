@@ -15,6 +15,25 @@ export function parseMoveConversationInput(value: unknown): MoveConversationInpu
   return { conversationId, targetProjectId };
 }
 
+export type ImportProjectSessionsInput = {
+  sourceProjectId: string;
+  targetProjectId: string;
+};
+
+export type ImportProjectSessionsResult =
+  | { ok: true; moved: string[]; skipped: { conversationId: string; error: string }[] }
+  | { ok: false; error: string };
+
+export function parseImportProjectSessionsInput(value: unknown): ImportProjectSessionsInput | null {
+  if (!isRecord(value)) return null;
+  if (Object.keys(value).length !== 2) return null;
+  const { sourceProjectId, targetProjectId } = value;
+  if (typeof sourceProjectId !== 'string' || sourceProjectId.length === 0) return null;
+  if (typeof targetProjectId !== 'string' || targetProjectId.length === 0) return null;
+  if (sourceProjectId === targetProjectId) return null;
+  return { sourceProjectId, targetProjectId };
+}
+
 export function conversationIdsToMove(
   conversations: Record<string, { parentId?: unknown; btwParentId?: unknown } | undefined>,
   rootId: string

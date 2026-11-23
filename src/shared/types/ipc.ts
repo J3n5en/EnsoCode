@@ -14,6 +14,7 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_REGISTER: 'conversations:register',
   /** 把会话改挂到另一个项目：改权威 projectId，并补丁 persist 行 */
   CONVERSATIONS_MOVE: 'conversations:move',
+  CONVERSATIONS_IMPORT_PROJECT: 'conversations:import-project',
   /** main → 主界面 renderer：它的会话写回被拒收，需重新读会话 */
   CONVERSATIONS_RESYNC: 'conversations:resync',
   /** 秘书：工作台与聊天卡片读的同一份 Main 状态 */

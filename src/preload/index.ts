@@ -43,6 +43,7 @@ import type {
   TreeNodeDto,
   TreeQuery,
 } from '@shared/memory/graphDto';
+import type { ImportProjectSessionsResult } from '@shared/moveConversation';
 import type {
   OauthFlowControlRequest,
   OauthFlowEvent,
@@ -365,6 +366,11 @@ const electronAPI = {
     }): Promise<
       { ok: true; value: ConversationAuthorityProjection } | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_MOVE, input),
+    importProjectSessions: (input: {
+      sourceProjectId: string;
+      targetProjectId: string;
+    }): Promise<ImportProjectSessionsResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_IMPORT_PROJECT, input),
     /** Main 拒收本窗口的会话写回，要求重新读会话 */
     onConversationsResync: (callback: () => void): (() => void) => {
       const listener = () => callback();

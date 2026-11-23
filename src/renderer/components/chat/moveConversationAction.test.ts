@@ -3,19 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   addToast: vi.fn(),
   setState: vi.fn(),
+  getState: vi.fn(),
   moveConversation: vi.fn(),
+  importProjectSessions: vi.fn(),
 }));
 
 vi.mock('@/components/ui/toast', () => ({ addToast: mocks.addToast }));
 vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: { setState: mocks.setState },
+  useSessionsStore: { setState: mocks.setState, getState: mocks.getState },
 }));
 
 import {
   canMoveConversationFrom,
   conversationMoveErrorTitle,
+  importProjectSessionsFromDialog,
   moveConversationFromMenu,
   moveConversationTargets,
+  projectRootConversationCount,
 } from './moveConversationAction';
 
 describe('moveConversationTargets', () => {
@@ -117,6 +121,98 @@ describe('moveConversationFromMenu', () => {
         title: 'Failed to move conversation',
         description: 'target-scratch',
       })
+    );
+  });
+});
+
+describe('projectRootConversationCount', () => {
+  it('counts root conversations of the project, archived included, children excluded', () => {
+    const conversations = {
+      a: { projectId: 'p1' },
+      b: { projectId: 'p1', archived: true },
+      child: { projectId: 'p1', parentId: 'a' },
+      btw: { projectId: 'p1', btwParentId: 'a' },
+      other: { projectId: 'p2' },
+    };
+    expect(projectRootConversationCount(conversations, 'p1')).toBe(2);
+  });
+});
+
+describe('importProjectSessionsFromDialog', () => {
+  const state = () => ({
+    conversations: {
+      c1: { projectId: 'p1', title: 'One', worktree: { path: '/wt' } },
+      child: { projectId: 'p1', parentId: 'c1' },
+      c2: { projectId: 'p1', title: 'Busy' },
+      archived: { projectId: 'p1', title: 'Old', archived: true },
+      other: { projectId: 'p3' },
+    },
+    worktreeStatuses: { c1: { exists: true } },
+  });
+  let next: ReturnType<typeof state> | undefined;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    next = undefined;
+    mocks.getState.mockImplementation(state);
+    mocks.setState.mockImplementation((fn: (s: unknown) => ReturnType<typeof state>) => {
+      next = fn(state());
+    });
+    vi.stubGlobal('window', {
+      electronAPI: { settings: { importProjectSessions: mocks.importProjectSessions } },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('moves imported roots with their children locally and reports success', async () => {
+    mocks.importProjectSessions.mockResolvedValue({
+      ok: true,
+      moved: ['c1', 'c2', 'archived'],
+      skipped: [],
+    });
+    expect(await importProjectSessionsFromDialog('p1', 'p2', (s) => s)).toBe(true);
+    expect(mocks.importProjectSessions).toHaveBeenCalledWith({
+      sourceProjectId: 'p1',
+      targetProjectId: 'p2',
+    });
+    expect(next?.conversations).toEqual({
+      c1: { projectId: 'p2', title: 'One', worktree: undefined, worktreeMissing: undefined },
+      child: { projectId: 'p2', parentId: 'c1' },
+      c2: { projectId: 'p2', title: 'Busy', worktree: undefined, worktreeMissing: undefined },
+      archived: {
+        projectId: 'p2',
+        title: 'Old',
+        archived: true,
+        worktree: undefined,
+        worktreeMissing: undefined,
+      },
+      other: { projectId: 'p3' },
+    });
+    expect(next?.worktreeStatuses).toEqual({});
+    expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }));
+  });
+
+  it('names the skipped running conversations', async () => {
+    mocks.importProjectSessions.mockResolvedValue({
+      ok: true,
+      moved: ['c1'],
+      skipped: [{ conversationId: 'c2', error: 'running' }],
+    });
+    expect(await importProjectSessionsFromDialog('p1', 'p2', (s) => s)).toBe(true);
+    expect(next?.conversations.c2.projectId).toBe('p1');
+    expect(mocks.addToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'warning',
+        description: expect.stringContaining('Busy'),
+      })
+    );
+  });
+
+  it('toasts a failure and leaves the local state alone', async () => {
+    mocks.importProjectSessions.mockResolvedValue({ ok: false, error: 'target-unavailable' });
+    expect(await importProjectSessionsFromDialog('p1', 'p2', (s) => s)).toBe(false);
+    expect(mocks.setState).not.toHaveBeenCalled();
+    expect(mocks.addToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', description: 'target-unavailable' })
     );
   });
 });

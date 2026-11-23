@@ -1439,6 +1439,17 @@ export const zhTranslations: Record<string, string> = {
   'Cannot move a running conversation': '运行中的会话不能移动',
   'Cannot move while its worktree is in use': '会话的 worktree 正在使用，暂不能移动',
   'Secretary conversations cannot be moved': '秘书会话不能移出秘书',
+  'Import conversations from another project…': '导入其他项目的会话…',
+  'Import conversations from another project': '导入其他项目的会话',
+  'All conversations of the selected project, archived ones included, will be moved under {{name}}. Session files stay where they are.':
+    '所选项目的全部会话（含已归档）将移到 {{name}} 下，会话文件保持原位不动。',
+  'No other projects': '没有其他项目',
+  '{{count}} conversations': '{{count}} 个会话',
+  'Failed to import conversations': '导入会话失败',
+  'Imported {{count}} conversations': '已导入 {{count}} 个会话',
+  'No conversations to import': '没有可导入的会话',
+  'Imported {{moved}} conversations, skipped {{count}} running or busy':
+    '已导入 {{moved}} 个会话，跳过 {{count}} 个运行中或占用中的会话',
   'Main working tree has uncommitted changes': '主工作树有未提交改动',
   'The new worktree branches off HEAD, so those changes stay in the main working tree and will not follow this session.':
     '新 worktree 从 HEAD 切出，这些改动会留在主工作树，不会跟随本会话。',
