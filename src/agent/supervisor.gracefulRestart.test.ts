@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
 import type { AgentWorkerEvent } from '@shared/types/agent';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { wakeColdRestartSession } from '../main/services/coldRestart';
 import { buildRestartManifest } from '../main/services/restartManifest';
 import type { BackgroundTaskManager } from './backgroundTasks';
@@ -933,6 +933,15 @@ describe('SessionSupervisor graceful restart', () => {
 
 describe('SessionSupervisor 重启保留转后台命令', () => {
   const logDir = path.join('/tmp/agent', 'task-logs');
+  // 通知补投走 150ms 的 setTimeout：用假时钟推进，真等会在高负载下和中间态断言赛跑
+  const holdTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const releaseTimers = async () => {
+    await vi.advanceTimersByTimeAsync(400);
+    vi.useRealTimers();
+  };
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   beforeEach(() => {
     mocks.sessions.length = 0;
     mocks.prefill.length = 0;
@@ -1193,6 +1202,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       ],
     });
     const { events, supervisor } = await startSupervisor(dataDir);
+    holdTimers();
     expect(existsSync(path.join(dataDir, DETACHED_TASKS_FILE))).toBe(false);
     const pending = readFileSync(
       path.join(dataDir, 'sessions', 'pending-notifications', 'parent.json'),
@@ -1224,7 +1234,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     expect(ofType(events, 'session-wake-requested')).toEqual([
       { type: 'session-wake-requested', sessionId: 'parent' },
     ]);
-    await sleep(400);
+    await releaseTimers();
     expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
     expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain(taskId);
     expect(managed?.pendingTaskReminders).toEqual([]);
@@ -1410,8 +1420,9 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
     await waitFor(events, 'parent-ready');
     const record = goneRecord('parent');
+    holdTimers();
     bgTasksOf(supervisor).recover([record]);
-    await sleep(400);
+    await releaseTimers();
     const session = mocks.sessions[0];
     expect(session.prompt).toHaveBeenCalledTimes(1);
     expect(String(session.prompt.mock.calls[0]?.[0])).toContain(
@@ -1429,8 +1440,9 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     const session = mocks.sessions[0];
     session.emit({ type: 'agent_start' });
     const record = goneRecord('parent');
+    holdTimers();
     bgTasksOf(supervisor).recover([record]);
-    await sleep(400);
+    await releaseTimers();
     expect(session.prompt).not.toHaveBeenCalled();
     expect(reminders(supervisor).join('\n')).toContain(record.taskId);
     expect(ofType(events, 'session-wake-requested')).toEqual([]);
@@ -1446,8 +1458,9 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     await waitFor(events, 'graceful-restart-ready');
     const own = goneRecord('parent');
     const unopened = goneRecord('other');
+    holdTimers();
     bgTasksOf(supervisor).recover([own, unopened]);
-    await sleep(400);
+    await releaseTimers();
     expect(mocks.sessions[0].prompt).not.toHaveBeenCalled();
     expect(ofType(events, 'session-wake-requested')).toEqual([]);
     const pendingDir = path.join(dataDir, 'sessions', 'pending-notifications');
@@ -1488,6 +1501,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     expect(ofType(events, 'session-wake-requested')).toEqual([
       { type: 'session-wake-requested', sessionId: 'parent' },
     ]);
+    holdTimers();
     supervisor.handleCommand({
       type: 'spawn-parent',
       identity: parent,
@@ -1496,7 +1510,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       resumeFile: SESSION_FILE,
     });
     await waitFor(events, 'parent-ready');
-    await sleep(400);
+    await releaseTimers();
     expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
     expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain('task-9-x finished');
     await supervisor.shutdown();
@@ -1546,6 +1560,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     expect(notices[0]).toContain('interrupted-by-restart');
     expect(notices[0]).toContain('started');
 
+    holdTimers();
     second.supervisor.handleCommand({
       type: 'spawn-parent',
       identity: parent,
@@ -1554,7 +1569,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       resumeFile: SESSION_FILE,
     });
     await waitFor(second.events, 'parent-ready');
-    await sleep(400);
+    await releaseTimers();
     expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
     expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain(taskId);
     expect(bgTasksOf(second.supervisor).snapshot('parent')).toEqual([
