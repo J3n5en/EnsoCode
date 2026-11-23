@@ -57,8 +57,8 @@ interface Slot {
   /** 宿主帧按 seq 顺序应用；缺口久未补齐则重新 hello 让宿主补发 */
   stream: ReturnType<typeof createRemoteOrderedStream<Sequenced>>;
   gapTimer: ReturnType<typeof setTimeout> | null;
-  /** 当前缺口从何时开始（诊断） */
-  gapAt?: number;
+  /** 当前缺口从何时开始、开始时的位置（诊断） */
+  gap?: { at: number; where: string };
   listeners: Map<string, Set<(payload: string) => void>>;
   /** 宿主已丢失该 renderer（重启/缓冲溢出/超时）：壳重载对应 iframe */
   onReset: () => void;
@@ -84,6 +84,8 @@ const WATCH_MS = 2_000;
 const ACK_STEP = 128 * 1024;
 /** 请求超过这么久才回来记进诊断 */
 const SLOW_INVOKE_MS = 1_000;
+/** 缺口超过这么久才补齐的记进诊断；短缺口是大帧走中继、小帧走直连的正常乱序 */
+const SLOW_GAP_MS = 300;
 const CAN_GUNZIP = typeof DecompressionStream === 'function';
 
 /** 桌面模式不用手机版的会话缓存：连接前读 IndexedDB 里的全部会话正文只会拖慢启动 */
@@ -319,15 +321,18 @@ export class DeskTunnel {
       return;
     }
     if (!slot.stream.gap) {
-      if (slot.gapAt !== undefined) {
-        this.note(`gap-closed ${slot.cid.slice(0, 4)} ${Date.now() - slot.gapAt}ms`);
-        slot.gapAt = undefined;
+      if (slot.gap) {
+        const took = Date.now() - slot.gap.at;
+        if (took >= SLOW_GAP_MS) this.note(`gap ${slot.gap.where} ${took}ms`);
+        slot.gap = undefined;
       }
       if (slot.gapTimer) clearTimeout(slot.gapTimer);
       slot.gapTimer = null;
     } else if (!slot.gapTimer) {
-      slot.gapAt ??= Date.now();
-      this.note(`gap ${slot.cid.slice(0, 4)} applied=${slot.stream.applied} got=${frame.seq}`);
+      slot.gap ??= {
+        at: Date.now(),
+        where: `${slot.cid.slice(0, 4)} applied=${slot.stream.applied} got=${frame.seq}`,
+      };
       this.watchGap(slot, Date.now());
     }
   }
@@ -365,8 +370,16 @@ export class DeskTunnel {
       const elapsed = Date.now() - pending.at;
       const result = frame.ok ? JSON.stringify(frame.data ?? null) : '';
       if (elapsed >= SLOW_INVOKE_MS) {
-        const sent = JSON.stringify(pending.message.args ?? null).length;
-        this.note(`slow ${pending.message.ch} ${elapsed}ms up=${sent} down=${result.length}`);
+        const { ch, args } = pending.message;
+        const sent = JSON.stringify(args ?? null).length;
+        // 写设置时带上键名：区分整份会话记录上传和普通设置
+        const key =
+          ch === IPC_CHANNELS.SETTINGS_WRITE_KEY &&
+          Array.isArray(args) &&
+          typeof args[0] === 'string'
+            ? ` ${args[0]}`
+            : '';
+        this.note(`slow ${ch}${key} ${elapsed}ms up=${sent} down=${result.length}`);
       }
       if (frame.ok) pending.resolve(result);
       else pending.reject(new Error(frame.error));
