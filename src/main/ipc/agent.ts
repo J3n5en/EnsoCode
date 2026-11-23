@@ -11,7 +11,7 @@ import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { appendInboundImageLines } from '@shared/secretary/inboundImages';
-import { wrapUntrusted } from '@shared/secretary/transcript';
+import { wrapPluginDelivery } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   cleanToolBatchLabel,
@@ -141,7 +141,13 @@ import {
 } from '../services/browserFileRoot';
 import type { BrowserActor } from '../services/browserTabClaims';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
-import { coldResumeReady, failColdResume, wakeColdRestartSession } from '../services/coldRestart';
+import {
+  type ColdRestartPlan,
+  coldResumeReady,
+  failColdResume,
+  wakeColdRestartOwners,
+  wakeColdRestartSession,
+} from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
@@ -781,6 +787,15 @@ export async function resumeRootFromRestartManifest(
     return { ok: false, error: 'model credentials unavailable' };
   }
   return spawnBoundSession(identity, { ...parsed, resumeFile: resume.file }, credentialKeys);
+}
+
+/** 冷启动：叫醒子代理 Run 被重启打断、却不在续跑名单里的父会话，就绪后由 recoverOwner 补通知 */
+export function wakeInterruptedRunOwners(current: ColdRestartPlan): Promise<void> {
+  return wakeColdRestartOwners(
+    agentService?.restartInterruptedOwners() ?? [],
+    resumeRootFromRestartManifest,
+    current
+  );
 }
 
 /** Main 侧给根会话发消息：deliveryId 由 Main 生成，供回执去重 */
@@ -1769,13 +1784,13 @@ export function registerAgentHandlers(): void {
         return undefined;
       return identity;
     },
-    // 插件消息进秘书会话一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导
-    (sessionId, pluginId, text) => {
+    // 插件消息一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导。
+    // 声明了 agent.injectTrusted 的插件可以给普通会话发不包的任务；秘书会话不认，照包
+    (sessionId, pluginId, text, trusted) => {
       const conversation = sourceAuthority?.conversation(sessionId);
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-      return isSecretaryProject(project)
-        ? wrapUntrusted(`plugin:${pluginId}`, redactSecrets(text))
-        : text;
+      if (isSecretaryProject(project)) return wrapPluginDelivery(pluginId, redactSecrets(text));
+      return trusted ? text : wrapPluginDelivery(pluginId, text);
     }
   );
   const sessionSource = () => ({

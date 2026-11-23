@@ -14,7 +14,11 @@ import {
   archiveSecretaryIds,
   filterArchivedByScope,
 } from '@shared/archiveScope';
-import { conversationDotTone } from '@shared/conversationDotTone';
+import {
+  conversationDotTone,
+  type PendingAskMark,
+  userAskCount,
+} from '@shared/conversationDotTone';
 import {
   ALL_GROUP_ID,
   filterProjectsByGroup,
@@ -2778,7 +2782,7 @@ interface ConversationRowProps {
     messages: { timestamp?: number }[];
     forkedFromConversationId?: string;
     unread?: boolean;
-    pendingAsks?: readonly { requestId: string }[];
+    pendingAsks?: readonly PendingAskMark[];
     pendingApprovals?: readonly unknown[];
     /** 标题总结在飞（标题后转圈） */
     titleSummaryPending?: boolean;
@@ -3403,7 +3407,7 @@ function ConversationDot({
     status: string;
     spawning: boolean;
     unread?: boolean;
-    pendingAsks?: readonly { requestId: string }[];
+    pendingAsks?: readonly PendingAskMark[];
     pendingApprovals?: readonly unknown[];
     hasRunningChild?: boolean;
   };
@@ -3416,7 +3420,7 @@ function ConversationDot({
           status: conversation.status,
           spawning: conversation.spawning,
           unread: conversation.unread,
-          pendingAskCount: conversation.pendingAsks?.length ?? 0,
+          pendingAskCount: userAskCount(conversation.pendingAsks),
           hasRunningChild: conversation.hasRunningChild,
         });
   // 锁进与项目行同宽的图标列:圆点/图标两种形态切换时标题不再左右跳动。

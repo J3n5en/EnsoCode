@@ -1028,6 +1028,21 @@ describe('PluginHostGate', () => {
     expect(inject).toHaveBeenCalledTimes(5);
   });
 
+  it('trusted 只收布尔值，原样交给注入，是否生效由服务按权限判', async () => {
+    const inject = vi.fn((_pluginId: string, _input: { trusted: boolean }) => ({
+      ok: true as const,
+    }));
+    deps.inject = inject;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', trusted: 'yes' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await gate.handle('a.b', 'session.inject', { text: 'hi', trusted: true }, agentCall());
+    await gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall());
+    expect(inject.mock.calls.map(([, input]) => input.trusted)).toEqual([true, false]);
+  });
+
   it('拒绝跨会话注入时带上插件 id，同一会话或已授权不通知', async () => {
     const onInjectDenied = vi.fn();
     const inject = vi.fn(() => ({ ok: true as const }));

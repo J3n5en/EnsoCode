@@ -1032,7 +1032,15 @@ export class AgentService implements AgentServiceContract {
   private afterRestartHint(entry: Pick<AgentRunLedgerEntry, 'agentId' | 'mode'>): string {
     return entry.mode === 'coworker'
       ? `The coworker is restored with its conversation: use subagent send with agentId ${entry.agentId} to ask what it finished or to continue the work.`
-      : `This task cannot be resumed after a restart: check what it already changed (files, git status), then spawn a new subagent for whatever is left. ${LIST_HINT}`;
+      : `This task cannot be resumed after a restart: check what it already changed (files, git status). Its uncommitted changes are still in the worktree, so spawn a new subagent to continue from them for whatever is left. ${LIST_HINT}`;
+  }
+
+  /** 冷启动：台账里被打断、父会话还不知情的 Run 所属父会话，即 recoverOwner 会补通知的那些 */
+  restartInterruptedOwners(): string[] {
+    const owners = [...this.previousRuns.values()]
+      .filter((entry) => entry.notified === false)
+      .map((entry) => entry.ownerId);
+    return [...new Set(owners)];
   }
 
   /**

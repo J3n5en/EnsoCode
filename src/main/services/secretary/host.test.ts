@@ -74,7 +74,6 @@ interface Harness {
     interruptDetails: Record<string, string>;
     contact: {
       milestones: { kind: string; title: string; conversationId: string; lastText?: string }[];
-      relayAsks: { conversationId: string; question: string; label: string }[];
       asks: { conversationId: string; requestId: string }[];
       resolved: { conversationId: string; requestId: string }[];
       replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
@@ -117,7 +116,6 @@ function harness(
     interruptDetails: {},
     contact: {
       milestones: [],
-      relayAsks: [],
       asks: [],
       resolved: [],
       replies: [],
@@ -183,9 +181,6 @@ function harness(
       },
       onScheduleFired: (input) => {
         state.contact.scheduleFired.push(input);
-      },
-      onRelayAsk: (input) => {
-        state.contact.relayAsks.push(input);
       },
       onAskRequest: (conversationId, ask) => {
         state.contact.asks.push({ conversationId, requestId: ask.requestId });
@@ -2234,7 +2229,7 @@ describe('联系方式转发', () => {
     ]);
   });
 
-  it('派出会话的提问转给秘书时，手机上也提示一条', () => {
+  it('派出会话的提问转给秘书时不打扰用户：手机渠道与桌面通知都不发', () => {
     const h = harness({});
     h.state.statuses.c1 = waiting;
     h.host.onAgentEvent(
@@ -2248,9 +2243,12 @@ describe('联系方式转发', () => {
       }),
       change('waiting', 'running')
     );
-    expect(h.state.contact.relayAsks).toEqual([
-      expect.objectContaining({ conversationId: 'c1', question: '用哪个方案？' }),
-    ]);
+    h.host.onAgentEvent(
+      event('ask-resolved', { requestId: 'ask-1', by: 'relay', answer: 'A', name: '小秘' }),
+      change('running', 'waiting')
+    );
+    expect(Object.values(h.state.contact).flat()).toEqual([]);
+    expect(h.state.notifications).toEqual([]);
   });
 
   it('秘书自己会话里的提问、收尾与审批都转发；别的会话不转发', () => {

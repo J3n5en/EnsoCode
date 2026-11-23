@@ -2,6 +2,8 @@ import {
   type ConversationDotTone,
   conversationDotTone,
   conversationHasRunningChild,
+  type PendingAskMark,
+  userAskCount,
 } from '@shared/conversationDotTone';
 import type { WorktreeStatus } from '@shared/types/worktree';
 import { worktreeReadyToAutoCleanup } from './worktree';
@@ -31,7 +33,7 @@ interface SidebarConversation {
   muted?: boolean;
   /** 仍在「活跃中」时被点开的时刻:留存窗口从它与最后一条消息中较晚者起算 */
   activeRenewedAt?: number;
-  pendingAsks?: readonly { requestId: string }[];
+  pendingAsks?: readonly PendingAskMark[];
   pendingApprovals?: readonly unknown[];
   coworkerIds?: readonly string[];
   subagents?: readonly { status: string }[];
@@ -153,7 +155,7 @@ function sidebarTone(
     status: conversation.status ?? 'idle',
     spawning: conversation.spawning,
     unread: conversation.unread,
-    pendingAskCount: conversation.pendingAsks?.length ?? 0,
+    pendingAskCount: userAskCount(conversation.pendingAsks),
     hasRunningChild: conversationHasRunningChild(
       { ...conversation, status: conversation.status ?? 'idle' },
       conversations as Record<string, { status: string; spawning?: boolean } | undefined>
@@ -357,7 +359,7 @@ function dotTone(id: string, conversations: Conversations): ConversationDotTone 
     status: conversation.status ?? 'idle',
     spawning: conversation.spawning,
     unread: conversation.unread,
-    pendingAskCount: conversation.pendingAsks?.length ?? 0,
+    pendingAskCount: userAskCount(conversation.pendingAsks),
     hasRunningChild: conversationHasRunningChild(
       { ...conversation, status: conversation.status ?? 'idle' },
       conversations as Record<string, { status: string; spawning?: boolean } | undefined>

@@ -1,4 +1,8 @@
-import { conversationDotTone, conversationHasRunningChild } from '../conversationDotTone';
+import {
+  conversationDotTone,
+  conversationHasRunningChild,
+  userAskCount,
+} from '../conversationDotTone';
 
 /** 与插件 `session_status` 同名同序 */
 export const THEME_STATES = ['idle', 'running', 'waiting', 'error'] as const;
@@ -10,7 +14,7 @@ interface StateConversation {
   unread?: boolean;
   parentId?: string;
   btwParentId?: string;
-  pendingAsks?: readonly unknown[];
+  pendingAsks?: readonly { relay?: unknown; answered?: unknown }[];
   pendingApprovals?: readonly unknown[];
   subagents?: readonly { status: string }[];
   coworkerIds?: readonly string[];
@@ -40,7 +44,7 @@ export function conversationThemeState(
     status: conversation.status ?? 'idle',
     spawning: conversation.spawning,
     pendingAskCount:
-      (conversation.pendingAsks?.length ?? 0) + (conversation.pendingApprovals?.length ?? 0),
+      userAskCount(conversation.pendingAsks) + (conversation.pendingApprovals?.length ?? 0),
     hasRunningChild: conversation.hasRunningChild,
   });
   return tone === 'failed' ? 'error' : tone === 'unread' ? 'idle' : tone;

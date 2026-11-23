@@ -32,7 +32,7 @@ import {
 } from '@shared/defaultModel';
 import { ELEVATE_ASKPASS_ENV } from '@shared/elevation';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
-import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
+import { PLUGIN_INJECT_WIRE_MAX_CHARS } from '@shared/extensionPlugins/protocol';
 import {
   parseRestartCheckpoint,
   RESTART_CHECKPOINT_ENV,
@@ -1088,7 +1088,7 @@ function describeCheckpoint(checkpoint: RestartCheckpoint, resumable: ReadonlySe
   return checkpoint.sessions
     .map(
       (entry) =>
-        `${entry.sessionId.slice(0, 8)}=${
+        `${deferredSessionLabel(entry.sessionId)}=${
           !resumable.has(entry.sessionId)
             ? '不进清单'
             : entry.nextStep === 'model-request'
@@ -2207,16 +2207,16 @@ export function sendPluginInterceptResultToSession(
 
 export function registerPluginSessionBridge(
   lookup: (sessionId: string) => SessionIdentity | undefined,
-  /** 投递前改写正文：秘书会话要把插件消息包成不可信内容 */
-  decorate?: (sessionId: string, pluginId: string, text: string) => string
+  /** 投递前改写正文：包成不可信内容；trusted 只在普通会话免包 */
+  decorate?: (sessionId: string, pluginId: string, text: string, trusted: boolean) => string
 ): void {
   setPluginSessionBridge({
     inject(sessionId, message) {
-      const text = decorate?.(sessionId, message.pluginId, message.text) ?? message.text;
-      if (text.length > PLUGIN_INJECT_MAX_CHARS) return { ok: false, error: '注入文本过长' };
+      const { images, trusted, ...rest } = message;
+      const text = decorate?.(sessionId, message.pluginId, message.text, trusted) ?? message.text;
+      if (text.length > PLUGIN_INJECT_WIRE_MAX_CHARS) return { ok: false, error: '注入文本过长' };
       const identity = lookup(sessionId);
       if (!identity) return { ok: false, error: '会话不在运行', notRunning: true };
-      const { images, ...rest } = message;
       const sent = sendAgentCommand({
         type: 'plugin-inject',
         identity,

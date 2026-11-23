@@ -103,4 +103,17 @@ describe('buildPushPayload', () => {
       buildPushPayload({ type: 'ask-request', identity }, '修复登录', true, false)?.title
     ).toBe('等待你的回答');
   });
+
+  it('转给秘书的提问不推送，普通提问与审批照推', () => {
+    const relayed = {
+      type: 'ask-request',
+      identity,
+      ask: { question: '用哪个？', relay: { name: '小秘' } },
+    };
+    expect(buildPushPayload(relayed, '修复登录')).toBeNull();
+    expect(
+      buildPushPayload({ type: 'ask-request', identity, ask: { question: '用哪个？' } }, 't')
+    ).toEqual({ title: '等待你的回答', body: '用哪个？', sessionId: identity.sessionId });
+    expect(buildPushPayload({ type: 'approval-request', identity }, 't')?.title).toBe('需要审批');
+  });
 });

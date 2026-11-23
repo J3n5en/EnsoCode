@@ -77,6 +77,23 @@ export async function wakeColdRestartSession(
   }));
 }
 
+/**
+ * 子代理 Run 被重启打断、父会话还不知情：父会话只在就绪时由 recoverOwner 补通知，
+ * 冷启动不续跑的父会话（等用户）要叫醒一次，否则要等有人打开它才知道
+ */
+export async function wakeColdRestartOwners(
+  ownerIds: Iterable<string>,
+  resume: (entry: RestartManifestEntry) => Promise<{ ok: boolean; error?: string }>,
+  current: ColdRestartPlan | null = plan ?? null
+): Promise<void> {
+  for (const sessionId of new Set(ownerIds)) {
+    const result = await wakeColdRestartSession(sessionId, resume, current);
+    console.log(
+      `[graceful-restart] wake owner of interrupted subagent runs ${sessionId.slice(0, 8)} ${result.ok ? 'ok' : `skipped: ${result.error}`}`
+    );
+  }
+}
+
 /** 「正在恢复会话」最多挡这么久：恢复卡住也要让用户能用 */
 export const COLD_RESUME_OVERLAY_TIMEOUT_MS = 30_000;
 

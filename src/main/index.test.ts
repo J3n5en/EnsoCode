@@ -94,7 +94,10 @@ vi.mock('./services/agentHost', () => ({
   recordAgentWorkerGone: vi.fn(),
   agentDataDir: () => '/tmp/enso-index-test/agent',
 }));
-vi.mock('./ipc/agent', () => ({ resumeRootFromRestartManifest: vi.fn() }));
+vi.mock('./ipc/agent', () => ({
+  resumeRootFromRestartManifest: vi.fn(),
+  wakeInterruptedRunOwners: vi.fn(),
+}));
 vi.mock('./ipc/appRestart', () => ({
   clearRestartOverlay: vi.fn(),
   registerAppRestartHandlers: mocks.registerForce,
