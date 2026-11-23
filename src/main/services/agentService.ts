@@ -10,7 +10,6 @@ import type {
   AgentControlSendRequest,
   AgentControlSpawnRequest,
   AgentControlWaitRequest,
-  AgentInstanceStatus,
   AgentListReceipt,
   AgentMode,
   AgentRunActivity,
@@ -115,14 +114,21 @@ export interface AgentServiceContract {
   resume(request: AgentControlResumeRequest): Promise<AgentServiceResult<AgentSpawnReceipt>>;
 }
 
+/**
+ * 实例状态只经 transition 改写。ready 的队列只在 Run 结束到 startNext 接手之间非空；
+ * parked / closed 不带队列：停放或关闭时排队的 Run 必须当场收口。
+ */
+type AgentState =
+  | { status: 'ready'; queue: readonly string[] }
+  | { status: 'active'; runId: string; queue: readonly string[] }
+  | { status: 'parked' | 'closed' };
+
 interface AgentRecord {
   context: AgentControlContext;
   agentId: string;
   mode: AgentMode;
   identity: ChildSessionIdentity;
-  status: AgentInstanceStatus;
-  activeRunId?: string;
-  queuedRunIds: string[];
+  readonly state: AgentState;
   title: string;
   /** task 已 resume 的次数 */
   resumes?: number;
@@ -207,6 +213,12 @@ const LIST_HINT = 'Use subagent list to see the subagents this conversation has 
 type ChildTask = Pick<ObservedTask, 'taskId' | 'command' | 'status' | 'startedAt' | 'exitCode'>;
 
 const CHILD_TASK_COMMAND_LIMIT = 120;
+
+const activeRunIdOf = (agent: AgentRecord): string | undefined =>
+  agent.state.status === 'active' ? agent.state.runId : undefined;
+
+const queueOf = (agent: AgentRecord): readonly string[] =>
+  'queue' in agent.state ? agent.state.queue : [];
 
 function failure<T>(
   code: Extract<AgentServiceResult<T>, { ok: false }>['code'],
@@ -305,8 +317,7 @@ export class AgentService implements AgentServiceContract {
     const existing = this.agents.get(identity.instanceId);
     if (existing) {
       if (!this.sameOwner(existing.context, context) || existing.mode !== 'coworker') return false;
-      existing.identity = identity;
-      existing.status = existing.activeRunId ? 'active' : 'ready';
+      this.reclaim(existing, identity);
       return true;
     }
     this.agents.set(identity.instanceId, {
@@ -314,11 +325,21 @@ export class AgentService implements AgentServiceContract {
       agentId: identity.instanceId,
       mode: 'coworker',
       identity,
-      status: 'ready',
-      queuedRunIds: [],
+      state: { status: 'ready', queue: [] },
       title: identity.instanceName,
     });
     return true;
+  }
+
+  private reclaim(agent: AgentRecord, identity: ChildSessionIdentity): void {
+    agent.identity = identity;
+    if (agent.state.status === 'parked' || agent.state.status === 'closed') {
+      this.transition(agent, { status: 'ready', queue: [] });
+    }
+  }
+
+  private transition(agent: AgentRecord, state: AgentState): void {
+    Object.assign(agent, { state });
   }
 
   /**
@@ -368,8 +389,7 @@ export class AgentService implements AgentServiceContract {
       agentId,
       mode,
       identity,
-      status: 'ready',
-      queuedRunIds: [],
+      state: { status: 'ready', queue: [] },
       title: request.name?.trim() || request.description,
     };
     const run = this.createRun(agent, runId, request.prompt, request.schema, request.gate);
@@ -397,19 +417,20 @@ export class AgentService implements AgentServiceContract {
       if (!request.requestId || !request.message.trim()) {
         return failure('invalid-state', 'requestId and message are required.');
       }
-      if (agent.value.status === 'closed') {
+      if (agent.value.state.status === 'closed') {
         return failure(
           'invalid-state',
           'Agent is dismissed and cannot receive messages. Spawn a new agent with the context it needs.'
         );
       }
-      if (agent.value.status === 'parked' && agent.value.mode === 'task') {
+      if (agent.value.state.status === 'parked' && agent.value.mode === 'task') {
         return failure(
           'invalid-state',
           'This task was interrupted. Use resume with its agentId to continue it from where it stopped.'
         );
       }
-      const active = agent.value.activeRunId ? this.runs.get(agent.value.activeRunId) : undefined;
+      const activeRunId = activeRunIdOf(agent.value);
+      const active = activeRunId ? this.runs.get(activeRunId) : undefined;
       if (request.expectedRunId && request.expectedRunId !== active?.runId) {
         return failure('run-mismatch', 'The active Run changed before delivery.');
       }
@@ -426,7 +447,10 @@ export class AgentService implements AgentServiceContract {
           prompt: request.message,
         });
         if (!sent.ok) return failure('runtime-unavailable', sent.error ?? 'Steer failed.');
-        if (TERMINAL_RUN_STATUSES.has(active.status) || agent.value.activeRunId !== active.runId) {
+        if (
+          TERMINAL_RUN_STATUSES.has(active.status) ||
+          activeRunIdOf(agent.value) !== active.runId
+        ) {
           return failure('invalid-state', 'The active Run ended while steer was being delivered.');
         }
         return {
@@ -449,8 +473,11 @@ export class AgentService implements AgentServiceContract {
       const run = this.createRun(agent.value, runId, request.message, request.schema, request.gate);
       this.runs.set(runId, run);
       this.persistRuns();
-      if (active) {
-        agent.value.queuedRunIds.push(runId);
+      if (active && agent.value.state.status === 'active') {
+        this.transition(agent.value, {
+          ...agent.value.state,
+          queue: [...agent.value.state.queue, runId],
+        });
         this.pushProgress(request.context.owner.ownerId);
         return {
           ok: true,
@@ -489,7 +516,12 @@ export class AgentService implements AgentServiceContract {
       run.value.delivered = true;
       run.value.stopRequested = true;
       if (run.value.status === 'queued') {
-        agent.queuedRunIds = agent.queuedRunIds.filter((id) => id !== run.value.runId);
+        if ('queue' in agent.state) {
+          this.transition(agent, {
+            ...agent.state,
+            queue: agent.state.queue.filter((id) => id !== run.value.runId),
+          });
+        }
       } else if (run.value.status !== 'validating') {
         const stopped = await this.options.runtime.stop({
           context: request.context,
@@ -510,9 +542,8 @@ export class AgentService implements AgentServiceContract {
       this.finishRun(run.value, 'cancelled');
       if (agent.mode === 'task') {
         this.closeTask(agent);
-      } else if (agent.activeRunId === run.value.runId) {
-        agent.activeRunId = undefined;
-        agent.status = 'ready';
+      } else if (agent.state.status === 'active' && agent.state.runId === run.value.runId) {
+        this.transition(agent, { status: 'ready', queue: agent.state.queue });
         await this.startNext(agent);
       }
       return { ok: true, value: this.snapshot(run.value) };
@@ -523,7 +554,7 @@ export class AgentService implements AgentServiceContract {
     return this.serial(request.context.owner.ownerId, async () => {
       const agent = this.ownedAgent(request.context, request.agentId);
       if (!agent.ok) return agent;
-      if (agent.value.status === 'closed') {
+      if (agent.value.state.status === 'closed') {
         return { ok: true, value: { agentId: agent.value.agentId } };
       }
       const dismissed = await this.options.runtime.dismiss({
@@ -541,9 +572,7 @@ export class AgentService implements AgentServiceContract {
           this.finishRun(run, 'cancelled');
         }
       }
-      agent.value.activeRunId = undefined;
-      agent.value.queuedRunIds = [];
-      agent.value.status = 'closed';
+      this.transition(agent.value, { status: 'closed' });
       return { ok: true, value: { agentId: agent.value.agentId } };
     });
   }
@@ -575,7 +604,7 @@ export class AgentService implements AgentServiceContract {
     if (invalid) return invalid;
     const visible = [...this.agents.values()]
       .filter((agent) => this.sameOwner(agent.context, request.context))
-      .filter((agent) => request.status === undefined || agent.status === request.status)
+      .filter((agent) => request.status === undefined || agent.state.status === request.status)
       .sort((left, right) => left.agentId.localeCompare(right.agentId));
     const start = request.cursor
       ? Math.max(0, visible.findIndex((agent) => agent.agentId === request.cursor) + 1)
@@ -589,11 +618,12 @@ export class AgentService implements AgentServiceContract {
           const latest = [...this.runs.values()]
             .filter((run) => run.agentId === agent.agentId)
             .sort((left, right) => right.createdAt - left.createdAt)[0];
+          const activeRunId = activeRunIdOf(agent);
           return {
             agentId: agent.agentId,
             mode: agent.mode,
-            status: agent.status,
-            ...(agent.activeRunId ? { activeRunId: agent.activeRunId } : {}),
+            status: agent.state.status,
+            ...(activeRunId ? { activeRunId } : {}),
             ...(latest ? { latestRun: this.snapshot(latest) } : {}),
           };
         }),
@@ -626,10 +656,10 @@ export class AgentService implements AgentServiceContract {
           'Only an interrupted task Agent can be resumed. Use send to continue a coworker.'
         );
       }
-      if (agent.status !== 'parked') {
+      if (agent.state.status !== 'parked') {
         return failure(
           'invalid-state',
-          agent.status === 'closed'
+          agent.state.status === 'closed'
             ? agent.resumeLimitHit
               ? `Agent cannot be resumed. ${RESUME_LIMIT_TEXT}`
               : 'Agent already finished or was dismissed and cannot be resumed.'
@@ -738,23 +768,26 @@ export class AgentService implements AgentServiceContract {
   observe(event: AgentWorkerEvent | { type: 'worker-exited' }): void {
     if (event.type === 'worker-exited') {
       for (const agent of this.agents.values()) {
-        const active = agent.activeRunId ? this.runs.get(agent.activeRunId) : undefined;
+        const activeRunId = activeRunIdOf(agent);
+        const active = activeRunId ? this.runs.get(activeRunId) : undefined;
         const interrupted = Boolean(active && !TERMINAL_RUN_STATUSES.has(active.status));
         const park = interrupted && this.mayPark(agent);
         // 父会话随 worker 一起没了，此刻无人可通知：父会话重新就绪时由 recoverOwner 补通知；
         // 排队的 Run 也一样，停放后不会再有人启动它们
-        for (const runId of [agent.activeRunId, ...agent.queuedRunIds]) {
+        for (const runId of [activeRunId, ...queueOf(agent)]) {
           const run = runId ? this.runs.get(runId) : undefined;
           if (!run || TERMINAL_RUN_STATUSES.has(run.status)) continue;
           run.delivered = true;
           run.parentUnaware = true;
           this.finishRun(run, 'interrupted', 'Agent worker exited.');
         }
-        agent.activeRunId = undefined;
-        agent.queuedRunIds = [];
         // 中断的 task 停放待 resume；子会话已随 worker 没了，无需回收
-        agent.status =
-          agent.mode === 'coworker' || park || agent.status === 'parked' ? 'parked' : 'closed';
+        this.transition(agent, {
+          status:
+            agent.mode === 'coworker' || park || agent.state.status === 'parked'
+              ? 'parked'
+              : 'closed',
+        });
       }
       return;
     }
@@ -766,18 +799,16 @@ export class AgentService implements AgentServiceContract {
       agent = [...this.agents.values()].find(
         (candidate) =>
           candidate.mode === 'coworker' &&
-          candidate.status !== 'closed' &&
+          candidate.state.status !== 'closed' &&
           candidate.context.owner.kind === 'chatSession' &&
           candidate.context.owner.ownerId === event.identity.parent.sessionId &&
           candidate.identity.instanceId === event.identity.instanceId
       );
-      if (agent) {
-        agent.identity = event.identity;
-        agent.status = agent.activeRunId ? 'active' : 'ready';
-      }
+      if (agent) this.reclaim(agent, event.identity);
     }
     if (!agent) return;
-    const active = agent.activeRunId ? this.runs.get(agent.activeRunId) : undefined;
+    const activeRunId = activeRunIdOf(agent);
+    const active = activeRunId ? this.runs.get(activeRunId) : undefined;
     if (event.type === 'message-upsert' && active) {
       const before = { text: active.text, activity: JSON.stringify(active.activity) };
       const text = projectedText(event.message);
@@ -843,20 +874,19 @@ export class AgentService implements AgentServiceContract {
       return;
     }
     // 停放的 task 回收子会话时的 child-ended 不改状态
-    if (event.type === 'child-ended' && agent.status === 'parked' && agent.mode === 'task') return;
+    if (event.type === 'child-ended' && agent.state.status === 'parked' && agent.mode === 'task')
+      return;
     if (event.type === 'child-ended' || event.type === 'child-rejected') {
       const terminal = event.type === 'child-rejected' ? 'failed' : 'interrupted';
       if (active) {
         active.validationAbort?.abort();
         this.finishRun(active, terminal, event.reason);
       }
-      for (const runId of agent.queuedRunIds) {
+      for (const runId of queueOf(agent)) {
         const queued = this.runs.get(runId);
         if (queued) this.finishRun(queued, terminal, event.reason);
       }
-      agent.queuedRunIds = [];
-      agent.activeRunId = undefined;
-      agent.status = 'closed';
+      this.transition(agent, { status: 'closed' });
     }
   }
 
@@ -973,7 +1003,7 @@ export class AgentService implements AgentServiceContract {
       const agent = this.agents.get(run.agentId);
       const title = agent?.title ?? run.title ?? run.agentId;
       const next =
-        agent?.status === 'parked' && agent.mode === 'task'
+        agent?.state.status === 'parked' && agent.mode === 'task'
           ? `its progress is saved: use subagent resume with agentId ${run.agentId} to continue from where it stopped — do not spawn it again.`
           : this.afterRestartHint(run);
       return `- "${title}" (agentId ${run.agentId}, runId ${run.runId}, ${run.mode}): ${next}`;
@@ -1104,7 +1134,7 @@ export class AgentService implements AgentServiceContract {
     return [...this.agents.values()].find(
       (agent) =>
         agent.mode === 'task' &&
-        agent.status === 'parked' &&
+        agent.state.status === 'parked' &&
         this.sameOwner(agent.context, context) &&
         this.latestRun(agent.agentId)?.prompt.trim() === wanted
     )?.agentId;
@@ -1140,8 +1170,7 @@ export class AgentService implements AgentServiceContract {
     run: RunRecord,
     callerAwaits = false
   ): Promise<AgentServiceResult<never> | { ok: true }> {
-    agent.activeRunId = run.runId;
-    agent.status = 'active';
+    this.transition(agent, { status: 'active', runId: run.runId, queue: queueOf(agent) });
     run.status = 'running';
     run.startedAt = this.now();
     this.pushProgress(agent.context.owner.ownerId);
@@ -1160,8 +1189,7 @@ export class AgentService implements AgentServiceContract {
           ...(run.gate !== undefined ? { gate: run.gate } : {}),
         });
     if (prompted.ok) return { ok: true };
-    agent.activeRunId = undefined;
-    agent.status = 'ready';
+    this.transition(agent, { status: 'ready', queue: queueOf(agent) });
     if (run.resumed) this.parkTask(agent);
     // spawn / send 当场启动失败由回执告知；排队后才启动的失败要另行通知
     if (callerAwaits) run.delivered = true;
@@ -1170,9 +1198,10 @@ export class AgentService implements AgentServiceContract {
   }
 
   private async startNext(agent: AgentRecord): Promise<void> {
-    if (agent.status === 'closed' || agent.activeRunId) return;
-    const runId = agent.queuedRunIds.shift();
+    if (agent.state.status !== 'ready') return;
+    const [runId, ...rest] = agent.state.queue;
     if (!runId) return;
+    this.transition(agent, { status: 'ready', queue: rest });
     const run = this.runs.get(runId);
     if (run?.status !== 'queued') {
       await this.startNext(agent);
@@ -1244,16 +1273,14 @@ export class AgentService implements AgentServiceContract {
       return;
     }
     this.finishRun(run, status, error);
-    agent.activeRunId = undefined;
-    agent.status = 'ready';
+    this.transition(agent, { status: 'ready', queue: queueOf(agent) });
     void this.serial(agent.context.owner.ownerId, () => this.startNext(agent));
   }
 
   /** task 只有一轮：完成、校验失败或被 stop 后都不能再用，关闭并回收子会话，否则留下孤儿 */
   private closeTask(agent: AgentRecord): void {
-    if (agent.status === 'closed') return;
-    agent.activeRunId = undefined;
-    agent.status = 'closed';
+    if (agent.state.status === 'closed') return;
+    this.transition(agent, { status: 'closed' });
     void this.options.runtime.dismiss({
       context: agent.context,
       identity: agent.identity,
@@ -1263,9 +1290,8 @@ export class AgentService implements AgentServiceContract {
 
   /** 中断的 task 停放：回收子会话，会话文件留盘，resume 时按原文件重开 */
   private parkTask(agent: AgentRecord): void {
-    if (agent.status === 'closed' || agent.status === 'parked') return;
-    agent.activeRunId = undefined;
-    agent.status = 'parked';
+    if (agent.state.status === 'closed' || agent.state.status === 'parked') return;
+    this.transition(agent, { status: 'parked' });
     void this.options.runtime.dismiss({
       context: agent.context,
       identity: agent.identity,
@@ -1335,7 +1361,7 @@ export class AgentService implements AgentServiceContract {
         truncated ? `Use subagent report with runId ${run.runId} for the full result.` : '',
         run.mode === 'coworker'
           ? `To continue this coworker, use subagent send with agentId ${run.agentId}.`
-          : this.agents.get(run.agentId)?.status === 'parked'
+          : this.agents.get(run.agentId)?.state.status === 'parked'
             ? `Its progress is saved: to continue from where it stopped, use subagent resume with agentId ${run.agentId} — do not spawn it again.`
             : '',
       ]
