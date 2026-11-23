@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { MessageTimeline } from './MessageTimeline';
+import type { NavRailItem } from './NavRail';
+
+let navItems: NavRailItem[] = [];
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/settings', () => ({ useSettingsStore: () => false }));
@@ -19,7 +22,12 @@ vi.mock('@/components/ui/button', () => ({
 }));
 vi.mock('react-virtuoso', () => ({ Virtuoso: () => null }));
 vi.mock('./chatHost', () => ({ useChatHost: () => null }));
-vi.mock('./NavRail', () => ({ NavRail: () => null }));
+vi.mock('./NavRail', () => ({
+  NavRail: (props: { items: NavRailItem[] }) => {
+    navItems = props.items;
+    return null;
+  },
+}));
 vi.mock('./WelcomeSuggestions', () => ({ WelcomeSuggestions: () => null }));
 vi.mock('./useFoldedTimeline', () => ({ useFoldedTimeline: (items: unknown) => items }));
 vi.mock('./TimelineRow', () => ({
@@ -145,5 +153,26 @@ describe('MessageTimeline 回到底部（全量渲染）', () => {
     await act(async () => resize());
     expect(scroller.scrollTop).toBe(0);
     expect(bottomButton()).toBeDefined();
+  });
+});
+
+describe('MessageTimeline 导航条', () => {
+  it('轮次预览不露引用块标签，显示追问本身', async () => {
+    const quoted = [
+      { kind: 'user', key: 'u1', text: '<quote>\n引用的原文\n</quote>\n为什么这样？' },
+      { kind: 'user', key: 'u2', text: '<quote>\n只有引用\n</quote>' },
+    ] as unknown as TimelineItem[];
+    await act(async () =>
+      root.render(
+        createElement(MessageTimeline, {
+          items: quoted,
+          busy: false,
+          running: false,
+          emptyTitle: 'Project',
+          virtualize: false,
+        })
+      )
+    );
+    expect(navItems.map((item) => item.question)).toEqual(['为什么这样？', '只有引用']);
   });
 });

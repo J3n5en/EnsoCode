@@ -156,6 +156,7 @@ export interface ConfigSyncState {
   expandLiveEdits?: boolean;
   expandLiveReasoning?: boolean;
   autoCollapseTurns?: boolean;
+  quoteSelectionButton?: boolean;
   collapseCompletedActivity?: boolean;
   collapseLiveActivity?: boolean;
   liveActivityFoldDelaySec?: number;

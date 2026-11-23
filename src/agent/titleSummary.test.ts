@@ -86,6 +86,12 @@ describe('buildTitleUserText：送给模型的用户消息（清洗后的用户�
     expect(buildTitleUserText('帮我修 bug')).toBe('帮我修 bug');
   });
 
+  it('选中文本引用块不进标题输入，只留追问', () => {
+    expect(buildTitleUserText('<quote>\n很长的一段引用\n</quote>\n这段为什么报错')).toBe(
+      '这段为什么报错'
+    );
+  });
+
   it('超长消息截断到 2000 字符，避免为一个标题烧长上下文', () => {
     expect(buildTitleUserText('x'.repeat(5000))).toHaveLength(2000);
   });
