@@ -9,16 +9,24 @@ export function DevToolsSection() {
   if (isRemoteClient()) return null;
 
   const open = async () => {
-    const result = await window.electronAPI.window.openDevTools();
-    if (result.ok) return;
-    addToast({
-      type: 'error',
-      title: t('Could not open developer tools'),
-      description:
-        result.error === 'main-window-unavailable'
-          ? t('The main window is closed. Open it and try again.')
-          : result.error,
-    });
+    try {
+      const result = await window.electronAPI.window.openDevTools();
+      if (result.ok) return;
+      addToast({
+        type: 'error',
+        title: t('Could not open developer tools'),
+        description:
+          result.error === 'main-window-unavailable'
+            ? t('The main window is closed. Open it and try again.')
+            : result.error,
+      });
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: t('Could not open developer tools'),
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   return (

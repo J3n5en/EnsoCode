@@ -72,4 +72,16 @@ describe('DevToolsSection', () => {
     expect(openButton()).toBeUndefined();
     expect(harness.openDevTools).not.toHaveBeenCalled();
   });
+
+  it('IPC 抛错时弹错误提示，不产生未捕获异常', async () => {
+    harness.openDevTools.mockRejectedValueOnce(new Error('ipc failed'));
+    await mount(false);
+    await act(async () => openButton()?.click());
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        description: 'ipc failed',
+      })
+    );
+  });
 });
