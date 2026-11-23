@@ -733,6 +733,7 @@ export interface SecretaryDailyItem {
   leftover?: { count: number };
   /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
   persistent?: true;
+  goalResult?: GoalResultView;
 }
 
 export interface SecretaryDailyCounts {

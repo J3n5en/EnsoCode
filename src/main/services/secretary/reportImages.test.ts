@@ -73,6 +73,22 @@ describe('SecretaryReportStore 归档', () => {
     expect(store.imageFile(CONV, names[0] as string)).toBe(join(dir, names[0] as string));
   });
 
+  it('结构化截图用说明作标签，结果写进报告', async () => {
+    const { store, shot } = setup();
+    const file = shot('home.png');
+    const goalResult = {
+      result: { summary: 'shipped', screenshots: [{ path: file, caption: '首页' }] },
+      at: T0,
+    };
+    const saved = await store.archive(CONV, T0, '完成', {
+      shots: [{ path: file, label: '首页' }],
+      goalResult,
+    });
+    expect(saved?.images[0]).toMatchObject({ label: '首页' });
+    expect(saved?.goalResult).toEqual(goalResult);
+    expect(store.read(CONV)?.goalResult).toEqual(goalResult);
+  });
+
   it('白名单外、符号链接越界、不存在、不是图片、超过单张上限的都标成不可用', async () => {
     const { store, dir, shot, outside } = setup({ maxBytes: 1024 });
     const far = join(outside, 'far.png');
