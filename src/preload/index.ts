@@ -538,6 +538,9 @@ const electronAPI = {
     /** 结果卡「知道了」：这条结果不再占工作台的「需要你处理」 */
     dismissResult: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DISMISS_RESULT, { conversationId }),
+    /** 出问题的等待派发卡「忽略」：从等待表里移除 */
+    dismissPending: (pendingId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DISMISS_PENDING, { pendingId }),
     /** 用户手动把一条派发记录标记完成，或撤销这个标记放回进行中 */
     markResult: (
       conversationId: string,

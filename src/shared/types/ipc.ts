@@ -33,6 +33,8 @@ export const IPC_CHANNELS = {
   SECRETARY_TODO_MUTATE: 'secretary:todo-mutate',
   /** 秘书：用户点过工作台结果卡的「知道了」，这条结果不再占需要你处理 */
   SECRETARY_DISMISS_RESULT: 'secretary:dismiss-result',
+  /** 秘书：用户忽略一条出问题的等待派发，从等待表里移除 */
+  SECRETARY_DISMISS_PENDING: 'secretary:dismiss-pending',
   /** 秘书：用户手动把一条派发记录标记完成，或撤销这个标记放回进行中 */
   SECRETARY_MARK_RESULT: 'secretary:mark-result',
   /** 秘书：停掉一条派发记录里遗留的后台任务（常驻服务、卡死的命令） */

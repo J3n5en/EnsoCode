@@ -9,6 +9,7 @@ import type {
   DispatchDraft,
   DispatchModelRef,
   DispatchRecord,
+  PendingDispatch,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProfile,
@@ -24,6 +25,7 @@ import type { ObservedTask } from '../backgroundTaskTracker';
 import {
   buildSecretaryState,
   createSecretaryDispatchHandlers,
+  dismissPending,
   dismissResult,
   grantTakeover,
   listTakeovers,
@@ -48,6 +50,7 @@ import {
   unfollowTarget,
 } from './following';
 import type { SecretarySessionStatus } from './readers';
+import { buildBoard } from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import type { SecretaryOpHandler } from './tools';
 
@@ -2956,6 +2959,91 @@ describe('dismissResult', () => {
   });
 });
 
+describe('dismissPending', () => {
+  const pendingOf = (id: string, over: Partial<PendingDispatch> = {}): PendingDispatch => ({
+    id,
+    projectId: 'p1',
+    secretaryConversationId: 'sec-1',
+    createdAt: 100,
+    updatedAt: 500,
+    status: 'failed',
+    problem: 'dependency-failed',
+    failedDependency: 'c1',
+    after: ['c1'],
+    draft: { projectId: 'p1', prompt: '接着改', worktree: false },
+    ...over,
+  });
+  const fileWith = (...items: PendingDispatch[]): SecretaryDispatchFile => ({
+    ...emptyFile(),
+    pending: Object.fromEntries(items.map((item) => [item.id, item])),
+  });
+  const needsYou = (file: SecretaryDispatchFile) =>
+    buildBoard(file, { rows: {}, statuses: {}, projects: [localProject()], todos: [] }).needsYou;
+
+  it('出问题的等待派发：移除并写审计，之后不再出现在需要你处理', () => {
+    const h = harness({ file: fileWith(pendingOf('pend-1')) });
+    h.file.outbox = [{ key: 'k', at: 1, text: 't' } as SecretaryDispatchFile['outbox'][number]];
+    expect(needsYou(h.file).map((card) => card.kind)).toEqual(['pending']);
+
+    expect(dismissPending(h.ports, 'pend-1')).toEqual({ ok: true });
+    expect(h.file.pending).toBeUndefined();
+    expect(needsYou(h.file)).toEqual([]);
+    // 秘书那边已经排队的结果照常投递
+    expect(h.file.outbox).toHaveLength(1);
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'pending_dismiss',
+        targetId: 'pend-1',
+        ok: true,
+        detail: 'dependency-failed',
+      },
+    ]);
+  });
+
+  it('只移除点名的那条：等待中的和其他出问题的都保留', () => {
+    const h = harness({
+      file: fileWith(
+        pendingOf('pend-1'),
+        pendingOf('pend-2', { problem: 'dispatch-failed' }),
+        pendingOf('wait-1', { status: 'waiting', problem: undefined, failedDependency: undefined })
+      ),
+    });
+    expect(dismissPending(h.ports, 'pend-1')).toEqual({ ok: true });
+    expect(Object.keys(h.file.pending ?? {}).sort()).toEqual(['pend-2', 'wait-1']);
+  });
+
+  it('等待中的不能忽略，不存在的拒绝，都不写盘不审计', () => {
+    const waiting = pendingOf('wait-1', { status: 'waiting', problem: undefined });
+    const h = harness({ file: fileWith(waiting) });
+    expect(dismissPending(h.ports, 'wait-1')).toEqual({ ok: false, error: 'not-dismissible' });
+    expect(dismissPending(h.ports, 'nope')).toEqual({ ok: false, error: 'not-found' });
+    expect(h.file.pending).toEqual({ 'wait-1': waiting });
+    expect(h.audits).toEqual([]);
+  });
+
+  it('秘书取消另一条等待派发时，不会把用户刚忽略的那条写回来', async () => {
+    const h = harness({
+      file: fileWith(
+        pendingOf('pend-1'),
+        pendingOf('wait-1', { status: 'waiting', problem: undefined, failedDependency: undefined })
+      ),
+    });
+    const projects = h.ports.projects;
+    // 取消流程等项目列表的间隙里，用户点了忽略
+    h.ports.projects = () => {
+      dismissPending(h.ports, 'pend-1');
+      return projects();
+    };
+    expect(await run(h.handlers.session_stop, { conversationId: 'wait-1' })).toEqual({
+      status: 'cancelled',
+      pendingId: 'wait-1',
+    });
+    expect(h.file.pending).toBeUndefined();
+  });
+});
+
 describe('markResult', () => {
   const file = (over: Partial<DispatchRecord> = {}): SecretaryDispatchFile => ({
     ...emptyFile(),
@@ -3345,6 +3433,42 @@ describe('派发先后依赖', () => {
       });
       expect(name).toBe(problem);
     }
+  });
+
+  it('两次判定并发都看到依赖失败：用户在两次之间忽略了它，第二次不会把它写回来', async () => {
+    const h = direct({
+      rows: { c1: depRow('c1') },
+      statuses: { c1: idle },
+      file: {
+        ...emptyFile(),
+        dispatched: { c1: { ...finished('c1'), lastResult: { kind: 'failed', turn: 1, at: 1 } } },
+      },
+    });
+    const { pendingId } = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    const rows = h.ports.rows;
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.ports.rows = async () => {
+      const value = await rows();
+      if (++calls === 2) await gate;
+      return value;
+    };
+    const first = startPendingDispatches(h.ports, [pendingId], NOW);
+    const second = startPendingDispatches(h.ports, [pendingId], NOW);
+    await first;
+    expect(dismissPending(h.ports, pendingId)).toEqual({ ok: true });
+    release();
+    await second;
+    expect(h.file.pending).toBeUndefined();
+    expect(h.file.outbox).toHaveLength(1);
+    expect(h.audits.filter((entry) => entry.op === 'dispatch_pending' && !entry.ok)).toHaveLength(
+      1
+    );
   });
 
   it('重启后等待中的派发还在，依赖结束后照样开始', async () => {

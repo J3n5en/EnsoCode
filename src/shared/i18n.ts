@@ -3720,6 +3720,7 @@ export const zhTranslations: Record<string, string> = {
   'Waiting on you': '需要你处理',
   'Open session': '打开会话',
   'Got it': '知道了',
+  Ignore: '忽略',
   'Show details': '展开详情',
   'Hide details': '收起详情',
   'Not started': '未开始',

@@ -83,6 +83,11 @@ const FAILURE_DETAIL_MAX_CHARS = 200;
 const EVENT_STAMP_SAVE_MS = 30_000;
 /** 遗留任务巡检间隔：每小时扫一遍已完成会话 */
 const LEFTOVER_PATROL_MS = 60 * 60 * 1000;
+/**
+ * 出问题的等待派发是终态，不会再开始；秘书出问题当场已收到结果。
+ * 看板卡片只是给用户的提醒，留一天，之后巡检清掉并留审计。
+ */
+const FAILED_PENDING_KEEP_MS = 24 * 60 * 60 * 1000;
 
 const RESULT_LABELS: Record<SecretaryResultKind, { zh: string; en: string }> = {
   'goal-complete': { zh: '目标已完成', en: 'goal completed' },
@@ -263,6 +268,31 @@ function awaitsOutcome(record: DispatchRecord): boolean {
     !SETTLED_RESULTS.has(record.lastResult.kind) ||
     record.reopenedAt !== undefined
   );
+}
+
+function expireFailedPending(
+  file: SecretaryDispatchFile,
+  now: number,
+  audit: (entry: SecretaryAuditEntry) => void
+): boolean {
+  const table = file.pending;
+  if (!table) return false;
+  let changed = false;
+  for (const [id, pending] of Object.entries(table)) {
+    if (pending.status !== 'failed' || now - pending.updatedAt < FAILED_PENDING_KEEP_MS) continue;
+    delete table[id];
+    audit({
+      at: now,
+      secretaryConversationId: pending.secretaryConversationId,
+      op: 'pending_expire',
+      targetId: id,
+      ok: true,
+      detail: pending.problem ?? 'dispatch-failed',
+    });
+    changed = true;
+  }
+  if (changed && Object.keys(table).length === 0) delete file.pending;
+  return changed;
 }
 
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
@@ -1306,6 +1336,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         changed = true;
       }
       if (fireSchedules(file, now)) changed = true;
+      if (expireFailedPending(file, now, (entry) => ports.audit?.(entry))) changed = true;
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
       const reported = ports.reportPeerTodos?.() ?? false;
