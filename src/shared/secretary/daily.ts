@@ -8,6 +8,7 @@ import type {
   SecretaryResultKind,
   SecretaryTodo,
 } from '../types/secretary';
+import { type GoalResultView, hasNeedsUser } from './goalResult';
 
 /** 结果记录（daily.jsonl）保留天数；派发记录与待办不清理，审计按体积轮转 */
 export const DAILY_RETENTION_DAYS = 180;
@@ -107,13 +108,11 @@ export function summarize(text: string | undefined): string | undefined {
   return line.length > SUMMARY_MAX_CHARS ? `${line.slice(0, SUMMARY_MAX_CHARS)}…` : line;
 }
 
-const DONE_KINDS: ReadonlySet<SecretaryResultKind> = new Set(['goal-complete']);
 const FAILED_KINDS: ReadonlySet<SecretaryResultKind> = new Set([
   'failed',
   'interrupted',
   'stalled',
 ]);
-const NEEDS_YOU_KINDS: ReadonlySet<SecretaryResultKind> = new Set(['needs-user', 'goal-blocked']);
 
 const RESULT_LABEL: Partial<Record<SecretaryResultKind, string>> = {
   'goal-complete': 'Goal complete',
@@ -162,11 +161,14 @@ function newestFirst(left: SecretaryDailyItem, right: SecretaryDailyItem): numbe
   return right.at - left.at || left.id.localeCompare(right.id);
 }
 
+type SessionColumn = 'done' | 'failed' | 'needsYou' | 'withSecretary';
+
 /** 终态结果落哪一列；中间态（turn-ended 之类）不上板 */
-function columnOf(kind: SecretaryResultKind): 'done' | 'failed' | 'needsYou' | null {
-  if (DONE_KINDS.has(kind)) return 'done';
+function columnOf(kind: SecretaryResultKind, goalResult?: GoalResultView): SessionColumn | null {
+  if (kind === 'needs-user') return 'needsYou';
+  if (kind === 'goal-complete') return hasNeedsUser(goalResult) ? 'needsYou' : 'done';
+  if (kind === 'goal-blocked') return hasNeedsUser(goalResult) ? 'needsYou' : 'withSecretary';
   if (FAILED_KINDS.has(kind)) return 'failed';
-  if (NEEDS_YOU_KINDS.has(kind)) return 'needsYou';
   return null;
 }
 
@@ -175,6 +177,8 @@ interface Terminal {
   at: number;
   kind: SecretaryResultKind;
   record?: SecretaryDailyRecord;
+  goalResult?: GoalResultView;
+  manual?: true;
 }
 
 /**
@@ -199,19 +203,40 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   };
 
   const live = day === dayKey(input.now);
-  const results = input.results.filter((record) => within(record.at) && columnOf(record.kind));
+  const results = input.results.filter(
+    (record) => within(record.at) && columnOf(record.kind, record.goalResult) !== null
+  );
 
   // 每个会话当天只留一条终态：结果日志按时间升序覆盖，同一会话重跑多次也只留最后一次
   const terminal = new Map<string, Terminal>();
   for (const record of [...results].sort((left, right) => left.at - right.at)) {
-    terminal.set(record.conversationId, { at: record.at, kind: record.kind, record });
+    terminal.set(record.conversationId, {
+      at: record.at,
+      kind: record.kind,
+      record,
+      ...(record.goalResult ? { goalResult: record.goalResult } : {}),
+    });
   }
-  // 兜底：结果日志里没有这个会话当天的记录（旧版本没写 daily.jsonl），用派发记录的 lastResult
+  // 与派发记录的 lastResult 按时间合并：更晚的结果（含手动标完成、后续恢复）覆盖旧日志
   for (const record of input.dispatched) {
     const last = record.lastResult;
-    if (!last || !within(last.at) || terminal.has(record.conversationId)) continue;
-    if (!columnOf(last.kind)) continue;
-    terminal.set(record.conversationId, { at: last.at, kind: last.kind });
+    if (!last || !within(last.at)) continue;
+    const goalResult =
+      !last.manual && (last.kind === 'goal-complete' || last.kind === 'goal-blocked')
+        ? record.goalResult
+        : undefined;
+    if (!columnOf(last.kind, goalResult)) continue;
+    const existing = terminal.get(record.conversationId);
+    if (!existing || last.at > existing.at || (last.at === existing.at && last.manual === true)) {
+      const keepRecord = existing?.kind === last.kind && !last.manual ? existing.record : undefined;
+      terminal.set(record.conversationId, {
+        at: last.at,
+        kind: last.kind,
+        ...(keepRecord ? { record: keepRecord } : {}),
+        ...(goalResult ? { goalResult } : {}),
+        ...(last.manual ? { manual: true as const } : {}),
+      });
+    }
   }
 
   const sessionCard = (
@@ -224,7 +249,12 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   ): SecretaryDailyItem => {
     const meta = metaOf(conversationId, projectId);
     const record = result?.record;
-    const label = result ? RESULT_LABEL[result.kind] : undefined;
+    const goalResult = result?.goalResult ?? record?.goalResult;
+    const label = result
+      ? result.kind === 'goal-complete' && hasNeedsUser(goalResult)
+        ? RESULT_LABEL['needs-user']
+        : RESULT_LABEL[result.kind]
+      : undefined;
     const summary = record ? summarize(record.text) : undefined;
     return {
       id: `session:${conversationId}`,
@@ -236,15 +266,19 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       ...(record?.text ? { detail: record.text } : {}),
       ...(record?.branch ? { branch: record.branch } : {}),
       ...(record?.commit ? { commit: record.commit } : {}),
-      ...(record?.goalResult ? { goalResult: record.goalResult } : {}),
+      ...(goalResult ? { goalResult } : {}),
       ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
       conversationId,
     };
   };
 
   // 一张卡只在一列：按当天最终状态归列，派出时间退到卡片上显示
-  const columns: Record<'running' | 'needsYou' | 'done' | 'failed', SecretaryDailyItem[]> = {
+  const columns: Record<
+    'running' | 'withSecretary' | 'needsYou' | 'done' | 'failed',
+    SecretaryDailyItem[]
+  > = {
     running: [],
+    withSecretary: [],
     needsYou: [],
     done: [],
     failed: [],
@@ -260,41 +294,85 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   );
 
   for (const record of input.dispatched) {
-    const result = terminal.get(record.conversationId);
+    let result = terminal.get(record.conversationId);
     const running = live && runningNow(record);
+    if (
+      record.manualUndoneAt !== undefined &&
+      record.lastResult === undefined &&
+      (!result || record.manualUndoneAt >= result.at)
+    ) {
+      result = undefined;
+    }
     // 接管会话不是派出去的：只有当天有终态、或今天还在跑时才上板
     if (record.takeover && !result && !running) continue;
     if (!result && !within(record.createdAt)) continue;
     placed.add(record.conversationId);
     const goal = record.goal?.split('\n')[0]?.trim();
+    const effectiveGoalResult = result?.goalResult ?? result?.record?.goalResult;
+    // 移出只影响看板：记录还在，但哪一列都不进
+    if (record.dismissedFromBoard === true && !result) continue;
+    // 主动停止（秘书 session_stop 或用户中止）：
+    // 停之前已交过完成结果（且不需要用户）的按完成显示；停后产生更新结果的按新结果显示；
+    // 其余（包括停之前曾失败/受阻的重复派发）归入「已停止」，不算失败或需要你。
+    const resultAfterStop =
+      result !== undefined && record.stoppedAt !== undefined && result.at > record.stoppedAt;
+    const completedBeforeStop =
+      result !== undefined && result.kind === 'goal-complete' && !hasNeedsUser(effectiveGoalResult);
+    if (
+      record.stoppedAt !== undefined &&
+      !resultAfterStop &&
+      !completedBeforeStop &&
+      !record.lastResult?.manual
+    ) {
+      if (record.dismissedFromBoard === true) continue;
+      stopped.push({
+        ...sessionCard(
+          record.conversationId,
+          record.projectId,
+          record.stoppedAt,
+          undefined,
+          record.createdAt,
+          goal
+        ),
+        label: STOPPED_LABEL,
+        tracked: true,
+      });
+      continue;
+    }
+    // 上游失败/受阻后恢复：重跑中归「进行中」，重跑后正常收尾（turn-ended）归「完成」
+    const recoveredRunning =
+      result !== undefined &&
+      running &&
+      !result.manual &&
+      (result.kind !== 'goal-complete' || hasNeedsUser(effectiveGoalResult));
+    const recoveredTurnEnded =
+      result !== undefined &&
+      !result.manual &&
+      result.kind !== 'goal-complete' &&
+      record.lastResult?.kind === 'turn-ended' &&
+      record.lastResult.at > result.at;
+    const effectiveResult = recoveredRunning || recoveredTurnEnded ? undefined : result;
+    const cardAt = recoveredRunning
+      ? record.createdAt
+      : recoveredTurnEnded
+        ? (record.lastResult?.at ?? record.createdAt)
+        : (effectiveResult?.at ?? record.createdAt);
     const card: SecretaryDailyItem = {
       ...sessionCard(
         record.conversationId,
         record.projectId,
-        result?.at ?? record.createdAt,
-        result,
+        cardAt,
+        effectiveResult,
         record.createdAt,
         goal
       ),
       tracked: true,
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
     };
-    // 移出只影响看板：记录还在，但哪一列都不进
-    if (record.dismissedFromBoard === true && !result) continue;
-    // 秘书停止或取消、之后没有新结果：离开进行中，单独显示「已停止」。
-    // 停止是明确的收口，残留的 running 与后台任务记录都不能把它挂回去；
-    // 当天有终态结果（完成、失败、需要你）时结果优先，停止不改列。
-    const stoppedBySecretary = record.stoppedAt !== undefined && !result;
-    if (stoppedBySecretary) {
-      card.label = STOPPED_LABEL;
-      card.at = record.stoppedAt as number;
-      stopped.push(card);
-      continue;
-    }
     // 当天没有终态结果时：真在跑、或从来没报过结果的才进「进行中」。
     // 报过结果、这一轮又没给新结果的会话，活已经干完，不能一直挂在进行中。
-    const column = result
-      ? columnOf(result.kind)
+    const column = effectiveResult
+      ? columnOf(effectiveResult.kind, effectiveGoalResult)
       : running || record.lastResult === undefined
         ? 'running'
         : 'done';
@@ -308,7 +386,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   // 没有派发记录、但当天有结果的会话（记录被清理或不属于本机派发）也要上板
   for (const [conversationId, result] of terminal) {
     if (placed.has(conversationId)) continue;
-    const column = columnOf(result.kind);
+    const column = columnOf(result.kind, result.goalResult ?? result.record?.goalResult);
     if (!column) continue;
     columns[column].push(
       sessionCard(conversationId, result.record?.projectId, result.at, result, undefined, undefined)
@@ -361,6 +439,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   const groups = (
     [
       { key: 'running', items: columns.running },
+      { key: 'withSecretary', items: columns.withSecretary },
       { key: 'stopped', items: stopped },
       { key: 'needsYou', items: columns.needsYou },
       { key: 'done', items: columns.done },

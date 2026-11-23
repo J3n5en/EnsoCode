@@ -319,6 +319,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { sessionTempDir } from './sessionTempDir';
 import { killRunGroup, sweepOrphanRuns } from './shell/detachedRun';
 import { prepareElevation, withElevation } from './shell/elevation';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
@@ -2932,6 +2933,7 @@ export class SessionSupervisor {
         commandGuard: withTempRootGuard(
           dcgPath ? withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) : undefined
         ),
+        sessionTempDir: remote ? null : sessionTempDir(sessionId, { cwd }),
       }
     );
     const checkpoints = new CheckpointManager(

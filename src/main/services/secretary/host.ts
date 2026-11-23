@@ -8,6 +8,7 @@ import {
   type GoalResult,
   type GoalResultCheck,
   type GoalResultView,
+  hasNeedsUser,
   parseGoalResultView,
 } from '@shared/secretary/goalResult';
 import {
@@ -744,6 +745,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     turnReport?: TurnReport,
     goalResult?: GoalResultView
   ): void {
+    // 手动标记完成的会话不再被后续迟到的受阻、轮次结束、停滞、失败拉回；
+    // 只有撤销标记或秘书发来新 goal 才会清掉 manual 标记重新跟踪
+    if (record.lastResult?.manual === true && kind !== 'goal-complete') return;
+    // 主动停止且未重新打开的会话：忽略停后迟到的报错/受阻/停滞噪声
+    if (
+      record.stoppedAt !== undefined &&
+      record.reopenedAt === undefined &&
+      kind !== 'goal-complete'
+    )
+      return;
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
     // 有了新结果，用户撤销标记的「放回进行中」到此为止
@@ -1289,6 +1300,31 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
         if (change && change.state !== 'error') delete record.failurePending;
+        // 会话处于运行态（含重启续跑无边沿变化）：清掉过时历史结果，避免旧结果把运行中会话拉回「需要你」
+        if (status.state === 'running' && record.lastResult?.manual !== true) {
+          if (change?.state === 'running' && change.previous !== 'running') {
+            delete record.stoppedAt;
+            delete record.failurePending;
+            if (record.lastResult?.kind === 'goal-complete' && hasNeedsUser(record.goalResult)) {
+              delete record.lastResult;
+              delete record.goalResult;
+            }
+          }
+          if (record.lastResult && record.lastResult.kind !== 'goal-complete')
+            delete record.lastResult;
+        }
+        // 用户在会话界面主动中止：停之前没交过完成结果的按「已停止」收口，不算失败
+        if (own && event.type === 'turn-completed' && event.aborted) {
+          delete record.failurePending;
+          if (record.lastResult?.kind !== 'goal-complete') {
+            record.stoppedAt = now;
+            delete record.backgroundRunning;
+            delete record.reopenedAt;
+            delete record.stalledTurn;
+            delete record.patrol;
+            if (record.lastResult) delete record.lastResult;
+          }
+        }
         // 空闲时命令直接抛错只有 status=failed、不会再有 turn-failed：先挂起等配对，到点补记。
         // 正在跑或等人时的 status=failed 不终止这一轮，之后照常有终态，不挂。
         if (
@@ -1297,7 +1333,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           event.status === 'failed' &&
           change?.state === 'error' &&
           change.previous === 'idle' &&
-          awaitsOutcome(record)
+          awaitsOutcome(record) &&
+          record.lastResult?.manual !== true &&
+          !(record.stoppedAt !== undefined && record.reopenedAt === undefined)
         ) {
           const failure = failureDetail(event.error);
           record.failurePending = { at: now, ...(failure ? { detail: failure } : {}) };

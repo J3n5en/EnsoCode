@@ -164,6 +164,10 @@ describe('buildSecretarySystemPrompt', () => {
     // worktree 规则：改代码开，只读调查不开
     expect(prompt).toMatch(/worktree true when the session will change code/);
     expect(prompt).toMatch(/worktree false for read-only/);
+    // todo_item_dispatch 支持 goal（缺省用待办文本），且首条消息不注入推送/合并约束
+    expect(prompt).toMatch(/todo_item_dispatch.*goal/i);
+    expect(prompt).not.toContain('The dispatch brief and the card show');
+    expect(prompt).toContain('The card shows the base and branch that were actually used.');
     // 不再提已经删掉的设置
     expect(prompt).not.toMatch(/autonomy|dispatch model from your settings|dispatch default/);
     expect(prompt).not.toMatch(/the interval and the threshold are in your settings/);

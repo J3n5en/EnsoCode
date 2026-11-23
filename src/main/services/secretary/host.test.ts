@@ -3166,3 +3166,102 @@ describe('结构化目标结果', () => {
     expect(h.state.file.outbox.map((update) => update.kind)).not.toContain('goal-complete');
   });
 });
+
+describe('看板与终态防回拉/防误报失败', () => {
+  it('手动标完成后，后续迟到的 goal-blocked / turn-ended / failed 不把状态拉回也不写 daily', () => {
+    const daily: unknown[] = [];
+    const h = harness({});
+    h.ports.recordDaily = (entry) => daily.push(entry);
+    h.state.file.dispatched.c1.lastResult = {
+      kind: 'goal-complete',
+      turn: 1,
+      at: 500,
+      manual: true,
+    };
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.state.statuses.c1 = idle;
+
+    h.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: '核验缺输出' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('turn-failed', { error: 'late' }), change('error', 'running'));
+
+    expect(h.state.file.dispatched.c1.lastResult).toEqual({
+      kind: 'goal-complete',
+      turn: 1,
+      at: 500,
+      manual: true,
+    });
+    expect(daily).toEqual([]);
+  });
+
+  it('主动停止（stoppedAt）后滞后的 turn-failed / worker 报错不记 failed；用户手动 abort 也记 stoppedAt', () => {
+    const daily: unknown[] = [];
+    const h = harness({});
+    h.ports.recordDaily = (entry) => daily.push(entry);
+    h.state.file.dispatched.c1.stoppedAt = 800;
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(
+      event('turn-failed', { error: 'aborted by user' }),
+      change('error', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(daily).toEqual([]);
+
+    // 用户在界面手动 abort：记 stoppedAt，不算失败
+    const h2 = harness({});
+    h2.state.statuses.c1 = idle;
+    h2.host.onAgentEvent(event('turn-completed', { aborted: true }), change('idle', 'running'));
+    expect(h2.state.file.dispatched.c1.stoppedAt).toBe(h2.state.now);
+    expect(h2.state.file.dispatched.c1.lastResult).toBeUndefined();
+  });
+
+  it('上游 503 failed 后重试重新运行并完成：重跑时清掉旧 failed，最终以 goal-complete 为准', () => {
+    const daily: { kind: string; at: number }[] = [];
+    const h = harness({});
+    h.ports.recordDaily = (entry) => daily.push({ kind: entry.kind, at: entry.at });
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(
+      event('turn-failed', { error: '503 Service Unavailable' }),
+      change('error', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed' });
+
+    // 重试开始跑：立刻清掉旧 failed
+    h.state.now += 1000;
+    h.state.statuses.c1 = running;
+    h.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'error'));
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+
+    // 重试成功并完成
+    h.state.now += 5000;
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'done' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(daily.map((d) => d.kind)).toEqual(['failed', 'goal-complete']);
+  });
+
+  it('会话处于 running（含重启续跑无边沿变化与旧 goal-complete(needsUser) 重跑）时清掉过时 lastResult', () => {
+    // 场景 1：重启续跑时 status 已经是 running 且无 previous !== running 边沿事件，旧 needs-user 仍会被清掉
+    const h1 = harness({});
+    h1.state.file.dispatched.c1.lastState = 'running';
+    h1.state.file.dispatched.c1.lastResult = { kind: 'needs-user', turn: 1, at: 100 };
+    h1.state.statuses.c1 = running;
+    h1.host.onAgentEvent(event('text-delta', { text: '继续跑测试' }), []);
+    expect(h1.state.file.dispatched.c1.lastResult).toBeUndefined();
+
+    // 场景 2：上一轮 goal-complete 带 needsUser，随后重新进入 running 时清掉旧结果与 goalResult
+    const h2 = harness({});
+    h2.state.file.dispatched.c1.lastState = 'idle';
+    h2.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: 100 };
+    h2.state.file.dispatched.c1.goalResult = {
+      at: 100,
+      result: { summary: '待拍板', needsUser: ['确认方案'] },
+    };
+    h2.state.statuses.c1 = running;
+    h2.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'idle'));
+    expect(h2.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h2.state.file.dispatched.c1.goalResult).toBeUndefined();
+  });
+});

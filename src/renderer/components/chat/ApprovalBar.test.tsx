@@ -67,6 +67,15 @@ describe('ApprovalBar dcg 规则解释', () => {
     expect(html).not.toContain('Why it is dangerous');
   });
 
+  it('内置守卫区分 Temp 根安全底线与非底线内置守卫（如 enso.dcg:invalid-verdict）', () => {
+    const invalidHtml = render([
+      guarded('enso.dcg:invalid-verdict', 'Command guard returned an unexpected response'),
+    ]);
+    expect(invalidHtml).toContain('enso.dcg:invalid-verdict');
+    expect(invalidHtml).toContain('Blocked by built-in guard');
+    expect(invalidHtml).not.toContain('Safety floor rule');
+  });
+
   it('带出风险等级、命中片段与可折叠的 dcg 说明；warn 档用提醒而非拦截文案', () => {
     const deny = render([
       {
@@ -98,8 +107,23 @@ describe('ApprovalBar dcg 规则解释', () => {
     ]);
     expect(enso).toContain(reason);
     expect(enso).not.toContain('dcg: ');
+    expect(enso).toContain('enso.windows:temp-root-delete');
+    expect(enso).toContain('full-access mode');
     const dcg = render([{ ...request, guard: { ruleId: 'core.git:reset-hard', reason: 'x' } }]);
     expect(dcg).toContain('dcg: ');
+    expect(dcg).toContain('core.git:reset-hard');
+    expect(dcg).toContain('full-access mode');
+  });
+
+  it('不可豁免高危规则说明安全底线与不可豁免原因，warn 档不显示拦截底线说明', () => {
+    const floor = render([guarded('core.filesystem:rm-rf-root-home')]);
+    expect(floor).toContain('core.filesystem:rm-rf-root-home');
+    expect(floor).toContain('cannot be exempted');
+    expect(floor).toContain('full-access mode');
+
+    const { protected: _protected, ...plain } = guarded('core.git:stash-drop');
+    const warn = render([{ ...plain, guard: { ...plain.guard, decision: 'warn' } }]);
+    expect(warn).not.toContain('full-access mode');
   });
 });
 

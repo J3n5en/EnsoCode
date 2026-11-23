@@ -9,7 +9,14 @@ import type {
   ProtectedActionCategory,
 } from '@shared/types/agent';
 import { rememberApprovalReview } from './approvalReviewRecords';
-import { type CommandGuard, type CommandGuardHit, isBlockingGuardHit } from './dcg';
+import {
+  type CommandGuard,
+  type CommandGuardHit,
+  isBlockingGuardHit,
+  isTempSubpathExemptibleHit,
+  stripSafeTempSubpathDeletes,
+  TEMP_ROOT_RULE_ID,
+} from './dcg';
 import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
@@ -23,12 +30,24 @@ const APPROVAL_REVISE_ERROR =
  * 无人值守下的拒绝文案（对齐 factory 的 delegatedToolDenied）：点名动作、说明没人能批准、
  * 要求不要重试、并给出替代做法——否则模型会原地重试同一条调用。
  */
-export function approvalNoUserMessage(label: string, mode: ApprovalMode): string {
+export function approvalNoUserMessage(
+  label: string,
+  mode: ApprovalMode,
+  guard?: CommandGuardHit
+): string {
+  const blockingGuard = guard && isBlockingGuardHit(guard) ? guard : undefined;
+  const guardDetail = blockingGuard
+    ? ` (guard rule ${blockingGuard.ruleId}: ${blockingGuard.reason})`
+    : '';
+  const tempHint =
+    blockingGuard?.ruleId === TEMP_ROOT_RULE_ID
+      ? ' Target a specific subdirectory or the session temp folder instead of the shared Temp root.'
+      : '';
   const base =
-    `Blocked: ${label} requires approval, but this session has no user available to approve it. ` +
-    'Do not retry the same call, and do not ask in prose and wait. Use an action that needs no ' +
-    'approval, or make the most reasonable assumption and continue. Stop only if the action is ' +
-    'unavoidable and irreversible — then say what is blocked and why.';
+    `Blocked: ${label} requires approval${guardDetail}, but this session has no user available to approve it. ` +
+    `Do not retry the same call, and do not ask in prose and wait.${tempHint} ` +
+    'Use an action that needs no approval, or make the most reasonable assumption and continue. ' +
+    'Stop only if the action is unavoidable and irreversible — then say what is blocked and why.';
   if (mode !== 'full') return base;
   return (
     `${base} Full access is on: nearly all actions run without confirmation, only always-confirm ` +
@@ -72,6 +91,8 @@ export interface ApprovalGateOptions {
   humanTimeoutMs?: number;
   /** dcg 命令守卫：命中即按 destructive 强制真人确认；豁免规则同底线 */
   commandGuard?: CommandGuard;
+  /** 会话专属临时目录：完全放行模式下允许删除其内部或本身，不因 dcg 通用删除规则误拦 */
+  sessionTempDir?: string | null;
 }
 
 /**
@@ -102,7 +123,12 @@ export class ApprovalGate {
   /** 子会话沿用底线配置，再按自身档位判断 */
   get floorOptions(): Pick<
     ApprovalGateOptions,
-    'protectedFloor' | 'exemptFull' | 'humanTimeoutMs' | 'commandGuard' | 'autoReject'
+    | 'protectedFloor'
+    | 'exemptFull'
+    | 'humanTimeoutMs'
+    | 'commandGuard'
+    | 'autoReject'
+    | 'sessionTempDir'
   > {
     return {
       protectedFloor: this.options?.protectedFloor === true,
@@ -111,12 +137,17 @@ export class ApprovalGate {
       commandGuard: this.options?.commandGuard,
       // 子会话沿用父会话的无人值守状态：否则子会话里仍会弹卡片等人
       autoReject: this.autoReject,
+      sessionTempDir: this.options?.sessionTempDir,
     };
   }
 
   get commandGuard(): CommandGuard | undefined {
     if (this.options?.exemptFull === true && this.mode === 'full') return undefined;
     return this.options?.commandGuard;
+  }
+
+  get sessionTempDir(): string | null | undefined {
+    return this.options?.sessionTempDir;
   }
 
   get humanTimeoutMs(): number | undefined {
@@ -362,10 +393,32 @@ export function withApproval(
         ? classifyProtectedTool(definition.name, kind, params)
         : null;
       const command = (params as { command?: unknown } | undefined)?.command;
-      const hit =
+      let hit =
         kind === 'command' && typeof command === 'string'
           ? await gate.commandGuard?.(definition.name, command, signal)
           : undefined;
+      if (gate.mode === 'full' && hit && typeof command === 'string' && command.length > 0) {
+        const exemptScope = isTempSubpathExemptibleHit(hit);
+        if (exemptScope) {
+          const stripped = stripSafeTempSubpathDeletes(definition.name, command, {
+            sessionTempDir: gate.sessionTempDir,
+            sessionOnly: exemptScope === 'session-only',
+          });
+          if (stripped) {
+            if (!stripped.remaining) {
+              hit = null;
+            } else {
+              try {
+                hit = await gate.commandGuard?.(definition.name, stripped.remaining, signal, {
+                  failClosedOnError: true,
+                });
+              } catch {
+                // 复检异常时 fail-closed，保留原命中
+              }
+            }
+          }
+        }
+      }
       // warn 只提示：不升级为受保护动作，卡片本来要弹时顺带展示
       const guard = hit && isBlockingGuardHit(hit) ? hit : undefined;
       const warning = hit && !guard ? hit : undefined;
@@ -387,7 +440,9 @@ export function withApproval(
         );
         // 无人值守的拒绝要点名动作，让模型知道是哪一条被拦、别原样重试
         if (result === 'no-approver') {
-          throw new Error(approvalNoUserMessage(definition.label || definition.name, gate.mode));
+          throw new Error(
+            approvalNoUserMessage(definition.label || definition.name, gate.mode, guard)
+          );
         }
         throwUnlessAllowed(result);
       }
