@@ -135,21 +135,37 @@ const GAP = 6;
 
 /**
  * 浮动按钮位置（fixed 坐标）：桌面放选区上方居中，放不下翻到下方；
- * 窄屏系统选择菜单在选区上方，按钮放下方。最终夹进视口，不跑出屏幕。
+ * 窄屏系统选择菜单在选区上方，按钮优先放下方。会盖住 obstacles（消息操作行等）时
+ * 先换到另一侧，两侧都被占就往障碍物旁边让开；都不行才退回默认位置。始终在视口内。
  */
 export function quoteButtonPosition(
   rect: QuoteAnchorRect,
   viewport: { width: number; height: number },
   size: { width: number; height: number },
-  mobile: boolean
+  mobile: boolean,
+  obstacles: QuoteAnchorRect[] = []
 ): { top: number; left: number } {
+  const clamp = (value: number, max: number) => Math.min(Math.max(EDGE, value), max);
+  const maxTop = viewport.height - size.height - EDGE;
+  const maxLeft = viewport.width - size.width - EDGE;
   const above = rect.top - size.height - GAP;
   const below = rect.bottom + GAP;
-  const top = mobile || above < EDGE ? below : above;
-  const left = (rect.left + rect.right) / 2 - size.width / 2;
-  const clamp = (value: number, max: number) => Math.min(Math.max(EDGE, value), max);
-  return {
-    top: clamp(top, viewport.height - size.height - EDGE),
-    left: clamp(left, viewport.width - size.width - EDGE),
-  };
+  const center = clamp((rect.left + rect.right) / 2 - size.width / 2, maxLeft);
+  const tops = (mobile ? [below, above] : [above, below]).filter(
+    (top) => top >= EDGE && top <= maxTop
+  );
+  const blocker = (top: number, left: number) =>
+    obstacles.find(
+      (o) =>
+        left < o.right && left + size.width > o.left && top < o.bottom && top + size.height > o.top
+    );
+  for (const top of tops) if (!blocker(top, center)) return { top, left: center };
+  for (const top of tops) {
+    const hit = blocker(top, center);
+    if (!hit) continue;
+    for (const left of [hit.right + GAP, hit.left - size.width - GAP]) {
+      if (left >= EDGE && left <= maxLeft && !blocker(top, left)) return { top, left };
+    }
+  }
+  return { top: clamp(mobile || above < EDGE ? below : above, maxTop), left: center };
 }

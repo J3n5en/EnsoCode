@@ -5,9 +5,24 @@ import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
 import { insertComposerQuote } from './composerMentionBridge';
-import { buildQuoteSegment, quoteButtonPosition, selectionQuoteText } from './quoteSelection';
+import {
+  buildQuoteSegment,
+  type QuoteAnchorRect,
+  quoteButtonPosition,
+  selectionQuoteText,
+} from './quoteSelection';
 
 const BUTTON_SIZE = { width: 72, height: 28 };
+
+/** 视口内的消息操作行 / 模型抬头：按钮不能压在它们上面 */
+function visibleObstacles(container: HTMLElement, viewportHeight: number): QuoteAnchorRect[] {
+  const rects: QuoteAnchorRect[] = [];
+  for (const element of container.querySelectorAll('[data-quote-skip]')) {
+    const r = element.getBoundingClientRect();
+    if (r.height > 0 && r.bottom > 0 && r.top < viewportHeight) rects.push(r);
+  }
+  return rects;
+}
 
 /** 时间线里选中文字时浮出的「引用」按钮：点击把选区作为引用块放进主输入框 */
 export function QuoteSelectionButton({
@@ -29,13 +44,14 @@ export function QuoteSelectionButton({
       const container = containerRef.current;
       const selection = window.getSelection();
       const text = container ? selectionQuoteText(selection, container) : null;
-      if (!text || !selection) {
+      if (!text || !selection || !container) {
         setAnchor(null);
         return;
       }
       const rect = selection.getRangeAt(0).getBoundingClientRect();
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      setAnchor({ text, ...quoteButtonPosition(rect, viewport, BUTTON_SIZE, mobile) });
+      const obstacles = visibleObstacles(container, viewport.height);
+      setAnchor({ text, ...quoteButtonPosition(rect, viewport, BUTTON_SIZE, mobile, obstacles) });
     };
     document.addEventListener('selectionchange', update);
     window.addEventListener('scroll', update, true);

@@ -186,4 +186,35 @@ describe('quoteButtonPosition', () => {
     );
     expect(pos.top).toBeGreaterThan(220);
   });
+
+  const overlaps = (
+    pos: { top: number; left: number },
+    r: { top: number; bottom: number; left: number; right: number }
+  ) =>
+    pos.left < r.right &&
+    pos.left + size.width > r.left &&
+    pos.top < r.bottom &&
+    pos.top + size.height > r.top;
+
+  // 真机 390 宽：选中用户消息文字，按钮正好压在下方「回退 / 复制 / 对话分支」上
+  it('窄屏选区下方是消息操作行时，改到选区上方', () => {
+    const selection = { top: 200, bottom: 220, left: 150, right: 300 };
+    const actions = { top: 226, bottom: 246, left: 120, right: 370 };
+    const pos = quoteButtonPosition(selection, viewport, size, true, [actions]);
+    expect(overlaps(pos, actions)).toBe(false);
+    expect(pos.top + size.height).toBeLessThanOrEqual(selection.top);
+  });
+
+  it('桌面选区上方被占时翻到下方，上下都被占时往旁边让开', () => {
+    const selection = { top: 200, bottom: 220, left: 100, right: 200 };
+    const header = { top: 160, bottom: 196, left: 60, right: 260 };
+    const below = quoteButtonPosition(selection, viewport, size, false, [header]);
+    expect(overlaps(below, header)).toBe(false);
+    expect(below.top).toBeGreaterThanOrEqual(selection.bottom);
+
+    const actions = { top: 222, bottom: 256, left: 60, right: 260 };
+    const aside = quoteButtonPosition(selection, viewport, size, false, [header, actions]);
+    expect(overlaps(aside, header)).toBe(false);
+    expect(overlaps(aside, actions)).toBe(false);
+  });
 });
