@@ -1467,7 +1467,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       return (mocks.createAgentSession.mock.calls[before][0] as { thinkingLevel?: string })
         .thinkingLevel;
     };
-    const spawnParent = async (reasoning?: { thinkingLevel: 'high' | 'low' }) => {
+    const spawnParent = async (reasoning?: { thinkingLevel: 'high' | 'low' | 'xhigh' }) => {
       const supervisor = new SessionSupervisor({
         emit: vi.fn(),
         agentDir: '/tmp/agent',
@@ -1505,6 +1505,13 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     it('类型预设 medium 仍高于父会话 high', async () => {
       const supervisor = await spawnParent({ thinkingLevel: 'high' });
       expect(await spawnChild(supervisor, entryMax, { thinkingLevel: 'medium' })).toBe('medium');
+    });
+
+    it('父会话 xhigh、子模型不支持思考 → 降为 off，spawn 不失败', async () => {
+      const supervisor = await spawnParent({ thinkingLevel: 'xhigh' });
+      expect(
+        await spawnChild(supervisor, { ...model, modelId: 'plain', reasoning: 'off' as const })
+      ).toBe('off');
     });
   });
 
