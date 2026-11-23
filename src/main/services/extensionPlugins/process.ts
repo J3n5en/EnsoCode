@@ -25,6 +25,8 @@ export interface PluginProcessDeps {
   ): Promise<unknown>;
   onExit(info: { unexpected: boolean }): void;
   onLog?(level: PluginLogLevel, message: string): void;
+  /** 缺省关闭。init 与运行中切换都读调用当下的值 */
+  loggingEnabled?: () => boolean;
   idleMs?: number;
   readyTimeoutMs?: number;
   /** 常驻进程不因空闲退出 */
@@ -217,6 +219,10 @@ export class PluginProcess {
     return this.stopWait;
   }
 
+  setLoggingEnabled(enabled: boolean): void {
+    if (this.child) this.post({ t: 'set-logging', enabled });
+  }
+
   private post(message: MainToPluginHost): void {
     try {
       this.child?.postMessage(message);
@@ -245,7 +251,13 @@ export class PluginProcess {
         () => fail('插件加载超时'),
         this.deps.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS
       );
-      child.once('spawn', () => this.post({ t: 'init', ...this.deps.init }));
+      child.once('spawn', () =>
+        this.post({
+          t: 'init',
+          ...this.deps.init,
+          loggingEnabled: this.deps.loggingEnabled?.() === true,
+        })
+      );
       child.on('message', (raw: unknown) => {
         if (!isRecord(raw)) return;
         if (raw.t === 'ready' && !settled) {

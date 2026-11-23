@@ -220,6 +220,8 @@ export interface SettingsState {
   updateChannel: UpdateChannel;
   /** 权限不变的插件市场更新自动安装；缺省开，只在本机 */
   pluginAutoUpdate: boolean;
+  /** 记录插件控制台与运行日志到磁盘；缺省关，只在本机 */
+  pluginLoggingEnabled: boolean;
 
   /** 网络代理：系统 / 直连 / 自定义；缺省 system */
   proxyMode: ProxyMode;
@@ -448,6 +450,7 @@ export interface SettingsState {
   setAutoRestartForUpdate: (value: AutoRestartMode) => void;
   setUpdateChannel: (value: UpdateChannel) => void;
   setPluginAutoUpdate: (value: boolean) => void;
+  setPluginLoggingEnabled: (enabled: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;
   setCustomCaCertPath: (path: string) => void;

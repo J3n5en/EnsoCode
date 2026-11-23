@@ -89,6 +89,7 @@ function createService(
     sourceEnv: extra.sourceEnv,
     sessionBridge: () => ({ inject: bridge, abort: vi.fn(() => ({ ok: true as const })) }),
     fork: fork as never,
+    pluginLoggingEnabled: () => true,
     gate: {
       fetch: vi.fn(),
       notify: () => true,

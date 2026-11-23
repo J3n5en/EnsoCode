@@ -359,7 +359,16 @@ export type PluginResponse =
   | { t: 'res'; id: string; ok: false; error: PluginErrorShape };
 
 export type MainToPluginHost =
-  | { t: 'init'; pluginId: string; pluginRoot: string; main: string; dataDir: string }
+  | {
+      t: 'init';
+      pluginId: string;
+      pluginRoot: string;
+      main: string;
+      dataDir: string;
+      /** 缺省关闭。只影响 console 采集，不影响宿主错误帧 */
+      loggingEnabled?: boolean;
+    }
+  | { t: 'set-logging'; enabled: boolean }
   | {
       t: 'call';
       id: string;
