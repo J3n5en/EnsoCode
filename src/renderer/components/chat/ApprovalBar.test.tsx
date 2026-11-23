@@ -237,4 +237,29 @@ describe('ApprovalBar 队首切换', () => {
     await act(async () => confirmBtn?.click());
     expect(ruleExempt).toHaveBeenCalledWith('core.git:reset-hard');
   });
+
+  it('decision=ask 时不查询/展示记忆豁免，点 Allow 也不累计放行次数', async () => {
+    const ruleState = vi
+      .fn()
+      .mockResolvedValue({ allowCount: 5, exempt: false, suggestExempt: true });
+    const ruleAllowed = vi.fn().mockResolvedValue(null);
+    Object.assign(window, {
+      electronAPI: {
+        dcg: { ruleState, ruleExempt: vi.fn(), ruleAllowed },
+      },
+    });
+    await mount([
+      {
+        ...request,
+        summary: 'git reset --hard',
+        protected: 'destructive',
+        guard: { ruleId: 'core.git:reset-hard', reason: 'r', decision: 'ask' },
+      },
+    ]);
+    expect(ruleState).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Always allow this rule');
+    await act(async () => vi.advanceTimersByTime(1000));
+    await allow();
+    expect(ruleAllowed).not.toHaveBeenCalled();
+  });
 });

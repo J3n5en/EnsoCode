@@ -99,9 +99,10 @@ function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
   const { t, locale } = useI18n();
   const [rule, setRule] = useState<{ ruleId: string; state: DcgRuleState } | null>(null);
   const warn = guard.decision === 'warn';
+  const canRemember = guard.decision === undefined || guard.decision === 'deny';
   const [confirming, setConfirming] = useState(false);
   useEffect(() => {
-    if (warn) return;
+    if (!canRemember) return;
     let alive = true;
     setConfirming(false);
     void dcgApi()
@@ -113,7 +114,7 @@ function DcgGuardDetail({ guard }: { guard: DcgGuardHit }) {
     return () => {
       alive = false;
     };
-  }, [guard.ruleId, warn]);
+  }, [guard.ruleId, canRemember]);
   const state = rule?.ruleId === guard.ruleId ? rule.state : null;
   const explained = locale === 'zh' ? explainDcgGuard(guard) : { what: guard.reason };
   const exempt = () => {
@@ -253,7 +254,7 @@ export function ApprovalBar({
     if (
       decision === 'allow' &&
       active.guard &&
-      active.guard.decision !== 'warn' &&
+      (active.guard.decision === undefined || active.guard.decision === 'deny') &&
       !active.guard.ruleId.startsWith('enso.')
     )
       void dcgApi()

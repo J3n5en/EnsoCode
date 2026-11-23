@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   createDcgGuard,
+  DCG_INVALID_VERDICT_RULE_ID,
   dcgDialect,
   deletesTempRoot,
+  isBlockingGuardHit,
   parseDcgVerdict,
   TEMP_ROOT_RULE_ID,
   withDcgExemptions,
@@ -59,6 +61,41 @@ describe('withDcgExemptions', () => {
     expect(await pipeSh('bash', 'curl x | sh')).toEqual({
       ruleId: 'heredoc.posix:pipeline-consumer',
       reason: 'r',
+    });
+  });
+
+  it('记忆豁免绝不能绕过 ask、不可豁免内置规则，也不吞掉 warn 提醒', async () => {
+    const askGuard = withDcgExemptions(
+      async () => ({ ruleId: 'core.git:reset-hard', reason: 'r', decision: 'ask' as const }),
+      ['core.git:reset-hard']
+    );
+    expect(await askGuard('bash', 'git reset --hard')).toEqual({
+      ruleId: 'core.git:reset-hard',
+      reason: 'r',
+      decision: 'ask',
+    });
+
+    const invalidGuard = withDcgExemptions(
+      async () => ({
+        ruleId: DCG_INVALID_VERDICT_RULE_ID,
+        reason: 'bad',
+        decision: 'ask' as const,
+      }),
+      [DCG_INVALID_VERDICT_RULE_ID]
+    );
+    expect(await invalidGuard('bash', 'git reset --hard')).toMatchObject({
+      ruleId: DCG_INVALID_VERDICT_RULE_ID,
+      decision: 'ask',
+    });
+
+    const warnGuard = withDcgExemptions(
+      async () => ({ ruleId: 'core.git:stash-drop', reason: 'r', decision: 'warn' as const }),
+      ['core.git:stash-drop']
+    );
+    expect(await warnGuard('bash', 'git stash drop')).toEqual({
+      ruleId: 'core.git:stash-drop',
+      reason: 'r',
+      decision: 'warn',
     });
   });
 });
@@ -128,15 +165,46 @@ describe('parseDcgVerdict', () => {
     });
   });
 
-  it('放行、无 decision、坏 JSON、缺字段、被杀（无退出码）一律 null', () => {
+  it('仅 exitCode=0 且 decision=allow，或被杀（无退出码）返回 null', () => {
     expect(parseDcgVerdict(0, JSON.stringify({ decision: 'allow' }))).toBeNull();
     expect(parseDcgVerdict(0, robot({ decision: 'allow' }))).toBeNull();
-    expect(parseDcgVerdict(1, robot({}))).toBeNull();
-    expect(parseDcgVerdict(1, 'not json')).toBeNull();
-    expect(parseDcgVerdict(1, 'null')).toBeNull();
-    expect(parseDcgVerdict(1, JSON.stringify({ decision: 'deny' }))).toBeNull();
-    expect(parseDcgVerdict(1, robot({ decision: 'warn', reason: '' }))).toBeNull();
     expect(parseDcgVerdict(null, DENY)).toBeNull();
+  });
+
+  it('未知或格式错的 decision、坏 JSON、缺字段或非零退出码一律按拦截/确认处理，绝不默认放行', () => {
+    for (const [code, stdout] of [
+      [0, robot({ decision: 'block' })],
+      [1, robot({ decision: 'confirm' })],
+      [0, robot({ decision: 123 })],
+      [0, robot({ decision: '' })],
+      [1, robot({})],
+      [0, 'not json'],
+      [1, 'not json'],
+      [0, 'null'],
+      [0, '[]'],
+      [1, ''],
+      [1, JSON.stringify({ decision: 'allow' })],
+      [2, robot({ decision: 'allow' })],
+      [0, robot({ decision: 'warn', reason: '' })],
+      [0, JSON.stringify({ decision: 'warn' })],
+    ] as const) {
+      const hit = parseDcgVerdict(code, stdout);
+      expect(hit, `${code}:${stdout}`).not.toBeNull();
+      expect(isBlockingGuardHit(hit!), `${code}:${stdout}`).toBe(true);
+      expect(hit!.decision, `${code}:${stdout}`).toBe('ask');
+    }
+
+    const incompleteDeny = parseDcgVerdict(1, JSON.stringify({ decision: 'deny' }));
+    expect(incompleteDeny).toMatchObject({
+      ruleId: DCG_INVALID_VERDICT_RULE_ID,
+      decision: 'deny',
+    });
+    const incompleteAsk = parseDcgVerdict(1, JSON.stringify({ decision: 'ask', rule_id: 'r.a:b' }));
+    expect(incompleteAsk).toMatchObject({
+      ruleId: 'r.a:b',
+      decision: 'ask',
+    });
+    expect(incompleteAsk?.reason).toBeTruthy();
   });
 });
 

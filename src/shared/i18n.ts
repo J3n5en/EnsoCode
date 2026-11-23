@@ -524,6 +524,14 @@ export const zhTranslations: Record<string, string> = {
   'dcg explanation': 'dcg 详细说明',
   Matched: '命中片段',
   Critical: '严重',
+  'dcg returned invalid output; confirmation required.': 'dcg 返回了无法解析的输出，请人工确认。',
+  'dcg exited abnormally despite allow decision; confirmation required.':
+    'dcg 退出状态异常（即使标记放行），请人工确认。',
+  'dcg returned malformed warning; confirmation required.':
+    'dcg 返回了格式异常的警告，请人工确认。',
+  'dcg returned an unknown decision; confirmation required.':
+    'dcg 返回了未知决策类型，请人工确认。',
+  'dcg required confirmation without details.': 'dcg 要求人工确认（未提供规则详情）。',
   'Deletes in the shared system Temp folder root, which holds files of other apps; delete only inside the session temp folder.':
     '在系统共用的 Temp 根目录里删除，那里有其他程序的文件；只应在会话专属临时目录内删除。',
   'Destructive command guard (dcg)': '破坏性命令守卫（dcg）',

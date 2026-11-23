@@ -27,6 +27,14 @@ export function dcgDialect(tool: string): 'posix' | 'ps' | null {
 /** warn 只提示不拦；缺省 decision 视同 deny */
 export const isBlockingGuardHit = (hit: CommandGuardHit): boolean => hit.decision !== 'warn';
 
+export const DCG_INVALID_VERDICT_RULE_ID = 'enso.dcg:invalid-verdict';
+const INVALID_OUTPUT_REASON = 'dcg returned invalid output; confirmation required.';
+const ABNORMAL_ALLOW_REASON =
+  'dcg exited abnormally despite allow decision; confirmation required.';
+const MALFORMED_WARNING_REASON = 'dcg returned malformed warning; confirmation required.';
+const UNKNOWN_DECISION_REASON = 'dcg returned an unknown decision; confirmation required.';
+const MISSING_DETAILS_REASON = 'dcg required confirmation without details.';
+
 /** matched_span 是 command 的 UTF-8 字节区间 */
 function matchedText(command: unknown, span: unknown): string | undefined {
   if (typeof command !== 'string' || !Array.isArray(span) || span.length !== 2) return undefined;
@@ -39,37 +47,84 @@ function matchedText(command: unknown, span: unknown): string | undefined {
   return text ? text.slice(0, DCG_MATCHED_MAX) : undefined;
 }
 
-/** 按 robot JSON 的 decision 判定，不看退出码（warn 退出 0）；被杀（无退出码）或解析失败 fail-open */
+function extraFields(record: Record<string, unknown>) {
+  const { severity, explanation } = record;
+  const matched = matchedText(record.command, record.matched_span);
+  return {
+    ...((DCG_SEVERITIES as readonly unknown[]).includes(severity)
+      ? { severity: severity as DcgSeverity }
+      : {}),
+    ...(typeof explanation === 'string' && explanation.trim()
+      ? { explanation: explanation.trim().slice(0, DCG_EXPLANATION_MAX) }
+      : {}),
+    ...(matched ? { matched } : {}),
+  };
+}
+
+const nonEmptyString = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;
+
+/**
+ * 按 robot JSON 的 decision 判定：
+ * - 仅 exitCode=0 且 decision="allow" 放行（null）；
+ * - warn 需完整 rule_id/reason 才按提示放行，否则升级为 ask；
+ * - deny / ask 按原档拦截或确认，缺字段用不可豁免内置规则兜底；
+ * - 未知/格式错的 decision、坏 JSON 或非零退出码一律按 ask 走确认（fail-closed，绝不默认放行）。
+ * 进程被超时或用户中止杀掉（exitCode === null）时返回 null。
+ */
 export function parseDcgVerdict(exitCode: number | null, stdout: string): CommandGuardHit | null {
   if (exitCode === null) return null;
   try {
     const value: unknown = JSON.parse(stdout);
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {
+        ruleId: DCG_INVALID_VERDICT_RULE_ID,
+        reason: INVALID_OUTPUT_REASON,
+        decision: 'ask',
+      };
+    }
     const record = value as Record<string, unknown>;
-    const { decision, rule_id: ruleId, reason, severity, explanation } = record;
-    if (!(DCG_GUARD_DECISIONS as readonly unknown[]).includes(decision)) return null;
-    if (typeof ruleId !== 'string' || !ruleId || typeof reason !== 'string' || !reason) return null;
-    const matched = matchedText(record.command, record.matched_span);
+    const { decision } = record;
+    if (decision === 'allow') {
+      return exitCode === 0
+        ? null
+        : { ruleId: DCG_INVALID_VERDICT_RULE_ID, reason: ABNORMAL_ALLOW_REASON, decision: 'ask' };
+    }
+    const ruleId = nonEmptyString(record.rule_id);
+    const reason = nonEmptyString(record.reason);
+    const extras = extraFields(record);
+    if (decision === 'warn') {
+      if (!ruleId || !reason) {
+        return {
+          ruleId: DCG_INVALID_VERDICT_RULE_ID,
+          reason: MALFORMED_WARNING_REASON,
+          decision: 'ask',
+        };
+      }
+      return { ruleId, reason, decision: 'warn', ...extras };
+    }
+    if ((DCG_GUARD_DECISIONS as readonly unknown[]).includes(decision)) {
+      return {
+        ruleId: ruleId ?? DCG_INVALID_VERDICT_RULE_ID,
+        reason: reason ?? MISSING_DETAILS_REASON,
+        decision: decision as CommandGuardHit['decision'],
+        ...extras,
+      };
+    }
     return {
-      ruleId,
-      reason,
-      decision: decision as CommandGuardHit['decision'],
-      ...((DCG_SEVERITIES as readonly unknown[]).includes(severity)
-        ? { severity: severity as DcgSeverity }
-        : {}),
-      ...(typeof explanation === 'string' && explanation.trim()
-        ? { explanation: explanation.trim().slice(0, DCG_EXPLANATION_MAX) }
-        : {}),
-      ...(matched ? { matched } : {}),
+      ruleId: ruleId ?? DCG_INVALID_VERDICT_RULE_ID,
+      reason: reason ?? UNKNOWN_DECISION_REASON,
+      decision: 'ask',
+      ...extras,
     };
   } catch {
-    return null;
+    return { ruleId: DCG_INVALID_VERDICT_RULE_ID, reason: INVALID_OUTPUT_REASON, decision: 'ask' };
   }
 }
 
 const MAX_OUTPUT = 64 * 1024;
 
-/** 用户按规则记忆的豁免：命中豁免规则视同未命中，交回原审批逻辑 */
+/** 用户按规则记忆的豁免：仅对普通可豁免规则的 deny 生效；绝不绕过 ask、不可豁免规则，也不吞 warn 提醒 */
 export function withDcgExemptions(
   guard: CommandGuard,
   exemptRules: readonly string[]
@@ -79,7 +134,9 @@ export function withDcgExemptions(
   const exempt = new Set(allowed);
   return async (tool, command, signal) => {
     const hit = await guard(tool, command, signal);
-    return hit && exempt.has(hit.ruleId) ? null : hit;
+    if (!hit) return null;
+    const isDeny = hit.decision === undefined || hit.decision === 'deny';
+    return isDeny && exempt.has(hit.ruleId) ? null : hit;
   };
 }
 
