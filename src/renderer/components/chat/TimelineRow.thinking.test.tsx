@@ -41,10 +41,13 @@ const turn = (n: number): ProjectedMessage[] => [
   },
 ];
 
-const thinking = (streaming: boolean): TimelineItem => ({
+const thinking = (
+  streaming: boolean,
+  text = BODY
+): Extract<TimelineItem, { kind: 'thinking' }> => ({
   kind: 'thinking',
   key: '3-0',
-  text: BODY,
+  text,
   streaming,
   durationMs: 1200,
 });
@@ -146,9 +149,9 @@ describe('思考块底部收起入口', () => {
       await act(async () => view.head().click());
       await act(async () => view.head().click());
       expect(view.container.textContent).toContain(BODY);
-      await view.render({ ...thinking(true), text: `${BODY}\n第二步继续推导` });
+      await view.render(thinking(true, `${BODY}\n第二步继续推导`));
       expect(view.container.textContent).toContain('第二步继续推导');
-      await view.render({ ...thinking(false), text: `${BODY}\n第二步继续推导` });
+      await view.render(thinking(false, `${BODY}\n第二步继续推导`));
       expect(view.container.textContent).toContain('第二步继续推导');
       expect(view.collapse()).toBeDefined();
     } finally {
