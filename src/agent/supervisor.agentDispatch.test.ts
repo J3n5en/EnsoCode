@@ -2188,6 +2188,25 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       }
     );
 
+    it('预检拒收：先发本轮失败终态，拒收回执最后到——收到回执即让出会话的消费者不会把失败记到下一条头上', async () => {
+      const { events, supervisor, piSession } = await spawned();
+      piSession.prompt.mockImplementationOnce(async () => {
+        throw new Error('No API key');
+      });
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
+      await settle();
+      expect(
+        events.flatMap((event) =>
+          event.type === 'delivery-rejected' || event.type === 'turn-failed'
+            ? [event.type]
+            : event.type === 'status' && event.status === 'failed'
+              ? ['failed']
+              : []
+        )
+      ).toEqual(['failed', 'turn-failed', 'delivery-rejected']);
+      await supervisor.shutdown();
+    });
+
     it('prompt 的 user 消息上屏后回执 deliveryId，且排在该 upsert 之后', async () => {
       const { events, supervisor, userMessage } = await spawned();
       supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
