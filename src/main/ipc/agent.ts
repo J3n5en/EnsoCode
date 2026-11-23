@@ -1562,13 +1562,18 @@ function distillSessionMemory(identity: SessionIdentity) {
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
     if (conversation?.bot) void getBotServices()?.memory.distill({ ...conversation, sessionFile });
     else
-      void scheduleMemoryDistill(
+      scheduleMemoryDistill(
         {
           sessionId: identity.sessionId,
           sessionFile,
           projectId: project?.state === 'active' ? project.projectId : null,
         },
         { continueFromLastJob: true }
+      ).catch((error: unknown) =>
+        console.warn('[memory] schedule distill failed', {
+          sessionId: identity.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
       );
   }
   return conversation?.bot;

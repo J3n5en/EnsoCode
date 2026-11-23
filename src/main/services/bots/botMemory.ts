@@ -16,7 +16,12 @@ interface BotMemoryDeps {
   schedule: (payload: DistillPayload) => Promise<string | undefined>;
   watermarksFile?: string;
   /** 整理推进了水位（有新内容被整理）后通知；since 为本次整理开始时间 */
-  onDistilled?: (input: { botId: string; chatId: string | null; since: number }) => void;
+  onDistilled?: (input: {
+    botId: string;
+    chatId: string | null;
+    since: number;
+    sessionId: string;
+  }) => void;
 }
 
 export class BotMemoryService {
@@ -118,7 +123,12 @@ export class BotMemoryService {
           this.persist();
         }
         if (next && next !== fromEntryId && context.botId)
-          this.deps.onDistilled?.({ botId: context.botId, chatId: context.chatId ?? null, since });
+          this.deps.onDistilled?.({
+            botId: context.botId,
+            chatId: context.chatId ?? null,
+            since,
+            sessionId: id,
+          });
         if (
           next &&
           chat &&

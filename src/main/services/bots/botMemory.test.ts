@@ -150,7 +150,12 @@ it('persists watermarks by conversation even after chat session replacement and 
 });
 
 it('reports a finished distill that advanced the watermark so notes can be rewritten', async () => {
-  const distilled: Array<{ botId: string; chatId: string | null; since: number }> = [];
+  const distilled: Array<{
+    botId: string;
+    chatId: string | null;
+    since: number;
+    sessionId: string;
+  }> = [];
   memory = new BotMemoryService({
     bots,
     chats,
@@ -160,7 +165,9 @@ it('reports a finished distill that advanced the watermark so notes can be rewri
   });
   const before = Date.now();
   await memory.distill(conversation());
-  expect(distilled).toEqual([{ botId, chatId: null, since: expect.any(Number) }]);
+  expect(distilled).toEqual([
+    { botId, chatId: null, since: expect.any(Number), sessionId: 'session' },
+  ]);
   expect(distilled[0].since).toBeGreaterThanOrEqual(before);
   // 水位没动（开关关闭 / 没有新内容）：不触发
   schedule.mockImplementationOnce(async () => 'entry-2');

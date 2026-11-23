@@ -66,6 +66,7 @@ import {
   awaitMemoryKg,
   awaitMemoryReconcile,
   awaitMemoryReembed,
+  awaitSessionDistill,
   closeMemoryDb,
   configureMemoryDistill,
   configureMemoryEmbedding,
@@ -613,6 +614,7 @@ describe('memoryHost 会话结束蒸馏接线', () => {
     configureMemoryDistill({ enabled: true, readTranscript: read, complete: () => complete });
     const p = { ...payload, sessionId: 'distill-retry' };
     await scheduleMemoryDistill(p);
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(1);
     expect(getMemoryDistillJobs().find((j) => j.payload.sessionId === p.sessionId)).toMatchObject({
       status: 'pending',
@@ -621,6 +623,7 @@ describe('memoryHost 会话结束蒸馏接线', () => {
     expect((await search('cert-manager')).results).toEqual([]);
     fail = false;
     await scheduleMemoryDistill(p);
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(2);
     const hits = (await search('cert-manager')).results;
     expect(hits).toHaveLength(1);
@@ -1695,8 +1698,10 @@ describe('memoryHost 会话聚合提炼（memoryDistillWindowMinutes）', () => 
     sessions['zero-a'] = talk('zero-a', 1, 2);
     sessions['zero-b'] = talk('zero-b', 1, 2);
     await scheduleMemoryDistill(code('zero-a', 'proj-zero'), resume);
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(1);
     await scheduleMemoryDistill(code('zero-b', 'proj-zero'), resume);
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(2);
     for (const text of seen) expect(text).not.toContain('## Session');
     expect(jobsOf('zero-a')[0].payload.sessions).toBeUndefined();
@@ -1745,6 +1750,7 @@ describe('memoryHost 会话聚合提炼（memoryDistillWindowMinutes）', () => 
     setup(5);
     sessions['bot-a'] = talk('bot-a', 1, 2);
     await scheduleMemoryDistill({ ...code('bot-a', null), botId: BOT });
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(1);
   });
 
@@ -1899,16 +1905,19 @@ describe('memoryHost 增量蒸馏（Bot 模式空闲 / 新对话）', () => {
     };
 
     expect(await scheduleMemoryDistill(base)).toBe('e2');
+    await awaitMemoryDistill();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toContain('redis');
 
     visible = all;
     expect(await scheduleMemoryDistill({ ...base, fromEntryId: 'e2' })).toBe('e4');
+    await awaitMemoryDistill();
     expect(seen).toHaveLength(2);
     expect(seen[1]).toContain('friday');
     expect(seen[1]).not.toContain('redis');
 
     expect(await scheduleMemoryDistill({ ...base, fromEntryId: 'e4' })).toBe('e4');
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(2);
 
     const jobs = getMemoryDistillJobs().filter((j) => j.payload.sessionId === 'inc-s1');
@@ -1957,14 +1966,17 @@ describe('memoryHost 增量蒸馏（Bot 模式空闲 / 新对话）', () => {
 
     // 首个任务（如未压缩会话的结束蒸馏）：没有历史任务，仍是全量
     expect(await scheduleMemoryDistill(code, resume)).toBe('e2');
+    await awaitMemoryDistill();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toContain('redis');
     // 同一内容再次触发（压缩后又结束）：无新增，不调 LLM
     expect(await scheduleMemoryDistill(code, resume)).toBe('e2');
+    await awaitMemoryDistill();
     expect(complete).toHaveBeenCalledTimes(1);
     // 之后新增内容：只蒸馏新增部分
     visible = all;
     expect(await scheduleMemoryDistill(code, resume)).toBe('e4');
+    await awaitMemoryDistill();
     expect(seen).toHaveLength(2);
     expect(seen[1]).toContain('friday');
     expect(seen[1]).not.toContain('redis');
@@ -2212,5 +2224,126 @@ describe('memoryHost 矛盾复核接线', () => {
     configureMemoryDistill({ enabled: false, complete: () => null });
     await seedPair('nomodel');
     expect(await runMemoryReconcileNow()).toBeNull();
+  });
+});
+
+describe('schedule-distill 不排在慢 LLM 任务后面', () => {
+  const within = <T>(promise: Promise<T>, ms = 2_000) =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`still pending after ${ms}ms`)), ms)
+      ),
+    ]);
+
+  it.each([0, 5])(
+    '窗口 %i 分钟：队头 LLM 卡住时仍立即落库并返回水位，放行后照常提炼',
+    async (windowMinutes) => {
+      closeMemoryDb();
+      configureMemoryEmbedding({ modelId: 'none' });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let headStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        headStarted = resolve;
+      });
+      const complete = vi.fn(async (_system: string, _user: string) => {
+        headStarted();
+        await gate;
+        return JSON.stringify({ memories: [] });
+      });
+      syncMemoryDistillFromSettings({
+        memoryDistillEnabled: true,
+        memoryDistillWindowMinutes: windowMinutes,
+        disabledBuiltinTools: [],
+      });
+      configureMemoryDistill({
+        readTranscript: async (file) => {
+          const id = path.basename(file, '.jsonl');
+          return [{ role: 'user' as const, text: `${id} picked redis`, entryId: `${id}-e1` }];
+        },
+        complete: () => complete,
+        now: Date.now,
+      });
+      const head = distillSessionNow({
+        sessionId: `slow-head-${windowMinutes}`,
+        sessionFile: `/fake/slow-head-${windowMinutes}.jsonl`,
+        projectId: null,
+      });
+      await started;
+      const id = `behind-slow-${windowMinutes}`;
+      try {
+        await expect(
+          within(
+            scheduleMemoryDistill(
+              { sessionId: id, sessionFile: `/fake/${id}.jsonl`, projectId: 'proj-slow' },
+              { continueFromLastJob: true }
+            )
+          )
+        ).resolves.toBe(`${id}-e1`);
+        // 返回前任务已落库：此刻进程被杀，重启后能按库里的任务续跑
+        expect(
+          memoryDatabase()
+            .prepare(
+              `SELECT COUNT(*) AS n FROM memory_jobs WHERE kind IN ('distill', 'distill-queue') AND target LIKE ?`
+            )
+            .get(`${id}#%`)
+        ).toEqual({ n: 1 });
+      } finally {
+        release();
+        await head;
+        await awaitMemoryDistill();
+      }
+      const ranQueued = complete.mock.calls.some(([, user]) => user.includes(`${id} picked`));
+      expect(ranQueued).toBe(windowMinutes === 0);
+      configureMemoryDistill({ enabled: false });
+    }
+  );
+
+  it('等本会话提炼只等自己这次，不被其他会话卡住的 LLM 任务拖住', async () => {
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: 'none' });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const complete = vi.fn(async (_system: string, user: string) => {
+      if (user.includes('stuck-a')) await gate;
+      return JSON.stringify({ memories: [] });
+    });
+    syncMemoryDistillFromSettings({
+      memoryDistillEnabled: true,
+      memoryDistillWindowMinutes: 0,
+      disabledBuiltinTools: [],
+    });
+    configureMemoryDistill({
+      readTranscript: async (file) => {
+        const id = path.basename(file, '.jsonl');
+        return [{ role: 'user' as const, text: `${id} picked redis`, entryId: `${id}-e1` }];
+      },
+      complete: () => complete,
+      now: Date.now,
+    });
+    const schedule = (id: string) =>
+      scheduleMemoryDistill({ sessionId: id, sessionFile: `/fake/${id}.jsonl`, projectId: null });
+    try {
+      await schedule('stuck-a');
+      await within(awaitSessionDistill('never-scheduled'));
+      let doneA = false;
+      const waitA = awaitSessionDistill('stuck-a').then(() => {
+        doneA = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(doneA).toBe(false);
+      release();
+      await within(waitA);
+      expect(complete).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await awaitMemoryDistill();
+      configureMemoryDistill({ enabled: false });
+    }
   });
 });

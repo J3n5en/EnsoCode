@@ -2436,9 +2436,15 @@ export class SessionSupervisor {
         return;
       }
       case 'memory-result': {
-        const managed = this.must(command.identity);
-        if (!managed.memory?.resolve(command)) {
-          console.warn(`[memory] dropped result for unknown request ${command.requestId}`);
+        const memory = this.must(command.identity).memory;
+        if (!memory?.resolve(command)) {
+          if (memory?.wasCancelled(command.requestId)) {
+            console.debug(
+              `[memory] dropped late result for cancelled request ${command.requestId}`
+            );
+          } else {
+            console.warn(`[memory] dropped result for unknown request ${command.requestId}`);
+          }
         }
         return;
       }
