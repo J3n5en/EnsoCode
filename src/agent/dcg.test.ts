@@ -8,7 +8,9 @@ import {
   dcgDialect,
   deletesTempRoot,
   isBlockingGuardHit,
+  isTempSubpathExemptibleHit,
   parseDcgVerdict,
+  stripSafeTempSubpathDeletes,
   TEMP_ROOT_RULE_ID,
   withDcgExemptions,
   withTempRootGuard,
@@ -239,6 +241,24 @@ describe('deletesTempRoot', () => {
       'rm -rf $TMPDIR/*',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 写法
       'rm -rf "${TMPDIR}"*',
+      // 切进 Temp 根再删当前目录 / 通配
+      'cd /tmp && rm -rf *',
+      'cd "$TMPDIR"; rm -rf .',
+      'Set-Location $env:TEMP; Remove-Item * -Recurse',
+      // 路径穿越回 Temp 根、find 删除 Temp 根、shell heredoc 删 Temp 根
+      'rm -rf /tmp/foo/..',
+      'rm -rf /tmp/foo/../*',
+      'find /tmp -maxdepth 1 -delete',
+      'find "$TMPDIR" -exec rm -rf {} +',
+      "sh <<'EOF'\nrm -rf /tmp/*\nEOF",
+      '(cd /tmp && rm -rf *)',
+      '/bin/sh <<EOF\nrm -rf /tmp/*\nEOF',
+      'echo "<<EOF"\nrm -rf /tmp/*\nEOF',
+      'cd /tmp && rm -rf $(ls)',
+      'cd "$TMPDIR" && rm -rf "$PWD"/*',
+      'cd /tmp && rm -rf ~+/*',
+      'cd /tmp && find -delete',
+      'rm -rf /tmp/{,}',
     ]) {
       expect(deletesTempRoot(command), command).toBe(true);
     }
@@ -255,10 +275,24 @@ describe('deletesTempRoot', () => {
       'Remove-Item .\\build -Recurse',
       'rm -rf /tmp/x',
       'rm -rf "$TMPDIR/enso-x"',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 具体子目录写法
+      'rm -rf "${TMPDIR}/sub/dir"',
       'rm -rf ./tmp/*',
       'rm -rf build/tmp/*',
       'ls /tmp',
       'Write-Output "remove temp files"',
+      // 跨语句无关引用：前句删具体子目录、后句切到 /tmp 运行脚本（真实误伤场景）
+      'rm -rf /tmp/ohg-old && mkdir -p /tmp/ohg-old/dist\ncd /tmp && node probe-old.mjs',
+      'rm -rf ./build && ls /tmp',
+      // 切到 /tmp 后只删明确的具体子目录（无通配、非 . / ..）
+      'cd /tmp && rm -rf ohg-old',
+      // 非 shell 的 heredoc 正文或注释里出现 rm 和 /tmp 不误判
+      "python3 - <<'PY'\n# rm something\np = '/tmp/'\nPY",
+      "cat <<'EOF' > /tmp/verify.mjs\n// rm old files\nconst dir = '/tmp';\nEOF",
+      // 注释里的 rm 不算删除动词
+      '# rm old files\nls /tmp',
+      // find 只作用于具体子目录
+      'find /tmp/my-run -delete',
     ]) {
       expect(deletesTempRoot(command), command).toBe(false);
     }
@@ -282,6 +316,88 @@ describe('withTempRootGuard', () => {
     expect((await guard('powershell', 'Remove-Item $env:TEMP\\*'))?.ruleId).toBe(TEMP_ROOT_RULE_ID);
     expect(await guard('powershell', 'git reset --hard')).toBeNull();
     expect(await guard('edit', 'Remove-Item $env:TEMP\\*')).toBeNull();
+  });
+});
+
+describe('stripSafeTempSubpathDeletes 与 isTempSubpathExemptibleHit', () => {
+  it('识别明确临时子目录删除（POSIX 与 PowerShell），并保留后续非删除语句供复检', () => {
+    expect(stripSafeTempSubpathDeletes('bash', 'rm -rf /tmp/enso-verify-123')).toEqual({
+      remaining: '',
+    });
+    expect(stripSafeTempSubpathDeletes('bash', 'rm -rf "$TMPDIR/foo" && git reset --hard')).toEqual(
+      {
+        remaining: 'git reset --hard',
+      }
+    );
+    expect(
+      stripSafeTempSubpathDeletes('powershell', 'Remove-Item "$env:TEMP\\my-dir" -Recurse -Force')
+    ).toEqual({
+      remaining: '',
+    });
+  });
+
+  it('Temp 根、通配、变量逃逸、.. 穿越与非临时目标一律返回 null', () => {
+    for (const [tool, cmd] of [
+      ['bash', 'rm -rf /tmp/*'],
+      ['bash', 'rm -rf /tmp/enso-*'],
+      ['bash', 'rm -rf /tmp/x/{..,b}/*'],
+      ['bash', 'rm -rf /tmp/x/.*/*'],
+      ['bash', 'rm -rf /tmp/x/*'],
+      ['bash', 'rm -rf "$TMPDIR/$SUB"'],
+      ['bash', 'export TMPDIR=$HOME; rm -rf "$TMPDIR/proj"'],
+      ['bash', 'TMPDIR=/ rm -rf "$TMPDIR/etc"'],
+      ['bash', 'rm -rf /tmp/a&find -delete'],
+      ['bash', 'rm -rf /tmp/a\npython3 <<EOF\nos.system("rm -rf ~")\nEOF'],
+      ['bash', 'ln -s ~ /tmp/x && rm -rf /tmp/x/sub'],
+      ['bash', 'rm -rf /tmp/foo/..'],
+      ['bash', 'rm -rf /'],
+      ['bash', 'rm -rf /tmp/foo /etc'],
+      ['bash', 'rm -rf "$TMPDIR/foo" && rm -rf /'],
+      ['powershell', 'Remove-Item "$env:TEMP\\*" -Recurse -Force'],
+      ['powershell', 'Remove-Item $env:TEMP\\x,C:\\Windows -Recurse -Force'],
+      ['powershell', 'Remove-Item "$env:TEMP\\my-dir" -Include *.txt -Recurse'],
+    ] as const) {
+      expect(stripSafeTempSubpathDeletes(tool, cmd), cmd).toBeNull();
+    }
+    // 当运行环境未设置 TMPDIR 时（如 Linux 默认为空），$TMPDIR/usr 会展开成 /usr，绝不放行
+    expect(
+      stripSafeTempSubpathDeletes('bash', 'rm -rf "$TMPDIR/usr"', { envTmpDir: '' })
+    ).toBeNull();
+    // sessionOnly 模式：只认会话专属临时目录，普通 /tmp/foo 不放行
+    const sessionDir = '/var/folders/aa/bb/T/enso-session-temp-501/sess-1';
+    expect(
+      stripSafeTempSubpathDeletes('bash', 'rm -rf /tmp/foo', {
+        sessionTempDir: sessionDir,
+        sessionOnly: true,
+      })
+    ).toBeNull();
+    expect(
+      stripSafeTempSubpathDeletes('bash', `rm -rf "${sessionDir}/work"`, {
+        sessionTempDir: sessionDir,
+        sessionOnly: true,
+      })
+    ).toEqual({ remaining: '' });
+  });
+
+  it('只对 deny 档文件系统删除规则生效；root-home 仅允许 sessionOnly，绝不绕过 ask 或非删除高危规则', () => {
+    expect(
+      isTempSubpathExemptibleHit({ ruleId: 'core.filesystem:rm-rf-general', reason: 'r' })
+    ).toBe('temp-subpath');
+    expect(
+      isTempSubpathExemptibleHit({ ruleId: 'core.filesystem:rm-rf-root-home', reason: 'r' })
+    ).toBe('session-only');
+    expect(
+      isTempSubpathExemptibleHit({
+        ruleId: 'core.filesystem:rm-rf-general',
+        reason: 'r',
+        decision: 'ask',
+      })
+    ).toBeNull();
+    expect(isTempSubpathExemptibleHit({ ruleId: TEMP_ROOT_RULE_ID, reason: 'r' })).toBeNull();
+    expect(
+      isTempSubpathExemptibleHit({ ruleId: 'core.filesystem:credential-file-write', reason: 'r' })
+    ).toBeNull();
+    expect(isTempSubpathExemptibleHit({ ruleId: 'core.git:reset-hard', reason: 'r' })).toBeNull();
   });
 });
 
@@ -318,5 +434,22 @@ describe.skipIf(process.platform === 'win32')('createDcgGuard', () => {
     expect(await createDcgGuard(join(dir, 'missing'))('bash', 'ls')).toBeNull();
     const slow = script('slow', `sleep 5\necho '${DENY}'\nexit 1`);
     expect(await createDcgGuard(slow, 100)('bash', 'ls')).toBeNull();
+  });
+
+  it('failClosedOnError=true 时，超时或无法执行按 ask 兜底，不误放行', async () => {
+    const slow = script('slow-recheck', 'sleep 2');
+    const timedOut = await createDcgGuard(slow, 80)('bash', 'git reset --hard', undefined, {
+      failClosedOnError: true,
+    });
+    expect(timedOut?.ruleId).toBe(DCG_INVALID_VERDICT_RULE_ID);
+    expect(timedOut?.decision).toBe('ask');
+    const missing = await createDcgGuard(join(dir, 'missing'))(
+      'bash',
+      'git reset --hard',
+      undefined,
+      { failClosedOnError: true }
+    );
+    expect(missing?.ruleId).toBe(DCG_INVALID_VERDICT_RULE_ID);
+    expect(missing?.decision).toBe('ask');
   });
 });
