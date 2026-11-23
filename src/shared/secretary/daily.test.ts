@@ -582,6 +582,23 @@ describe('一天的看板投影', () => {
     });
     expect(daily.groups.map((group) => group.key)).toEqual(['needsYou', 'failed']);
   });
+
+  it('完成卡片带上结构化结果', () => {
+    const goalResult = {
+      result: { summary: 'shipped', prs: [{ repo: 'owner/x', number: 12 }] },
+      at: at(15, 10),
+      checks: [{ kind: 'pr-state' as const, ref: 'owner/x#12', status: 'verified' as const }],
+    };
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [record({ goalResult })],
+      dispatched: [dispatch()],
+      todos: [],
+      audit: [],
+    });
+    const done = daily.groups.find((group) => group.key === 'done');
+    expect(done?.items[0]?.goalResult).toEqual(goalResult);
+  });
 });
 
 describe('已完成但还有遗留后台任务', () => {

@@ -482,6 +482,28 @@ describe('session_read', () => {
       baseIndex,
     });
 
+  it('带出结构化结果，自述按不可信内容脱敏', async () => {
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        goalResult: () => ({
+          at: 5,
+          result: { summary: `done ${SECRET}`, commits: ['abc1234'] },
+          checks: [{ kind: 'commit', ref: 'abc1234', status: 'verified' }],
+        }),
+      })
+    );
+    const result = await run(handlers.session_read, { conversationId: 's1' });
+    const goal = result.goalResult as { at: number; result: string; checks: unknown[] };
+    expect(goal.at).toBe(5);
+    expect(goal.checks).toEqual([{ kind: 'commit', ref: 'abc1234', status: 'verified' }]);
+    expect(goal.result).toContain('<untrusted-content source="session:s1">');
+    expect(goal.result).toContain('abc1234');
+    expect(goal.result).not.toContain(SECRET);
+  });
+
   it('只给 user 与 assistant 正文，脱敏后包进 untrusted-content', async () => {
     const handlers = createSecretaryReadHandlers(
       makePorts({
@@ -563,6 +585,34 @@ describe('session_read', () => {
 
     expect(result.messages).toEqual([]);
     expect(result.historyError).toBe('not-found');
+  });
+
+  it('完成后被自动归档的派出会话仍可读；用户手动归档的仍 not-found', async () => {
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({
+          auto: row({ archived: true, archivedAt: 9 }),
+          manual: row({ archived: true, archivedAt: 7 }),
+        }),
+        conversations: () => [conversation('auto', 'p1'), conversation('manual', 'p1')],
+        autoArchived: (conversationId, archivedRow) =>
+          conversationId === 'auto' && archivedRow.archivedAt === 9,
+      })
+    );
+    const auto = await handlers.session_read(
+      { conversationId: 'auto' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(auto.ok).toBe(true);
+    expect(
+      await handlers.session_read(
+        { conversationId: 'manual' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'not-found' });
+    const listed = await handlers.session_list({}, { secretaryConversationId: 'sec-1' });
+    expect(JSON.stringify(listed)).not.toContain('"auto"');
   });
 
   it('child、已归档、未知会话与不可见项目一律 not-found', async () => {

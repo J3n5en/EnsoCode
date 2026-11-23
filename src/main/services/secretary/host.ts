@@ -5,6 +5,12 @@ import { hasPendingReminder, type SessionReminder } from '@shared/reminders';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import {
+  type GoalResult,
+  type GoalResultCheck,
+  type GoalResultView,
+  parseGoalResultView,
+} from '@shared/secretary/goalResult';
+import {
   PATROL_IDLE_GOAL_MS,
   PATROL_INTERVAL_MS,
   type PatrolFacts,
@@ -41,6 +47,7 @@ import {
   recoverDeliveries,
   settleDelivery,
 } from './deliveries';
+import { unverifiableGoalChecks } from './goalResultVerify';
 import {
   leftoverNote,
   leftoverReason,
@@ -146,7 +153,19 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
   /** 会话报完成：存下完整汇报并复制里面点名的截图，供看板「结果」视图 */
-  archiveReport?(conversationId: string, at: number, text: string): void;
+  archiveReport?(
+    conversationId: string,
+    at: number,
+    text: string,
+    extra?: {
+      goalResult?: GoalResultView;
+      shots?: { path: string; label?: string }[];
+    }
+  ): void;
+  /**
+   * 只读核验 goal_complete 的结构化结果。没有这个端口时不核，结果仍带上、checks 空着。
+   */
+  verifyGoalResult?(conversationId: string, result: GoalResult): Promise<GoalResultCheck[]>;
   /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
   reportPeerTodos?(): boolean;
   /** 派出会话收口后自动归档：和用户手动归档写同一份会话行；缺省表示不自动归档 */
@@ -298,6 +317,16 @@ function expireFailedPending(
   return changed;
 }
 
+interface GoalVerifySlot {
+  result: GoalResult;
+  checks?: GoalResultCheck[];
+  done: boolean;
+  cancelled?: boolean;
+  onDone?: () => void;
+}
+
+export const GOAL_RESULT_VERIFY_MS = 8_000;
+
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let timer: ReturnType<typeof setInterval> | null = null;
   let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -306,6 +335,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let failureTimer: ReturnType<typeof setTimeout> | null = null;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
+  /** 结构化结果的只读核验。轮次结束时还没落定就先挂起收尾。 */
+  const goalVerifies = new Map<string, GoalVerifySlot>();
+  const goalVerifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 因后台任务暂不归档时最近记过的审计：同一批任务只记一次 */
   const archiveHolds = new Map<string, string>();
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
@@ -690,7 +722,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     /** 这一轮的完整正文：分支与提交号只在原文里认，落盘仍按 lastText 截断 */
     report?: string,
     /** 这一轮的结论原文：终态与一轮结束回传带上，手机与工作台仍用短正文 */
-    turnReport?: TurnReport
+    turnReport?: TurnReport,
+    goalResult?: GoalResultView
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
@@ -713,6 +746,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       [detail, leftover].filter(Boolean).join('；') || undefined,
       reportLastText(kind, turnReport, report) ?? record.lastText
     );
+    if (kind === 'goal-complete' && goalResult) {
+      update.goalResult = goalResult;
+      record.goalResult = goalResult;
+    }
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
@@ -747,9 +784,20 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       kind,
       text: record.lastText || update.text,
     });
-    rememberDaily(record, kind, now, title, report);
+    rememberDaily(record, kind, now, title, report, goalResult);
     const finalReport = kind === 'goal-complete' ? turnReport?.text.trim() || report?.trim() : '';
-    if (finalReport) ports.archiveReport?.(record.conversationId, now, redactSecrets(finalReport));
+    const shots = goalResult?.result.screenshots?.map((shot) => ({
+      path: shot.path,
+      ...(shot.caption ? { label: shot.caption } : {}),
+    }));
+    if (finalReport || (kind === 'goal-complete' && goalResult)) {
+      ports.archiveReport?.(
+        record.conversationId,
+        now,
+        finalReport ? redactSecrets(finalReport) : '',
+        goalResult ? { goalResult, ...(shots && shots.length > 0 ? { shots } : {}) } : undefined
+      );
+    }
     notifyResult(update, kind, {
       title,
       projectName,
@@ -764,7 +812,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     kind: SecretaryResultKind,
     now: number,
     title: string,
-    report: string | undefined
+    report: string | undefined,
+    goalResult?: GoalResultView
   ): void {
     if (!ports.recordDaily) return;
     if (!DAILY_KINDS.has(kind)) return;
@@ -778,6 +827,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       ...(body ? { text: redactSecrets(body) } : {}),
       // 只认这一轮的最终汇报：停滞、中断没有正文，不能拿上一轮的提交号充数
       ...(report ? extractReportRefs(report) : {}),
+      ...(goalResult ? { goalResult } : {}),
     });
   }
 
@@ -1052,6 +1102,83 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     failureTimer.unref?.();
   }
 
+  function goalView(slot: GoalVerifySlot, at: number): GoalResultView | undefined {
+    return parseGoalResultView({
+      result: slot.result,
+      at,
+      ...(slot.checks && slot.checks.length > 0 ? { checks: slot.checks } : {}),
+    });
+  }
+
+  function settleGoalVerify(
+    conversationId: string,
+    slot: GoalVerifySlot,
+    checks: GoalResultCheck[]
+  ): void {
+    if (slot.done || slot.cancelled) return;
+    slot.done = true;
+    slot.checks = checks;
+    const timer = goalVerifyTimers.get(conversationId);
+    if (timer) clearTimeout(timer);
+    goalVerifyTimers.delete(conversationId);
+    slot.onDone?.();
+  }
+
+  function cancelGoalVerify(conversationId: string): void {
+    const slot = goalVerifies.get(conversationId);
+    if (slot) slot.cancelled = true;
+    goalVerifies.delete(conversationId);
+    const timer = goalVerifyTimers.get(conversationId);
+    if (timer) clearTimeout(timer);
+    goalVerifyTimers.delete(conversationId);
+  }
+
+  function startGoalVerify(conversationId: string, result: GoalResult): void {
+    cancelGoalVerify(conversationId);
+    const slot: GoalVerifySlot = { result, done: !ports.verifyGoalResult };
+    goalVerifies.set(conversationId, slot);
+    const port = ports.verifyGoalResult;
+    if (!port) return;
+    const timer = setTimeout(
+      () => settleGoalVerify(conversationId, slot, unverifiableGoalChecks(result, '核验超时')),
+      GOAL_RESULT_VERIFY_MS
+    );
+    timer.unref?.();
+    goalVerifyTimers.set(conversationId, timer);
+    void port(conversationId, result).then(
+      (checks) => settleGoalVerify(conversationId, slot, checks),
+      () => settleGoalVerify(conversationId, slot, unverifiableGoalChecks(result, '核验超时'))
+    );
+  }
+
+  function finishGoalResult(
+    conversationId: string,
+    slot: GoalVerifySlot,
+    now: number,
+    detail: string | undefined,
+    report: string | undefined,
+    turnReport: TurnReport | undefined
+  ): void {
+    if (slot.cancelled) return;
+    goalVerifies.delete(conversationId);
+    const file = withEventStamps(ports.file());
+    const record = file.dispatched[conversationId];
+    if (!record) return;
+    recordResult(
+      file,
+      record,
+      'goal-complete',
+      now,
+      detail,
+      report,
+      turnReport,
+      goalView(slot, now)
+    );
+    saveEventFile(file, now);
+    ports.publish();
+    flush(now);
+  }
+
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
@@ -1092,12 +1219,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         if (own && event.type === 'goal-signal' && event.kind === 'complete') {
           pendingComplete.add(conversationId);
+          if (event.result) startGoalVerify(conversationId, event.result);
         }
         if (
           own &&
           (event.type === 'turn-failed' || (event.type === 'turn-completed' && event.aborted))
         ) {
           pendingComplete.delete(conversationId);
+          cancelGoalVerify(conversationId);
         }
         record.lastEventAt = now;
         eventStamps.set(conversationId, now);
@@ -1216,8 +1345,26 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           detail = undefined;
         }
         const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
-        if (kind && !awaiting) recordResult(file, record, kind, now, detail, report, turnReport);
+        let readyGoal: GoalResultView | undefined;
+        let goalDeferred = false;
+        if (kind === 'goal-complete') {
+          const slot = goalVerifies.get(conversationId);
+          if (slot && !slot.cancelled) {
+            if (slot.done) {
+              readyGoal = goalView(slot, now);
+              goalVerifies.delete(conversationId);
+            } else {
+              slot.onDone = () =>
+                finishGoalResult(conversationId, slot, now, detail, report, turnReport);
+              kind = null;
+              goalDeferred = true;
+            }
+          }
+        }
+        if (kind && !awaiting)
+          recordResult(file, record, kind, now, detail, report, turnReport, readyGoal);
         else if (
+          !goalDeferred &&
           own &&
           event.type === 'turn-completed' &&
           !event.aborted &&

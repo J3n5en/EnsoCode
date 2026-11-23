@@ -236,6 +236,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       ...(record?.text ? { detail: record.text } : {}),
       ...(record?.branch ? { branch: record.branch } : {}),
       ...(record?.commit ? { commit: record.commit } : {}),
+      ...(record?.goalResult ? { goalResult: record.goalResult } : {}),
       ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
       conversationId,
     };

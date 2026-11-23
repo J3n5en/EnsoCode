@@ -187,6 +187,45 @@ describe('SecretaryDailyBoard', () => {
     expect(text('[data-enso="secretary-daily-stat"]')).toBe('[Dispatched] 2 · 2/7');
   });
 
+  it('完成卡片显示 PR 链接、短 sha、核验徽标和截图张数', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        {
+          key: 'done',
+          items: [
+            item({
+              goalResult: {
+                at: 1,
+                result: {
+                  prs: [{ repo: 'owner/x', number: 12 }],
+                  commits: ['abc1234def'],
+                  screenshots: [{ path: '/tmp/a.png' }, { path: '/tmp/b.png' }],
+                },
+                checks: [
+                  { kind: 'pr-state', ref: 'owner/x#12', status: 'verified' },
+                  { kind: 'commit', ref: 'abc1234def', status: 'mismatch' },
+                  { kind: 'screenshot', ref: '/tmp/a.png', status: 'unverifiable' },
+                ],
+              },
+            }),
+          ],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    const facts = container.querySelector('[data-enso="secretary-goal-result"]');
+    expect(facts?.querySelector('a')?.getAttribute('href')).toBe(
+      'https://github.com/owner/x/pull/12'
+    );
+    expect(facts?.textContent).toContain('abc1234');
+    expect(facts?.textContent).toContain('2');
+    expect(
+      [...(facts?.querySelectorAll('[data-enso="secretary-goal-check"]') ?? [])].map((node) =>
+        node.getAttribute('data-status')
+      )
+    ).toEqual(['verified', 'mismatch', 'unverifiable']);
+  });
+
   it('空列照 kanban 显示图标和「暂无卡片」，不是整块隐藏', async () => {
     h.daily[TODAY] = daily({ groups: [] });
     await render(createElement(SecretaryDailyBoard));
