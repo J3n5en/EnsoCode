@@ -296,6 +296,11 @@ export type SecretaryResultKind =
 /** 转交提问的收尾方式：秘书代答、用户在原会话里直接答、超时兜底 */
 export const RELAY_ASK_STATUSES = ['pending', 'answered', 'user-answered', 'timed-out'] as const;
 
+/** 排队会话给秘书的回传：启动失败、被取消 */
+export const QUEUED_UPDATE_STATUSES = ['failed', 'cancelled'] as const;
+
+export type QueuedUpdateStatus = (typeof QUEUED_UPDATE_STATUSES)[number];
+
 export type RelayAskStatus = (typeof RELAY_ASK_STATUSES)[number];
 
 /**
@@ -434,6 +439,8 @@ export type SecretaryUpdate = {
   | { kind: 'ask-relay'; conversationId: string; askId: string; status: RelayAskStatus }
   /** 遗留任务巡检：说明哪个会话、什么命令、跑了多久；不自动杀进程 */
   | { kind: 'leftover'; conversationId: string }
+  /** 排队会话：自动启动失败（等用户立即开始或取消）、被取消（会话已删除） */
+  | { kind: 'queued'; conversationId: string; status: QueuedUpdateStatus }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
   | {

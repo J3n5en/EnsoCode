@@ -1,3 +1,4 @@
+import { queuedStartOf } from '@shared/secretary/queuedSession';
 import type { SecretaryResultKind, SecretaryTodo, TodoProblemCode } from '@shared/types/secretary';
 
 export type TodoStatus = 'todo' | 'active' | 'problem' | 'done';
@@ -7,13 +8,14 @@ export const TODO_STATUSES: readonly TodoStatus[] = ['todo', 'active', 'problem'
 export interface TodoSessionView {
   present: boolean;
   title?: string;
-  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'queued';
   result?: SecretaryResultKind;
   /** 这一轮是用户中断的；不落在记录上，只在当次事件里为真 */
   aborted?: boolean;
 }
 
-const LIVE = new Set<TodoSessionView['state']>(['running', 'waiting']);
+/** 排队会话还没开始但一定会开始：待办算进行中 */
+const LIVE = new Set<TodoSessionView['state']>(['running', 'waiting', 'queued']);
 
 function live(session: TodoSessionView): boolean {
   return LIVE.has(session.state);
@@ -95,7 +97,11 @@ export function todoSessionView(
 ): TodoSessionView {
   if (!row) return { present: false, state: 'not-started', ...(aborted ? { aborted: true } : {}) };
   const title = typeof row.title === 'string' && row.title.trim() ? row.title : undefined;
-  const state = row.sessionFile ? (status?.state ?? 'idle') : 'not-started';
+  const state = queuedStartOf(row)
+    ? 'queued'
+    : row.sessionFile
+      ? (status?.state ?? 'idle')
+      : 'not-started';
   return {
     present: true,
     ...(title ? { title } : {}),

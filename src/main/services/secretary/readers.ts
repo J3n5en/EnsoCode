@@ -1,4 +1,5 @@
 import { parseProfile } from '@shared/secretary/parse';
+import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   chunkMessageText,
   projectReadableMessages,
@@ -46,7 +47,13 @@ const MAX_READ_LIMIT = 30;
 /** 秘书没有工作区的三种伪项目：没有可派活的目录，也不该出现在它的项目清单里 */
 const HIDDEN_PROJECT_KINDS: ReadonlySet<string> = new Set(['secretary', 'scratch', 'bot-home']);
 
-export type SecretarySessionState = 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+export type SecretarySessionState =
+  | 'running'
+  | 'idle'
+  | 'waiting'
+  | 'error'
+  | 'not-started'
+  | 'queued';
 
 export interface SecretarySessionStatus {
   state: 'running' | 'idle' | 'waiting' | 'error';
@@ -98,6 +105,8 @@ interface ListedSession {
   sessionFile?: string;
   /** 会话行上的目标：与 session_create 挂的是同一种，巡检按它判定 */
   goal?: { text: string; status: string };
+  /** 排队会话：位次，或自动启动失败的原因 */
+  queue?: { position: number } | { failed: string };
 }
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
@@ -185,7 +194,9 @@ async function collect(ports: SecretaryReadPorts): Promise<{
     (await ports.conversations()).map((conversation) => [conversation.conversationId, conversation])
   );
   const sessions: ListedSession[] = [];
-  for (const [conversationId, row] of Object.entries(await ports.rows())) {
+  const rows = await ports.rows();
+  const positions = queuePositions(rows);
+  for (const [conversationId, row] of Object.entries(rows)) {
     if (row.parentId !== undefined || row.btwParentId !== undefined) continue;
     if (row.archived === true) continue;
     const projectId = typeof row.projectId === 'string' ? row.projectId : undefined;
@@ -195,6 +206,8 @@ async function collect(ports: SecretaryReadPorts): Promise<{
     if (authority.projectId !== projectId) continue;
     const sessionFile = typeof row.sessionFile === 'string' ? row.sessionFile : undefined;
     const goal = listedGoal(row.goal);
+    const queued = queuedStartOf(row);
+    const position = positions.get(conversationId);
     sessions.push({
       conversationId,
       projectId,
@@ -202,6 +215,11 @@ async function collect(ports: SecretaryReadPorts): Promise<{
       lastActiveAt: timestamp(row.lastActiveAt) ?? timestamp(row.createdAt) ?? 0,
       ...(sessionFile ? { sessionFile } : {}),
       ...(goal ? { goal } : {}),
+      ...(queued?.failed
+        ? { queue: { failed: queued.failed.error } }
+        : queued && position !== undefined
+          ? { queue: { position } }
+          : {}),
     });
   }
   sessions.sort(
@@ -238,7 +256,15 @@ function sessionState(
   session: ListedSession,
   status: SecretarySessionStatus
 ): SecretarySessionState {
+  if (session.queue) return 'queued';
   return session.sessionFile ? status.state : 'not-started';
+}
+
+function queueFields(session: ListedSession): Record<string, unknown> {
+  if (!session.queue) return {};
+  return 'failed' in session.queue
+    ? { queueFailed: redactSecrets(session.queue.failed) }
+    : { queuePosition: session.queue.position };
 }
 
 /**
@@ -348,6 +374,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           projectId: session.projectId,
           title: session.title,
           state: sessionState(session, status),
+          ...queueFields(session),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           ...(session.goal ? { goal: session.goal } : {}),
@@ -417,6 +444,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           projectId: session.projectId,
           title: session.title,
           state: sessionState(session, status),
+          ...queueFields(session),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           messages,

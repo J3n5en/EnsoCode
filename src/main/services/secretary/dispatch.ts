@@ -13,6 +13,7 @@ import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending'
 import {
   canOperate,
   type DispatchBaseFacts,
+  type DispatchLimit,
   inTakeoverScope,
   isUntracked,
   type OperateSource,
@@ -23,6 +24,7 @@ import {
   validateDispatch,
   validateDispatchBase,
 } from '@shared/secretary/policy';
+import { queuedCount, queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   SECRETARY_ATTACHMENT_MAX,
   SECRETARY_ATTACHMENT_PATH_MAX,
@@ -293,6 +295,14 @@ export interface SecretaryDispatchPorts {
   managedElsewhere?(conversationId: string): MaybePromise<string | null>;
   /** 全部秘书合计在跑的派发数（含本秘书）与合计上限；缺省不查合计 */
   runningTotal?(): MaybePromise<{ running: number; max: number }>;
+  /**
+   * 取消排队会话：直接删掉这个还没开始的会话（worktree、行、权威记录），派发记录按停止处理。
+   * 已开始或正在启动的拒绝。缺省表示不支持排队会话
+   */
+  cancelQueued?(
+    conversationId: string,
+    secretaryConversationId: string | null
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 const DISPATCH_OPS = [
@@ -334,6 +344,8 @@ const DENIALS = {
     'permission denied (managed-by-other): another secretary manages this session. Only the user can transfer it to you; do not retry.',
   'not-yours':
     'refused (not-yours): only messages you queued yourself can be withdrawn; this one was queued by the user or by another secretary',
+  'session-queued':
+    'refused (session-queued): this session is queued behind the dispatch limit and has not started yet, so it cannot take messages. Wait for it to start (it starts automatically when a slot frees up), or cancel it with session_stop and dispatch again.',
 } as const;
 
 export const NOT_OPERABLE_ERROR = DENIALS['not-operable'];
@@ -503,7 +515,7 @@ async function loadAttachments(
 }
 
 /** 等依赖的派发真正开始时读图：读不到的不挡派发，记下原因写进 prompt */
-async function loadPendingAttachments(
+export async function loadPendingAttachments(
   paths: readonly string[]
 ): Promise<{ images: LoadedImage[]; unavailable?: UnavailableImage[] }> {
   const images: LoadedImage[] = [];
@@ -661,7 +673,7 @@ async function profileOf(ports: SecretaryDispatchPorts): Promise<SecretaryProfil
 }
 
 /** 派出上限只数秘书派出的会话。接管是用户交来的已有会话，不占这个名额 */
-async function runningCount(
+export async function runningCount(
   ports: SecretaryDispatchPorts,
   file: SecretaryDispatchFile
 ): Promise<number> {
@@ -737,6 +749,7 @@ async function dispatchContext(
   const projects = await ports.projects();
   const file = ports.dispatchFile();
   const total = await ports.runningTotal?.();
+  const rows = await ports.rows();
   return {
     project: projects.find((candidate) => candidate.projectId === projectId),
     visible: visibleProjects(projects, profile).some(
@@ -744,7 +757,10 @@ async function dispatchContext(
     ),
     running: await runningCount(ports, file),
     max: profile.maxRunningDispatches,
-    ...(total ? { runningTotal: total.running, maxTotal: total.max } : {}),
+    queued: queuedCount(rows, ports.secretaryId ?? ''),
+    ...(total
+      ? { runningTotal: total.running, maxTotal: total.max, queuedTotal: queuedCount(rows) }
+      : {}),
     deferred,
   };
 }
@@ -807,6 +823,8 @@ function afterParam(params: Record<string, unknown>): string[] | undefined {
 
 type DispatchOutcome =
   | { kind: 'created'; conversationId: string }
+  /** 超过上限：会话已经建好，排队等空位 */
+  | { kind: 'queued'; conversationId: string; position: number; limit: DispatchLimit }
   | { kind: 'pending'; pendingId: string }
   | { kind: 'failed'; error: string };
 
@@ -862,13 +880,18 @@ async function executeDispatch(
   draft: DispatchDraft,
   secretaryConversationId: string,
   profile: SecretaryProfile,
-  attachments?: MainSessionRequest['attachments']
-): Promise<MainSessionResult> {
+  attachments?: MainSessionRequest['attachments'],
+  limit?: DispatchLimit
+): Promise<DispatchOutcome> {
+  // 排队的会话只存图片路径，开始时再读
+  const queuedPaths = limit ? draft.attachments : undefined;
   const created = await ports.createSession({
     projectId: draft.projectId,
     prompt: draft.prompt,
     worktree: draft.worktree,
     ...(attachments ? { attachments } : {}),
+    ...(limit ? { queued: true } : {}),
+    ...(queuedPaths?.length ? { attachmentPaths: queuedPaths } : {}),
     ...(draft.title ? { title: draft.title } : {}),
     ...(draft.model
       ? { model: { providerId: draft.model.providerId, modelId: draft.model.modelId } }
@@ -888,7 +911,7 @@ async function executeDispatch(
     // 派出的会话一律把 ask_user 先转给秘书：无人值守时不再直接拒绝，也不会卡住
     ...(profile.name ? { askRelay: { name: profile.name } } : {}),
   });
-  if (!created.ok) return created;
+  if (!created.ok) return { kind: 'failed', error: created.error };
   const now = ports.now();
   const file = ports.dispatchFile();
   file.dispatched[created.conversationId] = {
@@ -897,7 +920,8 @@ async function executeDispatch(
     secretaryConversationId,
     createdAt: now,
     turn: 0,
-    lastState: 'running',
+    // 排队会话还没开始：记成空闲，启动时才标回运行中，重启恢复也不会把它报成中断
+    lastState: limit ? 'idle' : 'running',
     lastEventAt: now,
     stateSince: now,
     ...(draft.todoId ? { todoId: draft.todoId } : {}),
@@ -913,7 +937,12 @@ async function executeDispatch(
     if (linked.changed) ports.saveTodos(linked.todos);
   }
   notifySecretaryChanged();
-  return created;
+  if (!limit) return { kind: 'created', conversationId: created.conversationId };
+  const rows = await ports.rows();
+  const position =
+    queuePositions(rows).get(created.conversationId) ??
+    queuedCount(rows, ports.secretaryId ?? '') + 1;
+  return { kind: 'queued', conversationId: created.conversationId, position, limit };
 }
 
 /** 带 after 的派发先落一条等待记录：不建会话、不占运行名额，重启后还在 */
@@ -955,7 +984,8 @@ async function startDispatch(
   draft: DispatchDraft,
   secretaryConversationId: string,
   profile: SecretaryProfile,
-  attachments?: MainSessionRequest['attachments']
+  attachments?: MainSessionRequest['attachments'],
+  limit?: DispatchLimit
 ): Promise<DispatchOutcome> {
   if ((draft.after?.length ?? 0) > 0) {
     return {
@@ -963,16 +993,7 @@ async function startDispatch(
       pendingId: await queuePending(ports, draft, secretaryConversationId),
     };
   }
-  const created = await executeDispatch(
-    ports,
-    draft,
-    secretaryConversationId,
-    profile,
-    attachments
-  );
-  return created.ok
-    ? { kind: 'created', conversationId: created.conversationId }
-    : { kind: 'failed', error: created.error };
+  return executeDispatch(ports, draft, secretaryConversationId, profile, attachments, limit);
 }
 
 /**
@@ -1006,7 +1027,8 @@ async function dispatchDraft(
   if (!validated.ok) return { kind: 'failed', error: validated.error };
   const base = await checkBase(ports, validated.draft);
   if (!base.ok) return { kind: 'failed', error: base.error };
-  const prepared = await prepareAttachments(validated.draft);
+  const limit = validated.overLimit;
+  const prepared = await prepareAttachments(validated.draft, limit !== undefined);
   if (!prepared.ok) return { kind: 'failed', error: prepared.error };
   // 派发固定直接执行，不出确认卡；派出的会话无人值守，审批照样自动拒绝
   const outcome = await startDispatch(
@@ -1014,25 +1036,27 @@ async function dispatchDraft(
     prepared.draft,
     secretaryConversationId,
     profile,
-    prepared.attachments
+    prepared.attachments,
+    limit
   );
   noteFollow(ports, secretaryConversationId, validated.draft, outcome);
   return outcome;
 }
 
 /**
- * 派发带图：现在就开始的当场读图；等依赖的只校验并存真实路径，开始时再读。
+ * 派发带图：现在就开始的当场读图；等依赖或排队的只校验并存真实路径，开始时再读。
  * 任何一张不合法整条拒绝，什么都不建。
  */
 async function prepareAttachments(
-  draft: DispatchDraft
+  draft: DispatchDraft,
+  queued: boolean
 ): Promise<
   | { ok: true; draft: DispatchDraft; attachments?: MainSessionRequest['attachments'] }
   | { ok: false; error: string }
 > {
   const paths = draft.attachments ?? [];
   if (paths.length === 0) return { ok: true, draft };
-  if ((draft.after?.length ?? 0) > 0) {
+  if (queued || (draft.after?.length ?? 0) > 0) {
     const probed = await probeAttachments(paths);
     if (!probed.ok) return probed;
     return { ok: true, draft: { ...draft, attachments: probed.value.map((image) => image.path) } };
@@ -1061,7 +1085,7 @@ function noteFollow(
   outcome: DispatchOutcome
 ): void {
   if (!ports.follow || outcome.kind === 'failed') return;
-  const targetId = outcome.kind === 'created' ? outcome.conversationId : outcome.pendingId;
+  const targetId = outcome.kind === 'pending' ? outcome.pendingId : outcome.conversationId;
   ports.follow({
     targetId,
     summary: draftSummary(draft),
@@ -1118,6 +1142,17 @@ function outcomeResult(
   if (outcome.kind === 'pending')
     return pendingResult(ports, ctx, op, outcome.pendingId, file.pending?.[outcome.pendingId]);
   const model = file.dispatched[outcome.conversationId]?.model;
+  if (outcome.kind === 'queued') {
+    ports.audit({
+      at,
+      secretaryConversationId: ctx.secretaryConversationId,
+      op,
+      targetId: outcome.conversationId,
+      ok: true,
+      detail: `queued #${outcome.position} ${outcome.limit}${modelDetail(model)}`,
+    });
+    return { ok: true, result: queuedResult(outcome) };
+  }
   ports.audit({
     at,
     secretaryConversationId: ctx.secretaryConversationId,
@@ -1127,6 +1162,17 @@ function outcomeResult(
     detail: `created${modelDetail(model)}`,
   });
   return { ok: true, result: { status: 'created', conversationId: outcome.conversationId } };
+}
+
+/** 排队派发的结果：说清会话已建好、为什么排队、怎么取消 */
+function queuedResult(outcome: Extract<DispatchOutcome, { kind: 'queued' }>) {
+  return {
+    status: 'queued',
+    conversationId: outcome.conversationId,
+    position: outcome.position,
+    reason: outcome.limit,
+    note: `The ${outcome.limit === 'dispatch-limit-total' ? 'total dispatch limit across all secretaries' : 'dispatch limit'} is reached, so the session was created but queued (position ${outcome.position}). It starts automatically, first in first out, when a slot frees up; the user can also start it right away. Cancel it with session_stop if it is no longer needed.`,
+  };
 }
 
 /** 等依赖的派发：结果里点名 pendingId，取消时把它当 conversationId 传给 session_stop */
@@ -1262,17 +1308,29 @@ export async function startPendingDispatches(
       continue;
     }
     const { attachments: paths, ...draft } = validated.draft;
-    const created = await executeDispatch(
-      ports,
-      draft,
-      pending.secretaryConversationId,
-      profile,
-      paths?.length ? await loadPendingAttachments(paths) : undefined
-    );
-    if (!created.ok) {
+    const limit = validated.overLimit;
+    // 依赖都结束了但名额已满：照常建出会话，排队等空位，不再判失败
+    const created = limit
+      ? await executeDispatch(
+          ports,
+          validated.draft,
+          pending.secretaryConversationId,
+          profile,
+          undefined,
+          limit
+        )
+      : await executeDispatch(
+          ports,
+          draft,
+          pending.secretaryConversationId,
+          profile,
+          paths?.length ? await loadPendingAttachments(paths) : undefined
+        );
+    if (created.kind === 'failed') {
       await failPending(ports, pending, 'dispatch-failed', undefined, created.error);
       continue;
     }
+    if (created.kind === 'pending') continue;
     // 关注项从等待中的派发改挂到真正建出来的会话上
     ports.refollow?.(pendingId, created.conversationId);
     ports.audit({
@@ -1281,7 +1339,7 @@ export async function startPendingDispatches(
       op: 'dispatch_pending',
       targetId: pendingId,
       ok: true,
-      detail: `started ${created.conversationId}`,
+      detail: `${created.kind === 'queued' ? 'queued' : 'started'} ${created.conversationId}`,
     });
   }
 }
@@ -1729,6 +1787,8 @@ export function createSecretaryDispatchHandlers(
       const profile = await profileOf(ports);
       const check = await checkOperate(ports, conversationId, profile);
       if (!check.ok) return deny(ports, ctx, 'session_send', check.code, conversationId);
+      if (queuedStartOf((await ports.rows())[conversationId]))
+        return deny(ports, ctx, 'session_send', 'session-queued', conversationId);
       const source = check.source;
       // 权限过了再读文件：图片全部校验通过才投递，任何一张不合法都在发出之前拒绝
       const forwarded = await loadAttachments(attachments);
@@ -1923,6 +1983,16 @@ export function createSecretaryDispatchHandlers(
       if (cancelled) return cancelled;
       const check = await checkOperate(ports, conversationId, await profileOf(ports));
       if (!check.ok) return deny(ports, ctx, 'session_stop', check.code, conversationId);
+      // 排队会话还没开始：停止就是取消，会话直接删掉
+      if (queuedStartOf((await ports.rows())[conversationId])) {
+        const cancelled = (await ports.cancelQueued?.(
+          conversationId,
+          ctx.secretaryConversationId
+        )) ?? { ok: false as const, error: 'queued sessions unsupported' };
+        if (!cancelled.ok)
+          return auditFailure(ports, ctx, 'session_stop', cancelled.error, conversationId);
+        return { ok: true, result: { status: 'cancelled', conversationId, deleted: true } };
+      }
       // 范围接管的会话：停下也算真正用上了它，从这里开始跟踪
       if (check.source === 'scope')
         await trackScopeSession(ports, conversationId, check.projectId, ctx);
@@ -2611,19 +2681,21 @@ export async function resolveProposal(
     ports,
     validated.draft,
     proposal.secretaryConversationId,
-    profile
+    profile,
+    undefined,
+    validated.overLimit
   );
   // 关注项从卡片改挂到真正建出来的会话（或等待中的派发）上
-  if (started.kind === 'created') ports.refollow?.(proposalId, started.conversationId);
-  else if (started.kind === 'pending') ports.refollow?.(proposalId, started.pendingId);
+  if (started.kind === 'pending') ports.refollow?.(proposalId, started.pendingId);
+  else if (started.kind !== 'failed') ports.refollow?.(proposalId, started.conversationId);
   return finishProposal(
     ports,
     proposalId,
     started.kind === 'failed'
       ? { ok: false, error: started.error }
-      : started.kind === 'created'
-        ? { ok: true, conversationId: started.conversationId }
-        : { ok: true }
+      : started.kind === 'pending'
+        ? { ok: true }
+        : { ok: true, conversationId: started.conversationId }
   );
 }
 

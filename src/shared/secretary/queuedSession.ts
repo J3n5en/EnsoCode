@@ -58,6 +58,17 @@ export function queueOwnerOf(row: unknown): string {
   return typeof origin?.secretaryId === 'string' ? origin.secretaryId : '';
 }
 
+/** 还在等空位的会话数（失败的、正在启动的不算，后者已计入在跑）：owner 缺省时数全部秘书 */
+export function queuedCount(rows: Readonly<Record<string, unknown>>, owner?: string): number {
+  let count = 0;
+  for (const row of Object.values(rows)) {
+    const queued = queuedStartOf(row);
+    if (!queued || queued.failed || queued.startingAt !== undefined) continue;
+    if (owner === undefined || queueOwnerOf(row) === owner) count += 1;
+  }
+  return count;
+}
+
 /**
  * 每个秘书各自的排队顺序（从 1 开始）。启动失败的不占位；
  * Main 的启动顺序、侧栏「第 N 位」、看板与手机端都读这一处。
@@ -75,7 +86,7 @@ export function queuePositions(rows: Readonly<Record<string, unknown>>): Map<str
   const positions = new Map<string, number>();
   for (const group of groups.values()) {
     group.sort((left, right) => left.at - right.at || left.id.localeCompare(right.id));
-    group.forEach((entry, index) => positions.set(entry.id, index + 1));
+    for (const [index, entry] of group.entries()) positions.set(entry.id, index + 1);
   }
   return positions;
 }

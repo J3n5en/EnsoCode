@@ -12,6 +12,7 @@ import type {
   PendingDispatch,
   PendingProblem,
   ProposalStatus,
+  QueuedUpdateStatus,
   RelayAskStatus,
   SecretaryActivity,
   SecretaryDispatchFile,
@@ -29,6 +30,7 @@ import type {
 import {
   CLEANUP_ITEM_KINDS,
   PATROL_REASONS as PATROL_REASON_KINDS,
+  QUEUED_UPDATE_STATUSES,
   RELAY_ASK_STATUSES,
   REPLACEABLE_GOAL_STATUSES,
 } from '../types/secretary';
@@ -676,6 +678,18 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
     const conversationId = text(value.conversationId);
     if (!conversationId) return undefined;
     return { ...base, ...scope, kind: 'leftover', conversationId };
+  }
+  if (value.kind === 'queued') {
+    const conversationId = text(value.conversationId);
+    if (!conversationId) return undefined;
+    if (!QUEUED_UPDATE_STATUSES.includes(value.status as QueuedUpdateStatus)) return undefined;
+    return {
+      ...base,
+      ...scope,
+      kind: 'queued',
+      conversationId,
+      status: value.status as QueuedUpdateStatus,
+    };
   }
   if (value.kind === 'proposal') {
     const proposalId = text(value.proposalId);
