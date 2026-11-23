@@ -191,4 +191,15 @@ describe('输入框引用块折叠 / 展开', () => {
     await act(async () => editor?.insertQuote(buildQuoteSegment(tenLines)!));
     expect(quoteChip()?.querySelector('[data-quote-truncated]')).toBeNull();
   });
+
+  // 真机：从 260 行代码块里全选引用，卡片曾标「原文 262 行」「引用 · 201 行」（把包裹的围栏行算进去）
+  it('代码块引用的行数按代码行计，不算包裹的围栏行', async () => {
+    const code = Array.from({ length: 260 }, (_, i) => `c${i + 1}`).join('\n');
+    await act(async () => editor?.insertQuote(buildQuoteSegment(`\`\`\`js\n${code}\n\`\`\``)!));
+    const chip = quoteChip();
+    expect(chip?.querySelector('[data-quote-truncated]')?.textContent).toContain('260');
+    expect(chip?.textContent).toContain('Quote · 200 lines');
+    expect(payloadText()).toContain('c200');
+    expect(payloadText()).not.toContain('c201');
+  });
 });

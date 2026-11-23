@@ -13,7 +13,7 @@ import {
   type MentionSegment,
   type QuoteSegment,
 } from './mentionComposer';
-import { quotePreview } from './quoteSelection';
+import { quoteLineCount, quotePreview } from './quoteSelection';
 import { extractSkillQuery } from './skillCompletion';
 
 /**
@@ -140,7 +140,7 @@ function buildQuoteChip(segment: QuoteSegment, labels: QuoteLabels): HTMLSpanEle
   icon.innerHTML = QUOTE_SVG;
   const title = document.createElement('span');
   title.className = 'min-w-0 flex-1 truncate';
-  title.textContent = labels.title(segment.text.split('\n').length);
+  title.textContent = labels.title(quoteLineCount(segment.text));
   head.append(icon, title);
   if (segment.originalLines) {
     const badge = document.createElement('span');

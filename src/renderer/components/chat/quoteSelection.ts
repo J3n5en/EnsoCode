@@ -7,18 +7,29 @@ export const QUOTE_MAX_CHARS = 20_000;
 const PREVIEW_LINES = 3;
 
 const FENCE_LINE = /^```/gm;
+const FENCE = /^```/;
+
+/** 引用的行数：代码块按代码行计，包裹的围栏行不算 */
+export function quoteLineCount(text: string): number {
+  return text.split('\n').filter((line) => !FENCE.test(line)).length;
+}
 
 export function buildQuoteSegment(raw: string): QuoteSegment | null {
   const text = raw.replace(/\r\n?/g, '\n').replace(/^\n+|\s+$/g, '');
   if (!text.trim()) return null;
   const lines = text.split('\n');
-  if (lines.length <= QUOTE_MAX_LINES && text.length <= QUOTE_MAX_CHARS) {
+  const total = quoteLineCount(text);
+  if (total <= QUOTE_MAX_LINES && text.length <= QUOTE_MAX_CHARS) {
     return { type: 'quote', text };
   }
-  let kept = lines.slice(0, QUOTE_MAX_LINES).join('\n').slice(0, QUOTE_MAX_CHARS);
+  let end = 0;
+  for (let count = 0; end < lines.length; end++) {
+    if (!FENCE.test(lines[end]) && ++count > QUOTE_MAX_LINES) break;
+  }
+  let kept = lines.slice(0, end).join('\n').slice(0, QUOTE_MAX_CHARS);
   // 截断切开了代码围栏就补上收尾，不让后面的正文被吞进代码块
   if ((kept.match(FENCE_LINE)?.length ?? 0) % 2 === 1) kept += '\n```';
-  return { type: 'quote', text: kept, originalLines: lines.length };
+  return { type: 'quote', text: kept, originalLines: total };
 }
 
 export function quotePreview(text: string): { preview: string; clipped: boolean } {
