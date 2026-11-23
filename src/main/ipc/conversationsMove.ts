@@ -17,7 +17,18 @@ import type {
   ProjectAuthorityProjection,
   RemoveProjectAuthorityRequest,
 } from '@shared/types/agent';
-import { type CopyProjectSessionsPorts, copyProjectSessions } from './conversationsCopy';
+import {
+  type CopyProjectSessionsPorts,
+  copyProjectSessions,
+  recoverCopy,
+} from './conversationsCopy';
+import {
+  beginImportJournal,
+  endImportJournal,
+  type ImportJournal,
+  pendingImportJournals,
+  serializeImport,
+} from './conversationsImportJournal';
 
 export { conversationIdsToMove, parseMoveConversationInput };
 
@@ -147,29 +158,60 @@ export async function handleImportProjectSessions(
     : result;
 }
 
-/** 移动：权威归属一次提交、会话行一次补丁，运行中等会话级拒绝跳过并回报 */
-async function moveProjectSessions(
+/**
+ * 移动：权威归属一次提交、会话行一次补丁，运行中等会话级拒绝跳过并回报。
+ * 归属、worktree 登记、会话行分属三份文件，先落事务记录；中途死掉由启动恢复补完解绑与会话行。
+ */
+function moveProjectSessions(
   { sourceProjectId, targetProjectId }: ProjectPairInput,
   ports: ImportProjectSessionsPorts
 ): Promise<ImportProjectSessionsResult> {
-  const result = ports.moveConversations(
-    ports.rootConversationIds(sourceProjectId).map((conversationId) => ({
+  return serializeImport(async () => {
+    const requests = ports.rootConversationIds(sourceProjectId).map((conversationId) => ({
       conversationId,
       running: ports.isRunning(conversationId),
       worktreeBusy: ports.worktreeBusy(conversationId),
-    })),
-    targetProjectId
-  );
-  if (!result.accepted) return { ok: false, error: result.error };
-  const { moved, skipped } = result.value;
-  const done: ImportProjectSessionsResult = {
-    ok: true,
-    mode: 'move',
-    imported: moved,
-    skipped,
-    sourceEmpty: false,
-  };
-  if (moved.length === 0) return done;
+    }));
+    let journal: string | undefined;
+    if (requests.length > 0) {
+      try {
+        journal = await beginImportJournal(ports.sessionDir, ports.randomUuid(), {
+          v: 1,
+          kind: 'move',
+          targetProjectId,
+          conversationIds: requests.map((request) => request.conversationId),
+        });
+      } catch {
+        return { ok: false, error: 'move-failed' };
+      }
+    }
+    const result = ports.moveConversations(requests, targetProjectId);
+    const moved = result.accepted ? result.value.moved : [];
+    if (moved.length > 0) finishMove(moved, targetProjectId, ports);
+    if (journal) await endImportJournal(journal, ports.durableFiles);
+    if (!result.accepted) return { ok: false, error: result.error };
+    await Promise.all(
+      moved.map((conversationId) => ports.releaseSessions(conversationId).catch(() => false))
+    );
+    return {
+      ok: true,
+      mode: 'move',
+      imported: moved,
+      skipped: result.value.skipped,
+      sourceEmpty: false,
+    };
+  });
+}
+
+/** 归属已提交之后的收尾，可重复执行：解绑 worktree，会话行改挂目标项目并清掉根会话上的 worktree */
+function finishMove(
+  moved: readonly string[],
+  targetProjectId: string,
+  ports: Pick<
+    ImportProjectSessionsPorts,
+    'unbindWorktree' | 'patchProjectIds' | 'readConversations'
+  >
+) {
   for (const conversationId of moved) {
     try {
       ports.unbindWorktree(conversationId);
@@ -180,10 +222,42 @@ async function moveProjectSessions(
     targetProjectId,
     moved
   );
-  await Promise.all(
-    moved.map((conversationId) => ports.releaseSessions(conversationId).catch(() => false))
+}
+
+function recoverMove(
+  journal: Extract<ImportJournal, { kind: 'move' }>,
+  ports: ImportProjectSessionsPorts
+) {
+  const moved = journal.conversationIds.filter(
+    (id) => ports.conversation(id)?.projectId === journal.targetProjectId
   );
-  return done;
+  if (moved.length > 0) finishMove(moved, journal.targetProjectId, ports);
+}
+
+/**
+ * 启动时在后台收尾上次中途死掉的整项目导入。只处理事务记录列出的会话与副本，
+ * 不按「没被引用」推断删除任何文件；读不懂的记录原样保留。失败只记日志。
+ */
+export function recoverProjectImports(ports: ImportProjectSessionsPorts): Promise<void> {
+  return serializeImport(async () => {
+    try {
+      for (const { file, journal } of await pendingImportJournals(ports.sessionDir)) {
+        if (!journal) {
+          console.warn('[project-import] 无法识别的事务记录，保留不动', file);
+          continue;
+        }
+        try {
+          if (journal.kind === 'copy') await recoverCopy(journal, ports);
+          else recoverMove(journal, ports);
+          await endImportJournal(file, ports.durableFiles);
+        } catch (error) {
+          console.warn('[project-import] 恢复失败，下次启动再试', file, error);
+        }
+      }
+    } catch (error) {
+      console.warn('[project-import] 恢复失败', error);
+    }
+  });
 }
 
 /** 弹窗用：源目录还在不在（决定默认移动还是复制），以及目标里已有几份副本 */

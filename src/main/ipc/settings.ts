@@ -1108,6 +1108,11 @@ export function registerSettingsHandlers(): void {
     const persistedRows = readPersistedConversations;
     return {
       sessionDir: join(app.getPath('userData'), 'agent', 'sessions'),
+      durableFiles: [
+        join(app.getPath('userData'), 'agent', 'source-registry.json'),
+        join(app.getPath('userData'), 'worktrees.json'),
+        getSettingsPath(),
+      ],
       project: (projectId) => registry.project(projectId),
       projectKind: (projectId) => registry.project(projectId)?.kind,
       conversation: (conversationId) => registry.conversation(conversationId),
@@ -1133,7 +1138,7 @@ export function registerSettingsHandlers(): void {
             const at = state.order.indexOf(before);
             state.order.splice(at < 0 ? 0 : at, 0, id);
           }
-        }),
+        }) && flushSettings(),
       rootConversationIds: (projectId) =>
         projectRootConversationIds(registry.rendererProjection().conversations, projectId),
       moveConversation: (conversationId, targetProjectId, options) =>
@@ -1168,6 +1173,7 @@ export function registerSettingsHandlers(): void {
             }
           }
         });
+        flushSettings();
       },
       unbindWorktree: unbindSessionWorktree,
       releaseSessions: async (conversationId) => {
@@ -1180,6 +1186,16 @@ export function registerSettingsHandlers(): void {
       removeScratchWorkspace,
     };
   };
+
+  // 上次中途死掉的整项目导入：启动后在后台收尾，不挡冷启动
+  setTimeout(() => {
+    void (async () => {
+      const ports = await conversationsMovePorts();
+      if (!ports) return;
+      const { recoverProjectImports } = await import('./conversationsMove');
+      await recoverProjectImports(ports);
+    })().catch((error) => console.warn('[project-import] 启动恢复失败', error));
+  }, 3_000).unref();
 
   ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {
     const { handleConversationsMove } = await import('./conversationsMove');
