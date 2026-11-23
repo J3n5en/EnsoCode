@@ -583,9 +583,9 @@ describe('子代理起的后台任务归属子代理', () => {
       await expect(tool('task_output').execute(`o-${taskId}`, { taskId })).rejects.toThrow(
         /unknown task/
       );
-      expect(JSON.stringify(await tool('task_stop').execute(`s-${taskId}`, { taskId }))).not.toContain(
-        'Stopped'
-      );
+      expect(
+        JSON.stringify(await tool('task_stop').execute(`s-${taskId}`, { taskId }))
+      ).not.toContain('Stopped');
     }
     const settled = await tool('task_settle').execute('settle', {
       tasks: foreign.map((taskId, index) => ({
