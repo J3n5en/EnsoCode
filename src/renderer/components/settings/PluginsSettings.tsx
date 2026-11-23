@@ -409,6 +409,54 @@ function TrustedUiLine() {
   );
 }
 
+function InstallPreviewTitle({ preview }: { preview: ExtensionPluginInstallPreview }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {preview.name} {preview.version}
+      {preview.existingVersion && (
+        <span className="ml-2 text-base text-muted-foreground">
+          {t('updating from {{version}}', { version: preview.existingVersion })}
+        </span>
+      )}
+    </>
+  );
+}
+
+function InstallPreviewDetails({ preview }: { preview: ExtensionPluginInstallPreview }) {
+  const { t } = useI18n();
+  return (
+    <>
+      <PluginCapabilityBlock
+        permissions={preview.permissions}
+        env={preview.env}
+        interop={preview.interop}
+        resident={preview.resident}
+        styles={preview.styles}
+        trustedUi={preview.hasRenderer}
+        events={preview.events}
+        schedules={preview.schedules}
+      />
+      {preview.mcpServers.map((server) => (
+        <p key={server.name} className="font-mono text-xs">
+          {server.command} {server.args.join(' ')}
+        </p>
+      ))}
+      {preview.mcpTools.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          {t('Host MCP tools it may call')}：
+          <span className="font-mono">{preview.mcpTools.join(', ')}</span>
+        </p>
+      )}
+      {preview.warnings.map((warning) => (
+        <p key={warning} className="text-muted-foreground text-xs">
+          {warning}
+        </p>
+      ))}
+    </>
+  );
+}
+
 function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const [items, setItems] = React.useState<PluginArtifactInfo[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -469,6 +517,10 @@ export function EnsoPluginsSettings({
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const themeErrors = usePluginThemesStore((state) => state.errors);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
+  /** 当前暂存来自市场弹窗：确认卡片就地显示在市场里，市场不关 */
+  const [previewInMarket, setPreviewInMarket] = React.useState(false);
+  /** 每关一次市场自增，用来识别关掉后才回来的市场暂存结果 */
+  const marketSession = React.useRef(0);
   const [panel, setPanel] = React.useState<{
     kind: 'config' | 'logs' | 'artifacts';
     pluginId: string;
@@ -573,15 +625,21 @@ export function EnsoPluginsSettings({
     };
   }, [requestedInstallUrl, onRequestedInstallUrlConsumed]);
 
-  const restage = async (id: string, fromMarket = false) => {
+  const restage = async (id: string, fromMarket = false, inMarket = false) => {
     setError(null);
     if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
     setPreview(null);
+    setPreviewInMarket(inMarket);
     setDownloading(true);
+    const session = marketSession.current;
     const api = window.electronAPI.extensionPlugins;
     const result = await (fromMarket ? api.marketStage(id) : api.restage(id)).finally(() => {
       setDownloading(false);
     });
+    if (inMarket && session !== marketSession.current) {
+      if (result.ok) void api.discard(result.preview.token);
+      return;
+    }
     if (!result.ok) setError(result.error);
     else setPreview(result.preview);
   };
@@ -620,14 +678,25 @@ export function EnsoPluginsSettings({
         title: t('{{name}} installed', { name: preview.name }),
         description: enabled.ok ? undefined : enabled.error,
       });
+      void refresh();
     }
     setPreview(null);
+    setPreviewInMarket(false);
   };
 
   const discard = () => {
     if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
     setPreview(null);
+    setPreviewInMarket(false);
   };
+
+  const closeMarket = () => {
+    if (busy) return;
+    marketSession.current += 1;
+    if (previewInMarket) discard();
+    setMarketOpen(false);
+  };
+  const marketPreview = previewInMarket ? preview : null;
 
   return (
     <div className="space-y-5" data-settings-row="plugins.enso">
@@ -727,22 +796,44 @@ export function EnsoPluginsSettings({
         </div>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
-      <Dialog open={marketOpen} onOpenChange={setMarketOpen}>
+      <Dialog
+        open={marketOpen}
+        onOpenChange={(open) => (open ? setMarketOpen(true) : closeMarket())}
+      >
         <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>{t('Marketplace')}</DialogTitle>
           </DialogHeader>
-          <DialogPanel>
-            <PluginMarket
-              key={marketQuery}
-              initialQuery={marketQuery}
-              disabled={busy || downloading}
-              installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
-              onInstall={(id) => {
-                setMarketOpen(false);
-                void restage(id, true);
-              }}
-            />
+          <DialogPanel className="space-y-3">
+            {error && <p className="text-destructive text-sm">{error}</p>}
+            {marketPreview && (
+              <div className="flex h-[min(72vh,720px)] min-h-0 flex-col gap-3">
+                <p className="font-medium text-base">
+                  <InstallPreviewTitle preview={marketPreview} />
+                </p>
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                  <InstallPreviewDetails preview={marketPreview} />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
+                    {t('Cancel')}
+                  </Button>
+                  <Button size="sm" disabled={busy} onClick={() => void commit()}>
+                    {busy ? <Spinner /> : t('Install')}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {/* 确认期间只隐藏不卸载，回到列表时保留搜索词、分类与详情位置 */}
+            <div hidden={marketPreview !== null}>
+              <PluginMarket
+                key={marketQuery}
+                initialQuery={marketQuery}
+                disabled={busy || downloading}
+                installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
+                onInstall={(id) => void restage(id, true, true)}
+              />
+            </div>
           </DialogPanel>
         </DialogContent>
       </Dialog>
@@ -759,47 +850,20 @@ export function EnsoPluginsSettings({
           }
         />
       )}
-      <Dialog open={preview !== null} onOpenChange={(open) => !open && !busy && discard()}>
+      <Dialog
+        open={preview !== null && !previewInMarket}
+        onOpenChange={(open) => !open && !busy && discard()}
+      >
         <DialogContent>
-          {preview && (
+          {preview && !previewInMarket && (
             <>
               <DialogHeader>
                 <DialogTitle>
-                  {preview.name} {preview.version}
-                  {preview.existingVersion && (
-                    <span className="ml-2 text-base text-muted-foreground">
-                      {t('updating from {{version}}', { version: preview.existingVersion })}
-                    </span>
-                  )}
+                  <InstallPreviewTitle preview={preview} />
                 </DialogTitle>
               </DialogHeader>
               <DialogPanel className="space-y-3">
-                <PluginCapabilityBlock
-                  permissions={preview.permissions}
-                  env={preview.env}
-                  interop={preview.interop}
-                  resident={preview.resident}
-                  styles={preview.styles}
-                  trustedUi={preview.hasRenderer}
-                  events={preview.events}
-                  schedules={preview.schedules}
-                />
-                {preview.mcpServers.map((server) => (
-                  <p key={server.name} className="font-mono text-xs">
-                    {server.command} {server.args.join(' ')}
-                  </p>
-                ))}
-                {preview.mcpTools.length > 0 && (
-                  <p className="text-muted-foreground text-xs">
-                    {t('Host MCP tools it may call')}：
-                    <span className="font-mono">{preview.mcpTools.join(', ')}</span>
-                  </p>
-                )}
-                {preview.warnings.map((warning) => (
-                  <p key={warning} className="text-muted-foreground text-xs">
-                    {warning}
-                  </p>
-                ))}
+                <InstallPreviewDetails preview={preview} />
               </DialogPanel>
               <DialogFooter>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
