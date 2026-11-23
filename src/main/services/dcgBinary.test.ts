@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DCG_VERSION, dcgAsset, dcgStatus, installDcg, uninstallDcg } from './dcgBinary';
+import {
+  checkDcgUpdate,
+  compareDcgVersions,
+  DCG_LATEST_RELEASE_API,
+  DCG_VERSION,
+  dcgAsset,
+  dcgStatus,
+  installDcg,
+  uninstallDcg,
+} from './dcgBinary';
 
 const roots: string[] = [];
 const tempRoot = () => {
@@ -81,5 +90,76 @@ describe('installDcg', () => {
     await expect(installDcg({ root: tempRoot(), platform: 'linux', arch: 'ia32' })).rejects.toThrow(
       /unsupported/i
     );
+  });
+});
+
+describe('compareDcgVersions', () => {
+  it('按数字比较 major.minor.patch，容忍 v 前缀，非法版本返回 null', () => {
+    expect(compareDcgVersions('v0.16.0', '0.16.0')).toBe(0);
+    expect(compareDcgVersions('0.16.1', '0.16.0')).toBeGreaterThan(0);
+    expect(compareDcgVersions('0.9.0', '0.16.0')).toBeLessThan(0);
+    expect(compareDcgVersions('1.0.0', '0.99.99')).toBeGreaterThan(0);
+    expect(compareDcgVersions('latest', '0.16.0')).toBeNull();
+    expect(compareDcgVersions('0.17.0-rc.1', '0.16.0')).toBeNull();
+  });
+});
+
+describe('checkDcgUpdate', () => {
+  const release = (tag: unknown) =>
+    vi.fn(async (_url: string) => new Response(JSON.stringify({ tag_name: tag })));
+
+  it('请求 GitHub latest release，与内置版本比较', async () => {
+    const fetch = release('v0.17.2');
+    expect(await checkDcgUpdate({ current: '0.16.0', fetch })).toEqual({
+      status: 'available',
+      current: '0.16.0',
+      latest: '0.17.2',
+    });
+    expect(fetch).toHaveBeenCalledWith(DCG_LATEST_RELEASE_API, expect.anything());
+    expect(DCG_LATEST_RELEASE_API).toBe(
+      'https://api.github.com/repos/Dicklesworthstone/destructive_command_guard/releases/latest'
+    );
+  });
+
+  it('相等或上游更旧都算已是最新', async () => {
+    for (const tag of ['v0.16.0', '0.15.3']) {
+      expect(await checkDcgUpdate({ current: '0.16.0', fetch: release(tag) })).toMatchObject({
+        status: 'latest',
+      });
+    }
+  });
+
+  it('限流单独识别：403 + remaining=0 或 429', async () => {
+    const limited = async () =>
+      new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+    expect(await checkDcgUpdate({ current: '0.16.0', fetch: limited })).toEqual({
+      status: 'failed',
+      current: '0.16.0',
+      reason: 'rate-limited',
+    });
+    const tooMany = async () => new Response('{}', { status: 429 });
+    expect(await checkDcgUpdate({ current: '0.16.0', fetch: tooMany })).toMatchObject({
+      reason: 'rate-limited',
+    });
+  });
+
+  it('断网、其它 HTTP 错误、坏响应都降级为失败结果而不是抛错', async () => {
+    const offline = async () => {
+      throw new TypeError('fetch failed');
+    };
+    expect(await checkDcgUpdate({ current: '0.16.0', fetch: offline })).toMatchObject({
+      status: 'failed',
+      reason: 'network',
+    });
+    const forbidden = async () => new Response('{}', { status: 403 });
+    expect(await checkDcgUpdate({ current: '0.16.0', fetch: forbidden })).toMatchObject({
+      reason: 'network',
+    });
+    for (const fetch of [release(42), release('nightly'), async () => new Response('not json')]) {
+      expect(await checkDcgUpdate({ current: '0.16.0', fetch })).toMatchObject({
+        status: 'failed',
+        reason: 'invalid',
+      });
+    }
   });
 });

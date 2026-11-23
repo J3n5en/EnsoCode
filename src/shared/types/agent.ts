@@ -27,6 +27,7 @@ import {
   parseCapabilityResult,
 } from '../capabilities/types';
 import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
+import { isDcgRuleId } from '../dcgRuleMemory';
 import type { DefaultModelRef } from '../defaultModel';
 import type { ExitKind } from '../exitInterrupt';
 import { parsePluginArtifactInfo } from '../extensionPlugins/artifacts';
@@ -114,6 +115,7 @@ import {
   type ThinkingLevel,
   TURN_REPORT_MAX_CHARS,
 } from './agentConstants';
+import { type DcgGuardHit, type DcgWarning, isDcgGuardHit, isDcgWarning } from './dcg';
 import { type EditMode, isEditMode } from './editMode';
 import {
   PROJECTED_APPLY_PATCH_PATH_COUNT_LIMIT,
@@ -323,8 +325,8 @@ export interface ApprovalRequestInfo {
   expiresAt?: number;
   /** 托管判定无效（超时 / 出错 / 缺字段）退回人工的原因 */
   reviewFallback?: ApprovalReviewFallback;
-  /** dcg 命令守卫命中的规则与原因 */
-  guard?: { ruleId: string; reason: string };
+  /** dcg 命令守卫命中的规则与原因；decision=warn 时只是提示 */
+  guard?: DcgGuardHit;
 }
 
 /** 提问是谁收的尾：用户在原会话里直接答、秘书代答、超时兜底 */
@@ -415,6 +417,7 @@ export interface ShellFailure {
 export interface ShellDetails {
   backgroundTaskId?: string;
   shellFailure?: ShellFailure;
+  dcgWarning?: DcgWarning;
 }
 
 export function parseShellFailure(value: unknown): ShellFailure | null {
@@ -1395,6 +1398,8 @@ export type AgentCommand =
       rtkEnabled?: boolean;
       /** dcg 命令守卫二进制；Main 仅在启用且已安装时下发 */
       dcgPath?: string;
+      /** 用户按规则记忆豁免的 dcg rule_id（仅当前 dcg 版本有效） */
+      dcgExemptRules?: string[];
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
       /** 旁路会话：首条 prompt 前缀注入，消费一次 */
@@ -1873,6 +1878,8 @@ export interface ProjectedMessage {
   backgroundTaskId?: string;
   /** bash / powershell 结果的结构化失败分类 */
   shellFailure?: ShellFailure;
+  /** dcg warn 档命中：不拦，只提示 */
+  dcgWarning?: DcgWarning;
   /** 插件工具写出的产出文件 */
   pluginArtifacts?: PluginArtifactInfo[];
   /** ImageGen 已落盘的本地图片，含 codemode 嵌套生成的产物。 */
@@ -2209,6 +2216,8 @@ export type AgentWorkerEvent =
       awaitingTasks?: true;
       /** 根会话还挂着自定提醒：在等自己定的时间点，goal 先不续跑 */
       awaitingReminder?: true;
+      /** 本轮实际使用的 provider id，供上游健康闸门判断恢复 */
+      provider?: string;
     }
   | {
       type: 'turn-failed';
@@ -2224,6 +2233,8 @@ export type AgentWorkerEvent =
       aborted?: true;
       /** 同 turn-completed：失败也结束被持有的 Run */
       continues?: string;
+      /** 本轮实际使用的 provider id，供上游健康闸门按 provider 聚合退避 */
+      provider?: string;
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -2952,6 +2963,7 @@ function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
     return false;
   }
   if (value.shellFailure !== undefined && !parseShellFailure(value.shellFailure)) return false;
+  if (value.dcgWarning !== undefined && !isDcgWarning(value.dcgWarning)) return false;
   if (value.pluginSource !== undefined && !parsePluginMessageSource(value.pluginSource))
     return false;
   if (
@@ -4038,6 +4050,7 @@ const agentCommandParsers = {
         'windowsLocalShell',
         'rtkEnabled',
         'dcgPath',
+        'dcgExemptRules',
         'remote',
         'rolePrompt',
         'systemPrompt',
@@ -4082,6 +4095,12 @@ const agentCommandParsers = {
       (value.pluginEvents !== undefined && !isPluginEventPlan(value.pluginEvents)) ||
       (value.rtkEnabled !== undefined && typeof value.rtkEnabled !== 'boolean') ||
       (value.dcgPath !== undefined && !isNonEmptyString(value.dcgPath)) ||
+      (value.dcgExemptRules !== undefined &&
+        !(
+          Array.isArray(value.dcgExemptRules) &&
+          value.dcgExemptRules.length <= 500 &&
+          value.dcgExemptRules.every(isDcgRuleId)
+        )) ||
       (value.planMode !== undefined && typeof value.planMode !== 'boolean') ||
       (value.windowsLocalShell !== undefined &&
         !(WINDOWS_LOCAL_SHELLS as readonly string[]).includes(value.windowsLocalShell as string)) ||
@@ -5309,7 +5328,8 @@ const agentWorkerEventParsers = {
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError))) &&
         (value.continues === undefined || isNonEmptyString(value.continues)) &&
         (value.awaitingTasks === undefined || value.awaitingTasks === true) &&
-        (value.awaitingReminder === undefined || value.awaitingReminder === true)
+        (value.awaitingReminder === undefined || value.awaitingReminder === true) &&
+        (value.provider === undefined || isNonEmptyString(value.provider))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }
@@ -5321,7 +5341,8 @@ const agentWorkerEventParsers = {
         isNonEmptyString(value.error) &&
         (value.retryExhausted === undefined || value.retryExhausted === true) &&
         (value.aborted === undefined || value.aborted === true) &&
-        (value.continues === undefined || isNonEmptyString(value.continues))
+        (value.continues === undefined || isNonEmptyString(value.continues)) &&
+        (value.provider === undefined || isNonEmptyString(value.provider))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }
@@ -5431,11 +5452,7 @@ const agentWorkerEventParsers = {
         isOptionalTimestamp(value.request.expiresAt) &&
         (value.request.reviewFallback === undefined ||
           APPROVAL_REVIEW_FALLBACKS.includes(value.request.reviewFallback as never)) &&
-        (value.request.guard === undefined ||
-          (isRecord(value.request.guard) &&
-            hasOnlyKeys(value.request.guard, ['ruleId', 'reason']) &&
-            isNonEmptyString(value.request.guard.ruleId) &&
-            isNonEmptyString(value.request.guard.reason)))
+        (value.request.guard === undefined || isDcgGuardHit(value.request.guard))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }

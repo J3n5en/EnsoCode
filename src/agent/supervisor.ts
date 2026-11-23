@@ -131,6 +131,7 @@ import { type EditMode, resolveEditMode } from '@shared/types/editMode';
 import type { ModelEntry } from '@shared/types/llm';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import type { SecretaryToolDescriptor } from '@shared/types/secretary';
+import { classifyUpstreamError } from '@shared/upstreamRecovery';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
@@ -221,7 +222,7 @@ import {
   previewModelDirectoryPush,
   registerCustomProviderModels,
 } from './customProviderRegistry';
-import { createDcgGuard, withTempRootGuard } from './dcg';
+import { createDcgGuard, withDcgExemptions, withTempRootGuard } from './dcg';
 import {
   appendInterruptedTasks,
   DETACHED_TASKS_FILE,
@@ -2065,7 +2066,8 @@ export class SessionSupervisor {
           command.instanceId,
           command.workflowPresetFiles,
           command.secretaryTools,
-          command.askRelay
+          command.askRelay,
+          command.dcgExemptRules
         );
         return;
       case 'spawn-child':
@@ -2759,7 +2761,8 @@ export class SessionSupervisor {
     instanceId?: string,
     workflowPresetFiles: readonly string[] = [],
     secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = [],
-    askRelay?: { name: string }
+    askRelay?: { name: string },
+    dcgExemptRules: readonly string[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2926,7 +2929,9 @@ export class SessionSupervisor {
         protectedFloor: botMode || protectedActions,
         autoReject: autoRejectApprovals,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
-        commandGuard: withTempRootGuard(dcgPath ? createDcgGuard(dcgPath) : undefined),
+        commandGuard: withTempRootGuard(
+          dcgPath ? withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) : undefined
+        ),
       }
     );
     const checkpoints = new CheckpointManager(
@@ -5220,10 +5225,11 @@ export class SessionSupervisor {
           // pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx）：标给 Main 做外层自动重试
           const exhausted =
             managed.turnRetried === true &&
-            isRetryableAssistantError({
+            (isRetryableAssistantError({
               stopReason: 'error',
               errorMessage: lastAssistant.errorMessage,
-            } as AssistantMessage);
+            } as AssistantMessage) ||
+              classifyUpstreamError({ error: lastAssistant.errorMessage }).kind === 'transient');
           this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.', exhausted);
           return;
         }
@@ -5298,6 +5304,7 @@ export class SessionSupervisor {
         ...(continues ? { continues } : {}),
         ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
         ...(awaitingReminder ? { awaitingReminder: true as const } : {}),
+        ...(managed.session.model?.provider ? { provider: managed.session.model.provider } : {}),
       });
     if (awaitingTasks) {
       // 常驻任务没有完成事件：第一次因这批任务持有时唤醒一次
@@ -5957,6 +5964,7 @@ export class SessionSupervisor {
         ...(retryExhausted ? { retryExhausted: true } : {}),
         ...(aborted ? { aborted: true as const } : {}),
         ...(continues ? { continues } : {}),
+        ...(managed.session.model?.provider ? { provider: managed.session.model.provider } : {}),
       });
     this.flushPendingReminders(managed);
     this.fireDueReminders(managed);

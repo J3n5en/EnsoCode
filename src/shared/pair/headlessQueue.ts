@@ -1,4 +1,5 @@
 import type { PairQueueAction } from '@shared/types/pair';
+import type { GoalUpstreamRetry } from '@shared/upstreamRecovery';
 
 export const GOAL_AUTO_TURN_LIMIT = 25;
 
@@ -22,6 +23,8 @@ export interface HeadlessGoal {
   noProgressRuns?: number;
   /** 上一轮最终 assistant 文本的归一化指纹 */
   lastOutput?: string;
+  /** 上游瞬态/配额故障自动退避等待元数据；仅 status === 'waiting' 时有值 */
+  retry?: GoalUpstreamRetry;
 }
 
 export interface HeadlessSessionRuntime {
@@ -151,7 +154,7 @@ export function applyHeadlessGoalSignal(
 ): HeadlessSessionRuntime {
   if (!runtime.goal) return runtime;
   const status = kind === 'complete' ? 'completed' : kind === 'blocked' ? 'blocked' : 'waiting';
-  return { ...runtime, goal: { ...runtime.goal, status, note } };
+  return { ...runtime, goal: { ...runtime.goal, status, note, retry: undefined } };
 }
 
 /** 轮次收束：先清中断标记，再投队列，最后续跑 goal。 */
@@ -233,11 +236,19 @@ export function applyHeadlessQueueAction(
     }
     case 'goal-pause':
       return runtime.goal
-        ? { runtime: { ...runtime, goal: { ...runtime.goal, status: 'paused' } } }
+        ? {
+            runtime: {
+              ...runtime,
+              goal: { ...runtime.goal, status: 'paused', retry: undefined },
+            },
+          }
         : { runtime };
     case 'goal-resume': {
       if (!runtime.goal) return { runtime };
-      return continueGoal({ ...runtime, goal: { ...runtime.goal, status: 'active' } });
+      return continueGoal({
+        ...runtime,
+        goal: { ...runtime.goal, status: 'active', retry: undefined },
+      });
     }
     case 'goal-clear':
       return { runtime: { ...runtime, goal: undefined } };

@@ -62,6 +62,11 @@ import {
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
 import type { SecretaryProfile, SecretaryToolDescriptor } from '@shared/types/secretary';
+import {
+  classifyUpstreamError,
+  type GoalUpstreamRetry,
+  type ProviderHealthSnapshot,
+} from '@shared/upstreamRecovery';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { isSecretFilePath, isUnderSecretDirectory } from '../../agent/protectedActions';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
@@ -244,6 +249,10 @@ import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { SubagentProgressPush } from '../services/subagentProgressPush';
 import { titleModelCandidates } from '../services/titleSummary';
+import {
+  createUpstreamRecoveryService,
+  type UpstreamRecoveryService,
+} from '../services/upstreamRecovery';
 import { ingestSessionJsonl } from '../services/usage/ledgerStore';
 import {
   botModeEnabled,
@@ -303,6 +312,10 @@ const isValidMessageInput = (sessionId: unknown, text: unknown, images: unknown)
 
 let dispatchService: AgentDispatchService | null = null;
 let agentService: AgentService | null = null;
+let upstreamRecovery: UpstreamRecoveryService | null = null;
+let upstreamSessionWakeHandler:
+  | ((conversationId: string, reason: 'probe' | 'recovered' | 'manual') => boolean)
+  | null = null;
 const pendingAgentControl = new Map<string, AbortController>();
 const pendingComputer = new Map<string, AbortController>();
 const pendingPluginTools = new Map<string, AbortController>();
@@ -332,6 +345,16 @@ export function getAgentDispatchService(): AgentDispatchService | null {
 
 export function getAgentService(): AgentService | null {
   return agentService;
+}
+
+export function getUpstreamRecoveryService(): UpstreamRecoveryService | null {
+  return upstreamRecovery;
+}
+
+export function setUpstreamSessionWakeHandler(
+  handler: ((conversationId: string, reason: 'probe' | 'recovered' | 'manual') => boolean) | null
+): void {
+  upstreamSessionWakeHandler = handler;
 }
 
 export function getSourceAuthorityRegistry(): SourceAuthorityRegistry | null {
@@ -1968,9 +1991,38 @@ export function registerAgentHandlers(): void {
     },
   });
 
+  upstreamRecovery?.dispose();
+  upstreamRecovery = createUpstreamRecoveryService({
+    onWake(event) {
+      if (event.waiter.kind === 'subagent') {
+        void agentService?.wakeUpstream(event.waiter.id);
+        return;
+      }
+      const handledByMain = upstreamSessionWakeHandler?.(event.waiter.id, event.reason) === true;
+      if (!handledByMain) {
+        try {
+          broadcastToRenderers(IPC_CHANNELS.AGENT_UPSTREAM_WAKE_EVENT, {
+            conversationId: event.waiter.id,
+            reason: event.reason,
+          });
+        } catch {
+          // renderer 已销毁
+        }
+      }
+    },
+    onHealthChange(snapshots: ProviderHealthSnapshot[]) {
+      try {
+        broadcastToRenderers(IPC_CHANNELS.AGENT_UPSTREAM_HEALTH_EVENT, snapshots);
+      } catch {
+        // renderer 已销毁
+      }
+    },
+  });
+
   agentService = new AgentService({
     ledger: fileAgentRunLedger(path.join(app.getPath('userData'), 'agent', 'subagent-runs.json')),
     restartCheckpoint: coldRestartChildren(),
+    upstreamRecovery,
     notify: (context, text, urgent) => {
       // 投给父会话当前 generation：换代前派出的 Run 结束后照样通知接续的会话
       const identity = rootIdentity(context.owner.ownerId);
@@ -2131,6 +2183,14 @@ export function registerAgentHandlers(): void {
     agentService?.observe(workerEvent);
     botWorkerObserver?.(workerEvent);
     humanTimeouts.observe(workerEvent);
+    if (
+      workerEvent.type === 'turn-completed' &&
+      !workerEvent.aborted &&
+      !('parent' in workerEvent.identity) &&
+      workerEvent.provider
+    ) {
+      upstreamRecovery?.reportSuccess(workerEvent.provider, workerEvent.identity.sessionId);
+    }
     if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
       const file = agentSessionIndex.sessionFile(workerEvent.identity);
       if (file) {
@@ -2227,6 +2287,7 @@ export function registerAgentHandlers(): void {
       sessionDesktop().releaseBrowserActor(workerEvent.identity.sessionId);
     }
     if (workerEvent.type === 'parent-ended') {
+      upstreamRecovery?.cancel(workerEvent.identity.sessionId);
       forgetParentToolProfile(workerEvent.identity.sessionId);
       sessionDesktop().forgetBrowserActor(workerEvent.identity.sessionId);
       if (!sharesBrowser(workerEvent.identity.sessionId))
@@ -2988,6 +3049,9 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ABORT,
     (_event, sessionId: unknown, options: unknown): AgentActionResult => {
+      if (typeof sessionId === 'string' && sessionId.length > 0) {
+        upstreamRecovery?.cancel(sessionId);
+      }
       const identity = exactIdentity(sessionId);
       if (!identity) return { ok: false, error: 'invalid abort or stale session generation' };
       const flag = (key: 'stopSubagents' | 'cancelReminders') =>
@@ -3002,11 +3066,128 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ABORT_RETRY,
     (_event, sessionId: unknown): AgentActionResult => {
+      if (typeof sessionId === 'string' && sessionId.length > 0) {
+        upstreamRecovery?.cancel(sessionId);
+      }
       const identity = exactIdentity(sessionId);
       return identity
         ? abortRetrySession(identity)
         : { ok: false, error: 'invalid abort-retry or stale session generation' };
     }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_UPSTREAM_REPORT_FAILURE,
+    (
+      _event,
+      raw: unknown
+    ):
+      | { action: 'wait'; retry: GoalUpstreamRetry }
+      | { action: 'exhausted'; note: string }
+      | { action: 'permanent'; hint?: string } => {
+      if (!raw || typeof raw !== 'object') {
+        return { action: 'permanent', hint: 'Invalid upstream failure payload' };
+      }
+      const input = raw as Record<string, unknown>;
+      if (!isNonEmptyString(input.sessionId) || !isNonEmptyString(input.error)) {
+        return { action: 'permanent', hint: 'Invalid upstream failure payload' };
+      }
+      const retryExhausted = input.retryExhausted === true;
+      const classified = classifyUpstreamError({
+        error: input.error,
+        retryExhausted,
+      });
+      if (classified.kind === 'permanent' || !upstreamRecovery) {
+        return {
+          action: 'permanent',
+          ...(classified.hint ? { hint: classified.hint } : {}),
+        };
+      }
+      const provider = isNonEmptyString(input.provider)
+        ? input.provider
+        : (sourceAuthority?.conversation(input.sessionId)?.selection?.providerId ?? 'default');
+      const since =
+        typeof input.since === 'number' && Number.isFinite(input.since) ? input.since : undefined;
+      const previousAttempt =
+        typeof input.previousAttempt === 'number' &&
+        Number.isInteger(input.previousAttempt) &&
+        input.previousAttempt >= 1
+          ? input.previousAttempt
+          : undefined;
+      const decision = upstreamRecovery.reportFailure({
+        id: input.sessionId,
+        kind: 'session',
+        provider,
+        errorKind: classified.kind,
+        lastError: input.error,
+        ...(classified.resetAt !== undefined ? { resetAt: classified.resetAt } : {}),
+        ...(since !== undefined ? { since } : {}),
+        ...(previousAttempt !== undefined ? { previousAttempt } : {}),
+      });
+      if (decision.action === 'wait') {
+        return {
+          action: 'wait',
+          retry: {
+            reason: 'upstream',
+            kind: decision.waiter.errorKind,
+            provider: decision.waiter.provider,
+            attempt: decision.waiter.attempt,
+            since: decision.waiter.since,
+            at: decision.waiter.nextAt,
+            lastError: decision.waiter.lastError,
+            ...(decision.waiter.resetAt !== undefined ? { resetAt: decision.waiter.resetAt } : {}),
+          },
+        };
+      }
+      return {
+        action: 'exhausted',
+        note: `${input.error} (upstream auto-retry window exhausted after ${decision.attempt} attempts)`,
+      };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_UPSTREAM_RETRY_NOW,
+    (_event, raw: unknown): AgentActionResult => {
+      const waiterId =
+        typeof raw === 'string'
+          ? raw
+          : raw &&
+              typeof raw === 'object' &&
+              isNonEmptyString((raw as Record<string, unknown>).waiterId)
+            ? ((raw as Record<string, unknown>).waiterId as string)
+            : null;
+      if (!waiterId) return { ok: false, error: 'invalid waiterId' };
+      const woke = upstreamRecovery?.retryNow(waiterId);
+      if (woke) return { ok: true };
+      // 闸门内存中没有（例如冷重启后仍留在磁盘上的 waiting goal）：直接触发一次手动唤醒
+      const handledByMain = upstreamSessionWakeHandler?.(waiterId, 'manual') === true;
+      if (!handledByMain) {
+        try {
+          broadcastToRenderers(IPC_CHANNELS.AGENT_UPSTREAM_WAKE_EVENT, {
+            conversationId: waiterId,
+            reason: 'manual',
+          });
+        } catch {
+          return { ok: false, error: 'renderer unavailable' };
+        }
+      }
+      return { ok: true };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_UPSTREAM_CANCEL,
+    (_event, sessionId: unknown): AgentActionResult => {
+      if (!isNonEmptyString(sessionId)) return { ok: false, error: 'invalid sessionId' };
+      upstreamRecovery?.cancel(sessionId);
+      return { ok: true };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_UPSTREAM_HEALTH_LIST,
+    (): ProviderHealthSnapshot[] => upstreamRecovery?.snapshots() ?? []
   );
 
   ipcMain.handle(

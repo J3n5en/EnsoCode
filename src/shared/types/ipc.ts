@@ -210,6 +210,11 @@ export const IPC_CHANNELS = {
   RESOURCES_SESSIONS_CLEAN_REQUEST: 'resources:sessions-clean-request',
   RESOURCES_SESSIONS_CLEAN_DONE: 'resources:sessions-clean-done',
 
+  // 设置 → 日志
+  LOGS_ERRORS: 'logs:errors',
+  LOGS_EXPORT: 'logs:export',
+  LOGS_REVEAL_EXPORT: 'logs:reveal-export',
+
   // 记忆管理
   MEMORY_LIST: 'memory:list',
   MEMORY_DETAIL: 'memory:detail',
@@ -243,6 +248,13 @@ export const IPC_CHANNELS = {
   DCG_STATUS: 'dcg:status',
   DCG_INSTALL: 'dcg:install',
   DCG_UNINSTALL: 'dcg:uninstall',
+  DCG_CHECK_UPDATE: 'dcg:check-update',
+  DCG_RULE_STATE: 'dcg:rule-state',
+  DCG_RULE_ALLOWED: 'dcg:rule-allowed',
+  DCG_RULE_EXEMPT: 'dcg:rule-exempt',
+  DCG_RULE_REVOKE: 'dcg:rule-revoke',
+  DCG_EXEMPTIONS_LIST: 'dcg:exemptions-list',
+  DCG_EXEMPTIONS_CLEAR: 'dcg:exemptions-clear',
   MEMORY_REEMBED: 'memory:reembed',
   MEMORY_CHANGED: 'memory:changed',
   MEMORY_GRAPH: 'memory:graph',
@@ -309,6 +321,12 @@ export const IPC_CHANNELS = {
   AGENT_ABORT: 'agent:abort',
   AGENT_ABORT_RETRY: 'agent:abort-retry',
   AGENT_RETRY: 'agent:retry',
+  AGENT_UPSTREAM_REPORT_FAILURE: 'agent:upstream-report-failure',
+  AGENT_UPSTREAM_RETRY_NOW: 'agent:upstream-retry-now',
+  AGENT_UPSTREAM_CANCEL: 'agent:upstream-cancel',
+  AGENT_UPSTREAM_HEALTH_LIST: 'agent:upstream-health-list',
+  AGENT_UPSTREAM_HEALTH_EVENT: 'agent:upstream-health',
+  AGENT_UPSTREAM_WAKE_EVENT: 'agent:upstream-wake',
   AGENT_EVENT: 'agent:event',
   AGENT_SNAPSHOT: 'agent:snapshot',
   /** 取走上次应用退出时被打断的回合（取一次即清空） */
