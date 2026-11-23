@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   steerSession: vi.fn(),
   withdrawSteerSession: vi.fn(),
   abortSession: vi.fn(),
+  clearSessionReminders: vi.fn(),
   setPairAgentBridge: vi.fn(),
   configurePairSessionHost: vi.fn(),
   respondApproval: vi.fn(),
@@ -84,6 +85,8 @@ vi.mock('../services/oauthProviders', () => ({
 }));
 vi.mock('../services/agentHost', () => ({
   abortSession: mocks.abortSession,
+  clearSessionReminders: mocks.clearSessionReminders,
+  fireSessionReminders: vi.fn(),
   compactSession: mocks.compactSession,
   forgetParentToolProfile: vi.fn(),
   agentTypeRegistrySnapshot: vi.fn(() => ({
@@ -254,6 +257,7 @@ describe('agent IPC Main identity boundary', () => {
     mocks.steerSession.mockClear();
     mocks.withdrawSteerSession.mockClear();
     mocks.abortSession.mockClear();
+    mocks.clearSessionReminders.mockClear();
     mocks.setPairAgentBridge.mockClear();
     mocks.configurePairSessionHost.mockClear();
     mocks.respondApproval.mockClear();
@@ -272,6 +276,34 @@ describe('agent IPC Main identity boundary', () => {
 
   it('派发 host 接上子代理模型解析，模型覆盖才不会被当成档案禁止', () => {
     expect(mocks.dispatchHost.resolveSubagentModel).toBe(resolveSubagentModelSelection);
+  });
+
+  it('worker 换代：断点交给子代理服务，换代按 worker 退出交给它续跑 Run；不进会话广播、不清 MCP 状态', () => {
+    const service = getAgentService()!;
+    const note = vi.spyOn(service, 'noteRestartCheckpoint');
+    const observe = vi.spyOn(service, 'observe');
+    const listener = mocks.setAgentEventListener.mock.calls.at(-1)![0];
+    const sessions = [
+      {
+        sessionId: 'conv-1::cw-a',
+        generation: 'g',
+        sessionFile: '/tmp/agent/sessions/child.jsonl',
+        seq: 1,
+        nextStep: 'model-request',
+        messageCount: 1,
+        toolsInFlight: [],
+      },
+    ];
+    listener({
+      type: 'graceful-restart-ready',
+      checkpoint: { version: 1, pid: 1, writtenAt: 1, sessions },
+    });
+    expect(note).toHaveBeenCalledWith(sessions);
+    listener({ type: 'worker-swapped' });
+    expect(observe).toHaveBeenCalledWith({ type: 'worker-exited' });
+    expect(observe).toHaveBeenCalledTimes(1);
+    note.mockRestore();
+    observe.mockRestore();
   });
 
   it('停止带 stopSubagents 时一并停掉根会话名下的子代理；不带选项或 child 身份不级联', async () => {
@@ -1071,6 +1103,45 @@ describe('agent IPC Main identity boundary', () => {
       });
       expect(mocks.isDetached).toHaveBeenCalledWith(parent);
       expect(send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('用户停止时取消会话自定提醒', () => {
+    const parent = { sessionId: 'conv-1', generation: 'gen-1' };
+    const invoke = (...args: unknown[]) =>
+      mocks.handlers.get(IPC_CHANNELS.AGENT_ABORT)?.(event, ...args);
+
+    it('带 cancelReminders 先清提醒再 abort；不带（卡死重试、插话立即发送）不清', async () => {
+      mocks.currentIdentity.mockReturnValue(parent);
+      mocks.abortSession.mockReturnValue({ ok: true });
+      const order: string[] = [];
+      mocks.clearSessionReminders.mockImplementation(() => order.push('clear'));
+      mocks.abortSession.mockImplementation(() => {
+        order.push('abort');
+        return { ok: true };
+      });
+      expect(await invoke('conv-1', { cancelReminders: true })).toEqual({ ok: true });
+      expect(mocks.clearSessionReminders).toHaveBeenCalledWith('conv-1');
+      expect(order).toEqual(['clear', 'abort']);
+
+      mocks.clearSessionReminders.mockClear();
+      for (const options of [undefined, {}, { cancelReminders: 'yes' }, 'cancel', null]) {
+        await invoke('conv-1', options);
+      }
+      expect(mocks.clearSessionReminders).not.toHaveBeenCalled();
+      expect(mocks.abortSession).toHaveBeenCalledWith(parent);
+    });
+
+    it('秘书 session_stop 与手机端停止也先清提醒', () => {
+      mocks.currentIdentity.mockReturnValue(parent);
+      abortRootFromMain('conv-1');
+      expect(mocks.clearSessionReminders).toHaveBeenCalledWith('conv-1');
+      mocks.clearSessionReminders.mockClear();
+      const bridge = mocks.setPairAgentBridge.mock.calls.at(-1)?.[0] as {
+        abort(sessionId: string): void;
+      };
+      bridge.abort('conv-1');
+      expect(mocks.clearSessionReminders).toHaveBeenCalledWith('conv-1');
     });
   });
 

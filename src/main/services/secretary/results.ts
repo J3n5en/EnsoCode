@@ -1,3 +1,4 @@
+import { formatGoalResultChecks, formatGoalResultClaims } from '@shared/secretary/goalResult';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import { type ProjectAuthority, TURN_REPORT_MAX_CHARS, type TurnReport } from '@shared/types/agent';
 import {
@@ -191,8 +192,14 @@ function formatLine(update: SecretaryUpdate): string {
         ? ` pending:${update.pendingId}`
         : '';
   const head = `- [${update.kind}${marker}] ${update.text}`;
-  if (!update.lastText) return head;
-  return `${head}\n${wrapUntrusted(untrustedSource(update), redactSecrets(update.lastText))}`;
+  const lines = [head];
+  if (update.goalResult?.checks && update.goalResult.checks.length > 0) {
+    lines.push(formatGoalResultChecks(update.goalResult));
+  }
+  const claims = update.goalResult ? formatGoalResultClaims(update.goalResult.result) : '';
+  const body = [update.lastText, claims].filter((part) => part && part.length > 0).join('\n');
+  if (!body) return lines.join('\n');
+  return `${lines.join('\n')}\n${wrapUntrusted(untrustedSource(update), redactSecrets(body))}`;
 }
 
 /**

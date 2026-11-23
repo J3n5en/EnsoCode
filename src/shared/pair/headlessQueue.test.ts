@@ -69,6 +69,20 @@ describe('headless queue', () => {
     expect(idle.runtime.goal?.note).toBe('automatic-turn limit (25) reached');
   });
 
+  it('does not continue the goal while the turn awaits its own reminder, but still flushes the queue', () => {
+    const goal = { text: 'ship it', status: 'active' as const, autoTurns: 0 };
+    const idleRuntime = { ...emptyHeadlessRuntime(), started: true, status: 'running', goal };
+    expect(onHeadlessIdle(idleRuntime).deliver?.kind).toBe('prompt');
+    const waiting = onHeadlessIdle(idleRuntime, { awaitingReminder: true });
+    expect(waiting.deliver).toBeUndefined();
+    expect(waiting.runtime.goal).toEqual(goal);
+    const queued = onHeadlessIdle(
+      { ...idleRuntime, queued: [{ id: 'q1', text: 'user says' }] },
+      { awaitingReminder: true }
+    );
+    expect(queued.deliver).toEqual({ kind: 'prompt', text: 'user says', images: undefined });
+  });
+
   it('stops continuation after a goal signal', () => {
     const runtime = {
       ...emptyHeadlessRuntime(),

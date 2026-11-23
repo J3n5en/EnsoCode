@@ -93,6 +93,7 @@ import { parseProviderHeaders } from '../providers/providerHeaders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
 import { parseSecretaryToolDescriptors } from '../secretary/customTools';
+import { type GoalResult, parseGoalResult } from '../secretary/goalResult';
 import { SECRETARY_INTERNAL_OPS, SECRETARY_OPS, type SecretaryInvokeOp } from '../secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
@@ -1615,6 +1616,10 @@ export type AgentCommand =
   | { type: 'task-stop'; sessionId: string; taskId: string }
   /** 用户手动保留（可附理由）；reason 为 null 取消保留 */
   | { type: 'task-keep'; sessionId: string; taskId: string; reason: string | null }
+  /** 按会话 id 寻址：把已到点的自定提醒交给会话；会话没打开就不动，打开时补发 */
+  | { type: 'reminders-fire'; sessionId: string }
+  /** 清掉根会话及其子会话的自定提醒与链计数（用户停止、删除、归档） */
+  | { type: 'reminders-clear'; sessionId: string }
   | { type: 'tool-background'; identity: SessionIdentity; toolCallId: string }
   | { type: 'workflow-stop'; identity: SessionIdentity; runId: string }
   | { type: 'subagent-stop'; identity: SessionIdentity; agentId: string }
@@ -2071,6 +2076,7 @@ export type RendererAgentEvent =
       | { type: 'graceful-restart-ready' }
       | { type: 'background-tasks-detached' }
       | { type: 'session-wake-requested' }
+      | { type: 'session-reminder-due' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2092,6 +2098,9 @@ export type RendererAgentEvent =
 
 /** detail：Main 汇总的退出原因（退出码 / worker 致命异常首行） */
 export type WorkerExitedEvent = { type: 'worker-exited'; detail?: string };
+
+/** 优雅重启换代（Main 不退）：旧 worker 已按断点退出，会话由下一代接着跑；只给 Main 内部，不进会话广播 */
+export type WorkerSwappedEvent = { type: 'worker-swapped' };
 
 export function workspaceBranchChangedNote(branch: string): string {
   return `<workspace-branch-changed>\nThe current workspace is now on Git branch ${JSON.stringify(branch)}. The directory is unchanged, but file contents may differ. Re-read relevant files before relying on earlier observations or edits. This is background information only, not a task or goal.\n</workspace-branch-changed>`;
@@ -2191,6 +2200,8 @@ export type AgentWorkerEvent =
       continues?: string;
       /** 子代理还有自己起的、在跑、没表态的后台任务：Run 继续持有，等任务完成唤醒它 */
       awaitingTasks?: true;
+      /** 根会话还挂着自定提醒：在等自己定的时间点，goal 先不续跑 */
+      awaitingReminder?: true;
     }
   | {
       type: 'turn-failed';
@@ -2374,6 +2385,8 @@ export type AgentWorkerEvent =
       seq: number;
       kind: 'complete' | 'blocked' | 'wait';
       note: string;
+      /** goal_complete 的结构化结果；非法值在解析时丢掉，不拒事件 */
+      result?: GoalResult;
     }
   | { type: 'plan-state'; identity: SessionIdentity; seq: number; state: PlanState }
   | {
@@ -2468,6 +2481,11 @@ export type AgentWorkerEvent =
        * 请 Main 按恢复清单打开它，worker 打开后把完成通知交给新一轮。旁路消费
        */
       type: 'session-wake-requested';
+      sessionId: string;
+    }
+  | {
+      /** 根会话的自定提醒到点：Main 判定会话还在（未删除、未归档）后回 reminders-fire，冷会话先打开。旁路消费 */
+      type: 'session-reminder-due';
       sessionId: string;
     }
   | {
@@ -4523,6 +4541,16 @@ const agentCommandParsers = {
       ? (value as unknown as AgentCommand)
       : null;
   },
+  'reminders-fire': (value: Record<string, unknown>): AgentCommand | null => {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentCommand)
+      : null;
+  },
+  'reminders-clear': (value: Record<string, unknown>): AgentCommand | null => {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentCommand)
+      : null;
+  },
   'tool-background': (value: Record<string, unknown>): AgentCommand | null => {
     return hasExactKeys(value, ['type', 'identity', 'toolCallId']) &&
       parseAnySessionIdentity(value.identity) &&
@@ -4952,6 +4980,11 @@ const agentWorkerEventParsers = {
       ? (value as unknown as AgentWorkerEvent)
       : null;
   },
+  'session-reminder-due': (value: Record<string, unknown>): AgentWorkerEvent | null => {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  },
   'unopened-background-tasks': (value: Record<string, unknown>): AgentWorkerEvent | null => {
     return hasExactKeys(value, ['type', 'sessionId', 'tasks']) &&
       isNonEmptyString(value.sessionId) &&
@@ -5255,7 +5288,8 @@ const agentWorkerEventParsers = {
         (value.requestBudgetError === undefined ||
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError))) &&
         (value.continues === undefined || isNonEmptyString(value.continues)) &&
-        (value.awaitingTasks === undefined || value.awaitingTasks === true)
+        (value.awaitingTasks === undefined || value.awaitingTasks === true) &&
+        (value.awaitingReminder === undefined || value.awaitingReminder === true)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }
@@ -5436,10 +5470,20 @@ const agentWorkerEventParsers = {
   'goal-signal': requireEventIdentity(
     'any',
     (value: Record<string, unknown>): AgentWorkerEvent | null => {
-      return (value.kind === 'complete' || value.kind === 'blocked' || value.kind === 'wait') &&
-        typeof value.note === 'string'
-        ? (value as unknown as AgentWorkerEvent)
-        : null;
+      if (
+        (value.kind !== 'complete' && value.kind !== 'blocked' && value.kind !== 'wait') ||
+        typeof value.note !== 'string'
+      ) {
+        return null;
+      }
+      if (!('result' in value)) return value as unknown as AgentWorkerEvent;
+      const parsed = parseGoalResult(value.result);
+      if (!parsed.ok) {
+        const rest = { ...value };
+        delete rest.result;
+        return rest as unknown as AgentWorkerEvent;
+      }
+      return { ...value, result: parsed.value } as unknown as AgentWorkerEvent;
     }
   ),
   'plan-state': requireEventIdentity(

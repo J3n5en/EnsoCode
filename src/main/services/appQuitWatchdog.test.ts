@@ -5,7 +5,9 @@ import {
   QUIT_REPLY_WAIT_FLOOR_MS,
   QUIT_TOOL_WAIT_LIMIT_MS,
 } from './agentQuitLimits';
+import { createAppQuitDrain } from './appQuitDrain';
 import {
+  agentWorkerQuitDrain,
   createQuitWatchdog,
   QUIT_FINISH_LIMIT_MS,
   QUIT_WATCHDOG_LIMIT_MS,
@@ -130,5 +132,59 @@ describe('退出看门狗', () => {
     dog.begin('quit', 'x');
     await vi.advanceTimersByTimeAsync(limits.totalMs);
     expect(host.kill).toHaveBeenCalled();
+  });
+});
+
+describe('will-quit 里等 agent 安全点', () => {
+  function drainWith(alive: boolean) {
+    const { host, dog } = setup();
+    const safePoint = Promise.withResolvers<void>();
+    const stopped = Promise.withResolvers<void>();
+    const agent = {
+      alive: () => alive,
+      prepare: vi.fn(() => safePoint.promise),
+      stop: vi.fn(() => stopped.promise),
+    };
+    const { step, onProgress } = agentWorkerQuitDrain(dog, agent);
+    const terminal = {
+      name: '终端',
+      shouldWait: () => true,
+      wait: () => new Promise<void>(() => {}),
+    };
+    const quit = vi.fn();
+    createAppQuitDrain([terminal, step], onProgress).onWillQuit({ preventDefault() {} }, quit);
+    return { host, agent, safePoint, stopped, quit };
+  }
+
+  it('没经过确认的退出（托盘、SIGTERM）到 will-quit 才等安全点：等安全点按总上限计时，不被收尾期限提前强退', async () => {
+    const { host, agent, safePoint } = drainWith(true);
+    expect(agent.prepare).toHaveBeenCalledOnce();
+    // 回复保底等满（远超收尾期限）也不强退
+    await vi.advanceTimersByTimeAsync(limits.finishMs * 3);
+    expect(host.exit).not.toHaveBeenCalled();
+    // 到了安全点（断点已落）：之后的收尾按收尾期限计
+    safePoint.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(agent.stop).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(limits.finishMs - 1);
+    expect(host.exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.exit).toHaveBeenCalledOnce();
+    expect(host.log.mock.calls[0][0]).toContain('will-quit 收尾');
+  });
+
+  it('安全点一直等不到：到总上限强退，不会无限挂住', async () => {
+    const { host } = drainWith(true);
+    await vi.advanceTimersByTimeAsync(limits.totalMs - 1);
+    expect(host.exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.exit).toHaveBeenCalledOnce();
+  });
+
+  it('没有 agent worker：直接按收尾期限计时', async () => {
+    const { host, agent } = drainWith(false);
+    expect(agent.prepare).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(limits.finishMs);
+    expect(host.exit).toHaveBeenCalledOnce();
   });
 });

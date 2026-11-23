@@ -1,3 +1,4 @@
+import type { GoalResultView } from '../secretary/goalResult';
 import type { ModelRef, ThinkingLevel } from './agent';
 
 /**
@@ -417,6 +418,8 @@ export interface DispatchRecord {
    * 有了可见回复就清掉。
    */
   sentAt?: number;
+  /** goal_complete 的结构化结果和宿主核验 */
+  goalResult?: GoalResultView;
 }
 
 export type SecretaryUpdate = {
@@ -428,6 +431,8 @@ export type SecretaryUpdate = {
   secretaryConversationId?: string;
   /** 非紧急更新到这个时间再投；缺省表示可以立刻投 */
   deliverAt?: number;
+  /** 只有 goal-complete 带：结构化结果与宿主核验 */
+  goalResult?: GoalResultView;
 } & (
   | { kind: SecretaryResultKind; conversationId: string }
   /** 转交给秘书的提问：pending 要秘书处理，其余是收尾通知 */
@@ -685,6 +690,7 @@ export interface SecretaryDailyRecord {
   commit?: string;
   /** 最终汇报里明确说了合并 */
   merged?: true;
+  goalResult?: GoalResultView;
 }
 
 /** 派发/接管会话按当天最终状态落一列；待办与设置变更是另外两类记录 */
@@ -727,6 +733,7 @@ export interface SecretaryDailyItem {
   leftover?: { count: number };
   /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
   persistent?: true;
+  goalResult?: GoalResultView;
 }
 
 export interface SecretaryDailyCounts {
@@ -792,6 +799,7 @@ export interface SecretaryStoredReport {
   imagesGoneAt?: number;
   /** 只在视图里：截图保留天数 */
   retentionDays?: number;
+  goalResult?: GoalResultView;
 }
 
 /** 已完成条目的「结果」视图；没存下报告（旧数据、手动标记完成）时 report 为 null */

@@ -1,5 +1,6 @@
 import type { AppExitReason } from '@shared/types/ipc';
 import { QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
+import type { AppQuitDrainStep } from './appQuitDrain';
 
 /** 整个退出的上限：工具等待上限之外再留 30 秒写清单、停 worker、关窗 */
 export const QUIT_WATCHDOG_LIMIT_MS = QUIT_TOOL_WAIT_LIMIT_MS + 30_000;
@@ -121,6 +122,8 @@ export function createQuitWatchdog(
   };
 }
 
+type QuitWatchdog = ReturnType<typeof createQuitWatchdog>;
+
 let host: Partial<QuitWatchdogHost> = {};
 
 /** Electron 入口注入 relaunch / exit 与落盘日志（主进程没有日志文件，结论写进 worker-exits.log） */
@@ -158,4 +161,44 @@ export const quitWatchdog = createQuitWatchdog({
 /** 已进入退出流程：拦 close 的浮窗此时必须放行，否则安装更新（先关窗再 before-quit）永远关不完窗 */
 export function isAppQuitting(): boolean {
   return quitWatchdog.active();
+}
+
+const AGENT_WORKER_STEP = 'agent worker';
+
+/**
+ * will-quit 收尾里的 agent worker 一步与进度上报。没经过确认的退出（托盘退出、dev 的 SIGTERM、
+ * 没有主窗口时的退出）到 will-quit 才开始等安全点：这段按总上限计时，过了安全点才收紧到收尾期限，
+ * 否则看门狗先于安全点强退，断点和恢复清单都来不及写。
+ */
+export function agentWorkerQuitDrain(
+  watchdog: Pick<QuitWatchdog, 'step'>,
+  agent: { alive(): boolean; prepare(): Promise<unknown>; stop(): Promise<void> }
+): { step: AppQuitDrainStep; onProgress(pending: string[]): void } {
+  let safePointPassed = false;
+  return {
+    step: {
+      name: AGENT_WORKER_STEP,
+      shouldWait: agent.alive,
+      wait: async () => {
+        try {
+          await agent.prepare();
+        } finally {
+          safePointPassed = true;
+          watchdog.step(`will-quit 收尾：${AGENT_WORKER_STEP}`, { finishing: true });
+        }
+        await agent.stop();
+      },
+    },
+    onProgress: (pending) => {
+      const finishing = safePointPassed || !pending.includes(AGENT_WORKER_STEP);
+      watchdog.step(
+        finishing
+          ? pending.length
+            ? `will-quit 收尾：${pending.join('、')}`
+            : 'will-quit'
+          : 'will-quit：等 agent 安全点',
+        { finishing }
+      );
+    },
+  };
 }

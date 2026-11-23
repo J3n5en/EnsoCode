@@ -1,5 +1,6 @@
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type { SecretaryDispatchFile, SecretaryUpdate } from '@shared/types/secretary';
+import type { HomeConversationResult } from './homeConversation';
 import type { SecretarySessionStatus } from './readers';
 import {
   BATCH_MAX_CHARS,
@@ -30,6 +31,8 @@ export interface DeliveryPorts {
   newId(): string;
   /** 本秘书的隐藏项目：回落只在它的会话里找，不跨秘书；缺省按全部秘书项目 */
   secretaryProjectId?(): string | null;
+  /** 还没有会话时建一条：要秘书动手的定时与同事消息不能一直等用户打开它 */
+  startConversation?(): Promise<HomeConversationResult>;
 }
 
 function retryDelay(attempt: number): number {
@@ -142,18 +145,37 @@ interface Group {
   updates: SecretaryUpdate[];
 }
 
-function planGroups(ports: DeliveryPorts, now: number): Group[] {
+/** 要秘书动手的更新；结果回传没有会话时只更新工作台 */
+const WAKES_SECRETARY: ReadonlySet<string> = new Set(['schedule', 'peer-message']);
+
+function dueKeys(ports: DeliveryPorts, now: number): Set<string> {
   const file = ports.file();
   const inflightKeys = new Set(file.inflight?.keys ?? []);
-  const due = new Set(
+  return new Set(
     dueUpdates(
       file.outbox.filter((update) => !inflightKeys.has(update.key)),
       now
     ).map((update) => update.key)
   );
+}
+
+function needsNewConversation(ports: DeliveryPorts, now: number): boolean {
+  const due = dueKeys(ports, now);
+  return ports
+    .file()
+    .outbox.some(
+      (update) =>
+        due.has(update.key) &&
+        WAKES_SECRETARY.has(update.kind) &&
+        !resolveTarget(ports, update.secretaryConversationId)
+    );
+}
+
+function planGroups(ports: DeliveryPorts, now: number): Group[] {
+  const file = ports.file();
+  const due = dueKeys(ports, now);
   const groups = new Map<string, SecretaryUpdate[]>();
   for (const update of file.outbox) {
-    if (inflightKeys.has(update.key)) continue;
     if (!due.has(update.key)) continue;
     const target = resolveTarget(ports, update.secretaryConversationId);
     if (!target) continue;
@@ -211,6 +233,11 @@ async function flushOnce(ports: DeliveryPorts, now: number): Promise<void> {
     const file = ports.file();
     delete file.inflight;
     ports.save(file);
+  }
+
+  if (ports.startConversation && needsNewConversation(ports, now)) {
+    const started = await ports.startConversation();
+    if (!started.ok) return;
   }
 
   for (const group of planGroups(ports, now)) {

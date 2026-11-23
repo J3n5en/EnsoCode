@@ -477,7 +477,10 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
     }
     finishTurn(
       sessionId,
-      onHeadlessIdle({ ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 })
+      onHeadlessIdle(
+        { ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 },
+        { awaitingReminder: event.awaitingReminder === true }
+      )
     );
   }
 }
