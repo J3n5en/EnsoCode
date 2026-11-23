@@ -106,28 +106,63 @@ describe('resolveChildThinkingInput', () => {
 });
 
 describe('pickChildReasoningOverride', () => {
-  it('派发 thinking 赢过类型预设与模型条目', () => {
-    expect(
-      pickChildReasoningOverride(
-        'off',
-        { reasoning: 'on', thinkingLevel: 'high' },
-        { reasoning: 'on', thinkingLevel: 'low' }
-      )
-    ).toEqual({ reasoning: 'off' });
+  it('派发 thinking 赢过类型预设', () => {
+    expect(pickChildReasoningOverride('off', { reasoning: 'on', thinkingLevel: 'high' })).toEqual({
+      reasoning: 'off',
+    });
   });
 
-  it('类型预设赢过模型条目；缺省字段回落到模型条目', () => {
-    expect(
-      pickChildReasoningOverride(
-        undefined,
-        { reasoning: 'on', thinkingLevel: 'high' },
-        { reasoning: 'off', thinkingLevel: 'low' }
-      )
-    ).toEqual({ reasoning: 'on', thinkingLevel: 'high' });
-    expect(pickChildReasoningOverride(undefined, {}, { thinkingLevel: 'low' })).toEqual({
-      thinkingLevel: 'low',
+  it('无派发时取类型预设，缺省字段不填', () => {
+    expect(pickChildReasoningOverride(undefined, { thinkingLevel: 'high' })).toEqual({
+      thinkingLevel: 'high',
     });
-    expect(pickChildReasoningOverride(undefined, undefined, undefined)).toEqual({});
+    expect(pickChildReasoningOverride(undefined, undefined)).toEqual({});
+  });
+});
+
+describe('子代理思考档优先级：派发 > 类型预设 > 父会话 > 模型条目预设', () => {
+  const entryMax = { reasoning: 'on' as const, thinkingLevel: 'max' as const };
+  const level = (
+    dispatched: Parameters<typeof pickChildReasoningOverride>[0],
+    typePreset: Parameters<typeof pickChildReasoningOverride>[1],
+    parentEnabled: boolean,
+    parentLevel: Parameters<typeof resolveChildReasoning>[2],
+    entry: Parameters<typeof resolveChildReasoning>[3]
+  ) =>
+    resolveChildReasoning(
+      pickChildReasoningOverride(dispatched, typePreset),
+      parentEnabled,
+      parentLevel,
+      entry
+    ).level;
+
+  it('父会话当前档赢过模型条目预设', () => {
+    expect(level(undefined, undefined, true, 'high', entryMax)).toBe('high');
+  });
+
+  it('父会话关闭推理时回落到模型条目预设', () => {
+    expect(level(undefined, undefined, false, undefined, entryMax)).toBe('max');
+  });
+
+  it('父开启但无档位时用模型条目档位', () => {
+    expect(level(undefined, undefined, true, undefined, entryMax)).toBe('max');
+  });
+
+  it('模型条目关闭推理压不过父会话开启', () => {
+    expect(level(undefined, undefined, true, 'high', { reasoning: 'off' })).toBe('high');
+  });
+
+  it('派发显式档仍最高', () => {
+    expect(level('low', { thinkingLevel: 'medium' }, true, 'high', entryMax)).toBe('low');
+  });
+
+  it('类型预设仍高于父会话', () => {
+    expect(level(undefined, { thinkingLevel: 'medium' }, true, 'high', entryMax)).toBe('medium');
+  });
+
+  it('全都没设时走原默认：父关 → off，强开 → medium', () => {
+    expect(level(undefined, undefined, false, undefined, undefined)).toBe('off');
+    expect(level(undefined, { reasoning: 'on' }, false, undefined, undefined)).toBe('medium');
   });
 });
 

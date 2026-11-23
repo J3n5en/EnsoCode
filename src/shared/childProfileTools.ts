@@ -31,6 +31,7 @@ export function childProfileToolIds(
     ids.push(shell);
     if (editMode === 'apply_patch') ids.push('apply_patch');
     else ids.push('edit', 'write');
+    ids.push('task_output', 'task_stop', 'task_settle');
   }
   ids.push('message_main_agent', 'message_coworker');
   if (options.exploreFold) ids.push('explore_mark', 'explore_fold');

@@ -219,6 +219,9 @@ describe('agentHost agent type tool filtering', () => {
       'ls',
       'bash',
       'apply_patch',
+      'task_output',
+      'task_stop',
+      'task_settle',
       'message_main_agent',
       'message_coworker',
     ]);
@@ -232,6 +235,9 @@ describe('agentHost agent type tool filtering', () => {
       'bash',
       'edit',
       'write',
+      'task_output',
+      'task_stop',
+      'task_settle',
       'message_main_agent',
       'message_coworker',
     ]);
@@ -254,6 +260,9 @@ describe('agentHost agent type tool filtering', () => {
       'bash',
       'edit',
       'write',
+      'task_output',
+      'task_stop',
+      'task_settle',
       'message_main_agent',
       'message_coworker',
     ]);
