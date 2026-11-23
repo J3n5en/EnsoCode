@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   sessions: [] as Array<Record<string, unknown>>,
@@ -83,7 +83,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
   };
 });
 
-import { SessionSupervisor } from './supervisor';
+import { AGENT_RUN_HOLD_LIMIT_MS, SessionSupervisor } from './supervisor';
 
 const parent = { sessionId: 'parent', generation: '11111111-1111-4111-8111-111111111111' };
 const child = {
@@ -365,5 +365,97 @@ describe('子代理起的后台任务归属子代理', () => {
     };
     expect(internals.taskWrapUp(parent.sessionId)).toBeUndefined();
     await ctx.supervisor.shutdown();
+  });
+
+  describe('持有有上限、可被父会话打断', () => {
+    let current: Awaited<ReturnType<typeof setup>> | undefined;
+    afterEach(async () => {
+      vi.useRealTimers();
+      await current?.supervisor.shutdown();
+      current = undefined;
+    });
+
+    /** 子代理 Run 开局；hold() 走完起了后台任务就结束的那一轮 */
+    async function startRun() {
+      const ctx = await setup();
+      current = ctx;
+      ctx.supervisor.handleCommand({
+        type: 'prompt-child',
+        identity: child,
+        requestId: 'run-1',
+        requestBudget: true,
+        task: { text: 'start the server', images: [], fileMentions: [] },
+      });
+      const startTask = () =>
+        ctx.childBash.execute('call-1', { command: 'sleep 30', background: true });
+      const hold = async () => {
+        await round(ctx.childSession, '服务已起，等它跑完', startTask);
+        expect(turnsCompleted(ctx.events).at(-1)).toMatchObject({ awaitingTasks: true });
+      };
+      return { ctx, startTask, hold };
+    }
+
+    /** 子会话被回收后不再有带 identity 的 task-ended，直接看任务表 */
+    const taskEnded = (ctx: Awaited<ReturnType<typeof setup>>) =>
+      (
+        ctx.supervisor as unknown as {
+          bgTasks: { snapshot(sessionId: string): Array<{ status: string }> };
+        }
+      ).bgTasks
+        .snapshot(child.sessionId)
+        .every((task) => task.status !== 'running');
+
+    it('任务一直不结束（常驻服务）：到时限唤醒子代理要它表态并交报告，那一轮结束 Run 收口', async () => {
+      const { ctx, hold } = await startRun();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await hold();
+      const before = ctx.childSession.prompt.mock.calls.length;
+
+      vi.advanceTimersByTime(AGENT_RUN_HOLD_LIMIT_MS);
+      const woken = promptTexts(ctx.childSession).slice(before).join('\n');
+      expect(woken).toContain('task_settle');
+      expect(woken).toContain('sleep 30');
+
+      vi.useRealTimers();
+      await round(ctx.childSession, '服务留着，报告如下');
+      const last = turnsCompleted(ctx.events).at(-1);
+      expect(last).toMatchObject({ continues: 'run-1' });
+      expect(last).not.toHaveProperty('awaitingTasks');
+    });
+
+    it('持有中空闲时收到父会话的插话：开新一轮送达，不排进没人取的插话队列', async () => {
+      const { ctx, hold } = await startRun();
+      await hold();
+
+      ctx.supervisor.handleCommand({ type: 'steer', identity: child, text: 'parent asks status' });
+      await until(() =>
+        promptTexts(ctx.childSession).some((text) => text.includes('parent asks status'))
+      );
+      await round(ctx.childSession, '状态是 Y');
+      expect(turnsCompleted(ctx.events).at(-1)).toMatchObject({ continues: 'run-1' });
+    });
+
+    it('持有中被 abort（父会话 stop）：在等的后台任务一并停掉', async () => {
+      const { ctx, hold } = await startRun();
+      await hold();
+      ctx.supervisor.handleCommand({ type: 'abort', identity: child });
+      await until(() => taskEnded(ctx));
+    });
+
+    it('持有中被 dismiss：在等的后台任务一并停掉', async () => {
+      const { ctx, hold } = await startRun();
+      await hold();
+      ctx.supervisor.handleCommand({ type: 'dismiss-child', parent, child });
+      await until(() => taskEnded(ctx));
+    });
+
+    it('还没进入持有的回合被 abort：后台任务照旧留着，与根会话一致', async () => {
+      const { ctx, startTask } = await startRun();
+      ctx.childSession.emit({ type: 'agent_start' });
+      await startTask();
+      ctx.supervisor.handleCommand({ type: 'abort', identity: child });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(taskEnded(ctx)).toBe(false);
+    });
   });
 });

@@ -8,6 +8,7 @@ import { AgentService, type AgentServiceRuntime } from './agentService';
 // worker 退出与 Main 重启（新建 AgentService，从同一份台账恢复）按任意顺序交错。
 // 子会话模型照 supervisor 持有 Run：回合结束时还有自己的后台任务就带 awaitingTasks，
 // 任务完成时空闲则唤醒新一轮（continues 指回被持有的 Run），忙则搭下一条工具结果。
+// 任务可能永远不结束（常驻服务、挂死）：taskdone 不算环境必然发生的步骤，持有靠时限（expire）收口。
 
 const parent = { sessionId: 'chat-1', generation: '11111111-1111-4111-8111-111111111111' };
 const context: AgentControlContext = {
@@ -25,7 +26,7 @@ type Mode = 'task' | 'coworker';
 const OUTCOMES = { ok: 'succeeded', abort: 'interrupted', fail: 'failed' } as const;
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 /** 不由父会话发起的步骤：它们都走完、父会话也不再操作时，系统必须收敛 */
-const ENVIRONMENT = /^(return|ready|end|turn|taskdone|restore|parent-ready)/;
+const ENVIRONMENT = /^(return|ready|end|turn|expire|restore|parent-ready)/;
 
 interface Budget {
   spawns: number;
@@ -53,6 +54,8 @@ interface Child {
   /** 忙时完成、还没交给模型的任务通知 */
   notices: boolean;
   wakes: number;
+  /** 持有到时限：due 时正忙、回合结束再告知；told 已要它交报告，回合结束不再持有 */
+  expiry?: 'due' | 'told';
   /** runtime.dismiss 回收、child-ended 还没发出的那一代子会话 */
   ending?: ChildSessionIdentity;
   dismissed: boolean;
@@ -60,7 +63,17 @@ interface Child {
 }
 
 /** 子会话随回收 / worker 退出一起没了：后台任务被杀，持有随之失效 */
-const kill = { live: false, turn: undefined, tasks: 0, held: undefined, notices: false };
+const kill = {
+  live: false,
+  turn: undefined,
+  tasks: 0,
+  held: undefined,
+  notices: false,
+  expiry: undefined,
+};
+/** 进入过持有的 Run 被叫停：它在等的任务一并停掉 */
+const release = (c: Child) =>
+  Object.assign(c, { held: undefined, expiry: undefined, ...(c.held ? { tasks: 0 } : {}) });
 
 interface World {
   service: AgentService;
@@ -109,7 +122,7 @@ function newService(w: World): AgentService {
     const c = child(id);
     if (!c.live) return { ok: false, error: 'child gone' };
     c.turn = runId;
-    c.held = undefined;
+    Object.assign(c, { held: undefined, expiry: undefined });
     return { ok: true };
   };
   const runtime: AgentServiceRuntime = {
@@ -145,7 +158,7 @@ function newService(w: World): AgentService {
     },
     steer: async () => ({ ok: true }),
     stop: async ({ identity: id }) => {
-      Object.assign(child(id), { turn: undefined, held: undefined });
+      Object.assign(release(child(id)), { turn: undefined });
       return { ok: true };
     },
     dismiss: async ({ identity: id }) => {
@@ -270,8 +283,9 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
             c.tasks++;
           } else if (outcome !== 'ok') u.faults++;
           const ok = outcome === 'ok' || outcome === 'bg';
-          const awaiting = ok && (c.tasks > 0 || c.notices);
+          const awaiting = ok && (c.tasks > 0 || c.notices) && c.expiry !== 'told';
           c.held = awaiting ? runId : undefined;
+          if (!awaiting) c.expiry = undefined;
           const run = internals(w).runs.get(runId);
           if (!awaiting && run && !TERMINAL.has(run.status))
             w.expected.set(runId, OUTCOMES[ok ? 'ok' : outcome]);
@@ -293,8 +307,9 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
           );
           if (awaiting && TERMINAL.has(internals(w).runs.get(runId)?.status ?? ''))
             w.premature ??= runId;
-          if (awaiting && c.notices) {
+          if (awaiting && (c.notices || c.expiry === 'due')) {
             c.notices = false;
+            if (c.expiry === 'due') c.expiry = 'told';
             c.turn = `${runId}~w${++c.wakes}`;
           }
         },
@@ -310,6 +325,19 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         },
       ]);
     }
+    // 持有时限到：空闲就唤醒它交报告，忙就等这一轮结束再告知
+    if (c.held && c.live && !c.expiry) {
+      out.push([
+        `expire:${i}`,
+        () => {
+          if (c.turn) c.expiry = 'due';
+          else {
+            c.expiry = 'told';
+            c.turn = `${c.held}~w${++c.wakes}`;
+          }
+        },
+      ]);
+    }
     // 用户在子代理 tab 里对持有中、空闲的子代理点停止
     const held = c.held;
     if (held && !c.turn && c.live && u.faults < cfg.faults) {
@@ -317,7 +345,7 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         `idle-abort:${i}`,
         () => {
           u.faults++;
-          c.held = undefined;
+          release(c);
           const run = internals(w).runs.get(held);
           if (run && !TERMINAL.has(run.status)) w.expected.set(held, 'interrupted');
           w.service.observe({
