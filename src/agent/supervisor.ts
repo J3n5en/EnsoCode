@@ -3569,7 +3569,7 @@ export class SessionSupervisor {
       ...builtin('background_tasks', createTaskTools(this.bgTasks, sessionId)),
       ...(toolEnabled('goal')
         ? createGoalTools(
-            (kind, note) => {
+            (kind, note, result) => {
               const managed = managedRef ?? this.sessions.get(sessionId);
               if (!managed) return;
               this.options.emit({
@@ -3578,6 +3578,7 @@ export class SessionSupervisor {
                 seq: ++managed.seq,
                 kind,
                 note,
+                ...(result ? { result } : {}),
               });
             },
             async (summary, signal) => {

@@ -278,6 +278,31 @@ describe('回传正文', () => {
     expect(text).toContain('- [goal-complete session:c1] app · 已完成');
   });
 
+  it('核验摘要在不可信包裹外，会话自述在包裹内并先脱敏', () => {
+    const text = formatSessionUpdates([
+      update({
+        kind: 'goal-complete',
+        text: 'app · 已完成',
+        lastText: '正文',
+        goalResult: {
+          at: 1,
+          result: {
+            summary: 'shipped sk-abcdefghijklmnopqrstuvwxyz123456',
+            commits: ['abc1234def'],
+          },
+          checks: [{ kind: 'commit', ref: 'abc1234def', status: 'verified' }],
+        },
+      }),
+    ]);
+    const checkAt = text.indexOf('核验：sha abc1234 在 main ✓');
+    const wrappedAt = text.indexOf('<untrusted-content source="session:c1">');
+    expect(checkAt).toBeGreaterThan(-1);
+    expect(wrappedAt).toBeGreaterThan(checkAt);
+    expect(text.slice(wrappedAt)).toContain('commits abc1234def');
+    expect(text.slice(wrappedAt)).toContain('正文');
+    expect(text).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
+  });
+
   it('界面解析与回传格式一致', () => {
     const batch = [
       update({
