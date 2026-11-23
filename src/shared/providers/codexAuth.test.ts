@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerAccountProvider } from '../piAccounts';
 import {
@@ -348,7 +349,6 @@ describe('installCodexLinkedRefresh', () => {
       });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
     const runtime = await ModelRuntime.create({
       authPath: authFile,
       modelsPath: null,
