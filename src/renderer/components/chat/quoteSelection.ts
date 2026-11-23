@@ -136,7 +136,7 @@ const GAP = 6;
 /**
  * 浮动按钮位置（fixed 坐标）：桌面放选区上方居中，放不下翻到下方；
  * 窄屏系统选择菜单在选区上方，按钮优先放下方。会盖住 obstacles（消息操作行等）时
- * 先换到另一侧，两侧都被占就往障碍物旁边让开；都不行才退回默认位置。始终在视口内。
+ * 先换到另一侧，再往障碍物旁边让开，再贴到选区左右；都不行才退回默认位置。始终在视口内。
  */
 export function quoteButtonPosition(
   rect: QuoteAnchorRect,
@@ -159,13 +159,20 @@ export function quoteButtonPosition(
       (o) =>
         left < o.right && left + size.width > o.left && top < o.bottom && top + size.height > o.top
     );
-  for (const top of tops) if (!blocker(top, center)) return { top, left: center };
+  const candidates: { top: number; left: number }[] = tops.map((top) => ({ top, left: center }));
   for (const top of tops) {
     const hit = blocker(top, center);
-    if (!hit) continue;
-    for (const left of [hit.right + GAP, hit.left - size.width - GAP]) {
-      if (left >= EDGE && left <= maxLeft && !blocker(top, left)) return { top, left };
-    }
+    if (hit)
+      candidates.push({ top, left: hit.right + GAP }, { top, left: hit.left - size.width - GAP });
   }
+  const middle = clamp((rect.top + rect.bottom) / 2 - size.height / 2, maxTop);
+  candidates.push(
+    { top: middle, left: rect.right + GAP },
+    { top: middle, left: rect.left - size.width - GAP }
+  );
+  const fits = ({ top, left }: { top: number; left: number }) =>
+    top >= EDGE && top <= maxTop && left >= EDGE && left <= maxLeft && !blocker(top, left);
+  const found = candidates.find(fits);
+  if (found) return found;
   return { top: clamp(mobile || above < EDGE ? below : above, maxTop), left: center };
 }

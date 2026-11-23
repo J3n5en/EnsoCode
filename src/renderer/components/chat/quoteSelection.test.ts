@@ -217,4 +217,18 @@ describe('quoteButtonPosition', () => {
     expect(overlaps(aside, header)).toBe(false);
     expect(overlaps(aside, actions)).toBe(false);
   });
+
+  // 真机 390 宽：选中回复最后一段，下方是整行操作条，上方紧挨着下一条消息的整行抬头
+  it('上下都被整行占满时，贴着选区旁边放，仍不压住任何一行', () => {
+    const selection = { top: 650, bottom: 666, left: 14, right: 63 };
+    const header = { top: 619, bottom: 640, left: 14, right: 368 };
+    const actions = { top: 673, bottom: 689, left: 14, right: 368 };
+    const pos = quoteButtonPosition(selection, { width: 390, height: 844 }, size, true, [
+      header,
+      actions,
+    ]);
+    expect(overlaps(pos, header)).toBe(false);
+    expect(overlaps(pos, actions)).toBe(false);
+    expect(overlaps(pos, selection)).toBe(false);
+  });
 });
