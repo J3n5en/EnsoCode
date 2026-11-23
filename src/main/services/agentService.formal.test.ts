@@ -560,6 +560,7 @@ const configs = [
             sends: 1,
             resumes: 1,
             crashes: 1,
+            holds: 0,
           },
           min: 100_000,
         },
