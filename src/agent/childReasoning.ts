@@ -57,16 +57,15 @@ export function thinkingToOverride(thinking: ChildThinkingLevel): ChildReasoning
 }
 
 /**
- * 合并子会话推理覆盖来源：派发 thinking > 类型预设 > 模型条目预设；逐字段回落。
+ * 合并子会话显式推理覆盖：派发 thinking > 类型预设。父会话与模型条目预设由 resolveChildReasoning 兜底。
  */
 export function pickChildReasoningOverride(
   dispatched: ChildThinkingLevel | undefined,
-  agentTypeOverride: ChildReasoningOverride | undefined,
-  modelOverride: ChildReasoningOverride | undefined
+  agentTypeOverride: ChildReasoningOverride | undefined
 ): ChildReasoningOverride {
   if (dispatched) return thinkingToOverride(dispatched);
-  const reasoning = agentTypeOverride?.reasoning ?? modelOverride?.reasoning;
-  const thinkingLevel = agentTypeOverride?.thinkingLevel ?? modelOverride?.thinkingLevel;
+  const reasoning = agentTypeOverride?.reasoning;
+  const thinkingLevel = agentTypeOverride?.thinkingLevel;
   return {
     ...(reasoning ? { reasoning } : {}),
     ...(thinkingLevel ? { thinkingLevel } : {}),
@@ -74,18 +73,26 @@ export function pickChildReasoningOverride(
 }
 
 /**
- * 子会话推理决策：派发 thinking / 条目级覆盖赢过父会话；
- * 缺省 = 跟随父。关闭时档位恒为 'off'（pi 不发 thinking）。
+ * 子会话推理决策：显式覆盖（派发/类型预设）> 父会话当前选择 > 模型条目预设 > medium。
+ * 父会话开启推理即视为给了值，模型条目只在父关闭或无档位时兜底。关闭时档位恒为 'off'（pi 不发 thinking）。
  */
 export function resolveChildReasoning(
   override: ChildReasoningOverride | undefined,
   parentEnabled: boolean,
-  parentLevel?: ThinkingLevel
+  parentLevel?: ThinkingLevel,
+  modelOverride?: ChildReasoningOverride
 ): { enabled: boolean; level: ThinkingLevel | 'off' } {
-  const enabled = override?.reasoning ? override.reasoning === 'on' : parentEnabled;
+  const enabled = override?.reasoning
+    ? override.reasoning === 'on'
+    : parentEnabled || modelOverride?.reasoning === 'on';
+  if (!enabled) return { enabled, level: 'off' };
   return {
     enabled,
-    level: enabled ? (override?.thinkingLevel ?? parentLevel ?? 'medium') : 'off',
+    level:
+      override?.thinkingLevel ??
+      (parentEnabled ? parentLevel : undefined) ??
+      modelOverride?.thinkingLevel ??
+      'medium',
   };
 }
 

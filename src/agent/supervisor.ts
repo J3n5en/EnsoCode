@@ -3085,13 +3085,24 @@ export class SessionSupervisor {
             : Promise.resolve([]);
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
         const base = await resolveSessionModel(runtime, selectedModel);
-        // 派发 thinking > 类型预设 > 模型条目预设 > 父会话。
+        // 派发 thinking > 类型预设 > 父会话 > 模型条目预设：默认值不压过用户当下的选择。
         // 类型预设来源：typed-spawn 用 resolved（Main 组装的类型配置），
         // coworker 直雇用 agentType（worker 侧快照）——此前 typed-spawn 不传，类型档被静默丢弃。
+        // 父会话读实时状态：会话中途改档走 set-thinking/set-reasoning，闭包里的 spawn 参数已过期。
+        const parentSession = this.sessions.get(identity.sessionId)?.session;
+        const parentLevel = parentSession
+          ? parentSession.thinkingLevel
+          : reasoningEnabled
+            ? thinkingLevel
+            : 'off';
+        const parentEnabled = parentSession
+          ? parentSession.model?.reasoning === true && parentLevel !== 'off'
+          : reasoningEnabled;
         const childReasoning = resolveChildReasoning(
-          pickChildReasoningOverride(thinkingOverride, resolved ?? agentType, selectedModel),
-          reasoningEnabled,
-          thinkingLevel
+          pickChildReasoningOverride(thinkingOverride, resolved ?? agentType),
+          parentEnabled,
+          parentLevel === 'off' ? undefined : parentLevel,
+          selectedModel
         );
         const fittedReasoning = fitChildReasoningToModel(childReasoning, base);
         const subModel = applyReasoningToModel(
