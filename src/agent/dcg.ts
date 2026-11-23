@@ -45,14 +45,18 @@ const TEMP_TOKEN = [
   String.raw`(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|[A-Z]:[\\/]+Users[\\/]+[^\\/\s'"]+)[\\/]+AppData[\\/]+Local[\\/]+Temp`,
   String.raw`[A-Z]:[\\/]+Windows[\\/]+Temp`,
   String.raw`\[(?:System\.)?IO\.Path\]::GetTempPath\(\)`,
+  // macOS / Linux：/tmp、/var/tmp、/private/tmp 与 $TMPDIR；./tmp、build/tmp 这类项目内路径不算
+  String.raw`(?<![\w.~$/-])(?:/private)?(?:/var)?/tmp`,
+  String.raw`\$\{?TMPDIR\}?`,
 ].join('|');
-/** Temp 根本身或根下通配（`\*`、`\*.*`）；后面跟具体子目录名的不算 */
+const PATH_STOP = String.raw`\s'"\x60;|,)&}`;
+/** Temp 根本身或根下带通配的一层（`\*`、`\*.tmp`、`tmp*`）；后面跟具体子目录名的不算 */
 const TEMP_ROOT_REF = new RegExp(
-  String.raw`(?:${TEMP_TOKEN})(?:[\\/]+(?:\*(?:\.\*)?)?)?(?=$|[\s'"\x60;|,)&}])`,
+  String.raw`(?:${TEMP_TOKEN})(?:[\\/]+(?:[^\\/${PATH_STOP}]*[*?][^\\/${PATH_STOP}]*)?)?(?=$|[${PATH_STOP}*])`,
   'i'
 );
 const DELETE_VERB =
-  /(?:^|[\s;|&({])(?:Remove-Item|ri|rm|rmdir|rd|del|erase)(?=\s|$)|\.Delete\s*\(/i;
+  /(?:^|[\s;|&({'"])(?:Remove-Item|ri|rm|rmdir|rd|del|erase)(?=\s|$)|\.Delete\s*\(/i;
 
 /** 命令里有删除动作且引用了系统 Temp 根：全系统共用目录，误删会伤到别的程序 */
 export function deletesTempRoot(command: string): boolean {

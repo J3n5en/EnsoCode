@@ -54,6 +54,18 @@ describe('deletesTempRoot', () => {
       'Remove-Item (Join-Path $env:TEMP "*") -Recurse',
       'Remove-Item ~\\AppData\\Local\\Temp\\* -Recurse',
       'Clear-RecycleBin; ri $env:temp\\* -r',
+      // 根下按通配删一批：会连带删掉别的程序的同类文件
+      'Remove-Item $env:TEMP\\*.tmp -Force',
+      'Remove-Item "$env:TEMP\\tmp*" -Recurse',
+      'cmd /c "del /q %TEMP%\\*"',
+      // macOS / Linux 的 Temp 根同样只读不删
+      'rm -rf /tmp/*',
+      'rm -rf /tmp',
+      'rm -rf /private/tmp/enso-*',
+      'rm -rf /var/tmp/*',
+      'rm -rf $TMPDIR/*',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell 的 ${TMPDIR} 写法
+      'rm -rf "${TMPDIR}"*',
     ]) {
       expect(deletesTempRoot(command), command).toBe(true);
     }
@@ -69,6 +81,10 @@ describe('deletesTempRoot', () => {
       'Set-Content $env:TEMP\\enso\\x\\a.txt hi',
       'Remove-Item .\\build -Recurse',
       'rm -rf /tmp/x',
+      'rm -rf "$TMPDIR/enso-x"',
+      'rm -rf ./tmp/*',
+      'rm -rf build/tmp/*',
+      'ls /tmp',
       'Write-Output "remove temp files"',
     ]) {
       expect(deletesTempRoot(command), command).toBe(false);

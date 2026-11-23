@@ -23,6 +23,7 @@ import {
 } from './backgroundTasks';
 import { ForegroundDetachedError } from './foregroundCommand';
 import { createSessionCommandTool } from './sessionShell';
+import { sessionTempRoot } from './sessionTempDir';
 
 const makeManager = (limits?: Partial<ShellLimits>) => {
   const notified: string[] = [];
@@ -113,7 +114,7 @@ describe('withBackground promptSnippet 跟随工具名', () => {
     expect(ps.promptSnippet).toMatch(/PowerShell/);
     expect(ps.description).toMatch(/Select-Object -First/);
     // 临时文件指向会话专属目录，而不是全系统共用的 $env:TEMP 根
-    expect(ps.description).toContain(path.join(tmpdir(), 'enso', 's1'));
+    expect(ps.description).toContain(path.join(sessionTempRoot(), 's1'));
     expect(ps.description).not.toMatch(/and \$env:TEMP,/);
     expect(ps.description).toMatch(/never .*\$env:TEMP root/i);
     expect(ps.description).toMatch(/Get-Content/);
@@ -125,7 +126,7 @@ describe('withBackground promptSnippet 跟随工具名', () => {
     const bash = tool('bash');
     expect(bash.description).toMatch(/cat\/head\/tail\/sed\/nl/);
     expect(bash.description).not.toMatch(/Select-Object|Get-Content|\$env:/);
-    expect(bash.description).not.toContain(path.join(tmpdir(), 'enso'));
+    expect(bash.description).not.toContain(sessionTempRoot());
     expect(bash.promptGuidelines?.[0]).toMatch(/nohup/);
   });
 
@@ -144,10 +145,10 @@ describe('withBackground promptSnippet 跟随工具名', () => {
         sessionId,
         cwd
       ).description;
-    expect(ps('s2', '/work/project')).toContain(path.join(tmpdir(), 'enso', 's2'));
-    expect(ps('s2', '/work/project')).not.toContain(path.join(tmpdir(), 'enso', 's1'));
+    expect(ps('s2', '/work/project')).toContain(path.join(sessionTempRoot(), 's2'));
+    expect(ps('s2', '/work/project')).not.toContain(path.join(sessionTempRoot(), 's1'));
     const inProject = ps('s1', tmpdir());
-    expect(inProject).not.toContain(path.join(tmpdir(), 'enso'));
+    expect(inProject).not.toContain(sessionTempRoot());
     expect(inProject).toMatch(/never .*\$env:TEMP root/i);
   });
 
