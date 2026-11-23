@@ -1406,7 +1406,7 @@ const electronAPI = {
     fork: (
       sessionId: string,
       targetConversationId: string,
-      anchor: { entryId: string } | { userIndexFromEnd: number }
+      anchor: { entryId: string } | { turnIndexFromEnd: number }
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_FORK, sessionId, targetConversationId, anchor),
     /** 上报当前正在查看的会话（null = 没在看任何会话），供 main 抑制重复的系统通知 */

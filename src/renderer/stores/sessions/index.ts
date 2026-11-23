@@ -570,7 +570,7 @@ interface SessionsState {
   compact(conversationId: string, instructions?: string, options?: { quiet?: boolean }): void;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
-  forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
+  forkFromMessage(conversationId: string, turnIndexFromEnd: number): Promise<string | null>;
   forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
   /** 时间线轮末行分叉：按本轮 user entryId 定位（压缩前的早期轮次也可用） */
   forkFromTurn(conversationId: string, turnKey: number): Promise<string | null>;
@@ -4182,9 +4182,9 @@ export const useSessionsStore = create<SessionsState>()(
           })();
         },
 
-        async forkFromMessage(conversationId, userIndexFromEnd) {
+        async forkFromMessage(conversationId, turnIndexFromEnd) {
           if (!(await wakeForFork(conversationId))) return null;
-          return forkConversation(get, set, conversationId, { userIndexFromEnd });
+          return forkConversation(get, set, conversationId, { turnIndexFromEnd });
         },
 
         async forkFromEntry(conversationId, entryId) {
@@ -4710,7 +4710,7 @@ async function forkConversation(
   },
   _set: unknown,
   sourceId: string,
-  anchor: { entryId: string } | { userIndexFromEnd: number }
+  anchor: { entryId: string } | { turnIndexFromEnd: number }
 ): Promise<string | null> {
   const source = get().conversations[sourceId];
   if (
@@ -4725,7 +4725,7 @@ async function forkConversation(
   const targetId = await get().newConversation(source.projectId, {
     forkedFrom: {
       conversationId: source.id,
-      entryId: 'entryId' in anchor ? anchor.entryId : `user:${anchor.userIndexFromEnd}`,
+      entryId: 'entryId' in anchor ? anchor.entryId : `turn:${anchor.turnIndexFromEnd}`,
     },
   });
   if (!targetId) return null;

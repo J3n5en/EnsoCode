@@ -2672,7 +2672,7 @@ export function rewindSession(
 export function forkSession(
   identity: SessionIdentity,
   targetConversationId: string,
-  anchor: { entryId: string } | { userIndexFromEnd: number }
+  anchor: { entryId: string } | { turnIndexFromEnd: number }
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({
     type: 'fork',
@@ -2680,7 +2680,7 @@ export function forkSession(
     targetConversationId,
     ...('entryId' in anchor
       ? { entryId: anchor.entryId }
-      : { userIndexFromEnd: anchor.userIndexFromEnd }),
+      : { turnIndexFromEnd: anchor.turnIndexFromEnd }),
   });
 }
 
