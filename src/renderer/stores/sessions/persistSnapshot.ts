@@ -116,7 +116,12 @@ function persistOne(conversation: PersistableConversation): PersistableConversat
   };
 }
 
-type PersistedEntry = { value: PersistableConversation; json: string };
+type PersistedEntry = {
+  value: PersistableConversation;
+  json: string;
+  /** queuedStart 的对象身份。同一会话对象上删掉它时必须重算，不能把旧值写回去 */
+  queuedStamp: unknown;
+};
 
 // 每次 set 都会 partialize：按会话对象身份缓存，流式时只有活跃会话重算，其余几百个直接复用
 const entries = new WeakMap<PersistableConversation, PersistedEntry>();
@@ -127,10 +132,12 @@ let cached: {
 } | null = null;
 
 function entryOf(conversation: PersistableConversation): PersistedEntry {
+  const queuedStamp = conversation.queuedStart;
   let entry = entries.get(conversation);
+  if (entry && entry.queuedStamp !== queuedStamp) entry = undefined;
   if (!entry) {
     const value = persistOne(conversation);
-    entry = { value, json: JSON.stringify(value) };
+    entry = { value, json: JSON.stringify(value), queuedStamp };
     entries.set(conversation, entry);
   }
   return entry;
@@ -148,6 +155,7 @@ export function cachedPartializeSessions(state: SessionsPersistSlice): SessionsP
     let entry = entryOf(conversation);
     const old = previous?.entries.get(id);
     if (old && old !== entry && old.json === entry.json) {
+      old.queuedStamp = conversation.queuedStart;
       entry = old;
       entries.set(conversation, old);
     }
