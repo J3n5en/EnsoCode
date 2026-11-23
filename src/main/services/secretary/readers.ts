@@ -21,6 +21,7 @@ import {
   type SessionToolActivity,
 } from '../sessionActivity';
 import { currentBranch, repoIsClean } from '../worktree/service';
+import { autoArchived } from './autoArchive';
 import { leftoverReason, taskIsPersistent } from './leftover';
 import { projectAliasesFromSettings, secretaryProjectNames } from './projectLabel';
 import {
@@ -79,6 +80,8 @@ export interface SecretaryReadPorts {
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
   /** 派发记录上的结构化结果；缺省表示没有 */
   goalResult?(conversationId: string): MaybePromise<GoalResultView | undefined>;
+  /** 这条已归档的行是不是派出会话完成后被 Main 自动归档的；缺省表示都不是 */
+  autoArchived?(conversationId: string, row: Record<string, unknown>): MaybePromise<boolean>;
   /** 只读 git；路径越界校验与采集都在 repoStatus 里 */
   repo: RepoStatusDeps;
 }
@@ -177,7 +180,11 @@ export function visibleProjects(
  * 秘书可见的会话：可见项目里的根会话，排除 child、bot、已归档与没有权威记录的残留行。
  * 排序在调用方按需截断，保证 session_list 与 project_info 的最近活跃口径一致。
  */
-async function collect(ports: SecretaryReadPorts): Promise<{
+async function collect(
+  ports: SecretaryReadPorts,
+  /** session_read 读完成结果：放行 Main 自动归档的派出会话，用户手动归档的仍不可见 */
+  withAutoArchived = false
+): Promise<{
   projects: ProjectAuthority[];
   sessions: ListedSession[];
 }> {
@@ -190,7 +197,11 @@ async function collect(ports: SecretaryReadPorts): Promise<{
   const sessions: ListedSession[] = [];
   for (const [conversationId, row] of Object.entries(await ports.rows())) {
     if (row.parentId !== undefined || row.btwParentId !== undefined) continue;
-    if (row.archived === true) continue;
+    if (
+      row.archived === true &&
+      !(withAutoArchived && (await ports.autoArchived?.(conversationId, row)) === true)
+    )
+      continue;
     const projectId = typeof row.projectId === 'string' ? row.projectId : undefined;
     if (!projectId || !visibleIds.has(projectId)) continue;
     const authority = authorities.get(conversationId);
@@ -386,7 +397,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const entryId = stringParam(params, 'entryId');
       const target =
         entryId !== undefined ? { entryId } : index !== undefined ? { index } : undefined;
-      const { sessions } = await collect(ports);
+      const { sessions } = await collect(ports, true);
       const session = sessions.find((candidate) => candidate.conversationId === conversationId);
       if (!session) return notFound;
       // 全文模式：按 entryId（优先）或 index 读单条消息，按 offset 分页；只放行 user / assistant，工具输出不外泄
@@ -602,6 +613,10 @@ export function readPortsFor(
     },
     goalResult(conversationId) {
       return new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId]?.goalResult;
+    },
+    autoArchived(conversationId, row) {
+      const record = new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId];
+      return record ? autoArchived(record, row) : false;
     },
     repo: realRepoDeps,
   };
