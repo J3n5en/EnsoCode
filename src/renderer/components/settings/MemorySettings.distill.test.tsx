@@ -271,4 +271,36 @@ describe('MemorySettings 提炼按钮状态', () => {
     });
     expect(distillAllButton()).toBeNull();
   });
+
+  it('中文界面下后台任务列表把排队中/进行中/已完成/失败翻译成中文，不展示英文 queued', async () => {
+    jobs = {
+      ...jobs,
+      distill: [
+        job(1, 'pending', 's1'),
+        job(2, 'running', 's2'),
+        { ...job(3, 'done', 's3'), done: 2 },
+        { ...job(4, 'done', 's4'), error: 'network error' },
+      ],
+      reembed: {
+        id: 9,
+        target: 'local:embed',
+        status: 'done',
+        cursor: 3,
+        total: 3,
+        done: 2,
+        failed: 1,
+        error: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    };
+    await mount();
+    const jobsSection = container.querySelector('[data-settings-row="memory.jobs"]');
+    expect(jobsSection?.textContent).toContain('排队中');
+    expect(jobsSection?.textContent).toContain('进行中');
+    expect(jobsSection?.textContent).toContain('已存 2 条');
+    expect(jobsSection?.textContent).toContain('network error');
+    expect(jobsSection?.textContent).toContain('已向量化 2 条 · 1 条失败');
+    expect(jobsSection?.textContent).not.toContain('queued');
+  });
 });

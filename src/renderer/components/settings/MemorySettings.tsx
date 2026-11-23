@@ -584,7 +584,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   ];
   const showRemotePicker =
     isRemoteEmbeddingId(embeddingModel) || selectedModel?.runtime === 'openai-compatible';
-  const jobRows = React.useMemo(() => toJobRows(jobs), [jobs]);
+  const jobRows = React.useMemo(() => toJobRows(jobs, t), [jobs, t]);
   const runningSessions = React.useMemo(() => runningDistillSessions(jobs), [jobs]);
   runningSessionsRef.current = runningSessions;
   const distillBusy = distilling !== null || runningSessions.size > 0;

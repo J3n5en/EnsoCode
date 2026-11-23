@@ -1,3 +1,4 @@
+import { translate } from '@shared/i18n';
 import type { DistillJobDto, KgJobDto, MemoryJobsSnapshot } from '@shared/memory/dto';
 import { describe, expect, it } from 'vitest';
 import { toJobRows } from './memoryJobRows';
@@ -164,5 +165,112 @@ describe('toJobRows', () => {
 
   it('is empty when nothing ever ran', () => {
     expect(toJobRows(snapshot())).toEqual([]);
+  });
+
+  it('translates queued, running, retry, done, cancelled and failed job details into zh and en', () => {
+    const zh = (key: string, params?: Record<string, string | number>) =>
+      translate('zh', key, params);
+    const en = (key: string, params?: Record<string, string | number>) =>
+      translate('en', key, params);
+
+    const data = snapshot({
+      distill: [
+        distill({ id: 1, status: 'pending', attempts: 0 }),
+        distill({ id: 2, status: 'running', attempts: 1 }),
+        distill({ id: 3, status: 'pending', attempts: 3 }),
+        distill({
+          id: 4,
+          status: 'done',
+          done: 2,
+          notes: [{ kind: 'low_importance', title: 'Chatter', detail: '' }],
+        }),
+        distill({ id: 5, status: 'cancelled' }),
+        distill({ id: 6, status: 'done', error: 'provider down' }),
+      ],
+      kg: [
+        kg({ id: 10, status: 'pending' }),
+        kg({ id: 11, status: 'running' }),
+        kg({ id: 12, status: 'done', total: 3, done: 2 }),
+        kg({ id: 13, status: 'cancelled' }),
+      ],
+      reembed: {
+        id: 20,
+        target: 'local:embed',
+        status: 'done',
+        cursor: 5,
+        total: 5,
+        done: 4,
+        failed: 1,
+        error: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+    });
+
+    const zhRows = toJobRows(data, zh);
+    const zhDetail = (key: string) => zhRows.find((r) => r.key === key)?.detail;
+    expect(zhDetail('distill:1')).toBe('排队中');
+    expect(zhDetail('distill:2')).toBe('进行中');
+    expect(zhDetail('distill:3')).toBe('第 3 次重试');
+    expect(zhDetail('distill:4')).toBe('已存 2 条');
+    expect(zhRows.find((r) => r.key === 'distill:4')?.notes).toEqual(['Chatter — 重要度过低']);
+    expect(zhDetail('distill:5')).toBe('已替代');
+    expect(zhDetail('distill:6')).toBe('provider down');
+    expect(zhDetail('kg:10')).toBe('排队中');
+    expect(zhDetail('kg:11')).toBe('抽取中');
+    expect(zhDetail('kg:12')).toBe('3 个实体 · 2 条关系');
+    expect(zhDetail('kg:13')).toBe('记忆已变更');
+    expect(zhDetail('reembed:20')).toBe('已向量化 4 条 · 1 条失败');
+
+    const enRows = toJobRows(data, en);
+    const enDetail = (key: string) => enRows.find((r) => r.key === key)?.detail;
+    expect(enDetail('distill:1')).toBe('queued');
+    expect(enDetail('distill:2')).toBe('running');
+    expect(enDetail('distill:3')).toBe('retry 3');
+    expect(enDetail('distill:4')).toBe('2 stored');
+    expect(enDetail('distill:5')).toBe('superseded');
+    expect(enDetail('distill:6')).toBe('provider down');
+    expect(enDetail('kg:10')).toBe('queued');
+    expect(enDetail('kg:11')).toBe('extracting');
+    expect(enDetail('kg:12')).toBe('3 entities · 2 links');
+    expect(enDetail('kg:13')).toBe('memory changed');
+    expect(enDetail('reembed:20')).toBe('4 vectorized · 1 failed');
+
+    const cancelledReembed = toJobRows(
+      snapshot({
+        reembed: {
+          id: 21,
+          target: 'local:embed',
+          status: 'cancelled',
+          cursor: 0,
+          total: 5,
+          done: 0,
+          failed: 0,
+          error: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      }),
+      zh
+    );
+    expect(cancelledReembed[0].detail).toBe('已取消');
+    const cancelledReembedEn = toJobRows(
+      snapshot({
+        reembed: {
+          id: 21,
+          target: 'local:embed',
+          status: 'cancelled',
+          cursor: 0,
+          total: 5,
+          done: 0,
+          failed: 0,
+          error: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      }),
+      en
+    );
+    expect(cancelledReembedEn[0].detail).toBe('cancelled');
   });
 });
