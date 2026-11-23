@@ -764,6 +764,12 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_SUBAGENT_PROGRESS_CHANGED: excluded(
     'Main-to-renderer push of running subagent progress snapshots for the desktop wait row.'
   ),
+  AGENT_REMINDERS_LIST: excluded(
+    'Read-only snapshot of pending session reminders shown in the desktop sidebar and GoalBar; renderer-only, not an Enso capability.'
+  ),
+  AGENT_REMINDERS_CHANGED: excluded(
+    'Main-to-renderer push of pending session reminder updates for the desktop sidebar and GoalBar.'
+  ),
   AGENT_WORKFLOW_STOP: excluded('Side panel control to stop a running workflow run.'),
   AGENT_SUBAGENT_STOP: excluded(
     'Desktop TaskBar control to abort a stuck or running subagent; renderer-only, not an Enso capability.'

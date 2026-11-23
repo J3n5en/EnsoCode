@@ -174,7 +174,10 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
       // 背压：缓冲超过 1MB 就拒，调用方改走中继
       if (dc.bufferedAmount() > 1_048_576) return false;
       try {
-        return dc.sendMessageBinary(bytes);
+        // libdatachannel 的 sendMessageBinary 返回 false 仅表示数据进了发送缓冲（仍会发出），
+        // 真正失败（未开/已关/超限）会抛异常；忽略返回值以免触发 DirectLink 误拆直连
+        dc.sendMessageBinary(bytes);
+        return true;
       } catch {
         return false;
       }

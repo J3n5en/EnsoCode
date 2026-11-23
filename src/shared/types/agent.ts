@@ -93,6 +93,7 @@ import {
 import { type PrivacyMaskSettings, parsePrivacyMaskSettings } from '../privacyMask/settings';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
 import { parseProviderHeaders } from '../providers/providerHeaders';
+import type { SessionReminderSummary } from '../reminders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
 import { parseSecretaryToolDescriptors } from '../secretary/customTools';
@@ -2091,6 +2092,7 @@ export type RendererAgentEvent =
       | { type: 'background-tasks-detached' }
       | { type: 'session-wake-requested' }
       | { type: 'session-reminder-due' }
+      | { type: 'session-reminders-changed' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2505,6 +2507,12 @@ export type AgentWorkerEvent =
       /** 根会话的自定提醒到点：Main 判定会话还在（未删除、未归档）后回 reminders-fire，冷会话先打开。旁路消费 */
       type: 'session-reminder-due';
       sessionId: string;
+    }
+  | {
+      /** 根会话（含子会话）未到点提醒快照变更：Main 转发给渲染层并刷新秘书看板。旁路消费 */
+      type: 'session-reminders-changed';
+      sessionId: string;
+      reminders: SessionReminderSummary[];
     }
   | {
       /**
@@ -5023,6 +5031,29 @@ const agentWorkerEventParsers = {
     return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
       ? (value as unknown as AgentWorkerEvent)
       : null;
+  },
+  'session-reminders-changed': (value: Record<string, unknown>): AgentWorkerEvent | null => {
+    if (
+      !hasExactKeys(value, ['type', 'sessionId', 'reminders']) ||
+      !isNonEmptyString(value.sessionId) ||
+      !Array.isArray(value.reminders)
+    ) {
+      return null;
+    }
+    for (const item of value.reminders) {
+      if (
+        !isRecord(item) ||
+        !hasOnlyKeys(item, ['id', 'dueAt', 'label']) ||
+        !isNonEmptyString(item.id) ||
+        typeof item.dueAt !== 'number' ||
+        !Number.isFinite(item.dueAt) ||
+        item.dueAt < 0 ||
+        (item.label !== undefined && typeof item.label !== 'string')
+      ) {
+        return null;
+      }
+    }
+    return value as unknown as AgentWorkerEvent;
   },
   'unopened-background-tasks': (value: Record<string, unknown>): AgentWorkerEvent | null => {
     return hasExactKeys(value, ['type', 'sessionId', 'tasks']) &&

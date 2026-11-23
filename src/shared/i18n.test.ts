@@ -161,6 +161,8 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Parent ready model did not match the bound model.',
   'Child ready identity mismatch.',
   'Child ready profile or model mismatch.',
+  // SecretaryRunningList.BADGE_STYLE + sessionFeed 等提醒文案
+  'Waiting for reminder',
 ] as const;
 
 describe('normalizeLocale', () => {
