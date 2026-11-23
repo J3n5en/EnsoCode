@@ -1,5 +1,6 @@
 import { stripBrowserElementBlocks } from './browser/designAnnotation';
 import { PASTED_TEXT_FILE_NAME, stripPastedTextRefs } from './pastedText';
+import { quotesAsMarkdown, withoutQuoteBlocks } from './quoteBlock';
 import { userTextWithoutSkills } from './skillCommands';
 import { splitUnattendedPrefix } from './unattendedNote';
 import { parseWorkflowPresetMessage } from './workflowPresetMessage';
@@ -10,7 +11,7 @@ export const INLINE_UI_REF = /\[Selected UI element "([^"]*)" — path: (.*?); t
 
 /** 把引用块折叠成 @标题，供标题/纯文本展示用（引用块原文不得污染标题） */
 export function mentionDisplayText(text: string): string {
-  return stripBrowserElementBlocks(text)
+  return quotesAsMarkdown(stripBrowserElementBlocks(text))
     .replace(INLINE_CHAT_REF, (_match, label: string) => `@${label}`)
     .replace(INLINE_UI_REF, (_match, label: string) => `@${label}`);
 }
@@ -22,7 +23,7 @@ export function cleanTitleSummarySource(text: string): string {
   const prepared = stripBrowserElementBlocks(
     stripPastedTextRefs(splitUnattendedPrefix(text).rest)
   ).trim();
-  const skills = userTextWithoutSkills(prepared);
+  const skills = userTextWithoutSkills(withoutQuoteBlocks(prepared));
   const trimmed = skills.text;
   if (!trimmed) return skills.names[0] ?? '';
 
@@ -69,7 +70,7 @@ export function extractRepresentativeTitle(text: string): string {
     if (skills.names[0]) return skills.names[0].slice(0, 40);
     return withoutPasted === text ? '[image]' : PASTED_TEXT_FILE_NAME;
   }
-  const displayed = mentionDisplayText(skills.text);
+  const displayed = mentionDisplayText(withoutQuoteBlocks(skills.text));
   const lines = displayed
     .split('\n')
     .map((l) => l.trim())

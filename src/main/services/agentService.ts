@@ -233,6 +233,8 @@ const RESTART_LIMIT_TEXT = `It was already resumed automatically ${AGENT_TASK_MA
 
 const USER_STOPPED_TEXT =
   '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
+const PARENT_STOPPED_TEXT =
+  '用户停止了父会话，这个子代理随之停止：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
 
 const LIST_HINT = 'Use subagent list to see the subagents this conversation has now.';
 
@@ -326,6 +328,8 @@ export class AgentService implements AgentServiceContract {
   private readonly runs = new Map<string, RunRecord>();
   private readonly waiters = new Set<Waiter>();
   private readonly queues = new Map<string, Promise<void>>();
+  /** 每个父会话被用户停止的次数：spawn 初始化期间计数变了就撤回，不起 Run */
+  private readonly ownerStops = new Map<string, number>();
   /** 上次 Main 运行留下的 Run 台账：只用于认出重启前的 id */
   private readonly previousRuns = new Map<string, AgentRunLedgerEntry>();
   /** 最近一次重启断点里的子会话：child sessionId → 断点条目 */
@@ -410,6 +414,7 @@ export class AgentService implements AgentServiceContract {
     }
     const reservationId = this.randomUuid();
     const runId = this.randomUuid();
+    const stops = this.ownerStops.get(request.context.owner.ownerId);
     let identity: ChildSessionIdentity;
     try {
       identity = await this.options.runtime.spawn({
@@ -446,7 +451,13 @@ export class AgentService implements AgentServiceContract {
     const run = this.createRun(agent, runId, request.prompt, request.schema, request.gate);
     this.agents.set(agentId, agent);
     this.runs.set(runId, run);
-    const started = await this.startRun(agent, run, true);
+    const started =
+      this.ownerStops.get(request.context.owner.ownerId) === stops
+        ? await this.startRun(agent, run, true)
+        : failure(
+            'invalid-state',
+            'The user stopped the parent conversation while this subagent was starting, so it was not started.'
+          );
     if (!started.ok) {
       this.agents.delete(agentId);
       this.runs.delete(runId);
@@ -598,6 +609,56 @@ export class AgentService implements AgentServiceContract {
         await this.startNext(agent);
       }
       return { ok: true, value: this.snapshot(run.value) };
+    });
+  }
+
+  /**
+   * 用户停止父会话：名下未结束的 Run 按用户中止收口（task 停放可 resume，coworker 回到 ready），
+   * 视同知情、不再唤醒父会话。排队的撤掉；子会话停不下来也照样收口；初始化中的 spawn 由计数撤回。
+   */
+  cancelOwner(ownerId: string): Promise<void> {
+    this.ownerStops.set(ownerId, (this.ownerStops.get(ownerId) ?? 0) + 1);
+    return this.serial(ownerId, async () => {
+      const open = [...this.runs.values()].filter(
+        (run) => run.context.owner.ownerId === ownerId && !TERMINAL_RUN_STATUSES.has(run.status)
+      );
+      for (const run of open) {
+        run.delivered = true;
+        run.stopRequested = true;
+        // 等重启续跑的也算停：不再自动接着跑，台账不再留续跑记录
+        run.restartCandidate = false;
+        const agent = this.agents.get(run.agentId);
+        if (agent && 'queue' in agent.state) {
+          const queue = agent.state.queue.filter((id) => id !== run.runId);
+          this.transition(agent, { ...agent.state, queue });
+        }
+      }
+      await Promise.all(
+        open.map(async (run) => {
+          const agent = this.agents.get(run.agentId);
+          if (agent && run.restartPending) {
+            run.restartPending = false;
+            this.finishRun(run, 'interrupted', PARENT_STOPPED_TEXT);
+            return;
+          }
+          if (!agent || run.status === 'queued') {
+            this.finishRun(run, 'cancelled');
+            return;
+          }
+          if (run.status === 'validating') run.validationAbort?.abort();
+          else {
+            await this.options.runtime
+              .stop({
+                context: run.context,
+                identity: agent.identity,
+                agentId: agent.agentId,
+                runId: run.runId,
+              })
+              .catch(() => undefined);
+          }
+          this.settleRun(agent, run, 'interrupted', PARENT_STOPPED_TEXT, true);
+        })
+      );
     });
   }
 

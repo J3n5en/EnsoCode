@@ -156,7 +156,9 @@ export const hireCoworker = vi.fn(
 export const summarizeTitle = vi.fn(
   async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })
 );
-export const agentAbort = vi.fn(async (_id: string) => ({ ok: true }));
+export const agentAbort = vi.fn(async (_id: string, _options?: { stopSubagents?: boolean }) => ({
+  ok: true,
+}));
 export const agentRelease = vi.fn(async (_id: string) => ({ ok: true }));
 export const btwSpawn = vi.fn(async () => ({ ok: true }));
 export const btwDispose = vi.fn(async () => ({ ok: true }));

@@ -337,4 +337,30 @@ describe('重启打断的子代理自动续跑', () => {
     expect(runtime.retry).toHaveBeenCalledWith(expect.objectContaining({ runId: spawned.runId }));
     expect(notify).not.toHaveBeenCalled();
   });
+
+  it('等续跑期间用户停止父会话：不再自动续跑，task 停放可手动 resume，台账不留续跑记录', async () => {
+    const ledger = fileLikeLedger();
+    const notify = vi.fn();
+    const { service, runtime, children } = setup({ ledger, notify });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.noteRestartCheckpoint(checkpointOf(children[0]));
+    service.observe({ type: 'worker-exited' });
+
+    await service.cancelOwner('chat-1');
+    service.recoverOwner(context);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(runtime.retry).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    expect(service.progress('chat-1')).toEqual([]);
+    expect(ledger.load().find((entry) => entry.runId === spawned.value.runId)).toMatchObject({
+      status: 'interrupted',
+      notified: true,
+    });
+    expect(ledger.load()[0]?.restart).toBeUndefined();
+    await expect(
+      service.resume({ context, requestId: 'r', agentId: spawned.value.agentId })
+    ).resolves.toMatchObject({ ok: true });
+  });
 });

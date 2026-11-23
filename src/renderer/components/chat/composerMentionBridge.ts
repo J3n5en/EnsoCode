@@ -4,7 +4,7 @@ import type {
   FileMentionCandidate,
   UiElementMentionCandidate,
 } from '@shared/types/mentions';
-import type { ComposerPayload } from './mentionComposer';
+import type { ComposerPayload, QuoteSegment } from './mentionComposer';
 
 /**
  * Composer 的 insertMention 出口。DndContext 在 App.tsx,而编辑器 ref 在
@@ -16,6 +16,7 @@ type InsertFn = (candidate: FileMentionCandidate | ChatMentionCandidate) => void
 
 let current: InsertFn | null = null;
 let insertText: ((text: string) => void) | null = null;
+let insertQuote: ((quote: QuoteSegment) => void) | null = null;
 let focusComposer: (() => void) | null = null;
 let insertUiElement:
   | ((candidate: UiElementMentionCandidate, image?: AttachedImage) => void)
@@ -49,6 +50,19 @@ export function registerComposerInsertText(fn: (text: string) => void): () => vo
 export function requestFocusComposer(): boolean {
   if (!focusComposer) return false;
   focusComposer();
+  return true;
+}
+
+export function registerComposerInsertQuote(fn: (quote: QuoteSegment) => void): () => void {
+  insertQuote = fn;
+  return () => {
+    if (insertQuote === fn) insertQuote = null;
+  };
+}
+
+export function insertComposerQuote(quote: QuoteSegment): boolean {
+  if (!insertQuote) return false;
+  insertQuote(quote);
   return true;
 }
 

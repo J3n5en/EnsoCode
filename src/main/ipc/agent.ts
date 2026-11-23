@@ -892,7 +892,14 @@ export function setAskRelayFromMain(
 
 export function abortRootFromMain(sessionId: string): void {
   const identity = exactIdentity(sessionId);
-  if (identity) abortSession(identity);
+  if (identity) stopWithSubagents(identity);
+}
+
+/** 用户（或替用户的秘书）停止：根会话名下在跑的子代理一并停掉；插话立即发送 / 卡死重试只断当前轮 */
+function stopWithSubagents(identity: SessionIdentity): AgentActionResult {
+  const result = abortSession(identity);
+  if (!('parent' in identity)) void agentService?.cancelOwner(identity.sessionId);
+  return result;
 }
 
 /** 秘书停后台任务：身份由 Main 按会话 id 解析，模型只能给任务 id */
@@ -1484,7 +1491,7 @@ function wirePairAgentBridge(): void {
     },
     abort: (sessionId) => {
       const identity = exactIdentity(sessionId);
-      if (identity) abortSession(identity);
+      if (identity) stopWithSubagents(identity);
     },
     respondApproval: (sessionId, requestId, decision) => {
       const identity = exactIdentity(sessionId);
@@ -2926,12 +2933,19 @@ export function registerAgentHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_ABORT, (_event, sessionId: unknown): AgentActionResult => {
-    const identity = exactIdentity(sessionId);
-    return identity
-      ? abortSession(identity)
-      : { ok: false, error: 'invalid abort or stale session generation' };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_ABORT,
+    (_event, sessionId: unknown, options: unknown): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      if (!identity) return { ok: false, error: 'invalid abort or stale session generation' };
+      const stopSubagents =
+        typeof options === 'object' &&
+        options !== null &&
+        'stopSubagents' in options &&
+        options.stopSubagents === true;
+      return stopSubagents ? stopWithSubagents(identity) : abortSession(identity);
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ABORT_RETRY,

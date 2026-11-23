@@ -3,7 +3,12 @@ import { useState } from 'react';
 import { useI18n } from '@/i18n';
 import type { QueuedMessage } from '@/stores/sessions';
 import { useSessionsStore } from '@/stores/sessions';
-import { canSaveQueuedEdit, queuedAttachmentLabel } from './queueEdit';
+import {
+  canEditQueuedInline,
+  canSaveQueuedEdit,
+  queuedAttachmentLabel,
+  queuedDisplayText,
+} from './queueEdit';
 
 /**
  * 排队消息区(grok build 形态):agent 干活时用户消息先入队,显示在输入框上方;
@@ -52,7 +57,9 @@ export function MessageQueue({
               className="h-6 min-w-0 flex-1 rounded border bg-transparent px-1.5 outline-none focus:ring-1 focus:ring-ring"
             />
           ) : (
-            <span className="min-w-0 flex-1 truncate">{message.text || '[image]'}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {queuedDisplayText(message.text) || '[image]'}
+            </span>
           )}
           {queuedAttachmentLabel(message.images?.length ?? 0, t('attachments')) && (
             <span
@@ -88,17 +95,19 @@ export function MessageQueue({
               >
                 <Undo2 className="h-3 w-3" />
               </button>
-              <button
-                type="button"
-                title={t('Edit')}
-                onClick={() => {
-                  setEditingId(message.id);
-                  setDraft(message.text);
-                }}
-                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-              >
-                <Pencil className="h-3 w-3" />
-              </button>
+              {canEditQueuedInline(message.text) && (
+                <button
+                  type="button"
+                  title={t('Edit')}
+                  onClick={() => {
+                    setEditingId(message.id);
+                    setDraft(message.text);
+                  }}
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
               <button
                 type="button"
                 title={t('Send now')}
