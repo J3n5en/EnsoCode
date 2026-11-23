@@ -13,6 +13,19 @@ export interface SessionReminder {
   chain: number;
 }
 
+/** 推送给界面与秘书看板的轻量提醒摘要（不含完整 prompt） */
+export interface SessionReminderSummary {
+  id: string;
+  dueAt: number;
+  label?: string;
+}
+
+/** 下一条未到点（或宽限期内）提醒，供侧栏、GoalBar、秘书看板与工作台复用 */
+export interface PendingReminderView extends SessionReminderSummary {
+  /** 同一会话挂着多条未到点提醒时的总数 */
+  count: number;
+}
+
 export interface ReminderFile {
   version: 1;
   reminders: SessionReminder[];
@@ -86,6 +99,22 @@ export function parseReminderFile(value: unknown): ReminderFile {
 export const ownedByRoot = (sessionId: string, rootId: string): boolean =>
   sessionId === rootId || sessionId.startsWith(`${rootId}::`);
 
+/** 子会话 id（root::child）归到所属根会话 id */
+export function rootIdOfReminder(sessionId: string): string {
+  const sep = sessionId.indexOf('::');
+  return sep === -1 ? sessionId : sessionId.slice(0, sep);
+}
+
+export function toReminderSummary(
+  item: Pick<SessionReminder, 'id' | 'dueAt' | 'label'>
+): SessionReminderSummary {
+  return {
+    id: item.id,
+    dueAt: item.dueAt,
+    ...(item.label ? { label: item.label } : {}),
+  };
+}
+
 /** 根会话自己及其子会话的提醒，按到点时间排序 */
 export function remindersOf(file: ReminderFile, rootId: string): SessionReminder[] {
   return file.reminders
@@ -99,4 +128,67 @@ export function hasPendingReminder(
   now: number
 ): boolean {
   return reminders.some((item) => item.dueAt > now - REMINDER_OVERDUE_GRACE_MS);
+}
+
+/** 过滤出未超时宽限期的提醒，按到点时间升序 */
+export function pendingRemindersOf<T extends Pick<SessionReminder, 'id' | 'dueAt' | 'label'>>(
+  reminders: readonly T[],
+  now: number
+): T[] {
+  return reminders
+    .filter((item) => item.dueAt > now - REMINDER_OVERDUE_GRACE_MS)
+    .sort((a, b) => a.dueAt - b.dueAt);
+}
+
+/** 取最早一条仍在等的提醒；全部超时或为空返回 undefined */
+export function nextPendingReminder(
+  reminders: readonly Pick<SessionReminder, 'id' | 'dueAt' | 'label'>[],
+  now: number
+): PendingReminderView | undefined {
+  const pending = pendingRemindersOf(reminders, now);
+  const first = pending[0];
+  if (!first) return undefined;
+  return {
+    ...toReminderSummary(first),
+    count: pending.length,
+  };
+}
+
+/** 本地 24h 钟点（HH:MM），与上游恢复重试时间同一格式 */
+export function formatReminderClock(at: number): string {
+  const date = new Date(at);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+export type ReminderTranslate = (key: string, params?: Record<string, string | number>) => string;
+
+/** 剩余时间短语（用于悬停提示） */
+export function formatReminderRemaining(dueAt: number, now: number, t: ReminderTranslate): string {
+  const diffMs = dueAt - now;
+  if (diffMs <= 0) return t('due now');
+  if (diffMs < 60_000) return t('<1m');
+  const totalMinutes = Math.ceil(diffMs / 60_000);
+  if (totalMinutes < 60) return t('in {{minutes}}m', { minutes: totalMinutes });
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0
+    ? t('in {{hours}}h {{minutes}}m', { hours, minutes })
+    : t('in {{hours}}h', { hours });
+}
+
+/** 悬停提示：钟点 + 剩余时间 + 完整 label（多条时附总数） */
+export function formatReminderTooltip(
+  reminder: PendingReminderView,
+  now: number,
+  t: ReminderTranslate
+): string {
+  const head = `${t('Waiting for reminder · {{time}}', {
+    time: formatReminderClock(reminder.dueAt),
+  })} (${formatReminderRemaining(reminder.dueAt, now, t)})`;
+  const parts = [head];
+  if (reminder.label) parts.push(reminder.label);
+  if (reminder.count > 1) parts.push(t('{{count}} reminders', { count: reminder.count }));
+  return parts.join(' — ');
 }

@@ -1,3 +1,4 @@
+import type { SessionReminder } from '@shared/reminders';
 import {
   buildSecretaryDaily,
   DAILY_RETENTION_DAYS,
@@ -6,6 +7,7 @@ import {
 } from '@shared/secretary/daily';
 import type { ProjectAuthority } from '@shared/types/agent';
 import type { SecretaryDaily, SecretaryDispatchFile, SecretaryTodo } from '@shared/types/secretary';
+import { readSessionReminders } from '../sessionReminders';
 import { readAudit } from './audit';
 import { readDailyRecords } from './dailyLog';
 import { projectAliasesFromSettings, secretaryProjectName } from './projectLabel';
@@ -22,6 +24,7 @@ export interface SecretaryDailyPorts {
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
+  reminders?(conversationId: string): readonly SessionReminder[];
   now(): number;
 }
 
@@ -73,6 +76,7 @@ export async function buildDaily(ports: SecretaryDailyPorts, day: string): Promi
     todos,
     audit,
     session,
+    ...(ports.reminders ? { reminders: ports.reminders } : {}),
     projectName,
     ...(earliest ? { earliest } : {}),
     retentionDays: DAILY_RETENTION_DAYS,
@@ -114,6 +118,7 @@ export function dailyPortsFor(ctx: SecretaryContext): SecretaryDailyPorts {
     async projectAliases() {
       return projectAliasesFromSettings((await import('../../ipc/settings')).readSettings());
     },
+    reminders: (conversationId) => readSessionReminders(conversationId),
     now: () => Date.now(),
   };
 }

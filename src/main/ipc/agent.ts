@@ -195,6 +195,7 @@ import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import type { RestartManifestEntry } from '../services/restartManifest';
 import { ContactStore, hasContactRoutes } from '../services/secretary/contact/store';
 import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
+import { notifySecretaryChanged } from '../services/secretary/dispatch';
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { unfollowTargetEverywhere } from '../services/secretary/following';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
@@ -247,6 +248,7 @@ import {
   readExternalSession,
 } from '../services/sessionImport';
 import { setSessionMuteOverride } from '../services/sessionMuteGate';
+import { readAllSessionReminders } from '../services/sessionReminders';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { SubagentProgressPush } from '../services/subagentProgressPush';
@@ -2226,6 +2228,18 @@ export function registerAgentHandlers(): void {
       );
       return;
     }
+    if (workerEvent.type === 'session-reminders-changed') {
+      try {
+        broadcastToRenderers(IPC_CHANNELS.AGENT_REMINDERS_CHANGED, {
+          sessionId: workerEvent.sessionId,
+          reminders: workerEvent.reminders,
+        });
+      } catch {
+        // renderer 已崩但 webContents 对象还在
+      }
+      notifySecretaryChanged();
+      return;
+    }
     // 断点已落盘：记下停在安全点的子会话，worker 退出时它们的 Run 等父会话就绪后接着跑
     if (workerEvent.type === 'graceful-restart-ready')
       agentService?.noteRestartCheckpoint(workerEvent.checkpoint.sessions);
@@ -3664,6 +3678,8 @@ export function registerAgentHandlers(): void {
       return stopSubagent(identity, agentId);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_REMINDERS_LIST, () => readAllSessionReminders());
 
   ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, root: unknown, query: unknown) => {
     if (!isNonEmptyString(root) || typeof query !== 'string') return [];
