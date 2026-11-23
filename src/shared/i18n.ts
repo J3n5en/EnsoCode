@@ -535,6 +535,12 @@ export const zhTranslations: Record<string, string> = {
   'Install Finder Quick Action': '安装访达快速操作',
   "'enso' terminal command": 'enso 终端命令',
   'Finder Quick Action': '访达快速操作',
+  Troubleshooting: '故障排查',
+  'Developer tools': '开发者工具',
+  'Open the console of the main window to see errors and logs.':
+    '打开主窗口的控制台，查看报错和日志。',
+  'Could not open developer tools': '无法打开开发者工具',
+  'The main window is closed. Open it and try again.': '主窗口已关闭，请先打开主窗口再试。',
   "Couldn't install the 'enso' command": '无法安装 enso 命令',
   "Shell command 'enso' installed in {{dir}}.": '已在 {{dir}} 安装 enso 命令。',
   'Run `enso .` in a terminal to open the current folder in EnsoCode.':
