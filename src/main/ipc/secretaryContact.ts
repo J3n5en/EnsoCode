@@ -397,8 +397,10 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       openInApp: (target) => deps.openInApp(target),
       // 手机关注的任务：派发与定时写、这里读与取消，重启后还在
       following: new FollowingStore(ctx.dir),
-      onError: (code, detail) => {
-        console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
+      onError: (code, detail, channelId) => {
+        console.warn(
+          `[secretary-contact] ${channelId ? `${channelId} ` : ''}${code}${detail ? `: ${detail}` : ''}`
+        );
       },
       hub,
       secretaryId: ctx.id,
@@ -562,12 +564,22 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
         }
       );
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_TEST, async (event, secretaryId: unknown) => {
-        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        const service = target(secretaryId);
-        if (!service) return { ok: false, error: 'secretary-required' };
-        return service.sendTest();
-      });
+      // 不带渠道是 Telegram 的测试消息；带插件渠道 id 是「立即重试」：解除暂停并发一条测试消息
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_TEST,
+        async (event, secretaryId: unknown, request: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          const channelId =
+            request && typeof request === 'object' && !Array.isArray(request)
+              ? (request as Record<string, unknown>).channelId
+              : undefined;
+          if (typeof channelId === 'string' && channelId && channelId !== TELEGRAM_CHANNEL_ID)
+            return service.retryChannel(channelId);
+          return service.sendTest();
+        }
+      );
 
       ipcMain.handle(
         IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS,

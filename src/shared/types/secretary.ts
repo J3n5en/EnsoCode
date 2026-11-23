@@ -1068,4 +1068,24 @@ export interface SecretaryContactChannelView {
   detail?: string;
   caps: SecretaryContactCaps;
   prefs: SecretaryContactChannelPrefs;
+  /** 出站发送连续失败的情况；最近一次发送成功就没有 */
+  outbound?: SecretaryContactOutboundHealth;
+}
+
+/** 插件渠道出站失败：degraded 还在照常发，paused 已暂停推送，冷却到期、入站或手动重试后再发 */
+export interface SecretaryContactOutboundHealth {
+  state: 'degraded' | 'paused';
+  consecutiveFailures: number;
+  lastErrorAt: number;
+  lastErrorCode: string;
+  /** 插件给的原因，已脱敏截断 */
+  detail?: string;
+  /** 插件抛错时带的 code */
+  pluginCode?: string;
+  /** 插件给用户看的提示，原样展示 */
+  userMessage?: string;
+  /** 暂停到什么时候；到点后下一条推送试一次 */
+  pausedUntil?: number;
+  /** 暂停期间没发出去的推送条数 */
+  suppressedCount: number;
 }

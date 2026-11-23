@@ -38,9 +38,24 @@ export interface ChannelMessage {
   replyToMessageId?: string;
 }
 
-export type ChannelErrorCode = 'token-required' | 'network' | 'unauthorized' | 'api';
+/** channel-paused：宿主因连续失败暂停了这个渠道的推送，没有真的发 */
+export type ChannelErrorCode =
+  | 'token-required'
+  | 'network'
+  | 'unauthorized'
+  | 'api'
+  | 'channel-paused';
 
-export type ChannelSend = { ok: true; messageId?: string } | { ok: false; error: ChannelErrorCode };
+/** 发送失败：detail 是渠道给的原因（已脱敏截断），插件渠道还可能带插件 code 与给用户看的提示 */
+export interface ChannelFailure {
+  ok: false;
+  error: ChannelErrorCode;
+  detail?: string;
+  pluginCode?: string;
+  userMessage?: string;
+}
+
+export type ChannelSend = { ok: true; messageId?: string } | ChannelFailure;
 
 export type ChannelResult = { ok: true } | { ok: false; error: ChannelErrorCode };
 

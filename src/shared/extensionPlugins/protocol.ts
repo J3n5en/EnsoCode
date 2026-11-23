@@ -340,6 +340,8 @@ export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 export interface PluginErrorShape {
   code: string;
   message: string;
+  /** 插件给用户看的提示（如「会话已过期，请在微信里给机器人发一条消息」）；旧插件没有 */
+  userMessage?: string;
 }
 
 export interface PluginRegistrations {
