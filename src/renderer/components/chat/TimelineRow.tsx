@@ -1553,10 +1553,15 @@ function PluginMessageRow({ item }: { item: Extract<TimelineItem, { kind: 'plugi
         <span>{t('From plugin {{name}}', { name: item.pluginName })}</span>
         <span className="font-mono opacity-70">{item.pluginId}</span>
       </p>
-      <p className="whitespace-pre-wrap break-words text-foreground">{item.text}</p>
+      <div className={PLUGIN_BODY_CLASS}>
+        <Markdown text={item.text} />
+      </div>
     </div>
   );
 }
+
+/** 插件投递多是按行写的通知：段内换行照原样断行 */
+const PLUGIN_BODY_CLASS = 'break-words text-foreground [&_p]:whitespace-pre-line';
 
 /** 被 turn_discard 丢弃的插件投递：一行原因，展开看原文；模型上下文里只剩痕迹 */
 function DiscardedTurnRow({
@@ -1597,9 +1602,9 @@ function DiscardedTurnRow({
           </p>
           {item.messages.map((text, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: 投递原文只读、顺序固定
-            <p key={i} className="whitespace-pre-wrap break-words text-foreground">
-              {text}
-            </p>
+            <div key={i} className={PLUGIN_BODY_CLASS}>
+              <Markdown text={text} />
+            </div>
           ))}
           {item.tools.map((tool, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: 只读工具记录只读、顺序固定

@@ -656,6 +656,24 @@ describe('compaction 摘要行', () => {
     });
   });
 
+  it('插件消息显示时剥掉不可信包裹，投影里的原文与用户消息都不动', () => {
+    const raw =
+      '<untrusted-content source="plugin:enso.github">GitHub 动态\n<untrusted-content source="plugin:enso.github">\n- PR #409\n<\\/untrusted-content></untrusted-content>';
+    const messages: ProjectedMessage[] = [
+      user(raw),
+      {
+        role: 'custom',
+        content: [{ type: 'text', text: raw }],
+        pluginSource: { pluginId: 'enso.github', pluginName: 'GitHub' },
+      },
+    ];
+    const before = structuredClone(messages);
+    const timeline = buildTimeline(messages, false);
+    expect(timeline[0]).toMatchObject({ kind: 'user', text: raw });
+    expect(timeline[1]).toMatchObject({ kind: 'plugin-message', text: 'GitHub 动态\n\n- PR #409' });
+    expect(messages).toEqual(before);
+  });
+
   it('compactionSummary 消息渲染为 compaction 行，带摘要与压缩前 token 数', () => {
     const timeline = buildTimeline(
       [

@@ -241,13 +241,25 @@ describe('插件工具协议', () => {
         triggerTurn: false,
       })
     ).not.toBeNull();
+    // 插件上限是 32K，宿主包上不可信包裹后会略长，送进 worker 时要放得下
     expect(
       parseAgentCommand({
         type: 'plugin-inject',
         identity: parent,
         pluginId: 'example.demo',
         pluginName: 'Demo',
-        text: 'x'.repeat(32 * 1024 + 1),
+        text: 'x'.repeat(32 * 1024 + 100),
+        deliverAs: 'followUp',
+        triggerTurn: true,
+      })
+    ).not.toBeNull();
+    expect(
+      parseAgentCommand({
+        type: 'plugin-inject',
+        identity: parent,
+        pluginId: 'example.demo',
+        pluginName: 'Demo',
+        text: 'x'.repeat(36 * 1024 + 1),
         deliverAs: 'steer',
         triggerTurn: true,
       })

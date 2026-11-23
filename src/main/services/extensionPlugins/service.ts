@@ -80,6 +80,7 @@ import {
   PluginHostGate,
   type SessionAttempt,
 } from './gate';
+import { resolveInjectTrust } from './injectTrust';
 import {
   commitStaged,
   discardStaged,
@@ -171,6 +172,8 @@ export interface PluginSessionBridge {
       images: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
+      /** 免去不可信包裹；只有普通会话认，秘书会话一律包 */
+      trusted: boolean;
     }
   ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
   abort(sessionId: string): { ok: true } | { ok: false; error: string };
@@ -2153,11 +2156,20 @@ export class ExtensionPluginService {
       images: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
+      trusted: boolean;
     }
   ): { ok: true } | { ok: false; error: string } {
     const manifest = this.enabledManifest(pluginId) ?? this.gateManifests.get(pluginId);
     const bridge = this.options.sessionBridge?.() ?? null;
     if (!manifest || !bridge) return { ok: false, error: '当前环境不能注入消息' };
+    const trust = resolveInjectTrust({
+      pluginId,
+      requested: input.trusted,
+      permissions: manifest.permissions,
+      source: this.records.find((record) => record.id === pluginId)?.source,
+    });
+    if (trust.ignored)
+      this.logger.append(pluginId, 'warn', 'trusted 已忽略：清单没有声明 agent.injectTrusted');
     return bridge.inject(input.sessionId, {
       pluginId,
       pluginName: manifest.name,
@@ -2165,6 +2177,7 @@ export class ExtensionPluginService {
       images: input.images,
       deliverAs: input.deliverAs,
       triggerTurn: input.triggerTurn,
+      trusted: trust.trusted,
     });
   }
 
