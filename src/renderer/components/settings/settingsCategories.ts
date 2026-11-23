@@ -46,7 +46,7 @@ export const SETTINGS_GROUPS: readonly {
   {
     id: 'system',
     label: 'System',
-    categories: ['usage', 'resources', 'experimental', 'bots', 'botTemplates', 'secretary'],
+    categories: ['usage', 'resources', 'logs', 'experimental', 'bots', 'botTemplates', 'secretary'],
   },
 ];
 
