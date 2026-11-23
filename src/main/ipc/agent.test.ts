@@ -226,6 +226,7 @@ import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
 import { SecretaryStore } from '../services/secretary/store';
 import {
+  abortRootFromMain,
   getAgentService,
   getSourceAuthorityRegistry,
   registerAgentHandlers,
@@ -294,6 +295,25 @@ describe('agent IPC Main identity boundary', () => {
       typeKey: 'agent:enso',
     });
     await handler(event, 'conv-1::cw-1', { stopSubagents: true });
+    expect(cancelOwner).not.toHaveBeenCalled();
+  });
+
+  it('秘书 session_stop 与手机停止按钮一并停子代理；卡死重试只断当前轮', () => {
+    const parent = { sessionId: 'conv-1', generation: 'gen-1' };
+    const cancelOwner = vi.spyOn(getAgentService()!, 'cancelOwner').mockResolvedValue();
+    mocks.currentIdentity.mockReturnValue(parent);
+
+    abortRootFromMain('conv-1');
+    expect(mocks.abortSession).toHaveBeenCalledWith(parent);
+    expect(cancelOwner).toHaveBeenCalledWith('conv-1');
+
+    cancelOwner.mockClear();
+    mocks.setPairAgentBridge.mock.calls.at(-1)![0].abort('conv-1');
+    expect(cancelOwner).toHaveBeenCalledWith('conv-1');
+
+    cancelOwner.mockClear();
+    mocks.configurePairSessionHost.mock.calls.at(-1)![0].abort('conv-1');
+    expect(mocks.abortSession).toHaveBeenLastCalledWith(parent);
     expect(cancelOwner).not.toHaveBeenCalled();
   });
 

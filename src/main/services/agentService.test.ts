@@ -1952,7 +1952,7 @@ describe('AgentService 父会话停止时级联停止子代理', () => {
     },
   };
 
-  it('停掉名下在跑的 task 与 coworker：task 关闭，coworker 保留，不另发通知', async () => {
+  it('停掉名下在跑的 task 与 coworker：按用户中止收口，task 停放可 resume，coworker 回到 ready，不另发通知', async () => {
     const notify = vi.fn();
     const { service, runtime } = setup({ notify });
     const task = await service.spawn(spawnRequest({ requestId: 'spawn-task' }));
@@ -1972,12 +1972,66 @@ describe('AgentService 父会话停止时级联停止子代理', () => {
     if (!listed.ok) throw new Error(listed.error);
     expect(
       Object.fromEntries(listed.value.agents.map((agent) => [agent.agentId, agent.status]))
-    ).toEqual({ [task.value.agentId]: 'closed', [coworker.value.agentId]: 'ready' });
+    ).toEqual({ [task.value.agentId]: 'parked', [coworker.value.agentId]: 'ready' });
     expect(runtime.dismiss).toHaveBeenCalledTimes(1);
     expect(runtime.dismiss).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: task.value.agentId })
     );
     expect(service.progress(owner.ownerId)).toEqual([]);
+    const report = await service.report({ context, requestId: 'r', runId: task.value.runId });
+    expect(report).toMatchObject({
+      ok: true,
+      value: { run: { status: 'interrupted' }, error: expect.stringContaining('父会话') },
+    });
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('停止后父会话接着发消息：停掉的 task 能 resume，也能派新的子代理', async () => {
+    const { service, runtime } = setup();
+    runtime.resume = vi.fn(async ({ identity }) => identity);
+    runtime.retry = vi.fn(async () => ({ ok: true }));
+    const task = await service.spawn(spawnRequest());
+    if (!task.ok) throw new Error(task.error);
+
+    await service.cancelOwner(owner.ownerId);
+
+    const resumed = await service.resume({
+      context,
+      requestId: 'resume',
+      agentId: task.value.agentId,
+    });
+    expect(resumed).toMatchObject({ ok: true, value: { status: 'running' } });
+    const fresh = await service.spawn(
+      spawnRequest({ requestId: 'spawn-fresh', prompt: 'other work' })
+    );
+    expect(fresh).toMatchObject({ ok: true, value: { status: 'running' } });
+  });
+
+  it('停止时还在初始化的 spawn：回收子会话、不起 Run，之后的 spawn 照常', async () => {
+    const notify = vi.fn();
+    const { service, runtime } = setup({ notify });
+    const create = vi.mocked(runtime.spawn).getMockImplementation()!;
+    let finishSpawn!: () => void;
+    vi.mocked(runtime.spawn).mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve) => {
+        finishSpawn = resolve;
+      });
+      return create(input);
+    });
+    const pending = service.spawn(spawnRequest());
+    await Promise.resolve();
+
+    await service.cancelOwner(owner.ownerId);
+    finishSpawn();
+
+    expect(await pending).toMatchObject({ ok: false });
+    expect(runtime.prompt).not.toHaveBeenCalled();
+    expect(runtime.dismiss).toHaveBeenCalledTimes(1);
+    expect(service.progress(owner.ownerId)).toEqual([]);
+    const listed = await service.list({ context, requestId: 'list', limit: 10 });
+    expect(listed.ok && listed.value.agents).toEqual([]);
+    const next = await service.spawn(spawnRequest({ requestId: 'spawn-next' }));
+    expect(next).toMatchObject({ ok: true, value: { status: 'running' } });
     expect(notify).not.toHaveBeenCalled();
   });
 
@@ -2031,7 +2085,7 @@ describe('AgentService 父会话停止时级联停止子代理', () => {
     expect(await waiting).toMatchObject({ ok: true, value: { timedOut: false } });
   });
 
-  it('某个 Run 停止失败或抛错时其余照停，整体不抛', async () => {
+  it('某个子会话停止失败或抛错：其余照停，Main 侧照样收口，整体不抛', async () => {
     const { service, runtime } = setup();
     const first = await service.spawn(spawnRequest({ requestId: 'spawn-1' }));
     const second = await service.spawn(spawnRequest({ requestId: 'spawn-2' }));
@@ -2046,6 +2100,6 @@ describe('AgentService 父会话停止时级联停止子代理', () => {
     await expect(service.cancelOwner(owner.ownerId)).resolves.toBeUndefined();
 
     expect(runtime.stop).toHaveBeenCalledTimes(3);
-    expect(service.progress(owner.ownerId)).toHaveLength(2);
+    expect(service.progress(owner.ownerId)).toEqual([]);
   });
 });

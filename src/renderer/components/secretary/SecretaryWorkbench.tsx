@@ -133,7 +133,9 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const [stopping, setStopping] = useState(false);
   const stop = () => {
     setStopping(true);
-    void window.electronAPI.agent.abort(card.conversationId).finally(() => setStopping(false));
+    void window.electronAPI.agent
+      .abort(card.conversationId, { stopSubagents: true })
+      .finally(() => setStopping(false));
   };
   // 实时审批与提问由会话状态决定，清结果不会让它消失，所以只在原因是结果时给「知道了」
   const dismissible =
@@ -396,7 +398,9 @@ function FeedEntry({ event }: { event: FeedEvent }) {
   const stop = conversationId
     ? () => {
         setStopping(true);
-        void window.electronAPI.agent.abort(conversationId).finally(() => setStopping(false));
+        void window.electronAPI.agent
+          .abort(conversationId, { stopSubagents: true })
+          .finally(() => setStopping(false));
       }
     : undefined;
   return (
