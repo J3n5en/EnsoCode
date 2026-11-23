@@ -1,6 +1,7 @@
 import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
 import { interruptReason } from '@shared/exitInterrupt';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
+import { hasPendingReminder, type SessionReminder } from '@shared/reminders';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import {
@@ -140,6 +141,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   tasksReported?(): boolean;
   /** 主会话名下还有没回来的子代理 Run；缺省表示没有 */
   subagentsRunning?(conversationId: string): boolean;
+  /** 会话（含子代理）挂着的自定提醒；缺省表示没有 */
+  reminders?(conversationId: string): readonly SessionReminder[];
   /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
   interruptDetail?(conversationId: string): string | undefined;
   /** 应用正在退出，这个会话写进了恢复清单、新实例接着跑：退出打断它不算结果 */
@@ -366,9 +369,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
    */
   function awaitsWake(conversationId: string, now: number): boolean {
     if (ports.subagentsRunning?.(conversationId)) return true;
+    if (reminderPending(conversationId, now)) return true;
     return (ports.tasks?.(conversationId) ?? []).some(
       (task) => task.status === 'running' && task.alive !== false && !taskIsPersistent(task, now)
     );
+  }
+
+  /** 在等自己定的提醒：到点超过宽限期还没被叫醒就不算 */
+  function reminderPending(conversationId: string, now: number): boolean {
+    return hasPendingReminder(ports.reminders?.(conversationId) ?? [], now);
   }
 
   /**
@@ -511,7 +520,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       if (ports.viewed?.(conversationId)) continue;
       const status = ports.status(conversationId);
-      if (!autoArchivable(record, row, status)) {
+      if (!autoArchivable(record, row, status, reminderPending(conversationId, now))) {
         archiveHolds.delete(conversationId);
         continue;
       }
@@ -912,6 +921,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         record.backgroundRunning !== true
           ? { awaitingReplySince: record.sentAt }
           : {}),
+        ...(reminderPending(record.conversationId, now) ? { reminderPending: true } : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {

@@ -2707,6 +2707,16 @@ export function keepBackgroundTask(
   return sendAgentCommand({ type: 'task-keep', sessionId, taskId, reason });
 }
 
+/** 清掉根会话及其子会话的自定提醒（用户停止、删除、会话已不可用） */
+export function clearSessionReminders(sessionId: string): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'reminders-clear', sessionId });
+}
+
+/** 把已到点的自定提醒交给会话（会话已在 worker 里） */
+export function fireSessionReminders(sessionId: string): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'reminders-fire', sessionId });
+}
+
 export function backgroundForegroundTool(
   identity: SessionIdentity,
   toolCallId: string

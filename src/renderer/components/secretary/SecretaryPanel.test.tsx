@@ -281,7 +281,10 @@ describe('SecretaryPanel', () => {
     expect(feed?.textContent).toContain('[Started]');
     click('[data-enso="secretary-feed-event"] button[aria-label="[Stop]"]');
     await flush();
-    expect(h.calls).toContainEqual({ name: 'abort', args: ['c1', { stopSubagents: true }] });
+    expect(h.calls).toContainEqual({
+      name: 'abort',
+      args: ['c1', { stopSubagents: true, cancelReminders: true }],
+    });
   });
 
   it('动态行点主体只展开，右侧图标才打开会话', async () => {

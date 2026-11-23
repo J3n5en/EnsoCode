@@ -1,3 +1,4 @@
+import type { SessionReminder } from '@shared/reminders';
 import { formatGoalResultClaims, type GoalResultView } from '@shared/secretary/goalResult';
 import { parseProfile } from '@shared/secretary/parse';
 import {
@@ -78,6 +79,8 @@ export interface SecretaryReadPorts {
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
+  /** 会话（含子代理）挂着的自定提醒；缺省表示没有 */
+  reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   /** 派发记录上的结构化结果；缺省表示没有 */
   goalResult?(conversationId: string): MaybePromise<GoalResultView | undefined>;
   /** 这条已归档的行是不是派出会话完成后被 Main 自动归档的；缺省表示都不是 */
@@ -443,6 +446,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         ...(message.truncated ? { truncated: true } : {}),
       }));
       const nextBefore = page.ok ? (messages[0]?.index ?? page.baseIndex) : (before ?? 0);
+      const reminders = (await ports.reminders?.(conversationId)) ?? [];
       return {
         ok: true,
         result: {
@@ -456,6 +460,15 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           hasMore: readable.hasMore,
           ...(readable.hasMore ? { nextBefore } : {}),
           ...(page.ok ? {} : { historyError: page.code }),
+          // 挂着自定提醒：会话在等自己定的时间点，不是卡住
+          ...(reminders.length > 0
+            ? {
+                reminders: reminders.map((item) => ({
+                  dueAt: item.dueAt,
+                  ...(item.label ? { label: item.label } : {}),
+                })),
+              }
+            : {}),
           ...goal,
         },
       };
@@ -493,9 +506,25 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           ...(task.ownerSessionId ? { startedBySubagent: task.ownerSessionId } : {}),
         };
       });
+      const reminders = (await ports.reminders?.(conversationId)) ?? [];
       return {
         ok: true,
-        result: { conversationId, projectId: session.projectId, tasks },
+        result: {
+          conversationId,
+          projectId: session.projectId,
+          tasks,
+          ...(reminders.length > 0
+            ? {
+                reminders: reminders.map((item) => ({
+                  id: item.id,
+                  ...(item.label ? { label: item.label } : {}),
+                  dueAt: item.dueAt,
+                  inMs: item.dueAt - now,
+                  ...(item.sessionId === conversationId ? {} : { subagent: item.sessionId }),
+                })),
+              }
+            : {}),
+        },
       };
     },
 
@@ -610,6 +639,9 @@ export function readPortsFor(
     },
     async tasks(conversationId) {
       return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
+    },
+    async reminders(conversationId) {
+      return (await import('../sessionReminders')).readSessionReminders(conversationId);
     },
     goalResult(conversationId) {
       return new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId]?.goalResult;

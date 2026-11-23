@@ -1311,6 +1311,29 @@ describe('自动巡检', () => {
     expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
   });
 
+  it('goal 会话空闲、没有后台任务但挂着没到点的提醒：不报停住；到点 2 分钟后还没被叫醒才照报', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    const due = 30 * MINUTE;
+    h.ports.reminders = () => [
+      {
+        id: 'r00000001',
+        sessionId: 'c1',
+        dueAt: due,
+        createdAt: 0,
+        prompt: 'check CI',
+        ifIdle: true,
+        chain: 1,
+      },
+    ];
+    h.host.tick(3 * MINUTE + 1);
+    h.host.tick(25 * MINUTE);
+    h.host.tick(due + 1 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toEqual([]);
+    h.host.tick(due + 5 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
   it('有存活后台任务的 idle 会话不走 3 分钟规则，20 分钟才兜底报', () => {
     const h = harness({});
     idleWithGoal(h);
@@ -2715,6 +2738,26 @@ describe('派出会话完成后自动归档', () => {
     complete(h, 1000);
     expect(h.state.rows.c1.archived).toBeUndefined();
     h.state.tasks.c1 = [];
+    h.host.tick(2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
+  });
+
+  it('挂着没触发的自定提醒时先不归档，提醒没了再归档', () => {
+    const h = archiving();
+    h.ports.reminders = () => [
+      {
+        id: 'r00000001',
+        sessionId: 'c1',
+        dueAt: 10 * MINUTE,
+        createdAt: 0,
+        prompt: 'check deploy',
+        ifIdle: true,
+        chain: 1,
+      },
+    ];
+    complete(h, 1000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    h.ports.reminders = () => [];
     h.host.tick(2000);
     expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
   });

@@ -9,7 +9,9 @@ import type { SecretarySessionStatus } from './readers';
 export function autoArchivable(
   record: DispatchRecord,
   row: Record<string, unknown> | undefined,
-  status: SecretarySessionStatus
+  status: SecretarySessionStatus,
+  /** 还挂着自定提醒：会话会被它叫醒，先不收走 */
+  reminderPending = false
 ): boolean {
   if (!row || row.archived === true) return false;
   if (row.secretaryOrigin === undefined || record.takeover) return false;
@@ -18,6 +20,7 @@ export function autoArchivable(
   if (record.autoArchiveResultAt === result.at) return false;
   if (status.state !== 'idle' || status.pendingAsks + status.pendingApprovals > 0) return false;
   if (record.backgroundRunning || record.reopenedAt !== undefined) return false;
+  if (reminderPending) return false;
   return true;
 }
 

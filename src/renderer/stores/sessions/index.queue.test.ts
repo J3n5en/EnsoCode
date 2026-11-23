@@ -521,7 +521,10 @@ describe('typed Agent child projection', () => {
     }));
     agentAbort.mockClear();
     await sessionsModule.useSessionsStore.getState().abort('parent');
-    expect(agentAbort).toHaveBeenCalledWith('parent', { stopSubagents: true });
+    expect(agentAbort).toHaveBeenCalledWith('parent', {
+      stopSubagents: true,
+      cancelReminders: true,
+    });
   });
 
   it('运行中压缩时用户中断：压缩放弃收口不吞中断标记，被中断轮收束时也不泵队列', async () => {
@@ -780,6 +783,40 @@ describe('typed Agent child projection', () => {
         status: 'paused',
         noProgressRuns: 3,
       });
+    });
+
+    it('这一轮挂着自定提醒：不续跑、不计无进展，目标保持 active；下一轮收束照常续跑', async () => {
+      seedGoal();
+      const digest = { firstUserText: 'ship it', userText: 'ship it', assistantText: 'wait CI' };
+      onAgentEvent?.({
+        type: 'turn-completed',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 2,
+        turnId: 't1',
+        digest,
+        awaitingReminder: true,
+      });
+      expect(agentPrompt).not.toHaveBeenCalled();
+      expect(sessionsModule.useSessionsStore.getState().conversations.parent.goal).toMatchObject({
+        status: 'active',
+        autoTurns: 0,
+        noProgressRuns: 2,
+      });
+      onAgentEvent?.({
+        type: 'turn-completed',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 3,
+        turnId: 't2',
+        digest: { ...digest, assistantText: 'CI passed' },
+      });
+      await vi.waitFor(() =>
+        expect(agentPrompt).toHaveBeenCalledWith(
+          'parent',
+          expect.stringContaining('<goal-continuation>'),
+          undefined,
+          expect.any(String)
+        )
+      );
     });
   });
 
