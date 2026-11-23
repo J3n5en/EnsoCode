@@ -33,6 +33,7 @@ vi.mock('@/stores/sidePanel', () => ({
 }));
 vi.mock('@/lib/terminalRegistry', () => ({ releaseTerminal: vi.fn() }));
 
+import { releaseTerminal } from '@/lib/terminalRegistry';
 import {
   bindSidePanelDock,
   disposeConversationResources,
@@ -176,5 +177,22 @@ describe('watchSidePanelAutoCollapse 关完最后一个 tab 收起侧栏', () =>
     dock.remove('files');
 
     expect(harness.uiByConversation.dock.open).toBe(false);
+  });
+});
+
+describe('disposeConversationResources 回收终端', () => {
+  // 曾经异步 import 回收：同一会话的多个终端并发 import，测试结束后还在加载 xterm
+  it('会话里每个终端都当场回收，不留异步尾巴', () => {
+    vi.stubGlobal('window', {});
+    const dock = fakeDock();
+    dock.add('files');
+    dock.add('term-1');
+    dock.add('term-2');
+    bindSidePanelDock('dock', dock.api);
+    vi.mocked(releaseTerminal).mockClear();
+
+    disposeConversationResources('dock');
+
+    expect(vi.mocked(releaseTerminal).mock.calls).toEqual([['term-1'], ['term-2']]);
   });
 });
