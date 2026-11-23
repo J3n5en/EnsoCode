@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -90,6 +90,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
   };
 });
 
+import { INTERRUPTED_TASKS_FILE } from './detachedTasksManifest';
 import { budgetWrapUpPrompt } from './requestBudget';
 import { SessionSupervisor } from './supervisor';
 
@@ -211,7 +212,7 @@ describe('SessionSupervisor 子代理请求预算', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
-  async function spawnChild(): Promise<{
+  async function spawnChild(restartDir?: string): Promise<{
     events: AgentWorkerEvent[];
     supervisor: SessionSupervisor;
     worker: FakeSession;
@@ -219,8 +220,9 @@ describe('SessionSupervisor 子代理请求预算', () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
-      agentDir: '/tmp/agent',
+      agentDir: restartDir ?? '/tmp/agent',
       sessionDir,
+      ...(restartDir ? { dataDir: restartDir } : {}),
     });
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
     await waitFor(events, 'parent-ready');
@@ -545,6 +547,77 @@ describe('SessionSupervisor 子代理请求预算', () => {
       (worker.sessionManager as { appendContextEdit: ReturnType<typeof vi.fn> }).appendContextEdit
     ).not.toHaveBeenCalled();
     expect(startRun).toHaveBeenCalledTimes(1);
+    await supervisor.shutdown();
+  });
+
+  it('重启后续跑：子会话停在已执行完的工具结果后，直接发下一次请求，不重放那次工具', async () => {
+    const { events, supervisor, worker } = await spawnChild();
+    const { appended, startRun } = prepareResume(worker, [
+      { role: 'user', content: 'inspect files' },
+      { role: 'assistant', ...toolCall(1) },
+      { role: 'toolResult', toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }] },
+    ]);
+    resumeRun(supervisor);
+    await settle();
+    expect(appended).toEqual([]);
+    expect(startRun).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === 'retry-skipped')).toBe(false);
+    await supervisor.shutdown();
+  });
+
+  it('持有后台任务时被重启：被停掉的任务记给子代理，续跑时把消息交给它、接着原 Run 开一轮', async () => {
+    const restartDir = mkdtempSync(path.join(tmpdir(), 'enso-restart-child-task-'));
+    try {
+      writeFileSync(
+        path.join(restartDir, INTERRUPTED_TASKS_FILE),
+        JSON.stringify({
+          version: 1,
+          tasks: [
+            {
+              taskId: 'task-7-ab',
+              sessionId: child.sessionId,
+              command: 'pnpm build',
+              startedAt: 1,
+              stoppedAt: 2,
+              logPath: path.join(restartDir, 'task-logs', 'task-7-ab.log'),
+              resident: false,
+            },
+          ],
+        })
+      );
+      const { events, supervisor, worker } = await spawnChild(restartDir);
+      prepareResume(worker, [
+        { role: 'user', content: 'inspect files' },
+        { role: 'assistant', ...finalAnswer('waiting for the build') },
+      ]);
+      resumeRun(supervisor);
+      await vi.waitFor(() => expect(worker.prompt).toHaveBeenCalledTimes(1));
+      expect(events.some((event) => event.type === 'retry-skipped')).toBe(false);
+      expect(String((worker.prompt.mock.calls[0] as unknown[] | undefined)?.[0])).toContain(
+        'pnpm build'
+      );
+      request(worker, finalAnswer('build was stopped by the restart; rerun needed'));
+      endRound(worker);
+      await waitFor(events, 'turn-completed');
+      expect(completed(events).at(-1)).toMatchObject({ continues: 'run-2' });
+      expect(completed(events).at(-1)?.awaitingTasks).toBeUndefined();
+      await supervisor.shutdown();
+    } finally {
+      rmSync(restartDir, { recursive: true, force: true });
+    }
+  });
+
+  it('续跑时子会话最后一条回复已完整、也没有在等的任务：照旧回执 nothing-to-retry', async () => {
+    const { events, supervisor, worker } = await spawnChild();
+    prepareResume(worker, [
+      { role: 'user', content: 'inspect files' },
+      { role: 'assistant', ...finalAnswer('done') },
+    ]);
+    resumeRun(supervisor);
+    await waitFor(events, 'retry-skipped');
+    expect(events.find((event) => event.type === 'retry-skipped')).toMatchObject({
+      reason: 'nothing-to-retry',
+    });
     await supervisor.shutdown();
   });
 });

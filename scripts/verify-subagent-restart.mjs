@@ -1,0 +1,492 @@
+#!/usr/bin/env node
+// 子代理跨重启续跑真机验证：隔离 dev 实例（ENSO_VERIFY=1、临时 userData、假模型服务），
+// 父会话派出 task 子代理 → 子代理执行 bash 途中应用优雅退出 → 同一 userData 重新启动 →
+// 子代理接着断点续跑（不重跑已执行的 bash）→ 父会话收到完成通知。
+//   node scripts/verify-subagent-restart.mjs [--keep]
+// 退出码：全部通过 0，否则 1。不碰真实 userData，不抢焦点（窗口不显示、不进 Dock）。
+
+import { spawn, spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { createServer as createNetServer } from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { uiElementElectron } from './verify-electron.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const KEEP = process.argv.includes('--keep');
+const OUT = mkdtempSync('/tmp/enso-subagent-restart-');
+const ENV = path.join(OUT, 'user-data');
+const PROJ = path.join(OUT, 'project');
+const MARKER = path.join(OUT, 'marker.txt');
+const START = Date.now();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const stamp = () => `+${((Date.now() - START) / 1000).toFixed(1)}s`;
+const timeline = [];
+const note = (line) => {
+  timeline.push(`${stamp()} ${line}`);
+  console.log(`${stamp()} ${line}`);
+};
+const results = [];
+const check = (ok, label, detail) => {
+  results.push({ ok: Boolean(ok), label });
+  console.log(
+    `${ok ? 'PASS' : 'FAIL'} ${label}${!ok && detail ? ` —— ${JSON.stringify(detail)}` : ''}`
+  );
+};
+
+async function waitFor(fn, label, timeout = 60_000, interval = 300) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    try {
+      const value = await fn();
+      if (value) return value;
+    } catch {}
+    if (Date.now() > deadline) throw new Error(`timeout: ${label}`);
+    await sleep(interval);
+  }
+}
+
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const server = createNetServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+
+// ---------- 假模型服务：按会话角色出剧本 ----------
+const requests = [];
+const textOf = (message) =>
+  typeof message?.content === 'string'
+    ? message.content
+    : (message?.content ?? [])
+        .map((part) =>
+          part?.type === 'text'
+            ? part.text
+            : part?.type === 'tool_result'
+              ? JSON.stringify(part.content)
+              : ''
+        )
+        .join('\n');
+const hasToolResult = (messages) =>
+  messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((c) => c?.type === 'tool_result')
+  );
+
+function sse(res, blocks, stop) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+  const events = [
+    {
+      type: 'message_start',
+      message: {
+        id: `msg_${Date.now()}`,
+        type: 'message',
+        role: 'assistant',
+        model: 'fake-model-1',
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    },
+  ];
+  blocks.forEach((block, index) => {
+    if (block.type === 'text') {
+      events.push({
+        type: 'content_block_start',
+        index,
+        content_block: { type: 'text', text: '' },
+      });
+      events.push({
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'text_delta', text: block.text },
+      });
+    } else {
+      events.push({
+        type: 'content_block_start',
+        index,
+        content_block: {
+          type: 'tool_use',
+          id: `toolu_${Date.now()}_${index}`,
+          name: block.name,
+          input: {},
+        },
+      });
+      events.push({
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input) },
+      });
+    }
+    events.push({ type: 'content_block_stop', index });
+  });
+  events.push({ type: 'message_delta', delta: { stop_reason: stop }, usage: { output_tokens: 5 } });
+  events.push({ type: 'message_stop' });
+  for (const event of events) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  res.end();
+}
+
+function script(body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const first = textOf(messages[0]);
+  const all = messages.map(textOf).join('\n');
+  const tools = (body?.tools ?? []).map((tool) => tool.name);
+  if (first.includes('CHILD-TASK')) {
+    if (!hasToolResult(messages)) {
+      const bash = tools.find((name) => name === 'bash') ?? 'bash';
+      return {
+        who: 'child',
+        action: `tool ${bash}`,
+        blocks: [
+          { type: 'tool_use', name: bash, input: { command: `sleep 6; echo step1 >> ${MARKER}` } },
+        ],
+        stop: 'tool_use',
+      };
+    }
+    return {
+      who: 'child',
+      action: 'final CHILD-DONE',
+      blocks: [{ type: 'text', text: 'CHILD-DONE' }],
+      stop: 'end_turn',
+    };
+  }
+  if (first.includes('PARENT-GO')) {
+    if (all.includes('CHILD-DONE'))
+      return {
+        who: 'parent',
+        action: 'final PARENT-GOT-IT',
+        blocks: [{ type: 'text', text: 'PARENT-GOT-IT' }],
+        stop: 'end_turn',
+      };
+    if (!hasToolResult(messages))
+      return {
+        who: 'parent',
+        action: 'tool subagent spawn',
+        blocks: [
+          {
+            type: 'tool_use',
+            name: 'subagent',
+            input: {
+              operation: 'spawn',
+              mode: 'task',
+              description: 'restart probe',
+              prompt: 'CHILD-TASK: run the step, then report CHILD-DONE',
+            },
+          },
+        ],
+        stop: 'tool_use',
+      };
+    return {
+      who: 'parent',
+      action: 'text PARENT-WAITING',
+      blocks: [{ type: 'text', text: 'PARENT-WAITING' }],
+      stop: 'end_turn',
+    };
+  }
+  return {
+    who: 'aux',
+    action: 'text ok',
+    blocks: [{ type: 'text', text: 'ok' }],
+    stop: 'end_turn',
+  };
+}
+
+async function startProvider() {
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      if ((req.url ?? '').includes('/v1/models')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ id: 'fake-model-1' }] }));
+        return;
+      }
+      let body = null;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {}
+      const reply = script(body);
+      const lastText = textOf(body?.messages?.at(-1)).replace(/\s+/g, ' ').slice(0, 600);
+      requests.push({ at: Date.now(), ...reply, lastText });
+      if (reply.who !== 'aux')
+        note(`model ← ${reply.who}: ${reply.action}  (last: ${lastText.slice(0, 120)})`);
+      sse(res, reply.blocks, reply.stop);
+    });
+  });
+  const port = await freePort();
+  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+  return { server, port };
+}
+
+// ---------- 隔离实例 ----------
+async function cdpPage(cdpPort, rendererPort) {
+  const target = await waitFor(
+    async () => {
+      const list = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
+      return list.find(
+        (t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${rendererPort}/`)
+      );
+    },
+    'renderer page',
+    120_000
+  );
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.onopen = resolve;
+    ws.onerror = reject;
+  });
+  let id = 0;
+  const pending = new Map();
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    pending.get(message.id)?.(message);
+    pending.delete(message.id);
+  };
+  const send = (method, params = {}) =>
+    new Promise((resolve) => {
+      const next = ++id;
+      pending.set(next, resolve);
+      ws.send(JSON.stringify({ id: next, method, params }));
+    });
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  const evaluate = async (expression) => {
+    const reply = await send('Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (reply.result?.exceptionDetails)
+      throw new Error(reply.result.exceptionDetails.exception?.description ?? 'eval failed');
+    return reply.result?.result?.value;
+  };
+  await waitFor(
+    () =>
+      evaluate(
+        'Boolean(window.__stores?.sessions?.getState && window.__stores?.settings?.getState)'
+      ),
+    'renderer stores'
+  );
+  return { evaluate, close: () => ws.close() };
+}
+
+async function launch(name) {
+  const cdpPort = await freePort();
+  const rendererPort = await freePort();
+  const electron = uiElementElectron(createRequire(path.join(ROOT, 'package.json'))('electron'));
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !/^(ENSO_|ELECTRON_)/.test(key))
+  );
+  const log = openSync(path.join(OUT, `${name}.log`), 'a');
+  const child = spawn('pnpm', ['dev'], {
+    cwd: ROOT,
+    env: {
+      ...env,
+      ENSO_USER_DATA_DIR: ENV,
+      ENSO_CDP_PORT: String(cdpPort),
+      ENSO_RENDERER_PORT: String(rendererPort),
+      ENSO_VERIFY: '1',
+      ELECTRON_EXEC_PATH: electron,
+    },
+    detached: true,
+    stdio: ['ignore', log, log],
+  });
+  note(`launch ${name} (pnpm dev pid=${child.pid})`);
+  const page = await cdpPage(cdpPort, rendererPort);
+  const main = electronMain(child.pid);
+  note(`${name} renderer ready (electron main pid=${main})`);
+  return { child, main, page };
+}
+
+/** pnpm dev 拉起的 Electron 主进程：命令行里没有 --type= 的那个后代 */
+function electronMain(rootPid) {
+  const rows = spawnSync('ps', ['-ax', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
+    .stdout.split('\n')
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .filter(Boolean)
+    .map(([, pid, ppid, command]) => ({ pid: Number(pid), ppid: Number(ppid), command }));
+  const mine = new Set([rootPid]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const row of rows)
+      if (mine.has(row.ppid) && !mine.has(row.pid)) {
+        mine.add(row.pid);
+        grew = true;
+      }
+  }
+  return rows.find(
+    (row) => mine.has(row.pid) && /Electron/.test(row.command) && !/--type=/.test(row.command)
+  )?.pid;
+}
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** 只给 Electron 主进程发 SIGTERM：走应用自己的退出（等安全点、写恢复清单），再收掉 dev 进程组 */
+async function quit(instance, timeout = 90_000) {
+  instance.page.close();
+  process.kill(instance.main, 'SIGTERM');
+  await waitFor(() => !alive(instance.main), 'electron exit', timeout, 200);
+  try {
+    process.kill(-instance.child.pid, 'SIGTERM');
+  } catch {}
+}
+
+const json = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null);
+const logLines = (name, pattern) =>
+  existsSync(path.join(OUT, `${name}.log`))
+    ? readFileSync(path.join(OUT, `${name}.log`), 'utf8')
+        .split('\n')
+        .filter((line) => pattern.test(line))
+    : [];
+
+async function main() {
+  mkdirSync(ENV, { recursive: true });
+  mkdirSync(PROJ, { recursive: true });
+  writeFileSync(path.join(PROJ, 'README.md'), 'isolated project\n');
+  const provider = await startProvider();
+  writeFileSync(
+    path.join(ENV, 'settings.json'),
+    JSON.stringify({
+      'enso-settings': {
+        state: {
+          providers: [
+            {
+              id: 'pv-A',
+              name: 'Provider A',
+              api: 'anthropic-messages',
+              apiKey: 'sk-fake-A',
+              baseUrl: `http://127.0.0.1:${provider.port}`,
+              enabled: true,
+              models: [{ id: 'fake-model-1' }],
+            },
+          ],
+          defaultModel: { providerId: 'pv-A', modelId: 'fake-model-1' },
+          onboarded: true,
+          theme: 'light',
+          language: 'en',
+        },
+        version: 2,
+      },
+    })
+  );
+  console.log(`out: ${OUT}`);
+
+  // 1. 父会话派出 task 子代理，子代理开始跑 bash
+  const first = await launch('run1');
+  const conversationId = await first.page.evaluate(`(async () => {
+    const S = () => window.__stores.sessions.getState();
+    const SET = () => window.__stores.settings.getState();
+    const project = await SET().addProject(${JSON.stringify(PROJ)});
+    const id = await S().newConversation(project.id);
+    S().selectConversation(id);
+    S().setApprovalMode(id, 'full');
+    const error = await S().send('PARENT-GO', { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, id);
+    return error ? 'error: ' + error : id;
+  })()`);
+  check(
+    conversationId && !String(conversationId).startsWith('error'),
+    '父会话建好并发出消息',
+    conversationId
+  );
+  await waitFor(
+    () => requests.some((r) => r.who === 'child' && r.action.startsWith('tool')),
+    '子代理发出 bash 调用'
+  );
+  await sleep(1500);
+  check(!existsSync(MARKER), '退出时子代理的 bash 还在跑（marker 未写）');
+
+  // 2. 优雅退出（SIGTERM → app.quit → 等安全点、写恢复清单）
+  note('SIGTERM run1 (graceful quit while the child bash is running)');
+  await quit(first);
+  note('run1 exited');
+  check(readFileSync(MARKER, 'utf8').trim() === 'step1', '退出前 bash 跑完（等到了安全点）');
+  const agentDir = path.join(ENV, 'agent');
+  const manifest = json(path.join(agentDir, 'restart-manifest.json'));
+  const checkpoint = json(path.join(agentDir, 'restart-checkpoint.json'));
+  const childEntry = checkpoint?.sessions?.find((s) => s.sessionId.includes('::'));
+  note(
+    `checkpoint: ${JSON.stringify(checkpoint?.sessions?.map((s) => ({ id: s.sessionId.slice(0, 20), nextStep: s.nextStep })))}`
+  );
+  note(
+    `manifest: ${JSON.stringify(manifest?.sessions?.map((s) => ({ id: s.sessionId.slice(0, 8), nextStep: s.nextStep })))}`
+  );
+  check(childEntry?.nextStep === 'model-request', '断点记下子会话停在模型请求前', checkpoint);
+  const ledger = json(path.join(agentDir, 'subagent-runs.json'));
+  const pendingRun = ledger?.runs?.find((r) => r.notified === false && r.restart);
+  note(
+    `ledger: ${JSON.stringify(ledger?.runs?.map((r) => ({ runId: r.runId.slice(0, 8), status: r.status, notified: r.notified, restart: Boolean(r.restart) })))}`
+  );
+  check(pendingRun, '台账里这次 Run 带着续跑记录', ledger);
+
+  // 3. 重新启动：子代理自动续跑，父会话收到完成通知
+  const childRequestsBefore = requests.filter((r) => r.who === 'child').length;
+  const second = await launch('run2');
+  await waitFor(
+    () => requests.some((r) => r.who === 'parent' && r.action.includes('PARENT-GOT-IT')),
+    '父会话收到完成通知并开一轮',
+    90_000
+  );
+  const childAfter = requests.filter((r) => r.who === 'child').slice(childRequestsBefore);
+  check(
+    childAfter.length === 1 &&
+      childAfter[0].action === 'final CHILD-DONE' &&
+      childAfter[0].lastText.includes('step1') === false,
+    '子代理重启后只发了一次请求：带着 bash 结果直接收尾，没有重新调用 bash',
+    childAfter
+  );
+  check(readFileSync(MARKER, 'utf8').trim() === 'step1', 'bash 只执行过一次（marker 只有一行）');
+  const notice = requests.find((r) => r.who === 'parent' && r.action.includes('PARENT-GOT-IT'));
+  check(
+    /succeeded/.test(notice?.lastText ?? ''),
+    '父会话收到的是完成通知（succeeded），不是中断通知',
+    notice
+  );
+  check(
+    !requests.some((r) => r.who === 'parent' && /interrupted/.test(r.lastText)),
+    '父会话没有收到「已中断」通知'
+  );
+  check(
+    pendingRun && notice?.lastText.includes(pendingRun.runId),
+    '完成通知里的 runId 就是重启前那个 runId',
+    { runId: pendingRun?.runId, notice: notice?.lastText }
+  );
+  for (const line of logLines(
+    'run2',
+    /\[agent\] restart resume|wake owner|cold resume|graceful-restart\] wake/
+  ))
+    note(`run2 log: ${line.trim()}`);
+  await quit(second, 30_000);
+  provider.server.close();
+
+  const failed = results.filter((r) => !r.ok);
+  writeFileSync(path.join(OUT, 'timeline.txt'), timeline.join('\n'));
+  console.log(`\n${results.length - failed.length}/${results.length} passed → ${OUT}/timeline.txt`);
+  if (!KEEP && failed.length === 0) rmSync(OUT, { recursive: true, force: true });
+  return failed.length === 0 ? 0 : 1;
+}
+
+main()
+  .then((code) => process.exit(code))
+  .catch((error) => {
+    console.error(error instanceof Error ? error.stack : error);
+    console.error(`out: ${OUT}`);
+    process.exit(2);
+  });

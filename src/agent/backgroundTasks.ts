@@ -1017,15 +1017,21 @@ export class BackgroundTaskManager {
 
   /**
    * worker 收尾前：还在跑、即将被停掉的任务（含空闲会话的）。记进台账后调 handOverNotices，
-   * 本代不再发完成通知，由下一代在任务表留下「因重启中断」并通知一次。子代理的任务记到根会话：子会话不随换代恢复。
+   * 本代不再发完成通知，由下一代在任务表留下「因重启中断」并通知一次。子代理的任务记到根会话（子会话不随换代恢复），
+   * keepChild 认定重启后会续跑的子会话除外：记给它本身，续跑时交给它
    */
-  interruptedOnShutdown(now = Date.now()): InterruptedTaskRecord[] {
+  interruptedOnShutdown(
+    now = Date.now(),
+    keepChild: (sessionId: string) => boolean = () => false
+  ): InterruptedTaskRecord[] {
     const records: InterruptedTaskRecord[] = [];
     for (const task of this.tasks.values()) {
       if (task.info.status !== 'running' || task.settling) continue;
       records.push({
         taskId: task.info.taskId,
-        sessionId: task.sessionId.split('::')[0] ?? task.sessionId,
+        sessionId: keepChild(task.sessionId)
+          ? task.sessionId
+          : (task.sessionId.split('::')[0] ?? task.sessionId),
         command: commandSummary(task.info.command),
         startedAt: task.info.startedAt,
         stoppedAt: now,

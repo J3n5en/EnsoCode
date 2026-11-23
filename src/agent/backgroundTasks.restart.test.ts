@@ -435,4 +435,23 @@ describe.runIf(posix)('worker 收尾停掉的后台任务记台账、下一代�
       expect.objectContaining({ taskId: server, status: 'failed', interrupted: 'restart' }),
     ]);
   });
+
+  it('重启后会续跑的子代理：它的任务记给子会话本身，不打扰父会话', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-bg-interrupted-child-'));
+    const logDir = path.join(dir, 'task-logs');
+    const first = makeManager(logDir);
+    const build = first.manager.start('root::cw-worker', 'echo building; sleep 30', dir);
+    const other = first.manager.start('root::cw-other', 'sleep 30', dir);
+    const records = first.manager.interruptedOnShutdown(
+      Date.now(),
+      (sessionId) => sessionId === 'root::cw-worker'
+    );
+    expect(records).toEqual([
+      expect.objectContaining({ taskId: build, sessionId: 'root::cw-worker' }),
+      expect.objectContaining({ taskId: other, sessionId: 'root' }),
+    ]);
+    first.manager.handOverNotices(records.map((record) => record.taskId));
+    first.manager.stopAll();
+    await until(() => first.ended.length === 2);
+  });
 });

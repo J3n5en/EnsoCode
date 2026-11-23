@@ -1,6 +1,37 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { AgentMode, AgentOwnerIdentity, AgentRunStatus } from '@shared/types/agent';
+import { type ChildSessionIdentity, parseChildSessionIdentity } from '@shared/builtinAgents';
+import type {
+  AgentControlSpawnRequest,
+  AgentMode,
+  AgentOwnerIdentity,
+  AgentRunGate,
+  AgentRunStatus,
+} from '@shared/types/agent';
+
+/** 子代理派发参数：重启后重建子会话时按它重新解析同一套模型、思考档、类型 */
+export interface AgentSpawnSpec {
+  description: string;
+  name?: string;
+  agentType?: string;
+  model?: string;
+  thinking?: AgentControlSpawnRequest['thinking'];
+}
+
+/** 重启时还在跑的 Run：新 Main 据此重建 Agent 与 Run，接着原子会话续跑 */
+export interface AgentRunRestartRecord {
+  child: ChildSessionIdentity;
+  spawn: AgentSpawnSpec;
+  prompt: string;
+  schema?: unknown;
+  gate?: AgentRunGate;
+  /** 手动 resume 已用次数 */
+  resumes: number;
+  /** 重启后已自动续跑的次数 */
+  restartResumes: number;
+  /** 已用的模型请求数：请求预算接着累计 */
+  requests: number;
+}
 
 /** 子代理 Run 的身份台账：只存 id 与状态，Main 重启后据此认出旧 runId / agentId */
 export interface AgentRunLedgerEntry {
@@ -16,6 +47,7 @@ export interface AgentRunLedgerEntry {
   title?: string;
   /** 父会话已得知它的结局；false = 重启后父会话就绪时要补通知 */
   notified?: boolean;
+  restart?: AgentRunRestartRecord;
 }
 
 export interface AgentRunLedgerStore {
@@ -35,6 +67,53 @@ const STATUSES: ReadonlySet<string> = new Set([
   'interrupted',
 ]);
 const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value !== '';
+const count = (value: unknown): value is number =>
+  Number.isInteger(value) && (value as number) >= 0;
+const optionalString = (value: unknown): value is string | undefined =>
+  value === undefined || nonEmpty(value);
+
+function parseRestart(value: unknown): AgentRunRestartRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const child = parseChildSessionIdentity(record.child);
+  const spawn = record.spawn as Record<string, unknown> | undefined;
+  const gate = record.gate as Record<string, unknown> | undefined;
+  if (
+    !child ||
+    !spawn ||
+    typeof spawn !== 'object' ||
+    !nonEmpty(spawn.description) ||
+    !optionalString(spawn.name) ||
+    !optionalString(spawn.agentType) ||
+    !optionalString(spawn.model) ||
+    !optionalString(spawn.thinking) ||
+    typeof record.prompt !== 'string' ||
+    (gate !== undefined && (typeof gate !== 'object' || !nonEmpty(gate?.commandRef))) ||
+    !count(record.resumes) ||
+    !count(record.restartResumes) ||
+    !count(record.requests)
+  ) {
+    return null;
+  }
+  return {
+    child,
+    spawn: {
+      description: spawn.description,
+      ...(spawn.name ? { name: spawn.name } : {}),
+      ...(spawn.agentType ? { agentType: spawn.agentType } : {}),
+      ...(spawn.model ? { model: spawn.model } : {}),
+      ...(spawn.thinking
+        ? { thinking: spawn.thinking as AgentControlSpawnRequest['thinking'] }
+        : {}),
+    },
+    prompt: record.prompt,
+    ...(record.schema !== undefined ? { schema: record.schema } : {}),
+    ...(gate ? { gate: { commandRef: gate.commandRef as string } } : {}),
+    resumes: record.resumes,
+    restartResumes: record.restartResumes,
+    requests: record.requests,
+  };
+}
 
 function parseEntry(value: unknown): AgentRunLedgerEntry | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -53,6 +132,7 @@ function parseEntry(value: unknown): AgentRunLedgerEntry | null {
   ) {
     return null;
   }
+  const restart = entry.restart === undefined ? undefined : parseRestart(entry.restart);
   return {
     runId: entry.runId,
     agentId: entry.agentId,
@@ -67,6 +147,7 @@ function parseEntry(value: unknown): AgentRunLedgerEntry | null {
       : {}),
     ...(typeof entry.title === 'string' && entry.title ? { title: entry.title.slice(0, 200) } : {}),
     ...(typeof entry.notified === 'boolean' ? { notified: entry.notified } : {}),
+    ...(restart ? { restart } : {}),
   };
 }
 
