@@ -2283,6 +2283,13 @@ export const zhTranslations: Record<string, string> = {
   'Pause goal': '暂停目标',
   'Resume goal': '继续目标',
   'Clear goal': '清除目标',
+  'Waiting for upstream recovery': '等待上游恢复',
+  'Waiting for upstream recovery · next {{time}}': '等待上游恢复 · 下次 {{time}}',
+  'Quota exhausted': '额度用完',
+  'Quota exhausted · next {{time}}': '额度用完 · 下次 {{time}}',
+  'Stop auto-retry': '停止自动重试',
+  'Upstream unavailable ({{provider}}), retrying automatically':
+    '上游不可用（{{provider}}），自动重试中',
   Plan: '计划',
   'Plan mode is on: read-only research, then a plan for your approval':
     'Plan 模式已开启：只读调研，产出计划交你审批',

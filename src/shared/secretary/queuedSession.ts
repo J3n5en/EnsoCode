@@ -18,6 +18,12 @@ export interface QueuedStart {
   startingAt?: number;
   /** 自动启动失败：移出自动队列，等用户「立即开始」重试或取消 */
   failed?: { at: number; error: string };
+  /** 启动遇瞬态错误时的自动重试次数（上限 5 次） */
+  retryCount?: number;
+  /** 下次允许自动重试的时间戳（epoch ms） */
+  nextRetryAt?: number;
+  /** 最近一次瞬态启动错误 */
+  lastError?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -49,6 +55,11 @@ export function queuedStartOf(row: unknown): QueuedStart | undefined {
     ...(askRelay ? { askRelay } : {}),
     ...(finite(raw.startingAt) ? { startingAt: raw.startingAt } : {}),
     ...(failed ? { failed } : {}),
+    ...(typeof raw.retryCount === 'number' && Number.isInteger(raw.retryCount) && raw.retryCount > 0
+      ? { retryCount: raw.retryCount }
+      : {}),
+    ...(finite(raw.nextRetryAt) ? { nextRetryAt: raw.nextRetryAt } : {}),
+    ...(typeof raw.lastError === 'string' && raw.lastError ? { lastError: raw.lastError } : {}),
   };
 }
 
