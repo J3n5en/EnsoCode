@@ -1013,7 +1013,8 @@ export const useBotsStore = create<BotsState>()((set, get) => {
         return;
       }
       const conversationId = chat.sessions[chat.members[0]]?.conversationId;
-      if (conversationId) await window.electronAPI.agent.abort(conversationId);
+      if (conversationId)
+        await window.electronAPI.agent.abort(conversationId, { stopSubagents: true });
     },
 
     rewind: async (chatId, entryId, restoreFiles) => {
