@@ -102,6 +102,7 @@ import {
 } from '../services/secretary/skills';
 import { createStatePublisher } from '../services/secretary/statePublisher';
 import { SecretaryStore } from '../services/secretary/store';
+import { readSessionReminders } from '../services/sessionReminders';
 import {
   getSourceAuthorityRegistry,
   isRootSessionAlive,
@@ -323,6 +324,7 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     tasks: (conversationId) => observedBackgroundTasks(conversationId),
     tasksReported: () => backgroundTaskStates.reported(),
     subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
+    reminders: (conversationId) => readSessionReminders(conversationId),
     // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
     interruptDetail: (conversationId) =>
       interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),

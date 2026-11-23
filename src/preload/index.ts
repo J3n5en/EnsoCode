@@ -1261,8 +1261,12 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text, images, deliveryId),
     withdrawSteer: (sessionId: string, deliveryId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_WITHDRAW_STEER, sessionId, deliveryId),
-    abort: (sessionId: string): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
+    /** cancelReminders：用户停止时一并取消会话自己定的提醒 */
+    abort: (
+      sessionId: string,
+      options?: { cancelReminders?: boolean }
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId, options),
     abortRetry: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT_RETRY, sessionId),
     retry: (

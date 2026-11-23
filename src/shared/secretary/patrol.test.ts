@@ -105,9 +105,9 @@ describe('goal 会话空闲停住', () => {
       patrolAnomalies([{ ...waiting, awaitingReplySince: 0 }], PATROL_IDLE_GOAL_MS + 1)
     ).toEqual([]);
     // 运行卡住照报
-    expect(
-      patrolAnomalies([{ ...waiting, state: 'running' }], PATROL_RUNNING_MS + 1)
-    ).toEqual([{ conversationId: 'c1', reason: 'running-stalled' }]);
+    expect(patrolAnomalies([{ ...waiting, state: 'running' }], PATROL_RUNNING_MS + 1)).toEqual([
+      { conversationId: 'c1', reason: 'running-stalled' },
+    ]);
   });
 
   it('最后一条是完成汇报的不算停住', () => {

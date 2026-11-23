@@ -1211,6 +1211,8 @@ export const useSessionsStore = create<SessionsState>()(
         });
       });
 
+      /** 上一轮收束时会话还挂着自定提醒：goal 先不续跑，等提醒叫醒的那一轮收束再刷新 */
+      const awaitingReminder = new Set<string>();
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
           set((state) => {
@@ -1979,6 +1981,8 @@ export const useSessionsStore = create<SessionsState>()(
           void recoverStaleSession(id, event.reason, event.identity.generation);
         }
         if (event.type === 'turn-completed' || event.type === 'turn-failed') {
+          if (event.type === 'turn-completed' && event.awaitingReminder) awaitingReminder.add(id);
+          else awaitingReminder.delete(id);
           // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口。
           // 中断标记只在发起窗口本地，别的窗口（如 PWA 完整模式）发起的中断靠 worker 的 aborted 认出
           const aborted = event.type === 'turn-completed' && event.aborted === true;
@@ -2164,6 +2168,7 @@ export const useSessionsStore = create<SessionsState>()(
         )
           return;
         if (goal?.status !== 'active') return;
+        if (awaitingReminder.has(id)) return;
         if ((conversation.queuedMessages ?? []).length > 0) return;
         // 规划与待审期间不自动推进：计划需要用户审批
         const phase = planPhase(conversation.planState);
@@ -3908,7 +3913,8 @@ export const useSessionsStore = create<SessionsState>()(
                 : {}),
             })
           );
-          await window.electronAPI.agent.abort(id);
+          // 用户停止：会话自己定的提醒一并取消
+          await window.electronAPI.agent.abort(id, { cancelReminders: true });
         },
 
         setGoal(conversationId, text) {

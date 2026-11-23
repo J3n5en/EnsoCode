@@ -944,7 +944,10 @@ describe('session_tasks', () => {
     expect(JSON.stringify(tasks)).not.toContain('secret prompt');
 
     const read = await run(handlers.session_read, { conversationId: 's1' });
-    expect(read.reminders).toEqual([{ dueAt: now + 60_000 }, { dueAt: now + 120_000, label: 'ci' }]);
+    expect(read.reminders).toEqual([
+      { dueAt: now + 60_000 },
+      { dueAt: now + 120_000, label: 'ci' },
+    ]);
 
     const none = await run(
       createSecretaryReadHandlers({ ...ports, reminders: () => [] }).session_tasks,

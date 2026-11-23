@@ -85,6 +85,7 @@ vi.mock('../services/oauthProviders', () => ({
 vi.mock('../services/agentHost', () => ({
   abortSession: mocks.abortSession,
   clearSessionReminders: mocks.clearSessionReminders,
+  fireSessionReminders: vi.fn(),
   compactSession: mocks.compactSession,
   forgetParentToolProfile: vi.fn(),
   agentTypeRegistrySnapshot: vi.fn(() => ({
