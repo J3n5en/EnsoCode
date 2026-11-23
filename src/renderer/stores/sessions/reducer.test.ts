@@ -14,6 +14,7 @@ import {
   truncatedNeedsSnapshotResync,
   upsertOutOfRange,
 } from './reducer';
+import { buildTimeline } from './timeline';
 
 const identity = (generation = 'g1') => ({ sessionId: 's1', generation });
 const base: SessionProjection = { ...emptyProjection };
@@ -789,6 +790,28 @@ describe('applyAgentEvent', () => {
         identity: { ...identity(), generation: 'stale' },
       })
     ).toBe(after);
+  });
+
+  it('上一轮卡住导致的拒收带上原因，时间线据此提示先重启会话', () => {
+    const echo = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hi' }],
+      optimistic: true,
+      deliveryId: 'd1',
+    };
+    const after = applyAgentEvent({ ...base, messages: [echo] }, 's1', {
+      type: 'delivery-rejected',
+      identity: identity(),
+      seq: 1,
+      deliveryId: 'd1',
+      reason: 'turn-stuck',
+    });
+    expect(after.messages).toEqual([
+      { ...echo, deliveryRejected: true, rejectedReason: 'turn-stuck' },
+    ]);
+    expect(buildTimeline(after.messages, false, [])).toEqual([
+      expect.objectContaining({ kind: 'user', deliveryState: 'stuck' }),
+    ]);
   });
 
   it('用户请求撤回的回显收到拒收回执即移除，同文其他回显不受影响', () => {

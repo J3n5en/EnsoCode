@@ -304,6 +304,53 @@ describe('withdraw undelivered messages', () => {
     }
   );
 
+  it.each(['rejected', 'pending'])(
+    '一键重发只对拒收的气泡生效，按新投递号原样发出（%s）',
+    (delivery) => {
+      const store = sessionsModule.useSessionsStore;
+      const image = { type: 'image' as const, data: 'aGk=', mimeType: 'image/png' };
+      const echo = {
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: 'continue' }, image],
+        optimistic: true,
+        deliveryId: 'd1',
+        deliveryRejected: delivery === 'rejected',
+      };
+      store.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: {
+            ...state.conversations.parent,
+            started: true,
+            status: 'idle',
+            messages: [echo],
+          },
+        },
+      }));
+      const before = store.getState().conversations.parent;
+      store.getState().resendMessage('parent', 'd1');
+      const after = store.getState().conversations.parent;
+      if (delivery === 'pending') {
+        expect(after).toBe(before);
+        expect(agentPrompt).not.toHaveBeenCalled();
+        return;
+      }
+      expect(after.queuedMessages ?? []).toEqual([]);
+      expect(after.messages).toEqual([
+        expect.objectContaining({ optimistic: true, content: echo.content }),
+      ]);
+      const resent = after.messages[0]!;
+      expect(resent.deliveryId).not.toBe('d1');
+      expect(resent.deliveryRejected).toBeUndefined();
+      expect(agentPrompt).toHaveBeenCalledWith(
+        'parent',
+        'continue',
+        [{ data: 'aGk=', mimeType: 'image/png' }],
+        resent.deliveryId
+      );
+    }
+  );
+
   describe('运行中撤回模型未读的插话', () => {
     const pendingEcho = {
       role: 'user' as const,

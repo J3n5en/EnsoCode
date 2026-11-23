@@ -29,8 +29,10 @@ export type TimelineMessage = ProjectedMessage & {
   optimistic?: boolean;
   /** 本地投递标识：投递失败时按它精确收回，不误删并发的另一条乐观消息 */
   deliveryId?: string;
-  /** worker 明确拒收；只有这种乐观回显可以本地撤回。 */
+  /** worker 明确拒收；只有这种乐观回显可以本地撤回或重发。 */
   deliveryRejected?: boolean;
+  /** 拒收原因：上一轮卡住停不下来，重发前要先重开会话 */
+  rejectedReason?: 'turn-stuck';
   /** 用户已请求撤回未读插话：worker 撤回成功回执 delivery-rejected 时直接移除 */
   withdrawRequested?: true;
 };
@@ -517,7 +519,13 @@ export function applyAgentEvent(
           message.deliveryId === event.deliveryId
             ? message.withdrawRequested
               ? []
-              : [{ ...message, deliveryRejected: true }]
+              : [
+                  {
+                    ...message,
+                    deliveryRejected: true,
+                    ...(event.reason ? { rejectedReason: event.reason } : {}),
+                  },
+                ]
             : [message]
         ),
         lastSeq: event.seq,

@@ -64,6 +64,7 @@ import {
   PackageMinus,
   Pause,
   RefreshCw,
+  RotateCcw,
   SkipForward,
   Sparkles,
   Target,
@@ -85,6 +86,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { InjectedMessageCard } from '@/components/bots/InjectedMessageCard';
+import { restartConversationFromMenu } from '@/components/chat/reloadConversationAction';
 import { conversationIdBySessionFile } from '@/components/chat/sessionRefJump';
 import { SecretaryFace } from '@/components/secretary/SecretaryFace';
 import {
@@ -1951,6 +1953,46 @@ function WithdrawButton({ messageIndex }: { messageIndex: number }) {
   );
 }
 
+function RestartStuckButton() {
+  const { t } = useI18n();
+  const conversationId = useSessionsStore((state) => displayedConversation(state)?.id);
+  if (!conversationId) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => void restartConversationFromMenu(conversationId, t)}
+      className="inline-flex items-center gap-1 hover:text-foreground"
+    >
+      <RotateCcw className="h-3 w-3" />
+      {t('Restart conversation')}
+    </button>
+  );
+}
+
+function ResendButton({ messageIndex }: { messageIndex: number }) {
+  const { t } = useI18n();
+  const host = useChatHost();
+  const conversationId = useSessionsStore((state) => displayedConversation(state)?.id);
+  const deliveryId = useSessionsStore((state) => {
+    const conversation = conversationId ? state.conversations[conversationId] : undefined;
+    if (host || !conversation || conversation.historyOnly) return undefined;
+    const message = conversation.messages[messageIndex - (conversation.historyBaseIndex ?? 0)];
+    return canWithdrawMessage(message) ? message?.deliveryId : undefined;
+  });
+  if (!conversationId || !deliveryId) return null;
+  return (
+    <button
+      type="button"
+      title={t('Resend')}
+      onClick={() => useSessionsStore.getState().resendMessage(conversationId, deliveryId)}
+      className="inline-flex items-center gap-1 hover:text-foreground"
+    >
+      <RefreshCw className="h-3 w-3" />
+      {t('Resend')}
+    </button>
+  );
+}
+
 /** 回退入口：已 spawn 非 spawning，或可 resume 的历史主会话。未恢复 coworker / remote / historyOnly 不显示；活 child 保持。 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
@@ -2145,7 +2187,7 @@ function UserMeta({
   text: string;
   timestamp?: number;
   canCollapse?: boolean;
-  deliveryState?: 'pending' | 'rejected';
+  deliveryState?: 'pending' | 'rejected' | 'stuck';
   onToggleTurn?: (key: string, collapsed: boolean) => void;
 }) {
   const { t } = useI18n();
@@ -2153,11 +2195,21 @@ function UserMeta({
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
       <RewindButton messageIndex={messageIndex} />
+      <ResendButton messageIndex={messageIndex} />
       <WithdrawButton messageIndex={messageIndex} />
       <UserPromptCopy text={text} />
       {deliveryState && (
-        <span>{t(deliveryState === 'rejected' ? 'Not sent' : 'Delivery unconfirmed')}</span>
+        <span>
+          {t(
+            deliveryState === 'stuck'
+              ? 'Not sent: the previous turn is stuck and could not be interrupted. Restart the conversation, then resend.'
+              : deliveryState === 'rejected'
+                ? 'Not sent'
+                : 'Delivery unconfirmed'
+          )}
+        </span>
       )}
+      {deliveryState === 'stuck' && <RestartStuckButton />}
       {autoCollapseTurns && canCollapse && onToggleTurn && (
         <button
           type="button"
