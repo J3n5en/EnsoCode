@@ -76,7 +76,6 @@ const KEEP = keepRequested(process.env, process.argv);
 // 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
 const MEMORY_ONLY = process.argv.includes('--memory-only');
 const FORWARD_IMAGES_ONLY = process.argv.includes('--forward-images-only');
-const CONTACT_ONLY = process.argv.includes('--contact-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -729,10 +728,6 @@ async function run(cdp, pluginZipUrl) {
   }
   if (FORWARD_IMAGES_ONLY) {
     await verifyForwardImages(cdp, setup);
-    return;
-  }
-  if (CONTACT_ONLY) {
-    await verifyTelegramContact(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
