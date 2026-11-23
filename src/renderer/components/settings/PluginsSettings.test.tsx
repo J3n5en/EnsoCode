@@ -310,11 +310,10 @@ describe('ExtensionPluginLogs', () => {
       'error',
       'error',
     ]);
-    expect(rendered[0]?.className).not.toContain('text-destructive');
-    expect(rendered[0]?.className).not.toContain('text-warning');
-    expect(rendered[1]?.className).toContain('text-warning');
-    expect(rendered[2]?.className).toContain('text-destructive');
-    expect(rendered[3]?.className).toContain('text-destructive');
+    expect(rendered[0]?.className).not.toMatch(/color-(warning|destructive)/);
+    expect(rendered[1]?.className).toContain('color-warning');
+    expect(rendered[2]?.className).toContain('color-destructive');
+    expect(rendered[3]?.className).toBe(rendered[2]?.className);
   });
 
   it('行首时间戳单独渲染', async () => {
