@@ -272,6 +272,34 @@ describe('agent IPC Main identity boundary', () => {
     expect(mocks.dispatchHost.resolveSubagentModel).toBe(resolveSubagentModelSelection);
   });
 
+  it('worker 换代：断点交给子代理服务，换代按 worker 退出交给它续跑 Run；不进会话广播、不清 MCP 状态', () => {
+    const service = getAgentService()!;
+    const note = vi.spyOn(service, 'noteRestartCheckpoint');
+    const observe = vi.spyOn(service, 'observe');
+    const listener = mocks.setAgentEventListener.mock.calls.at(-1)![0];
+    const sessions = [
+      {
+        sessionId: 'conv-1::cw-a',
+        generation: 'g',
+        sessionFile: '/tmp/agent/sessions/child.jsonl',
+        seq: 1,
+        nextStep: 'model-request',
+        messageCount: 1,
+        toolsInFlight: [],
+      },
+    ];
+    listener({
+      type: 'graceful-restart-ready',
+      checkpoint: { version: 1, pid: 1, writtenAt: 1, sessions },
+    });
+    expect(note).toHaveBeenCalledWith(sessions);
+    listener({ type: 'worker-swapped' });
+    expect(observe).toHaveBeenCalledWith({ type: 'worker-exited' });
+    expect(observe).toHaveBeenCalledTimes(1);
+    note.mockRestore();
+    observe.mockRestore();
+  });
+
   it('停止带 stopSubagents 时一并停掉根会话名下的子代理；不带选项或 child 身份不级联', async () => {
     const parent = { sessionId: 'conv-1', generation: 'gen-1' };
     const cancelOwner = vi.spyOn(getAgentService()!, 'cancelOwner').mockResolvedValue();
