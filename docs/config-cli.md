@@ -94,6 +94,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `longCacheRetention`（布尔，默认 `false`）打开后，会话请求（主会话、子代理、coworker、秘书、插件 agent.run）对 Anthropic Messages 接口的模型使用 1 小时 prompt cache，其余接口和标题等一次性辅助请求仍用默认 5 分钟；从下一次请求起生效，无需重启。
 
+`recentModels` 是模型选择器「最近使用」列表：`{ providerId, modelId }` 数组，最近的在前，最多 5 条且不重复；不符合的整体写入会被拒绝。它只存 id，不是密钥、路径或执行入口，热生效，不参与配置同步（引用本机 provider id）。
+
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
 - `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`

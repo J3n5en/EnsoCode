@@ -355,6 +355,36 @@ describe('config CLI socket', () => {
     expect((await state()).longCacheRetention).toBe(true);
   });
 
+  it('最近使用模型可写，只接受去重且不超过 5 条的 providerId/modelId 列表', async () => {
+    const refs = [
+      { providerId: 'p1', modelId: 'm1' },
+      { providerId: 'p1', modelId: 'm2' },
+    ];
+    expect(await config({ action: 'set', key: 'recentModels', value: refs })).toEqual({ ok: true });
+    expect((await state()).recentModels).toEqual(refs);
+    for (const value of [
+      'p1/m1',
+      [refs[0], refs[0]],
+      [{ providerId: 'p1' }],
+      [{ ...refs[0], apiKey: 'x' }],
+      Array.from({ length: 6 }, (_, i) => ({ providerId: 'p', modelId: String(i) })),
+    ]) {
+      expect(await config({ action: 'set', key: 'recentModels', value })).toMatchObject({
+        ok: false,
+      });
+    }
+    expect((await state()).recentModels).toEqual(refs);
+    const schema = await config({ action: 'schema' });
+    const keys = new Map(
+      (schema.keys as Array<Record<string, unknown>>).map((entry) => [entry.path, entry])
+    );
+    expect(keys.get('recentModels')).toMatchObject({
+      writable: true,
+      secret: false,
+      requiresRestart: false,
+    });
+  });
+
   it('提炼聚合窗口热生效可写，只接受预设分钟数', async () => {
     expect(await config({ action: 'set', key: 'memoryDistillWindowMinutes', value: 0 })).toEqual({
       ok: true,

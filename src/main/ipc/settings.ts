@@ -111,6 +111,7 @@ export const SETTINGS_STATE_FIELDS = [
   'liveActivityFoldDelaySec',
   'pinUnfinishedTodos',
   'pinnedModels',
+  'recentModels',
   'headerSessionTabs',
   'headerRecentMinutes',
   'chatWide',
@@ -210,6 +211,7 @@ export type SettingsStateField = (typeof SETTINGS_STATE_FIELDS)[number];
 const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'hashlineEditEnabled',
   'pinnedModels',
+  'recentModels',
   'approvalAutoManage',
   'approvalAllowThreshold',
   'privacyMasking',
