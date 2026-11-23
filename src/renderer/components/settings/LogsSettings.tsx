@@ -62,18 +62,22 @@ function ErrorSummary() {
   const [rows, setRows] = React.useState<{ key: string; entry: AppLogEntry }[] | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
+  const requestIdRef = React.useRef(0);
 
   const load = React.useCallback(async (min: LogSummaryLevel) => {
+    const id = ++requestIdRef.current;
     setLoading(true);
     try {
       const entries = await window.electronAPI.logs.errors(min);
+      if (requestIdRef.current !== id) return;
       // 每次刷新整体替换列表，序号即稳定标识
       setRows(entries.map((entry, i) => ({ key: `${i}:${entry.time}`, entry })));
       setExpanded(null);
     } catch {
+      if (requestIdRef.current !== id) return;
       setRows([]);
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === id) setLoading(false);
     }
   }, []);
 

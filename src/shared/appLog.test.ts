@@ -36,7 +36,27 @@ describe('redactSecrets', () => {
       'id eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTYifQ.SflKxwRJSMeKKF2QT4fwpM',
     ],
     ['URL 内嵌凭据', 'clone https://user:p4ssw0rd@github.com/a/b.git'],
+    ['URL 单段 token 凭据', 'clone https://mysecretpat999@github.com/a/b.git'],
     ['cookie 头', 'Cookie: session=abc123def456'],
+    ['多项 Cookie 头', 'Cookie: session=abc123def456; sid=SECRET_SID_999; csrftoken=CSRF_888'],
+    ['Set-Cookie 头', 'Set-Cookie: sid=SET_COOKIE_SECRET; HttpOnly; Path=/'],
+    ['小写 bearer', 'auth: bearer lowercase_bearer_token_12345'],
+    ['Stripe key', 'stripe sk_live_51HqABCDEFGHIJKLMNOP and rk_test_99ZzABCDEFGHIJKLMNOP'],
+    ['HuggingFace token', 'hf hf_ABCDEFGHIJKLMNOPQRSTUVWXYZ12'],
+    ['xAI key', 'xai xai-AbCdEf1234567890GhIjKlMn'],
+    ['Groq key', 'groq gsk_AbCdEf1234567890GhIjKlMnOp'],
+    ['Perplexity key', 'pplx pplx-AbCdEf1234567890GhIjKlMnOp'],
+    ['Google OAuth', 'oauth ya29.a0AfB_byC1234567890abcdef'],
+    ['npm token', 'npm npm_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'],
+    ['PyPI token', 'pypi pypi-AgEIcHlwaS5vcmcCJDEyMzQ1Njc4OTA'],
+    [
+      'SendGrid key',
+      `sg ${['SG', 'AbCdEf1234567890GhIjKl', 'MnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrS'].join('.')}`,
+    ],
+    [
+      '转义 JSON 里的密钥',
+      '{"m":"failed: {\\"api_key\\":\\"ESCAPED_SECRET_1\\",\\"password\\":\\"ESCAPED_PASS_2\\"}"}',
+    ],
   ])('%s 被脱敏', (_name, input) => {
     const out = redactSecrets(input);
     expect(out).toContain('***');
@@ -60,7 +80,21 @@ describe('redactSecrets', () => {
       'AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw',
       'SflKxwRJSMeKKF2QT4fwpM',
       'p4ssw0rd',
+      'mysecretpat999',
       'abc123def456',
+      'SECRET_SID_999',
+      'CSRF_888',
+      'SET_COOKIE_SECRET',
+      'lowercase_bearer_token_12345',
+      '51HqABCDEFGHIJKLMNOP',
+      '99ZzABCDEFGHIJKLMNOP',
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ12',
+      'AbCdEf1234567890GhIjKlMn',
+      'a0AfB_byC1234567890abcdef',
+      'AgEIcHlwaS5vcmcCJDEyMzQ1Njc4OTA',
+      'MnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrS',
+      'ESCAPED_SECRET_1',
+      'ESCAPED_PASS_2',
     ]) {
       expect(out).not.toContain(secret);
     }
@@ -74,8 +108,49 @@ describe('redactSecrets', () => {
     expect(out).toContain('done');
   });
 
+  it('本机用户路径、邮箱与手机号脱敏，且不误伤 npm 包名、版本号和时间戳', () => {
+    const input = [
+      'at /Users/alice/work/app.ts:10',
+      'cfg=/home/bob/.config/enso',
+      'win=C:\\Users\\carol\\AppData\\Local\\enso',
+      'winJson="C:\\\\Users\\\\dave\\\\Desktop"',
+      'email=alice.smith@company.com',
+      'phone=+86 13812345678 mobile=13987654321',
+      'pkg=@anthropic-ai/sdk@1.2.3 ts=1735689600000 port=8080',
+    ].join('\n');
+    const out = redactSecrets(input);
+    for (const leaked of [
+      'alice',
+      'bob',
+      'carol',
+      'dave',
+      'alice.smith@company.com',
+      '13812345678',
+      '13987654321',
+    ]) {
+      expect(out, leaked).not.toContain(leaked);
+    }
+    expect(out).toContain('/Users/<user>/work/app.ts:10');
+    expect(out).toContain('/home/<user>/.config/enso');
+    expect(out).toContain('C:\\Users\\<user>\\AppData\\Local\\enso');
+    expect(out).toContain('C:\\\\Users\\\\<user>\\\\Desktop');
+    expect(out).toContain('@anthropic-ai/sdk@1.2.3');
+    expect(out).toContain('ts=1735689600000');
+    expect(out).toContain('port=8080');
+  });
+
+  it('超长连续字符线性处理，不发生 O(n²) 正则回溯', () => {
+    const run = 'a'.repeat(200_000);
+    const start = Date.now();
+    const out = redactSecrets(`${run} https://u:p4ss@h sk-proj-AbCdEf1234567890`);
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(out).not.toContain('p4ss');
+    expect(out).not.toContain('AbCdEf1234567890');
+  });
+
   it('普通文本保持不变', () => {
-    const text = '[agent] turn finished in 120ms, tokens: 42, session=abc';
+    const text =
+      '[agent] turn finished in 120ms, tokens: 42, session=abc, {"token":false,"auth":{"token":null}}';
     expect(redactSecrets(text)).toBe(text);
   });
 });

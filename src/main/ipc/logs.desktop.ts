@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { ipcMain, shell } from '@platform';
 import { type LogExportResult, parseLogExportHours, parseLogSummaryLevel } from '@shared/appLog';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, BrowserWindow, dialog, type WebContents } from 'electron';
 import { collectErrorSummary, ERROR_SUMMARY_LIMIT, exportLogs } from '../services/appLogs';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';

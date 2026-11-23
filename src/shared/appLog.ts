@@ -1,3 +1,5 @@
+import { redactSecrets as sharedRedactSecrets } from './redactSecrets';
+
 /** 应用日志：结构化行（JSONL）的格式、解析、脱敏与错误汇总。纯函数，Main / worker / 测试共用 */
 
 export type AppLogLevel = 'info' | 'warn' | 'error';
@@ -41,39 +43,8 @@ function isAppLogSource(value: unknown): value is AppLogSource {
   return typeof value === 'string' && (APP_LOG_SOURCES as readonly string[]).includes(value);
 }
 
-const MASK = '***';
-const SECRET_NAME =
-  '(?<![\\w-])[\\w-]*(?:key|token|secret|password|passwd|pwd|passphrase|authorization|auth|cookie|credentials?|signature)';
-/** 顺序有讲究：先整段（私钥、URL 凭据、已知前缀），再键值对兜底。宁可多脱 */
-const REDACTIONS: [RegExp, string][] = [
-  [
-    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
-    `${MASK}PRIVATE KEY${MASK}`,
-  ],
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, `$1${MASK}@`],
-  [/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/g, `$1 ${MASK}`],
-  [/\bsk-[A-Za-z0-9_-]{8,}/g, MASK],
-  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, MASK],
-  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, MASK],
-  [/\bglpat-[A-Za-z0-9_-]{16,}/g, MASK],
-  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, MASK],
-  [/\bAIza[0-9A-Za-z_-]{30,}/g, MASK],
-  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, MASK],
-  [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}/g, MASK],
-  [/\d{6,12}:[A-Za-z0-9_-]{30,}/g, MASK],
-  // "password": "a b c" —— 引号内整段
-  [
-    new RegExp(`(${SECRET_NAME}["']?\\s*[:=]\\s*)(["'])(?:\\\\.|(?!\\2)[^\\\\])*\\2`, 'gi'),
-    `$1$2${MASK}$2`,
-  ],
-  // password=xxx / token: xxx / ?api_key=xxx
-  [new RegExp(`(${SECRET_NAME}["']?\\s*[:=]\\s*)(?!\\*{3})[^\\s"'&,;}\\]]+`, 'gi'), `$1${MASK}`],
-];
-
 export function redactSecrets(text: string): string {
-  let out = text;
-  for (const [pattern, replacement] of REDACTIONS) out = out.replace(pattern, replacement);
-  return out;
+  return sharedRedactSecrets(text, { mask: '***', preserveUrlUser: false, redactPii: true });
 }
 
 /** console 文本按 `[模块]` 前缀归属来源；没有前缀用进程默认来源 */
@@ -149,16 +120,39 @@ export function parsePluginLogLines(text: string, pluginId: string): AppLogEntry
 
 const STAMPED_LINE = /^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\] ?/;
 
+/** worker-exits.log 混有正常优雅重启记录与崩溃退出：按内容分级，避免把正常日志算成错误 */
+export function classifyWorkerExitLevel(text: string): AppLogLevel {
+  const first = text.split('\n', 1)[0]?.trim() ?? '';
+  if (first.startsWith('[quit-watchdog]')) return 'error';
+  if (first.startsWith('[graceful-restart]')) {
+    return /超时|强制退出|没在|失败|出错/.test(first) ? 'warn' : 'info';
+  }
+  if (first.startsWith('exit pid=')) {
+    if (/\bcode=0(?:\s|\(|$)/.test(first) || /\(graceful restart\)$/.test(first)) {
+      if (!/uncaught|unhandled|error|exception|fatal|oom|crash/i.test(first)) return 'info';
+    }
+    return 'error';
+  }
+  if (first.startsWith('gone reason=')) {
+    return /^gone reason=clean-exit\b/.test(first) ? 'info' : 'error';
+  }
+  if (first.startsWith('output tail pid=')) return 'warn';
+  return 'error';
+}
+
 /** appendCappedLog 写的 `[ISO] text`，后续无时间戳的行并入上一条 */
 export function parseStampedLog(
   text: string,
   source: AppLogSource,
-  level: AppLogLevel
+  level: AppLogLevel | ((text: string) => AppLogLevel)
 ): AppLogEntry[] {
   const out: AppLogEntry[] = [];
   let current: { time: number; lines: string[] } | null = null;
   const flush = () => {
-    if (current) out.push(entry(current.time, level, source, current.lines.join('\n')));
+    if (!current) return;
+    const body = current.lines.join('\n');
+    const resolved = typeof level === 'function' ? level(body) : level;
+    out.push(entry(current.time, resolved, source, body));
   };
   for (const line of text.split('\n')) {
     const match = STAMPED_LINE.exec(line);

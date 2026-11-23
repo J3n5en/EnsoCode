@@ -1,10 +1,13 @@
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, open, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { crc32, deflateRawSync } from 'node:zlib';
+import { createInterface } from 'node:readline';
+import { promisify } from 'node:util';
+import { crc32, deflateRaw } from 'node:zlib';
 import {
   type AppLogEntry,
   type AppLogLevel,
+  classifyWorkerExitLevel,
   logLineTime,
   parseAppLogLines,
   parsePluginLogLines,
@@ -12,6 +15,9 @@ import {
   redactSecrets,
   summarizeErrors,
 } from '@shared/appLog';
+
+const deflateRawAsync = promisify(deflateRaw);
+const EXPORT_MAX_BYTES_PER_FILE = 16 * 1024 * 1024;
 
 /** 结构化日志目录（相对 userData）。放在 agent/ 下且以 .log 结尾，存储页「日志」清理会一并覆盖 */
 export const APP_LOG_DIR = 'agent/logs';
@@ -49,20 +55,20 @@ async function logFiles(userData: string): Promise<{ rel: string; kind: LogKind 
   return out;
 }
 
-function readTail(file: string, maxBytes: number): string {
-  let fd: number | null = null;
+async function readTail(file: string, maxBytes: number): Promise<string> {
+  let fh: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    fd = openSync(file, 'r');
-    const { size } = fstatSync(fd);
+    fh = await open(file, 'r');
+    const { size } = await fh.stat();
     const length = Math.min(size, maxBytes);
     const buffer = Buffer.alloc(length);
-    readSync(fd, buffer, 0, length, size - length);
-    const text = buffer.toString('utf8');
+    const { bytesRead } = await fh.read(buffer, 0, length, size - length);
+    const text = buffer.subarray(0, bytesRead).toString('utf8');
     return length < size ? text.slice(text.indexOf('\n') + 1) : text;
   } catch {
     return '';
   } finally {
-    if (fd !== null) closeSync(fd);
+    if (fh !== null) await fh.close().catch(() => {});
   }
 }
 
@@ -74,24 +80,43 @@ export async function collectErrorSummary(
   const entries: AppLogEntry[] = [];
   for (const { rel, kind } of await logFiles(userData)) {
     if (kind === 'other') continue;
-    const text = readTail(path.join(userData, rel), SUMMARY_TAIL_BYTES);
+    const text = await readTail(path.join(userData, rel), SUMMARY_TAIL_BYTES);
     if (!text) continue;
     if (kind === 'jsonl') entries.push(...parseAppLogLines(text));
-    else if (kind === 'stamped') entries.push(...parseStampedLog(text, 'agent', 'error'));
+    else if (kind === 'stamped')
+      entries.push(...parseStampedLog(text, 'agent', classifyWorkerExitLevel));
     else
       entries.push(...parsePluginLogLines(text, path.basename(rel).replace(/\.log(?:\.1)?$/, '')));
   }
   return summarizeErrors(entries, options);
 }
 
-/** 只留时间窗内的行；无时间戳的续行跟随上一行，文件开头的续行看文件修改时间 */
-function sliceWindow(text: string, cutoff: number, mtime: number): string {
+/** 流式按行裁剪时间窗并脱敏；无时间戳的续行跟随上一行，超大文件只读末尾上限以免卡顿 */
+async function sliceWindowFile(
+  file: string,
+  size: number,
+  cutoff: number,
+  mtime: number
+): Promise<string> {
+  const start = size > EXPORT_MAX_BYTES_PER_FILE ? size - EXPORT_MAX_BYTES_PER_FILE : 0;
+  const stream = createReadStream(file, { encoding: 'utf8', start });
+  const rl = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
   let keep = mtime >= cutoff;
+  let skipPartialFirst = start > 0;
   const out: string[] = [];
-  for (const line of text.split('\n')) {
-    const time = logLineTime(line);
-    if (time !== null) keep = time >= cutoff;
-    if (keep && line) out.push(redactSecrets(line));
+  try {
+    for await (const line of rl) {
+      if (skipPartialFirst) {
+        skipPartialFirst = false;
+        continue;
+      }
+      const time = logLineTime(line);
+      if (time !== null) keep = time >= cutoff;
+      if (keep && line) out.push(redactSecrets(line));
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
   }
   return out.length > 0 ? `${out.join('\n')}\n` : '';
 }
@@ -113,7 +138,7 @@ export async function exportLogs(
       continue;
     }
     if (!info.isFile() || info.mtimeMs < cutoff) continue;
-    const text = sliceWindow(await readFile(file, 'utf8'), cutoff, info.mtimeMs);
+    const text = await sliceWindowFile(file, info.size, cutoff, info.mtimeMs);
     if (text) entries.push({ name: rel, data: Buffer.from(text, 'utf8'), mtime: info.mtimeMs });
   }
   const fileCount = entries.length;
@@ -128,7 +153,7 @@ export async function exportLogs(
     ),
     mtime: now,
   });
-  const zip = createZip(entries);
+  const zip = await createZip(entries);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, zip);
   return { files: fileCount, bytes: zip.length };
@@ -150,13 +175,13 @@ function dosTime(ms: number): { time: number; date: number } {
 }
 
 /** 最小 zip 写出（deflate，无 zip64）；导出体积受滚动上限约束，远不到 4GB */
-function createZip(entries: ZipEntry[]): Buffer {
+async function createZip(entries: ZipEntry[]): Promise<Buffer> {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const entry of entries) {
     const name = Buffer.from(entry.name, 'utf8');
-    const compressed = deflateRawSync(entry.data);
+    const compressed = await deflateRawAsync(entry.data);
     const crc = crc32(entry.data);
     const { time, date } = dosTime(entry.mtime);
     const local = Buffer.alloc(30);
