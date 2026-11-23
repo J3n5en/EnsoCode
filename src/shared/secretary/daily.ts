@@ -1,3 +1,4 @@
+import { nextPendingReminder, type SessionReminder } from '../reminders';
 import type {
   DispatchRecord,
   SecretaryAuditEntry,
@@ -152,6 +153,7 @@ export interface DailyInput {
   audit: readonly SecretaryAuditEntry[];
   /** 会话已删或不属于可见项目时返回空对象 */
   session?: (conversationId: string) => DailySessionMeta;
+  reminders?: (conversationId: string) => readonly SessionReminder[];
   projectName?: (projectId: string) => string;
   earliest?: string;
   retentionDays?: number;
@@ -288,7 +290,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   // 已经标了遗留任务的会话不算在跑：残留的 running 与后台任务都不能把它挂在进行中
   const runningNow = (record: DispatchRecord): boolean =>
     record.leftoverTasks === undefined &&
-    (record.lastState === 'running' || record.backgroundRunning === true);
+    (record.lastState === 'running' ||
+      record.backgroundRunning === true ||
+      nextPendingReminder(input.reminders?.(record.conversationId) ?? [], input.now) !== undefined);
   const dispatchedToday = input.dispatched.filter(
     (record) => !record.takeover && within(record.createdAt)
   );
@@ -381,6 +385,14 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       card.leftover = { count: record.leftoverTasks.count };
     // 还在跑但带着常驻服务：和「正在跑」区分开
     if (column === 'running' && record.backgroundPersistent) card.persistent = true;
+    // 空闲但挂着未到点提醒：继续放在「进行中」列，但标「等提醒 · HH:MM」
+    if (column === 'running' && live && record.lastState !== 'running') {
+      const pendingReminder = nextPendingReminder(
+        input.reminders?.(record.conversationId) ?? [],
+        input.now
+      );
+      if (pendingReminder) card.pendingReminder = pendingReminder;
+    }
     if (column) columns[column].push(card);
   }
   // 没有派发记录、但当天有结果的会话（记录被清理或不属于本机派发）也要上板

@@ -141,6 +141,7 @@ function identityOf(
           | 'background-tasks-detached'
           | 'session-wake-requested'
           | 'session-reminder-due'
+          | 'session-reminders-changed'
           | 'unopened-background-tasks';
       }
     | McpWorkerEvent
@@ -575,6 +576,7 @@ export class AgentSessionIndex {
       event.type === 'background-tasks-detached' ||
       event.type === 'session-wake-requested' ||
       event.type === 'session-reminder-due' ||
+      event.type === 'session-reminders-changed' ||
       event.type === 'unopened-background-tasks'
     )
       return false;

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { SessionReminder } from '@shared/reminders';
 import {
   describeForwardedImages,
   type ForwardedImage,
@@ -188,6 +189,7 @@ export interface SecretaryDispatchPorts {
   /** 主会话自身状态（不含子代理运行态）：自身空闲时直接 prompt，不必排队干等子代理结束 */
   ownStatus?(conversationId: string): MaybePromise<SecretarySessionStatus>;
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
+  reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   claims?(): MaybePromise<readonly SecretaryClaimView[]>;
   createSession(request: MainSessionRequest): Promise<MainSessionResult>;
   prompt(
@@ -3039,6 +3041,7 @@ export interface SecretaryStatePorts {
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
+  reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   claims?(): MaybePromise<readonly SecretaryClaimView[]>;
 }
 
@@ -3086,11 +3089,14 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
   const aliases = (await ports.projectAliases?.()) ?? {};
   const statuses: Record<string, SecretarySessionStatus> = {};
   const subagents: Record<string, readonly AgentRunProgress[]> = {};
+  const reminders: Record<string, readonly SessionReminder[]> = {};
   for (const record of Object.values(file.dispatched)) {
     if (!rows[record.conversationId]) continue;
     statuses[record.conversationId] = await ports.status(record.conversationId);
     const runs = await ports.subagents?.(record.conversationId);
     if (runs && runs.length > 0) subagents[record.conversationId] = runs;
+    const items = await ports.reminders?.(record.conversationId);
+    if (items && items.length > 0) reminders[record.conversationId] = items;
   }
   return {
     file,
@@ -3101,6 +3107,7 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
       rows,
       statuses,
       subagents,
+      reminders,
       projects,
       aliases,
       todos: await ports.todos(),
@@ -3155,6 +3162,8 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
       (await import('../../ipc/agent')).observedOwnSessionStatus(conversationId),
     subagents: async (conversationId) =>
       (await import('../../ipc/agent')).observedSubagentProgress(conversationId),
+    reminders: async (conversationId) =>
+      (await import('../sessionReminders')).readSessionReminders(conversationId),
     async claims() {
       const store = peekEventClaimStore();
       if (!store) return [];

@@ -1,3 +1,4 @@
+import { formatReminderClock, formatReminderTooltip } from '@shared/reminders';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import {
   NEEDS_YOU_RESULTS,
@@ -80,6 +81,11 @@ function todoStateText(
   conversations: Record<string, unknown>,
   t: (key: string, params?: Record<string, string | number>) => string
 ): string {
+  if (todo.pendingReminder) {
+    return t('Waiting for reminder · {{time}}', {
+      time: formatReminderClock(todo.pendingReminder.dueAt),
+    });
+  }
   if (!todo.sessionState) return '';
   if (todo.sessionState !== 'queued') return t(SESSION_STATE_LABEL[todo.sessionState]);
   const row = todo.conversationId ? conversations[todo.conversationId] : undefined;
@@ -362,13 +368,20 @@ function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?
             type="button"
             data-enso="secretary-todo-session"
             disabled={!openable}
+            title={
+              todo.pendingReminder
+                ? formatReminderTooltip(todo.pendingReminder, Date.now(), t)
+                : undefined
+            }
             onClick={() => {
               if (todo.conversationId) openSessionPeek(todo.conversationId);
             }}
             className="mt-0.5 block max-w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground disabled:cursor-default"
           >
             {todo.sessionTitle || t('Open session')}
-            {todo.sessionState ? ` · ${todoStateText(todo, conversations, t)}` : ''}
+            {todo.sessionState || todo.pendingReminder
+              ? ` · ${todoStateText(todo, conversations, t)}`
+              : ''}
           </button>
         )}
         {phase === 'problem' && todo.problem && (
