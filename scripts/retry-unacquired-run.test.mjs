@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   decideRetryUnacquiredRun,
-  hasNewerActiveOrSucceededRun,
+  hasNewerRun,
   isUnacquiredRunnerJob,
   UNACQUIRED_MARKER,
 } from './retry-unacquired-run.mjs';
@@ -21,7 +21,7 @@ const unacquiredAnnotations = [
 
 const makeJob = (overrides = {}) => ({
   id: 1001,
-  name: 'desktop / build-mac',
+  name: 'desktop / build-mac (arm64)',
   conclusion: 'cancelled',
   steps: [],
   runner_id: 0,
@@ -66,6 +66,16 @@ test('仅将零步骤、未分配 runner 且带平台未获取报错的 cancelle
   );
   // 手动取消或无平台 annotation
   assert.equal(isUnacquiredRunnerJob(makeJob(), []), false);
+  // 被 cancel-in-progress 并发组取消（即使零步骤、未分配 runner）
+  assert.equal(
+    isUnacquiredRunnerJob(makeJob(), [
+      {
+        annotation_level: 'notice',
+        message: "Canceling since a higher priority waiting request for 'beta-build' exists",
+      },
+    ]),
+    false
+  );
   // 只有 notice 没有 failure annotation
   assert.equal(
     isUnacquiredRunnerJob(makeJob(), [
@@ -77,52 +87,28 @@ test('仅将零步骤、未分配 runner 且带平台未获取报错的 cancelle
   assert.equal(isUnacquiredRunnerJob(makeJob({ steps: undefined }), unacquiredAnnotations), false);
 });
 
-test('有更新的运行正在进行或已成功时，视为已被取代', () => {
+test('只要存在 run_number 更大的更新运行（不论其状态），均视为已被取代', () => {
   const current = makeRun({ id: 500, run_number: 146 });
-  assert.equal(hasNewerActiveOrSucceededRun(current, [current]), false);
+  assert.equal(hasNewerRun(current, [current]), false);
   // 更旧的运行不算取代
   assert.equal(
-    hasNewerActiveOrSucceededRun(current, [
-      current,
-      makeRun({ id: 499, run_number: 145, conclusion: 'success' }),
-    ]),
+    hasNewerRun(current, [current, makeRun({ id: 499, run_number: 145, conclusion: 'success' })]),
     false
   );
-  // 更新的运行也失败或被取消不算取代
-  assert.equal(
-    hasNewerActiveOrSucceededRun(current, [
-      current,
-      makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'cancelled' }),
-      makeRun({ id: 502, run_number: 148, status: 'completed', conclusion: 'failure' }),
-    ]),
-    false
-  );
-  // 更新的运行正在排队或运行中
-  assert.equal(
-    hasNewerActiveOrSucceededRun(current, [
-      current,
-      makeRun({ id: 501, run_number: 147, status: 'queued', conclusion: null }),
-    ]),
-    true
-  );
-  assert.equal(
-    hasNewerActiveOrSucceededRun(current, [
-      current,
-      makeRun({ id: 501, run_number: 147, status: 'in_progress', conclusion: null }),
-    ]),
-    true
-  );
-  // 更新的运行已经成功发版
-  assert.equal(
-    hasNewerActiveOrSucceededRun(current, [
-      current,
-      makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'success' }),
-    ]),
-    true
-  );
+  // 更新的运行处于任意状态（排队、运行中、成功、失败、被取消、被跳过）都意味着已有更新的提交，绝不再重跑旧轮次
+  for (const newer of [
+    makeRun({ id: 501, run_number: 147, status: 'queued', conclusion: null }),
+    makeRun({ id: 501, run_number: 147, status: 'in_progress', conclusion: null }),
+    makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'success' }),
+    makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'failure' }),
+    makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'cancelled' }),
+    makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'skipped' }),
+  ]) {
+    assert.equal(hasNewerRun(current, [current, newer]), true);
+  }
 });
 
-test('所有异常 job 均为未拿到 runner 且未超重试上限、未被新 run 取代时才允许重跑', () => {
+test('双机并行中一台已成功、另一台未拿到 runner 且未被新 run 取代时，仅重跑缺失架构', () => {
   const okJobs = [
     makeJob({
       id: 1,
@@ -140,9 +126,17 @@ test('所有异常 job 均为未拿到 runner 且未超重试上限、未被新 
       runner_id: 2,
       runner_name: 'r2',
     }),
+    makeJob({
+      id: 21,
+      name: 'desktop / build-mac (x64)',
+      conclusion: 'success',
+      steps: [{ name: 'Build macOS (x64)' }],
+      runner_id: 21,
+      runner_name: 'mac-x64',
+    }),
     makeJob({ id: 3, name: 'release', conclusion: 'skipped', steps: [] }),
   ];
-  const unacquiredMac = makeJob({ id: 4, name: 'desktop / build-mac' });
+  const unacquiredMac = makeJob({ id: 4, name: 'desktop / build-mac (arm64)' });
 
   const decision = decideRetryUnacquiredRun({
     run: makeRun(),
@@ -159,7 +153,7 @@ test('所有异常 job 均为未拿到 runner 且未超重试上限、未被新 
 });
 
 test('任一真实失败、达到上限、非 failure 结论或已被取代时都拒绝重跑', () => {
-  const unacquiredMac = makeJob({ id: 4, name: 'desktop / build-mac' });
+  const unacquiredMac = makeJob({ id: 4, name: 'desktop / build-mac (arm64)' });
   const realFailedWin = makeJob({
     id: 5,
     name: 'desktop / build-windows',
@@ -167,6 +161,14 @@ test('任一真实失败、达到上限、非 failure 结论或已被取代时�
     steps: [{ name: 'Build Windows' }],
     runner_id: 99,
     runner_name: 'GitHub Actions 99',
+  });
+  const concurrencyCancelledX64 = makeJob({
+    id: 6,
+    name: 'desktop / build-mac (x64)',
+    conclusion: 'cancelled',
+    steps: [{ name: 'Build macOS (x64)' }],
+    runner_id: 100,
+    runner_name: 'mac-x64',
   });
 
   // 混入真实失败：绝不吞掉或重跑
@@ -178,6 +180,25 @@ test('任一真实失败、达到上限、非 failure 结论或已被取代时�
       recentRuns: [makeRun()],
     }).retry,
     false
+  );
+
+  // 一台未拿到 runner、另一台被新轮次 concurrency 取消：绝不重跑
+  assert.deepEqual(
+    decideRetryUnacquiredRun({
+      run: makeRun(),
+      jobs: [unacquiredMac, concurrencyCancelledX64],
+      annotationsByJobId: {
+        4: unacquiredAnnotations,
+        6: [
+          {
+            annotation_level: 'notice',
+            message: "Canceling since a higher priority waiting request for 'beta-build' exists",
+          },
+        ],
+      },
+      recentRuns: [makeRun()],
+    }),
+    { retry: false, reason: 'real_failure_or_manual_cancel', unacquiredJobIds: [] }
   );
 
   // 达到最大尝试次数（默认 3）
@@ -211,6 +232,20 @@ test('任一真实失败、达到上限、非 failure 结论或已被取代时�
       recentRuns: [
         makeRun(),
         makeRun({ id: 501, run_number: 147, status: 'in_progress', conclusion: null }),
+      ],
+    }),
+    { retry: false, reason: 'superseded_by_newer_run', unacquiredJobIds: [] }
+  );
+
+  // 已有更新的 Beta 存在（即使新轮次自己失败或被更更新的取消），也不回头重跑旧轮次
+  assert.deepEqual(
+    decideRetryUnacquiredRun({
+      run: makeRun(),
+      jobs: [unacquiredMac],
+      annotationsByJobId: { 4: unacquiredAnnotations },
+      recentRuns: [
+        makeRun(),
+        makeRun({ id: 501, run_number: 147, status: 'completed', conclusion: 'failure' }),
       ],
     }),
     { retry: false, reason: 'superseded_by_newer_run', unacquiredJobIds: [] }

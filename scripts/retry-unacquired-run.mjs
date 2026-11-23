@@ -21,15 +21,13 @@ export function isUnacquiredRunnerJob(job, annotations) {
   );
 }
 
-export function hasNewerActiveOrSucceededRun(run, recentRuns) {
+export function hasNewerRun(run, recentRuns) {
   if (!run || !Array.isArray(recentRuns)) return false;
   const currentNumber = Number(run.run_number);
   if (!Number.isFinite(currentNumber)) return false;
-  return recentRuns.some((other) => {
-    if (!other || other.id === run.id) return false;
-    if (Number(other.run_number) <= currentNumber) return false;
-    return other.status !== 'completed' || other.conclusion === 'success';
-  });
+  return recentRuns.some(
+    (other) => other && other.id !== run.id && Number(other.run_number) > currentNumber
+  );
 }
 
 export function decideRetryUnacquiredRun({
@@ -45,7 +43,7 @@ export function decideRetryUnacquiredRun({
   if (Number(run.run_attempt ?? 1) >= maxAttempts) {
     return { retry: false, reason: 'max_attempts_reached', unacquiredJobIds: [] };
   }
-  if (hasNewerActiveOrSucceededRun(run, recentRuns)) {
+  if (hasNewerRun(run, recentRuns)) {
     return { retry: false, reason: 'superseded_by_newer_run', unacquiredJobIds: [] };
   }
   const problemJobs = (jobs ?? []).filter(
@@ -123,7 +121,7 @@ async function main() {
     const latestRuns =
       ghApiJson(`repos/${repo}/actions/workflows/${run.workflow_id}/runs?per_page=20`)
         .workflow_runs ?? [];
-    if (hasNewerActiveOrSucceededRun(run, latestRuns)) {
+    if (hasNewerRun(run, latestRuns)) {
       writeSummary(`退避期间已有更新的 Beta 运行，取消重跑 run #${run.run_number} (${runId})`);
       return;
     }
