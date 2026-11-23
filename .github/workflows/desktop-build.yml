@@ -79,7 +79,7 @@ jobs:
       matrix:
         arch: [arm64, x64]
     # arm64 与 x64 双台 Apple 芯片 runner 并行打包（Intel runner 各阶段慢 2–4 倍）；
-    # fail-fast: false 配合 beta-retry 的 rerun-failed-jobs，单台未分到 runner 时保留已成功的架构。
+    # fail-fast: false：单台未分到 runner 时保留已成功的架构，手动 Re-run failed jobs 只补缺的那台。
     # 原生依赖全是 N-API 预编译，按目标架构装包即可；after-pack 校验包内 Mach-O 架构。
     runs-on: macos-15
     timeout-minutes: 30
