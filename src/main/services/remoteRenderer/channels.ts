@@ -13,6 +13,7 @@ const DENIED_PREFIXES = [
   'app:',
   'notification:',
   'pair:',
+  'logs:',
 ];
 
 const DENIED: ReadonlySet<string> = new Set([

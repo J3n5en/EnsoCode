@@ -2206,6 +2206,8 @@ export type AgentWorkerEvent =
       awaitingTasks?: true;
       /** 根会话还挂着自定提醒：在等自己定的时间点，goal 先不续跑 */
       awaitingReminder?: true;
+      /** 本轮实际使用的 provider id，供上游健康闸门判断恢复 */
+      provider?: string;
     }
   | {
       type: 'turn-failed';
@@ -2221,6 +2223,8 @@ export type AgentWorkerEvent =
       aborted?: true;
       /** 同 turn-completed：失败也结束被持有的 Run */
       continues?: string;
+      /** 本轮实际使用的 provider id，供上游健康闸门按 provider 聚合退避 */
+      provider?: string;
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -5300,7 +5304,8 @@ const agentWorkerEventParsers = {
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError))) &&
         (value.continues === undefined || isNonEmptyString(value.continues)) &&
         (value.awaitingTasks === undefined || value.awaitingTasks === true) &&
-        (value.awaitingReminder === undefined || value.awaitingReminder === true)
+        (value.awaitingReminder === undefined || value.awaitingReminder === true) &&
+        (value.provider === undefined || isNonEmptyString(value.provider))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }
@@ -5312,7 +5317,8 @@ const agentWorkerEventParsers = {
         isNonEmptyString(value.error) &&
         (value.retryExhausted === undefined || value.retryExhausted === true) &&
         (value.aborted === undefined || value.aborted === true) &&
-        (value.continues === undefined || isNonEmptyString(value.continues))
+        (value.continues === undefined || isNonEmptyString(value.continues)) &&
+        (value.provider === undefined || isNonEmptyString(value.provider))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }
