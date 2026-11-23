@@ -82,6 +82,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -977,34 +978,70 @@ function ChatRefCard({ label, sessionFile }: { label: string; sessionFile: strin
   );
 }
 
-/** 选中文本引用块：左边框引用样式，代码围栏渲染为代码块，截断时标注原文行数 */
-function QuoteBlock({ text, originalLines }: { text: string; originalLines?: number }) {
+const QUOTE_BLOCK_MAX_HEIGHT = 240;
+
+/** 选中文本引用块：左边框引用样式，代码围栏渲染为代码块，截断时标注原文行数；超高时底部渐隐，可展开 / 收起 */
+export function QuoteBlock({ text, originalLines }: { text: string; originalLines?: number }) {
   const { t } = useI18n();
+  const bodyRef = useRef<HTMLSpanElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    // scrollHeight 是内容全高，不受 max-height 影响，折叠/展开下判定一致
+    const measure = () => setOverflowing(body.scrollHeight > QUOTE_BLOCK_MAX_HEIGHT + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
+  const clipped = overflowing && !expanded;
   return (
     <span
       data-enso="quote-block"
-      className="my-1 block max-h-60 overflow-y-auto overscroll-contain border-l-2 border-brand/40 pl-2.5 text-muted-foreground"
+      className="mt-1 mb-2.5 block border-l-2 border-brand/40 pl-2.5 text-muted-foreground"
     >
       {originalLines ? (
         <span data-quote-truncated="" className="mb-0.5 block text-[11px] text-warning">
           {t('Truncated · original {{count}} lines', { count: originalLines })}
         </span>
       ) : null}
-      {splitQuoteFences(text).map((part, index) =>
-        part.type === 'code' ? (
-          <span
+      <span
+        ref={bodyRef}
+        data-quote-body=""
+        data-clipped={clipped ? '' : undefined}
+        style={clipped ? { maxHeight: QUOTE_BLOCK_MAX_HEIGHT } : undefined}
+        className={cn('block', clipped && 'overflow-hidden mask-b-from-60%')}
+      >
+        {splitQuoteFences(text).map((part, index) =>
+          part.type === 'code' ? (
+            <span
+              // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+              key={index}
+              data-quote-code=""
+              className="my-1 block overflow-x-auto whitespace-pre rounded-md bg-background/60 px-2 py-1 font-mono text-xs"
+            >
+              {part.code}
+            </span>
+          ) : (
             // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
-            key={index}
-            data-quote-code=""
-            className="my-1 block overflow-x-auto whitespace-pre rounded-md bg-background/60 px-2 py-1 font-mono text-xs"
-          >
-            {part.code}
-          </span>
-        ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
-          <span key={index}>{part.text}</span>
-        )
-      )}
+            <span key={index}>{part.text}</span>
+          )
+        )}
+      </span>
+      {overflowing ? (
+        <button
+          type="button"
+          data-quote-toggle=""
+          data-quote-skip=""
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-0.5 text-[11px] text-muted-foreground/80 select-none hover:text-foreground"
+        >
+          {expanded ? t('Show less') : t('Show more')}
+        </button>
+      ) : null}
     </span>
   );
 }
