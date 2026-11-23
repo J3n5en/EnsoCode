@@ -1,11 +1,24 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseRestartCheckpoint, RESTART_CHECKPOINT_FILE } from '@shared/gracefulRestart';
+import {
+  parseRestartCheckpoint,
+  RESTART_CHECKPOINT_FILE,
+  type RestartCheckpointEntry,
+} from '@shared/gracefulRestart';
 import {
   type RestartManifest,
   type RestartManifestEntry,
   takeRestartManifest,
 } from './restartManifest';
+
+/** 断点里停在安全点的子会话：子代理 Run 据此在重启后接着跑 */
+export type ColdRestartChild = Pick<
+  RestartCheckpointEntry,
+  'sessionId' | 'generation' | 'nextStep'
+>;
+
+/** 清单里的会话已删除 / 归档：冷启动重开它时的错误 */
+export const CONVERSATION_UNAVAILABLE = 'conversation unavailable';
 
 export interface ColdRestartPlan {
   /** 交给第一代 worker 的断点文件（RESTART_CHECKPOINT_ENV） */
@@ -13,6 +26,7 @@ export interface ColdRestartPlan {
   manifest: RestartManifest;
   /** 停在模型请求前、冷启动要主动续跑的会话 */
   resume: RestartManifestEntry[];
+  children: ColdRestartChild[];
 }
 
 /** 清单与配套断点都在才接管；任一缺失或对不上就都不用，会话照常按需恢复 */
@@ -32,6 +46,9 @@ export function loadColdRestartPlan(dataDir: string, now = Date.now()): ColdRest
     checkpointFile,
     manifest,
     resume: manifest.sessions.filter((entry) => entry.nextStep === 'model-request'),
+    children: checkpoint.sessions
+      .filter((entry) => entry.sessionId.includes('::') && entry.toolsInFlight.length === 0)
+      .map(({ sessionId, generation, nextStep }) => ({ sessionId, generation, nextStep })),
   };
 }
 
@@ -53,6 +70,11 @@ export function coldRestartPlan(dataDir: string): ColdRestartPlan | null {
 /** 冷启动会主动续跑的会话：退出 / 更新的中断记录要跳过它们，避免再重试一遍 */
 export function coldResumedSessionIds(): ReadonlySet<string> {
   return new Set(plan?.resume.map((entry) => entry.sessionId) ?? []);
+}
+
+/** 冷启动断点里停在安全点的子会话（没有接管的清单时为空） */
+export function coldRestartChildren(): readonly ColdRestartChild[] {
+  return plan?.children ?? [];
 }
 
 const woken = new Set<string>();
@@ -84,13 +106,16 @@ export async function wakeColdRestartSession(
 export async function wakeColdRestartOwners(
   ownerIds: Iterable<string>,
   resume: (entry: RestartManifestEntry) => Promise<{ ok: boolean; error?: string }>,
-  current: ColdRestartPlan | null = plan ?? null
+  current: ColdRestartPlan | null = plan ?? null,
+  /** 父会话已删除 / 归档：它名下的 Run 不再等它 */
+  onUnavailable?: (sessionId: string) => void
 ): Promise<void> {
   for (const sessionId of new Set(ownerIds)) {
     const result = await wakeColdRestartSession(sessionId, resume, current);
     console.log(
       `[graceful-restart] wake owner of interrupted subagent runs ${sessionId.slice(0, 8)} ${result.ok ? 'ok' : `skipped: ${result.error}`}`
     );
+    if (result.error === CONVERSATION_UNAVAILABLE) onUnavailable?.(sessionId);
   }
 }
 

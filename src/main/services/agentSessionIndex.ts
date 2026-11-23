@@ -269,6 +269,13 @@ export class AgentSessionIndex {
       .map((session) => session.identity.sessionId);
   }
 
+  /** 有子代理在跑回合（父会话可能已空闲在等它）：退出要等它到安全点，重启后才能接着跑 */
+  hasRunningChild(): boolean {
+    return [...this.sessions.values()].some(
+      (session) => 'parent' in session.identity && session.alive && session.status === 'running'
+    );
+  }
+
   /** 退出记录：正在跑回合的父会话 + 回合 id / 开始时刻 / 最后一条消息下标 */
   runningTurnSnapshot(): RunningAtExitEntry[] {
     const at = this.now();

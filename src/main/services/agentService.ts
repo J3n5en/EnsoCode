@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type ChildSessionIdentity, isSameChildSessionIdentity } from '@shared/builtinAgents';
+import type { RestartCheckpointEntry } from '@shared/gracefulRestart';
 import type {
   AgentControlContext,
   AgentControlDismissRequest,
@@ -33,8 +34,18 @@ import {
   AGENT_RUN_LEDGER_LIMIT,
   type AgentRunLedgerEntry,
   type AgentRunLedgerStore,
+  type AgentRunRestartRecord,
+  type AgentSpawnSpec,
 } from './agentRunLedger';
 import type { ObservedTask } from './backgroundTaskTracker';
+
+export type { AgentSpawnSpec } from './agentRunLedger';
+
+/** 重启断点里一个子会话的去向：生成代对得上才续跑 */
+export type RestartChildStep = Pick<
+  RestartCheckpointEntry,
+  'sessionId' | 'generation' | 'nextStep'
+>;
 
 interface RuntimeResult {
   ok: boolean;
@@ -82,11 +93,12 @@ export interface AgentServiceRuntime {
   validate?(
     input: AgentRuntimeRunInput & { text?: string }
   ): Promise<RuntimeResult & { value?: unknown }>;
-  /** 用原会话文件重开被中断 task 的子会话；没有可续的会话文件时抛错 */
+  /** 用原会话文件重开被中断的子会话；没有可续的会话文件时抛错。spawn 是派发参数，派发配置不在内存时据此重新解析 */
   resume?(input: {
     context: AgentControlContext;
     identity: ChildSessionIdentity;
     agentId: string;
+    spawn?: AgentSpawnSpec;
   }): Promise<ChildSessionIdentity>;
   /** 对重开的子会话续跑未完成的回合（unfinishedOnly retry），不追加 prompt */
   retry?(input: {
@@ -134,6 +146,10 @@ interface AgentRecord {
   resumes?: number;
   /** 用满 resume 次数后又被打断，因此关闭而非停放 */
   resumeLimitHit?: boolean;
+  /** 派发参数：重启后重建子会话用；adopt 认回的 coworker 没有 */
+  spawn?: AgentSpawnSpec;
+  /** 重启后已自动续跑的次数 */
+  restartResumes?: number;
 }
 
 interface RunRecord {
@@ -173,6 +189,12 @@ interface RunRecord {
   restored?: boolean;
   /** 按台账重建的 Run 没有 AgentRecord 可查标题 */
   title?: string;
+  /** 重启打断、子会话在断点里：父会话就绪后自动续跑（同一 runId），期间不算中断 */
+  restartPending?: boolean;
+  /** worker 退出时正在跑：Main 也随后退出时，新 Main 若在断点里找到它的子会话仍可续跑 */
+  restartCandidate?: boolean;
+  /** 没能自动续跑的原因：随中断通知告诉父会话 */
+  restartFallback?: string;
 }
 
 interface Waiter {
@@ -194,6 +216,8 @@ export interface AgentServiceOptions {
   onProgress?: (ownerId: string, runs: AgentRunProgress[]) => void;
   /** Run 身份台账：Main 重启后内存里的 Run 表会丢，靠它认出旧 id 并说明原因 */
   ledger?: AgentRunLedgerStore;
+  /** 冷启动读到的重启断点里的子会话 */
+  restartCheckpoint?: readonly RestartChildStep[];
 }
 
 const TERMINAL_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
@@ -204,6 +228,8 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
 ]);
 
 const RESUME_LIMIT_TEXT = `It was already resumed ${AGENT_TASK_MAX_RESUMES} times, the limit, so it cannot be resumed again: check what it already did, then spawn a fresh task for the rest or finish it yourself.`;
+
+const RESTART_LIMIT_TEXT = `It was already resumed automatically ${AGENT_TASK_MAX_RESUMES} times after restarts, so it was not resumed again.`;
 
 const USER_STOPPED_TEXT =
   '用户在子代理的 tab 里停止了它：这是用户主动中止，不是失败。除非用户要求或确实还需要它剩下的工作，不要自行续跑或重派。';
@@ -302,6 +328,10 @@ export class AgentService implements AgentServiceContract {
   private readonly queues = new Map<string, Promise<void>>();
   /** 上次 Main 运行留下的 Run 台账：只用于认出重启前的 id */
   private readonly previousRuns = new Map<string, AgentRunLedgerEntry>();
+  /** 最近一次重启断点里的子会话：child sessionId → 断点条目 */
+  private restartSteps = new Map<string, RestartChildStep>();
+  /** 已由重启续跑接管的子会话 */
+  private readonly restartClaimed = new Set<string>();
   private readonly randomUuid: () => string;
   private readonly now: () => number;
 
@@ -309,6 +339,20 @@ export class AgentService implements AgentServiceContract {
     this.randomUuid = options.randomUuid ?? randomUUID;
     this.now = options.now ?? Date.now;
     for (const entry of options.ledger?.load() ?? []) this.previousRuns.set(entry.runId, entry);
+    this.noteRestartCheckpoint(options.restartCheckpoint ?? []);
+  }
+
+  /** worker 落下重启断点（换代或退出前）：记下哪些子会话停在了安全点、可以接着跑 */
+  noteRestartCheckpoint(sessions: readonly RestartChildStep[]): void {
+    this.restartSteps = new Map(
+      sessions
+        .filter((entry) => entry.sessionId.includes('::'))
+        .map((entry) => [entry.sessionId, entry])
+    );
+  }
+
+  private atSafePoint(child: ChildSessionIdentity): boolean {
+    return this.restartSteps.get(child.sessionId)?.generation === child.generation;
   }
 
   /** Main 从权威 child metadata 恢复持久 coworker；task 与非 agent-tool child 不得调用。 */
@@ -391,6 +435,13 @@ export class AgentService implements AgentServiceContract {
       identity,
       state: { status: 'ready', queue: [] },
       title: request.name?.trim() || request.description,
+      spawn: {
+        description: request.description,
+        ...(request.name?.trim() ? { name: request.name.trim() } : {}),
+        ...(request.agentType ? { agentType: request.agentType } : {}),
+        ...(request.model ? { model: request.model } : {}),
+        ...(request.thinking ? { thinking: request.thinking } : {}),
+      },
     };
     const run = this.createRun(agent, runId, request.prompt, request.schema, request.gate);
     this.agents.set(agentId, agent);
@@ -673,6 +724,7 @@ export class AgentService implements AgentServiceContract {
           context: request.context,
           identity: agent.identity,
           agentId: agent.agentId,
+          ...(agent.spawn ? { spawn: agent.spawn } : {}),
         });
       } catch (error) {
         return failure(
@@ -771,11 +823,22 @@ export class AgentService implements AgentServiceContract {
         if (agent.state.status === 'closed') continue;
         const activeRunId = activeRunIdOf(agent);
         const active = activeRunId ? this.runs.get(activeRunId) : undefined;
+        // 子会话停在了重启断点：这次 Run 不算中断，父会话就绪后接着跑
+        const resumable =
+          active?.status === 'running' &&
+          agent.spawn !== undefined &&
+          this.atSafePoint(agent.identity);
+        if (active && resumable) {
+          active.status = 'queued';
+          active.activity = undefined;
+          active.restartPending = true;
+          this.restartClaimed.add(agent.identity.sessionId);
+        } else if (active?.status === 'running') active.restartCandidate = true;
         const interrupted = Boolean(active && !TERMINAL_RUN_STATUSES.has(active.status));
-        const park = interrupted && this.mayPark(agent);
+        const park = resumable || (interrupted && this.mayPark(agent));
         // 父会话随 worker 一起没了，此刻无人可通知：父会话重新就绪时由 recoverOwner 补通知；
         // 排队的 Run 也一样，停放后不会再有人启动它们
-        for (const runId of [activeRunId, ...queueOf(agent)]) {
+        for (const runId of [resumable ? undefined : activeRunId, ...queueOf(agent)]) {
           const run = runId ? this.runs.get(runId) : undefined;
           if (!run || TERMINAL_RUN_STATUSES.has(run.status)) continue;
           run.delivered = true;
@@ -790,6 +853,8 @@ export class AgentService implements AgentServiceContract {
               : 'closed',
         });
       }
+      this.restartSteps.clear();
+      this.persistRuns();
       return;
     }
     if (!('identity' in event) || !('parent' in event.identity)) return;
@@ -990,6 +1055,101 @@ export class AgentService implements AgentServiceContract {
   }
 
   /**
+   * 这个子会话由重启续跑接管（自动续跑，或停放待 resume 的 task）：父会话恢复子会话时不要按父会话模型另开一份
+   */
+  claimsRestartChild(sessionId: string): boolean {
+    for (const entry of this.previousRuns.values()) {
+      const restart = entry.restart;
+      if (
+        entry.notified === false &&
+        restart?.child.sessionId === sessionId &&
+        this.atSafePoint(restart.child) &&
+        (entry.mode === 'task' || restart.restartResumes < AGENT_TASK_MAX_RESUMES)
+      )
+        return true;
+    }
+    return this.restartClaimed.has(sessionId);
+  }
+
+  /** 父会话已删除 / 归档：它名下等补通知、等续跑的 Run 直接结束，不再等它 */
+  abandonOwner(ownerId: string): void {
+    let changed = false;
+    for (const entry of this.previousRuns.values()) {
+      if (entry.ownerId !== ownerId || entry.notified !== false) continue;
+      entry.notified = true;
+      delete entry.restart;
+      changed = true;
+    }
+    if (!changed) return;
+    console.log(`[agent] owner ${ownerId.slice(0, 8)} is gone: its interrupted subagent Runs end`);
+    this.persistRuns();
+  }
+
+  /** 台账里重启时停在断点的 Run：按原样重建 Agent 与 Run（同一 agentId / runId / 子会话 / 派发参数） */
+  private rebuildRestarted(context: AgentControlContext, entry: AgentRunLedgerEntry): void {
+    const restart = entry.restart!;
+    this.previousRuns.delete(entry.runId);
+    const agent: AgentRecord = {
+      context,
+      agentId: entry.agentId,
+      mode: entry.mode,
+      identity: restart.child,
+      state: { status: 'parked' },
+      title: entry.title ?? restart.spawn.name ?? restart.spawn.description,
+      resumes: restart.resumes,
+      restartResumes: restart.restartResumes,
+      spawn: restart.spawn,
+    };
+    const run = this.createRun(agent, entry.runId, restart.prompt, restart.schema, restart.gate);
+    run.createdAt = entry.createdAt;
+    run.priorRequests = restart.requests;
+    run.resumed = true;
+    this.agents.set(agent.agentId, agent);
+    this.runs.set(run.runId, run);
+    if (agent.mode === 'task' || restart.restartResumes < AGENT_TASK_MAX_RESUMES)
+      this.restartClaimed.add(agent.identity.sessionId);
+    if (restart.restartResumes < AGENT_TASK_MAX_RESUMES) {
+      run.restartPending = true;
+      return;
+    }
+    run.delivered = true;
+    run.parentUnaware = true;
+    run.restartFallback = RESTART_LIMIT_TEXT;
+    this.finishRun(run, 'interrupted', RESTART_LIMIT_TEXT);
+  }
+
+  /** 父会话已就绪：重开子会话，同一 runId 接着断点续跑；重开不了就停放并告诉父会话原因 */
+  private async resumeRestarted(agent: AgentRecord, run: RunRecord): Promise<void> {
+    run.restartPending = false;
+    // 接着断点续跑（retry），不重发任务 prompt
+    run.resumed = true;
+    agent.restartResumes = (agent.restartResumes ?? 0) + 1;
+    this.persistRuns();
+    const { resume, retry } = this.options.runtime;
+    try {
+      if (!resume || !retry) throw new Error('Agent resume is unavailable.');
+      agent.identity = await resume({
+        context: agent.context,
+        identity: agent.identity,
+        agentId: agent.agentId,
+        ...(agent.spawn ? { spawn: agent.spawn } : {}),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[agent] restart resume ${run.runId} failed: ${reason}`);
+      this.transition(agent, { status: 'parked' });
+      this.finishRun(
+        run,
+        'interrupted',
+        `EnsoCode restarted while this Run was in progress and could not continue it automatically: ${reason}`
+      );
+      return;
+    }
+    console.log(`[agent] restart resume ${run.runId} (${agent.mode}) continues`);
+    await this.startRun(agent, run);
+  }
+
+  /**
    * 父会话（重新）就绪：重启或 worker 退出时被打断、父会话还不知情的 Run 统一通知一次，
    * 否则模型会一直等一个不会来的完成通知。
    */
@@ -997,9 +1157,18 @@ export class AgentService implements AgentServiceContract {
     if (this.validateContext(context)) return;
     for (const entry of [...this.previousRuns.values()]) {
       if (entry.notified === false && this.ledgerOwned(entry, context)) {
+        if (entry.restart && this.atSafePoint(entry.restart.child)) {
+          this.rebuildRestarted(context, entry);
+          continue;
+        }
         const run = this.restoredRun(context, entry.runId);
         if (run) run.parentUnaware = true;
       }
+    }
+    for (const run of [...this.runs.values()]) {
+      const agent = this.agents.get(run.agentId);
+      if (!run.restartPending || !agent || !this.sameOwner(agent.context, context)) continue;
+      void this.serial(context.owner.ownerId, () => this.resumeRestarted(agent, run));
     }
     const unaware = [...this.runs.values()].filter(
       (run) =>
@@ -1017,7 +1186,8 @@ export class AgentService implements AgentServiceContract {
         agent?.state.status === 'parked' && agent.mode === 'task'
           ? `its progress is saved: use subagent resume with agentId ${run.agentId} to continue from where it stopped — do not spawn it again.`
           : this.afterRestartHint(run);
-      return `- "${title}" (agentId ${run.agentId}, runId ${run.runId}, ${run.mode}): ${next}`;
+      const reason = run.restartFallback ? `${run.restartFallback} ` : '';
+      return `- "${title}" (agentId ${run.agentId}, runId ${run.runId}, ${run.mode}): ${reason}${next}`;
     });
     this.persistRuns();
     this.options.notify?.(
@@ -1098,7 +1268,9 @@ export class AgentService implements AgentServiceContract {
     const { ledger } = this.options;
     if (!ledger) return;
     const current = [...this.runs.values()].map((run): AgentRunLedgerEntry => {
-      const title = this.agents.get(run.agentId)?.title ?? run.title;
+      const agent = this.agents.get(run.agentId);
+      const title = agent?.title ?? run.title;
+      const restart = agent ? this.restartRecord(agent, run) : undefined;
       return {
         runId: run.runId,
         agentId: run.agentId,
@@ -1112,9 +1284,29 @@ export class AgentService implements AgentServiceContract {
         ...(title ? { title } : {}),
         // 没跑完或结束了但父会话不知情：重启后父会话就绪时要补一次通知
         notified: TERMINAL_RUN_STATUSES.has(run.status) && run.delivered && !run.parentUnaware,
+        ...(restart ? { restart } : {}),
       };
     });
     ledger.save([...this.previousRuns.values(), ...current].slice(-AGENT_RUN_LEDGER_LIMIT));
+  }
+
+  /** 在跑或等续跑的 Run：落下重建它所需的一切，重启后才能接着跑 */
+  private restartRecord(agent: AgentRecord, run: RunRecord): AgentRunRestartRecord | undefined {
+    const live =
+      run.restartPending ||
+      activeRunIdOf(agent) === run.runId ||
+      (run.restartCandidate && run.parentUnaware && agent.state.status !== 'closed');
+    if (!agent.spawn || !live) return undefined;
+    return {
+      child: agent.identity,
+      spawn: agent.spawn,
+      prompt: run.prompt,
+      ...(run.schema !== undefined ? { schema: run.schema } : {}),
+      ...(run.gate !== undefined ? { gate: run.gate } : {}),
+      resumes: agent.resumes ?? 0,
+      restartResumes: agent.restartResumes ?? 0,
+      requests: run.priorRequests + run.requestIndexes.size,
+    };
   }
 
   private sameOwner(left: AgentControlContext, right: AgentControlContext): boolean {

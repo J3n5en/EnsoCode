@@ -39,6 +39,37 @@ interface ModelSelection {
   config: SpawnModelConfig;
 }
 
+type ParentSource = NonNullable<ReturnType<ActiveConversationRegistry['resolveParentSource']>>;
+
+interface SpawnOverrides {
+  model?: string;
+  thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /** 子代理历史里给用户看的任务标题，不参与实例名 */
+  title?: string;
+}
+
+type SpawnConfigResolution =
+  | {
+      ok: true;
+      candidate: AgentTypeCandidate;
+      resolved: AgentTypeResolution;
+      config: ResolvedAgentTypeSpawnConfig;
+      expectedModel: ModelRef;
+    }
+  | { ok: false; failure: { error: string; suggestedAction: string } };
+
+/** 会话文件每一行都得是完整 JSON：重启时写坏的不能拿来续跑 */
+function intactSessionFile(file: string): boolean {
+  try {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (line.trim()) JSON.parse(line);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 雇人时解析类型。未传类型则默认 worker；同名自定义类型会换掉 builtin:worker。 */
 export function selectHiredAgentType(
   candidates: readonly AgentTypeCandidate[],
@@ -138,6 +169,8 @@ export interface AgentDispatchServiceOptions {
   sourceRegistry: ActiveConversationRegistry;
   sessionIndex: AgentSessionIndex;
   host: DispatchHost;
+  /** 子会话由重启续跑接管：父会话就绪时不按父会话模型另开一份 */
+  restoreClaimed?: (childSessionId: string) => boolean;
   readStoredOauthCredentialKeys: () => Promise<ReadonlySet<string>>;
   emitRendererEvent: (event: RendererAgentEvent) => void;
   emitDispatchEvent?: (ownerWebContentsId: number, event: DispatchMainEvent) => void;
@@ -227,12 +260,7 @@ export class AgentDispatchService {
     guard?: TeamExecutionGuard,
     dispatchOrigin: 'manual' | 'agent-tool' = 'manual',
     mode: 'task' | 'coworker' = 'coworker',
-    overrides?: {
-      model?: string;
-      thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-      /** 子代理历史里给用户看的任务标题，不参与实例名 */
-      title?: string;
-    },
+    overrides?: SpawnOverrides,
     controlledAgentId?: string
   ): Promise<TeamOperationResult> {
     if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
@@ -258,82 +286,17 @@ export class AgentDispatchService {
         suggestedAction: 'Check the model login and retry.',
       };
     }
-    const parentModel = this.options.host.resolveModel(
-      source.selectedModel.providerId,
-      source.selectedModel.modelId,
-      credentialKeys
-    );
-    if (!parentModel.ok || !parentModel.selection) {
-      return {
-        ok: false,
-        code: 'unavailable',
-        error: parentModel.error ?? 'The parent model is unavailable.',
-        suggestedAction: 'Select a usable model and retry.',
-      };
-    }
-    const snapshot = this.options.host.registrySnapshot();
-    const candidate = selectHiredAgentType(snapshot.candidates, agentType);
-    if (!candidate) {
-      return {
-        ok: false,
-        code: 'unavailable',
-        error: `Agent type is unavailable: ${agentType ?? 'worker'}`,
-        suggestedAction: 'Choose an available Agent type.',
-      };
-    }
-    const resolved = this.options.host.resolveAgentType(
-      candidate.typeKey,
-      parentModel.selection,
+    const spawn = this.resolveSpawnConfig(
+      parentConversationId,
+      source,
       credentialKeys,
-      parentConversationId
+      agentType,
+      dispatchOrigin,
+      overrides
     );
-    if (!resolved.ok || !resolved.config || !resolved.expectedModel) {
-      return {
-        ok: false,
-        code: 'unavailable',
-        error: resolved.error ?? 'The Agent type is unavailable.',
-        suggestedAction: 'Choose an available Agent type and model.',
-      };
-    }
-    let spawnConfig = resolved.config;
-    let expectedModel = resolved.expectedModel;
-    if (overrides?.model) {
-      if (!resolved.allowsModelOverride || !this.options.host.resolveSubagentModel) {
-        return {
-          ok: false,
-          code: 'unavailable',
-          error: 'The selected Agent profile does not allow model override.',
-          suggestedAction: 'Remove model or choose an agent_pick profile.',
-        };
-      }
-      const selected = this.options.host.resolveSubagentModel(overrides.model, credentialKeys);
-      if (!selected.ok || !selected.selection) {
-        return {
-          ok: false,
-          code: 'unavailable',
-          error: selected.error ?? 'The selected subagent model is unavailable.',
-          suggestedAction: 'Choose an enabled subagent model.',
-        };
-      }
-      expectedModel = selected.selection.ref;
-      spawnConfig = { ...spawnConfig, model: selected.selection.config };
-    } else if (dispatchOrigin === 'agent-tool' && resolved.allowsModelOverride) {
-      return {
-        ok: false,
-        code: 'unavailable',
-        error: 'This Agent profile requires an explicit model.',
-        suggestedAction: 'Pass one of the enabled subagent models.',
-      };
-    }
-    if (overrides?.thinking) {
-      // 调用方显式档位走类型槽（派发 > 类型预设 > 父会话 > 模型条目）；写进 model 槽会排到父会话之后，还会被当成模型能力覆盖
-      const { thinkingLevel: _preset, ...rest } = spawnConfig;
-      spawnConfig = {
-        ...rest,
-        reasoning: overrides.thinking === 'off' ? 'off' : 'on',
-        ...(overrides.thinking === 'off' ? {} : { thinkingLevel: overrides.thinking }),
-      };
-    }
+    if (!spawn.ok) return { ok: false, code: 'unavailable', ...spawn.failure };
+    const { candidate, resolved, expectedModel } = spawn;
+    const spawnConfig = spawn.config;
     if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
     const reserved = this.options.sessionIndex.reserveChild(
       target.identity,
@@ -415,6 +378,116 @@ export class AgentDispatchService {
     }
   }
 
+  /** 派发参数 → 子会话配置：父会话模型、类型、模型覆盖与思考档的同一套解析，派发与重启后重建共用 */
+  private resolveSpawnConfig(
+    parentConversationId: string,
+    source: ParentSource,
+    credentialKeys: ReadonlySet<string>,
+    agentType: string | undefined,
+    dispatchOrigin: 'manual' | 'agent-tool',
+    overrides?: SpawnOverrides
+  ): SpawnConfigResolution {
+    const fail = (error: string, suggestedAction: string): SpawnConfigResolution => ({
+      ok: false,
+      failure: { error, suggestedAction },
+    });
+    const parentModel = this.options.host.resolveModel(
+      source.selectedModel.providerId,
+      source.selectedModel.modelId,
+      credentialKeys
+    );
+    if (!parentModel.ok || !parentModel.selection) {
+      return fail(
+        parentModel.error ?? 'The parent model is unavailable.',
+        'Select a usable model and retry.'
+      );
+    }
+    const snapshot = this.options.host.registrySnapshot();
+    const candidate = selectHiredAgentType(snapshot.candidates, agentType);
+    if (!candidate) {
+      return fail(
+        `Agent type is unavailable: ${agentType ?? 'worker'}`,
+        'Choose an available Agent type.'
+      );
+    }
+    const resolved = this.options.host.resolveAgentType(
+      candidate.typeKey,
+      parentModel.selection,
+      credentialKeys,
+      parentConversationId
+    );
+    if (!resolved.ok || !resolved.config || !resolved.expectedModel) {
+      return fail(
+        resolved.error ?? 'The Agent type is unavailable.',
+        'Choose an available Agent type and model.'
+      );
+    }
+    let config = resolved.config;
+    let expectedModel = resolved.expectedModel;
+    if (overrides?.model) {
+      if (!resolved.allowsModelOverride || !this.options.host.resolveSubagentModel) {
+        return fail(
+          'The selected Agent profile does not allow model override.',
+          'Remove model or choose an agent_pick profile.'
+        );
+      }
+      const selected = this.options.host.resolveSubagentModel(overrides.model, credentialKeys);
+      if (!selected.ok || !selected.selection) {
+        return fail(
+          selected.error ?? 'The selected subagent model is unavailable.',
+          'Choose an enabled subagent model.'
+        );
+      }
+      expectedModel = selected.selection.ref;
+      config = { ...config, model: selected.selection.config };
+    } else if (dispatchOrigin === 'agent-tool' && resolved.allowsModelOverride) {
+      return fail(
+        'This Agent profile requires an explicit model.',
+        'Pass one of the enabled subagent models.'
+      );
+    }
+    if (overrides?.thinking) {
+      // 调用方显式档位走类型槽（派发 > 类型预设 > 父会话 > 模型条目）；写进 model 槽会排到父会话之后，还会被当成模型能力覆盖
+      const { thinkingLevel: _preset, ...rest } = config;
+      config = {
+        ...rest,
+        reasoning: overrides.thinking === 'off' ? 'off' : 'on',
+        ...(overrides.thinking === 'off' ? {} : { thinkingLevel: overrides.thinking }),
+      };
+    }
+    return { ok: true, candidate, resolved, config, expectedModel };
+  }
+
+  /** 内存里没有派发配置（Main 重启过）：按派发参数与持久化的子会话 metadata 重新得到同一套配置 */
+  private async respawnRecord(
+    parentConversationId: string,
+    previous: ChildSessionIdentity,
+    persistedChild: unknown,
+    spec?: { agentType?: string; model?: string; thinking?: SpawnOverrides['thinking'] }
+  ): Promise<
+    { config: ResolvedAgentTypeSpawnConfig; metadata: ChildConversationMetadata } | undefined
+  > {
+    const metadata =
+      this.options.sessionIndex.childMetadata(previous) ??
+      parseChildConversationMetadata(persistedChild);
+    if (!spec || !metadata) return undefined;
+    const source = this.options.sourceRegistry.resolveParentSource(parentConversationId);
+    if (!source) throw new Error('The parent source is unavailable.');
+    const spawn = this.resolveSpawnConfig(
+      parentConversationId,
+      source,
+      await this.options.readStoredOauthCredentialKeys(),
+      spec.agentType,
+      'agent-tool',
+      {
+        ...(spec.model ? { model: spec.model } : {}),
+        ...(spec.thinking ? { thinking: spec.thinking } : {}),
+      }
+    );
+    if (!spawn.ok) throw new Error(spawn.failure.error);
+    return { config: spawn.config, metadata };
+  }
+
   async spawnControlledAgent(input: {
     agentId: string;
     parentConversationId: string;
@@ -453,7 +526,14 @@ export class AgentDispatchService {
    */
   async resumeControlledAgent(
     parentConversationId: string,
-    previous: ChildSessionIdentity
+    previous: ChildSessionIdentity,
+    /** 派发参数：Main 重启后内存里的派发配置没了，按它重新解析同一套配置 */
+    spec?: {
+      description: string;
+      agentType?: string;
+      model?: string;
+      thinking?: SpawnOverrides['thinking'];
+    }
   ): Promise<ChildSessionIdentity> {
     const target = this.options.sessionIndex.resolveTeamTarget(parentConversationId);
     if (!target.ok) throw new Error(target.error);
@@ -468,14 +548,24 @@ export class AgentDispatchService {
     ) {
       return live;
     }
-    const task = this.resumableTasks.get(previous.sessionId);
+    const persisted = this.options.sessionIndex.persistedConversation(previous.sessionId);
+    const resumeFile =
+      this.options.sessionIndex.sessionFile(previous) ??
+      (typeof persisted?.sessionFile === 'string' ? persisted.sessionFile : undefined);
+    const task =
+      this.resumableTasks.get(previous.sessionId) ??
+      (await this.respawnRecord(parentConversationId, previous, persisted?.child, spec));
     if (!task) {
       throw new Error('This subagent cannot be resumed: its spawn record is gone.');
     }
-    const resumeFile = this.options.sessionIndex.sessionFile(previous);
     if (!resumeFile || !existsSync(resumeFile)) {
       throw new Error(
         'This subagent cannot be resumed: it was interrupted before its first reply was saved, so there is no progress to continue. Spawn it again.'
+      );
+    }
+    if (!intactSessionFile(resumeFile)) {
+      throw new Error(
+        'This subagent cannot be resumed: its session file is corrupted, so its progress cannot be loaded.'
       );
     }
     const source = this.options.sourceRegistry.resolveParentSource(parentConversationId);
@@ -844,6 +934,7 @@ export class AgentDispatchService {
     if (!source) return;
     const credentialKeys = await this.options.readStoredOauthCredentialKeys();
     for (const coworkerId of coworkerIds) {
+      if (this.options.restoreClaimed?.(coworkerId)) continue;
       const child = this.options.sessionIndex.persistedConversation(coworkerId);
       if (!child || child.ended === true) continue;
       const resumeFile = typeof child.sessionFile === 'string' ? child.sessionFile : undefined;

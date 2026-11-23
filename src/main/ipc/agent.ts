@@ -142,7 +142,9 @@ import {
 import type { BrowserActor } from '../services/browserTabClaims';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import {
+  CONVERSATION_UNAVAILABLE,
   type ColdRestartPlan,
+  coldRestartChildren,
   coldResumeReady,
   failColdResume,
   wakeColdRestartOwners,
@@ -763,7 +765,7 @@ export async function resumeRootFromRestartManifest(
 ): Promise<AgentActionResult> {
   const conversation = sourceAuthority?.conversation(entry.sessionId);
   if (!conversation || conversation.bot || conversation.lifecycle === 'ended')
-    return { ok: false, error: 'conversation unavailable' };
+    return { ok: false, error: CONVERSATION_UNAVAILABLE };
   if (exactIdentity(entry.sessionId)) return { ok: false, error: 'session already spawned' };
   const cwd = authoritativeSpawnCwd(entry.sessionId);
   const parsed =
@@ -794,7 +796,8 @@ export function wakeInterruptedRunOwners(current: ColdRestartPlan): Promise<void
   return wakeColdRestartOwners(
     agentService?.restartInterruptedOwners() ?? [],
     resumeRootFromRestartManifest,
-    current
+    current,
+    (ownerId) => agentService?.abandonOwner(ownerId)
   );
 }
 
@@ -1874,6 +1877,7 @@ export function registerAgentHandlers(): void {
   dispatchService = new AgentDispatchService({
     sourceRegistry: sourceBindings,
     sessionIndex: agentSessionIndex,
+    restoreClaimed: (childSessionId) => agentService?.claimsRestartChild(childSessionId) ?? false,
     readStoredOauthCredentialKeys,
     emitRendererEvent: broadcastAgentEvent,
     emitDispatchEvent: (ownerWebContentsId, dispatchEvent) => {
@@ -1923,6 +1927,7 @@ export function registerAgentHandlers(): void {
 
   agentService = new AgentService({
     ledger: fileAgentRunLedger(path.join(app.getPath('userData'), 'agent', 'subagent-runs.json')),
+    restartCheckpoint: coldRestartChildren(),
     notify: (context, text, urgent) => {
       // 投给父会话当前 generation：换代前派出的 Run 结束后照样通知接续的会话
       const identity = rootIdentity(context.owner.ownerId);
@@ -1977,7 +1982,11 @@ export function registerAgentHandlers(): void {
       stop: async (input) => abortSession(input.identity),
       dismiss: async (input) => dismissChildSession(input.identity.parent, input.identity, false),
       resume: (input) =>
-        dispatchService!.resumeControlledAgent(input.context.owner.ownerId, input.identity),
+        dispatchService!.resumeControlledAgent(
+          input.context.owner.ownerId,
+          input.identity,
+          input.spawn
+        ),
       retry: async (input) =>
         retrySession(input.identity, true, {
           turnId: input.runId,
@@ -2044,6 +2053,9 @@ export function registerAgentHandlers(): void {
       );
       return;
     }
+    // 断点已落盘：记下停在安全点的子会话，worker 退出时它们的 Run 等父会话就绪后接着跑
+    if (workerEvent.type === 'graceful-restart-ready')
+      agentService?.noteRestartCheckpoint(workerEvent.checkpoint.sessions);
     if (
       workerEvent.type === 'session-reloaded' ||
       workerEvent.type === 'workspace-lock-result' ||
