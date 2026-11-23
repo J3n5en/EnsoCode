@@ -92,7 +92,9 @@ export function QueuedSessionButtons({
 /** 打开尚未启动的排队会话：首条消息、位次，以及立即开始 / 取消。 */
 export function QueuedSessionCard({ conversationId }: { conversationId: string }) {
   const { t } = useI18n();
-  const queued = useSessionsStore((state) => queuedStartOf(state.conversations[conversationId]));
+  // 选择器只取行上的原对象：queuedStartOf 每次返回新对象，放进选择器会无限重渲染
+  const row = useSessionsStore((state) => state.conversations[conversationId]);
+  const queued = queuedStartOf(row);
   const position = useSessionsStore((state) =>
     queuePositions(state.conversations).get(conversationId)
   );
