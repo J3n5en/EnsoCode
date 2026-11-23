@@ -26,6 +26,16 @@ import {
 } from '@shared/extensionPlugins/protocol';
 import { parseStatusPatch, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import type { SpawnModelConfig } from '@shared/types/agent';
+import {
+  type EventClaimAcquireResult,
+  type EventClaimCandidate,
+  type EventClaimView,
+  parseClaimCandidates,
+  parseClaimGroup,
+  parseClaimKey,
+  parseClaimLabel,
+  parseClaimSubscribedAt,
+} from '@shared/types/eventClaims';
 import { pluginError } from './process';
 
 export const GESTURE_TTL_MS = 30_000;
@@ -221,9 +231,14 @@ export interface GateDeps {
       triggerTurn: boolean;
       /** 插件请求免包裹；是否生效由服务按 agent.injectTrusted 判 */
       trusted: boolean;
+      claimKey?: string;
+      claimLabel?: string;
+      claimGroup?: string;
+      claimSubscribedAt?: number;
+      claimCandidates?: EventClaimCandidate[];
       sender?: PluginInjectSender;
     }
-  ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
+  ): SessionAttempt;
   /** 让发起窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
   wakeSession?(sessionId: string, origin: number | null): Promise<void>;
   /** 在会话旁启动只读代理；进度与终态由服务推给插件进程 */
@@ -235,6 +250,21 @@ export interface GateDeps {
   /** 取消本插件的代理；没有这个代理返回 false */
   agentCancel?(pluginId: string, runId: string): boolean;
   abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
+  claims?: {
+    claim(input: {
+      key: string;
+      sessionId: string;
+      pluginId: string;
+      label?: string;
+      group?: string;
+      subscribedAt?: number;
+      candidates?: EventClaimCandidate[];
+    }): EventClaimAcquireResult;
+    renew(key: string, sessionId: string): EventClaimView | null;
+    release(key: string, sessionId: string): boolean;
+    list(filter?: { prefix?: string; sessionId?: string; pluginId?: string }): EventClaimView[];
+    releaseSession?(sessionId: string): number;
+  };
   callPlugin?(
     callerId: string,
     targetId: string,
@@ -293,7 +323,14 @@ export interface GateDeps {
   ): Promise<unknown>;
 }
 
-export type SessionAttempt = { ok: true } | { ok: false; error: string; notRunning?: boolean };
+export type SessionAttempt =
+  | {
+      ok: true;
+      skipped?: true;
+      ownerSessionId?: string;
+      claimStatus?: 'claimed' | 'renewed';
+    }
+  | { ok: false; error: string; notRunning?: boolean };
 
 export interface PluginAgentRunRequest {
   runId: string;
@@ -750,6 +787,7 @@ export class PluginHostGate {
           throw pluginError('INVALID_ARGS', 'triggerTurn 不合法');
         if (a.trusted !== undefined && typeof a.trusted !== 'boolean')
           throw pluginError('INVALID_ARGS', 'trusted 不合法');
+        const claim = this.readClaimRequest(a);
         const sender = parsePluginInjectSender(a.sender);
         if (sender === null) throw pluginError('INVALID_ARGS', 'sender 不合法');
         const bridge = this.deps.inject;
@@ -762,6 +800,7 @@ export class PluginHostGate {
           deliverAs,
           triggerTurn: a.triggerTurn === true,
           trusted: a.trusted === true,
+          ...claim,
           ...(sender ? { sender } : {}),
         };
         const result = await this.untilRunning(
@@ -772,7 +811,19 @@ export class PluginHostGate {
         );
         if (!result.ok) throw pluginError('INJECT_FAILED', result.error);
         this.noteSession(pluginId, sessionId);
-        return null;
+        if (result.skipped) {
+          return {
+            delivered: false,
+            ownerSessionId: result.ownerSessionId ?? sessionId,
+            status: 'held-by-other',
+          };
+        }
+        if (!claim.claimKey) return null;
+        return {
+          delivered: true,
+          ownerSessionId: sessionId,
+          status: result.claimStatus ?? 'claimed',
+        };
       }
       case 'agent.run': {
         permit('agent.run');
@@ -836,8 +887,14 @@ export class PluginHostGate {
         if (!this.deps.abort) throw pluginError('UNSUPPORTED', '当前环境不能中止会话');
         const result = this.deps.abort(pluginId, sessionId);
         if (!result.ok) throw pluginError('ABORT_FAILED', result.error);
+        this.deps.claims?.releaseSession?.(sessionId);
         return null;
       }
+      case 'claims.claim':
+      case 'claims.renew':
+      case 'claims.release':
+      case 'claims.list':
+        return this.claims(pluginId, api, a, optionalInvocation());
       case 'plugin.call': {
         permit('plugin.call');
         const inv = invocation();
@@ -1135,6 +1192,92 @@ export class PluginHostGate {
       result = attempt();
     }
     return result;
+  }
+
+  private readClaimRequest(args: Record<string, unknown>): {
+    claimKey?: string;
+    claimLabel?: string;
+    claimGroup?: string;
+    claimSubscribedAt?: number;
+    claimCandidates?: EventClaimCandidate[];
+  } {
+    if (
+      args.claimKey === undefined &&
+      args.claimLabel === undefined &&
+      args.claimGroup === undefined &&
+      args.claimSubscribedAt === undefined &&
+      args.claimCandidates === undefined
+    ) {
+      return {};
+    }
+    const claimKey = parseClaimKey(args.claimKey);
+    if (!claimKey) throw pluginError('INVALID_ARGS', 'claimKey 不合法');
+    const claimLabel = parseClaimLabel(args.claimLabel);
+    if (claimLabel === null) throw pluginError('INVALID_ARGS', 'claimLabel 不合法');
+    const claimGroup = parseClaimGroup(args.claimGroup);
+    if (claimGroup === null) throw pluginError('INVALID_ARGS', 'claimGroup 不合法');
+    const claimSubscribedAt = parseClaimSubscribedAt(args.claimSubscribedAt);
+    if (claimSubscribedAt === null) throw pluginError('INVALID_ARGS', 'claimSubscribedAt 不合法');
+    const claimCandidates = parseClaimCandidates(args.claimCandidates);
+    if (claimCandidates === null) throw pluginError('INVALID_ARGS', 'claimCandidates 不合法');
+    return {
+      claimKey,
+      ...(claimLabel !== undefined ? { claimLabel } : {}),
+      ...(claimGroup !== undefined ? { claimGroup } : {}),
+      ...(claimSubscribedAt !== undefined ? { claimSubscribedAt } : {}),
+      ...(claimCandidates !== undefined ? { claimCandidates } : {}),
+    };
+  }
+
+  private claims(
+    pluginId: string,
+    api: 'claims.claim' | 'claims.renew' | 'claims.release' | 'claims.list',
+    args: Record<string, unknown>,
+    inv: Invocation | null
+  ): EventClaimAcquireResult | EventClaimView | EventClaimView[] | boolean | null {
+    const permit = this.deps.manifest(pluginId)?.permissions.includes('agent.inject');
+    if (!permit) throw pluginError('PERMISSION_DENIED', '插件未获授权：agent.inject');
+    const claims = this.deps.claims;
+    if (!claims) throw pluginError('UNSUPPORTED', '当前环境不能认领对象');
+    if (api === 'claims.list') {
+      const prefix = this.claimFilter(args.prefix, 'prefix');
+      const sessionId = this.claimFilter(args.sessionId, 'sessionId');
+      const filterPlugin = this.claimFilter(args.pluginId, 'pluginId');
+      return claims.list({
+        ...(prefix ? { prefix } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(filterPlugin ? { pluginId: filterPlugin } : {}),
+      });
+    }
+    const key = parseClaimKey(args.key);
+    if (!key) throw pluginError('INVALID_ARGS', 'key 不合法');
+    const sessionId = this.targetSession(pluginId, args, inv);
+    if (api === 'claims.renew') return claims.renew(key, sessionId);
+    if (api === 'claims.release') return claims.release(key, sessionId);
+    const label = parseClaimLabel(args.label);
+    if (label === null) throw pluginError('INVALID_ARGS', 'label 不合法');
+    const group = parseClaimGroup(args.group);
+    if (group === null) throw pluginError('INVALID_ARGS', 'group 不合法');
+    const subscribedAt = parseClaimSubscribedAt(args.subscribedAt);
+    if (subscribedAt === null) throw pluginError('INVALID_ARGS', 'subscribedAt 不合法');
+    const candidates = parseClaimCandidates(args.candidates);
+    if (candidates === null) throw pluginError('INVALID_ARGS', 'candidates 不合法');
+    return claims.claim({
+      key,
+      sessionId,
+      pluginId,
+      ...(label !== undefined ? { label } : {}),
+      ...(group !== undefined ? { group } : {}),
+      ...(subscribedAt !== undefined ? { subscribedAt } : {}),
+      ...(candidates !== undefined ? { candidates } : {}),
+    });
+  }
+
+  private claimFilter(raw: unknown, name: string): string | undefined {
+    if (raw === undefined) return undefined;
+    const parsed = parseClaimKey(raw);
+    if (!parsed) throw pluginError('INVALID_ARGS', `${name} 不合法`);
+    return parsed;
   }
 
   /** 相对项目根解析；先 realpath，再确认仍在授权范围内，不能借符号链接逃出 */

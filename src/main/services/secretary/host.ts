@@ -8,6 +8,7 @@ import {
   type GoalResult,
   type GoalResultCheck,
   type GoalResultView,
+  hasNeedsUser,
   parseGoalResultView,
 } from '@shared/secretary/goalResult';
 import {
@@ -1336,14 +1337,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
         if (change && change.state !== 'error') delete record.failurePending;
-        // 用户或重试让会话重新进入运行态：清掉历史非完成终态与停止标记，状态以本次为准
-        if (
-          change?.state === 'running' &&
-          change.previous !== 'running' &&
-          record.lastResult?.manual !== true
-        ) {
-          delete record.stoppedAt;
-          delete record.failurePending;
+        // 会话处于运行态（含重启续跑无边沿变化）：清掉过时历史结果，避免旧结果把运行中会话拉回「需要你」
+        if (status.state === 'running' && record.lastResult?.manual !== true) {
+          if (change?.state === 'running' && change.previous !== 'running') {
+            delete record.stoppedAt;
+            delete record.failurePending;
+            if (record.lastResult?.kind === 'goal-complete' && hasNeedsUser(record.goalResult)) {
+              delete record.lastResult;
+              delete record.goalResult;
+            }
+          }
           if (record.lastResult && record.lastResult.kind !== 'goal-complete')
             delete record.lastResult;
         }

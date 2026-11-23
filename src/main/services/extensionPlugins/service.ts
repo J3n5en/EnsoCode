@@ -68,6 +68,7 @@ import type {
 } from '@shared/extensionPlugins/types';
 import type { McpServerSpawnConfig, SpawnModelConfig } from '@shared/types/agent';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
+import { getEventClaimStore, peekEventClaimStore } from '../eventClaims';
 import type {
   NativeAgentTypeSource,
   NativePluginAgentDef,
@@ -365,6 +366,13 @@ export class ExtensionPluginService {
       abort: (pluginId, sessionId) => {
         const bridge = this.enabledManifest(pluginId) ? this.options.sessionBridge?.() : null;
         return bridge ? bridge.abort(sessionId) : { ok: false, error: '当前环境不能中止会话' };
+      },
+      claims: {
+        claim: (input) => getEventClaimStore().acquire(input),
+        renew: (key, sessionId) => getEventClaimStore().renew(key, sessionId),
+        release: (key, sessionId) => getEventClaimStore().release(key, sessionId),
+        list: (filter) => getEventClaimStore().list(filter),
+        releaseSession: (sessionId) => getEventClaimStore().releaseSession(sessionId),
       },
       agentRun: (pluginId, input) => this.startAgentRun(pluginId, input),
       agentModel: (pluginId) => this.agentModel(pluginId),
@@ -1485,6 +1493,7 @@ export class ExtensionPluginService {
   /** 会话删除：插件不再据它判定可见范围 */
   forgetSession(sessionId: string): void {
     this.gate.forgetSession(sessionId);
+    peekEventClaimStore()?.releaseSession(sessionId);
   }
 
   async intercept<E extends PluginInterceptEvent>(input: {
@@ -2167,16 +2176,8 @@ export class ExtensionPluginService {
 
   private inject(
     pluginId: string,
-    input: {
-      sessionId: string;
-      text: string;
-      images: PluginInjectImage[];
-      deliverAs: 'steer' | 'followUp' | 'nextTurn';
-      triggerTurn: boolean;
-      trusted: boolean;
-      sender?: PluginInjectSender;
-    }
-  ): { ok: true } | { ok: false; error: string } {
+    input: Parameters<NonNullable<GateDeps['inject']>>[1]
+  ): SessionAttempt {
     const manifest = this.enabledManifest(pluginId) ?? this.gateManifests.get(pluginId);
     const bridge = this.options.sessionBridge?.() ?? null;
     if (!manifest || !bridge) return { ok: false, error: '当前环境不能注入消息' };
@@ -2189,7 +2190,7 @@ export class ExtensionPluginService {
     });
     if (trust.ignored)
       this.logger.append(pluginId, 'warn', 'trusted 已忽略：清单没有声明 agent.injectTrusted');
-    const result = bridge.inject(input.sessionId, {
+    const message = {
       pluginId,
       pluginName: manifest.name,
       text: input.text,
@@ -2201,10 +2202,32 @@ export class ExtensionPluginService {
       permissions: manifest.permissions,
       ...(source ? { source } : {}),
       ...(input.sender ? { sender: input.sender } : {}),
+    };
+    if (!input.claimKey) {
+      const result = bridge.inject(input.sessionId, message);
+      if (result.ok && result.trustedOverriddenByExternal)
+        this.logger.append(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
+      return result;
+    }
+    const store = getEventClaimStore();
+    const acquired = store.acquire({
+      key: input.claimKey,
+      sessionId: input.sessionId,
+      pluginId,
+      ...(input.claimLabel !== undefined ? { label: input.claimLabel } : {}),
+      ...(input.claimGroup !== undefined ? { group: input.claimGroup } : {}),
+      ...(input.claimSubscribedAt !== undefined ? { subscribedAt: input.claimSubscribedAt } : {}),
+      ...(input.claimCandidates !== undefined ? { candidates: input.claimCandidates } : {}),
     });
-    if (result.ok && result.trustedOverriddenByExternal)
+    if (!acquired.acquired) {
+      return { ok: true, skipped: true, ownerSessionId: acquired.ownerSessionId };
+    }
+    const sent = bridge.inject(input.sessionId, message);
+    if (!sent.ok && acquired.status === 'claimed') store.release(input.claimKey, input.sessionId);
+    if (!sent.ok) return sent;
+    if (sent.trustedOverriddenByExternal)
       this.logger.append(pluginId, 'warn', 'trusted 已忽略：投递带有非 owner 的外部原文');
-    return result;
+    return { ok: true, claimStatus: acquired.status, ownerSessionId: input.sessionId };
   }
 
   private callExport(

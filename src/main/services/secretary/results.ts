@@ -13,6 +13,7 @@ import {
   type PendingDispatch,
   type SecretaryBoard,
   type SecretaryCard,
+  type SecretaryClaimView,
   type SecretaryDispatchFile,
   type SecretaryProposal,
   type SecretaryResultKind,
@@ -468,6 +469,7 @@ export function countsAsRunning(
 
 export function sessionNeedsUser(record: DispatchRecord, state: SessionLiveState): boolean {
   if (state === 'waiting') return true;
+  // 运行中（且非 waiting，说明此刻没有待审批或待回答提问）：历史结果已过时，不能占「需要你处理」
   if (state === 'running') return false;
   const result = record.lastResult;
   if (!result || result.dismissed) return false;
@@ -510,6 +512,7 @@ export interface BoardInput {
   projects: readonly ProjectAuthority[];
   todos: readonly SecretaryTodo[];
   aliases?: Readonly<Record<string, string>>;
+  claims?: readonly SecretaryClaimView[];
 }
 
 function boardSubagents(
@@ -683,6 +686,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ];
     }),
     ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
+    ...(input.claims && input.claims.length > 0 ? { claims: [...input.claims] } : {}),
   };
 }
 

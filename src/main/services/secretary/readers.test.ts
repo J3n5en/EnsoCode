@@ -471,6 +471,32 @@ describe('session_list', () => {
       'c',
     ]);
   });
+
+  it('会话持有认领时附上 key，claims_list 按前缀过滤', async () => {
+    const claim = {
+      key: 'github:acme/app#1:review',
+      sessionId: 's1',
+      sessionTitle: '审查',
+      pluginId: 'github',
+      claimedAt: 1,
+      lastHeartbeatAt: 2,
+      active: true,
+    };
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row({ title: '审查' }) }),
+        conversations: () => [conversation('s1', 'p1')],
+        claims: () => [claim],
+      })
+    );
+    const listed = await run(handlers.session_list);
+    expect(listed.sessions).toEqual([
+      expect.objectContaining({ conversationId: 's1', claims: [claim.key] }),
+    ]);
+    expect((await run(handlers.claims_list, { prefix: 'github:' })).claims).toEqual([claim]);
+    expect((await run(handlers.claims_list, { prefix: 'tg:' })).claims).toEqual([]);
+  });
 });
 
 describe('session_read', () => {

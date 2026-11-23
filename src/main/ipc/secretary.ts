@@ -10,6 +10,7 @@ import { resumesAfterQuit } from '../services/agentHost';
 import { backgroundTaskStates } from '../services/backgroundTaskTracker';
 import { coldResumedSessionIds, onColdResumeFailed } from '../services/coldRestart';
 import { notifyDesktop } from '../services/desktopHooks';
+import { getEventClaimStore } from '../services/eventClaims';
 import { interruptedTurnReason } from '../services/interruptedTurns';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
@@ -696,6 +697,7 @@ const NO_SECRETARY = { ok: false as const, error: 'secretary-required' };
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  getEventClaimStore().onChanged(broadcastState);
   // worker 报完启动时的任务表：启动时没敢判的自动归档、被误归档的会话在这里补判
   backgroundTaskStates.onReported(() => {
     for (const instance of hosts.values()) instance.sweepAutoArchive();

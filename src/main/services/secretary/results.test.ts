@@ -446,6 +446,31 @@ describe('工作台投影', () => {
     });
     expect(board.needsYou.map((card) => card.kind)).toEqual(['proposal', 'session']);
     expect(board.needsYou[1]).toMatchObject({ conversationId: 'waiting', state: 'waiting' });
+    expect(board.claims).toBeUndefined();
+    const claimed = buildBoard(file, {
+      rows: {
+        waiting: { id: 'waiting', title: '等审批', sessionFile: '/tmp/w.jsonl' },
+        running: { id: 'running', title: '在跑', sessionFile: '/tmp/r.jsonl' },
+        done: { id: 'done', title: '做完', sessionFile: '/tmp/d.jsonl' },
+      },
+      statuses: { waiting, running, done: idle },
+      projects,
+      todos: [],
+      claims: [
+        {
+          key: 'tg:-1:1',
+          sessionId: 'running',
+          sessionTitle: '在跑',
+          pluginId: 'tg',
+          claimedAt: 1,
+          lastHeartbeatAt: 2,
+          active: true,
+        },
+      ],
+    });
+    expect(claimed.claims).toEqual([
+      expect.objectContaining({ key: 'tg:-1:1', sessionTitle: '在跑' }),
+    ]);
     expect(
       board.running.map((card) => (card.kind === 'session' ? card.conversationId : ''))
     ).toEqual(['running']);
@@ -1355,5 +1380,62 @@ describe('排队会话', () => {
       'done',
       'manual',
     ]);
+  });
+
+  it('运行中的会话（无待审批/提问）即使带历史残留结果也进「进行中」，不进「需要你处理」', () => {
+    const file = emptyFile({
+      dispatched: {
+        started: record({
+          conversationId: 'started',
+          lastState: 'running',
+        }),
+        staleNeedsUser: record({
+          conversationId: 'staleNeedsUser',
+          lastState: 'running',
+          lastResult: { kind: 'needs-user', turn: 1, at: 10 },
+        }),
+        staleFailed: record({
+          conversationId: 'staleFailed',
+          lastState: 'running',
+          lastResult: { kind: 'failed', turn: 1, at: 10 },
+        }),
+        staleGoalNeed: record({
+          conversationId: 'staleGoalNeed',
+          lastState: 'running',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 10 },
+          goalResult: { at: 10, result: { summary: '旧结果', needsUser: ['旧待确认'] } },
+        }),
+        realWait: record({
+          conversationId: 'realWait',
+          lastState: 'waiting',
+          lastResult: { kind: 'needs-user', turn: 1, at: 10 },
+        }),
+      },
+    });
+    const rows = {
+      started: { title: '刚派出正在跑', sessionFile: '/s/started.jsonl' },
+      staleNeedsUser: { title: '审批过后继续运行', sessionFile: '/s/staleNeedsUser.jsonl' },
+      staleFailed: { title: '失败后恢复运行', sessionFile: '/s/staleFailed.jsonl' },
+      staleGoalNeed: { title: '旧 needsUser 重跑中', sessionFile: '/s/staleGoalNeed.jsonl' },
+      realWait: { title: '真实待审批', sessionFile: '/s/realWait.jsonl' },
+    };
+    const statuses = {
+      started: running,
+      staleNeedsUser: running,
+      staleFailed: running,
+      staleGoalNeed: running,
+      realWait: waiting,
+    };
+    const board = buildBoard(file, { rows, statuses, projects, todos: [] });
+    expect(board.needsYou.map((c) => (c.kind === 'session' ? c.conversationId : ''))).toEqual([
+      'realWait',
+    ]);
+    expect(board.running.map((c) => (c.kind === 'session' ? c.conversationId : '')).sort()).toEqual(
+      ['staleFailed', 'staleGoalNeed', 'staleNeedsUser', 'started']
+    );
+    expect(countsAsRunning(file.dispatched.staleNeedsUser, rows.staleNeedsUser, running)).toBe(
+      true
+    );
+    expect(countsAsRunning(file.dispatched.staleGoalNeed, rows.staleGoalNeed, running)).toBe(true);
   });
 });

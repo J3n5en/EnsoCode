@@ -15,8 +15,9 @@ import type {
   ProjectAuthority,
   ProjectedMessage,
 } from '@shared/types/agent';
-import type { SecretaryProfile } from '@shared/types/secretary';
+import type { SecretaryClaimView, SecretaryProfile } from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
+import { peekEventClaimStore } from '../eventClaims';
 import { redactSecrets } from '../memory/distill';
 import {
   ACTIVITY_LIMIT_DEFAULT,
@@ -97,6 +98,8 @@ export interface SecretaryReadPorts {
   autoArchived?(conversationId: string, row: Record<string, unknown>): MaybePromise<boolean>;
   /** 只读 git；路径越界校验与采集都在 repoStatus 里 */
   repo: RepoStatusDeps;
+  /** 当前未过期的对象认领；缺省表示没有 */
+  claims?(): MaybePromise<readonly SecretaryClaimView[]>;
 }
 
 export interface SecretaryReadHandlers {
@@ -104,6 +107,7 @@ export interface SecretaryReadHandlers {
   project_info: SecretaryOpHandler;
   repo_status: SecretaryOpHandler;
   session_list: SecretaryOpHandler;
+  claims_list: SecretaryOpHandler;
   session_read: SecretaryOpHandler;
   session_tasks: SecretaryOpHandler;
   session_activity: SecretaryOpHandler;
@@ -428,6 +432,12 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const scoped = projectId
         ? sessions.filter((session) => session.projectId === projectId)
         : sessions;
+      const held = new Map<string, string[]>();
+      for (const claim of (await ports.claims?.()) ?? []) {
+        const keys = held.get(claim.sessionId) ?? [];
+        keys.push(claim.key);
+        held.set(claim.sessionId, keys);
+      }
       const rows = [];
       for (const session of scoped.slice(0, limit)) {
         const status = await ports.status(session.conversationId);
@@ -435,6 +445,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           (await ports.subagents?.(session.conversationId)) ?? [],
           `session:${session.conversationId}`
         );
+        const claims = held.get(session.conversationId);
         rows.push({
           conversationId: session.conversationId,
           projectId: session.projectId,
@@ -445,9 +456,24 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           lastActiveAt: session.lastActiveAt,
           ...(session.goal ? { goal: session.goal } : {}),
           ...(subagents.length > 0 ? { subagents } : {}),
+          ...(claims && claims.length > 0 ? { claims } : {}),
         });
       }
       return { ok: true, result: { sessions: rows } };
+    },
+
+    async claims_list(params) {
+      const prefix = optionalFilter(params, 'prefix');
+      const sessionId = optionalFilter(params, 'sessionId');
+      const pluginId = optionalFilter(params, 'pluginId');
+      if (prefix === null || sessionId === null || pluginId === null) return invalidArguments;
+      const claims = ((await ports.claims?.()) ?? []).filter((claim) => {
+        if (prefix && !claim.key.startsWith(prefix)) return false;
+        if (sessionId && claim.sessionId !== sessionId) return false;
+        if (pluginId && claim.pluginId !== pluginId) return false;
+        return true;
+      });
+      return { ok: true, result: { claims } };
     },
 
     async session_read(params) {
@@ -727,5 +753,31 @@ export function readPortsFor(
       return record ? autoArchived(record, row) : false;
     },
     repo: realRepoDeps,
+    async claims() {
+      const store = peekEventClaimStore();
+      if (!store) return [];
+      const rows = await (await import('../../ipc/settings')).readPersistedConversations();
+      return store.list().map((claim) => ({
+        key: claim.key,
+        sessionId: claim.sessionId,
+        sessionTitle: sessionTitle(rows[claim.sessionId], claim.sessionId),
+        pluginId: claim.pluginId,
+        ...(claim.label !== undefined ? { label: claim.label } : {}),
+        ...(claim.group !== undefined ? { group: claim.group } : {}),
+        claimedAt: claim.claimedAt,
+        lastHeartbeatAt: claim.lastHeartbeatAt,
+        active: claim.active,
+      }));
+    },
   };
+}
+
+function optionalFilter(params: Record<string, unknown>, key: string): string | null | undefined {
+  if (params[key] === undefined) return undefined;
+  return stringParam(params, key) ?? null;
+}
+
+function sessionTitle(row: Record<string, unknown> | undefined, sessionId: string): string {
+  const title = row?.title;
+  return typeof title === 'string' && title.trim() ? title : sessionId;
 }

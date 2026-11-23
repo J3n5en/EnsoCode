@@ -131,7 +131,63 @@ export interface EnsoInjectInput {
   sessionId?: string;
   deliverAs?: 'nextTurn' | 'steer' | 'followUp';
   triggerTurn?: boolean;
+  /** 同一外部对象只投给认领它的会话，例如 `github:acme/app#1:review` */
+  claimKey?: string;
+  claimLabel?: string;
+  claimGroup?: string;
+  /** 订阅时间，候选里越早越优先 */
+  claimSubscribedAt?: number;
+  claimCandidates?: EnsoClaimCandidate[];
 }
+
+/** 不带 claimKey 时注入仍返回 null，和旧插件兼容 */
+export interface EnsoInjectResult {
+  delivered: boolean;
+  ownerSessionId: string;
+  status: 'claimed' | 'renewed' | 'held-by-other';
+}
+
+export interface EnsoClaimCandidate {
+  sessionId: string;
+  subscribedAt?: number;
+  active?: boolean;
+}
+
+export interface EnsoClaimView {
+  key: string;
+  sessionId: string;
+  pluginId: string;
+  label?: string;
+  group?: string;
+  subscribedAt?: number;
+  claimedAt: number;
+  lastHeartbeatAt: number;
+  leaseUntil: number;
+  active: boolean;
+}
+
+export interface EnsoClaimAcquireInput {
+  key: string;
+  sessionId?: string;
+  label?: string;
+  group?: string;
+  subscribedAt?: number;
+  candidates?: EnsoClaimCandidate[];
+}
+
+export type EnsoClaimAcquireResult =
+  | {
+      acquired: true;
+      status: 'claimed' | 'renewed';
+      ownerSessionId: string;
+      claim: EnsoClaimView;
+    }
+  | {
+      acquired: false;
+      status: 'held-by-other';
+      ownerSessionId: string;
+      claim: EnsoClaimView;
+    };
 
 export type EnsoContribRegister =
   | {
@@ -227,7 +283,15 @@ export interface EnsoHostApi {
   ) => Promise<{ content: string; isError: boolean }>;
   'tool.progress': (text: string) => Promise<unknown>;
   'artifact.write': (input: EnsoArtifactWrite) => Promise<PluginArtifactInfo>;
-  'session.inject': (input: EnsoInjectInput) => Promise<void>;
+  'session.inject': (input: EnsoInjectInput) => Promise<EnsoInjectResult | null>;
+  'claims.claim': (input: EnsoClaimAcquireInput) => Promise<EnsoClaimAcquireResult>;
+  'claims.renew': (key: string, sessionId?: string) => Promise<EnsoClaimView | null>;
+  'claims.release': (key: string, sessionId?: string) => Promise<boolean>;
+  'claims.list': (filter?: {
+    prefix?: string;
+    sessionId?: string;
+    pluginId?: string;
+  }) => Promise<EnsoClaimView[]>;
   'session.abort': (sessionId?: string) => Promise<void>;
   'plugin.call': (pluginId: string, name: string, args?: unknown) => Promise<unknown>;
   'ui.clipboard': (text: string) => Promise<void>;
@@ -397,6 +461,12 @@ export interface EnsoMain {
      * 返回取消订阅函数；进程退出、插件停用或卸载后自动失效。
      */
     onTurnEnd(listener: (event: { sessionId: string }) => void): EnsoDisposable;
+  };
+  claims: {
+    claim: EnsoHostApi['claims.claim'];
+    renew: EnsoHostApi['claims.renew'];
+    release: EnsoHostApi['claims.release'];
+    list: EnsoHostApi['claims.list'];
   };
   host: { capabilities: EnsoHostApi['host.capabilities'] };
   /** 秘书联系方式渠道：register 交出收发实现，inbound 把对方的话交给秘书，setStatus 报登录状态 */

@@ -3215,6 +3215,8 @@ export const zhTranslations: Record<string, string> = {
   Planning: '思考',
   Busy: '执行',
   'Needs you': '等待',
+  'Object claims': '对象认领',
+  'Claimed by {{session}}': '由 {{session}} 认领',
   Stuck: '异常',
   Finished: '完成',
   'In line': '排队中',

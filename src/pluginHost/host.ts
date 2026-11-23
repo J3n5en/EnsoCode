@@ -508,6 +508,14 @@ export function runPluginHost(transport: HostTransport): void {
         create: (input?: unknown) => hostCall('session.create', input ?? {}),
         onTurnEnd,
       },
+      claims: {
+        claim: (input: unknown) => hostCall('claims.claim', input ?? {}),
+        renew: (key: string, sessionId?: string) =>
+          hostCall('claims.renew', sessionId !== undefined ? { key, sessionId } : { key }),
+        release: (key: string, sessionId?: string) =>
+          hostCall('claims.release', sessionId !== undefined ? { key, sessionId } : { key }),
+        list: (filter?: unknown) => hostCall('claims.list', filter ?? {}),
+      },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
       contact: {
         register: async (channelId: unknown, impl: unknown) => {
