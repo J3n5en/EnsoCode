@@ -318,6 +318,16 @@ function actions(w: World, cfg: Budget & { modes: Mode[] }): [string, () => unkn
         () => {
           u.faults++;
           c.held = undefined;
+          const run = internals(w).runs.get(held);
+          if (run && !TERMINAL.has(run.status)) w.expected.set(held, 'interrupted');
+          w.service.observe({
+            type: 'turn-completed',
+            identity: c.identity,
+            seq: 0,
+            turnId: `${held}~a`,
+            aborted: true,
+            continues: held,
+          });
         },
       ]);
     }

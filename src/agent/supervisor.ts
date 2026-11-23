@@ -2526,7 +2526,18 @@ export class SessionSupervisor {
           if (managed.status === 'running') {
             managed.turnAborted = true;
             managed.abortedTurnId = abortedTurnId;
-          } else managed.agentRunId = undefined;
+          } else if (managed.agentRunId) {
+            // 持有中空闲：没有在跑的回合可收口，单独发一个接上原 Run 的终态，否则 Run 永远收不了口
+            this.options.emit({
+              type: 'turn-completed',
+              identity: managed.identity,
+              seq: ++managed.seq,
+              turnId: randomUUID(),
+              aborted: true,
+              continues: managed.agentRunId,
+            });
+            managed.agentRunId = undefined;
+          }
           managed.turnRetried = false;
           managed.status = 'idle';
           this.emitStatus(managed);
