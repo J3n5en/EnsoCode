@@ -1,3 +1,5 @@
+import { quotesAsMarkdown } from './quoteBlock';
+
 /** 工作区搜索（mod+k）纯逻辑：文档模型 + 排序/过滤契约，无 electron / fs / React 依赖。 */
 
 export type WorkspaceSearchScope = 'project' | 'all' | 'all-including-archived';
@@ -195,7 +197,11 @@ function pickField(
   query: string
 ): WorkspaceSearchField | undefined {
   const idPrefix = query.trim().toLowerCase();
-  const matched = doc.fields.filter((field) =>
+  // 正文按界面可见形态检索与摘要：引用块标签不进摘要
+  const fields = doc.fields.map((field) =>
+    field.field === 'body' ? { ...field, text: quotesAsMarkdown(field.text) } : field
+  );
+  const matched = fields.filter((field) =>
     field.field === 'id'
       ? field.text.toLowerCase().startsWith(idPrefix)
       : fieldMatches(field.text, tokens)

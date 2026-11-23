@@ -245,6 +245,28 @@ describe('重启打断的子代理自动续跑', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it('等安全点超时：断点在 worker 收尾时才落、Main 退出前没记下，断点里有子会话就照样续跑，不报 restart-lost', async () => {
+    const ledger = fileLikeLedger();
+    const before = setup({ ledger });
+    const spawned = await before.service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    const child = before.children[0];
+    before.service.observe({ type: 'worker-exited' });
+    const notify = vi.fn();
+    const after = setup({ ledger, notify, restartCheckpoint: checkpointOf(child, 'await-user') });
+    expect(after.service.claimsRestartChild(child.sessionId)).toBe(true);
+    after.service.recoverOwner(context);
+    await vi.waitFor(() => expect(after.runtime.retry).toHaveBeenCalledTimes(1));
+    expect(after.runtime.retry).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: spawned.value.runId, agentId: spawned.value.agentId })
+    );
+    expect(notify).not.toHaveBeenCalled();
+    const list = await after.service.list({ context, requestId: 'l' });
+    expect(list.ok && list.value.agents.map((agent) => agent.agentId)).toEqual([
+      spawned.value.agentId,
+    ]);
+  });
+
   it('重启时子会话没到安全点（断点里没有它）：照旧按中断通知，不自动续跑', async () => {
     const ledger = fileLikeLedger();
     const before = setup({ ledger });

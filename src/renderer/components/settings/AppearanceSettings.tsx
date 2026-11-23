@@ -842,6 +842,8 @@ function ConversationDisplaySection() {
   const setExpandLiveReasoning = useSettingsStore((s) => s.setExpandLiveReasoning);
   const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
   const setAutoCollapseTurns = useSettingsStore((s) => s.setAutoCollapseTurns);
+  const quoteSelectionButton = useSettingsStore((s) => s.quoteSelectionButton);
+  const setQuoteSelectionButton = useSettingsStore((s) => s.setQuoteSelectionButton);
   const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
   const setCollapseCompletedActivity = useSettingsStore((s) => s.setCollapseCompletedActivity);
   const collapseLiveActivity = useSettingsStore((s) => s.collapseLiveActivity);
@@ -906,6 +908,15 @@ function ConversationDisplaySection() {
           )}
           checked={autoCollapseTurns}
           onChange={setAutoCollapseTurns}
+        />
+        <SwitchRow
+          rowId="appearance.quoteSelectionButton"
+          title={t('Quote button on text selection')}
+          description={t(
+            'Show a floating Quote button when you select text in the conversation; click it to put the selection into the input box as a quote'
+          )}
+          checked={quoteSelectionButton}
+          onChange={setQuoteSelectionButton}
         />
         <SwitchRow
           rowId="appearance.collapseCompletedActivity"

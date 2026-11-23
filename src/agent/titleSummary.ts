@@ -1,5 +1,6 @@
 /** 会话标题总结：一次性补全的输入与输出处理（纯函数，供 supervisor 调用）。 */
 
+import { withoutQuoteBlocks } from '@shared/quoteBlock';
 import { userTextWithoutSkills } from '@shared/skillCommands';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import {
@@ -114,7 +115,7 @@ const INLINE_UI_REF = /\[Selected UI element "([^"]*)" — path: (.*?); text: (.
 export function buildTitleUserText(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return '';
-  const skills = userTextWithoutSkills(trimmed);
+  const skills = userTextWithoutSkills(withoutQuoteBlocks(trimmed));
 
   const chatLabels: string[] = [];
   for (const match of skills.text.matchAll(INLINE_CHAT_REF)) {

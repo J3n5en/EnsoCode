@@ -44,6 +44,7 @@ export function ChatSessionTimeline({
   timelineRef,
   peek = false,
   readOnly = false,
+  quotable = false,
 }: {
   conversationId: string;
   cwd?: string;
@@ -54,6 +55,8 @@ export function ChatSessionTimeline({
   peek?: boolean;
   /** 只读（已归档）：不给会拉起 worker 或要快照的重试 */
   readOnly?: boolean;
+  /** 选中文字可引用到主输入框 */
+  quotable?: boolean;
 }) {
   const projectId = useSessionsStore((state) => state.conversations[conversationId]?.projectId);
   const secretarySession = useSettingsStore((state) =>
@@ -343,6 +346,7 @@ export function ChatSessionTimeline({
         olderCursor={historyBaseIndex}
         onStartReached={historyBaseIndex > 0 ? loadOlder : undefined}
         searchQuery={findOpen ? findQuery : ''}
+        quotable={quotable}
         activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
         secretarySession={secretarySession}
         {...(secretaryFace ? { secretaryFace } : {})}

@@ -107,6 +107,7 @@ export const SETTINGS_STATE_FIELDS = [
   'expandLiveEdits',
   'expandLiveReasoning',
   'autoCollapseTurns',
+  'quoteSelectionButton',
   'collapseCompletedActivity',
   'collapseLiveActivity',
   'liveActivityFoldDelaySec',
