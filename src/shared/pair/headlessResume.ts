@@ -1,5 +1,5 @@
 import type { AgentSpawnRequest, ApprovalMode, ThinkingLevel } from '@shared/types/agent';
-import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agentConstants';
 
 export interface PersistedPairConversation {
   sessionId: string;

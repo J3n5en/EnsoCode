@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { IPC_CHANNELS } from '@shared/types';
-import type { WebContents } from 'electron';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { app, ipcMain, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({ app: new EventEmitter(), ipcMain: new EventEmitter() }));
@@ -8,7 +8,6 @@ vi.mock('./updater/AutoUpdater', () => ({
   autoUpdaterService: { isQuittingForUpdate: () => false },
 }));
 
-import { app, ipcMain } from 'electron';
 import { attachAppCloseConfirm, setBeforeConfirmedQuit } from './appCloseConfirm';
 
 describe('app close confirmation visibility', () => {

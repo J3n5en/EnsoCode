@@ -9,8 +9,8 @@ import {
   parseBtwPromptRequest,
   parseBtwSpawnRequest,
 } from '@shared/btw';
-import { IPC_CHANNELS } from '@shared/types';
 import { type SpawnModelConfig, TITLE_SUMMARY_MAX_CANDIDATES } from '@shared/types/agent';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
 import {
   abortCompleteText,

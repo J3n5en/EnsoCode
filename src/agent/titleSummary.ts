@@ -3,14 +3,14 @@
 import { withoutQuoteBlocks } from '@shared/quoteBlock';
 import { userTextWithoutSkills } from '@shared/skillCommands';
 import { isContinuationTurn } from '@shared/titleContinuation';
-import {
-  type ProjectedMessage,
-  type SpawnModelConfig,
-  type TitleSummaryInput,
-  TURN_REPORT_MAX_CHARS,
-  type TurnDigest,
-  type TurnReport,
+import type {
+  ProjectedMessage,
+  SpawnModelConfig,
+  TitleSummaryInput,
+  TurnDigest,
+  TurnReport,
 } from '@shared/types/agent';
+import { TURN_REPORT_MAX_CHARS } from '@shared/types/agentConstants';
 
 /** 送给模型的用户消息上限：标题只需要开头，长指令全文只会烧 token */
 const MAX_INPUT_CHARS = 2000;

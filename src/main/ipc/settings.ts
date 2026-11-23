@@ -23,7 +23,8 @@ import {
 import { type Locale, normalizeLocale } from '@shared/i18n';
 import { collectPresetPromptIds } from '@shared/presetPrompts';
 import { normalizeSshTimeoutSeconds } from '@shared/sshTimeout';
-import { IPC_CHANNELS, isEditMode, resolveEditMode } from '@shared/types';
+import { isEditMode, resolveEditMode } from '@shared/types/editMode';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { appDesktop } from '../services/desktopHooks';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import {

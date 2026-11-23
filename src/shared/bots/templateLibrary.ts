@@ -1,4 +1,5 @@
-import { APPROVAL_MODES, type ApprovalMode } from '../types/agent';
+import type { ApprovalMode } from '../types/agent';
+import { APPROVAL_MODES } from '../types/agentConstants';
 import { type BotProfile, checkBotName, NEW_GROUP_ROUTING_MODE } from '../types/bot';
 import type { BotDraftInput } from '../types/botIpc';
 import { parseTeamSpec, TEAM_MEMBERS_MAX, type TeamRefList, type TeamSpec } from './team';

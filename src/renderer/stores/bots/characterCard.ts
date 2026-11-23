@@ -1,4 +1,5 @@
-import { APPROVAL_MODES, type ApprovalMode } from '@shared/types/agent';
+import type { ApprovalMode } from '@shared/types/agent';
+import { APPROVAL_MODES } from '@shared/types/agentConstants';
 import { BOT_NAME_MAX, type BotProfile } from '@shared/types/bot';
 
 export type CharacterCardDraft = Pick<BotProfile, 'name' | 'title' | 'scope'> & {

@@ -1,6 +1,7 @@
 import { ipcMain } from '@platform';
 import { resolveSshTarget } from '@shared/ssh';
-import { IPC_CHANNELS, type SshHostKeyChallenge } from '@shared/types';
+import type { SshHostKeyChallenge } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { getSshConnectionStore, type SshConnectionUpsert } from '../services/sshConnectionStore';
 import { trustSshHostKey } from '../services/sshHostKey';

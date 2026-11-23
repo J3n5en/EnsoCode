@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { parseAppCloseResponse, shouldBypassCloseConfirm } from '@shared/appClose';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, ipcMain, type WebContents } from 'electron';
 import { presentWindow } from '../windows/verifyLaunch';
 import { autoUpdaterService } from './updater/AutoUpdater';

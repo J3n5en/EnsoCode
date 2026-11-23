@@ -1,8 +1,5 @@
-import {
-  type ProjectedMessage,
-  type SpawnModelConfig,
-  TURN_REPORT_MAX_CHARS,
-} from '@shared/types/agent';
+import type { ProjectedMessage, SpawnModelConfig } from '@shared/types/agent';
+import { TURN_REPORT_MAX_CHARS } from '@shared/types/agentConstants';
 import { describe, expect, it } from 'vitest';
 import {
   buildInitialTitleUserText,

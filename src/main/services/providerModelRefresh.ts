@@ -5,14 +5,14 @@ import {
   normalizeProviderModelRefreshIntervalHours,
 } from '@shared/providers/modelRefreshInterval';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
-import {
-  type FetchedModel,
-  type ListModelsResult,
-  MODEL_API_KINDS,
-  type ModelApiKind,
-  type ModelEntry,
-  type ProviderApiConfig,
+import type {
+  FetchedModel,
+  ListModelsResult,
+  ModelApiKind,
+  ModelEntry,
+  ProviderApiConfig,
 } from '@shared/types';
+import { MODEL_API_KINDS } from '@shared/types/llm';
 
 const HOUR_MS = 60 * 60 * 1000;
 

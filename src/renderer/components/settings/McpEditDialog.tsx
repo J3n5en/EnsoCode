@@ -12,7 +12,7 @@ import {
   parseMcpTimeoutSec,
 } from '@shared/mcpTimeout';
 import type { McpServerEntry, McpTransport } from '@shared/types';
-import { MCP_TRANSPORTS } from '@shared/types';
+import { MCP_TRANSPORTS } from '@shared/types/assets';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import {

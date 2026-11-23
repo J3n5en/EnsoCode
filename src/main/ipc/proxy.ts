@@ -1,6 +1,6 @@
 import { ipcMain } from '@platform';
 import { isValidProxyUrl, normalizeProxyMode } from '@shared/proxy';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { getProxyConfig } from '../services/proxyConfig';
 
 /** UI（PROXY_APPLY）与本机配置 CLI 共用：把代理设置应用到会话、进程环境与 worker */

@@ -1,5 +1,5 @@
 import { app, ipcMain } from '@platform';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { isMainRenderer } from '../services/renderers';
 
 export function toBadgeCount(value: unknown): number | null {

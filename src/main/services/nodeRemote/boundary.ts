@@ -1,5 +1,5 @@
 import { parseNodeSettingsUrl } from '@shared/nodeSettings';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 
 /**
  * 远程节点主界面是对方下发的代码，跑在本机进程里。它能请本机 main 代办的只有这里列出的：

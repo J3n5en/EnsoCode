@@ -9,7 +9,7 @@ import {
   SECRETARY_SESSION_MESSAGE_MAX,
   type SecretaryOp,
 } from '@shared/secretary/tools';
-import { THINKING_LEVELS } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import type { MemoryInvoker } from './memory';
 
 type JsonSchema = Record<string, unknown>;

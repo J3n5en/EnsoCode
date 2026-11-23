@@ -138,36 +138,35 @@ import type {
   SshHostKeyChallenge,
   TestProviderResult,
 } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
-import type {
-  AgentActionResult,
-  AgentRunProgress,
-  AgentSpawnRequest,
-  ApprovalDecision,
-  ApprovalMode,
-  AttachedImage,
-  AuthorityMutationResult,
-  ChildHistoryResult,
-  ChildRunListResult,
-  ConversationAuthorityProjection,
-  ConversationAuthorityRequest,
-  ConversationReloadResult,
-  CreateConversationAuthorityRequest,
-  CreateProjectAuthorityRequest,
-  DispatchMainEvent,
-  McpStatusEvent,
-  McpStatusPush,
-  ParentHistoryTailResult,
-  ProjectAuthorityProjection,
-  RemoveProjectAuthorityRequest,
-  RendererAgentEvent,
-  SelectProjectAuthorityRequest,
-  SourceAuthorityProjection,
-  ThinkingLevel,
-  TitleSummaryInput,
-  UpdateConversationSelectionRequest,
+import {
+  type AgentActionResult,
+  type AgentRunProgress,
+  type AgentSpawnRequest,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type AttachedImage,
+  type AuthorityMutationResult,
+  type ChildHistoryResult,
+  type ChildRunListResult,
+  type ConversationAuthorityProjection,
+  type ConversationAuthorityRequest,
+  type ConversationReloadResult,
+  type CreateConversationAuthorityRequest,
+  type CreateProjectAuthorityRequest,
+  type DispatchMainEvent,
+  type McpStatusEvent,
+  type McpStatusPush,
+  type ParentHistoryTailResult,
+  type ProjectAuthorityProjection,
+  parseDispatchMainEvent,
+  type RemoveProjectAuthorityRequest,
+  type RendererAgentEvent,
+  type SelectProjectAuthorityRequest,
+  type SourceAuthorityProjection,
+  type ThinkingLevel,
+  type TitleSummaryInput,
+  type UpdateConversationSelectionRequest,
 } from '@shared/types/agent';
-import { parseDispatchMainEvent } from '@shared/types/agent';
 import type {
   BotAbilitySuggestRequest,
   BotAbilitySuggestResult,
@@ -234,7 +233,7 @@ import type {
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
-import type { RestartBlocker, RestartOverlayState } from '@shared/types/ipc';
+import { IPC_CHANNELS, type RestartBlocker, type RestartOverlayState } from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,

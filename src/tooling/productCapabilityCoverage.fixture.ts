@@ -1,7 +1,9 @@
 import type { SettingsState } from '../renderer/stores/settings/types';
 import type { JsonSchema } from '../shared/capabilities/types';
 import type { ProductSurfaceId } from '../shared/productSurfaces';
-import { BUILTIN_AGENT_TYPES, BUILTIN_TOOLS, type IPC_CHANNELS } from '../shared/types';
+import type { IPC_CHANNELS } from '../shared/types';
+import { BUILTIN_AGENT_TYPES } from '../shared/types/assets';
+import { BUILTIN_TOOLS } from '../shared/types/builtinTools';
 
 export type CoverageDisposition =
   | { kind: 'surface'; surfaceIds: readonly [ProductSurfaceId, ...ProductSurfaceId[]] }

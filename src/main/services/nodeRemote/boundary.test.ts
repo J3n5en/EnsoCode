@@ -1,5 +1,5 @@
 import { nodeShellUrl } from '@shared/nodeSettings';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS } from '@shared/types/ipc';
 import { shell, type WebContents } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { attachNavigationGuard } from '../../windows/appNavigation';
