@@ -8,6 +8,7 @@ import type { AgentRunLedgerEntry } from './agentRunLedger';
 import { AgentService, type AgentServiceRuntime } from './agentService';
 import {
   COLD_RESUME_OVERLAY_TIMEOUT_MS,
+  coldResumedSessionIds,
   coldResumeReady,
   failColdResume,
   loadColdRestartPlan,
@@ -258,6 +259,73 @@ describe('冷启动续跑失败', () => {
     offEarly();
     offLate();
     log.mockRestore();
+  });
+
+  it('coldResumedSessionIds 包含直接续跑的根会话与正在等安全点子代理续跑的父会话，不含空闲 coworker 父会话与清单外会话', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-cold-ids-'));
+    const checkpoint: RestartCheckpoint = {
+      version: 1 as const,
+      pid: 1,
+      writtenAt: 1000,
+      sessions: [
+        entry('direct', 'model-request'),
+        entry('parent-wait', 'await-user'),
+        entry('parent-wait::child-running', 'model-request'),
+        entry('parent-coworker', 'await-user'),
+        entry('parent-coworker::child-idle', 'await-user'),
+        entry('outside-manifest::child-running', 'model-request'),
+      ],
+    };
+    writeFileSync(path.join(dir, RESTART_CHECKPOINT_FILE), JSON.stringify(checkpoint), 'utf8');
+    const manifest = buildRestartManifest({
+      reason: 'update',
+      checkpoint,
+      settingsOf: (id) =>
+        id === 'direct' || id === 'parent-wait' || id === 'parent-coworker'
+          ? { providerId: 'p', modelId: 'm', cwd: '/w' }
+          : null,
+      now: 1001,
+    });
+    writeRestartManifest(dir, manifest);
+    const plan = loadColdRestartPlan(dir, 1002);
+    expect(plan).not.toBeNull();
+    const ids = coldResumedSessionIds(plan);
+    expect([...ids].sort()).toEqual(['direct', 'parent-wait']);
+    expect(coldResumedSessionIds(null).size).toBe(0);
+  });
+
+  it('唤醒等子代理续跑的父会话失败时，通知冷启动续跑失败订阅者', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-cold-wake-fail-'));
+    const checkpoint: RestartCheckpoint = {
+      version: 1 as const,
+      pid: 1,
+      writtenAt: 1000,
+      sessions: [
+        entry('parent-wait', 'await-user'),
+        entry('parent-wait::child-running', 'model-request'),
+      ],
+    };
+    writeFileSync(path.join(dir, RESTART_CHECKPOINT_FILE), JSON.stringify(checkpoint), 'utf8');
+    const manifest = buildRestartManifest({
+      reason: 'update',
+      checkpoint,
+      settingsOf: (id) =>
+        id === 'parent-wait' ? { providerId: 'p', modelId: 'm', cwd: '/w' } : null,
+      now: 1001,
+    });
+    writeRestartManifest(dir, manifest);
+    const plan = loadColdRestartPlan(dir, 1002)!;
+    const failed: Array<[string, string]> = [];
+    const off = onColdResumeFailed((id, err) => failed.push([id, err]));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await wakeColdRestartOwners(
+      ['parent-wait'],
+      async () => ({ ok: false, error: 'provider unavailable' }),
+      plan
+    );
+    log.mockRestore();
+    off();
+    expect(failed).toContainEqual(['parent-wait', 'provider unavailable']);
   });
 });
 

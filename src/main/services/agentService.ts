@@ -1357,7 +1357,8 @@ export class AgentService implements AgentServiceContract {
       return;
     }
     console.log(`[agent] restart resume ${run.runId} (${agent.mode}) continues`);
-    await this.startRun(agent, run);
+    const started = await this.startRun(agent, run);
+    if (started.ok) this.persistRuns();
   }
 
   /**
@@ -1603,8 +1604,6 @@ export class AgentService implements AgentServiceContract {
           ...(run.gate !== undefined ? { gate: run.gate } : {}),
         });
     if (prompted.ok) {
-      // callerAwaits=true 的调用方（spawn/send/resume）统一在返回前落盘，避免每次启动双写
-      if (!callerAwaits) this.persistRuns();
       return { ok: true };
     }
     this.transition(agent, { status: 'ready', queue: queueOf(agent) });

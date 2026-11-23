@@ -67,9 +67,30 @@ export function coldRestartPlan(dataDir: string): ColdRestartPlan | null {
   return plan;
 }
 
-/** 冷启动会主动续跑的会话：退出 / 更新的中断记录要跳过它们，避免再重试一遍 */
-export function coldResumedSessionIds(): ReadonlySet<string> {
-  return new Set(plan?.resume.map((entry) => entry.sessionId) ?? []);
+/** 清单里正在等安全点子代理自动续跑的父会话（父会话本身在 await-user，子会话在 model-request） */
+function coldResumedSubagentOwners(current: ColdRestartPlan | null): Set<string> {
+  const owners = new Set<string>();
+  if (!current) return owners;
+  const manifestIds = new Set(current.manifest.sessions.map((entry) => entry.sessionId));
+  for (const child of current.children) {
+    if (child.nextStep !== 'model-request') continue;
+    const sep = child.sessionId.indexOf('::');
+    if (sep <= 0) continue;
+    const ownerId = child.sessionId.slice(0, sep);
+    if (manifestIds.has(ownerId)) owners.add(ownerId);
+  }
+  return owners;
+}
+
+/** 冷启动会自动续跑的会话（含等子代理自动续跑的父会话）：退出 / 更新的中断记录要跳过它们 */
+export function coldResumedSessionIds(
+  current: ColdRestartPlan | null = plan ?? null
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  if (!current) return ids;
+  for (const entry of current.resume) ids.add(entry.sessionId);
+  for (const ownerId of coldResumedSubagentOwners(current)) ids.add(ownerId);
+  return ids;
 }
 
 /** 冷启动断点里停在安全点的子会话（没有接管的清单时为空） */
@@ -110,11 +131,21 @@ export async function wakeColdRestartOwners(
   /** 父会话已删除 / 归档：它名下的 Run 不再等它 */
   onUnavailable?: (sessionId: string) => void
 ): Promise<void> {
+  const subagentOwners = coldResumedSubagentOwners(current);
   for (const sessionId of new Set(ownerIds)) {
+    if (subagentOwners.has(sessionId)) resumeOutstanding.add(sessionId);
     const result = await wakeColdRestartSession(sessionId, resume, current);
     console.log(
       `[graceful-restart] wake owner of interrupted subagent runs ${sessionId.slice(0, 8)} ${result.ok ? 'ok' : `skipped: ${result.error}`}`
     );
+    if (
+      !result.ok &&
+      subagentOwners.has(sessionId) &&
+      result.error !== 'resumed by cold restart' &&
+      result.error !== 'already woken'
+    ) {
+      failColdResume(sessionId, result.error ?? 'wake failed');
+    }
     if (result.error === CONVERSATION_UNAVAILABLE) onUnavailable?.(sessionId);
   }
 }

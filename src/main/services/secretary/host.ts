@@ -86,6 +86,8 @@ import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
 
 const TICK_MS = 60_000;
+/** 冷启动按恢复清单自动续跑的等待上限：超过仍未恢复成活轮次则按中断回传 */
+export const COLD_RESUME_TIMEOUT_MS = 3 * 60_000;
 /** 单独的 status=failed 等这么久还没等到 turn-failed，就补记失败 */
 const FAILURE_PAIR_MS = 5_000;
 /** 失败原因带进回传与通知的上限 */
@@ -354,6 +356,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let failureTimer: ReturnType<typeof setTimeout> | null = null;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
+  /** 启动恢复时按恢复清单放行、正在等待恢复成活轮次的会话 → 放行时刻 */
+  const coldResumePending = new Map<string, number>();
   /** 结构化结果的只读核验。轮次结束时还没落定就先挂起收尾。 */
   const goalVerifies = new Map<string, GoalVerifySlot>();
   const goalVerifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1267,8 +1271,23 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         record.lastEventAt = now;
         eventStamps.set(conversationId, now);
-        if (record.lastState !== status.state) record.stateSince = now;
-        record.lastState = status.state;
+        const resumedLive =
+          status.state === 'running' ||
+          ports.subagentsRunning?.(conversationId) === true ||
+          event.type === 'turn-completed' ||
+          event.type === 'turn-failed' ||
+          event.type === 'goal-signal' ||
+          event.type === 'ask-request' ||
+          event.type === 'approval-request';
+        if (resumedLive) coldResumePending.delete(conversationId);
+        // 冷启动续跑中先到 parent-ready/idle：别把看板状态翻回 idle，等续跑轮次真正起来或失败/超时
+        const holdResumingState =
+          coldResumePending.has(conversationId) &&
+          status.state === 'idle' &&
+          event.type !== 'parent-rejected';
+        const effectiveState = holdResumingState ? 'running' : status.state;
+        if (record.lastState !== effectiveState) record.stateSince = now;
+        record.lastState = effectiveState;
         // 报错的会话不会再被后台任务唤醒，残留的记录会让它一直被算在跑
         if (status.state === 'error') {
           delete record.backgroundRunning;
@@ -1332,8 +1351,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             !queuedStartOf(rows[conversationId]) &&
             awaitsOutcome(record)
           ) {
-            kind = 'failed';
-            detail = `会话没能启动：${failureDetail(event.reason) ?? '原因未知'}`;
+            const wasColdResuming = coldResumePending.delete(conversationId);
+            kind = wasColdResuming ? 'interrupted' : 'failed';
+            detail = wasColdResuming
+              ? `应用重启后自动续跑失败：${failureDetail(event.reason) ?? '原因未知'}`
+              : `会话没能启动：${failureDetail(event.reason) ?? '原因未知'}`;
             delete record.reopenedAt;
           }
           // 秘书追加任务唤起的这一轮：目标停在受阻或暂停不会续跑，这一轮结束就是停下了，照常报。
@@ -1489,6 +1511,30 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       let changed = false;
       for (const record of records) {
         const status = statuses[record.conversationId];
+        const resumeStartedAt = coldResumePending.get(record.conversationId);
+        if (resumeStartedAt !== undefined) {
+          if (
+            record.lastState !== 'running' ||
+            record.lastResult?.turn === record.turn ||
+            status?.state === 'running' ||
+            ports.subagentsRunning?.(record.conversationId) === true
+          ) {
+            coldResumePending.delete(record.conversationId);
+            if (status?.state === 'running' || ports.subagentsRunning?.(record.conversationId)) {
+              record.lastEventAt = Math.max(record.lastEventAt, now);
+            }
+          } else if (now - resumeStartedAt >= COLD_RESUME_TIMEOUT_MS) {
+            coldResumePending.delete(record.conversationId);
+            record.lastState = 'idle';
+            record.stateSince = now;
+            recordResult(file, record, 'interrupted', now, '应用重启后超时未恢复运行');
+            changed = true;
+            continue;
+          } else if (status?.state === 'idle') {
+            // 超时前保持看板「进行中」，不因尚未唤醒被误翻回 idle
+            continue;
+          }
+        }
         if (!status || record.lastState === status.state) continue;
         record.stateSince = now;
         record.lastState = status.state;
@@ -1576,13 +1622,17 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
     onRestartResumeFailed(conversationId, error, now = ports.now()) {
       if (!ports.enabled()) return;
+      coldResumePending.delete(conversationId);
       const file = ports.file();
       const record = file.dispatched[conversationId];
       if (!record) return;
+      // 本轮已由 parent-rejected 等事件记过结果时不再重复推送
+      if (record.lastResult?.turn === record.turn) return;
       const state = ports.status(conversationId).state;
-      if (record.lastState !== state) record.stateSince = now;
-      record.lastState = state;
-      recordResult(file, record, 'failed', now, `应用重启后没能接着跑：${error}`);
+      const nextState = state === 'running' ? 'idle' : state;
+      if (record.lastState !== nextState) record.stateSince = now;
+      record.lastState = nextState;
+      recordResult(file, record, 'interrupted', now, `应用重启后自动续跑失败：${error}`);
       ports.save(file);
       syncLinkedTodos(ports, file, ports.rows(), new Set());
       ports.publish();
@@ -1635,7 +1685,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       for (const record of Object.values(file.dispatched)) {
         if (record.lastState !== 'running') continue;
         // 冷启动正按恢复清单接着跑：不是中断，之后按它的事件照常判定
-        if (ports.coldResumed?.(record.conversationId)) continue;
+        if (ports.coldResumed?.(record.conversationId)) {
+          coldResumePending.set(record.conversationId, now);
+          continue;
+        }
         // 存量修正：记录还写着进行中，但会话已经空闲、没有后台任务与待处理项，
         // 最后一条结果又是终态——直接收回终态，升级后不用用户一个个点
         const status = ports.status(record.conversationId);
@@ -1668,7 +1721,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           record,
           'interrupted',
           now,
-          ports.interruptDetail?.(record.conversationId)
+          ports.interruptDetail?.(record.conversationId) ?? '应用重启时未写入恢复清单，无法自动续跑'
         );
         changed = true;
       }
