@@ -416,6 +416,7 @@ function OwnerIdentity({
 }) {
   const { t } = useI18n();
   const saved = owner.githubLogins.join(', ');
+  const bound = owner.githubLogins.length > 0;
   const [draft, setDraft] = useState(saved);
   const [dirty, setDirty] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -425,7 +426,7 @@ function OwnerIdentity({
   }, [saved, dirty]);
 
   useEffect(() => {
-    if (owner.githubLogins.length > 0) {
+    if (bound) {
       setSuggestion(null);
       return;
     }
@@ -438,7 +439,7 @@ function OwnerIdentity({
     return () => {
       alive = false;
     };
-  }, [owner.githubLogins]);
+  }, [bound]);
 
   const fill = (login: string) => {
     setDirty(true);

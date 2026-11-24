@@ -63,35 +63,30 @@ function senderOpenTag(
   return `<untrusted-content ${attrs.join(' ')}>`;
 }
 
-/** 整段已经是同一插件的完整一层，且正文里没有字面结束标签：原样保留，不再套 role */
-function sameSourceWrap(source: string, text: string): boolean {
-  const tail = '</untrusted-content>';
-  const marked = `<untrusted-content source="${source}"`;
-  if (!text.startsWith(marked) || !text.endsWith(tail)) return false;
-  const after = text.charAt(marked.length);
-  if (after !== '>' && after !== ' ') return false;
-  const openEnd = text.indexOf('>');
-  if (openEnd < 0 || /[<>\n]/.test(text.slice(marked.length, openEnd))) return false;
-  return !text.slice(openEnd + 1, -tail.length).includes(END_TAG);
-}
-
 export function wrapPluginDelivery(
   pluginId: string,
   text: string,
   meta?: { sender?: PluginInjectSender; role?: PluginInjectOrigin }
 ): string {
   const source = `plugin:${pluginId}`;
-  if (sameSourceWrap(source, text)) return text;
+  const head = `<untrusted-content source="${source}">`;
+  const tail = '</untrusted-content>';
   const role = meta?.role;
-  if (!meta?.sender && !role) return wrapUntrusted(source, text);
-  const escaped = text
+  const open = meta?.sender
+    ? senderOpenTag(source, meta.sender, role ?? 'external')
+    : role
+      ? `<untrusted-content source="${source}" role="${role}">`
+      : head;
+  // 只认旧插件的裸包裹头，或与宿主这次判定完全相同的头；自带别的 role/sender 一律当正文转义
+  const own = [head, open].find((tag) => text.startsWith(tag) && text.endsWith(tail));
+  const inner = own ? text.slice(own.length, text.length - tail.length) : null;
+  const body = inner !== null && !inner.includes(END_TAG) ? inner : text;
+  if (open === head) return wrapUntrusted(source, body);
+  const escaped = body
     .split(END_TAG)
     .join('<\\/untrusted-content')
     .split(OPEN_TAG)
     .join('<\\untrusted-content');
-  const open = meta?.sender
-    ? senderOpenTag(source, meta.sender, role ?? 'external')
-    : `<untrusted-content source="${source}" role="${role}">`;
   return `${open}${escaped}</untrusted-content>`;
 }
 
