@@ -49,6 +49,81 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     "selected": [],
   },
   {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"enabled":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.secretary.contactSettings({\\"externalConfirm\\":true},\\"s1\\")","electronAPI.secretary.contactState(\\"s1\\")"]}",
+    ],
+    "kind": "choice",
+    "row": "contacts.owner",
+    "selected": [
+      "Let the agent decide",
+    ],
+  },
+  {
+    "current": "j3n5en",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.owner",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"enabled":false},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.owner",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -192,39 +267,36 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"style\\":\\"detailed\\"},null)"]}",
     ],
     "kind": "choice",
     "row": "secretary.style",
     "selected": [
-      "Detailed",
+      "Concise",
     ],
   },
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"en\\"},null)"]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"zh\\"},null)"]}",
     ],
     "kind": "choice",
     "row": "secretary.style",
     "selected": [
-      "English",
+      "Follow the interface language",
     ],
   },
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"off\\"},null)"]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"with-done\\"},null)"]}",
     ],
     "kind": "choice",
     "row": "secretary.style",
     "selected": [
-      "Off",
+      "Only what needs you",
     ],
   },
   {
@@ -275,17 +347,6 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":["electronAPI.secretary.contactSettings({\\"externalConfirm\\":true},null)","electronAPI.secretary.contactState(null)"]}",
-    ],
-    "kind": "choice",
-    "row": null,
-    "selected": [
-      "Let the agent decide",
-    ],
-  },
-  {
-    "current": {},
-    "effects": [
       "{"store":{},"api":[]}",
       "{"store":{},"api":[]}",
     ],
@@ -300,70 +361,6 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     "current": "",
     "effects": [],
     "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "j3n5en",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"enabled":false}},null)",
-          "electronAPI.secretary.contactState(null)",
-        ],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.secretary.contactSettings({"enabled":false},null)",
-          "electronAPI.secretary.contactState(null)",
-        ],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
     "row": null,
   },
 ]
@@ -404,6 +401,81 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     "kind": "choice",
     "row": "bots.routeClassifier",
     "selected": [],
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"enabled":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.secretary.contactSettings({\\"externalConfirm\\":true},\\"s1\\")","electronAPI.secretary.contactState(\\"s1\\")"]}",
+    ],
+    "kind": "choice",
+    "row": "contacts.owner",
+    "selected": [
+      "Let the agent decide",
+    ],
+  },
+  {
+    "current": "j3n5en",
+    "effects": [],
+    "kind": "input",
+    "row": "contacts.owner",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"enabled":false},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.owner",
   },
   {
     "current": "false",
@@ -548,36 +620,36 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":[]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"style\\":\\"detailed\\"},null)"]}",
     ],
     "kind": "choice",
     "row": "secretary.style",
     "selected": [
-      "Detailed",
+      "Concise",
     ],
   },
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"en\\"},null)"]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"zh\\"},null)"]}",
     ],
     "kind": "choice",
     "row": "secretary.style",
     "selected": [
-      "English",
+      "Follow the interface language",
     ],
   },
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":[]}",
-      "{"store":{},"api":[]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"off\\"},null)"]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"with-done\\"},null)"]}",
     ],
     "kind": "choice",
     "row": "secretary.style",
     "selected": [
-      "Off",
+      "Only what needs you",
     ],
   },
   {
@@ -635,84 +707,9 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     ],
   },
   {
-    "current": {},
-    "effects": [
-      "{"store":{},"api":["electronAPI.secretary.contactSettings({\\"externalConfirm\\":true},null)","electronAPI.secretary.contactState(null)"]}",
-    ],
-    "kind": "choice",
-    "row": null,
-    "selected": [
-      "Let the agent decide",
-    ],
-  },
-  {
     "current": "",
     "effects": [],
     "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "j3n5en",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"enabled":false}},null)",
-          "electronAPI.secretary.contactState(null)",
-        ],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.secretary.contactSettings({"enabled":false},null)",
-          "electronAPI.secretary.contactState(null)",
-        ],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
     "row": null,
   },
 ]
@@ -723,6 +720,8 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 深链行 i
   "bots.assistantModel",
   "bots.maxRunningTurns",
   "bots.routeClassifier",
+  "contacts.channels",
+  "contacts.owner",
   "experimental.botMode",
   "experimental.dropShelf",
   "experimental.scratchSessions",

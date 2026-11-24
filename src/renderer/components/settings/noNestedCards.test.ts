@@ -44,18 +44,6 @@ const LEGACY = new Set([
   'SkillsSettings.tsx',
   'WorkflowDesigner.tsx',
   'WorkflowsSettings.tsx',
-  // PR3d 秘书 / 连接 / 系统组
-  'BotSettings.tsx',
-  'BotTemplatesSettings.tsx',
-  'DevicesSettings.tsx',
-  'ResourcesSettings.tsx',
-  'SecretarySettings.tsx',
-  'SshSettings.tsx',
-  'usage/DailyTrendChart.tsx',
-  'usage/HourlyHeatmap.tsx',
-  'usage/RankingTable.tsx',
-  'usage/StatCard.tsx',
-  'usage/UsagePricingEditor.tsx',
   // PR4 去掉独立窗口时（导航搜索框）
   'SettingsContent.tsx',
 ]);

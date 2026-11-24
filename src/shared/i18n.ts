@@ -448,6 +448,9 @@ export const zhTranslations: Record<string, string> = {
   'Runtime & sessions': '运行与会话',
   'Contacts & owner': '联系方式与主人',
   'Contact channels': '联系渠道',
+  'Manage in Settings': '在设置里管理',
+  'Contacts and owner identity are managed in Settings.': '联系方式和主人身份改在设置里管理。',
+  'Danger zone': '危险操作',
   'Where the secretary can be reached and where it pushes updates.':
     '秘书能在哪里被联系到、往哪里推送。',
   Network: '网络',

@@ -7,7 +7,7 @@ import { setupPin } from './pin.testUtils';
 /** 迁移时只改这里：分区 → 页面组件 */
 async function SYSTEM_GROUP_PAGES() {
   const { SecretarySettings } = await import('./SecretarySettings');
-  const { SecretaryContactPanel } = await import('@/components/secretary/SecretaryContactPanel');
+  const { ContactsSettings } = await import('./ContactsSettings');
   const { DevicesSettings } = await import('./DevicesSettings');
   const { SshSettings } = await import('./SshSettings');
   const { UsageSettings } = await import('./UsageSettings');
@@ -17,7 +17,7 @@ async function SYSTEM_GROUP_PAGES() {
   const { BotTemplatesSettings } = await import('./BotTemplatesSettings');
   return {
     secretary: SecretarySettings,
-    contacts: () => <SecretaryContactPanel />,
+    contacts: ContactsSettings,
     phone: DevicesSettings,
     ssh: SshSettings,
     usage: UsageSettings,
