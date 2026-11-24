@@ -466,6 +466,7 @@ export const zhTranslations: Record<string, string> = {
   'Unstage all': '取消全部暂存',
   'Discard changes': '丢弃修改',
   'Delete untracked file': '删除未跟踪文件',
+  'Delete untracked files': '删除未跟踪文件',
   'Delete untracked file {{path}} permanently?': '永久删除未跟踪文件 {{path}}？',
   'Restore {{path}} to its staged version? Unstaged changes will be lost.':
     '将 {{path}} 恢复为暂存版本？未暂存的修改将丢失。',
@@ -477,8 +478,12 @@ export const zhTranslations: Record<string, string> = {
   'Permanently delete {{count}} untracked files': '永久删除 {{count}} 个未跟踪文件',
   'Unstaged changes in {{count}} tracked files will be lost; the files are restored to their staged version.':
     '{{count}} 个已跟踪文件的未暂存修改将丢失，文件本身保留并恢复为暂存版本。',
+  'Unstaged changes in {{count}} tracked files in {{path}} will be lost; the files are restored to their staged version.':
+    '{{path}} 中 {{count}} 个已跟踪文件的未暂存修改将丢失，文件本身保留并恢复为暂存版本。',
   '{{count}} untracked files will be permanently deleted and cannot be recovered.':
     '{{count}} 个未跟踪文件将被永久删除，删除后无法恢复。',
+  '{{count}} untracked files in {{path}} will be permanently deleted and cannot be recovered.':
+    '{{path}} 中的 {{count}} 个未跟踪文件将被永久删除，删除后无法恢复。',
   'Tracked files are not changed.': '已跟踪文件不受影响。',
   'Resolve conflicts first.': '请先解决冲突。',
   '{{count}} conflicted': '{{count}} 个冲突',
