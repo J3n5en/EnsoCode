@@ -2,6 +2,7 @@ import type { SessionReminder } from '@shared/reminders';
 import {
   buildSecretaryDaily,
   DAILY_RETENTION_DAYS,
+  type DailySessionMeta,
   dayKey,
   parseDayKey,
 } from '@shared/secretary/daily';
@@ -56,7 +57,7 @@ export async function buildDaily(ports: SecretaryDailyPorts, day: string): Promi
     return secretaryProjectName(project, aliases);
   };
 
-  const session = (conversationId: string): { title?: string; projectName?: string } => {
+  const session = (conversationId: string): DailySessionMeta => {
     const row = rows[conversationId];
     if (!row) return {};
     const title = typeof row.title === 'string' && row.title.trim() ? row.title : undefined;
@@ -64,6 +65,7 @@ export async function buildDaily(ports: SecretaryDailyPorts, day: string): Promi
     return {
       ...(title ? { title } : {}),
       ...(projectId ? { projectName: projectName(projectId) } : {}),
+      ...(row.archived === true ? { archived: true as const } : {}),
     };
   };
 

@@ -101,4 +101,19 @@ describe('goal_complete 结构化结果', () => {
       .properties;
     expect(properties?.result?.type).toBe('object');
   });
+
+  it('needsUser 只放用户本人要决定或亲手做的事，可选善后进 followUps', () => {
+    const tool = complete(createGoalTools(() => {}));
+    const parameters = tool?.parameters as
+      | { properties?: Record<string, { properties?: Record<string, { description?: string }> }> }
+      | undefined;
+    const result = parameters?.properties?.result;
+    const needsUser = result?.properties?.needsUser?.description ?? '';
+    const followUps = result?.properties?.followUps?.description ?? '';
+    expect(needsUser).toMatch(/only the user/i);
+    expect(needsUser).toContain('followUps');
+    expect(needsUser).toMatch(/imperative/i);
+    expect(followUps).toMatch(/optional/i);
+    expect(tool?.description).toContain('needsUser');
+  });
 });
