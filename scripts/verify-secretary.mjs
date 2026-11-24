@@ -89,6 +89,9 @@ const NEEDS_USER_WORDING_ONLY = process.argv.includes('--needs-user-wording-only
 const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
 // 只跑「确认技能提案后秘书收到更新」：只唤醒一轮，不出现 Request aborted
 const PROPOSAL_ABORTED_ONLY = process.argv.includes('--proposal-aborted-only');
+// 只跑删除秘书：3 个秘书各有会话，中间那个定好提醒、一条在跑；设置页删掉它后看弹窗、选中、
+// 会话与提醒，退出重开看不复活、另两个完好。整体 3 分钟硬超时，截图存到 /tmp/pr480-*.png
+const DELETE_SECRETARY_ONLY = process.argv.includes('--delete-secretary-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -591,7 +594,19 @@ async function main() {
   log(`  listening on http://127.0.0.1:${TG_PORT}`);
   await portLease.release('cdp');
   await portLease.release('renderer');
-  start('dev', 'pnpm', ['dev'], {
+  await startDev('dev');
+  log('  isolated instance up');
+
+  const cdp = await waitForStableRenderer();
+  try {
+    await run(cdp, pluginZipUrl);
+  } finally {
+    cdp.close();
+  }
+}
+
+async function startDev(name) {
+  start(name, 'pnpm', ['dev'], {
     ENSO_USER_DATA_DIR: ENV,
     ENSO_CDP_PORT: String(CDP_PORT),
     ENSO_RENDERER_PORT: String(RENDERER_PORT),
@@ -620,14 +635,6 @@ async function main() {
     'isolated userData markers',
     30_000
   );
-  log('  isolated instance up');
-
-  const cdp = await waitForStableRenderer();
-  try {
-    await run(cdp, pluginZipUrl);
-  } finally {
-    cdp.close();
-  }
 }
 
 // __stores 要等 renderer 模块图跑完才赋值。electron-vite 在预加载重编时会 full-reload，
@@ -774,6 +781,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (PROPOSAL_ABORTED_ONLY) {
     await verifyProposalAborted(cdp, setup);
+    return;
+  }
+  if (DELETE_SECRETARY_ONLY) {
+    await verifyDeleteSecretary(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -8821,6 +8832,422 @@ async function verifyMultiSecretary(cdp, setup) {
   );
 }
 
+/** 开发实例里的 Electron 主进程：沿 pnpm dev 的子孙找，不带 --type= 的那个 */
+function electronMainOf(rootPid) {
+  const rows = spawnSync('ps', ['-ax', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
+    .stdout.split('\n')
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .filter(Boolean)
+    .map(([, pid, ppid, command]) => ({ pid: Number(pid), ppid: Number(ppid), command }));
+  const mine = new Set([rootPid]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const row of rows)
+      if (mine.has(row.ppid) && !mine.has(row.pid)) {
+        mine.add(row.pid);
+        grew = true;
+      }
+  }
+  return rows.find(
+    (row) => mine.has(row.pid) && /Electron/.test(row.command) && !/--type=/.test(row.command)
+  )?.pid;
+}
+
+const isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** 优雅退出当前开发实例（SIGTERM 给 Electron 主进程，等它自己收尾退出），再用同一份 userData 重开 */
+async function restartDev(cdp, whileStopped) {
+  const dev = children.findLast((entry) => entry.name.startsWith('dev'));
+  const main = electronMainOf(dev.child.pid);
+  cdp.close();
+  process.kill(main, 'SIGTERM');
+  await waitFor(() => !isAlive(main), 'electron exit', 30_000, 200);
+  try {
+    process.kill(-dev.child.pid, 'SIGTERM');
+  } catch {
+    // pnpm dev 已随 Electron 退出
+  }
+  await waitFor(
+    async () => {
+      try {
+        await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(500) });
+        return false;
+      } catch {
+        return true;
+      }
+    },
+    'old CDP port closed',
+    15_000
+  );
+  whileStopped?.();
+  await startDev('dev-2');
+  return waitForStableRenderer();
+}
+
+async function verifyDeleteSecretary(cdp, setup) {
+  let page = cdp.json.bind(cdp);
+  const root = path.join(ENV, 'secretary');
+  const remindersFile = path.join(sessionsDir, 'reminders.json');
+  const reminders = () =>
+    existsSync(remindersFile) ? (readJson(remindersFile).reminders ?? []) : [];
+  const requestsNow = async () => (await fetch(`http://127.0.0.1:${FAKE_PORT}/__requests`)).json();
+  const NO_ANIMATION =
+    "const style = document.createElement('style'); style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }'; document.head.appendChild(style);";
+
+  // 秘书会话的工具白名单里没有 remind_me：提醒定在中间那个秘书派出的会话上（删除后它留作无人管理的普通会话）
+  log('== 删除秘书：建 3 个秘书各 2 个会话；中间那个派出一个定好提醒的会话、另一条在跑');
+  const dispatchArgs = {
+    projectId: setup.projectId,
+    title: 'PR480 带提醒的活',
+    prompt: 'PR480 [[tool:remind_me {"in":"30s","prompt":"PR480-PING 到点了","label":"pr480"}]]',
+  };
+  const made = await page(`
+    const api = window.electronAPI.secretary;
+    const secretary = await SEC();
+    const profile = (name, color) => ({
+      name, avatar: { color }, visibleProjectIds: 'all', maxRunningDispatches: 3, patrolEnabled: true,
+      replyLanguage: 'ui', style: 'concise', notify: 'off', addressAs: null, dailyBriefAt: null,
+    });
+    const ids = ['default'];
+    for (const [name, color] of [['阿甲', '#f97316'], ['阿乙', '#22c55e']]) {
+      const created = await api.create();
+      if (!created.ok) return JSON.stringify(created);
+      const saved = await api.saveProfile(profile(name, color), created.secretaryId);
+      if (!saved.ok) return JSON.stringify(saved);
+      ids.push(created.secretaryId);
+    }
+    const [, middle] = ids;
+    const sessions = {};
+    const lines = {};
+    for (const id of ids) {
+      await until(() => secretary.getState().states[id]?.projectId, 15000);
+      const project = SET().projects.find((entry) => entry.id === secretary.getState().states[id].projectId);
+      sessions[id] = [];
+      for (let i = 0; i < 2; i++) {
+        const conversationId = await secretary.getState().newSecretaryConversation({ secretaryId: id });
+        const text =
+          id !== middle ? 'PR480 你好 ' + id + '-' + i
+          : i === 0 ? ${JSON.stringify(`派活 ${toolDirective('session_create', dispatchArgs)}`)}
+          : 'PR480 慢慢说 [[slow:90000]]';
+        await S().send(text, { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, conversationId);
+        sessions[id].push(conversationId);
+        lines[conversationId] = text;
+      }
+    }
+    const replied = await until(() =>
+      Object.values(sessions).flat().every((cid) => {
+        const messages = S().conversations[cid]?.messages ?? [];
+        if (lines[cid].includes('slow')) return messages.length > 1;
+        return messages.some((m) => m.role === 'assistant');
+      }), 40000);
+    const tool = await until(
+      () => (S().conversations[sessions[middle][0]]?.messages ?? []).find((m) => m.toolName === 'session_create') ?? null,
+      30000
+    );
+    const text = (Array.isArray(tool?.content) ? tool.content : []).filter((part) => part.type === 'text').map((part) => part.text).join('');
+    const dispatched = /"conversationId":"([^"]+)"/.exec(text)?.[1] ?? null;
+    return JSON.stringify({ ok: Boolean(replied) && Boolean(dispatched), ids, sessions, middle, dispatched, text: dispatched ? null : text });
+  `);
+  assert(made.ok, '删除秘书: 3 个秘书、各自的会话与派出会话都建好', made);
+  const [, middle, last] = made.ids;
+  const [, runningSession] = made.sessions[middle];
+  const reminder = await waitFor(
+    () => reminders().find((item) => item.sessionId === made.dispatched) ?? null,
+    'dispatched session reminder',
+    30_000
+  );
+  log(`  reminder due in ${Math.round((reminder.dueAt - Date.now()) / 1000)}s`);
+  const keptIds = [...made.sessions.default, ...made.sessions[last]];
+  // settings.json 落盘有防抖：等 7 条会话行都写进去再记基线
+  const rowsBefore = await waitFor(
+    () => {
+      const rows = conversationsIn() ?? {};
+      return [...keptIds, ...made.sessions[middle], made.dispatched].every((id) => rows[id])
+        ? rows
+        : null;
+    },
+    'conversation rows persisted',
+    15_000
+  ).catch(() => conversationsIn() ?? {});
+  const keptRows = Object.fromEntries(keptIds.map((id) => [id, rowsBefore[id]?.title ?? null]));
+  assert(
+    keptIds.every((id) => rowsBefore[id]) &&
+      made.sessions[middle].every((id) => rowsBefore[id]) &&
+      rowsBefore[made.dispatched]?.secretaryOrigin?.secretaryId === middle,
+    '删除秘书: 删除前 6 个秘书会话行都在，派出会话归属「阿甲」',
+    { keys: Object.keys(rowsBefore), dispatched: rowsBefore[made.dispatched] }
+  );
+  const lastFiles = readdirSync(path.join(root, 'members', last)).sort();
+  const lastProfile = readFileSync(path.join(root, 'members', last, 'profile.json'), 'utf8');
+  const defaultProfile = readFileSync(path.join(root, 'profile.json'), 'utf8');
+
+  log('== 删除秘书：设置页选中间那个，走两步确认');
+  await page(`
+    await window.electronAPI.window.openSettings({ category: 'secretary', rowId: 'secretary.profile' });
+    return 'null';
+  `);
+  const settings = await waitFor(
+    () => connect('settings.html').catch(() => null),
+    'settings window',
+    30_000,
+    500
+  );
+  const picked = await settings.json(`
+    ${NO_ANIMATION}
+    const pick = await until(() => document.querySelector('[data-enso=secretary-settings-pick][data-secretary-id="${middle}"]'), 20000);
+    pick?.click();
+    const named = await until(() => document.querySelector('[data-enso=secretary-form-name]')?.value === '阿甲', 20000);
+    return JSON.stringify({ ok: Boolean(named) });
+  `);
+  assert(picked.ok, '删除秘书: 设置页选中中间的秘书「阿甲」', picked);
+  await settings.shot('/tmp/pr480-1-before.png');
+  const confirmStep = await settings.json(`
+    document.querySelector('[data-enso=secretary-settings-delete]').click();
+    const next = await until(() => {
+      const button = document.querySelector('[data-enso=secretary-delete-next]');
+      return button && !button.disabled ? button : null;
+    }, 15000);
+    const title = document.querySelector('[data-enso=secretary-delete-dialog]')?.innerText ?? '';
+    next?.click();
+    const confirm = await until(() => document.querySelector('[data-enso=secretary-delete-confirm]'), 5000);
+    await sleep(200);
+    return JSON.stringify({ ok: Boolean(confirm), title, label: confirm?.innerText ?? null });
+  `);
+  assert(
+    confirmStep.ok && confirmStep.title.includes('阿甲') && confirmStep.label === '永久删除',
+    '删除秘书: 预览写的是「阿甲」，第二步是「永久删除」',
+    confirmStep
+  );
+  await settings.shot('/tmp/pr480-2-confirm.png');
+
+  log('== 删除秘书：点永久删除，录下弹窗每一帧');
+  await settings.evaluate(`(() => {
+    window.__pr480 = [];
+    const t0 = performance.now();
+    const note = () => {
+      const dialog = document.querySelector('[data-enso=secretary-delete-dialog]');
+      const button = document.querySelector('[data-enso=secretary-delete-confirm]');
+      const cancel = [...(dialog?.querySelectorAll('button') ?? [])].find((b) => b.innerText === '取消');
+      const entry = { t: Math.round(performance.now() - t0), dialog: Boolean(dialog), label: button?.innerText ?? null, confirmDisabled: button?.disabled ?? null, cancelDisabled: cancel?.disabled ?? null };
+      const prev = window.__pr480.at(-1);
+      if (!prev || JSON.stringify({ ...prev, t: 0 }) !== JSON.stringify({ ...entry, t: 0 })) window.__pr480.push(entry);
+    };
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    note();
+  })()`);
+  const frames = [];
+  const collect = (async () => {
+    for (let i = 0; i < 12; i++) {
+      const reply = await settings.send('Page.captureScreenshot', { format: 'png' });
+      if (reply.result?.data) frames.push(reply.result.data);
+      const closed = await settings.evaluate(
+        "!document.querySelector('[data-enso=secretary-delete-dialog]')"
+      );
+      if (closed) break;
+    }
+  })();
+  await settings.evaluate(
+    "setTimeout(() => document.querySelector('[data-enso=secretary-delete-confirm]').click(), 0); 'clicked'"
+  );
+  await collect;
+  const timeline = await settings.json(`
+    await until(() => !document.querySelector('[data-enso=secretary-delete-dialog]'), 15000);
+    await sleep(300);
+    return JSON.stringify(window.__pr480);
+  `);
+  log(`  dialog timeline ${JSON.stringify(timeline)}`);
+  const busy = timeline.find((entry) => entry.label === '删除中…');
+  assert(
+    busy && busy.confirmDisabled === true && busy.cancelDisabled === true,
+    '删除秘书: 点下后按钮变「删除中…」，确认与取消都禁用',
+    timeline
+  );
+  assert(
+    timeline.at(-1).dialog === false &&
+      timeline.indexOf(busy) < timeline.findIndex((entry) => entry.dialog === false),
+    '删除秘书: 「删除中…」之后弹窗关闭',
+    timeline
+  );
+  assert(
+    timeline
+      .slice(timeline.indexOf(busy))
+      .every((entry) => !entry.dialog || (entry.label === '删除中…' && entry.confirmDisabled)),
+    '删除秘书: 「删除中…」到弹窗消失之间没有闪回可点的「永久删除」',
+    timeline
+  );
+  log(`  ${frames.length} frames captured during deletion`);
+  // 删除过程中连拍的每一帧都留档，拍没拍到「删除中…」由人看
+  for (const [index, frame] of frames.entries())
+    writeFileSync(`/tmp/pr480-3-deleting-${index}.png`, Buffer.from(frame, 'base64'));
+
+  const after = await settings.json(`
+    await until(() => document.querySelector('[data-enso=secretary-form-name]')?.value === '秘书', 15000);
+    await sleep(300);
+    const picks = [...document.querySelectorAll('[data-enso=secretary-settings-pick]')];
+    return JSON.stringify({
+      picks: picks.map((node) => node.getAttribute('data-secretary-id')),
+      selected: picks.filter((node) => node.hasAttribute('data-selected')).map((node) => node.getAttribute('data-secretary-id')),
+      selectedName: picks.find((node) => node.hasAttribute('data-selected'))?.innerText ?? null,
+      formName: document.querySelector('[data-enso=secretary-form-name]')?.value ?? null,
+    });
+  `);
+  assert(
+    JSON.stringify(after.picks) === JSON.stringify(['default', last]) &&
+      after.selected.length === 1 &&
+      after.selected[0] === 'default' &&
+      after.selectedName === '秘书' &&
+      after.formName === '秘书',
+    '删除秘书: 列表剩下另外两个，选中落到「秘书」且表单就是它自己的',
+    after
+  );
+  await settings.shot('/tmp/pr480-4-after.png');
+
+  log('== 删除秘书：被删的会话不再运行，提醒不再触发，另外两个完好');
+  const requestsAtDelete = (await requestsNow()).count;
+  const mainView = await page(`
+    ${NO_ANIMATION}
+    await sleep(1500);
+    const secretary = await SEC();
+    const sections = [...document.querySelectorAll('[data-enso=secretary-section]')].map((node) => node.getAttribute('data-secretary-id'));
+    const running = S().conversations[${JSON.stringify(runningSession)}];
+    return JSON.stringify({
+      list: (await window.electronAPI.secretary.list()).map((entry) => entry.id),
+      sections,
+      states: Object.keys(secretary.getState().states),
+      running: running ? { status: running.status ?? null, isStreaming: running.isStreaming ?? null } : null,
+    });
+  `);
+  log(`  main ${JSON.stringify(mainView)}`);
+  assert(
+    JSON.stringify(mainView.list) === JSON.stringify(['default', last]) &&
+      !mainView.sections.includes(middle),
+    '删除秘书: 主窗口侧栏不再有「阿甲」',
+    mainView
+  );
+  await cdp.shot('/tmp/pr480-5-main.png');
+  const registry = readJson(registryFile);
+  const middleProjects = (registry.projects ?? []).filter((project) =>
+    String(project.canonicalPath ?? '').includes(`/members/${middle}/`)
+  );
+  const middleConversations = (registry.conversations ?? []).filter((conversation) =>
+    made.sessions[middle].includes(conversation.conversationId)
+  );
+  assert(
+    middleProjects.every((project) => project.state === 'removed') &&
+      middleConversations.every((conversation) => conversation.lifecycle === 'ended'),
+    '删除秘书: 它的隐藏项目已撤、两条会话都已结束',
+    { middleProjects, middleConversations }
+  );
+  // 派出会话删除后留作无人管理的普通会话：它自己的提醒照常到点，但不再回传给已删的秘书
+  const waitMs = Math.max(0, reminder.dueAt - Date.now()) + 8_000;
+  log(`  wait ${Math.round(waitMs / 1000)}s past the reminder due time`);
+  await sleep(waitMs);
+  const afterDue = await requestsNow();
+  const fresh = afterDue.requests.slice(
+    afterDue.requests.length - (afterDue.count - requestsAtDelete)
+  );
+  assert(
+    fresh.length > 0 && fresh.every((request) => request.lastUserText.includes('"pr480"')),
+    '删除秘书: 删除后只有派出会话按自己的提醒跑了一轮，被删秘书自己的会话再没向模型发过请求',
+    { atDelete: requestsAtDelete, now: afterDue.count, fresh }
+  );
+  const dispatchedRow = conversationsIn()[made.dispatched];
+  assert(
+    dispatchedRow && dispatchedRow.secretaryOrigin === undefined,
+    '删除秘书: 派出会话还在，只清掉了「阿甲」的归属',
+    dispatchedRow
+  );
+  const checkKept = (label) => {
+    const rows = conversationsIn();
+    assert(
+      made.sessions[middle].every((id) => !rows[id]) &&
+        keptIds.every((id) => rows[id] && (rows[id].title ?? null) === keptRows[id]),
+      `${label}: 被删秘书的会话行没了，另外两个秘书的会话行原样`,
+      {
+        kept: keptIds.filter((id) => !rows[id]),
+        leftover: made.sessions[middle].filter((id) => rows[id]),
+      }
+    );
+    const ids = readJson(path.join(root, 'secretaries.json')).secretaries.map((entry) => entry.id);
+    assert(
+      JSON.stringify(ids) === JSON.stringify(['default', last]) &&
+        !existsSync(path.join(root, 'members', middle)) &&
+        JSON.stringify(readdirSync(path.join(root, 'members', last)).sort()) ===
+          JSON.stringify(lastFiles) &&
+        readFileSync(path.join(root, 'members', last, 'profile.json'), 'utf8') === lastProfile &&
+        readFileSync(path.join(root, 'profile.json'), 'utf8') === defaultProfile,
+      `${label}: 登记只剩两个，被删目录没了，另外两个的档案与目录原样`,
+      { ids, files: readdirSync(path.join(root, 'members', last)).sort(), lastFiles }
+    );
+  };
+  checkKept('删除秘书');
+  settings.close();
+
+  log('== 删除秘书：退出再打开（关着时给被删秘书自己的会话塞一条已到点的提醒）');
+  cdp = await restartDev(cdp, () => {
+    const file = existsSync(remindersFile)
+      ? readJson(remindersFile)
+      : { version: 1, reminders: [], chains: {} };
+    file.reminders.push({
+      id: 'r0480abcd',
+      sessionId: made.sessions[middle][0],
+      dueAt: Date.now() - 1_000,
+      createdAt: Date.now() - 60_000,
+      prompt: 'PR480-OWN 已删秘书自己会话的提醒',
+      label: 'pr480-own',
+      ifIdle: false,
+      chain: 1,
+    });
+    writeFileSync(remindersFile, JSON.stringify(file));
+  });
+  page = cdp.json.bind(cdp);
+  const requestsAtReopen = (await requestsNow()).count;
+  const reopened = await page(`
+    ${NO_ANIMATION}
+    await until(() => document.querySelectorAll('[data-enso=secretary-section]').length >= 2, 30000);
+    await sleep(1500);
+    return JSON.stringify({
+      list: (await window.electronAPI.secretary.list()).map((entry) => ({ id: entry.id, name: entry.name })),
+      sections: [...document.querySelectorAll('[data-enso=secretary-section]')].map((node) => node.getAttribute('data-secretary-id')),
+      middleConversations: ${JSON.stringify(made.sessions[middle])}.filter((id) => S().conversations[id]),
+    });
+  `);
+  log(`  reopened ${JSON.stringify(reopened)}`);
+  assert(
+    JSON.stringify(reopened.list.map((entry) => entry.id)) === JSON.stringify(['default', last]) &&
+      reopened.list.map((entry) => entry.name).join(',') === '秘书,阿乙' &&
+      !reopened.sections.includes(middle) &&
+      reopened.middleConversations.length === 0,
+    '删除秘书: 重开后「阿甲」没有复活，另外两个都在',
+    reopened
+  );
+  await cdp.shot('/tmp/pr480-6-reopened.png');
+  await waitFor(
+    () => !reminders().some((item) => item.id === 'r0480abcd'),
+    'own-session reminder cleared',
+    30_000
+  );
+  await sleep(2_000);
+  const afterRestart = await requestsNow();
+  const reopenedFresh = afterRestart.requests.slice(
+    afterRestart.requests.length - (afterRestart.count - requestsAtReopen)
+  );
+  assert(
+    !reopenedFresh.some((request) => request.lastUserText.includes('pr480-own')),
+    '删除秘书: 重开后被删秘书会话的到点提醒被清掉，没有唤醒会话',
+    { fresh: reopenedFresh, reminders: reminders() }
+  );
+  checkKept('删除秘书（重开后）');
+  cdp.close();
+}
+
 process.on('SIGINT', () => {
   log('\nSIGINT, cleaning up');
   void finish(130);
@@ -8841,6 +9268,12 @@ process.on('unhandledRejection', (error) => {
 if (NEEDS_USER_WORDING_ONLY) {
   setTimeout(() => {
     console.error('\nFAIL needs-user-wording: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
+if (DELETE_SECRETARY_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL delete-secretary: 3 分钟硬超时');
     void finish(124);
   }, 180_000).unref();
 }
