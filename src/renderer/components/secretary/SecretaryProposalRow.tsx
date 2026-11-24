@@ -86,6 +86,7 @@ export function SecretaryProposalRow({
   const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
   const projects = useSettingsStore((state) => state.projects);
   const providers = useSettingsStore((state) => state.providers) ?? [];
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
 
   // 状态推送还没到时只占位：卡片不能把这一行吞掉
   if (!proposal) {
@@ -111,7 +112,7 @@ export function SecretaryProposalRow({
 
   const project = projects.find((entry) => entry.id === proposal.draft.projectId);
   const failed = proposal.status === 'failed';
-  const model = modelLabel(providers, proposal.draft.model);
+  const model = modelLabel(providers, proposal.draft.model, virtualModels);
 
   return (
     <div data-enso="secretary-proposal" className={cardClass(prominent)}>

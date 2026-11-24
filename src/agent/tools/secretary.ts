@@ -17,7 +17,7 @@ type JsonSchema = Record<string, unknown>;
 const MODEL_SCHEMA: JsonSchema = {
   type: 'object',
   description:
-    "Optional: an exact provider and model, checked before anything is created. An unknown, disabled or credential-less provider or model is refused with an error and is never silently replaced by the default. Omit it to follow the project's default model.",
+    'Optional: an exact provider and model, checked before anything is created. For a virtual model the user configured (such as Auto), pass providerId "enso-virtual" and modelId the virtual model id. An unknown, disabled or credential-less provider or model is refused with an error that lists the usable models, virtual models included, and is never silently replaced by the default. Omit it to follow the project\'s default model.',
   properties: {
     providerId: { type: 'string', minLength: 1, maxLength: 200 },
     modelId: { type: 'string', minLength: 1, maxLength: 200 },
