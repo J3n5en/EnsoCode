@@ -33,6 +33,22 @@ describe('conversations patch', () => {
     expect(isEmptyConversationsPatch(diffConversations(value, structuredClone(value)))).toBe(true);
   });
 
+  it('值为 undefined 的字段按缺省处理：不在两端（结构化克隆 vs JSON）之间来回推整表', () => {
+    const disk = blob({ a: { id: 'a', title: 'A' }, b: { id: 'b' } }, ['a', 'b']);
+    const ipc = blob(
+      { a: { id: 'a', title: 'A', error: undefined }, b: { id: 'b', pinned: undefined } },
+      ['a', 'b']
+    );
+    expect(isEmptyConversationsPatch(diffConversations(disk, ipc))).toBe(true);
+    expect(isEmptyConversationsPatch(diffConversations(ipc, disk))).toBe(true);
+    expect(
+      diffConversations(
+        blob({ a: { id: 'a', title: 'A' } }, ['a']),
+        blob({ a: { id: 'a', title: undefined } }, ['a'])
+      )
+    ).toEqual({ upserts: { a: { set: {}, unset: ['title'] } }, removes: [] });
+  });
+
   it('merges concurrent edits from two renderers without losing either', () => {
     const base = blob({ a: { id: 'a', title: 'A' }, b: { id: 'b', title: 'B' } }, ['a', 'b']);
     // 远端新建 r 并改 a 的标题；桌面并发新建 d 并置顶 b

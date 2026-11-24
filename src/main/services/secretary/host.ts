@@ -9,6 +9,7 @@ import {
   type GoalResultCheck,
   type GoalResultView,
   hasNeedsUser,
+  needsUserItems,
   parseGoalResultView,
 } from '@shared/secretary/goalResult';
 import {
@@ -362,6 +363,20 @@ interface GoalVerifySlot {
 }
 
 export const GOAL_RESULT_VERIFY_MS = 8_000;
+
+/** 完成当时的待决定事项和 summary。只写非空，之后「知道了」不回改这条动态 */
+function activitySnapshot(
+  goalResult: GoalResultView
+): Pick<SecretaryActivity, 'needsUser' | 'summary'> {
+  const needsUser = needsUserItems(goalResult)
+    .map((item) => redactSecrets(item).trim())
+    .filter((item) => item.length > 0);
+  const summary = redactSecrets(goalResult.result.summary?.trim() ?? '').trim();
+  return {
+    ...(needsUser.length > 0 ? { needsUser } : {}),
+    ...(summary ? { summary } : {}),
+  };
+}
 
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -795,6 +810,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       conversationId: record.conversationId,
       kind,
       text: record.lastText || update.text,
+      ...(kind === 'goal-complete' && goalResult ? activitySnapshot(goalResult) : {}),
     });
     rememberDaily(record, kind, now, title, report, goalResult);
     const finalReport = kind === 'goal-complete' ? turnReport?.text.trim() || report?.trim() : '';

@@ -144,3 +144,169 @@ describe('mergeFeedHead', () => {
     ]);
   });
 });
+
+describe('feedEvents 完成条目', () => {
+  const noise = '- | | PR 拆分方式 | 合并为 1 个 PR';
+
+  const goal = (
+    over: Partial<Extract<SecretaryCard, { kind: 'session' }>> = {}
+  ): Extract<SecretaryCard, { kind: 'session' }> => {
+    const card = session('c1', 1);
+    if (card.kind !== 'session') throw new Error('session');
+    return {
+      ...card,
+      state: 'idle',
+      result: 'goal-complete',
+      resultAt: 20,
+      lastText: noise,
+      ...over,
+    };
+  };
+
+  it('活动条目带 needsUser 时换成待决定标签，正文是条目而不是噪声', () => {
+    const events = feedEvents(
+      board({
+        done: [goal()],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            needsUser: ['是否合并', '确认发版'],
+          },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Done · needs your decision',
+      tone: 'ok',
+      detail: '是否合并；确认发版',
+    });
+    expect(
+      events.find((event) => event.id === 'activity:c1:20:goal-complete')?.detail
+    ).not.toContain('PR 拆分方式');
+  });
+
+  it('活动条目只有 summary 时保持完成标签，正文是 summary', () => {
+    const events = feedEvents(
+      board({
+        done: [session('c1', 1)],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            summary: '已合并上架',
+          },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: '已合并上架',
+    });
+  });
+
+  it('活动条目没有 needsUser 和 summary 时正文仍是原文', () => {
+    const events = feedEvents(
+      board({
+        done: [session('c1', 1)],
+        activity: [{ at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise }],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: noise,
+    });
+  });
+
+  it('老的活动条目靠同时刻同结果的卡片补 needsUser 或 summary', () => {
+    const withNeed = goal({ needsUser: ['是否合并', '确认发版'], summary: '卡片摘要' });
+    const withSummary = {
+      ...goal({ conversationId: 'c2', summary: '已合并上架' }),
+      conversationId: 'c2',
+    };
+    const events = feedEvents(
+      board({
+        done: [withNeed, withSummary],
+        activity: [
+          { at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise },
+          { at: 9, conversationId: 'c1', kind: 'goal-complete', text: noise },
+          { at: 20, conversationId: 'c2', kind: 'goal-complete', text: noise },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Done · needs your decision',
+      tone: 'ok',
+      detail: '是否合并；确认发版',
+    });
+    expect(events.find((event) => event.id === 'activity:c1:9:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: noise,
+    });
+    expect(events.find((event) => event.id === 'activity:c2:20:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: '已合并上架',
+    });
+  });
+
+  it('会话投影没有 needsUser 但有 summary 时正文是 summary', () => {
+    const events = feedEvents(board({ done: [goal({ summary: '已合并上架' })] }));
+    expect(events.find((event) => event.id === 'session:c1')).toMatchObject({
+      label: 'Goal complete',
+      detail: '已合并上架',
+    });
+    expect(events.find((event) => event.id === 'session:c1')?.detail).not.toContain('PR 拆分方式');
+  });
+
+  it('续跑中的会话仍标进行中，不改用完成文案', () => {
+    const events = feedEvents(
+      board({
+        running: [goal({ continuing: true, needsUser: ['确认'], summary: '摘要' })],
+      })
+    );
+    expect(events.find((event) => event.id === 'session:c1')).toMatchObject({
+      label: 'In progress',
+      detail: '确认',
+    });
+  });
+
+  it('同一会话同一次结果只出一条：活动历史在时不再重复投影会话卡片', () => {
+    const events = feedEvents(
+      board({
+        done: [goal({ needsUser: ['是否合并'] })],
+        activity: [
+          { at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise },
+          { at: 9, conversationId: 'c1', kind: 'goal-complete', text: noise },
+        ],
+      })
+    );
+    expect(events.map((event) => event.id)).toEqual([
+      'activity:c1:20:goal-complete',
+      'activity:c1:9:goal-complete',
+    ]);
+  });
+
+  it('卡片已有新结果或在跑时，旧的活动历史和会话卡片各出一条', () => {
+    const newer = feedEvents(
+      board({
+        done: [goal({ result: 'turn-ended', resultAt: 30 })],
+        activity: [{ at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise }],
+      })
+    );
+    expect(newer.map((event) => event.id)).toEqual(['session:c1', 'activity:c1:20:goal-complete']);
+    const running = feedEvents(
+      board({
+        running: [goal({ state: 'running', stateSince: 25 })],
+        activity: [{ at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise }],
+      })
+    );
+    expect(running.map((event) => event.id)).toEqual([
+      'session:c1',
+      'activity:c1:20:goal-complete',
+    ]);
+  });
+});

@@ -108,6 +108,30 @@ function texts(value: unknown): string[] {
   return out;
 }
 
+/** 动态上的字符串列表：丢掉非字符串和空白，超长只留前面的，不因坏项丢整条 */
+function activityTexts(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const itemText = text(item);
+    if (!itemText) continue;
+    out.push(itemText);
+    if (out.length === limit) break;
+  }
+  return out;
+}
+
+function activityExtras(
+  value: Record<string, unknown>
+): Pick<SecretaryActivity, 'needsUser' | 'summary'> {
+  const needsUser = activityTexts(value.needsUser, 20);
+  const summary = text(value.summary);
+  return {
+    ...(needsUser.length > 0 ? { needsUser } : {}),
+    ...(summary ? { summary } : {}),
+  };
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
@@ -814,9 +838,18 @@ function parseActivity(value: unknown): SecretaryActivity | undefined {
   const conversationId = text(value.conversationId);
   const entryText = typeof value.text === 'string' ? value.text : '';
   if (at === undefined || !conversationId) return undefined;
-  if (value.kind === 'seen') return { at, conversationId, kind: 'seen', text: entryText };
+  const extra = activityExtras(value);
+  if (value.kind === 'seen') {
+    return { at, conversationId, kind: 'seen', text: entryText, ...extra };
+  }
   if (!RESULT_KINDS.includes(value.kind as SecretaryResultKind)) return undefined;
-  return { at, conversationId, kind: value.kind as SecretaryResultKind, text: entryText };
+  return {
+    at,
+    conversationId,
+    kind: value.kind as SecretaryResultKind,
+    text: entryText,
+    ...extra,
+  };
 }
 
 export function parseDispatchFile(value: unknown): SecretaryDispatchFile {

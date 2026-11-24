@@ -581,6 +581,7 @@ function FeedEntry({ event }: { event: FeedEvent }) {
           .finally(() => setStopping(false));
       }
     : undefined;
+  const line = event.detail ? `${t(event.label)} · ${event.detail}` : t(event.label);
   return (
     <div
       data-enso="secretary-feed-event"
@@ -617,12 +618,13 @@ function FeedEntry({ event }: { event: FeedEvent }) {
         </span>
         <span className="mt-0.5 block truncate text-[13px]">{event.title}</span>
         <span
+          title={line}
           className={cn(
             'mt-0.5 block text-[12px] text-muted-foreground',
             expanded ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'
           )}
         >
-          {event.detail ? `${t(event.label)} · ${event.detail}` : t(event.label)}
+          {line}
         </span>
       </button>
       {event.running && stop && (
