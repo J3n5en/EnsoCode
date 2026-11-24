@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  type CommandGuard,
   createDcgGuard,
   DCG_INVALID_VERDICT_RULE_ID,
   dcgDialect,
@@ -210,6 +211,13 @@ describe('parseDcgVerdict', () => {
   });
 });
 
+/** 派出会话部署完清理临时文件时被 temp-root-delete 误拦的原始命令（会话 10cb0eab） */
+const DEPLOY_CLEANUP_COMMANDS = [
+  String.raw`sleep 15; ssh -o BatchMode=yes ali 'pm2 jlist | python3 -c "import json,sys; [print(p[\"name\"],p[\"pm2_env\"][\"status\"],p[\"pm2_env\"][\"restart_time\"]) for p in json.load(sys.stdin) if p[\"name\"]==\"enso-relay\"]"; curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8787/healthz; rm -rf /tmp/enso-relay-upload-59dc0c2; ls -d /tmp/enso-relay-upload* 2>/dev/null; ls /opt/enso-relay | grep -c "\.new$"'; rm -rf /tmp/ali-deploy /tmp/ali-deploy-build.log; git checkout -- packages/relay-go/frontend && git clean -fdq packages/relay-go/frontend -e desk-bundle; rm -rf packages/relay-go/frontend/desk-bundle; git status --short; git rev-parse HEAD`,
+  String.raw`sleep 15; ssh -o BatchMode=yes ali 'pm2 jlist | python3 -c "import json,sys; [print(p[\"name\"],p[\"pm2_env\"][\"status\"],p[\"pm2_env\"][\"restart_time\"]) for p in json.load(sys.stdin) if p[\"name\"]==\"enso-relay\"]"; curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8787/healthz; cd /tmp/enso-relay-upload-59dc0c2 && rm -f part-* enso-relay-linux-amd64 check.sh && cd / && rmdir /tmp/enso-relay-upload-59dc0c2; ls -d /tmp/enso-relay-upload* 2>/dev/null; echo remaining-new=$(ls /opt/enso-relay | grep -c "\.new$")'`,
+  String.raw`ssh -o BatchMode=yes ali 'pm2 jlist | python3 -c "import json,sys; [print(p[\"name\"],p[\"pm2_env\"][\"status\"],p[\"pm2_env\"][\"restart_time\"]) for p in json.load(sys.stdin) if p[\"name\"]==\"enso-relay\"]"; curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8787/healthz; cd /tmp/enso-relay-upload-59dc0c2 && rm -f part-* enso-relay-linux-amd64 check.sh && cd .. && rmdir enso-relay-upload-59dc0c2; ls -d /tmp/enso-relay-upload* 2>/dev/null; echo remaining-new=$(ls /opt/enso-relay | grep -c "\.new$")'`,
+];
+
 describe('deletesTempRoot', () => {
   it('删除系统 Temp 根或根下通配视为命中', () => {
     for (const command of [
@@ -259,6 +267,19 @@ describe('deletesTempRoot', () => {
       'cd /tmp && rm -rf ~+/*',
       'cd /tmp && find -delete',
       'rm -rf /tmp/{,}',
+      'rm -rf /private/tmp/',
+      'rm -rf "$TMPDIR"',
+      // 根下一层完全由变量展开决定：变量为空即退化成删 Temp 根
+      'rm -rf /tmp/$X',
+      'rm -rf "$TMPDIR/$name"',
+      // 子 shell 脚本里切进 Temp 根再删
+      'bash -c "cd /tmp && rm -rf *"',
+      // 远端按 POSIX 语义判：远端的 /tmp 同样是共享 Temp 根
+      "ssh ali 'rm -rf /tmp/*'",
+      "ssh -o BatchMode=yes -p 22 ali 'cd /tmp && rm -rf *'",
+      'ssh ali rm -rf /tmp',
+      'cd /tmp && bash -c "rm -rf *"',
+      `sh -c 'rm -rf "$1"' _ /tmp`,
     ]) {
       expect(deletesTempRoot(command), command).toBe(true);
     }
@@ -293,9 +314,22 @@ describe('deletesTempRoot', () => {
       '# rm old files\nls /tmp',
       // find 只作用于具体子目录
       'find /tmp/my-run -delete',
+      // 只删明确子路径；同一段远端/子 shell 脚本里别的命令带根下通配不算删根
+      ...DEPLOY_CLEANUP_COMMANDS,
+      'rm -rf /tmp/ali-deploy /tmp/ali-deploy-build.log',
+      "ssh ali 'rm -rf /tmp/enso-relay-upload-59dc0c2'",
+      "bash -c 'rm -rf /tmp/a; ls -d /tmp/a*'",
+      // 远端命令不继承本机 cwd
+      'cd /tmp && ssh ali "rm -rf old-build"',
     ]) {
       expect(deletesTempRoot(command), command).toBe(false);
     }
+  });
+
+  it('本机 Temp 根的绝对路径只对本机命令生效，不套用到 ssh 远端命令', () => {
+    const tmpDir = '/var/folders/ab/cd/T';
+    expect(deletesTempRoot(`rm -rf ${tmpDir}`, { tmpDir })).toBe(true);
+    expect(deletesTempRoot(`ssh ali 'rm -rf ${tmpDir}'`, { tmpDir })).toBe(false);
   });
 });
 
@@ -309,6 +343,17 @@ describe('withTempRootGuard', () => {
     );
     expect(await guard('powershell', 'Remove-Item $env:TEMP\\enso\\a -Recurse')).toBeNull();
     expect((await guard('bash', 'git reset --hard'))?.ruleId).toBe('core.git:reset-hard');
+  });
+
+  it('放行的明确 Temp 子路径不影响内层守卫对 home、项目目录与根目录的拦截', async () => {
+    const inner: CommandGuard = async (_tool, command) =>
+      /\brm\b/.test(command) ? { ruleId: 'core.filesystem:rm-rf-root-home', reason: 'x' } : null;
+    const guard = withTempRootGuard(inner);
+    for (const command of ['rm -rf ~', 'rm -rf /', 'rm -rf /Users/alice/project']) {
+      expect((await guard('bash', command))?.ruleId, command).toBe(
+        'core.filesystem:rm-rf-root-home'
+      );
+    }
   });
 
   it('没装 dcg 也生效；非命令工具不检查', async () => {
