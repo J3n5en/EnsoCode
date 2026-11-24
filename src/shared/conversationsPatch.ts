@@ -43,6 +43,9 @@ function sliceOf(value: unknown): Slice {
 const same = (a: unknown, b: unknown): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
 
+/** 落盘与远端编码都是 JSON 语义：值为 undefined 的字段等同缺省（renderer 经结构化克隆写回会带着它们） */
+const field = (row: Row, key: string): unknown => (Object.hasOwn(row, key) ? row[key] : undefined);
+
 /** 侧栏 order 只收根会话；子会话 / btw 只挂在父会话下 */
 const isOrderRoot = (row: unknown): boolean => isRecord(row) && !row.parentId && !row.btwParentId;
 
@@ -83,9 +86,13 @@ export function diffConversations(previous: unknown, next: unknown): Conversatio
     const base = isRecord(old) ? old : {};
     const set: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(row)) {
-      if (!(key in base) || !same(base[key], value)) set[key] = value;
+      if (value === undefined) continue;
+      const prev = field(base, key);
+      if (prev === undefined || !same(prev, value)) set[key] = value;
     }
-    const unset = Object.keys(base).filter((key) => !(key in row));
+    const unset = Object.keys(base).filter(
+      (key) => base[key] !== undefined && field(row, key) === undefined
+    );
     if (!isRecord(old) || Object.keys(set).length > 0 || unset.length > 0) {
       upserts[id] = { set, unset };
     }
