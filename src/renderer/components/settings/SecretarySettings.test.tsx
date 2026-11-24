@@ -87,7 +87,9 @@ function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile 
 
 const api = {
   list: vi.fn(async () => [] as { id: string; name: string | null }[]),
-  onListChanged: vi.fn((_listener: (list: { id: string; name: string | null }[]) => void) => () => {}),
+  onListChanged: vi.fn(
+    (_listener: (list: { id: string; name: string | null }[]) => void) => () => {}
+  ),
   getProfile: vi.fn(),
   saveProfile: vi.fn(),
   setAvatar: vi.fn(),
