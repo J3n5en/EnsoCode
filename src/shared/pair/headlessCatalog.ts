@@ -1,5 +1,7 @@
+import { hasPendingReminder } from '@shared/reminders';
 import { queuedStartOf } from '@shared/secretary/queuedSession';
 import type { PairCatalogPayload, PairCreatedSession } from '@shared/types/pair';
+import { type GoalUpstreamRetry, isUpstreamWaitingGoal } from '@shared/upstreamRecovery';
 
 type CatalogEntry = PairCatalogPayload['catalog'][number];
 
@@ -60,4 +62,19 @@ export function catalogQueueOverride(
   if (!queued) return undefined;
   if (queued.failed) return { status: 'queued', queueFailed: queued.failed.error };
   return { status: 'queued', queuePosition: position ?? 1 };
+}
+
+/** 空闲挂起原因：等上游恢复优先（与桌面侧栏图标同序），其次未到点提醒；运行中不标 */
+export function catalogParked(
+  row: {
+    status?: string;
+    spawning?: boolean;
+    goal?: { status?: string; retry?: GoalUpstreamRetry };
+  },
+  reminders: readonly { dueAt: number }[] | undefined,
+  now: number
+): CatalogEntry['parked'] {
+  if (row.status === 'running' || row.spawning) return undefined;
+  if (isUpstreamWaitingGoal(row.goal)) return 'upstream';
+  return reminders && hasPendingReminder(reminders, now) ? 'reminder' : undefined;
 }

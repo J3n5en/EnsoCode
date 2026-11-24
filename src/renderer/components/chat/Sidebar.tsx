@@ -27,7 +27,7 @@ import {
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
 import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
-import { formatReminderTooltip } from '@shared/reminders';
+import { formatReminderTooltip, hasPendingReminder } from '@shared/reminders';
 import { conversationThemeState } from '@shared/theme/themeState';
 import type { Project } from '@shared/types';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
@@ -175,7 +175,7 @@ import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { closeBackgroundTasks } from '@/stores/backgroundTasksView';
 import { useSecretaryStore } from '@/stores/secretary';
-import { usePendingReminder } from '@/stores/sessionReminders';
+import { usePendingReminder, useSessionRemindersStore } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   activeConversationIds,
@@ -758,15 +758,27 @@ export function Sidebar({
     return () => clearInterval(timer);
   }, []);
   const activeRetention = { now: nowTick, ms: activeRetentionMinutes * 60_000 };
+  const remindersByConversation = useSessionRemindersStore((state) => state.byConversation);
+  const pendingReminderIds = new Set(
+    Object.keys(remindersByConversation).filter((id) =>
+      hasPendingReminder(remindersByConversation[id] ?? [], nowTick)
+    )
+  );
   const activeIds = activeConversationIds(
     order,
     conversations,
     archivedProjectIds,
-    activeRetention
+    activeRetention,
+    pendingReminderIds
   );
   const activeHoverTitle = (id: string) => {
     const projectName = hoverProjectName(projects, conversations[id].projectId);
-    const remaining = activeRetentionRemainingMs(id, conversations, activeRetention);
+    const remaining = activeRetentionRemainingMs(
+      id,
+      conversations,
+      activeRetention,
+      pendingReminderIds
+    );
     if (remaining === undefined) return projectName;
     const hint = t('Stays in Active for about {{count}} more min', {
       count: Math.ceil(remaining / 60_000),

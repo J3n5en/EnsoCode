@@ -114,6 +114,8 @@ export interface PairCatalogPayload {
       note?: string;
       autoTurns: number;
     };
+    /** 空闲挂起：等提醒或等上游恢复，手机抽屉据此留在「活跃中」 */
+    parked?: 'reminder' | 'upstream';
     slashCommands?: { name: string; description: string }[];
     context?: ContextUsage;
     usageTotals?: SessionUsageTotals;

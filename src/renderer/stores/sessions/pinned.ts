@@ -6,6 +6,7 @@ import {
   userAskCount,
 } from '@shared/conversationDotTone';
 import type { WorktreeStatus } from '@shared/types/worktree';
+import { type GoalUpstreamRetry, isUpstreamWaitingGoal } from '@shared/upstreamRecovery';
 import { worktreeReadyToAutoCleanup } from './worktree';
 
 /**
@@ -42,6 +43,7 @@ interface SidebarConversation {
   /** 排队尚未启动。失败启动看 queueFailed，语气是 failed */
   queued?: boolean;
   queueFailed?: string;
+  goal?: { status: string; retry?: GoalUpstreamRetry };
 }
 
 type Conversations = Record<string, SidebarConversation | undefined>;
@@ -152,14 +154,19 @@ export function projectConversationIds(
 
 function sidebarTone(
   conversation: SidebarConversation,
-  conversations: Conversations
+  conversations: Conversations,
+  pendingReminder = false
 ): ConversationDotTone {
   return conversationDotTone({
     status: conversation.queueFailed ? 'failed' : (conversation.status ?? 'idle'),
     spawning: conversation.spawning,
     unread: conversation.unread,
     pendingAskCount: userAskCount(conversation.pendingAsks),
-    queued: conversation.queued === true && !conversation.queueFailed,
+    // 与侧栏状态图标同口径：等上游恢复也画排队时钟
+    queued:
+      (conversation.queued === true && !conversation.queueFailed) ||
+      isUpstreamWaitingGoal(conversation.goal),
+    hasPendingReminder: pendingReminder,
     hasRunningChild: conversationHasRunningChild(
       { ...conversation, status: conversation.status ?? 'idle' },
       conversations as Record<string, { status: string; spawning?: boolean } | undefined>
@@ -167,11 +174,16 @@ function sidebarTone(
   });
 }
 
-/** 不受留存窗口影响、始终留在「活跃中」:运行、待确认、未读、未读失败 */
+/** 挂起等待（排队、等上游恢复、等提醒）:留在「活跃中」,排在其余活跃会话之后 */
+function isParked(tone: ConversationDotTone): boolean {
+  return tone === 'queued' || tone === 'reminder';
+}
+
+/** 不受留存窗口影响、始终留在「活跃中」:运行、待确认、未读、未读失败、续跑中、挂起等待 */
 function staysActive(tone: ConversationDotTone, conversation: SidebarConversation): boolean {
-  if (tone === 'queued') return true;
   if (tone === 'failed')
     return conversation.unread === true || conversation.queueFailed !== undefined;
+  if (isParked(tone) || conversation.goal?.status === 'active') return true;
   return tone === 'running' || tone === 'waiting' || tone === 'unread';
 }
 
@@ -189,28 +201,32 @@ function retentionAnchor(conversation: SidebarConversation): number | undefined 
  * 归档的与 order 之外的会话(coworker)不参与。
  */
 /**
- * 蓝/绿/红活跃态:运行、待确认、未读失败、未读。失败查看过即退出(红点仍在项目组里)。
+ * 活跃态:运行、待确认、未读失败、未读、续跑中,其后是排队、等上游恢复、等提醒;两档内各按活跃时间倒序。
+ * 失败查看过即退出(红点仍在项目组里)。pendingReminderIds 是挂着未到点提醒的根会话。
  * retention.ms>0 时,最后一条消息或续期时刻落在窗口内的会话不论已读都保留;超窗回到上述规则。
  */
 export function activeConversationIds(
   order: readonly string[],
   conversations: Conversations,
   archivedProjectIds: readonly string[] = [],
-  retention?: { now: number; ms: number }
+  retention?: { now: number; ms: number },
+  pendingReminderIds: ReadonlySet<string> = new Set()
 ): string[] {
   const archivedProjects = new Set(archivedProjectIds);
   const cutoff = retention && retention.ms > 0 ? retention.now - retention.ms : undefined;
-  return sortByActivity(
-    order.filter((id) => {
-      const conversation = sidebarRoot(id, conversations);
-      if (!conversation || conversation.archived === true) return false;
-      if (archivedProjects.has(conversation.projectId)) return false;
-      if (staysActive(sidebarTone(conversation, conversations), conversation)) return true;
-      const anchor = retentionAnchor(conversation);
-      return cutoff !== undefined && anchor !== undefined && anchor >= cutoff;
-    }),
-    conversations
-  );
+  const parked = new Set<string>();
+  const ids = order.filter((id) => {
+    const conversation = sidebarRoot(id, conversations);
+    if (!conversation || conversation.archived === true) return false;
+    if (archivedProjects.has(conversation.projectId)) return false;
+    const tone = sidebarTone(conversation, conversations, pendingReminderIds.has(id));
+    if (isParked(tone)) parked.add(id);
+    if (staysActive(tone, conversation)) return true;
+    const anchor = retentionAnchor(conversation);
+    return cutoff !== undefined && anchor !== undefined && anchor >= cutoff;
+  });
+  const sorted = sortByActivity(ids, conversations);
+  return [...sorted.filter((id) => !parked.has(id)), ...sorted.filter((id) => parked.has(id))];
 }
 
 /**
@@ -247,11 +263,15 @@ export function headerSessionTabIds(
 export function activeRetentionRemainingMs(
   id: string,
   conversations: Conversations,
-  retention: { now: number; ms: number }
+  retention: { now: number; ms: number },
+  pendingReminderIds: ReadonlySet<string> = new Set()
 ): number | undefined {
   if (!(retention.ms > 0)) return undefined;
   const conversation = sidebarRoot(id, conversations);
-  if (!conversation || staysActive(sidebarTone(conversation, conversations), conversation)) {
+  if (
+    !conversation ||
+    staysActive(sidebarTone(conversation, conversations, pendingReminderIds.has(id)), conversation)
+  ) {
     return undefined;
   }
   const anchor = retentionAnchor(conversation);

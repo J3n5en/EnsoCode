@@ -735,6 +735,70 @@ describe('activeConversationIds', () => {
     };
     expect(activeConversationIds(['q', 'bad'], rows).sort()).toEqual(['bad', 'q']);
   });
+
+  describe('等提醒 / 排队 / 等上游恢复 / 续跑中', () => {
+    const upstream = {
+      reason: 'upstream' as const,
+      kind: 'transient' as const,
+      provider: 'x',
+      attempt: 1,
+      since: 1,
+      at: 2,
+      lastError: 'e',
+    };
+    const rows = {
+      run: { ...conv('p1', 1, 10), status: 'running' },
+      remind: { ...conv('p1', 2, 90), status: 'idle' },
+      queued: { ...conv('p1', 3, 80), status: 'idle', queued: true },
+      upstream: {
+        ...conv('p1', 4, 70),
+        status: 'idle',
+        goal: { status: 'waiting', retry: upstream },
+      },
+      continuing: { ...conv('p1', 5, 60), status: 'idle', goal: { status: 'active' } },
+      done: { ...conv('p1', 6, 100), status: 'idle', goal: { status: 'completed' } },
+    };
+    const ids = Object.keys(rows);
+    const reminders = new Set(['remind']);
+
+    it('都进活跃中；等提醒、排队、等上游恢复排在运行中与续跑中之后，两档内按活跃倒序', () => {
+      expect(activeConversationIds(ids, rows, [], undefined, reminders)).toEqual([
+        'continuing',
+        'run',
+        'remind',
+        'queued',
+        'upstream',
+      ]);
+    });
+
+    it('状态结束后移出：提醒撤销、排队开跑后完成、上游恢复后完成、goal 完成', () => {
+      const settled = {
+        ...rows,
+        queued: { ...rows.queued, queued: false },
+        upstream: { ...rows.upstream, goal: { status: 'completed' } },
+        continuing: { ...rows.continuing, goal: { status: 'completed' } },
+      };
+      expect(activeConversationIds(ids, settled, [], undefined, new Set())).toEqual(['run']);
+    });
+
+    it('提醒到点开跑：回到运行中一档', () => {
+      const woken = { ...rows, remind: { ...rows.remind, status: 'running' } };
+      expect(activeConversationIds(ids, woken, [], undefined, reminders)).toEqual([
+        'remind',
+        'continuing',
+        'run',
+        'queued',
+        'upstream',
+      ]);
+    });
+
+    it('靠这些状态留下的会话不显示留存剩余时间', () => {
+      const retention = { now: 100, ms: 50 };
+      expect(activeRetentionRemainingMs('remind', rows, retention, reminders)).toBeUndefined();
+      expect(activeRetentionRemainingMs('continuing', rows, retention)).toBeUndefined();
+      expect(activeRetentionRemainingMs('done', rows, retention)).toBe(50);
+    });
+  });
 });
 
 describe('等你处理优先', () => {

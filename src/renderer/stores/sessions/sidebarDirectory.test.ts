@@ -54,6 +54,24 @@ describe('selectSidebarConversations', () => {
     expect(directory.b.secretaryOrigin).toBeUndefined();
   });
 
+  it('goal 状态与上游重试随投影带到侧栏，供活跃中判定与等上游恢复徽标', () => {
+    const retry = {
+      reason: 'upstream',
+      kind: 'quota',
+      provider: 'x',
+      attempt: 1,
+      since: 1,
+      at: 2,
+      lastError: 'e',
+    };
+    const directory = selectSidebarConversations({
+      a: conv('a', { goal: { text: 'g', status: 'waiting', autoTurns: 3, retry } }),
+      b: conv('b'),
+    });
+    expect(directory.a.goal).toEqual({ status: 'waiting', retry });
+    expect(directory.b.goal).toBeUndefined();
+  });
+
   it('coworker 从 idle 变为 running 时重建目录，父条目 hasRunningChild 翻转', () => {
     const parent = conv('parent', { status: 'idle', coworkerIds: ['kid'] });
     const first = selectSidebarConversations({
