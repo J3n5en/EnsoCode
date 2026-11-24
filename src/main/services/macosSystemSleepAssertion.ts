@@ -124,8 +124,9 @@ export class MacosSystemSleepAssertion {
     }
   }
 
+  // -w：app 以任何方式退出时 caffeinate 跟着退，否则孤儿 caffeinate 继承的异常端口会让 crashpad_handler 常驻。
   private caffeinateArgs(): string[] {
-    return this.preventDisplaySleep ? ['-d', '-i', '-s'] : ['-i', '-s'];
+    return ['-w', String(process.pid), ...(this.preventDisplaySleep ? ['-d'] : []), '-i', '-s'];
   }
 
   private scheduleRetry(): void {
