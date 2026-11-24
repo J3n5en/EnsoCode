@@ -82,7 +82,7 @@ function makePorts(options: {
   const repos = options.repos ?? [];
   const calls: string[] = [];
   const sizeCalls: string[] = [];
-  const archived: { conversationId: string; at: number }[] = [];
+  const archived: { conversationId: string; at: number; via: string }[] = [];
   const audits: SecretaryAuditEntry[] = [];
   const retired: { repoPath: string; target: string; root: string }[] = [];
   const repoOf = (cwd: string): FakeRepo | undefined =>
@@ -165,9 +165,10 @@ function makePorts(options: {
     projects: () => [project()],
     rows: () => options.rows ?? {},
     dispatchFile: () => options.file ?? emptyFile(),
-    archive: (conversationId, at) => {
-      archived.push({ conversationId, at });
+    archive: (conversationId, at, via) => {
+      archived.push({ conversationId, at, via });
     },
+    unarchive: () => {},
     // 与生产一致：改名进回收目录后用 git worktree remove 注销登记
     async removeWorktree(repoPath, target, root) {
       retired.push({ repoPath, target, root });
@@ -605,7 +606,8 @@ describe('applyCleanup', () => {
       items: [item({ id: sessionItemId('c-done'), kind: 'session', name: '写发布说明' })],
     });
     expect(result.archived).toBe(1);
-    expect(archived).toEqual([{ conversationId: 'c-done', at: now }]);
+    // 记下是清理归档的：之后秘书能用 session_unarchive 拉回来
+    expect(archived).toEqual([{ conversationId: 'c-done', at: now, via: 'cleanup_apply' }]);
     expect(audits[0]).toMatchObject({ op: 'cleanup_session', ok: true });
     expect(cleanupReportText(result)).toContain('archived 1');
   });

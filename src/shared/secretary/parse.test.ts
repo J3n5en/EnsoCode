@@ -342,6 +342,27 @@ describe('parseDispatchFile', () => {
     expect(file.dispatched.c1).toMatchObject({ autoArchivedAt: 30, autoArchiveResultAt: 20 });
   });
 
+  it('秘书归档的来源读回来还在，来源不认识的整条丢掉', () => {
+    const record = (secretaryArchived: unknown) => ({
+      conversationId: 'c1',
+      projectId: 'p1',
+      secretaryConversationId: 's1',
+      createdAt: 10,
+      lastEventAt: 10,
+      lastState: 'idle',
+      secretaryArchived,
+    });
+    const file = parseDispatchFile({
+      dispatched: {
+        c1: record({ at: 30, via: 'cleanup_apply' }),
+        c2: { ...record({ at: 30, via: 'user' }), conversationId: 'c2' },
+      },
+    });
+    expect(file.dispatched.c1?.secretaryArchived).toEqual({ at: 30, via: 'cleanup_apply' });
+    expect(file.dispatched.c2).toBeDefined();
+    expect(file.dispatched.c2?.secretaryArchived).toBeUndefined();
+  });
+
   it('手动标记、重新打开、撤销与收掉的目标读回来还在：重启后撤销标记与追加跟踪照常', () => {
     const base = {
       conversationId: 'c1',

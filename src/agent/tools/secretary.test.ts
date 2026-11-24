@@ -339,6 +339,7 @@ describe('secretary tools', () => {
     expect(normalizeSecretaryParams('session_archive', { ids: ['s1', ''] })).toEqual({
       ids: ['s1'],
     });
+    expect(normalizeSecretaryParams('session_unarchive', { id: 's1' })).toEqual({ ids: ['s1'] });
     // 空数组有含义的列表不动
     expect(
       normalizeSecretaryParams('secretary_profile_propose', { visibleProjectIds: [''] })

@@ -171,7 +171,8 @@ interface Harness {
   baseFacts: DispatchBaseFacts;
   baseFactsCalls: { projectPath: string; checkout?: string; baseRef?: string; branch?: string }[];
   forgotten: string[];
-  archived: { conversationId: string; at: number }[];
+  archived: { conversationId: string; at: number; via: string }[];
+  unarchived: string[];
   answers: { conversationId: string; askId: string; answer: string; name: string }[];
   relays: { conversationId: string; relay: { name: string } | null }[];
   /** 会话的后台任务投影与停任务记录 */
@@ -235,6 +236,7 @@ function harness(
     baseFactsCalls: [],
     forgotten: [],
     archived: [],
+    unarchived: [],
     answers: [],
     relays: [],
     tasks: new Map(Object.entries(options.tasks ?? {})),
@@ -366,8 +368,26 @@ function harness(
       rows: () => h.rows,
       dispatchFile: () => structuredClone(h.file),
       removeWorktree: async () => ({ status: 'failed', reason: 'rename-failed' }),
-      archive: (conversationId, at) => {
-        h.archived.push({ conversationId, at });
+      // 与生产端口同一契约：会话行标上归档，派发记录记下是哪个秘书操作归档的
+      archive: (conversationId, at, via) => {
+        h.archived.push({ conversationId, at, via });
+        const row = h.rows[conversationId];
+        if (row) h.rows[conversationId] = { ...row, archived: true, archivedAt: at };
+        const record = h.file.dispatched[conversationId];
+        if (record) record.secretaryArchived = { at, via };
+      },
+      unarchive: (conversationId) => {
+        h.unarchived.push(conversationId);
+        const row = h.rows[conversationId];
+        if (row) {
+          const { archived: _archived, archivedAt: _archivedAt, ...rest } = row;
+          h.rows[conversationId] = rest;
+        }
+        const record = h.file.dispatched[conversationId];
+        if (record) {
+          delete record.secretaryArchived;
+          delete record.autoArchivedAt;
+        }
       },
       audit: (entry) => {
         h.audits.push(entry);
@@ -2596,7 +2616,7 @@ describe('清理提案', () => {
     expect(resolved.proposal.kind === 'cleanup' && resolved.proposal.report).toContain(
       'archived 1'
     );
-    expect(h.archived).toEqual([{ conversationId: 'c-done', at: NOW }]);
+    expect(h.archived).toEqual([{ conversationId: 'c-done', at: NOW, via: 'cleanup_apply' }]);
     expect(h.audits.some((entry) => entry.op === 'cleanup_session')).toBe(true);
   });
 
@@ -3927,7 +3947,7 @@ const settledFile = (
   ),
 });
 
-const settledRows = (conversationIds: string[]) =>
+const settledRows = (conversationIds: string[]): Record<string, Record<string, unknown>> =>
   Object.fromEntries(
     conversationIds.map((id) => [
       id,
@@ -3952,7 +3972,7 @@ describe('session_archive', () => {
         failed: 0,
       },
     });
-    expect(h.archived).toEqual([{ conversationId: 'c1', at: NOW }]);
+    expect(h.archived).toEqual([{ conversationId: 'c1', at: NOW, via: 'session_archive' }]);
     expect(h.audits.at(-1)).toMatchObject({
       op: 'session_archive',
       targetId: 'c1',
@@ -4049,6 +4069,163 @@ describe('session_archive', () => {
     const empty = await call(h.handlers.session_archive, {});
     expect(empty.ok).toBe(false);
     expect(h.archived).toEqual([]);
+  });
+});
+
+describe('session_unarchive', () => {
+  type Unarchived = {
+    results: { conversationId: string; status: string; reason?: string }[];
+    unarchived: number;
+    skipped: number;
+    failed: number;
+  };
+  const payload = (result: unknown) => (result as { result: Unarchived }).result;
+  /** 已经由秘书 session_archive 归档的派发会话 */
+  const archivedBySecretary = async (ids: string[] = ['c1']) => {
+    const h = harness({
+      file: settledFile(ids),
+      rows: settledRows(ids),
+      conversations: ids.map((id) => rootConversation(id)),
+    });
+    await call(h.handlers.session_archive, { ids });
+    expect(ids.every((id) => h.rows[id]?.archived === true)).toBe(true);
+    return h;
+  };
+
+  it('秘书归档的会话能拉回来，之后照常 session_send 带 goal 继续', async () => {
+    const h = await archivedBySecretary();
+    const result = await call(h.handlers.session_unarchive, { conversationId: 'c1' });
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        results: [{ conversationId: 'c1', status: 'unarchived' }],
+        unarchived: 1,
+        skipped: 0,
+        failed: 0,
+      },
+    });
+    expect(h.rows.c1?.archived).toBeUndefined();
+    expect(h.rows.c1?.archivedAt).toBeUndefined();
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_unarchive',
+      secretaryConversationId: 'sec-1',
+      targetId: 'c1',
+      ok: true,
+      detail: 'unarchived (session_archive)',
+    });
+    const sent = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '用户审核后要改标题',
+      goal: '按用户意见改完标题并提交',
+    });
+    expect(sent.ok).toBe(true);
+    expect(h.attachedGoals).toEqual([{ conversationId: 'c1', goal: '按用户意见改完标题并提交' }]);
+  });
+
+  it('cleanup_apply 归档的与旧版 Main 自动归档的都能拉回来', async () => {
+    const file = settledFile(['c1', 'c2']);
+    file.dispatched.c1 = {
+      ...file.dispatched.c1,
+      secretaryArchived: { at: 800, via: 'cleanup_apply' },
+    } as DispatchRecord;
+    file.dispatched.c2 = { ...file.dispatched.c2, autoArchivedAt: 700 } as DispatchRecord;
+    const rows = settledRows(['c1', 'c2']);
+    rows.c1 = { ...rows.c1, archived: true, archivedAt: 800 };
+    rows.c2 = { ...rows.c2, archived: true, archivedAt: 700 };
+    const h = harness({ file, rows });
+    const result = await call(h.handlers.session_unarchive, { ids: ['c1', 'c2'] });
+    expect(payload(result).results).toEqual([
+      { conversationId: 'c1', status: 'unarchived' },
+      { conversationId: 'c2', status: 'unarchived' },
+    ]);
+    expect(h.unarchived).toEqual(['c1', 'c2']);
+  });
+
+  it('用户手动归档的拒绝，原因是 archived-by-user', async () => {
+    const rows = settledRows(['c1']);
+    rows.c1 = { ...rows.c1, archived: true, archivedAt: 700 };
+    const h = harness({ file: settledFile(['c1']), rows });
+    const result = await call(h.handlers.session_unarchive, { conversationId: 'c1' });
+    expect(payload(result).results[0]).toMatchObject({ conversationId: 'c1', status: 'skipped' });
+    expect(payload(result).results[0]?.reason).toContain('archived-by-user');
+    expect(h.rows.c1?.archived).toBe(true);
+    expect(h.unarchived).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_unarchive',
+      targetId: 'c1',
+      ok: false,
+      detail: 'archived-by-user',
+    });
+  });
+
+  it('秘书归档后用户取消又亲手归档：这次算用户的，拒绝', async () => {
+    const h = await archivedBySecretary();
+    h.rows.c1 = { ...h.rows.c1, archived: true, archivedAt: NOW + 5000 };
+    const result = await call(h.handlers.session_unarchive, { conversationId: 'c1' });
+    expect(payload(result).results[0]?.reason).toContain('archived-by-user');
+    expect(h.rows.c1?.archived).toBe(true);
+  });
+
+  it('不归秘书管、已删除、没归档、项目不可见的都跳过并说明原因', async () => {
+    const file = settledFile(['c1', 'gone', 'live']);
+    const rows = {
+      ...settledRows(['c1', 'live', 'other']),
+      c1: { ...settledRows(['c1']).c1, archived: true, archivedAt: 700 },
+      other: { ...settledRows(['other']).other, archived: true, archivedAt: 700 },
+    };
+    file.dispatched.c1 = {
+      ...file.dispatched.c1,
+      secretaryArchived: { at: 700, via: 'session_archive' },
+    } as DispatchRecord;
+    const cases: [string, string][] = [
+      ['other', 'not-operable'],
+      ['gone', 'not-found'],
+      ['live', 'not-archived'],
+    ];
+    const h = harness({ file, rows });
+    for (const [conversationId, code] of cases) {
+      const result = await call(h.handlers.session_unarchive, { conversationId });
+      expect(result.ok).toBe(true);
+      expect(payload(result).results[0]?.status).toBe('skipped');
+      expect(payload(result).results[0]?.reason).toContain(code);
+    }
+    const hidden = harness({ file, rows, profile: profile({ visibleProjectIds: ['p2'] }) });
+    const refused = await call(hidden.handlers.session_unarchive, { conversationId: 'c1' });
+    expect(payload(refused).results[0]?.reason).toContain('not-visible');
+    expect(h.unarchived).toEqual([]);
+    expect(hidden.unarchived).toEqual([]);
+  });
+
+  it('批量逐条给结果、逐条审计，写盘失败的报 failed 不影响其余', async () => {
+    const h = await archivedBySecretary(['c1', 'c2', 'c3']);
+    h.rows.c2 = { ...h.rows.c2, archivedAt: NOW + 1 };
+    const unarchive = h.ports.cleanup.unarchive;
+    h.ports.cleanup.unarchive = (conversationId) => {
+      if (conversationId === 'c3') throw new Error('disk full');
+      return unarchive(conversationId);
+    };
+    const result = await call(h.handlers.session_unarchive, { ids: ['c1', 'c2', 'c3', 'nope'] });
+    expect(result.ok).toBe(true);
+    const body = payload(result);
+    expect(body.results.map((entry) => [entry.conversationId, entry.status])).toEqual([
+      ['c1', 'unarchived'],
+      ['c2', 'skipped'],
+      ['c3', 'failed'],
+      ['nope', 'skipped'],
+    ]);
+    expect(body.results[2]?.reason).toContain('disk full');
+    expect([body.unarchived, body.skipped, body.failed]).toEqual([1, 2, 1]);
+    expect(h.audits.filter((entry) => entry.op === 'session_unarchive')).toHaveLength(4);
+  });
+
+  it('超过 20 个或没给 id 按参数错误拒绝', async () => {
+    const h = await archivedBySecretary();
+    const tooMany = await call(h.handlers.session_unarchive, {
+      ids: Array.from({ length: 21 }, (_, index) => `c${index}`),
+    });
+    expect(tooMany.ok).toBe(false);
+    expect((await call(h.handlers.session_unarchive, {})).ok).toBe(false);
+    expect(h.unarchived).toEqual([]);
   });
 });
 

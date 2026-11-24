@@ -54,6 +54,7 @@ const GROUP_TITLES: Record<string, string> = {
   session_stop: 'Stopped {{count}} sessions',
   session_task_stop: 'Stopped {{count}} background tasks',
   session_archive: 'Archived {{count}} sessions',
+  session_unarchive: 'Unarchived {{count}} sessions',
   result_mark_done: 'Marked {{count}} sessions done',
   result_mark_undo: 'Undid {{count}} marks',
   session_answer: 'Answered {{count}} questions',

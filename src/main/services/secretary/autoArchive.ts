@@ -1,5 +1,5 @@
 import { queuedStartOf } from '@shared/secretary/queuedSession';
-import type { DispatchRecord } from '@shared/types/secretary';
+import type { DispatchRecord, SecretaryArchiveVia } from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import type { SecretarySessionStatus } from './readers';
 
@@ -42,4 +42,18 @@ export function autoArchived(
     record.autoArchivedAt !== undefined &&
     row.archivedAt === record.autoArchivedAt
   );
+}
+
+/**
+ * 当前这次归档是谁做的。secretaryArchived.at 必须是数字且等于会话行 archivedAt；
+ * 时刻缺失时 undefined === undefined 不算。对不上再认旧版自动归档，否则是用户的。
+ */
+export function archivedBySecretary(
+  record: DispatchRecord,
+  row: Record<string, unknown> | undefined
+): SecretaryArchiveVia | 'auto' | null {
+  if (row?.archived !== true) return null;
+  const mark = record.secretaryArchived;
+  if (mark && typeof mark.at === 'number' && row.archivedAt === mark.at) return mark.via;
+  return autoArchived(record, row) ? 'auto' : null;
 }

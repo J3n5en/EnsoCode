@@ -19,7 +19,9 @@ import {
   RELAY_ASK_STATUSES,
   REPLACEABLE_GOAL_STATUSES,
   type RelayAskStatus,
+  SECRETARY_ARCHIVE_VIAS,
   type SecretaryActivity,
+  type SecretaryArchiveVia,
   type SecretaryDispatchFile,
   type SecretaryProfile,
   type SecretaryProfileDraft,
@@ -589,6 +591,13 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (autoArchivedAt !== undefined) record.autoArchivedAt = autoArchivedAt;
   const autoArchiveResultAt = time(value.autoArchiveResultAt);
   if (autoArchiveResultAt !== undefined) record.autoArchiveResultAt = autoArchiveResultAt;
+  if (isObject(value.secretaryArchived)) {
+    const at = time(value.secretaryArchived.at);
+    const via = value.secretaryArchived.via;
+    if (at !== undefined && (SECRETARY_ARCHIVE_VIAS as readonly string[]).includes(via as string)) {
+      record.secretaryArchived = { at, via: via as SecretaryArchiveVia };
+    }
+  }
   const sentAt = time(value.sentAt);
   if (sentAt !== undefined) record.sentAt = sentAt;
   const reopenedAt = time(value.reopenedAt);

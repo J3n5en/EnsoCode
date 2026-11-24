@@ -26,6 +26,7 @@ import type {
   CleanupListDetail,
   CleanupListSummary,
   CleanupSummaryItem,
+  SecretaryArchiveVia,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProfile,
@@ -110,7 +111,9 @@ export interface CleanupPorts {
   dispatchFile(): MaybePromise<SecretaryDispatchFile>;
   /** 任何秘书正在跑的派发会话占着的 worktree（真实路径）；缺省表示没有 */
   busyWorktrees?(): MaybePromise<ReadonlySet<string>>;
-  archive(conversationId: string, at: number): MaybePromise<void>;
+  archive(conversationId: string, at: number, via: SecretaryArchiveVia): MaybePromise<void>;
+  /** 取消归档：清掉会话行的归档标记，并清掉派发记录上的秘书归档与旧版自动归档时刻 */
+  unarchive(conversationId: string): MaybePromise<void>;
   /** 删 worktree：改名进 root 下的回收目录并注销登记，空间后台释放 */
   removeWorktree(repoPath: string, target: string, root: string): Promise<RetireResult>;
   /** 跨卷退回、还在后台删的 worktree：清单不再列 */
@@ -889,7 +892,7 @@ async function applyCleanupItems(
       continue;
     }
     // 只归档，不删除：会话正文与 jsonl 都留着
-    await ports.archive(conversationId, now);
+    await ports.archive(conversationId, now, 'cleanup_apply');
     record({ id: item.id, kind: 'session', name: item.name, action: 'archived' });
   }
 
@@ -1234,12 +1237,41 @@ export function realCleanupPorts(
     busyWorktrees: async () => (await import('./crossSecretary')).runningWorktreePaths(),
     removeWorktree: (repoPath, target, root) => worktreeTrash.retire({ repoPath, target, root }),
     removingWorktree: (target) => worktreeTrash.isRemoving(target),
-    archive: async (conversationId, at) => {
+    archive: async (conversationId, at, via) => {
       const { patchConversationsState } = await import('../../ipc/settings');
       patchConversationsState((state) => {
         const row = state.conversations[conversationId];
         if (!row) return;
         state.conversations[conversationId] = { ...row, archived: true, archivedAt: at };
+      });
+      const store = new SecretaryStore(ctx.dir);
+      const file = store.dispatch();
+      const record = file.dispatched[conversationId];
+      if (!record) return;
+      store.saveDispatch({
+        ...file,
+        dispatched: {
+          ...file.dispatched,
+          [conversationId]: { ...record, secretaryArchived: { at, via } },
+        },
+      });
+    },
+    unarchive: async (conversationId) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row) return;
+        const { archived: _archived, archivedAt: _archivedAt, ...rest } = row;
+        state.conversations[conversationId] = rest;
+      });
+      const store = new SecretaryStore(ctx.dir);
+      const file = store.dispatch();
+      const record = file.dispatched[conversationId];
+      if (!record) return;
+      const { secretaryArchived: _mark, autoArchivedAt: _auto, ...rest } = record;
+      store.saveDispatch({
+        ...file,
+        dispatched: { ...file.dispatched, [conversationId]: rest },
       });
     },
     audit: (entry) => appendAudit(ctx.dir, entry),

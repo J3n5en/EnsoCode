@@ -81,6 +81,7 @@ import { classifyUpstreamError, nextPendingRetryDelayMs } from '@shared/upstream
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
+import { archivedBySecretary } from './autoArchive';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { appendDailyRecord } from './dailyLog';
 import { todoDispatchPrompt } from './dispatchBrief';
@@ -132,7 +133,7 @@ export const MAX_DISPATCH_DEPENDENCIES = 10;
 export const MAX_ARCHIVE_IDS = 20;
 
 /** 归档一条会话的结果：skipped 是前置条件不满足，failed 是写盘出错 */
-export type ArchiveStatus = 'archived' | 'skipped' | 'failed';
+export type ArchiveStatus = 'archived' | 'unarchived' | 'skipped' | 'failed';
 
 export interface ArchiveOutcome {
   conversationId: string;
@@ -152,6 +153,18 @@ const ARCHIVE_REFUSALS: Record<string, string> = {
     'skipped (running): the session is still running or still has an unfinished background task; stop it first with session_stop or session_task_stop',
   'needs-user':
     'skipped (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+};
+
+/** 取消归档被拒的原因码，模型看到的是可读说明 */
+const UNARCHIVE_REFUSALS: Record<string, string> = {
+  'not-operable':
+    'skipped (not-operable): only sessions you dispatched or already track can be unarchived; this one is not yours',
+  'not-found': 'skipped (not-found): no such session, it may already be deleted',
+  'not-visible':
+    "skipped (not-visible): the session's project is not in the secretary's visible projects",
+  'not-archived': 'skipped (not-archived): this session is not archived',
+  'archived-by-user':
+    'skipped (archived-by-user): the user archived this session, or an older archive whose source cannot be told apart (both count as the user). Ask the user to unarchive it in the app; do not retry',
 };
 
 /** 手动收口被拒的原因码，模型看到的是可读说明 */
@@ -332,6 +345,7 @@ const DISPATCH_OPS = [
   'session_stop',
   'session_task_stop',
   'session_archive',
+  'session_unarchive',
   'result_mark_done',
   'result_mark_undo',
   'session_answer',
@@ -1611,6 +1625,26 @@ async function archiveRefusal(
 }
 
 /**
+ * 取消归档的前置条件。只认派发或接管跟踪的记录，且这次归档必须是秘书做的
+ * （session_archive、cleanup_apply，或旧版自动归档）。返回原因码，null 表示可以拉回。
+ */
+async function unarchiveRefusal(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  profile: SecretaryProfile
+): Promise<string | null> {
+  const record = ports.dispatchFile().dispatched[conversationId];
+  if (!record) return 'not-operable';
+  const row = (await ports.rows())[conversationId];
+  if (!row) return 'not-found';
+  const visible = visibleProjects(await ports.projects(), profile);
+  if (!visible.some((project) => project.projectId === record.projectId)) return 'not-visible';
+  if (row.archived !== true) return 'not-archived';
+  if (!archivedBySecretary(record, row)) return 'archived-by-user';
+  return null;
+}
+
+/**
  * 范围接管的会话第一次被真正用上：从这一刻起才跟踪它的状态与结果。
  * 之前不建记录，所以范围里的其他会话不会被推给秘书，也不改未读与静音。
  */
@@ -2197,7 +2231,7 @@ export function createSecretaryDispatchHandlers(
           continue;
         }
         try {
-          await ports.cleanup.archive(conversationId, ports.now());
+          await ports.cleanup.archive(conversationId, ports.now(), 'session_archive');
           results.push({ conversationId, status: 'archived' });
           // 归档的会话不会再报结果：关注项一并移除
           ports.unfollow?.(conversationId);
@@ -2233,6 +2267,79 @@ export function createSecretaryDispatchHandlers(
             ...(entry.reason ? { reason: ARCHIVE_REFUSALS[entry.reason] ?? entry.reason } : {}),
           })),
           archived: count('archived'),
+          skipped: count('skipped'),
+          failed: count('failed'),
+        },
+      };
+    },
+
+    /**
+     * 取消归档：拉回自己派出或跟踪、且由秘书归档的会话。效果与用户手动取消归档一致。
+     * 用户自己归档的、或分不清来源的，拒绝。
+     */
+    async session_unarchive(params, ctx) {
+      const ids = archiveIds(params);
+      if (!ids) {
+        return {
+          ok: false,
+          error: `invalid arguments: pass "conversationId" or "ids" with 1-${MAX_ARCHIVE_IDS} session ids`,
+        };
+      }
+      const profile = await profileOf(ports);
+      const results: ArchiveOutcome[] = [];
+      for (const conversationId of ids) {
+        const refusal = await unarchiveRefusal(ports, conversationId, profile);
+        if (refusal) {
+          results.push({ conversationId, status: 'skipped', reason: refusal });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_unarchive',
+            targetId: conversationId,
+            ok: false,
+            detail: refusal,
+          });
+          continue;
+        }
+        const via = archivedBySecretary(
+          ports.dispatchFile().dispatched[conversationId]!,
+          (await ports.rows())[conversationId]
+        );
+        try {
+          await ports.cleanup.unarchive(conversationId);
+          results.push({ conversationId, status: 'unarchived' });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_unarchive',
+            targetId: conversationId,
+            ok: true,
+            detail: `unarchived (${via})`,
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'unarchive failed';
+          results.push({ conversationId, status: 'failed', reason });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_unarchive',
+            targetId: conversationId,
+            ok: false,
+            detail: reason,
+          });
+        }
+      }
+      notifySecretaryChanged();
+      const count = (status: ArchiveStatus) =>
+        results.filter((entry) => entry.status === status).length;
+      return {
+        ok: true,
+        result: {
+          results: results.map((entry) => ({
+            ...entry,
+            ...(entry.reason ? { reason: UNARCHIVE_REFUSALS[entry.reason] ?? entry.reason } : {}),
+          })),
+          unarchived: count('unarchived'),
           skipped: count('skipped'),
           failed: count('failed'),
         },
