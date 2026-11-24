@@ -46,9 +46,10 @@ function badgeOf(card: SessionCard): { label: string; className: string } {
 function RunningRow({ card }: { card: SessionCard }) {
   const { t, locale } = useI18n();
   const providers = useSettingsStore((state) => state.providers) ?? [];
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
   const [expanded, setExpanded] = useState(false);
   const badge = badgeOf(card);
-  const model = modelLabel(providers, card.model);
+  const model = modelLabel(providers, card.model, virtualModels);
   const upstreamRetry = card.upstreamRetry;
   const upstreamLabel = upstreamRetry
     ? upstreamRetry.kind === 'quota'

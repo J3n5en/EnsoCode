@@ -18,4 +18,22 @@ describe('modelLabel', () => {
   it('没有模型时返回空串', () => {
     expect(modelLabel(providers, undefined)).toBe('');
   });
+
+  it('虚拟模型显示它的名称，条目没了退回 id', () => {
+    const virtualModels = [
+      {
+        id: 'v1',
+        name: 'Auto',
+        enabled: true,
+        primary: { providerId: 'p1', modelId: 'm1' },
+        fallbacks: [],
+      },
+    ];
+    expect(
+      modelLabel(providers, { providerId: 'enso-virtual', modelId: 'v1' }, virtualModels)
+    ).toBe('Auto');
+    expect(
+      modelLabel(providers, { providerId: 'enso-virtual', modelId: 'v9' }, virtualModels)
+    ).toBe('v9');
+  });
 });

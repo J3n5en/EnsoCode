@@ -3344,12 +3344,15 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
      * 模型行启用；虚拟模型按目录解析。这里只判定，不改任何配置。
      */
     resolveModel: async (ref) => {
-      const { modelRefForSpawnConfig, providersFromSettings, resolveModelSelection } = await import(
-        '../agentHost'
-      );
+      const {
+        modelRefForSpawnConfig,
+        providersFromSettings,
+        resolveModelSelection,
+        virtualModelsFromSettings,
+      } = await import('../agentHost');
       const { readStoredOauthCredentialKeys } = await import('../oauthProviders');
       const { modelUsability } = await import('@shared/defaultModel');
-      const { dispatchModelChoices, dispatchProviderId } = await import('./dispatchModel');
+      const { resolveDispatchModel } = await import('./dispatchModel');
       let keys: ReadonlySet<string>;
       try {
         keys = await readStoredOauthCredentialKeys();
@@ -3357,31 +3360,22 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
         return { ok: false, error: 'model credentials unavailable' };
       }
       const providers = providersFromSettings();
-      const providerId = dispatchProviderId(ref.providerId, providers);
-      const resolved = resolveModelSelection(providerId, ref.modelId, keys, {
-        allowVirtual: true,
-      });
-      if (!resolved.ok) {
-        const credentials = {
-          oauthCredentials: { status: 'ready' as const, authenticatedAccountKeys: keys },
-        };
-        const choices = dispatchModelChoices(
-          providers,
-          (id, modelId) =>
-            modelUsability({ providerId: id, modelId }, providers, credentials) === 'usable'
-        );
-        return {
-          ok: false,
-          error: choices
-            ? `${resolved.error}. providerId must be an exact id below (not a name), or omit model to follow the project's default model:\n${choices}`
-            : resolved.error,
-        };
-      }
-      const model = modelRefForSpawnConfig(resolved.selection.config);
-      return {
-        ok: true,
-        model: { ...model, ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}) },
+      const credentials = {
+        oauthCredentials: { status: 'ready' as const, authenticatedAccountKeys: keys },
       };
+      return resolveDispatchModel(ref, {
+        providers,
+        virtualModels: virtualModelsFromSettings(),
+        resolve: (wanted) => {
+          const resolved = resolveModelSelection(wanted.providerId, wanted.modelId, keys, {
+            allowVirtual: true,
+          });
+          return resolved.ok
+            ? { ok: true, ref: modelRefForSpawnConfig(resolved.selection.config) }
+            : resolved;
+        },
+        usable: (wanted) => modelUsability(wanted, providers, credentials) === 'usable',
+      });
     },
     follow: (input) => {
       recordPhoneFollow(
