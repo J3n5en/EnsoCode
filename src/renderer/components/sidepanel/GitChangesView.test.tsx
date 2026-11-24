@@ -564,9 +564,61 @@ describe('GitChangesView 文件夹右键菜单', () => {
     const unstagedDiscard = dirAction('unstaged', 'src', 'discard');
     const untrackedDiscard = dirAction('untracked', 'new', 'discard');
     expect(unstagedDiscard?.disabled).toBe(true);
-    expect(unstagedDiscard?.title).toBe('Resolve conflicts first.');
+    expect(unstagedDiscard?.textContent).toContain('Resolve conflicts first.');
     expect(untrackedDiscard?.disabled).toBe(true);
-    expect(untrackedDiscard?.title).toBe('Resolve conflicts first.');
+    expect(untrackedDiscard?.textContent).toContain('Resolve conflicts first.');
+  });
+
+  it('同一目录混有多组文件时，每组文件夹只操作本组文件，且不混入同名前缀目录', async () => {
+    harness.git.status.mockResolvedValue(
+      statusWith(
+        [
+          { path: 'src/a/m.ts', status: 'modified' },
+          { path: 'src/a/both.ts', status: 'modified' },
+          { path: 'src/a/new.ts', status: 'untracked' },
+          { path: 'src/ab/m.ts', status: 'modified' },
+          { path: 'src/ab/new.ts', status: 'untracked' },
+        ],
+        [
+          { path: 'src/a/s.ts', status: 'added' },
+          { path: 'src/a/both.ts', status: 'modified' },
+        ]
+      )
+    );
+    await render();
+    await click(dirAction('unstaged', 'src/a', 'discard'));
+    expect(q('[data-confirm-description]')?.textContent).toContain(
+      'Unstaged changes in 2 tracked files in src/a will be lost'
+    );
+    expect(q('[data-confirm-description]')?.textContent).not.toContain('untracked');
+    await click(q('[data-confirm-ok]'));
+    expect(harness.git.discard).toHaveBeenLastCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['src/a/m.ts', 'src/a/both.ts'],
+      confirmUntracked: false,
+    });
+
+    await click(dirAction('untracked', 'src/a', 'discard'));
+    expect(q('[data-confirm-description]')?.textContent).toBe(
+      '1 untracked files in src/a will be permanently deleted and cannot be recovered. Tracked files are not changed.'
+    );
+    await click(q('[data-confirm-ok]'));
+    expect(harness.git.discard).toHaveBeenLastCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['src/a/new.ts'],
+      confirmUntracked: true,
+    });
+    expect(harness.git.discard).toHaveBeenCalledTimes(2);
+
+    await click(groupToggle('staged'));
+    await click(dirAction('staged', 'src/a', 'unstage'));
+    expect(harness.git.unstage).toHaveBeenCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['src/a/s.ts', 'src/a/both.ts'],
+    });
   });
 
   it('搜索筛选激活时，文件夹右键仅作用于当前筛选命中的文件', async () => {

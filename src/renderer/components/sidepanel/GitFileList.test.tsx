@@ -111,4 +111,33 @@ describe('GitFileList 目录右键扩展', () => {
     expect(renderDirectory).not.toHaveBeenCalled();
     expect(container.querySelectorAll('[data-file]').length).toBe(nestedFiles.length);
   });
+
+  it('同名前缀目录分开汇总，目录本身不作为文件出现', async () => {
+    const seen = new Map<string, string[]>();
+    await act(async () =>
+      root.render(
+        <GitFileList
+          files={[
+            { path: 'src/a/x.ts', status: 'modified' },
+            { path: 'src/ab/y.ts', status: 'modified' },
+            { path: 'src/a.ts', status: 'modified' },
+          ]}
+          tree
+          renderDirectory={(directory, trigger) => {
+            seen.set(
+              directory.path,
+              directory.files.map((file) => file.path)
+            );
+            return trigger;
+          }}
+        >
+          {(file) => <span data-file={file.path}>{file.path}</span>}
+        </GitFileList>
+      )
+    );
+    expect([...seen.keys()].sort()).toEqual(['src', 'src/a', 'src/ab']);
+    expect(seen.get('src/a')).toEqual(['src/a/x.ts']);
+    expect(seen.get('src/ab')).toEqual(['src/ab/y.ts']);
+    expect(seen.get('src')).toEqual(['src/a/x.ts', 'src/ab/y.ts', 'src/a.ts']);
+  });
 });

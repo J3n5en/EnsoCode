@@ -277,35 +277,25 @@ export function GitChangesView({
   const trackedPaths = groups[1].files.map((file) => file.path);
   const untrackedPaths = groups[2].files.map((file) => file.path);
   const bulkDescription = bulkDiscard
-    ? bulkDiscard.directory
-      ? [
-          bulkDiscard.tracked.length > 0 &&
-            t(
-              'Unstaged changes in {{count}} tracked files in {{path}} will be lost; the files are restored to their staged version.',
-              { count: bulkDiscard.tracked.length, path: bulkDiscard.directory }
-            ),
-          bulkDiscard.untracked.length > 0 &&
-            t(
-              '{{count}} untracked files in {{path}} will be permanently deleted and cannot be recovered.',
-              { count: bulkDiscard.untracked.length, path: bulkDiscard.directory }
-            ),
-        ]
-          .filter(Boolean)
-          .join(' ')
-      : [
-          bulkDiscard.tracked.length > 0 &&
-            t(
-              'Unstaged changes in {{count}} tracked files will be lost; the files are restored to their staged version.',
-              { count: bulkDiscard.tracked.length }
-            ),
-          bulkDiscard.untracked.length > 0 &&
-            t('{{count}} untracked files will be permanently deleted and cannot be recovered.', {
-              count: bulkDiscard.untracked.length,
-            }),
-          bulkDiscard.kind === 'untracked' && t('Tracked files are not changed.'),
-        ]
-          .filter(Boolean)
-          .join(' ')
+    ? [
+        bulkDiscard.tracked.length > 0 &&
+          t(
+            bulkDiscard.directory
+              ? 'Unstaged changes in {{count}} tracked files in {{path}} will be lost; the files are restored to their staged version.'
+              : 'Unstaged changes in {{count}} tracked files will be lost; the files are restored to their staged version.',
+            { count: bulkDiscard.tracked.length, path: bulkDiscard.directory ?? '' }
+          ),
+        bulkDiscard.untracked.length > 0 &&
+          t(
+            bulkDiscard.directory
+              ? '{{count}} untracked files in {{path}} will be permanently deleted and cannot be recovered.'
+              : '{{count}} untracked files will be permanently deleted and cannot be recovered.',
+            { count: bulkDiscard.untracked.length, path: bulkDiscard.directory ?? '' }
+          ),
+        bulkDiscard.kind === 'untracked' && t('Tracked files are not changed.'),
+      ]
+        .filter(Boolean)
+        .join(' ')
     : '';
   const commit = () => {
     if (canCommit) {
@@ -638,9 +628,6 @@ export function GitChangesView({
                                         variant="destructive"
                                         data-git-dir-action="discard"
                                         data-git-dir-path={directory.path}
-                                        title={
-                                          conflicted > 0 ? t('Resolve conflicts first.') : undefined
-                                        }
                                         disabled={blocked || conflicted > 0 || count === 0}
                                         onClick={() => {
                                           const tracked = directory.files
@@ -659,11 +646,16 @@ export function GitChangesView({
                                         }}
                                       >
                                         <Undo2 className="size-3.5" />
-                                        <span className="flex-1">
+                                        <span className="flex flex-1 flex-col">
                                           {t(
                                             isUntrackedGroup
                                               ? 'Delete untracked files'
                                               : 'Discard changes'
+                                          )}
+                                          {conflicted > 0 && (
+                                            <span className="text-[11px] text-muted-foreground">
+                                              {t('Resolve conflicts first.')}
+                                            </span>
                                           )}
                                         </span>
                                         <span className="font-mono text-[11px] opacity-70">
