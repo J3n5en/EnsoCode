@@ -58,6 +58,7 @@ import {
   isDraftEmptyConversation,
   recentConversations,
 } from '@/lib/workspaceSearchDocs';
+import { openSettings } from '@/stores/appView';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -328,7 +329,7 @@ export function WorkspaceSearchDialog({
   };
 
   const openSetting = (entry: SettingsSearchEntry) => {
-    void window.electronAPI.window.openSettings({
+    openSettings({
       category: entry.category as import('@shared/settingsDeepLink').SettingsCategory,
       rowId: entry.id,
     });
@@ -547,7 +548,7 @@ export function WorkspaceSearchDialog({
                       value="open-settings"
                       className="gap-2.5"
                       onClick={() => {
-                        void window.electronAPI.window.openSettings();
+                        openSettings();
                         onOpenChange(false);
                       }}
                     >

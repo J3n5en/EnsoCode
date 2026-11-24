@@ -23,6 +23,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -54,6 +55,7 @@ import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
 import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
+import { SettingsView } from '@/components/settings/SettingsView';
 import {
   AlertDialog,
   AlertDialogClose,
@@ -82,6 +84,7 @@ import {
 } from '@/lib/keybindings';
 import { easeOutLayout, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
+import { bindSettingsHistory } from '@/lib/settingsHistory';
 import { subscribeSidebarToggle } from '@/lib/sidebarToggle';
 import {
   addSidePanelBtw,
@@ -89,11 +92,22 @@ import {
   closeActiveSidePanelTab,
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
+import { createViewTransition, prefersReducedMotion, type ViewSide } from '@/lib/viewTransition';
 import { Z_INDEX } from '@/lib/z-index';
 import { pluginCommands, runPluginCommand } from '@/plugins/commands';
 import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { PluginNotices } from '@/plugins/PluginNotices';
 import { PluginUiHost } from '@/plugins/PluginUiHost';
+import {
+  closeSettings,
+  openSettings,
+  setSettingsMobileDetail,
+  settingsHistoryDepth,
+  setWorkbenchCovered,
+  toggleSettings,
+  useAppViewStore,
+  useSettingsOpen,
+} from '@/stores/appView';
 import { useBackgroundTasksView } from '@/stores/backgroundTasksView';
 import { useBotsStore } from '@/stores/bots';
 import {
@@ -326,6 +340,13 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
+      if (pressed === bindings['open-settings']) {
+        e.preventDefault();
+        toggleSettings();
+        return;
+      }
+      // 设置页盖着工作区：工作区快捷键不响应
+      if (useAppViewStore.getState().settings) return;
       if (pressed === bindings['toggle-app-mode']) {
         const settings = useSettingsStore.getState();
         if (!settings.botModeEnabled) return;
@@ -368,9 +389,6 @@ export default function App() {
         e.preventDefault();
         if (menuAlreadyHandled(e, pressed)) return;
         toggleSidebar();
-      } else if (pressed === bindings['open-settings']) {
-        e.preventDefault();
-        void window.electronAPI.window.openSettings();
       } else if (pressed === bindings['open-secretary']) {
         if (useSettingsStore.getState().secretaryEnabled) {
           e.preventDefault();
@@ -435,7 +453,7 @@ export default function App() {
     if (!sideOpen || !sideFullscreen) return;
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (isBotModeActive()) return;
+      if (isBotModeActive() || useAppViewStore.getState().settings) return;
       e.preventDefault();
       useSidePanelStore.getState().setFullscreen(false);
     };
@@ -448,6 +466,85 @@ export default function App() {
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
+
+  // 设置页盖在工作区上原地切换（PLAN §3.6）：工作区保持挂载、几何不变，只是隐藏
+  const settingsOpen = useSettingsOpen();
+  const settingsLayerRef = useRef<HTMLDivElement>(null);
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const workbenchSidebarRef = useRef<HTMLDivElement>(null);
+  const [viewMotion, setViewMotion] = useState<{ top: ViewSide } | null>(null);
+  const [viewTransition] = useState(() =>
+    createViewTransition({
+      reducedMotion: prefersReducedMotion,
+      onSettle: () => setViewMotion(null),
+    })
+  );
+  // 上一次提交时显示的一侧：切换的这一帧两层都要在场，动画才能拿到退场方的元素
+  const [shownOpen, setShownOpen] = useState(settingsOpen);
+  useLayoutEffect(() => {
+    if (shownOpen === settingsOpen) return;
+    setShownOpen(settingsOpen);
+    const layer = settingsLayerRef.current;
+    const slot = (name: string) => layer?.querySelector(`[data-enso="${name}"]`) ?? null;
+    const result = viewTransition.run(settingsOpen ? 'settings' : 'workbench', {
+      workbench: {
+        sidebar: isMobile ? null : workbenchSidebarRef.current,
+        main: botModeActive ? workbenchRef.current : workspaceRef.current,
+      },
+      settings: isMobile
+        ? { sidebar: layer, main: null }
+        : { sidebar: slot('settings-nav'), main: slot('settings-content') },
+    });
+    setViewMotion(result.animating ? { top: result.top } : null);
+  }, [settingsOpen, shownOpen, viewTransition, isMobile, botModeActive]);
+  useEffect(() => () => viewTransition.finish(), [viewTransition]);
+  const settingsMounted = settingsOpen || shownOpen || viewMotion !== null;
+  const workbenchHidden = settingsOpen && shownOpen && viewMotion === null;
+  useLayoutEffect(() => setWorkbenchCovered(settingsMounted), [settingsMounted]);
+  useEffect(() => {
+    if (settingsOpen) setDrawerOpen(false);
+  }, [settingsOpen]);
+  // 主进程推来的深链（enso://install-plugin 等）：挂载时拉一次，之后每次推送再拉
+  useEffect(() => {
+    void window.electronAPI.window.consumeSettingsDeepLink().then((link) => {
+      if (link) openSettings(link);
+    });
+    return window.electronAPI.window.onSettingsDeepLink(() => {
+      void window.electronAPI.window.consumeSettingsDeepLink().then(openSettings);
+    });
+  }, []);
+  // 浏览器版（/desk）：设置层级同步到历史，后退 / 手势返回先退出设置，不离开页面
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
+  useEffect(() => {
+    if (!window.electronAPI.remote) return;
+    return bindSettingsHistory(window, {
+      depth: () => settingsHistoryDepth(useAppViewStore.getState(), isMobileRef.current),
+      apply: (depth) => {
+        if (depth === 0) {
+          closeSettings();
+          return;
+        }
+        openSettings();
+        setSettingsMobileDetail(depth === 2);
+      },
+      subscribe: (listener) => useAppViewStore.subscribe(listener),
+    });
+  }, []);
+  const settingsLayer = settingsMounted ? (
+    <div
+      ref={settingsLayerRef}
+      data-enso="settings-view"
+      inert={!settingsOpen}
+      className={cn(
+        'absolute inset-0 flex',
+        isMobile && 'bg-background',
+        viewMotion?.top === 'workbench' ? 'z-0' : 'z-[2]'
+      )}
+    >
+      <SettingsView navWidth={width} open={settingsOpen} />
+    </div>
+  ) : null;
 
   const chromeKind = useWindowChromeKind();
   // Bot 视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
@@ -479,6 +576,7 @@ export default function App() {
   // Bot 模式开启时顶栏居中是 Bot 切换器，标签会与之重叠，整体让位
   const headerSessionTabs =
     headerSessionTabsEnabled &&
+    !settingsOpen &&
     desktopShell &&
     !botModeEnabled &&
     !(sideInTitleRow && sideFullscreen) ? (
@@ -548,7 +646,8 @@ export default function App() {
                 <button
                   type="button"
                   data-enso="sidebar-toggle"
-                  className={TOOLBAR_BUTTON}
+                  className={cn(TOOLBAR_BUTTON, settingsOpen && 'pointer-events-none opacity-40')}
+                  disabled={settingsOpen}
                   onClick={toggleSidebar}
                   title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
                 >
@@ -559,7 +658,7 @@ export default function App() {
                   )}
                 </button>
               </div>
-              {desktopShell && (
+              {desktopShell && !settingsOpen && (
                 <>
                   <button
                     type="button"
@@ -594,7 +693,15 @@ export default function App() {
             // 右侧面板开关与面板 tab 条右端（面板 8px 外边距 + 8px 内边距）对齐
             desktopShell && chromeKind === 'mac' && 'pr-4'
           )}
-          actions={desktopShell ? (sideInTitleRow ? undefined : sideToggle) : panelActions}
+          actions={
+            settingsOpen
+              ? undefined
+              : desktopShell
+                ? sideInTitleRow
+                  ? undefined
+                  : sideToggle
+                : panelActions
+          }
         />
       ) : (
         <TitleBar
@@ -625,125 +732,138 @@ export default function App() {
       {!desktopShell && <RestartWaitStrip />}
       {!desktopShell && <UpdateBanner />}
       {!desktopShell && <ZoomBanner />}
-      <div className="flex min-h-0 flex-1">
-        {botModeActive ? (
-          // Bot 模式：成员/群聊侧栏 + 聊天区；Code 侧栏/会话/右侧面板卸载
-          <BotView
-            sidebarWidth={width}
-            collapsed={collapsed}
-            onToggleCollapse={toggleSidebar}
-            onResize={handleResize}
-          />
-        ) : (
-          <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
-            {isMobile ? (
-              <>
-                <AnimatePresence>
-                  {drawerOpen && (
-                    <motion.div
-                      key="drawer-backdrop"
-                      className="fixed inset-0 bg-black/40"
-                      style={{ zIndex: Z_INDEX.MOBILE_DRAWER }}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      onClick={closeDrawer}
+      <div className="relative flex min-h-0 flex-1">
+        <div
+          ref={workbenchRef}
+          data-enso="workbench"
+          inert={workbenchHidden}
+          className={cn(
+            'flex min-h-0 min-w-0 flex-1',
+            workbenchHidden && 'invisible',
+            viewMotion?.top === 'workbench' && 'z-[1]'
+          )}
+        >
+          {botModeActive ? (
+            // Bot 模式：成员/群聊侧栏 + 聊天区；Code 侧栏/会话/右侧面板卸载
+            <BotView
+              sidebarWidth={width}
+              collapsed={collapsed}
+              onToggleCollapse={toggleSidebar}
+              onResize={handleResize}
+            />
+          ) : (
+            <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
+              {isMobile ? (
+                <>
+                  <AnimatePresence>
+                    {drawerOpen && (
+                      <motion.div
+                        key="drawer-backdrop"
+                        className="fixed inset-0 bg-black/40"
+                        style={{ zIndex: Z_INDEX.MOBILE_DRAWER }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={closeDrawer}
+                      />
+                    )}
+                  </AnimatePresence>
+                  <motion.div
+                    className="fixed inset-y-0 left-0 flex bg-background shadow-xl"
+                    style={{ zIndex: Z_INDEX.MOBILE_DRAWER }}
+                    initial={false}
+                    animate={{ x: drawerOpen ? 0 : '-105%' }}
+                    transition={springStandard}
+                    inert={!drawerOpen}
+                  >
+                    <Sidebar
+                      width={Math.min(320, Math.round(viewportWidth * 0.85))}
+                      collapsed={false}
+                      onToggleCollapse={closeDrawer}
+                      onOpenSearch={() => setSearchOpen(true)}
+                      onNavigate={closeDrawer}
                     />
-                  )}
-                </AnimatePresence>
-                <motion.div
-                  className="fixed inset-y-0 left-0 flex bg-background shadow-xl"
-                  style={{ zIndex: Z_INDEX.MOBILE_DRAWER }}
-                  initial={false}
-                  animate={{ x: drawerOpen ? 0 : '-105%' }}
-                  transition={springStandard}
-                  inert={!drawerOpen}
-                >
+                  </motion.div>
+                </>
+              ) : (
+                <div ref={workbenchSidebarRef} className="flex min-h-0 shrink-0">
                   <Sidebar
-                    width={Math.min(320, Math.round(viewportWidth * 0.85))}
-                    collapsed={false}
-                    onToggleCollapse={closeDrawer}
+                    width={collapsed ? undefined : width}
+                    collapsed={collapsed}
+                    onToggleCollapse={toggleSidebar}
                     onOpenSearch={() => setSearchOpen(true)}
-                    onNavigate={closeDrawer}
                   />
-                </motion.div>
-              </>
-            ) : (
-              <>
-                <Sidebar
-                  width={collapsed ? undefined : width}
-                  collapsed={collapsed}
-                  onToggleCollapse={toggleSidebar}
-                  onOpenSearch={() => setSearchOpen(true)}
-                />
-                {!collapsed && <ResizeHandle edge={desktopShell} onResize={handleResize} />}
-              </>
-            )}
-            <div
-              ref={workspaceRef}
-              className={cn(
-                'relative flex min-h-0 min-w-0 flex-1',
-                // mac 右侧面板要向上伸进顶栏行：只裁横向
-                titleRowPanel ? 'overflow-x-clip' : 'overflow-hidden',
-                // 卡片 1px 描边画在盒外，左/上各让出 1px 才不被裁掉；overflow-clip-margin 对单轴 clip 和 hidden 都不生效
-                desktopShell && '-mt-px -ml-px pt-px pr-[8px] pb-[8px] pl-px'
+                  {!collapsed && <ResizeHandle edge={desktopShell} onResize={handleResize} />}
+                </div>
               )}
-            >
               <div
-                data-enso="main"
+                ref={workspaceRef}
                 className={cn(
-                  'relative flex min-h-0 min-w-0 flex-1 flex-col bg-background',
-                  desktopShell && 'overflow-hidden rounded-[10px] shadow-surface',
-                  // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
-                  sideInTitleRow && 'rounded-r-none'
+                  'relative flex min-h-0 min-w-0 flex-1',
+                  // mac 右侧面板要向上伸进顶栏行：只裁横向
+                  titleRowPanel ? 'overflow-x-clip' : 'overflow-hidden',
+                  // 卡片 1px 描边画在盒外，左/上各让出 1px 才不被裁掉；overflow-clip-margin 对单轴 clip 和 hidden 都不生效
+                  desktopShell && '-mt-px -ml-px pt-px pr-[8px] pb-[8px] pl-px'
                 )}
-                // 全屏面板开壁纸时是半透明的，铺开后把被盖住的对话藏掉，否则会透上来
-                style={
-                  sideOpen && sideFullscreen
-                    ? {
-                        visibility: 'hidden',
-                        transition: `visibility 0s ${easeOutLayout.duration}s`,
-                      }
-                    : undefined
-                }
               >
-                <PluginUiHost />
-                {/* 秘书引导是独占页：透明背景下面板色 alpha 为 0，背后的空会话必须停止绘制 */}
-                <ChatAreaFrame
-                  hidden={(secretaryEnabled && secretaryWelcomeOpen) || backgroundTasksOpen}
+                <div
+                  data-enso="main"
+                  className={cn(
+                    'relative flex min-h-0 min-w-0 flex-1 flex-col bg-background',
+                    desktopShell && 'overflow-hidden rounded-[10px] shadow-surface',
+                    // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
+                    sideInTitleRow && 'rounded-r-none'
+                  )}
+                  // 全屏面板开壁纸时是半透明的，铺开后把被盖住的对话藏掉，否则会透上来
+                  style={
+                    sideOpen && sideFullscreen
+                      ? {
+                          visibility: 'hidden',
+                          transition: `visibility 0s ${easeOutLayout.duration}s`,
+                        }
+                      : undefined
+                  }
                 >
-                  <ShellChromeContext.Provider value={shellChrome}>
-                    <ChatView />
-                  </ShellChromeContext.Provider>
-                </ChatAreaFrame>
-                {desktopShell && <RestartWaitStrip />}
-                {desktopShell && <UpdateBanner />}
-                {desktopShell && <ZoomBanner />}
-                {/* 初次设置只盖聊天区；远端浏览器（PWA 完整模式）同样走这条路径 */}
-                {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
-                {backgroundTasksOpen && <BackgroundTasksPage />}
+                  <PluginUiHost />
+                  {/* 秘书引导是独占页：透明背景下面板色 alpha 为 0，背后的空会话必须停止绘制 */}
+                  <ChatAreaFrame
+                    hidden={(secretaryEnabled && secretaryWelcomeOpen) || backgroundTasksOpen}
+                  >
+                    <ShellChromeContext.Provider value={shellChrome}>
+                      <ChatView />
+                    </ShellChromeContext.Provider>
+                  </ChatAreaFrame>
+                  {desktopShell && <RestartWaitStrip />}
+                  {desktopShell && <UpdateBanner />}
+                  {desktopShell && <ZoomBanner />}
+                  {/* 初次设置只盖聊天区；远端浏览器（PWA 完整模式）同样走这条路径 */}
+                  {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
+                  {backgroundTasksOpen && <BackgroundTasksPage />}
+                </div>
+                {/* 收起时也常驻：条件挂载会让开合首帧聊天区先跳一次宽度。gap 按外壳形态取，不随开合变 */}
+                {!sideFullscreen && !isMobile && (
+                  <ResizeHandle
+                    gap={desktopShell && !titleRowPanel}
+                    inactive={!sideOpen}
+                    onResize={handleSideResize}
+                    onResizingChange={setSideResizing}
+                  />
+                )}
+                <Suspense fallback={null}>
+                  <SidePanel
+                    width={sideWidth}
+                    resizing={sideResizing}
+                    card={desktopShell}
+                    titleRow={titleRowPanel}
+                  />
+                </Suspense>
               </div>
-              {/* 收起时也常驻：条件挂载会让开合首帧聊天区先跳一次宽度。gap 按外壳形态取，不随开合变 */}
-              {!sideFullscreen && !isMobile && (
-                <ResizeHandle
-                  gap={desktopShell && !titleRowPanel}
-                  inactive={!sideOpen}
-                  onResize={handleSideResize}
-                  onResizingChange={setSideResizing}
-                />
-              )}
-              <Suspense fallback={null}>
-                <SidePanel
-                  width={sideWidth}
-                  resizing={sideResizing}
-                  card={desktopShell}
-                  titleRow={titleRowPanel}
-                />
-              </Suspense>
-            </div>
-          </DndContext>
-        )}
+            </DndContext>
+          )}
+        </div>
+        {!isMobile && settingsLayer}
       </div>
+      {isMobile && settingsLayer}
       {settingsHydrated && !onboarded && !window.electronAPI.remote && <Onboarding />}
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
       <SessionPeekDialog />

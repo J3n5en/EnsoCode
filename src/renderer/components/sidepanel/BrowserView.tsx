@@ -11,6 +11,7 @@ import { useI18n } from '@/i18n';
 import { syncOverlayGuard } from '@/lib/overlayGuard';
 import { resolveSidePanelDockConversationId } from '@/lib/sidePanelDockId';
 import { cn } from '@/lib/utils';
+import { useWorkbenchCovered } from '@/stores/appView';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelShown, useSidePanelStore } from '@/stores/sidePanel';
 import {
@@ -122,7 +123,9 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   );
   const sidebarOpen = useSidePanelShown(dockConversationId);
   const isActiveConversation = useSessionsStore((s) => s.activeId === dockConversationId);
-  const hostVisible = active ?? (sidebarOpen && isActiveConversation);
+  // 设置页盖住工作区（含进出动画）时原生视图要让开，否则会叠在设置页上
+  const workbenchCovered = useWorkbenchCovered();
+  const hostVisible = (active ?? (sidebarOpen && isActiveConversation)) && !workbenchCovered;
   // 标注快捷键：Bot 面板由宿主传 active。Code 侧栏按可见优先，多个可见浏览器才用分组是否激活区分
   const browserHotkeys = usePanelHotkeyTarget('browser', active === undefined);
   const hotkeysActive = active ?? browserHotkeys;

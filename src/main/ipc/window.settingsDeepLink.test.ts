@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  settingsWindow: null as { isDestroyed: () => boolean } | null,
-  sent: [] as Array<{ channel: string; args: unknown[] }>,
+  mainWindow: { id: 'main' },
+  openSettingsWindow: vi.fn(),
+  focusMainWindow: vi.fn(),
+  sent: [] as Array<{ win: unknown; channel: string; args: unknown[] }>,
 }));
 
 vi.mock('electron', () => ({
@@ -17,19 +19,18 @@ vi.mock('electron', () => ({
   },
 }));
 vi.mock('../windows/SettingsWindow', () => ({
-  getSettingsWindow: () => mocks.settingsWindow,
-  openSettingsWindow: () => {
-    mocks.settingsWindow ??= { isDestroyed: () => false };
-    return mocks.settingsWindow;
-  },
+  getSettingsWindow: () => null,
+  openSettingsWindow: mocks.openSettingsWindow,
 }));
 vi.mock('../windows/createAppWindow', () => ({
   getWindowWebContents: vi.fn(),
-  sendToWindow: (_win: unknown, channel: string, ...args: unknown[]) =>
-    mocks.sent.push({ channel, args }),
+  sendToWindow: (win: unknown, channel: string, ...args: unknown[]) =>
+    mocks.sent.push({ win, channel, args }),
   TRAFFIC_LIGHT_POSITION: { x: 0, y: 0 },
 }));
-vi.mock('../windows/MainWindow', () => ({ focusMainWindow: vi.fn() }));
+vi.mock('../windows/MainWindow', () => ({
+  focusMainWindow: mocks.focusMainWindow.mockImplementation(() => mocks.mainWindow),
+}));
 vi.mock('../windows/dragRegionRefresh', () => ({ shouldRefreshDragRegions: vi.fn() }));
 vi.mock('../desktop/shellCommand', () => ({
   readShellIntegrationStatusSync: vi.fn(),
@@ -39,46 +40,55 @@ vi.mock('../services/appMenu', () => ({ installAppMenu: vi.fn() }));
 vi.mock('../services/nodeRemote', () => ({ sendToNodeViews: vi.fn() }));
 vi.mock('./settings', () => ({ readLocale: () => 'zh' }));
 
-const { registerWindowHandlers } = await import('./window');
+const { openPluginInstallFromProtocol, registerWindowHandlers } = await import('./window');
 registerWindowHandlers();
 
 const openSettings = (link?: unknown) =>
   mocks.handlers.get(IPC_CHANNELS.WINDOW_OPEN_SETTINGS)?.({}, link);
-/** 设置页挂载时拉取的深链 */
-const consumeOnMount = () => mocks.handlers.get(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME)?.();
-/** 已挂载的设置页收到的深链 */
-const liveLinks = () =>
-  mocks.sent.filter((m) => m.channel === IPC_CHANNELS.SETTINGS_DEEP_LINK).map((m) => m.args[0]);
-const closeSettingsWindow = () => {
-  mocks.settingsWindow = null;
-};
+/** 主窗口渲染层拉取暂存的深链（挂载时，或收到推送后） */
+const consume = () => mocks.handlers.get(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME)?.();
+const pushes = () => mocks.sent.filter((m) => m.channel === IPC_CHANNELS.SETTINGS_DEEP_LINK);
 
 beforeEach(() => {
-  closeSettingsWindow();
-  consumeOnMount();
+  consume();
   mocks.sent.length = 0;
+  mocks.focusMainWindow.mockClear();
+  mocks.openSettingsWindow.mockClear();
 });
 
-describe('设置窗口深链', () => {
-  it('窗口未打开：新窗口挂载时拿到日志页深链', () => {
+describe('设置深链投到主窗口的内嵌设置页', () => {
+  it('不再打开独立设置窗口：聚焦主窗口并推送', () => {
     openSettings({ category: 'logs' });
-    expect(consumeOnMount()).toMatchObject({ category: 'logs' });
-    expect(consumeOnMount()).toBeNull();
+    expect(mocks.openSettingsWindow).not.toHaveBeenCalled();
+    expect(mocks.focusMainWindow).toHaveBeenCalledTimes(1);
+    expect(pushes()).toEqual([
+      {
+        win: mocks.mainWindow,
+        channel: IPC_CHANNELS.SETTINGS_DEEP_LINK,
+        args: [expect.objectContaining({ category: 'logs' })],
+      },
+    ]);
   });
 
-  it('窗口已打开（停在通用页）：深链直接推给已挂载的页面', () => {
-    openSettings();
-    consumeOnMount();
+  it('主窗口渲染层还没挂上（推送丢了）：挂载时拉到日志页深链，只拉一次', () => {
     openSettings({ category: 'logs' });
-    expect(liveLinks()).toEqual([expect.objectContaining({ category: 'logs' })]);
+    expect(consume()).toMatchObject({ category: 'logs', rowId: 'logs.root' });
+    expect(consume()).toBeNull();
   });
 
-  it('已打开时推送过的深链不留到下一次新开窗口', () => {
-    openSettings();
-    consumeOnMount();
-    openSettings({ category: 'logs', rowId: 'logs.root' });
-    closeSettingsWindow();
-    openSettings();
-    expect(consumeOnMount()).toBeNull();
+  it('enso://install-plugin 落到插件页并带上安装地址', () => {
+    openPluginInstallFromProtocol('https://example.com/p.zip');
+    expect(consume()).toEqual({
+      category: 'plugins',
+      rowId: 'plugins.enso',
+      pluginInstallUrl: 'https://example.com/p.zip',
+    });
+  });
+
+  it('不带链接或链接非法：仍进设置，不残留上一条深链', () => {
+    openSettings({ category: 'logs' });
+    openSettings({ category: 'nope' });
+    expect(pushes()).toHaveLength(2);
+    expect(consume()).toBeNull();
   });
 });

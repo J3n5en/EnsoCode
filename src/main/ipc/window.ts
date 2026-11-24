@@ -14,7 +14,6 @@ import {
 } from '../windows/createAppWindow';
 import { shouldRefreshDragRegions } from '../windows/dragRegionRefresh';
 import { focusMainWindow } from '../windows/MainWindow';
-import { getSettingsWindow, openSettingsWindow } from '../windows/SettingsWindow';
 import { parseOpenSettingsRequest } from './searchAnything';
 import { readLocale } from './settings';
 
@@ -33,12 +32,13 @@ export function notifyOpenFolderRequested(): void {
   sendToWindow(focusMainWindow(), IPC_CHANNELS.WINDOW_OPEN_FOLDER_REQUESTED);
 }
 
+/**
+ * 设置在主窗口里原地打开。链接先暂存再推送：已挂载的渲染层收到推送后来拉取，
+ * 新建或还没挂上的渲染层挂载时拉取；两条路取的是同一份，只会生效一次。
+ */
 function openSettingsDeepLink(link: ReturnType<typeof parseOpenSettingsRequest>): void {
-  const existing = getSettingsWindow();
-  const win = openSettingsWindow();
-  // 已挂载的设置页只收推送；新窗口挂载时再拉取，推送此时会丢
-  if (win !== existing) pendingDeepLink = link;
-  else if (link) sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
+  pendingDeepLink = link;
+  sendToWindow(focusMainWindow(), IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
 }
 
 /**

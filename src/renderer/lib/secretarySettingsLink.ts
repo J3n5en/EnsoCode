@@ -1,3 +1,5 @@
+import { openSettings } from '@/stores/appView';
+
 /** 设置页正在编辑的秘书：设置窗口与主窗口同源，靠它（和 storage 事件）对上同一个秘书 */
 export const SETTINGS_SECRETARY_KEY = 'enso-settings-secretary';
 
@@ -10,5 +12,5 @@ export function openSecretarySettings(secretaryId?: string): void {
       // 存不下时设置页停在上次选的秘书，页面里还能手动切
     }
   }
-  void window.electronAPI.window.openSettings({ category: 'secretary', rowId: 'secretary.root' });
+  openSettings({ category: 'secretary', rowId: 'secretary.root' });
 }

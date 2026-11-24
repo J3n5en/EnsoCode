@@ -1,3 +1,4 @@
+import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import { X } from 'lucide-react';
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -19,9 +20,23 @@ import './styles/globals.css';
 installThemeStyles();
 installScrollbarActivity();
 
+/** 独立设置窗口（PR4 删除）：挂载先拉取暂存的深链，之后收推送 */
+function useStandaloneDeepLink(): { link: SettingsDeepLink | null; linkSeq: number } {
+  const [state, setState] = React.useState({ link: null as SettingsDeepLink | null, linkSeq: 0 });
+  React.useEffect(() => {
+    const apply = (link: SettingsDeepLink | null) => {
+      if (link) setState((prev) => ({ link, linkSeq: prev.linkSeq + 1 }));
+    };
+    void window.electronAPI.window.consumeSettingsDeepLink().then(apply);
+    return window.electronAPI.window.onSettingsDeepLink(apply);
+  }, []);
+  return state;
+}
+
 function SettingsApp() {
   const { t } = useI18n();
   const chromeKind = useWindowChromeKind();
+  const { link, linkSeq } = useStandaloneDeepLink();
 
   // 远程浏览器里设置是叠加层，需要整行 TitleBar 上的关闭按钮
   if (chromeKind !== 'mobile' && chromeKind !== 'web') {
@@ -31,7 +46,7 @@ function SettingsApp() {
         <ShellChromeContext.Provider
           value={{ trailing: <WindowControls kind={chromeKind} edgeGap={8} /> }}
         >
-          <SettingsContent />
+          <SettingsContent link={link} linkSeq={linkSeq} />
         </ShellChromeContext.Provider>
         <ToastProvider />
         <PluginNotices />
@@ -60,7 +75,7 @@ function SettingsApp() {
         }
       />
       <main className="min-h-0 flex-1 overflow-hidden">
-        <SettingsContent />
+        <SettingsContent link={link} linkSeq={linkSeq} />
       </main>
       <ToastProvider />
       <PluginNotices />

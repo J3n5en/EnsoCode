@@ -31,6 +31,7 @@ import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { PluginIcon } from '@/plugins/PluginIcon';
 import { PluginFrame } from '@/plugins/PluginView';
+import { openSettings } from '@/stores/appView';
 import { SecretaryContactGroupRow } from './SecretaryContactGroupRow';
 import {
   privateChatOwner,
@@ -1230,7 +1231,7 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
             data-enso="secretary-contact-market"
             className={cn(BUTTON_CLASS, 'self-start')}
             onClick={() =>
-              void window.electronAPI.window.openSettings({
+              openSettings({
                 category: 'plugins',
                 rowId: 'plugins.enso',
                 marketQuery: 'contact',
