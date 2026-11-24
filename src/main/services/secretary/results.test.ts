@@ -1791,6 +1791,20 @@ describe('needsUser 先经秘书筛选', () => {
     ]);
   });
 
+  it('秘书功能关着：不等 30 分钟，立即进「需要你」', () => {
+    const board = buildBoard(emptyFile({ dispatched: { need: need() } }), {
+      rows: { need: { title: '需用户确认', sessionFile: '/s/need.jsonl' }, s1: sec },
+      statuses: { need: idle },
+      projects: [],
+      todos: [],
+      now: NOW,
+      secretaryEnabled: false,
+    });
+    expect(ids(board.needsYou)).toEqual(['need']);
+    expect(board.needsYou[0]).toMatchObject({ needsUser: ['删临时文件', '在 Mac 上点确认'] });
+    expect(board.needsYou[0]).not.toHaveProperty('triage');
+  });
+
   it('goal-blocked 的 needsUser、实时审批与提问不经筛选，照旧直接进「需要你」', () => {
     const blocked = boardOf({
       need: need({ lastResult: { kind: 'goal-blocked', turn: 1, at } }),

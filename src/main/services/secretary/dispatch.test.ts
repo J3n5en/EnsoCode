@@ -5181,4 +5181,26 @@ describe('needs_user_escalate：秘书筛选后把 needsUser 升级给用户', (
       await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '清理', NOW)
     ).toEqual({ ok: true, cleared: true });
   });
+
+  it('秘书功能关着：条目全都直接给用户，只答一条不收口', async () => {
+    const h = withNeeds(['删临时文件', '是否清理孤儿进程']);
+    h.ports.secretaryEnabled = () => false;
+    expect(
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '清理', NOW)
+    ).toEqual({ ok: true, cleared: false });
+  });
+
+  it('带关联提问的升级没落上时记一笔失败审计', () => {
+    const h = withNeeds(['删临时文件']);
+    h.file.dispatched.c1.lastResult = { kind: 'goal-blocked', turn: 1, at: NOW - 10_000 };
+    expect(
+      escalateNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 0 }, '要删吗？', 'ask')
+    ).toEqual({ ok: false, error: 'nothing-pending' });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'needs_user_escalate',
+      targetId: 'c1',
+      ok: false,
+      detail: 'ask: nothing-pending',
+    });
+  });
 });

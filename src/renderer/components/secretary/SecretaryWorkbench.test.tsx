@@ -222,6 +222,25 @@ describe('SecretaryWorkbench 结果卡', () => {
     expect(stats?.textContent).toContain('0');
   });
 
+  it('等审批的会话进「需要你」只因审批；它完成结果里的 needsUser 仍算在「秘书处理中」', async () => {
+    h.board = board([
+      sessionCard({
+        state: 'waiting',
+        result: 'goal-complete',
+        triage: true,
+        needsUser: ['删临时文件'],
+      }),
+    ]);
+    await render(<SecretaryWorkbench name="小安" />);
+    const needs = container.querySelector('[data-enso="secretary-needs-you"]');
+    expect(needs?.querySelectorAll('[data-enso="secretary-card"]')).toHaveLength(1);
+    expect(needs?.textContent).toContain('[Waiting for you]');
+    expect(needs?.textContent).not.toContain('[Done · with secretary]');
+    expect(needs?.querySelector('[data-enso="secretary-card-needs-user-item"]')).toBeNull();
+    const toggle = container.querySelector('[data-enso="secretary-triage-toggle"]');
+    expect(toggle?.textContent).toContain('· 1');
+  });
+
   it('「打开会话」跳过去后，目标会话给返回秘书', async () => {
     h.board = board([sessionCard({ result: 'failed' })]);
     await render(<SecretaryWorkbench name="小安" />);

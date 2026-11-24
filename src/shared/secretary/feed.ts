@@ -48,6 +48,8 @@ type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
 /** 目标已完成但结构化结果里仍有要用户本人处理的事（决定或动手分不清，用中性说法） */
 export const DONE_NEEDS_USER_LABEL = 'Done · needs you';
+/** 完成结果里的 needsUser 还在等秘书筛选：不对用户说「需要你」 */
+export const DONE_WITH_SECRETARY_LABEL = 'Done · with secretary';
 
 const RESULT_FEED: Record<SecretaryResultKind, Feed> = {
   'goal-complete': { tone: 'ok', label: 'Goal complete' },
@@ -73,6 +75,8 @@ function settledKind(card: SessionCard): SecretaryResultKind | undefined {
   if (card.pendingReminder && card.state !== 'running') return undefined;
   if (card.continuing) return undefined;
   if (!card.result || card.state === 'running') return undefined;
+  // 完成后又在等审批或提问：此刻要用户处理的是这次等待，不是上一轮的完成
+  if (card.state === 'waiting' && card.result === 'goal-complete') return 'needs-user';
   return card.result;
 }
 
@@ -81,16 +85,22 @@ function settledKind(card: SessionCard): SecretaryResultKind | undefined {
  * 都没有时返回 undefined，调用方保持原来的标签和正文。
  */
 function goalCompleteFeed(
-  facts: { needsUser?: readonly string[]; summary?: string },
+  facts: { needsUser?: readonly string[]; summary?: string; triage?: boolean },
   base: Feed
 ): { feed: Feed; detail: string } | undefined {
+  const summary = facts.summary?.trim();
+  if (facts.triage) {
+    return {
+      feed: { tone: 'ok', label: DONE_WITH_SECRETARY_LABEL },
+      detail: summary ?? '',
+    };
+  }
   const needs = (facts.needsUser ?? [])
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
   if (needs.length > 0) {
     return { feed: { tone: 'ok', label: DONE_NEEDS_USER_LABEL }, detail: needs.join('；') };
   }
-  const summary = facts.summary?.trim();
   if (summary) return { feed: base, detail: summary };
   return undefined;
 }
@@ -114,8 +124,10 @@ function sessionEvent(card: SessionCard): FeedEvent {
   const kind = settledKind(card);
   const overlay = kind === 'goal-complete' ? goalCompleteFeed(card, RESULT_FEED[kind]) : undefined;
   const detail =
-    overlay?.detail ??
-    (card.needsUser && card.needsUser.length > 0 ? card.needsUser.join('；') : card.lastText);
+    overlay?.detail ||
+    (card.needsUser && card.needsUser.length > 0 && !card.triage
+      ? card.needsUser.join('；')
+      : card.lastText);
   return {
     id: `session:${card.conversationId}`,
     at: feed.at,
@@ -172,17 +184,26 @@ function activityEvent(entry: SecretaryActivity, card: SessionCard | undefined):
     card !== undefined && card.result === entry.kind && card.resultAt === entry.at
       ? card
       : undefined;
+  // 之后被秘书或答复收口（手动完成）：当时的 needsUser 已处理，按普通完成显示
+  const settledLater =
+    card !== undefined && card.manual === true && (card.resultAt ?? 0) > entry.at;
+  const current = sameResult?.needsUser && sameResult.needsUser.length > 0 ? sameResult : undefined;
   const overlay =
     entry.kind === 'goal-complete'
       ? goalCompleteFeed(
           {
-            needsUser: entry.needsUser ?? sameResult?.needsUser,
+            needsUser: settledLater
+              ? undefined
+              : current && !current.triage
+                ? current.needsUser
+                : (entry.needsUser ?? sameResult?.needsUser),
             summary: entry.summary ?? sameResult?.summary,
+            triage: sameResult?.triage === true,
           },
           base
         )
       : undefined;
-  const detail = overlay?.detail ?? entry.text;
+  const detail = overlay?.detail || entry.text;
   return {
     id: `activity:${entry.conversationId}:${entry.at}:${entry.kind}`,
     at: entry.at,

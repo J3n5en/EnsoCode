@@ -208,6 +208,8 @@ export interface SecretaryDispatchPorts {
   projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
+  /** 秘书功能开关：关着时 needsUser 不等筛选；缺省按开着 */
+  secretaryEnabled?(): MaybePromise<boolean>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
   /** 主会话自身状态（不含子代理运行态）：自身空闲时直接 prompt，不必排队干等子代理结束 */
   ownStatus?(conversationId: string): MaybePromise<SecretarySessionStatus>;
@@ -3065,12 +3067,24 @@ export function escalateNeedsUser(
   const { conversationId, needsUserIndex } = link;
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
-  if (!record) return { ok: false, error: 'not-found' };
+  // 秘书工具的失败由 handler 记审计；带关联提问的由宿主触发，在这里记
+  const refuse = (error: string): { ok: false; error: string } => {
+    if (via === 'ask')
+      ports.audit({
+        at: ports.now(),
+        secretaryConversationId: record?.secretaryConversationId ?? null,
+        op: 'needs_user_escalate',
+        targetId: conversationId,
+        ok: false,
+        detail: `ask: ${error}`,
+      });
+    return { ok: false, error };
+  };
+  if (!record) return refuse('not-found');
   const view = pendingNeedsUser(record);
-  if (!view) return { ok: false, error: 'nothing-pending' };
+  if (!view) return refuse('nothing-pending');
   const count = needsUserItems(view).length;
-  if (needsUserIndex !== undefined && needsUserIndex >= count)
-    return { ok: false, error: 'bad-index' };
+  if (needsUserIndex !== undefined && needsUserIndex >= count) return refuse('bad-index');
   const now = ports.now();
   const rewritten = text ? redactSecrets(text.trim()).slice(0, ESCALATE_TEXT_MAX_CHARS) : '';
   record.goalResult = escalateGoalResultNeedsUser(
@@ -3135,7 +3149,11 @@ export async function answerNeedsUser(
   });
   const shown = shownNeedsUser(
     record.goalResult,
-    secretaryLiveIn(rows, record.secretaryConversationId),
+    secretaryLiveIn(
+      rows,
+      record.secretaryConversationId,
+      (await ports.secretaryEnabled?.()) ?? true
+    ),
     now
   );
   if (shown.answers.length < shown.items.length) {
@@ -3327,6 +3345,8 @@ export interface SecretaryStatePorts {
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
   threads?(): MaybePromise<readonly SecretaryDemandThreadView[]>;
+  /** 秘书功能开关；缺省按开着 */
+  secretaryEnabled?(): MaybePromise<boolean>;
 }
 
 export async function buildSecretaryState(
@@ -3396,6 +3416,7 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
       aliases,
       todos: await ports.todos(),
       threads: (await ports.threads?.()) ?? [],
+      secretaryEnabled: (await ports.secretaryEnabled?.()) ?? true,
     }),
   };
 }
@@ -3410,6 +3431,7 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
   return {
     secretaryId: ctx.id,
     secretaryProjectId: () => ctx.projectId,
+    secretaryEnabled: async () => (await import('./enabled')).secretaryEnabled(),
     managedElsewhere: async (conversationId) =>
       (await import('./crossSecretary')).managedElsewhere(ctx.id, conversationId),
     runningTotal: async () => (await import('./crossSecretary')).runningTotal(),
