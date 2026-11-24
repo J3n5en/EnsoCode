@@ -61,6 +61,10 @@ beforeEach(() => {
     ].join('\n')
   );
   write('agent/compaction.log', 'stale only\n', hoursAgo(48));
+  write(
+    'agent/worker-aborts.log',
+    `[${new Date(hoursAgo(0.4)).toISOString()}] pid=102 origin=uncaughtException AbortError: The operation was aborted\n`
+  );
 });
 
 afterEach(() => {
@@ -130,6 +134,7 @@ describe('exportLogs', () => {
     expect(exits).toContain('stack line');
     expect(exits).not.toContain('hunter2');
     expect(() => read('agent/compaction.log')).toThrow();
+    expect(read('agent/worker-aborts.log')).toContain('pid=102 origin=uncaughtException');
     expect(JSON.parse(read('export-info.json'))).toMatchObject({ hours: 24 });
   });
 });

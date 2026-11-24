@@ -24,7 +24,11 @@ export const APP_LOG_DIR = 'agent/logs';
 const PLUGIN_LOG_DIR = 'extension-plugins/logs';
 const WORKER_EXIT_LOG = 'agent/worker-exits.log';
 /** 只导出、不进汇总的旧式日志 */
-const EXTRA_EXPORT_LOGS = ['agent/compaction.log', 'agent/interrupted-turns.log'];
+const EXTRA_EXPORT_LOGS = [
+  'agent/compaction.log',
+  'agent/interrupted-turns.log',
+  'agent/worker-aborts.log',
+];
 const SUMMARY_TAIL_BYTES = 512 * 1024;
 export const ERROR_SUMMARY_LIMIT = 50;
 
