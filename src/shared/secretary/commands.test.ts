@@ -179,7 +179,15 @@ describe('/board', () => {
   const daily: SecretaryDaily = {
     day: '2026-05-20',
     today: true,
-    counts: { dispatched: 3, completed: 2, failed: 1, needsYou: 1, todosDone: 0, merged: 0 },
+    counts: {
+      dispatched: 3,
+      completed: 2,
+      completedEarlier: 0,
+      failed: 1,
+      needsYou: 1,
+      todosDone: 0,
+      merged: 0,
+    },
     groups: [
       {
         key: 'done',
@@ -199,6 +207,16 @@ describe('/board', () => {
     expect(text).toContain('<b>完成 2</b>');
     expect(text).toContain('enso://secretary?conversation=c1');
     expect(text).toContain('▸ 写文档');
+  });
+
+  it('完成里有之前派出或接手的，统计行注明，不和派出数矛盾', () => {
+    const mixed = { ...daily, counts: { ...daily.counts, completedEarlier: 1 } };
+    expect(formatBoardMessage('zh', mixed)).toContain(
+      '派出 3 · 完成 2（含之前派出或接手的 1）· 失败 1 · 需要你 1'
+    );
+    expect(formatBoardMessage('en', mixed)).toContain(
+      'dispatched 3 · done 2 (1 earlier or taken over) · failed 1 · needs you 1'
+    );
   });
 
   it('一列太长就截断并说明还有几条', () => {

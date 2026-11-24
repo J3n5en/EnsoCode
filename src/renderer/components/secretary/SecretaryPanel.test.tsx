@@ -280,6 +280,43 @@ describe('SecretaryPanel', () => {
     );
   });
 
+  it('今日战报：之前派出或接手的完成另起一句，不混进今天派出的完成数', async () => {
+    h.board = h.secretary.board = board({
+      done: [
+        sessionCard('today', { state: 'idle', result: 'goal-complete', resultAt: NOW - 30_000 }),
+        sessionCard('old', {
+          state: 'idle',
+          startedAt: NOW - 86_400_000,
+          result: 'goal-complete',
+          resultAt: NOW - 20_000,
+        }),
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    expect(text('[data-enso="secretary-workbench"]')).toContain(
+      'Today 1 dispatched, 1 completed, 0 failed; plus 1 earlier or taken over completed'
+    );
+  });
+
+  it('今天没派新活但完成了之前的，不说「还没派活」', async () => {
+    h.board = h.secretary.board = board({
+      done: [
+        sessionCard('old', {
+          state: 'idle',
+          startedAt: NOW - 86_400_000,
+          result: 'goal-complete',
+          resultAt: NOW - 20_000,
+        }),
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    expect(text('[data-enso="secretary-workbench"]')).toContain(
+      'No new dispatches today; 1 earlier or taken over completed'
+    );
+  });
+
   it('全空时给空状态与记一条待办入口', async () => {
     await render(<SecretaryPanel />);
     await flush();
