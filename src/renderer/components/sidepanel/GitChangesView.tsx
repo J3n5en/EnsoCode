@@ -638,6 +638,9 @@ export function GitChangesView({
                                         variant="destructive"
                                         data-git-dir-action="discard"
                                         data-git-dir-path={directory.path}
+                                        title={
+                                          conflicted > 0 ? t('Resolve conflicts first.') : undefined
+                                        }
                                         disabled={blocked || conflicted > 0 || count === 0}
                                         onClick={() => {
                                           const tracked = directory.files
@@ -646,6 +649,7 @@ export function GitChangesView({
                                           const untracked = directory.files
                                             .filter((file) => file.status === 'untracked')
                                             .map((file) => file.path);
+                                          if (!tracked.length && !untracked.length) return;
                                           setBulkDiscard({
                                             kind: isUntrackedGroup ? 'untracked' : 'all',
                                             tracked,

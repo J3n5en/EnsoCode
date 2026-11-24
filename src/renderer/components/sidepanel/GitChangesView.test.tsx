@@ -510,7 +510,7 @@ describe('GitChangesView 文件夹右键菜单', () => {
     });
   });
 
-  it('未暂存文件夹可暂存或确认后丢弃目录下全部已跟踪修改（confirmUntracked 为 false）', async () => {
+  it('未暂存文件夹点击暂存时对目录下全部已跟踪文件调用 stage', async () => {
     harness.git.status.mockResolvedValue(nestedStatus());
     await render();
     await click(dirAction('unstaged', 'src/a', 'stage'));
@@ -519,7 +519,11 @@ describe('GitChangesView 文件夹右键菜单', () => {
       projectId: 'project',
       paths: ['src/a/one.ts', 'src/a/deep/two.ts'],
     });
+  });
 
+  it('未暂存文件夹确认后丢弃目录下全部已跟踪修改（confirmUntracked 为 false）', async () => {
+    harness.git.status.mockResolvedValue(nestedStatus());
+    await render();
     await click(dirAction('unstaged', 'src/a', 'discard'));
     expect(harness.git.discard).not.toHaveBeenCalled();
     expect(q('[data-confirm-title]')?.textContent).toBe('Discard changes');
@@ -554,11 +558,15 @@ describe('GitChangesView 文件夹右键菜单', () => {
     });
   });
 
-  it('存在冲突文件时，文件夹右键的丢弃修改与删除未跟踪文件禁用', async () => {
+  it('存在冲突文件时，文件夹右键的丢弃修改与删除未跟踪文件禁用并提示先解决冲突', async () => {
     harness.git.status.mockResolvedValue(mixed());
     await render();
-    expect(dirAction('unstaged', 'src', 'discard')?.disabled).toBe(true);
-    expect(dirAction('untracked', 'new', 'discard')?.disabled).toBe(true);
+    const unstagedDiscard = dirAction('unstaged', 'src', 'discard');
+    const untrackedDiscard = dirAction('untracked', 'new', 'discard');
+    expect(unstagedDiscard?.disabled).toBe(true);
+    expect(unstagedDiscard?.title).toBe('Resolve conflicts first.');
+    expect(untrackedDiscard?.disabled).toBe(true);
+    expect(untrackedDiscard?.title).toBe('Resolve conflicts first.');
   });
 
   it('搜索筛选激活时，文件夹右键仅作用于当前筛选命中的文件', async () => {
