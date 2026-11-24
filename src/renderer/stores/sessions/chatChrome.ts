@@ -1,3 +1,4 @@
+import { conversationCwd } from '@shared/conversationCwd';
 import { conversationHasRunningChild } from '@shared/conversationDotTone';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import type { Conversation } from './index';
@@ -64,6 +65,22 @@ export function selectEmptyChatState(
 ): 'hydrating' | 'empty' | null {
   if (chrome) return null;
   return sessionsHydrated ? 'empty' : 'hydrating';
+}
+
+/** 会话自己的工作目录（与 agent 的 cwd 同源）：顶栏复制路径、时间线解析相对路径都用它 */
+export function chatWorkspacePath(
+  chrome: Pick<ChatChrome, 'parentId' | 'parentWorktreePath'> | null,
+  project: { kind?: string; path: string } | undefined
+): string | undefined {
+  if (!chrome || !project) return chrome?.parentWorktreePath;
+  return (
+    conversationCwd({
+      kind: project.kind,
+      canonicalPath: project.path,
+      conversationId: chrome.parentId,
+      worktreePath: chrome.parentWorktreePath,
+    }) ?? undefined
+  );
 }
 
 type SessionsSlice = {
