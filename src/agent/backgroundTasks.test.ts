@@ -208,9 +208,17 @@ describe('resolveBackgroundLaunch', () => {
     });
   });
 
-  it.each(['linux', 'darwin'])('%s 下 bash 且无 transform 时,只回原样 command/cwd', (platform) => {
-    const result = resolveBackgroundLaunch('bash', 'echo hi', '/tmp', undefined, { platform });
-    expect(result).toEqual({ command: 'echo hi', cwd: '/tmp' });
+  it('bash 且无 transform 时,带上 resolveBash 给出的 shell 与参数', () => {
+    const result = resolveBackgroundLaunch('bash', 'echo hi', '/tmp', undefined, {
+      resolveBash: () => ({ shell: '/usr/local/bin/bash', args: ['-c'] }),
+    });
+    expect(result).toEqual({
+      command: 'echo hi',
+      cwd: '/tmp',
+      file: '/usr/local/bin/bash',
+      argsPrefix: ['-c'],
+      commandTransport: undefined,
+    });
   });
 
   it('win32 下 powershell 走 file 分支：powershell.exe + 完整参数前缀，命令作为最后一个参数', () => {
@@ -370,7 +378,7 @@ describe('BackgroundTaskManager', () => {
   });
 
   it.skipIf(process.platform === 'win32').each([
-    ['输出直写文件', { detachable: true }],
+    ['输出直写文件', { detachable: true, file: '/bin/bash', argsPrefix: ['-c'] }],
     ['管道', undefined],
   ])(
     '只写 stderr 的命令（%s）：运行中面板 tail 就有内容，outputBytes 计数',
@@ -396,7 +404,7 @@ describe('BackgroundTaskManager', () => {
 
   // 验收脚本 spawn 的 Electron 带 detached（独立会话），只杀根进程组会把它留成孤儿
   it.skipIf(process.platform === 'win32').each([
-    ['输出直写文件', { detachable: true }],
+    ['输出直写文件', { detachable: true, file: '/bin/bash', argsPrefix: ['-c'] }],
     ['管道', undefined],
   ])('stop（%s）连带结束自立进程组的子孙进程', async (_kind, opts) => {
     const { manager, ended } = makeManager({ killGraceMs: 200 });
