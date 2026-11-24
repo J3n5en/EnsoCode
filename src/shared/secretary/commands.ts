@@ -448,8 +448,8 @@ export function formatBoardMessage(
     ? `<b>${daily.day}${daily.today ? '（今天）' : ''}</b>`
     : `<b>${daily.day}${daily.today ? ' (today)' : ''}</b>`;
   const stats = zh
-    ? `派出 ${counts.dispatched} · 完成 ${counts.completed} · 失败 ${counts.failed} · 需要你 ${counts.needsYou}`
-    : `dispatched ${counts.dispatched} · done ${counts.completed} · failed ${counts.failed} · needs you ${counts.needsYou}`;
+    ? `派出 ${counts.dispatched} · 完成 ${counts.completed}${counts.completedEarlier > 0 ? `（含之前派出或接手的 ${counts.completedEarlier}）` : ''} · 失败 ${counts.failed} · 需要你 ${counts.needsYou}`
+    : `dispatched ${counts.dispatched} · done ${counts.completed}${counts.completedEarlier > 0 ? ` (${counts.completedEarlier} earlier or taken over)` : ''} · failed ${counts.failed} · needs you ${counts.needsYou}`;
   const lines = [head, stats];
   if (daily.groups.length === 0) {
     lines.push(zh ? '这一天没有记录。' : 'No records for this day.');

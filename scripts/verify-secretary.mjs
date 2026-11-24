@@ -98,6 +98,9 @@ const PROPOSAL_ABORTED_ONLY = process.argv.includes('--proposal-aborted-only');
 // 只跑删除秘书：3 个秘书各有会话，中间那个定好提醒、一条在跑；设置页删掉它后看弹窗、选中、
 // 会话与提醒，退出重开看不复活、另两个完好。整体 3 分钟硬超时，截图存到 /tmp/pr480-*.png
 const DELETE_SECRETARY_ONLY = process.argv.includes('--delete-secretary-only');
+// 只跑工作台今日战报：跨天完成、接手、失败、手动标完成混在一起时按会话计数。
+// 整体 3 分钟硬超时，截图存到 /tmp/workbench-counts-*.png
+const WORKBENCH_COUNTS_ONLY = process.argv.includes('--workbench-counts-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -799,6 +802,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (DELETE_SECRETARY_ONLY) {
     await verifyDeleteSecretary(cdp, setup);
+    return;
+  }
+  if (WORKBENCH_COUNTS_ONLY) {
+    await verifyWorkbenchCounts(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -7482,6 +7489,113 @@ async function verifyNeedsUserTriage(cdp, setup) {
   log('  shots /tmp/needs-user-triage-{pending,escalated,fallback}.png');
 }
 
+async function verifyWorkbenchCounts(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 工作台今日战报：按会话计数，之前派出或接手的完成另算');
+  const dispatch = directDispatcher(page, setup);
+  const keys = ['today', 'marked', 'crossDay', 'takenOver', 'failed'];
+  const ids = {};
+  for (const key of keys) {
+    const created = await dispatch('session_create', {
+      projectId: setup.projectId,
+      prompt: '做完就收尾',
+      title: `战报 ${key}`,
+      goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了' })}]]`,
+    });
+    assert(created.ok, `今日战报: 会话 ${key} 建成`, created);
+    ids[key] = created.conversationId;
+  }
+  for (const id of Object.values(ids)) {
+    await waitFor(
+      () => readJson(dispatchFile).dispatched[id]?.lastResult?.kind === 'goal-complete',
+      `goal-complete ${id}`,
+      60_000,
+      300
+    );
+  }
+  await sleep(1_000);
+  // 造跨天、接手、手动标完成与失败：改隔离实例的 dispatch.json，再用一次待办写入触发推送
+  const seeded = readJson(dispatchFile);
+  const now = Date.now();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(22, 0, 0, 0);
+  const records = Object.fromEntries(keys.map((key) => [key, seeded.dispatched[ids[key]]]));
+  records.crossDay.createdAt = yesterday.getTime();
+  records.takenOver.takeover = { grantedAt: now, via: 'user' };
+  records.marked.lastResult = { ...records.marked.lastResult, at: now, manual: true };
+  records.failed.lastResult = { kind: 'failed', turn: records.failed.turn, at: now };
+  writeFileSync(dispatchFile, JSON.stringify(seeded));
+  const published = await page(`
+    return JSON.stringify(
+      await window.electronAPI.secretary.mutateTodo({ action: 'add', text: '战报占位待办' })
+    );
+  `);
+  assert(published.ok, '今日战报: 写盘后触发一次状态推送', published);
+
+  const expected = '今天派出 3 件，已完成 2 件，1 件失败；另完成之前派出或接手的 2 件';
+  const view = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+    document.head.appendChild(style);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+    }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    const panel = await until(() => onScreen() && visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const line = await until(
+      () =>
+        [...(visiblePanel()?.querySelectorAll('[data-enso=secretary-workbench] p') ?? [])].find(
+          (node) => node.innerText === ${JSON.stringify(expected)}
+        ) ?? null,
+      20000
+    );
+    const stats = visiblePanel()?.querySelector('[data-enso=secretary-stats]');
+    const workbench = visiblePanel()?.querySelector('[data-enso=secretary-workbench]');
+    workbench?.scrollIntoView({ block: 'start' });
+    await sleep(400);
+    const top = workbench?.getBoundingClientRect();
+    const bottom = stats?.getBoundingClientRect();
+    return JSON.stringify({
+      line: line?.innerText ?? null,
+      lines: [...(workbench?.querySelectorAll('p') ?? [])].slice(0, 3).map((node) => node.innerText),
+      rect:
+        top && bottom
+          ? { x: top.x, y: top.y, width: top.width, height: bottom.bottom - top.y }
+          : null,
+    });
+  `);
+  log(`  today ${JSON.stringify(view)}`);
+  assert(view.line === expected, '今日战报: 完成只数今天派出的，之前派出或接手的另起一句', view);
+  await cdp.shot('/tmp/workbench-counts-panel.png');
+  if (view.rect) {
+    const pad = 12;
+    await cdp.shotClip('/tmp/workbench-counts-top.png', {
+      x: Math.max(0, view.rect.x - pad),
+      y: Math.max(0, view.rect.y - pad),
+      width: view.rect.width + pad * 2,
+      height: view.rect.height + pad * 2,
+    });
+  }
+  log('  shots /tmp/workbench-counts-{panel,top}.png');
+}
+
 async function verifyNeedsUserLink(cdp, setup) {
   const page = cdp.json.bind(cdp);
   log('== needsUser 关联：秘书带 relatesTo 转问，用户答复后自动标已答复、答完移出「需要你」');
@@ -9674,6 +9788,12 @@ if (DELETE_SECRETARY_ONLY) {
 if (PROPOSAL_ABORTED_ONLY) {
   setTimeout(() => {
     console.error('\nFAIL proposal-aborted: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
+if (WORKBENCH_COUNTS_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL workbench-counts: 3 分钟硬超时');
     void finish(124);
   }, 180_000).unref();
 }

@@ -56,6 +56,7 @@ const daily = (over: Partial<SecretaryDaily> = {}): SecretaryDaily => ({
   counts: {
     dispatched: 2,
     completed: 1,
+    completedEarlier: 0,
     failed: 0,
     needsYou: 1,
     todosDone: 3,

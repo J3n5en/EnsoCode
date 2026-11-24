@@ -332,8 +332,10 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     (record.lastState === 'running' ||
       record.backgroundRunning === true ||
       nextPendingReminder(input.reminders?.(record.conversationId) ?? [], input.now) !== undefined);
-  const dispatchedToday = input.dispatched.filter(
-    (record) => !record.takeover && within(record.createdAt)
+  const dispatchedToday = new Set(
+    input.dispatched
+      .filter((record) => !record.takeover && within(record.createdAt))
+      .map((record) => record.conversationId)
   );
 
   for (const record of input.dispatched) {
@@ -534,8 +536,11 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     day,
     today: day === dayKey(input.now),
     counts: {
-      dispatched: dispatchedToday.length,
+      dispatched: dispatchedToday.size,
       completed: columns.done.length,
+      completedEarlier: columns.done.filter(
+        (item) => !item.conversationId || !dispatchedToday.has(item.conversationId)
+      ).length,
       failed: columns.failed.length,
       needsYou: columns.needsYou.length,
       todosDone: todos.filter((item) => item.doneAt !== undefined).length,

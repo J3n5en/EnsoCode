@@ -782,15 +782,22 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
     );
   }
 
-  const { dispatched, completed, failed } = digest.today;
+  const { dispatched, completed, failed, earlier } = digest.today;
   const todayLine =
-    dispatched + completed + failed === 0
-      ? t('Nothing dispatched today')
+    dispatched === 0
+      ? earlier === 0
+        ? t('Nothing dispatched today')
+        : t('No new dispatches today; {{count}} earlier or taken over completed', {
+            count: earlier,
+          })
       : t('Today {{dispatched}} dispatched, {{completed}} completed, {{failed}} failed', {
           dispatched,
           completed,
           failed,
-        });
+        }) +
+        (earlier > 0
+          ? t('; plus {{count}} earlier or taken over completed', { count: earlier })
+          : '');
   const active = board.todos.filter((todo) => todo.phase === 'active');
   const problem = board.todos.filter((todo) => todo.phase === 'problem');
   const open = board.todos.filter((todo) => (todo.phase ?? 'todo') === 'todo');
