@@ -12,6 +12,7 @@ export { SettingsDangerAction } from './danger';
 export {
   SettingsExpandableRow,
   SettingsPage,
+  SettingsPreview,
   SettingsRow,
   SettingsSaved,
   SettingsSection,
