@@ -43,6 +43,12 @@
   background: transparent;
 }
 
+/* 建立定位包含块，确保 .dv-groupview 自带的 overflow:hidden 能裁住面板内
+   position:absolute 元素（如 sr-only），避免穿透撑出外层 .dv-view 滚动条 */
+.enso-side-dock .dv-groupview {
+  position: relative;
+}
+
 .enso-side-dock .dv-tabs-and-actions-container {
   /* 必须走 --color-* 映射层：背景图模式下注入通用面板 alpha */
   background: var(--color-background);

@@ -110,7 +110,7 @@ export function GitHistoryView({
       hasSelection={path !== null}
       actions={<GitFileViewToggle tree={tree} onToggle={onToggleTree} />}
       navigation={
-        <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+        <div className="relative min-h-0 flex-1 overflow-y-auto px-1 pb-1">
           {commits.map((commit) => {
             const expanded = selectedCommit?.hash === commit.hash;
             return (
