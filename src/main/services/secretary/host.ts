@@ -51,6 +51,7 @@ import { redactSecrets } from '../memory/distill';
 import { autoArchived, liveTasks } from './autoArchive';
 import type { SecretaryContactPort } from './contact/service';
 import {
+  type DeliveryOutcome,
   type DeliveryPorts,
   flushDeliveries,
   recoverDeliveries,
@@ -295,10 +296,22 @@ function resultEventOf(
   }
 }
 
-/** 只有正常结束才算投递成功；中止与报错都按失败重投 */
-function deliveryOutcome(event: RendererAgentEvent): 'done' | 'failed' | null {
+/**
+ * 只有投递那一轮正常结束才算成功；中止与报错都按失败重投。
+ * worker 收口时先报空闲、再发 turn-completed：空闲时投出的这一批还没上屏，紧随其后的结局属于上一轮。
+ */
+function deliveryOutcome(
+  event: RendererAgentEvent,
+  inflight: NonNullable<SecretaryDispatchFile['inflight']>
+): DeliveryOutcome | null {
+  if (event.type === 'worker-exited') return 'failed';
+  if (event.type === 'delivery-settled' || event.type === 'delivery-rejected') {
+    if (event.deliveryId !== inflight.deliveryId) return null;
+    return event.type === 'delivery-settled' ? 'started' : 'failed';
+  }
+  if (!inflight.started) return null;
   if (event.type === 'turn-completed') return event.aborted ? 'failed' : 'done';
-  if (event.type === 'turn-failed' || event.type === 'worker-exited') return 'failed';
+  if (event.type === 'turn-failed') return 'failed';
   return null;
 }
 
@@ -1054,7 +1067,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const text = event.digest?.assistantText?.trim();
     if (!text) return;
     // 系统回传注入的回合：手机发起的任务链上，这一轮也算「回给手机」
-    const delivery = ports.file().inflight?.secretaryConversationId === conversationId;
+    const inflight = ports.file().inflight;
+    const delivery = inflight?.secretaryConversationId === conversationId && inflight.started;
     contact.onTurnReply(conversationId, text, {
       ...(delivery ? { delivery: true } : {}),
       ...(event.turnId ? { turnId: event.turnId } : {}),
@@ -1258,10 +1272,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (sessionId) touched.add(sessionId);
 
       // 先结算在途投递（自己读改写），再读最新状态记结果，避免用旧快照覆盖结算结果
-      const inflightTarget = ports.file().inflight?.secretaryConversationId;
-      if (inflightTarget && touched.has(inflightTarget)) {
-        const outcome = deliveryOutcome(event);
-        if (outcome) settleDelivery(ports, inflightTarget, outcome, now);
+      const inflight = ports.file().inflight;
+      if (inflight && touched.has(inflight.secretaryConversationId)) {
+        const outcome = deliveryOutcome(event, inflight);
+        if (outcome) settleDelivery(ports, inflight.secretaryConversationId, outcome, now);
       }
 
       const file = withEventStamps(ports.file());

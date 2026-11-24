@@ -803,7 +803,7 @@ function parseInflight(value: unknown): SecretaryDispatchFile['inflight'] {
     keys: texts(value.keys),
     attempt: clampInt(value.attempt, 1, 6) ?? 1,
     nextAttemptAt: time(value.nextAttemptAt) ?? 0,
-    ...(typeof value.settled === 'boolean' ? { settled: value.settled } : {}),
+    ...(value.started === true ? { started: true } : {}),
     ...(time(value.idleGraceUntil) !== undefined
       ? { idleGraceUntil: time(value.idleGraceUntil) }
       : {}),
