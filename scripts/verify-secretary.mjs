@@ -6920,39 +6920,68 @@ async function verifyQueuedSessions(cdp, setup) {
 
 async function verifyProposalAborted(cdp, setup) {
   const page = cdp.json.bind(cdp);
-  log('== 确认技能提案：秘书只唤醒一轮，不出现 Request aborted');
-  const draft = { name: 'abort-check', description: '确认提案验收', body: '# 步骤\n\n- 跑测试' };
-  // [[slow]] 让每轮回复都要流几秒，接近真实模型：投递那一轮还在跑时技能已写盘
-  const ask = `沉淀成 skill [[slow:3000]] [[tool:skill_propose ${JSON.stringify(draft)}]]`;
+  const kinds = (
+    process.argv.find((arg) => arg.startsWith('--proposal-kinds='))?.slice(17) ??
+    'tool,skill,profile'
+  ).split(',');
+  for (const kind of kinds) await verifyProposalAbortedKind(cdp, setup, page, kind);
+}
+
+const ABORT_TOOL_DRAFT = {
+  name: 'abort-card',
+  description: '回显文本',
+  runtime: 'node',
+  parameters: {
+    type: 'object',
+    properties: { text: { type: 'string' } },
+    required: ['text'],
+    additionalProperties: false,
+  },
+  readOnly: true,
+  code: 'let raw = "";\nprocess.stdin.on("data", (chunk) => (raw += chunk));\nprocess.stdin.on("end", () => {\n  process.stdout.write("card:" + JSON.parse(raw).text);\n});',
+};
+
+const ABORT_PROPOSALS = {
+  tool: { op: 'tool_propose', draft: ABORT_TOOL_DRAFT },
+  skill: {
+    op: 'skill_propose',
+    draft: { name: 'abort-check', description: '确认提案验收', body: '# 步骤\n\n- 跑测试' },
+  },
+  profile: { op: 'secretary_profile_propose', draft: { name: '小确' } },
+};
+
+/** 用户在秘书提案那一轮还没说完时就点了确认：秘书只回应一次，不出现 Request aborted */
+async function verifyProposalAbortedKind(cdp, setup, page, kind) {
+  const { op, draft } = ABORT_PROPOSALS[kind];
+  log(`== 确认 ${op}：提案那一轮还在跑时点确认，秘书只唤醒一轮，不出现 Request aborted`);
+  // [[slow]] 让每轮回复都要流几秒，接近真实模型：提案后秘书还在写回复时用户就点了确认
+  const ask = `提个 ${kind} 提案 [[slow:6000]] [[tool:${op} ${JSON.stringify(draft)}]]`;
   const proposed = await page(`
     const secretary = await SEC();
     const id = await secretary.getState().newSecretaryConversation();
     S().selectConversation(id);
     const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
     await S().send(${JSON.stringify(ask)}, { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, id);
-    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=skill]'), 30000);
-    const idle = await until(() => S().conversations[id]?.status === 'idle', 30000);
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=${kind}]'), 30000);
     const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
-    return JSON.stringify({ ok: Boolean(card && idle && proposal?.status === 'pending'), id, proposalId: proposal?.id });
+    const running = S().conversations[id]?.status === 'running';
+    const before = (S().conversations[id]?.messages ?? []).length;
+    if (card && running && proposal?.status === 'pending') await secretary.getState().resolveProposal(proposal.id, 'confirm');
+    return JSON.stringify({ ok: Boolean(card && running && proposal?.status === 'pending'), id, proposalId: proposal?.id, before });
   `);
-  assert(proposed.ok, 'proposal-aborted: 出现待确认的技能卡片且秘书空闲', proposed);
-  await sleep(1000);
-  await fetch(`http://127.0.0.1:${FAKE_PORT}/__reset`);
-  const before = await page(
-    `return JSON.stringify((S().conversations[${JSON.stringify(proposed.id)}]?.messages ?? []).length)`
-  );
-  await page(`
-    const secretary = await SEC();
-    await secretary.getState().resolveProposal(${JSON.stringify(proposed.proposalId)}, 'confirm');
-    return 'null';
-  `);
-  await sleep(15_000);
+  assert(proposed.ok, `proposal-aborted(${kind}): 卡片出现时秘书还在跑，就地确认`, proposed);
   const after = await page(`
     const id = ${JSON.stringify(proposed.id)};
-    await until(() => S().conversations[id]?.status === 'idle', 30000);
     const textOf = (message) => typeof message.content === 'string' ? message.content :
       (Array.isArray(message.content) ? message.content : []).filter((part) => part.type === 'text').map((part) => part.text).join('');
-    const messages = (S().conversations[id]?.messages ?? []).slice(${before}).map((message) => ({
+    const list = () => S().conversations[id]?.messages ?? [];
+    // 等投递那一轮回完：session-updates 之后有一条助手消息，且会话回到空闲
+    await until(() => {
+      const at = list().findIndex((message) => message.role === 'user' && textOf(message).includes('<session-updates>'));
+      return at >= 0 && list().slice(at + 1).some((message) => message.role === 'assistant') && S().conversations[id]?.status === 'idle';
+    }, 60000);
+    await sleep(3000);
+    const messages = list().slice(${proposed.before}).map((message) => ({
       role: message.role,
       text: textOf(message).slice(0, 160),
       stopReason: message.stopReason,
@@ -6962,26 +6991,55 @@ async function verifyProposalAborted(cdp, setup) {
     return JSON.stringify({
       status: secretary.getState().secretary.proposals[${JSON.stringify(proposed.proposalId)}]?.status,
       messages,
-      domErrors: [...document.querySelectorAll('[data-enso=timeline-error], .text-red-500')].map((node) => node.innerText).filter((text) => text.includes('abort')),
     });
   `);
-  const requests = await (await fetch(`http://127.0.0.1:${FAKE_PORT}/__requests`)).json();
-  const report = {
-    ...after,
-    modelRequests: requests.requests.map((request) => request.lastUserText.slice(0, 80)),
-  };
-  log(JSON.stringify(report, null, 2));
-  await cdp.shot('/tmp/proposal-aborted-confirm.png');
-  assert(report.status === 'succeeded', 'proposal-aborted: 提案执行成功', report);
-  const updates = report.messages.filter(
+  log(JSON.stringify(after, null, 2));
+  assert(after.status === 'succeeded', `proposal-aborted(${kind}): 提案执行成功`, after);
+  const updatesAt = after.messages.findIndex(
     (message) => message.role === 'user' && message.text.includes('<session-updates>')
   );
-  assert(updates.length === 1, 'proposal-aborted: 秘书只收到一条 session-updates', report);
   assert(
-    report.messages.every((message) => !message.errorMessage),
-    'proposal-aborted: 秘书会话里没有错误回复（Request aborted）',
-    report
+    after.messages.filter(
+      (message) => message.role === 'user' && message.text.includes('<session-updates>')
+    ).length === 1,
+    `proposal-aborted(${kind}): 秘书只收到一条 session-updates`,
+    after
   );
+  assert(
+    after.messages.slice(updatesAt + 1).filter((message) => message.role === 'assistant').length ===
+      1,
+    `proposal-aborted(${kind}): 秘书对这条更新只回应一次`,
+    after
+  );
+  assert(
+    after.messages.every((message) => !message.errorMessage && message.stopReason !== 'aborted'),
+    `proposal-aborted(${kind}): 秘书会话里没有错误回复（Request aborted）`,
+    after
+  );
+  if (kind === 'tool') {
+    const ran = await page(`
+      const id = ${JSON.stringify(proposed.id)};
+      const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+      const textOf = (message) => (Array.isArray(message.content) ? message.content : []).filter((part) => part.type === 'text').map((part) => part.text).join('');
+      await S().send('用新工具 [[call:my_abort_card {"text":"ok"}]]', { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, id);
+      const result = await until(() => (S().conversations[id]?.messages ?? []).find((message) => message.toolName === 'my_abort_card') ?? null, 40000);
+      await until(() => S().conversations[id]?.status === 'idle', 40000);
+      return JSON.stringify({ text: result ? textOf(result) : null, isError: result?.isError === true });
+    `);
+    assert(
+      !ran.isError && ran.text?.includes('card:ok'),
+      'proposal-aborted(tool): 下一轮就能调用新工具 my_abort_card',
+      ran
+    );
+  }
+  await page(`
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+    document.head.appendChild(style);
+    await sleep(300);
+    return 'null';
+  `);
+  await cdp.shot(`/tmp/proposal-aborted2-${kind}.png`);
 }
 
 async function verifyGoalResult(cdp, setup) {
@@ -9610,6 +9668,12 @@ if (NEEDS_USER_TRIAGE_ONLY) {
 if (DELETE_SECRETARY_ONLY) {
   setTimeout(() => {
     console.error('\nFAIL delete-secretary: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
+if (PROPOSAL_ABORTED_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL proposal-aborted: 3 分钟硬超时');
     void finish(124);
   }, 180_000).unref();
 }

@@ -16,6 +16,7 @@
  * 脚本在 prompt 里写 `[[tool:<工具名> <JSON 参数>]]` 即可指定要发的调用，
  * 可写多个（验证危险操作排队）。已有工具结果的回合则返回纯文本收尾，
  * 避免无限循环。
+ * 最后一条用户消息里写 `[[call:<工具名> <JSON 参数>]]` 则不管之前有没有工具结果都发这次调用（验下一轮能用上新工具）。
  * 写 `[[slow:<毫秒>]]` 则文本回复拆成多段，在这段时间里慢慢流完（验证会话运行期间的界面）。
  *
  * 目的是让真机验收不触碰真实账号、不花 token、且行为可预期：
@@ -52,9 +53,19 @@ function messageText(msg) {
 
 /** 从整轮 messages 取出 `[[tool:name {json}]]`（不要只看最后一条：host 常会再塞 workflow-state） */
 function parseToolDirectives(messages) {
-  const text = (messages ?? []).map(messageText).join('\n');
+  return parseCalls((messages ?? []).map(messageText).join('\n'), 'tool');
+}
+
+/** 最后一条是用户消息时取它里面的 `[[call:name {json}]]`：会话里已有工具结果，新一轮也能再发调用 */
+function lastUserCalls(messages) {
+  const last = (messages ?? []).at(-1);
+  if (last?.role !== 'user' || hasToolResult([last])) return [];
+  return parseCalls(messageText(last), 'call');
+}
+
+function parseCalls(text, directive) {
   const out = [];
-  const re = /\[\[tool:([\w-]+)\s*(\{[\s\S]*?\})?\]\]/g;
+  const re = new RegExp(`\\[\\[${directive}:([\\w-]+)\\s*(\\{[\\s\\S]*?\\})?\\]\\]`, 'g');
   let m = re.exec(text);
   while (m) {
     let input = {};
@@ -235,7 +246,13 @@ const server = createServer((req, res) => {
     }
 
     const messages = parsed?.messages;
-    const calls = hasToolResult(messages) ? [] : parseToolDirectives(messages);
+    const turnCalls = lastUserCalls(messages);
+    const calls =
+      turnCalls.length > 0
+        ? turnCalls
+        : hasToolResult(messages)
+          ? []
+          : parseToolDirectives(messages);
     if (calls.length > 0) return void sse(res, toolUseReply(calls));
     const slow = slowMs(messages);
     const parts = slow > 0 ? Math.max(2, Math.round(slow / 500)) : 1;
