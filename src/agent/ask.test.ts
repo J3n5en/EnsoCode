@@ -130,6 +130,52 @@ describe('转交给秘书的提问', () => {
   });
 });
 
+describe('秘书转问 needsUser 的关联', () => {
+  const run = (tool: ReturnType<typeof createAskTool>, args: unknown) =>
+    tool.execute(
+      'call-ask',
+      (tool.prepareArguments?.(args) ?? args) as never,
+      undefined,
+      undefined,
+      {} as never
+    );
+
+  it('秘书版 ask_user 的 relatesTo 随用户答复一起收尾，字符串形式也先归一', async () => {
+    const { manager, resolutions } = make();
+    const tool = createAskTool(manager, { secretary: true });
+    const pending = run(tool, {
+      question: '清理孤儿进程吗？',
+      relatesTo: '{"conversationId":" c1 ","needsUserIndex":"1"}',
+    });
+    manager.respond(manager.snapshot()[0].requestId, '清理');
+    await pending;
+    expect(resolutions).toEqual([
+      {
+        by: 'user',
+        answer: '清理',
+        relatesTo: { conversationId: 'c1', needsUserIndex: 1 },
+        askedAt: expect.any(Number),
+      },
+    ]);
+  });
+
+  it('坏的 relatesTo（含不合法序号）整段丢掉，不会扩大成全部条目；普通会话的 ask_user 不声明这个参数', async () => {
+    const { manager, resolutions } = make();
+    const tool = createAskTool(manager, { secretary: true });
+    expect(tool.prepareArguments?.({ question: 'q', relatesTo: { needsUserIndex: -1 } })).toEqual({
+      question: 'q',
+    });
+    const pending = run(tool, {
+      question: 'q',
+      relatesTo: { conversationId: 'c1', needsUserIndex: -1 },
+    });
+    manager.respond(manager.snapshot()[0].requestId, 'a');
+    await pending;
+    expect(resolutions).toEqual([{ by: 'user', answer: 'a' }]);
+    expect(JSON.stringify(createAskTool(manager).parameters)).not.toContain('relatesTo');
+  });
+});
+
 describe('无人值守：没人能回答提问', () => {
   it('开关打开时 ask 不发请求也不建 pending，直接按「没人回答」失败', async () => {
     const { manager, infos } = make(600_000);

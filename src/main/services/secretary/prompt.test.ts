@@ -33,6 +33,15 @@ describe('buildSecretarySystemPrompt', () => {
     expect(results).toContain('result_mark_done');
   });
 
+  it('转问 needsUser 必须带 relatesTo，答复后宿主自动收口，不再手动 result_mark_done', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
+    const results = prompt.split('\n').find((line) => line.startsWith('Results:')) ?? '';
+    expect(results).toContain('needs-user[N]');
+    expect(results).toMatch(/always pass relatesTo/);
+    expect(results).toMatch(/needsUserIndex/);
+    expect(results).toMatch(/do not call result_mark_done for it/);
+  });
+
   it('称呼按档案写进提示词，没设置时不写称呼（默认）', () => {
     expect(
       buildSecretarySystemPrompt({

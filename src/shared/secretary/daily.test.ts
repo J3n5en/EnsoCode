@@ -1011,6 +1011,33 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
     expect(card?.summary).toBe('Review 完成');
   });
 
+  it('同一份结果在派发记录里已部分答复：日看板卡片带上答复，供逐条标已答复', () => {
+    const goalResult = {
+      at: at(15, 14),
+      result: { summary: 'Review 完成', needsUser: ['是否合并上架 #62', '确认是否同步发版'] },
+    };
+    const answers = [{ index: 1, answer: '先不发', at: at(15, 20) }];
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({ at: at(15, 14), conversationId: 'c-pr62', kind: 'goal-complete', goalResult }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-pr62',
+          createdAt: at(15, 10),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 14) },
+          goalResult: { ...goalResult, answers },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    const card = daily.groups.find((g) => g.key === 'needsYou')?.items[0];
+    expect(card?.needsUser).toEqual(['是否合并上架 #62', '确认是否同步发版']);
+    expect(card?.goalResult?.answers).toEqual(answers);
+  });
+
   it('已归档会话的 needsUser 结果不再进「需要你」，归入完成且不带 needsUser', () => {
     const goalResult = {
       at: at(15, 14),

@@ -1307,7 +1307,9 @@ export class SessionSupervisor {
       }
       if (busy && item.ifIdle) continue;
       if (!this.reminders.take(item.id)) continue;
-      texts.push(reminderNotice(item));
+      texts.push(
+        reminderNotice(item, this.reminders.missedWhileDown(item.id) ? Date.now() : undefined)
+      );
       chain = Math.max(chain, item.chain);
     }
     if (texts.length === 0) return;
@@ -3696,7 +3698,7 @@ export class SessionSupervisor {
               : withApproval(gate, 'mcp', tool)
           )
         : []),
-      ...builtin('ask_user', [createAskTool(askManager)]),
+      ...builtin('ask_user', [createAskTool(askManager, { secretary: secretaryMode })]),
       ...builtin('subagent', [unifiedSubagentTool]),
       ...builtin('workflow', [
         createWorkflowTool({
@@ -3948,6 +3950,8 @@ export class SessionSupervisor {
             ...(resolution?.by ? { by: resolution.by } : {}),
             ...(resolution?.answer ? { answer: resolution.answer } : {}),
             ...(resolution?.name ? { name: resolution.name } : {}),
+            ...(resolution?.relatesTo ? { relatesTo: resolution.relatesTo } : {}),
+            ...(resolution?.askedAt !== undefined ? { askedAt: resolution.askedAt } : {}),
           });
         }
       },

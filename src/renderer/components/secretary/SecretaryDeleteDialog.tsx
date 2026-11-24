@@ -1,4 +1,5 @@
 import type { SecretaryDeletePreview } from '@shared/types/secretary';
+import { Loader2 } from 'lucide-react';
 import * as React from 'react';
 import {
   AlertDialog,
@@ -52,6 +53,7 @@ export function SecretaryDeleteDialog({
   React.useEffect(() => {
     if (!open) return;
     setStep('preview');
+    setBusy(false);
     setError(null);
     setPreview(null);
     void window.electronAPI.secretary.deletePreview(secretaryId).then((result) => {
@@ -63,17 +65,17 @@ export function SecretaryDeleteDialog({
   const confirm = async () => {
     setBusy(true);
     setError(null);
-    try {
-      const result = await window.electronAPI.secretary.deleteSecretary(secretaryId, true);
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      onOpenChange(false);
-      onDeleted?.();
-    } finally {
+    const result = await window.electronAPI.secretary
+      .deleteSecretary(secretaryId, true)
+      .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+    if (!result.ok) {
+      setError(result.error);
       setBusy(false);
+      return;
     }
+    // 成功后保持「删除中…」直到弹窗卸下或再次打开，关闭动画期间不闪回可点的按钮
+    onOpenChange(false);
+    onDeleted?.();
   };
 
   const empty =
@@ -86,7 +88,10 @@ export function SecretaryDeleteDialog({
       0;
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => (busy && !next ? undefined : onOpenChange(next))}
+    >
       <AlertDialogPopup className="sm:max-w-md" data-enso="secretary-delete-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-base">
@@ -134,7 +139,7 @@ export function SecretaryDeleteDialog({
         )}
         {error ? <p className="px-1 text-xs text-destructive">{error}</p> : null}
         <AlertDialogFooter variant="bare">
-          <AlertDialogClose render={<Button variant="outline" size="sm" />}>
+          <AlertDialogClose render={<Button variant="outline" size="sm" disabled={busy} />}>
             {t('Cancel')}
           </AlertDialogClose>
           {step === 'preview' ? (
@@ -155,7 +160,8 @@ export function SecretaryDeleteDialog({
               disabled={busy}
               onClick={() => void confirm()}
             >
-              {t('Delete permanently')}
+              {busy && <Loader2 className="size-3.5 animate-spin" />}
+              {busy ? t('Deleting…') : t('Delete permanently')}
             </Button>
           )}
         </AlertDialogFooter>

@@ -334,6 +334,38 @@ export interface ApprovalRequestInfo {
 export const ASK_ANSWER_BY = ['user', 'relay', 'timeout'] as const;
 export type AskAnswerBy = (typeof ASK_ANSWER_BY)[number];
 
+/** 秘书转问派出会话结果里的 needsUser：用户答复后宿主据此把那条记为已答复 */
+export interface AskRelatesTo {
+  conversationId: string;
+  /** needsUser 列表里从 0 开始的位置；缺省表示这一问覆盖全部条目 */
+  needsUserIndex?: number;
+}
+
+/** 序号给了但不合法时整段作废：丢掉序号会被当成「覆盖全部条目」 */
+export function parseAskRelatesTo(raw: unknown): AskRelatesTo | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const { conversationId, needsUserIndex } = raw as Record<string, unknown>;
+  if (typeof conversationId !== 'string' || !conversationId.trim()) return undefined;
+  if (needsUserIndex === undefined || needsUserIndex === null)
+    return { conversationId: conversationId.trim() };
+  const index =
+    typeof needsUserIndex === 'string' && needsUserIndex.trim()
+      ? Number(needsUserIndex)
+      : needsUserIndex;
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return undefined;
+  return { conversationId: conversationId.trim(), needsUserIndex: index };
+}
+
+/** ask-resolved 的关联字段坏了只剥掉它，提问照常收尾；关联与提问时间必须成对 */
+function withAskLink(value: Record<string, unknown>): Record<string, unknown> {
+  if (value.relatesTo === undefined && value.askedAt === undefined) return value;
+  const { relatesTo, askedAt, ...rest } = value;
+  const link = parseAskRelatesTo(relatesTo);
+  return link && typeof askedAt === 'number' && Number.isFinite(askedAt)
+    ? { ...rest, relatesTo: link, askedAt }
+    : rest;
+}
+
 /** agent 向用户的提问（ask_user 工具,阻塞等答复） */
 export interface AskRequestInfo {
   requestId: string;
@@ -346,6 +378,8 @@ export interface AskRequestInfo {
   expiresAt?: number;
   /** 已转给秘书：原会话不弹给用户，只留一行「已转给 X」，用户仍可直接回答 */
   relay?: { name: string };
+  /** 秘书在替这条派出会话的 needsUser 问用户 */
+  relatesTo?: AskRelatesTo;
   /** 渲染层投影：提问已收尾，用来在原会话里留一行状态；worker 不下发 */
   answered?: { by: AskAnswerBy; name?: string; answer?: string };
 }
@@ -2336,6 +2370,10 @@ export type AgentWorkerEvent =
       answer?: string;
       /** 秘书代答时的名字 */
       name?: string;
+      /** 提问带的 needsUser 关联，原样带回 */
+      relatesTo?: AskRelatesTo;
+      /** 带关联时提问发出的时间：晚于它的新结果不认这次答复 */
+      askedAt?: number;
     }
   | { type: 'subagent-update'; identity: SessionIdentity; seq: number; agent: SubagentInfo }
   | {
@@ -5508,7 +5546,7 @@ const agentWorkerEventParsers = {
         (value.by === undefined || (ASK_ANSWER_BY as readonly unknown[]).includes(value.by)) &&
         (value.answer === undefined || typeof value.answer === 'string') &&
         (value.name === undefined || isNonEmptyString(value.name))
-        ? (value as unknown as AgentWorkerEvent)
+        ? (withAskLink(value) as unknown as AgentWorkerEvent)
         : null;
     }
   ),

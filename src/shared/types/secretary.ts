@@ -1,5 +1,5 @@
 import type { PendingReminderView } from '../reminders';
-import type { GoalResultView } from '../secretary/goalResult';
+import type { GoalResultView, NeedsUserAnswer } from '../secretary/goalResult';
 import type { GoalUpstreamRetry } from '../upstreamRecovery';
 import type { ModelRef, ThinkingLevel } from './agent';
 import type { DemandMilestoneKind, DemandThreadStatus } from './demandThreads';
@@ -639,6 +639,8 @@ export type SecretaryCard =
       resultAt?: number;
       /** 结构化结果里待用户处理的条目（已脱敏，未清除时展示） */
       needsUser?: readonly string[];
+      /** 用户已答复的条目（秘书带关联转问）：index 对应 needsUser 的位置 */
+      needsUserAnswers?: readonly NeedsUserAnswer[];
       /** goal-complete 的 summary（已脱敏）。点「知道了」后仍保留，手动标完成不带 */
       summary?: string;
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */

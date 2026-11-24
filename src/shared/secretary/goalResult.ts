@@ -54,32 +54,63 @@ export interface GoalResultCheck {
   detail?: string;
 }
 
+/** 用户对某条 needsUser 的答复；index 是 needsUserItems 里的位置 */
+export interface NeedsUserAnswer {
+  index: number;
+  answer: string;
+  at: number;
+}
+
 export interface GoalResultView {
   result: GoalResult;
   checks?: GoalResultCheck[];
+  /** 秘书带关联转问后用户的答复；属于这一份结果，新结果整体替换时自然清空 */
+  answers?: NeedsUserAnswer[];
   at: number;
+}
+
+function listNeedsUser(result: GoalResult): string[] {
+  return (result.needsUser ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
 }
 
 /** 结构化结果里是否明确列出了需要用户亲自处理的事项 */
 export function needsUserItems(view: GoalResultView | undefined): string[] {
-  return (view?.result.needsUser ?? [])
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  return view ? listNeedsUser(view.result) : [];
 }
 
 export function hasNeedsUser(view: GoalResultView | undefined): boolean {
   return needsUserItems(view).length > 0;
 }
 
-/** 清除已处理的 needsUser，保留 PR/commit/checks 等客观事实；无剩余内容时返回 undefined */
+/** 记下一次答复：index 缺省表示覆盖全部条目，同一条再答以新的为准 */
+export function answerGoalResultNeedsUser(
+  view: GoalResultView,
+  index: number | undefined,
+  answer: string,
+  at: number
+): GoalResultView {
+  const count = needsUserItems(view).length;
+  const targets = index === undefined ? [...Array(count).keys()] : [index];
+  const kept = (view.answers ?? []).filter((item) => !targets.includes(item.index));
+  const added = targets.map((target) => ({ index: target, answer, at }));
+  return { ...view, answers: [...kept, ...added].sort((a, b) => a.index - b.index) };
+}
+
+export function unansweredNeedsUserCount(view: GoalResultView | undefined): number {
+  const answered = new Set((view?.answers ?? []).map((item) => item.index));
+  return needsUserItems(view).filter((_, index) => !answered.has(index)).length;
+}
+
+/** 清除已处理的 needsUser 与答复，保留 PR/commit/checks 等客观事实；无剩余内容时返回 undefined */
 export function stripGoalResultNeedsUser(
   view: GoalResultView | undefined
 ): GoalResultView | undefined {
-  if (!view?.result.needsUser) return view;
+  if (!view?.result.needsUser && !view?.answers) return view;
   const { needsUser: _needsUser, ...rest } = view.result;
+  const { answers: _answers, ...base } = view;
   const hasRest = Object.keys(rest).length > 0 || (view.checks?.length ?? 0) > 0;
   if (!hasRest) return undefined;
-  return { ...view, result: rest };
+  return { ...base, result: rest };
 }
 
 export type GoalResultParse = { ok: true; value: GoalResult } | { ok: false; error: string };
@@ -479,6 +510,8 @@ export function parseGoalResultView(raw: unknown): GoalResultView | undefined {
   if (!parsed.ok) return undefined;
   if (typeof raw.at !== 'number' || !Number.isFinite(raw.at)) return undefined;
   const view: GoalResultView = { result: parsed.value, at: raw.at };
+  const answers = parseAnswers(raw.answers);
+  if (answers.length > 0) view.answers = answers;
   if (!Array.isArray(raw.checks)) return view;
   const checks = raw.checks.flatMap((item) => {
     const check = parseCheck(item);
@@ -486,6 +519,17 @@ export function parseGoalResultView(raw: unknown): GoalResultView | undefined {
   });
   if (checks.length > 0) view.checks = checks;
   return view;
+}
+
+function parseAnswers(raw: unknown): NeedsUserAnswer[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_ITEMS).flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const { index, answer, at } = item;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return [];
+    if (typeof answer !== 'string' || typeof at !== 'number' || !Number.isFinite(at)) return [];
+    return [{ index, answer: answer.slice(0, MAX_TEXT), at }];
+  });
 }
 
 function shortSha(sha: string): string {
@@ -590,7 +634,8 @@ export function formatGoalResultClaims(result: GoalResult): string {
     lines.push(shot.caption ? `截图 ${shot.path} ${shot.caption}` : `截图 ${shot.path}`);
   }
   for (const item of result.followUps ?? []) lines.push(`follow-up: ${item}`);
-  for (const item of result.needsUser ?? []) lines.push(`needs-user: ${item}`);
+  for (const [index, item] of listNeedsUser(result).entries())
+    lines.push(`needs-user[${index}]: ${item}`);
   if (result.deploy) {
     const bits = [
       result.deploy.needed ? 'needed' : '',

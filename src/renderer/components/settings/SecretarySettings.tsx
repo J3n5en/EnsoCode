@@ -556,6 +556,8 @@ export function SecretarySettings() {
     }
   });
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // 点删除时的那个秘书：途中列表推送或主窗口切换选中，都不改删除对象
+  const [deleteTarget, setDeleteTarget] = React.useState<string>();
 
   const loadList = React.useCallback(async () => {
     const list = await window.electronAPI.secretary.list();
@@ -627,7 +629,10 @@ export function SecretarySettings() {
                 variant="ghost"
                 size="sm"
                 data-enso="secretary-settings-delete"
-                onClick={() => setDeleteOpen(true)}
+                onClick={() => {
+                  setDeleteTarget(current);
+                  setDeleteOpen(true);
+                }}
               >
                 {t('Delete secretary')}
               </Button>
@@ -635,12 +640,13 @@ export function SecretarySettings() {
           </div>
         )}
         <SecretaryProfileSettings key={current ?? 'single'} />
-        {current && (
+        {deleteTarget && (
           <SecretaryDeleteDialog
             open={deleteOpen}
-            secretaryId={current}
+            secretaryId={deleteTarget}
             onOpenChange={setDeleteOpen}
             onDeleted={() => {
+              setSecretaries((list) => list.filter((entry) => entry.id !== deleteTarget));
               setSelected(undefined);
               void loadList();
             }}

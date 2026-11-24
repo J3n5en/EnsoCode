@@ -41,6 +41,16 @@ export const REMINDER_PROMPT_MAX = 4000;
 export const REMINDER_LABEL_MAX = 80;
 /** 到点后这么久还没被叫醒，巡检恢复正常判定 */
 export const REMINDER_OVERDUE_GRACE_MS = 2 * 60_000;
+/** worker 加载时已过点超过这么久：重启或 worker 停着期间到点，通知里标明延迟 */
+export const REMINDER_LATE_MS = 60_000;
+/** worker 意外退出后为提醒重新拉起的最短间隔，防崩溃循环 */
+export const REMINDER_REVIVE_MIN_MS = 60_000;
+
+/** worker 意外退出后多久为提醒拉起它：最早的到点时间，至少隔 REMINDER_REVIVE_MIN_MS；没有提醒不拉起 */
+export function reminderReviveDelay(dueAts: readonly number[], now: number): number | undefined {
+  if (dueAts.length === 0) return undefined;
+  return Math.max(REMINDER_REVIVE_MIN_MS, Math.min(...dueAts) - now);
+}
 
 const ID_RE = /^r[0-9a-f]{8}$/;
 

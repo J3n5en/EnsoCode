@@ -25,6 +25,7 @@ import { appendDailyRecord } from '../services/secretary/dailyLog';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import { resolveTarget } from '../services/secretary/deliveries';
 import {
+  answerNeedsUser,
   buildSecretaryState,
   dismissPending,
   dismissResult,
@@ -427,6 +428,14 @@ function hostPortsFor(
     },
     isSecretaryConversation: (conversationId) =>
       secretaryIdOfConversation(conversationId) === ctx.id,
+    answerNeedsUser: (link, answer, askedAt) => {
+      void answerNeedsUser(dispatchPorts, link, answer, askedAt).catch((error: unknown) => {
+        console.warn(
+          '[secretary] needsUser answer failed:',
+          error instanceof Error ? error.message : String(error)
+        );
+      });
+    },
     publish: () => broadcastState(),
     now: () => Date.now(),
     backgroundStalls: (now) => driver?.watch(now) ?? [],
@@ -811,15 +820,16 @@ export function registerSecretaryHandlers(): void {
     if (!ctx) return { ok: false, error: 'not-found' };
     // 二次确认：界面先拿预览、用户再点一次确认，才会带上这个标记
     if (parsed.confirmed !== true) return { ok: false, error: 'confirmation-required' };
-    const host = hosts.get(ctx.id);
-    host?.stop();
-    hosts.delete(ctx.id);
-    resumeFailureSubscriptions.get(ctx.id)?.();
-    resumeFailureSubscriptions.delete(ctx.id);
-    statePublishers.delete(ctx.id);
-    await contacts?.remove(ctx.id, true);
     const result = await deleteSecretary(ctx, {
       forget: (conversationId) => driver?.forget(conversationId),
+      stop: async () => {
+        hosts.get(ctx.id)?.stop();
+        hosts.delete(ctx.id);
+        resumeFailureSubscriptions.get(ctx.id)?.();
+        resumeFailureSubscriptions.delete(ctx.id);
+        statePublishers.delete(ctx.id);
+        await contacts?.remove(ctx.id, true);
+      },
     });
     notifySecretariesChanged();
     broadcastState();

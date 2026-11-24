@@ -201,7 +201,7 @@ import {
   configurePairSessionHost,
   handlePairHeadlessAgentEvent,
 } from '../services/pairSessionHost';
-import { planReminderWake } from '../services/reminderWake';
+import { planReminderWake, reminderResumeFromAuthority } from '../services/reminderWake';
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
@@ -1024,6 +1024,7 @@ async function wakeForReminder(sessionId: string): Promise<void> {
     row: readPersistedConversation(sessionId),
     alive: agentSessionIndex.isAlive(sessionId),
     lifecycle: sourceAuthority?.conversation(sessionId)?.lifecycle,
+    known: Boolean(sourceAuthority?.conversation(sessionId)),
   });
   const tag = `[reminder] due ${sessionId.slice(0, 8)}`;
   if (plan === 'clear') {
@@ -1039,6 +1040,15 @@ async function wakeForReminder(sessionId: string): Promise<void> {
   let result = await wakeColdRestartSession(sessionId, resumeRootFromRestartManifest);
   if (result.error === 'not in restart manifest' || result.error === 'already woken')
     result = await resumeRootFromMain(sessionId);
+  // 强杀丢掉 settings 投影里的会话行：权威注册表同步落盘，按它恢复
+  if (!result.ok && result.error === 'unknown session') {
+    const fromAuthority = reminderResumeFromAuthority({
+      sessionId,
+      authority: sourceAuthority?.conversation(sessionId),
+      cwd: authoritativeSpawnCwd(sessionId),
+    });
+    if (fromAuthority) result = await spawnRootFromMain(fromAuthority);
+  }
   console.log(`${tag}: resume ${result.ok ? 'ok' : `skipped: ${result.error}`}`);
 }
 
@@ -1561,7 +1571,8 @@ function distillSessionMemory(identity: SessionIdentity) {
   if (sessionFile) {
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
     if (conversation?.bot) void getBotServices()?.memory.distill({ ...conversation, sessionFile });
-    else
+    // 已删秘书的会话：私有空间已删，项目一撤 projectId 就成了 null，会落进全局
+    else if (!isSecretaryProject(project) || project?.state === 'active')
       scheduleMemoryDistill(
         {
           sessionId: identity.sessionId,
