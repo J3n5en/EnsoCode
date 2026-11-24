@@ -1,9 +1,12 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  INTERRUPTED_TURNS_FACTS,
+  INTERRUPTED_TURNS_LOG,
   interruptedTurnReason,
   readInterruptedTurnFacts,
   recoverInterruptedTurns,
@@ -66,6 +69,39 @@ describe('recoverInterruptedTurns', () => {
     ]);
     // 记录只消费一次
     expect(existsSync(runningAtExitPath(dir))).toBe(false);
+  });
+
+  it('应用日志关闭时重启恢复照常：事实文件写出可读回，只是不写诊断日志', async () => {
+    messages.c1 = [assistant([toolCall('call-1', 'bash')], { timestamp: 1_000 })];
+    const record = {
+      pid: 4242,
+      kind: 'update' as const,
+      at: 2_000,
+      sessions: [{ conversationId: 'c1', startedAt: 900 }],
+    };
+    const recover = () =>
+      recoverInterruptedTurns({
+        agentDir: dir,
+        startupAt: 5_000,
+        now: 5_000,
+        pid: 9,
+        pidAlive: () => false,
+        readMessages,
+      });
+    writeRunningAtExit(dir, record);
+    expect(await recover()).toHaveLength(1);
+    expect(readInterruptedTurnFacts(dir).map((turn) => turn.conversationId)).toEqual(['c1']);
+    expect(existsSync(path.join(dir, INTERRUPTED_TURNS_FACTS))).toBe(true);
+    expect(existsSync(path.join(dir, INTERRUPTED_TURNS_LOG))).toBe(false);
+
+    setAppLoggingEnabled(true);
+    try {
+      writeRunningAtExit(dir, record);
+      expect(await recover()).toHaveLength(1);
+      expect(readFileSync(path.join(dir, INTERRUPTED_TURNS_LOG), 'utf8')).toContain('pid=4242');
+    } finally {
+      setAppLoggingEnabled(false);
+    }
   });
 
   it('SIGKILL：只有心跳留下的记录、进程已不在，也能识别', async () => {
