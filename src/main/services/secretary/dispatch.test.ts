@@ -14,6 +14,7 @@ import type {
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProfileDraft,
+  SecretaryProposal,
   SecretaryRelayAsk,
   SecretarySkillDraft,
   SecretaryTodo,
@@ -39,6 +40,7 @@ import {
   type SecretaryDispatchPorts,
   type SecretaryQueuedMessage,
   saveCleanupProposal,
+  setProposalAcceptedListener,
   startPendingDispatches,
   stopLeftoverTasks,
   untrack,
@@ -2673,6 +2675,44 @@ describe('确认卡的两段式回传', () => {
       'proposal:cleanup-1:executing',
       'proposal:cleanup-1:succeeded',
     ]);
+  });
+
+  // 技能、档案、工具写盘后要释放秘书会话：先投「正在执行」，释放会把这次投递的模型请求中止（Request aborted）
+  it.each([
+    ['skill', { name: 'deploy-check', description: '发布前跑一遍', body: '# 步骤' }],
+    ['profile', { name: '小秘' }],
+    [
+      'tool',
+      {
+        name: 'upper-text',
+        description: '把文本转成大写',
+        runtime: 'node',
+        parameters: { type: 'object', properties: {} },
+        readOnly: true,
+        code: 'process.stdout.write("x")',
+      },
+    ],
+  ] as const)('确认 %s 提案：写完才投递，秘书只收到一条终态', async (kind, draft) => {
+    const h = harness();
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind,
+      draft,
+    } as SecretaryProposal;
+    const flushedWith: string[][] = [];
+    setProposalAcceptedListener(() => flushedWith.push(h.file.outbox.map((update) => update.key)));
+    try {
+      const result = await resolveProposal(h.ports, 'p1', 'confirm');
+      expect(result.ok && result.proposal.status).toBe('succeeded');
+    } finally {
+      setProposalAcceptedListener(null);
+    }
+    expect(h.file.outbox.map((update) => update.key)).toEqual(['proposal:p1:succeeded']);
+    expect(flushedWith).toEqual([['proposal:p1:succeeded']]);
   });
 
   it('取消时立刻推「已取消」', async () => {
