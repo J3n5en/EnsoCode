@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
+import type { ScannedSession } from './types';
 
 const parseLine = (line: string): Record<string, unknown> | null => {
   try {
@@ -206,13 +207,13 @@ function isSubagent(filePath: string): boolean {
 export function listGeminiSessions(
   projectPath: string,
   home = process.env.HOME ?? ''
-): ExternalSession[] {
+): ScannedSession[] {
   const ids = new Set<string>();
   const slug = projectSlug(home, projectPath);
   if (slug) ids.add(slug);
   ids.add(createHash('sha256').update(projectPath).digest('hex'));
   const seen = new Set<string>();
-  const sessions: ExternalSession[] = [];
+  const sessions: ScannedSession[] = [];
   for (const id of ids) {
     for (const filePath of listSessionFiles(home, id)) {
       if (seen.has(filePath) || isSubagent(filePath)) continue;

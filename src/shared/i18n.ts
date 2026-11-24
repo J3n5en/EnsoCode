@@ -2504,6 +2504,10 @@ export const zhTranslations: Record<string, string> = {
     '从本地 AI 应用导入 {{name}} 项目下的对话历史。',
   'No sessions found for this project': '没有找到该项目的会话',
   'Select a session to preview': '选择一个会话预览',
+  'The session list is out of date. Please rescan.': '会话列表已过期，请重新扫描。',
+  'This session is outside the allowed folders and cannot be read.':
+    '该会话已不在允许的目录内，无法读取。',
+  'This session has no messages to import.': '该会话没有可导入的消息。',
   Untitled: '未命名',
   '{{count}} messages': '{{count}} 条消息',
   Import: '导入',
