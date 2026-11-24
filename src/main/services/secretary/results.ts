@@ -19,7 +19,6 @@ import {
   type PendingDispatch,
   type SecretaryBoard,
   type SecretaryCard,
-  type SecretaryClaimView,
   type SecretaryDemandThreadView,
   type SecretaryDispatchFile,
   type SecretaryProposal,
@@ -527,7 +526,6 @@ export interface BoardInput {
   projects: readonly ProjectAuthority[];
   todos: readonly SecretaryTodo[];
   aliases?: Readonly<Record<string, string>>;
-  claims?: readonly SecretaryClaimView[];
   threads?: readonly SecretaryDemandThreadView[];
 }
 
@@ -581,7 +579,6 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     if (!row) continue;
     // 用户从看板上移出：记录与会话都还在，只是不再占工作台的列
     if (record.dismissedFromBoard === true) continue;
-    // 已归档的会话用户看不到，也不再要他处理：只留在「完成」
     const archived = row.archived === true;
     const status = input.statuses[record.conversationId];
     const hasSubagents = (input.subagents?.[record.conversationId]?.length ?? 0) > 0;
@@ -673,6 +670,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       else queuedCards.push({ card, at: queued.queuedAt });
       continue;
     }
+    // 归档了就是用户已经处理过，不再占「需要你处理」
     const needsYouNow = !archived && sessionNeedsUser(record, state);
     if (needsYouNow) needsYou.push(card);
     else if (going) running.push(card);
@@ -743,7 +741,6 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ];
     }),
     ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
-    ...(input.claims && input.claims.length > 0 ? { claims: [...input.claims] } : {}),
     ...(input.threads && input.threads.length > 0 ? { threads: [...input.threads] } : {}),
   };
 }

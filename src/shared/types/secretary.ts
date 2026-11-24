@@ -679,7 +679,6 @@ export interface SecretaryBoard {
   todos: SecretaryBoardTodo[];
   done: SecretaryCard[];
   activity?: SecretaryActivity[];
-  claims?: SecretaryClaimView[];
   threads?: SecretaryDemandThreadView[];
 }
 

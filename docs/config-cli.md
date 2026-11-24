@@ -100,6 +100,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `pluginLoggingEnabled`（布尔，缺省 `false`）控制是否记录插件控制台输出与运行日志。关闭时不采集、不进缓冲、不写盘，启动失败和崩溃等错误状态仍然显示。只接受布尔值，热生效，无需重启插件或应用，不参与配置同步。
 
+`appLoggingEnabled`（布尔，缺省 `false`）控制是否记录应用日志：`agent/logs/main.log`、`agent/logs/agent.log`、`agent/worker-exits.log`、`agent/compaction.log`、`agent/interrupted-turns.log`。关闭时这些文件不写盘，console 照常输出到 stdout/stderr；重启恢复等功能性文件（如 `interrupted-turns.json`、`worker-crash.json`、后台任务输出）照常写，已有日志不删除，仍可在设置 → 日志查看和导出。只接受布尔值，主进程与 agent worker 热生效，无需重启，不参与配置同步。与 `pluginLoggingEnabled` 相互独立。
+
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
 - `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`

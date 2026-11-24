@@ -10,10 +10,38 @@ const harness = vi.hoisted(() => ({
   exportLogs: vi.fn(),
   revealExport: vi.fn(async () => undefined),
   addToast: vi.fn(),
+  appLoggingEnabled: true,
+  setAppLoggingEnabled: vi.fn(),
+  pluginLoggingEnabled: false,
+  setPluginLoggingEnabled: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/toast', () => ({ addToast: harness.addToast }));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: (select: (state: Record<string, unknown>) => unknown) =>
+    select({
+      appLoggingEnabled: harness.appLoggingEnabled,
+      setAppLoggingEnabled: harness.setAppLoggingEnabled,
+      pluginLoggingEnabled: harness.pluginLoggingEnabled,
+      setPluginLoggingEnabled: harness.setPluginLoggingEnabled,
+    }),
+}));
+vi.mock('@/components/ui/switch', () => ({
+  Switch: ({
+    checked,
+    onCheckedChange,
+  }: {
+    checked?: boolean;
+    onCheckedChange?: (v: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      aria-pressed={checked === true}
+      onClick={() => onCheckedChange?.(checked !== true)}
+    />
+  ),
+}));
 vi.mock('@/components/ui/button', () => ({
   Button: ({
     variant: _variant,
@@ -59,6 +87,10 @@ const button = (text: string) => {
   return found as HTMLElement;
 };
 
+async function mount() {
+  await act(async () => root.render(<LogsSettings />));
+}
+
 beforeEach(async () => {
   const dom = parseHTML('<html><body><div id="root"></div></body></html>');
   vi.stubGlobal('window', dom.window);
@@ -74,10 +106,12 @@ beforeEach(async () => {
     },
   });
   vi.clearAllMocks();
+  harness.appLoggingEnabled = true;
+  harness.pluginLoggingEnabled = false;
   harness.errors.mockResolvedValue(ENTRIES);
   container = dom.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
-  await act(async () => root.render(<LogsSettings />));
+  await mount();
 });
 
 afterEach(async () => {
@@ -86,6 +120,44 @@ afterEach(async () => {
 });
 
 describe('LogsSettings', () => {
+  const toggle = (label: string) => {
+    const row = [...container.querySelectorAll('label')].find((el) =>
+      el.textContent?.includes(label)
+    );
+    expect(row, label).not.toBeUndefined();
+    return row?.querySelector('button[aria-pressed]') as HTMLElement;
+  };
+
+  it('顶部有应用日志、插件日志两个独立开关，各写各的设置项', async () => {
+    harness.appLoggingEnabled = false;
+    await mount();
+    const app = toggle('Record app logs');
+    const plugin = toggle('Record plugin logs');
+    expect(app.getAttribute('aria-pressed')).toBe('false');
+    expect(plugin.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => app.click());
+    expect(harness.setAppLoggingEnabled).toHaveBeenCalledWith(true);
+    expect(harness.setPluginLoggingEnabled).not.toHaveBeenCalled();
+    await act(async () => plugin.click());
+    expect(harness.setPluginLoggingEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('应用日志关闭时最近错误显示未开启与开启入口，历史日志仍可查看', async () => {
+    harness.appLoggingEnabled = false;
+    await mount();
+    expect(container.textContent).toContain('App logging is off');
+    expect(container.textContent).toContain('[mcp] connect failed');
+    expect(container.textContent).toContain(
+      'App logging is off. The export only includes logs recorded earlier.'
+    );
+    await act(async () => button('Enable app logging').click());
+    expect(harness.setAppLoggingEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('应用日志打开时不显示未开启提示', () => {
+    expect(container.textContent).not.toContain('App logging is off');
+  });
+
   it('默认只拉 error，列表显示来源，点开看到堆栈', async () => {
     expect(harness.errors).toHaveBeenCalledWith('error');
     expect(container.textContent).toContain('MCP');
