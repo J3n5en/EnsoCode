@@ -164,6 +164,17 @@ describe('useSecretaryStore', () => {
     expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('executing');
   });
 
+  it('reload 向 Main 重读并替换手上那份未启用的状态', async () => {
+    useSecretaryStore.setState({
+      focusedId: 'default',
+      states: { default: { ...EMPTY_SECRETARY_STATE, secretaryId: 'default' } },
+    });
+    initialState = Promise.resolve(stateWith('pending'));
+    await useSecretaryStore.getState().reload('default');
+    expect(useSecretaryStore.getState().states.default?.enabled).toBe(true);
+    expect(useSecretaryStore.getState().secretary.enabled).toBe(true);
+  });
+
   it('resolveProposal 在途按提案 id 标记，结束后清除', async () => {
     let settle: () => void = () => {};
     resolveProposal.mockImplementationOnce(

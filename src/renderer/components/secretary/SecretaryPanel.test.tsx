@@ -45,6 +45,7 @@ vi.mock('@/stores/secretary', () => ({
       focusedId: null,
       resolving: {},
       resolveProposal: () => undefined,
+      reload: (secretaryId?: string) => h.calls.push({ name: 'reload', args: secretaryId }),
     }),
 }));
 
@@ -222,6 +223,24 @@ afterEach(() => {
 });
 
 describe('SecretaryPanel', () => {
+  it('秘书状态是 enabled=false 时不留白：显示读取提示、自动重读，可手动重试', async () => {
+    h.secretary = {
+      enabled: false,
+      projectId: null,
+      profile: null,
+      persona: '',
+      board: board(),
+      proposals: {},
+      takeovers: [],
+    };
+    await render(<SecretaryPanel />);
+    await flush();
+    expect(container.textContent).toContain('[Loading secretary…]');
+    expect(h.calls.filter((call) => call.name === 'reload')).toHaveLength(1);
+    click('[data-enso="secretary-panel-reload"]');
+    expect(h.calls.filter((call) => call.name === 'reload')).toHaveLength(2);
+  });
+
   it('顶部显示名字与一行摘要，并留设置入口', async () => {
     h.board = h.secretary.board = board({
       needsYou: [proposalCard],

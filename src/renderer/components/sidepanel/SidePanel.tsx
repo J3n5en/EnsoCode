@@ -94,6 +94,7 @@ import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { GlobalPluginLayer, GlobalPluginSlot } from './GlobalPluginLayer';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
+import { PanelErrorBoundary } from './PanelErrorBoundary';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
 import { isPluginPanelId, pinnableTabForId, planPinnedPanels } from './pinnedTabs';
 import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
@@ -879,15 +880,26 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
   return <SidePanelHeaderActions containerApi={props.containerApi} group={props.group} />;
 }
 
+/** 每种面板各包一层错误边界：一块出错只在那一块显示原因，不白屏也不拖垮窗口 */
+function guardPanel<P extends object>(name: string, Panel: (props: P) => ReactNode) {
+  return function GuardedPanel(props: P) {
+    return (
+      <PanelErrorBoundary name={name}>
+        <Panel {...props} />
+      </PanelErrorBoundary>
+    );
+  };
+}
+
 const DOCK_COMPONENTS = {
-  terminal: TerminalPanel,
-  changes: ChangesPanel,
-  files: FilesPanel,
-  browser: BrowserPanel,
-  btw: BtwPanel,
-  workflow: WorkflowPanel,
-  secretary: Secretary,
-  plugin: PluginViewPanel,
+  terminal: guardPanel('terminal', TerminalPanel),
+  changes: guardPanel('changes', ChangesPanel),
+  files: guardPanel('files', FilesPanel),
+  browser: guardPanel('browser', BrowserPanel),
+  btw: guardPanel('btw', BtwPanel),
+  workflow: guardPanel('workflow', WorkflowPanel),
+  secretary: guardPanel('secretary', Secretary),
+  plugin: guardPanel('plugin', PluginViewPanel),
 };
 
 /** 跟随应用暗色模式(applyAppTheme 切换 documentElement 的 dark class) */
