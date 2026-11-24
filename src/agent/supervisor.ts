@@ -271,7 +271,12 @@ import {
   resolveOauthPoolModel,
 } from './oauthAccountPool';
 import { outputLimitRecoveryExtension } from './outputLimitRecovery';
-import { applyOwnerAskResolution, OwnerGate, withOwnerGate } from './ownerGate';
+import {
+  applyOwnerAskResolution,
+  OWNER_GATE_AUDIT_LOG,
+  OwnerGate,
+  withOwnerGate,
+} from './ownerGate';
 import { withPathHints } from './pathHints';
 import { PendingNotificationStore } from './pendingNotifications';
 import { type PersonaHolder, personaExtension } from './personaExtension';
@@ -2505,6 +2510,9 @@ export class SessionSupervisor {
           triggerTurn: command.triggerTurn,
           ...(command.origin ? { origin: command.origin } : {}),
           ...(command.sender ? { sender: command.sender } : {}),
+          ...(typeof command.ownerConfirm === 'boolean'
+            ? { ownerConfirm: command.ownerConfirm }
+            : {}),
         });
         if (!delivered?.ok) {
           console.warn('[plugin-inject]', delivered?.error ?? '会话未接受注入');
@@ -3770,7 +3778,14 @@ export class SessionSupervisor {
             readonlyAgentTypes,
             agentTypeOf: (agentId) => spawnedAgentTypes.get(agentId),
           }),
-          ownerGate
+          ownerGate,
+          (entry) => {
+            if (!this.options.dataDir) return;
+            appendCappedLog(
+              path.join(this.options.dataDir, OWNER_GATE_AUDIT_LOG),
+              `owner-gate session=${sessionId} ${JSON.stringify(entry)}`
+            );
+          }
         )
       );
     // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具、插件工具与自造工具都不在其中。

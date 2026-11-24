@@ -15,9 +15,23 @@ export type TurnTriggerOrigin =
       pluginId: string;
       pluginName?: string;
       sender?: PluginInjectSender;
+      /** 主人打开了「非主人消息必须确认」 */
+      confirm: boolean;
     };
 
 export type OwnerGateCategory = 'dispatch' | 'subagent' | 'command';
+
+export interface OwnerGateAuditEntry {
+  at: number;
+  action: string;
+  category: OwnerGateCategory;
+  pluginId: string;
+  sender?: PluginInjectSender;
+  ok: boolean;
+}
+
+/** 非主人轮次里放行的敏感动作。相对 dataDir */
+export const OWNER_GATE_AUDIT_LOG = 'owner-gate-audit.log';
 
 export interface OwnerGateMatch {
   category: OwnerGateCategory;
@@ -285,7 +299,7 @@ function describeTrigger(origin: TurnTriggerOrigin): string {
 
 function ownerGateError(gate: OwnerGate, match: OwnerGateMatch): Error {
   return new Error(
-    `需要 owner 确认（Owner confirmation required）。来源：${describeTrigger(gate.origin())}。被拦截的动作：${match.action}。请调用 ask_user 请 owner 确认（提供「同意」「拒绝」选项），或等待 owner 在会话或私聊里回复确认后再执行。未确认前禁止重试。`
+    `需要 owner 确认（Owner confirmation required）。来源：${describeTrigger(gate.origin())}。被拦截的动作：${match.action}。请调用 ask_user 请 owner 确认（提供「同意」「拒绝」选项），或等待 owner 在会话或私聊里回复确认后再执行。未确认前禁止重试。可在「秘书 → 联系方式 → 主人身份」绑定 GitHub 账号，或把外部消息处理改回「交给 agent 判断」。`
   );
 }
 
@@ -321,6 +335,7 @@ export class OwnerGate {
       pluginId,
       ...(pluginName ? { pluginName } : {}),
       ...(sender ? { sender } : {}),
+      confirm: details.ownerConfirm === true,
     };
   }
 
@@ -356,13 +371,37 @@ export function applyOwnerAskResolution(
   return gate.handleAskUserAnswer(resolution.answer);
 }
 
-export function withOwnerGate(definition: ToolDefinition, gate: OwnerGate): ToolDefinition {
+export function withOwnerGate(
+  definition: ToolDefinition,
+  gate: OwnerGate,
+  audit?: (entry: OwnerGateAuditEntry) => void
+): ToolDefinition {
   return {
     ...definition,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      if (!gate.isOwner()) {
+      const origin = gate.origin();
+      if (origin.kind === 'external') {
         const match = classifyOwnerGatedTool(definition.name, params);
-        if (match) throw ownerGateError(gate, match);
+        if (match) {
+          if (origin.confirm) throw ownerGateError(gate, match);
+          const record = (ok: boolean) =>
+            audit?.({
+              at: Date.now(),
+              action: match.action,
+              category: match.category,
+              pluginId: origin.pluginId,
+              ...(origin.sender ? { sender: origin.sender } : {}),
+              ok,
+            });
+          try {
+            const result = await definition.execute(toolCallId, params, signal, onUpdate, ctx);
+            record(true);
+            return result;
+          } catch (error) {
+            record(false);
+            throw error;
+          }
+        }
       }
       return definition.execute(toolCallId, params, signal, onUpdate, ctx);
     },

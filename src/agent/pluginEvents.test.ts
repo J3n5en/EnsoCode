@@ -431,6 +431,20 @@ describe('插件事件扩展', () => {
       pluginName: 'Scheduler',
     });
   });
+
+  it('ownerConfirm 为 true 时写进 details，缺省不添', () => {
+    const { invoker, sendMessage } = harness(plan({ inject: true }));
+    invoker.deliver({
+      pluginId: 'enso.github',
+      pluginName: 'GitHub',
+      text: '请合并',
+      deliverAs: 'followUp',
+      triggerTurn: true,
+      origin: 'external',
+      ownerConfirm: true,
+    });
+    expect(sendMessage.mock.calls[0]?.[0].details).toMatchObject({ ownerConfirm: true });
+  });
 });
 
 describe('子会话的插件事件', () => {

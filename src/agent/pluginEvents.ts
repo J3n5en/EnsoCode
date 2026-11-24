@@ -52,6 +52,7 @@ export interface PluginInjectMessage {
   triggerTurn: boolean;
   origin?: PluginInjectOrigin;
   sender?: PluginInjectSender;
+  ownerConfirm?: boolean;
 }
 
 type SendPluginMessage = ExtensionAPI['sendMessage'];
@@ -210,6 +211,9 @@ export class PluginEventInvoker {
             pluginName: message.pluginName,
             ...(message.origin ? { origin: message.origin } : {}),
             ...(message.sender ? { sender: message.sender } : {}),
+            ...(typeof message.ownerConfirm === 'boolean'
+              ? { ownerConfirm: message.ownerConfirm }
+              : {}),
           },
         },
         { deliverAs: message.deliverAs, triggerTurn: message.triggerTurn }

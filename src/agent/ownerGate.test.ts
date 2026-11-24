@@ -129,8 +129,22 @@ describe('OwnerGate', () => {
     return gate;
   }
 
+  function confirmingGate() {
+    const gate = new OwnerGate();
+    gate.observeMessage(
+      pluginMessage({
+        pluginId: 'enso.tgclient',
+        pluginName: 'Telegram',
+        origin: 'external',
+        ownerConfirm: true,
+        sender: { channel: 'telegram', userId: '9', displayName: '群友' },
+      })
+    );
+    return gate;
+  }
+
   it('非 owner 插件投递拦截开工动作，只读照常执行', async () => {
-    const gate = externalGate();
+    const gate = confirmingGate();
     for (const [name, params] of blocked) {
       await expect(call(gate, name, params)).rejects.toThrow(/需要 owner 确认/);
       await expect(call(gate, name, params)).rejects.toThrow(/Owner confirmation required/);
@@ -164,14 +178,16 @@ describe('OwnerGate', () => {
 
   it('没有 origin 的旧插件投递按非 owner 拦截', async () => {
     const gate = new OwnerGate();
-    gate.observeMessage(pluginMessage({ pluginId: 'enso.github', pluginName: 'GitHub' }));
+    gate.observeMessage(
+      pluginMessage({ pluginId: 'enso.github', pluginName: 'GitHub', ownerConfirm: true })
+    );
     expect(gate.isOwner()).toBe(false);
     expect(gate.origin()).toMatchObject({ kind: 'external', pluginId: 'enso.github' });
     await expect(call(gate, 'bash', { command: 'git push' })).rejects.toThrow(/需要 owner 确认/);
   });
 
   it('真人同意后放行，拒绝、超时和代答不放行', async () => {
-    const gate = externalGate();
+    const gate = confirmingGate();
     expect(applyOwnerAskResolution(gate, { by: 'timeout', answer: '同意' })).toBe(false);
     expect(applyOwnerAskResolution(gate, { by: 'relay', answer: 'yes' })).toBe(false);
     expect(gate.isOwner()).toBe(false);
@@ -209,5 +225,86 @@ describe('OwnerGate', () => {
       }),
     ]);
     expect(ownerPlugin.origin()).toEqual({ kind: 'owner', source: 'plugin-owner' });
+  });
+
+  async function callAudited(
+    gate: OwnerGate,
+    name: string,
+    params: unknown,
+    audit: (entry: {
+      at: number;
+      action: string;
+      category: string;
+      pluginId: string;
+      ok: boolean;
+    }) => void,
+    execute: ToolDefinition['execute'] = (async () => 'ran') as unknown as ToolDefinition['execute']
+  ) {
+    const wrapped = withOwnerGate(
+      {
+        name,
+        label: name,
+        description: name,
+        parameters: { type: 'object', properties: {} } as ToolDefinition['parameters'],
+        execute,
+      },
+      gate,
+      audit
+    );
+    return wrapped.execute('call-1', params, undefined, undefined, undefined as never);
+  }
+
+  it('非主人且不要求确认时，push、派发和子代理都执行并记审计', async () => {
+    const gate = externalGate();
+    const audit = vi.fn();
+    for (const [name, params, action, category] of [
+      ['bash', { command: 'git push' }, 'git push', 'command'],
+      ['session_send', {}, 'session_send', 'dispatch'],
+      ['subagent', { operation: 'spawn' }, 'subagent spawn', 'subagent'],
+    ] as const) {
+      audit.mockClear();
+      await expect(callAudited(gate, name, params, audit)).resolves.toBe('ran');
+      expect(audit).toHaveBeenCalledOnce();
+      expect(audit.mock.calls[0]?.[0]).toMatchObject({
+        action,
+        category,
+        pluginId: 'enso.tgclient',
+        ok: true,
+        sender: { channel: 'telegram', userId: '9', displayName: '群友' },
+      });
+      expect(audit.mock.calls[0]?.[0].at).toEqual(expect.any(Number));
+    }
+  });
+
+  it('放行后的动作失败也记审计', async () => {
+    const audit = vi.fn();
+    const execute = (async () => {
+      throw new Error('push rejected');
+    }) as ToolDefinition['execute'];
+    await expect(
+      callAudited(externalGate(), 'bash', { command: 'git push' }, audit, execute)
+    ).rejects.toThrow('push rejected');
+    expect(audit).toHaveBeenCalledOnce();
+    expect(audit.mock.calls[0]?.[0]).toMatchObject({ action: 'git push', ok: false });
+  });
+
+  it('要求确认时恢复拦截，并说明可以绑定 GitHub 或改回交给 agent', async () => {
+    await expect(call(confirmingGate(), 'bash', { command: 'git push' })).rejects.toThrow(
+      /交给 agent 判断/
+    );
+  });
+
+  it('主人投递不审计', async () => {
+    const gate = new OwnerGate();
+    gate.observeMessage(
+      pluginMessage({
+        pluginId: 'enso.tgclient',
+        origin: 'owner',
+        sender: { channel: 'telegram', userId: '1' },
+      })
+    );
+    const audit = vi.fn();
+    await expect(callAudited(gate, 'bash', { command: 'git push' }, audit)).resolves.toBe('ran');
+    expect(audit).not.toHaveBeenCalled();
   });
 });

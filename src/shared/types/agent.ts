@@ -1711,6 +1711,7 @@ export type AgentCommand =
       triggerTurn: boolean;
       origin?: PluginInjectOrigin;
       sender?: PluginInjectSender;
+      ownerConfirm?: boolean;
     }
   | {
       type: 'rewind';
@@ -4583,9 +4584,10 @@ const agentCommandParsers = {
     if (value.sender !== undefined && !sender) return null;
     const origin = value.origin === undefined ? undefined : parsePluginInjectOrigin(value.origin);
     if (value.origin !== undefined && !origin) return null;
+    if (value.ownerConfirm !== undefined && typeof value.ownerConfirm !== 'boolean') return null;
     if (
       !(
-        hasOnlyKeys(value, [...PLUGIN_INJECT_KEYS, 'images', 'origin', 'sender']) &&
+        hasOnlyKeys(value, [...PLUGIN_INJECT_KEYS, 'images', 'origin', 'sender', 'ownerConfirm']) &&
         PLUGIN_INJECT_KEYS.every((key) => key in value) &&
         parsePluginInjectImages(value.images) !== null &&
         parseSessionIdentity(value.identity) &&

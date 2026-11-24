@@ -303,6 +303,10 @@ describe('插件工具协议', () => {
     expect(withOrigin({ origin: 'owner' })).toMatchObject({ origin: 'owner' });
     expect(withOrigin({ origin: 'external' })).toMatchObject({ origin: 'external' });
     expect(withOrigin({ origin: 'trusted' })).toBeNull();
+    expect(withOrigin({ ownerConfirm: true })).toMatchObject({ ownerConfirm: true });
+    expect(withOrigin({ ownerConfirm: false })).toMatchObject({ ownerConfirm: false });
+    expect(withOrigin({ ownerConfirm: 'yes' })).toBeNull();
+    expect(withOrigin({ ownerConfirm: 1 })).toBeNull();
     expect(
       withOrigin({
         sender: { channel: 'telegram', userId: 7, isOwner: true, role: 'owner' },
