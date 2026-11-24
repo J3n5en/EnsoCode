@@ -183,8 +183,9 @@ function normalizedTmpDir(raw?: string): string | null {
   return candidate;
 }
 
-function tempTokensFor(tmpDir?: string): string {
-  const extra = normalizedTmpDir(tmpDir);
+/** tmpDir 为 null：不加本机运行时 Temp 路径（判远端命令用） */
+function tempTokensFor(tmpDir?: string | null): string {
+  const extra = tmpDir === null ? null : normalizedTmpDir(tmpDir);
   const tokens = [...BASE_TEMP_TOKENS];
   if (extra && !/^\/(?:private\/)?(?:var\/)?tmp$/i.test(extra)) {
     const escaped = escapeRegExp(extra).replace(/(?:\\\/|\\\\)+/g, '[\\\\/]+');
@@ -193,14 +194,21 @@ function tempTokensFor(tmpDir?: string): string {
   return tokens.join('|');
 }
 
-function buildTempRootMatcher(tmpDir?: string): { rootRef: RegExp; exactRoot: RegExp } {
+interface TempRootMatcher {
+  rootRef: RegExp;
+  exactRoot: RegExp;
+}
+
+function buildTempRootMatcher(tmpDir?: string | null): TempRootMatcher {
   const tokens = tempTokensFor(tmpDir);
   // 1) Temp 根本身或根/. 2) 根下带通配或花括号/字符类展开的一层（*、*.tmp、{,}） 3) 根下含 .. 穿越回根
+  // 4) 根下某一段整段由变量/命令替换展开（/tmp/$X）：可能为空或 ..，无法确定不是根
   const rootRef = new RegExp(
     [
       String.raw`(?:${tokens})(?:[\\/]+\.?)?(?=$|[${PATH_STOP}*])`,
       String.raw`(?:${tokens})[\\/]+[^\\/${PATH_STOP}]*[*?[\]{}][^\\/${PATH_STOP}]*(?=$|[${PATH_STOP}])`,
       String.raw`(?:${tokens})[\\/]+(?:[^\\/${PATH_STOP}]+[\\/])*\.\.(?=$|[\\/${PATH_STOP}])`,
+      String.raw`(?:${tokens})(?:[\\/]+[^\\/${PATH_STOP}]+)*[\\/]+[$\x60%]`,
     ].join('|'),
     'i'
   );
@@ -493,13 +501,71 @@ function deletesCurrentOrWildcardRelative(stmt: string): boolean {
   });
 }
 
-/** 命令里有删除动作且作用于系统 Temp 根：按语句判定，不跨无关命令误拼，也不吞掉 cd /tmp && rm -rf * */
-export function deletesTempRoot(command: string, opts?: { tmpDir?: string }): boolean {
+const SSH_OPTS_WITH_ARG = new Set('BbcDEeFIiJLlmOopQRSWw');
+const POSIX_SHELL_CMD = /^(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)$/;
+const MAX_NESTED_SCRIPT_DEPTH = 3;
+
+/** ssh 的远端命令或 sh -c 的脚本：拆出来按独立脚本判定，不让同段脚本里别的命令的路径算到 rm 头上 */
+function nestedScriptOf(stmt: string): { script: string; remote: boolean } | null {
+  const tokens = tokenizeShell(stmt);
+  if (!tokens) return null;
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  const cmd = tokens[i++];
+  if (cmd === undefined) return null;
+  if (/^(?:\S*\/)?ssh$/.test(cmd)) {
+    for (; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (tok === '--') {
+        i++;
+        break;
+      }
+      if (!tok.startsWith('-') || tok === '-') break;
+      for (let j = 1; j < tok.length; j++) {
+        if (!SSH_OPTS_WITH_ARG.has(tok[j])) continue;
+        if (j === tok.length - 1) i++;
+        break;
+      }
+    }
+    if (i >= tokens.length) return null;
+    // 远端 shell 会把 host 之后的参数用空格拼起来重新解析
+    return { script: tokens.slice(i + 1).join(' '), remote: true };
+  }
+  if (!POSIX_SHELL_CMD.test(cmd)) return null;
+  let sawC = false;
+  for (; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (!tok.startsWith('-') || tok === '-' || tok === '--') break;
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(tok)) sawC = true;
+    else if (tok === '-o' || tok === '+o') i++;
+  }
+  if (tokens[i] === '--') i++;
+  // 脚本后还有位置参数（sh -c 'rm -rf "$1"' _ /tmp）时路径在外层，退回整句判定
+  return sawC && i === tokens.length - 1 ? { script: tokens[i], remote: false } : null;
+}
+
+const REMOTE_TEMP_ROOT_MATCHER = buildTempRootMatcher(null);
+
+function scanTempRootDeletes(
+  command: string,
+  matcher: TempRootMatcher,
+  startInTempRoot: boolean,
+  depth: number
+): boolean {
   const cleaned = stripShellComments(stripNonShellHeredocs(command));
   const statements = splitShellStatements(cleaned);
-  const { rootRef, exactRoot } = buildTempRootMatcher(opts?.tmpDir);
-  let inTempRoot = false;
+  const { rootRef, exactRoot } = matcher;
+  let inTempRoot = startInTempRoot;
   for (const stmt of statements) {
+    const nested = depth < MAX_NESTED_SCRIPT_DEPTH ? nestedScriptOf(stmt) : null;
+    if (nested) {
+      // 远端路径属于远端机器：按 POSIX 共享 Temp 根判，不套本机 Temp 路径与本机 cwd
+      const hit = nested.remote
+        ? scanTempRootDeletes(nested.script, REMOTE_TEMP_ROOT_MATCHER, false, depth + 1)
+        : scanTempRootDeletes(nested.script, matcher, inTempRoot, depth + 1);
+      if (hit) return true;
+      continue;
+    }
     if (DELETE_VERB.test(stmt)) {
       if (rootRef.test(stmt)) return true;
       if (inTempRoot && deletesCurrentOrWildcardRelative(stmt)) return true;
@@ -510,6 +576,11 @@ export function deletesTempRoot(command: string, opts?: { tmpDir?: string }): bo
     }
   }
   return false;
+}
+
+/** 命令里有删除动作且作用于系统 Temp 根：按语句判定，不跨无关命令误拼，也不吞掉 cd /tmp && rm -rf * */
+export function deletesTempRoot(command: string, opts?: { tmpDir?: string }): boolean {
+  return scanTempRootDeletes(command, buildTempRootMatcher(opts?.tmpDir), false, 0);
 }
 
 const TEMP_SUBPATH_GENERAL_RULES: ReadonlySet<string> = new Set([

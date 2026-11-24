@@ -14,7 +14,7 @@ import {
 } from '../windows/createAppWindow';
 import { shouldRefreshDragRegions } from '../windows/dragRegionRefresh';
 import { focusMainWindow } from '../windows/MainWindow';
-import { openSettingsWindow } from '../windows/SettingsWindow';
+import { getSettingsWindow, openSettingsWindow } from '../windows/SettingsWindow';
 import { parseOpenSettingsRequest } from './searchAnything';
 import { readLocale } from './settings';
 
@@ -34,10 +34,11 @@ export function notifyOpenFolderRequested(): void {
 }
 
 function openSettingsDeepLink(link: ReturnType<typeof parseOpenSettingsRequest>): void {
+  const existing = getSettingsWindow();
   const win = openSettingsWindow();
-  if (!link) return;
-  pendingDeepLink = link;
-  sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
+  // 已挂载的设置页只收推送；新窗口挂载时再拉取，推送此时会丢
+  if (win !== existing) pendingDeepLink = link;
+  else if (link) sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
 }
 
 /**
