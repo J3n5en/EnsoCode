@@ -95,6 +95,7 @@ describe('buildDaily', () => {
     expect(daily.counts).toEqual({
       dispatched: 0,
       completed: 1,
+      completedEarlier: 1,
       failed: 0,
       needsYou: 0,
       todosDone: 0,

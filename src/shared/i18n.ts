@@ -3947,7 +3947,10 @@ export const zhTranslations: Record<string, string> = {
   'Good afternoon': '下午好',
   'Good evening': '晚上好',
   'Today {{dispatched}} dispatched, {{completed}} completed, {{failed}} failed':
-    '今天派出 {{dispatched}} 件，完成 {{completed}} 件，{{failed}} 件失败',
+    '今天派出 {{dispatched}} 件，已完成 {{completed}} 件，{{failed}} 件失败',
+  '; plus {{count}} earlier or taken over completed': '；另完成之前派出或接手的 {{count}} 件',
+  'No new dispatches today; {{count}} earlier or taken over completed':
+    '今天没派新活，完成了之前派出或接手的 {{count}} 件',
   'Nothing dispatched today': '今天还没派活',
   Started: '开始执行',
   'Goal complete': '目标完成',

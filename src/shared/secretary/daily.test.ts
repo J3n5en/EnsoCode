@@ -153,6 +153,7 @@ describe('一天的看板投影', () => {
     expect(daily.counts).toEqual({
       dispatched: 1,
       completed: 1,
+      completedEarlier: 0,
       failed: 1,
       needsYou: 1,
       todosDone: 1,
@@ -204,7 +205,11 @@ describe('一天的看板投影', () => {
         dispatch(),
         dispatch({ conversationId: 'c2' }),
         dispatch({ conversationId: 'c3', createdAt: at(14, 22) }),
-        dispatch({ conversationId: 'c4', takeover: true, lastResult: manualDone(14) }),
+        dispatch({
+          conversationId: 'c4',
+          takeover: { grantedAt: at(15, 9), via: 'user' },
+          lastResult: manualDone(14),
+        }),
         dispatch({ conversationId: 'c5', lastResult: manualDone(15) }),
       ],
       todos: [],

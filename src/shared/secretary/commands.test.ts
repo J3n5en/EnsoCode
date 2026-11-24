@@ -212,7 +212,7 @@ describe('/board', () => {
   it('完成里有之前派出或接手的，统计行注明，不和派出数矛盾', () => {
     const mixed = { ...daily, counts: { ...daily.counts, completedEarlier: 1 } };
     expect(formatBoardMessage('zh', mixed)).toContain(
-      '派出 3 · 完成 2（含之前派出或接手的 1）· 失败 1 · 需要你 1'
+      '派出 3 · 完成 2（含之前派出或接手的 1） · 失败 1 · 需要你 1'
     );
     expect(formatBoardMessage('en', mixed)).toContain(
       'dispatched 3 · done 2 (1 earlier or taken over) · failed 1 · needs you 1'

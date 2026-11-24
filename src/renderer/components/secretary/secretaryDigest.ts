@@ -7,7 +7,8 @@ export { sessionFeed };
 export interface SecretaryDigest {
   /** i18n key：Good morning / Good afternoon / Good evening */
   greeting: string;
-  today: { dispatched: number; completed: number; failed: number };
+  /** 按会话数：completed/failed 是今天派出的会话的最终状态，earlier 是之前派出或接手、今天完成的 */
+  today: { dispatched: number; completed: number; failed: number; earlier: number };
   counts: { needsYou: number; running: number; todos: number };
   events: FeedEvent[];
 }
@@ -40,15 +41,30 @@ export function secretaryDigest(board: SecretaryBoard, now: number): SecretaryDi
     (card): card is SessionCard => card.kind === 'session'
   );
   const dayStart = startOfDay(now);
-  const today = sessions.filter((card) => (card.resultAt ?? 0) >= dayStart);
+  // 还在跑的卡带的是上一轮的结果，不是最终状态
+  const running = new Set(
+    board.running.flatMap((card) => (card.kind === 'session' ? [card.conversationId] : []))
+  );
+  const finalResult = (card: SessionCard) =>
+    running.has(card.conversationId) ? undefined : card.result;
+  const completed = (card: SessionCard) => {
+    const result = finalResult(card);
+    return result !== undefined && COMPLETED_RESULTS.has(result);
+  };
+  const dispatched = sessions.filter((card) => !card.takeover && card.startedAt >= dayStart);
+  const dispatchedIds = new Set(dispatched.map((card) => card.conversationId));
   return {
     greeting: greetingAt(now),
     today: {
-      dispatched: sessions.filter((card) => card.startedAt >= dayStart).length,
-      completed: today.filter(
-        (card) => card.result !== undefined && COMPLETED_RESULTS.has(card.result)
+      dispatched: dispatched.length,
+      completed: dispatched.filter(completed).length,
+      failed: dispatched.filter((card) => finalResult(card) === 'failed').length,
+      earlier: sessions.filter(
+        (card) =>
+          !dispatchedIds.has(card.conversationId) &&
+          (card.resultAt ?? 0) >= dayStart &&
+          completed(card)
       ).length,
-      failed: today.filter((card) => card.result === 'failed').length,
     },
     counts: {
       needsYou: board.needsYou.length,
