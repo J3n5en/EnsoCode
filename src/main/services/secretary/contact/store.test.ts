@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ContactStore,
   emptyContactFile,
   parseContactFile,
   telegramGroupBindings,
@@ -182,5 +183,61 @@ describe('Telegram 论坛话题绑定（落在路由表上）', () => {
       { id: GROUP, title: 'EnsoCode 交流群', all: false, topics: [{ id: '12' }] },
       { id: '-7', title: '绑定码绑的群', all: true, topics: [] },
     ]);
+  });
+});
+
+describe('GitHub 主人与外部确认', () => {
+  it('解析时按大小写去重、丢掉坏值，最多留 10 个；externalConfirm 只有 true 才打开', () => {
+    const extra = Array.from({ length: 12 }, (_, index) => `user${index}`);
+    const file = parseContactFile({
+      githubLogins: [
+        ' J3n5en ',
+        'j3n5en',
+        'bad login',
+        'github-actions[bot]',
+        '',
+        1,
+        'a'.repeat(40),
+        '-nope',
+        ...extra,
+      ],
+      externalConfirm: 'yes',
+    });
+    expect(file.githubLogins[0]).toBe('J3n5en');
+    expect(file.githubLogins).toHaveLength(10);
+    expect(new Set(file.githubLogins.map((login) => login.toLowerCase())).size).toBe(10);
+    expect(file.githubLogins).not.toContain('bad login');
+    expect(file.externalConfirm).toBe(false);
+    expect(parseContactFile({ externalConfirm: true }).externalConfirm).toBe(true);
+    expect(emptyContactFile().githubLogins).toEqual([]);
+    expect(emptyContactFile().externalConfirm).toBe(false);
+  });
+
+  it('解绑和更换 bot 后仍保留 GitHub 账号与外部确认', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'contact-github-'));
+    try {
+      const store = new ContactStore(dir);
+      await store.ready();
+      store.save({
+        ...emptyContactFile(),
+        githubLogins: ['J3n5en'],
+        externalConfirm: true,
+        bot: { id: 1, username: 'enso_bot', name: 'Enso' },
+        chat: { id: 2, username: 'j3n5en' },
+      });
+      const unbound = store.saveUnbound();
+      expect(unbound.githubLogins).toEqual(['J3n5en']);
+      expect(unbound.externalConfirm).toBe(true);
+      expect(unbound.chat).toBeUndefined();
+      const forgotten = await store.saveForgotten();
+      expect(forgotten.githubLogins).toEqual(['J3n5en']);
+      expect(forgotten.externalConfirm).toBe(true);
+      expect(forgotten.bot).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

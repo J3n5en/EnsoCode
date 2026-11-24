@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { ContactRouteClaim } from '@shared/secretary/contact';
+import { githubLoginsFrom } from '@shared/secretary/githubLogin';
 import type {
   SecretaryContactBindRejection,
   SecretaryContactBot,
@@ -54,6 +55,10 @@ export interface ContactFile {
   telegramGroupTitles: Record<string, string>;
   /** 只绑了群或话题、没绑私聊时的主人（Telegram 用户 id）；绑了私聊时以 chat.id 为准 */
   ownerId?: number;
+  /** GitHub login。大小写不敏感去重，保留用户写法，最多 10 个 */
+  githubLogins: string[];
+  /** true：非主人消息必须主人确认。false：交给 agent 判断 */
+  externalConfirm: boolean;
   /** 用绑定码绑到群或话题的路由：收发都走这里。topicId 缺省表示整个群 */
   telegramRoutes: TelegramRoute[];
   /** 见过的论坛话题，`chatId:topicId` → 话题名，只给设置页勾选用；空串表示见过但不知道名字 */
@@ -117,6 +122,8 @@ export function emptyContactFile(): ContactFile {
     telegramGroupTitles: {},
     telegramRoutes: [],
     telegramTopicTitles: {},
+    githubLogins: [],
+    externalConfirm: false,
   };
 }
 
@@ -501,6 +508,8 @@ export function parseContactFile(raw: unknown): ContactFile {
     ...(positiveInt(raw.ownerId) !== undefined ? { ownerId: positiveInt(raw.ownerId) } : {}),
     telegramRoutes: parseRoutes(raw.telegramRoutes),
     telegramTopicTitles: parseTopicTitles(raw.telegramTopicTitles),
+    githubLogins: githubLoginsFrom(raw.githubLogins),
+    externalConfirm: raw.externalConfirm === true,
   };
 }
 
@@ -560,6 +569,8 @@ export class ContactStore {
       // 解绑是整体解绑：群和话题的路由一起释放，别的秘书才能绑过去
       telegramRoutes: [],
       telegramTopicTitles: current.telegramTopicTitles,
+      githubLogins: current.githubLogins,
+      externalConfirm: current.externalConfirm,
     });
   }
 
@@ -579,6 +590,8 @@ export class ContactStore {
       telegramGroupTitles: current.telegramGroupTitles,
       telegramRoutes: [],
       telegramTopicTitles: current.telegramTopicTitles,
+      githubLogins: current.githubLogins,
+      externalConfirm: current.externalConfirm,
     });
   }
 }

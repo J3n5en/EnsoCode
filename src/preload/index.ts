@@ -719,6 +719,8 @@ const electronAPI = {
     contactSettings: (
       patch:
         | { enabled?: boolean; allowCardConfirm?: boolean; allowMemory?: boolean }
+        | { githubLogins: string[] }
+        | { externalConfirm: boolean }
         | { channelId: string; prefs: Partial<SecretaryContactChannelPrefs> }
         | { telegramGroup: { action: 'add' | 'remove'; chatId: string } }
         | { telegramRoute: { action: 'remove'; chatId: string; topicId?: string } }
@@ -726,6 +728,9 @@ const electronAPI = {
       secretaryId?: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch, secretaryId),
+    /** 读本机 gh 登录名。只填进输入框，不写入 */
+    contactGithubSuggest: (): Promise<{ login: string | null }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_GITHUB_SUGGEST),
     /** 拉一个 Telegram 群的论坛话题：失败带错误码与 Telegram 的说明 */
     contactTelegramTopics: (
       chatId: string,

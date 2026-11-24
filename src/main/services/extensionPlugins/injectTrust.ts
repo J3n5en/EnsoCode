@@ -1,5 +1,6 @@
 import type { ExtensionPluginPermission } from '@shared/extensionPlugins/manifest';
 import type { PluginInjectOrigin, PluginInjectSender } from '@shared/extensionPlugins/protocol';
+import { GITHUB_LOGIN } from '@shared/secretary/githubLogin';
 import { wrapPluginDelivery } from '@shared/secretary/transcript';
 import type { PluginInstallSource } from './install';
 
@@ -31,6 +32,10 @@ export interface OwnerBindings {
   telegramPrivateChatIds: ReadonlySet<string>;
   /** key 是小写 channelId */
   channelOwnerIds?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** 小写 GitHub login */
+  githubLogins?: ReadonlySet<string>;
+  /** 任一秘书打开：非主人投递必须主人确认 */
+  externalConfirm?: boolean;
 }
 
 const EMPTY_OWNER_BINDINGS: OwnerBindings = {
@@ -56,6 +61,26 @@ export function isBoundOwner(
   return false;
 }
 
+function isOfficialGithub(input: { pluginId: string; source?: PluginInstallSource }): boolean {
+  return (
+    input.pluginId === 'enso.github' &&
+    input.source?.kind === 'market' &&
+    input.source.id === 'enso.github'
+  );
+}
+
+/**
+ * github 渠道只认官方市场插件 enso.github 上、已绑定的 login。
+ * 别的插件自称 github、bot、没有 userId，都不是主人。Telegram 和其他渠道仍走 isBoundOwner。
+ */
+function senderIsOwnerOf(input: PluginInjectDeliveryInput, bindings: OwnerBindings): boolean {
+  const sender = input.sender;
+  if (!sender) return false;
+  if (sender.channel.toLowerCase() !== 'github') return isBoundOwner(sender, bindings);
+  if (!isOfficialGithub(input) || !sender.userId || !GITHUB_LOGIN.test(sender.userId)) return false;
+  return bindings.githubLogins?.has(sender.userId.toLowerCase()) ?? false;
+}
+
 export interface PluginInjectDeliveryInput {
   pluginId: string;
   text: string;
@@ -75,6 +100,8 @@ export interface PluginInjectDeliveryDecision {
   trustedIgnored: boolean;
   trustedOverriddenByExternal: boolean;
   senderIsOwner: boolean;
+  /** 非主人，且主人打开了「必须确认」 */
+  ownerConfirm: boolean;
 }
 
 export type PluginInjectPrepareInput = Pick<
@@ -93,7 +120,7 @@ export function resolvePluginInjectDelivery(
     source: input.source,
   });
   const senderIsOwner = input.sender
-    ? isBoundOwner(input.sender, input.ownerBindings ?? EMPTY_OWNER_BINDINGS)
+    ? senderIsOwnerOf(input, input.ownerBindings ?? EMPTY_OWNER_BINDINGS)
     : false;
   const origin: PluginInjectOrigin = input.sender
     ? senderIsOwner
@@ -103,7 +130,9 @@ export function resolvePluginInjectDelivery(
       ? 'owner'
       : 'external';
   const trustedOverriddenByExternal = Boolean(input.sender && !senderIsOwner && base.trusted);
-  const unwrapped = !input.isSecretarySession && base.trusted && (!input.sender || senderIsOwner);
+  const ownerConfirm = origin === 'external' && input.ownerBindings?.externalConfirm === true;
+  // 有发送者一律包裹，主人也标 role。没发送者时，可信的普通会话仍免包
+  const unwrapped = !input.isSecretarySession && base.trusted && !input.sender;
   if (unwrapped) {
     return {
       text: input.text,
@@ -112,19 +141,20 @@ export function resolvePluginInjectDelivery(
       trustedIgnored: base.ignored,
       trustedOverriddenByExternal: false,
       senderIsOwner,
+      ownerConfirm,
     };
   }
   const body = input.isSecretarySession ? (input.redact?.(input.text) ?? input.text) : input.text;
   return {
-    text: wrapPluginDelivery(
-      input.pluginId,
-      body,
-      input.sender ? { sender: input.sender, role: origin } : undefined
-    ),
+    text: wrapPluginDelivery(input.pluginId, body, {
+      ...(input.sender ? { sender: input.sender } : {}),
+      role: origin,
+    }),
     origin,
     unwrapped: false,
     trustedIgnored: base.ignored,
     trustedOverriddenByExternal,
     senderIsOwner,
+    ownerConfirm,
   };
 }

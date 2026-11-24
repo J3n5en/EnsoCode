@@ -38,6 +38,18 @@ export const zhTranslations: Record<string, string> = {
   "The Telegram remote plugin (enso.telegram) is enabled. Do not give both the same bot token: only one place can poll a bot, so they would steal each other's messages.":
     '已启用 Telegram 远程插件（enso.telegram）。两边不要用同一个 bot token：一个 bot 只能有一处在轮询，会互相抢消息。',
   'Enable contacts': '启用联系方式',
+  'Owner identity': '主人身份',
+  'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.':
+    '这些 GitHub 账号算你本人。其他人的事件默认交给 agent 判断，除非你要求必须确认。',
+  'GitHub accounts': 'GitHub 账号',
+  'Comma or space separated': '用逗号或空格分隔',
+  'Detected the gh login {{login}} on this machine': '检测到本机 gh 登录账号 {{login}}',
+  'Fill in': '填入',
+  'Save GitHub accounts': '保存',
+  'That is not a GitHub login': '这不是合法的 GitHub 账号',
+  'Messages that are not from you': '外部渠道的非主人消息',
+  'Let the agent decide': '交给 agent 判断',
+  'Require your confirmation': '必须主人确认',
   'Contacts are off: nothing is sent or received on any channel.':
     '联系方式已关闭：所有渠道都不收不发。',
   'Find more contact channels in the plugin market': '从插件市场找更多联系方式',

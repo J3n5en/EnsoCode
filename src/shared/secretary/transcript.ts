@@ -63,26 +63,36 @@ function senderOpenTag(
   return `<untrusted-content ${attrs.join(' ')}>`;
 }
 
+/** 整段已经是同一插件的完整一层，且正文里没有字面结束标签：原样保留，不再套 role */
+function sameSourceWrap(source: string, text: string): boolean {
+  const tail = '</untrusted-content>';
+  const marked = `<untrusted-content source="${source}"`;
+  if (!text.startsWith(marked) || !text.endsWith(tail)) return false;
+  const after = text.charAt(marked.length);
+  if (after !== '>' && after !== ' ') return false;
+  const openEnd = text.indexOf('>');
+  if (openEnd < 0 || /[<>\n]/.test(text.slice(marked.length, openEnd))) return false;
+  return !text.slice(openEnd + 1, -tail.length).includes(END_TAG);
+}
+
 export function wrapPluginDelivery(
   pluginId: string,
   text: string,
   meta?: { sender?: PluginInjectSender; role?: PluginInjectOrigin }
 ): string {
   const source = `plugin:${pluginId}`;
-  const head = `<untrusted-content source="${source}">`;
-  const tail = '</untrusted-content>';
-  const inner =
-    text.startsWith(head) && text.endsWith(tail)
-      ? text.slice(head.length, text.length - tail.length)
-      : null;
-  const body = inner !== null && !inner.includes(END_TAG) ? inner : text;
-  if (!meta?.sender) return wrapUntrusted(source, body);
-  const escaped = body
+  if (sameSourceWrap(source, text)) return text;
+  const role = meta?.role;
+  if (!meta?.sender && !role) return wrapUntrusted(source, text);
+  const escaped = text
     .split(END_TAG)
     .join('<\\/untrusted-content')
     .split(OPEN_TAG)
     .join('<\\untrusted-content');
-  return `${senderOpenTag(source, meta.sender, meta.role ?? 'external')}${escaped}</untrusted-content>`;
+  const open = meta?.sender
+    ? senderOpenTag(source, meta.sender, role ?? 'external')
+    : `<untrusted-content source="${source}" role="${role}">`;
+  return `${open}${escaped}</untrusted-content>`;
 }
 
 const HOST_WRAP = /^<untrusted-content(?:\s[^<>\n]*)?>([\s\S]*)<\/untrusted-content>$/u;
