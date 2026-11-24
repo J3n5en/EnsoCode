@@ -1,13 +1,20 @@
 import type { GitFile } from '@shared/types/git';
 import { parseHTML } from 'linkedom';
-import { act, type ComponentProps, type ReactNode } from 'react';
+import { act, type ComponentProps, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitChangesView } from './GitChangesView';
+import type { GitFileDirectory } from './GitFileList';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
 
 const harness = vi.hoisted(() => ({
-  git: { status: vi.fn(), fileDiff: vi.fn(), discard: vi.fn() },
+  git: {
+    status: vi.fn(),
+    fileDiff: vi.fn(),
+    discard: vi.fn(),
+    stage: vi.fn(),
+    unstage: vi.fn(),
+  },
   sessions: {
     activeId: 'a' as string | null,
     refreshWorktreeStatuses: () => Promise.resolve(),
@@ -61,6 +68,16 @@ vi.mock('@/components/chat/ConfirmDialog', () => ({
       </div>
     ) : null,
 }));
+vi.mock('@/components/ui/context-menu', () => ({
+  ContextMenu: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ContextMenuTrigger: ({ render }: { render?: ReactElement }) => render ?? null,
+  ContextMenuPopup: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ContextMenuSeparator: () => null,
+  ContextMenuItem: ({
+    variant: _variant,
+    ...props
+  }: ComponentProps<'button'> & { variant?: string }) => <button type="button" {...props} />,
+}));
 vi.mock('@/components/ui/menu', () => ({
   Menu: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   MenuTrigger: ({ render: _render, ...props }: ComponentProps<'button'> & { render?: unknown }) => (
@@ -111,17 +128,44 @@ vi.mock('./GitPanelLayout', () => ({
 vi.mock('./GitFileList', () => ({
   GitFileList: ({
     files,
+    tree,
+    renderDirectory,
     children,
   }: {
     files: GitFile[];
+    tree: boolean;
+    renderDirectory?: (directory: GitFileDirectory, trigger: ReactElement) => ReactNode;
     children: (file: GitFile) => ReactNode;
-  }) => (
-    <>
-      {files.map((file) => (
-        <div key={file.path}>{children(file)}</div>
-      ))}
-    </>
-  ),
+  }) => {
+    const directories = new Map<string, GitFileDirectory>();
+    if (tree && renderDirectory) {
+      for (const file of files) {
+        const parts = file.path.split('/').slice(0, -1);
+        let current = '';
+        for (const name of parts) {
+          current = current ? `${current}/${name}` : name;
+          let entry = directories.get(current);
+          if (!entry) {
+            entry = { name, path: current, files: [] };
+            directories.set(current, entry);
+          }
+          entry.files.push(file);
+        }
+      }
+    }
+    return (
+      <>
+        {[...directories.values()].map((directory) => (
+          <div key={`dir:${directory.path}`} data-git-dir={directory.path}>
+            {renderDirectory?.(directory, <button type="button">{directory.name}</button>)}
+          </div>
+        ))}
+        {files.map((file) => (
+          <div key={file.path}>{children(file)}</div>
+        ))}
+      </>
+    );
+  },
   GitFileViewToggle: () => null,
 }));
 vi.mock('./GitFileRow', () => ({
@@ -185,6 +229,8 @@ beforeEach(() => {
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent: vi.fn(), detachEvent: vi.fn() });
   harness.git.status.mockReset().mockResolvedValue(statusWith());
   harness.git.discard.mockReset().mockResolvedValue({ ok: true });
+  harness.git.stage.mockReset().mockResolvedValue({ ok: true });
+  harness.git.unstage.mockReset().mockResolvedValue({ ok: true });
   harness.git.fileDiff
     .mockReset()
     .mockResolvedValue({ ok: true, path: 'src/x.ts', oldText: 'a', newText: 'b' });
@@ -426,5 +472,106 @@ describe('GitChangesView 放弃入口', () => {
     await click(option('cancel'));
     expect(q('[data-confirm-dialog]')).toBeNull();
     expect(harness.git.discard).not.toHaveBeenCalled();
+  });
+});
+
+describe('GitChangesView 文件夹右键菜单', () => {
+  const dirAction = (groupId: string, path: string, action: 'stage' | 'unstage' | 'discard') =>
+    q(
+      `[data-git-group="${groupId}"] [data-git-dir-path="${path}"][data-git-dir-action="${action}"]`
+    ) as HTMLButtonElement | null;
+
+  const nestedStatus = () =>
+    statusWith(
+      [
+        { path: 'src/a/one.ts', status: 'modified' },
+        { path: 'src/a/deep/two.ts', status: 'deleted' },
+        { path: 'src/b/other.ts', status: 'modified' },
+        { path: 'new/x/a.ts', status: 'untracked' },
+        { path: 'new/x/sub/b.ts', status: 'untracked' },
+      ],
+      [
+        { path: 'staged/dir/a.ts', status: 'modified' },
+        { path: 'staged/dir/sub/b.ts', status: 'added' },
+      ]
+    );
+
+  it('已暂存文件夹仅提供取消暂存，不提供丢弃修改，点击对目录下所有文件调用 unstage', async () => {
+    harness.git.status.mockResolvedValue(nestedStatus());
+    await render();
+    await click(groupToggle('staged'));
+    expect(dirAction('staged', 'staged/dir', 'discard')).toBeNull();
+    expect(dirAction('staged', 'staged/dir', 'stage')).toBeNull();
+    await click(dirAction('staged', 'staged/dir', 'unstage'));
+    expect(harness.git.unstage).toHaveBeenCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['staged/dir/a.ts', 'staged/dir/sub/b.ts'],
+    });
+  });
+
+  it('未暂存文件夹可暂存或确认后丢弃目录下全部已跟踪修改（confirmUntracked 为 false）', async () => {
+    harness.git.status.mockResolvedValue(nestedStatus());
+    await render();
+    await click(dirAction('unstaged', 'src/a', 'stage'));
+    expect(harness.git.stage).toHaveBeenCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['src/a/one.ts', 'src/a/deep/two.ts'],
+    });
+
+    await click(dirAction('unstaged', 'src/a', 'discard'));
+    expect(harness.git.discard).not.toHaveBeenCalled();
+    expect(q('[data-confirm-title]')?.textContent).toBe('Discard changes');
+    expect(q('[data-confirm-description]')?.textContent).toContain(
+      'Unstaged changes in 2 tracked files in src/a will be lost'
+    );
+    expect(q('[data-confirm-ok]')?.textContent).toBe('Discard');
+    await click(q('[data-confirm-ok]'));
+    expect(harness.git.discard).toHaveBeenCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['src/a/one.ts', 'src/a/deep/two.ts'],
+      confirmUntracked: false,
+    });
+  });
+
+  it('未跟踪文件夹确认后以 confirmUntracked: true 删除目录下全部未跟踪文件', async () => {
+    harness.git.status.mockResolvedValue(nestedStatus());
+    await render();
+    await click(dirAction('untracked', 'new/x', 'discard'));
+    expect(q('[data-confirm-title]')?.textContent).toBe('Delete untracked files');
+    expect(q('[data-confirm-description]')?.textContent).toContain(
+      '2 untracked files in new/x will be permanently deleted and cannot be recovered.'
+    );
+    expect(q('[data-confirm-ok]')?.textContent).toBe('Delete 2 untracked files');
+    await click(q('[data-confirm-ok]'));
+    expect(harness.git.discard).toHaveBeenCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['new/x/a.ts', 'new/x/sub/b.ts'],
+      confirmUntracked: true,
+    });
+  });
+
+  it('存在冲突文件时，文件夹右键的丢弃修改与删除未跟踪文件禁用', async () => {
+    harness.git.status.mockResolvedValue(mixed());
+    await render();
+    expect(dirAction('unstaged', 'src', 'discard')?.disabled).toBe(true);
+    expect(dirAction('untracked', 'new', 'discard')?.disabled).toBe(true);
+  });
+
+  it('搜索筛选激活时，文件夹右键仅作用于当前筛选命中的文件', async () => {
+    harness.git.status.mockResolvedValue(nestedStatus());
+    await render();
+    await search('two.ts');
+    await click(dirAction('unstaged', 'src/a', 'discard'));
+    await click(q('[data-confirm-ok]'));
+    expect(harness.git.discard).toHaveBeenCalledWith({
+      conversationId: 'a',
+      projectId: 'project',
+      paths: ['src/a/deep/two.ts'],
+      confirmUntracked: false,
+    });
   });
 });
