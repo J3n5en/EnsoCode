@@ -21,9 +21,24 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuPopup,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,7 +46,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { GitDiffPreview } from './GitDiffPreview';
-import { GitFileList, GitFileViewToggle } from './GitFileList';
+import { type GitFileDirectory, GitFileList, GitFileViewToggle } from './GitFileList';
 import { GitFileRow } from './GitFileRow';
 import { GitHistoryView } from './GitHistoryView';
 import { GitPanelLayout } from './GitPanelLayout';
@@ -43,6 +58,8 @@ type BulkDiscard = {
   kind: 'all' | 'untracked';
   tracked: string[];
   untracked: string[];
+  /** 仅从树状视图文件夹右键触发时设置，用于确认弹窗明确标注目标目录 */
+  directory?: string;
 };
 
 export function GitChangesView({
@@ -263,13 +280,18 @@ export function GitChangesView({
     ? [
         bulkDiscard.tracked.length > 0 &&
           t(
-            'Unstaged changes in {{count}} tracked files will be lost; the files are restored to their staged version.',
-            { count: bulkDiscard.tracked.length }
+            bulkDiscard.directory
+              ? 'Unstaged changes in {{count}} tracked files in {{path}} will be lost; the files are restored to their staged version.'
+              : 'Unstaged changes in {{count}} tracked files will be lost; the files are restored to their staged version.',
+            { count: bulkDiscard.tracked.length, path: bulkDiscard.directory ?? '' }
           ),
         bulkDiscard.untracked.length > 0 &&
-          t('{{count}} untracked files will be permanently deleted and cannot be recovered.', {
-            count: bulkDiscard.untracked.length,
-          }),
+          t(
+            bulkDiscard.directory
+              ? '{{count}} untracked files in {{path}} will be permanently deleted and cannot be recovered.'
+              : '{{count}} untracked files will be permanently deleted and cannot be recovered.',
+            { count: bulkDiscard.untracked.length, path: bulkDiscard.directory ?? '' }
+          ),
         bulkDiscard.kind === 'untracked' && t('Tracked files are not changed.'),
       ]
         .filter(Boolean)
@@ -560,7 +582,93 @@ export function GitChangesView({
                         </GitAction>
                       </div>
                       {expanded && (
-                        <GitFileList key={filter} files={group.files} tree={tree}>
+                        <GitFileList
+                          key={filter}
+                          files={group.files}
+                          tree={tree}
+                          renderDirectory={(directory: GitFileDirectory, trigger: ReactElement) => {
+                            const paths = directory.files.map((file) => file.path);
+                            const count = paths.length;
+                            const isUntrackedGroup = group.id === 'untracked';
+                            return (
+                              <ContextMenu>
+                                <ContextMenuTrigger
+                                  render={trigger as ReactElement<Record<string, unknown>>}
+                                />
+                                <ContextMenuPopup className="min-w-44">
+                                  <ContextMenuItem
+                                    data-git-dir-action={group.staged ? 'unstage' : 'stage'}
+                                    data-git-dir-path={directory.path}
+                                    disabled={blocked || count === 0}
+                                    onClick={() =>
+                                      void perform(group.staged ? 'Unstage' : 'Stage', () =>
+                                        window.electronAPI.git[group.staged ? 'unstage' : 'stage']({
+                                          ...request,
+                                          paths,
+                                        })
+                                      )
+                                    }
+                                  >
+                                    {group.staged ? (
+                                      <Minus className="size-3.5" />
+                                    ) : (
+                                      <Plus className="size-3.5" />
+                                    )}
+                                    <span className="flex-1">
+                                      {t(group.staged ? 'Unstage' : 'Stage')}
+                                    </span>
+                                    <span className="font-mono text-[11px] opacity-70">
+                                      {count}
+                                    </span>
+                                  </ContextMenuItem>
+                                  {!group.staged && (
+                                    <>
+                                      <ContextMenuSeparator />
+                                      <ContextMenuItem
+                                        variant="destructive"
+                                        data-git-dir-action="discard"
+                                        data-git-dir-path={directory.path}
+                                        disabled={blocked || conflicted > 0 || count === 0}
+                                        onClick={() => {
+                                          const tracked = directory.files
+                                            .filter((file) => file.status !== 'untracked')
+                                            .map((file) => file.path);
+                                          const untracked = directory.files
+                                            .filter((file) => file.status === 'untracked')
+                                            .map((file) => file.path);
+                                          if (!tracked.length && !untracked.length) return;
+                                          setBulkDiscard({
+                                            kind: isUntrackedGroup ? 'untracked' : 'all',
+                                            tracked,
+                                            untracked,
+                                            directory: directory.path,
+                                          });
+                                        }}
+                                      >
+                                        <Undo2 className="size-3.5" />
+                                        <span className="flex flex-1 flex-col">
+                                          {t(
+                                            isUntrackedGroup
+                                              ? 'Delete untracked files'
+                                              : 'Discard changes'
+                                          )}
+                                          {conflicted > 0 && (
+                                            <span className="text-[11px] text-muted-foreground">
+                                              {t('Resolve conflicts first.')}
+                                            </span>
+                                          )}
+                                        </span>
+                                        <span className="font-mono text-[11px] opacity-70">
+                                          {count}
+                                        </span>
+                                      </ContextMenuItem>
+                                    </>
+                                  )}
+                                </ContextMenuPopup>
+                              </ContextMenu>
+                            );
+                          }}
+                        >
                           {(file) => (
                             <GitFileRow
                               file={file}
@@ -702,7 +810,15 @@ export function GitChangesView({
         onOpenChange={(open) => {
           if (!open) setBulkDiscard(null);
         }}
-        title={t(bulkDiscard?.kind === 'untracked' ? 'Discard untracked' : 'Discard all')}
+        title={t(
+          bulkDiscard?.directory
+            ? bulkDiscard.kind === 'untracked'
+              ? 'Delete untracked files'
+              : 'Discard changes'
+            : bulkDiscard?.kind === 'untracked'
+              ? 'Discard untracked'
+              : 'Discard all'
+        )}
         description={bulkDescription}
         confirmLabel={
           bulkDiscard?.untracked.length
@@ -712,7 +828,7 @@ export function GitChangesView({
                   : 'Delete {{count}} untracked files',
                 { count: bulkDiscard.untracked.length }
               )
-            : t('Discard all')
+            : t(bulkDiscard?.directory ? 'Discard' : 'Discard all')
         }
         onConfirm={() => {
           if (bulkDiscard) {
