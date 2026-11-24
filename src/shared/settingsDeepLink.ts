@@ -5,6 +5,9 @@ export const SETTINGS_CATEGORIES = [
   'general',
   'shortcuts',
   'appearance',
+  'conversation',
+  'terminal',
+  'runtime',
   'providers',
   'skills',
   'plugins',
@@ -44,7 +47,46 @@ const MARKET_QUERY = /^[a-z0-9-]{1,32}$/u;
 
 const CATEGORY_SET = new Set<string>(SETTINGS_CATEGORIES);
 
+/** 拆页后挪了分区的行：行号不变，深链改落新分区并继续闪那一行 */
+const ROW_RELOCATIONS: Readonly<Record<string, SettingsCategory>> = {
+  'general.generationStallTimeout': 'runtime',
+  'general.autoRetryLimit': 'runtime',
+  'general.longCacheRetention': 'runtime',
+  'general.smartCompactEnabled': 'runtime',
+  'general.compactReserveTokens': 'runtime',
+  'general.autoArchiveIdleDays': 'runtime',
+  'general.autoArchiveMergedWorktrees': 'runtime',
+  'general.autoDeleteArchivedDays': 'runtime',
+  'general.activeRetentionMinutes': 'runtime',
+  'general.worktreeRoot': 'runtime',
+  'general.terminalShell': 'terminal',
+  'general.windowsLocalShell': 'terminal',
+  'appearance.fileOpening': 'terminal',
+  'appearance.chatTypography': 'conversation',
+  'appearance.openChangesOnFileEdit': 'conversation',
+  'appearance.compactReadOnlyTools': 'conversation',
+  'appearance.expandLiveEdits': 'conversation',
+  'appearance.expandLiveReasoning': 'conversation',
+  'appearance.autoCollapseTurns': 'conversation',
+  'appearance.quoteSelectionButton': 'conversation',
+  'appearance.collapseCompletedActivity': 'conversation',
+  'appearance.collapseLiveActivity': 'conversation',
+  'appearance.liveActivityFoldDelaySec': 'conversation',
+  'appearance.pinUnfinishedTodos': 'conversation',
+  'appearance.headerSessionTabs': 'conversation',
+};
+
+export function relocateSettingsLink<T extends SettingsDeepLink>(link: T): T {
+  const category = ROW_RELOCATIONS[link.rowId];
+  return category ? { ...link, category } : link;
+}
+
 export function parseSettingsDeepLink(raw: unknown): SettingsDeepLink | null {
+  const link = parseRawSettingsDeepLink(raw);
+  return link && relocateSettingsLink(link);
+}
+
+function parseRawSettingsDeepLink(raw: unknown): SettingsDeepLink | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const category = (raw as { category?: unknown }).category;
   const rowId = (raw as { rowId?: unknown }).rowId ?? `${String(category)}.root`;

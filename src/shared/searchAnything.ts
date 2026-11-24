@@ -125,71 +125,94 @@ export function searchSettingsEntries(
 const STATIC_CATALOG: SettingsSearchEntry[] = [
   { id: 'general.language', category: 'general', title: 'Language' },
   {
+    id: 'terminal.appearance',
+    category: 'terminal',
+    title: 'Terminal appearance',
+    description: 'Color scheme, font, size and weight of side panel terminals',
+  },
+  {
+    id: 'general.autoArchiveIdleDays',
+    category: 'runtime',
+    title: 'Archive idle conversations',
+    description:
+      'Move conversations that have been idle this long into Archived. Does not delete them.',
+  },
+  {
+    id: 'general.autoArchiveMergedWorktrees',
+    category: 'runtime',
+    title: 'Clean up merged worktrees',
+  },
+  {
+    id: 'general.autoDeleteArchivedDays',
+    category: 'runtime',
+    title: 'Delete archived conversations after',
+  },
+  {
     id: 'general.windowsLocalShell',
-    category: 'general',
+    category: 'terminal',
     title: 'Windows local command shell',
     description:
       'Only the Windows local agent command tool. SSH and other platforms stay on bash. Takes effect on the next session.',
   },
   {
     id: 'general.terminalShell',
-    category: 'general',
+    category: 'terminal',
     title: 'Terminal shell',
     description: 'Applies to new side panel terminals. SSH projects keep the remote login shell.',
   },
   {
     id: 'appearance.openChangesOnFileEdit',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Open Changes when files are edited',
   },
   {
     id: 'appearance.compactReadOnlyTools',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Compact read-only tool calls',
   },
   {
     id: 'appearance.expandLiveEdits',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Expand file edits while running',
   },
   {
     id: 'appearance.expandLiveReasoning',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Expand reasoning while streaming',
   },
   {
     id: 'appearance.autoCollapseTurns',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Auto-collapse previous turns',
   },
   {
     id: 'appearance.quoteSelectionButton',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Quote button on text selection',
   },
   {
     id: 'appearance.collapseCompletedActivity',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Collapse activity after reply',
   },
   {
     id: 'appearance.collapseLiveActivity',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Collapse finished activity while replying',
   },
   {
     id: 'appearance.liveActivityFoldDelaySec',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Wait before folding',
   },
   {
     id: 'appearance.pinUnfinishedTodos',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Pin unfinished todos',
   },
   {
     id: 'appearance.headerSessionTabs',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Show active sessions in the title bar',
   },
   {
@@ -199,7 +222,7 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
   },
   {
     id: 'appearance.chatTypography',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Conversation typography',
     description: 'Headings, tables and inline code scale with the body text',
   },
@@ -212,32 +235,32 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
   },
   {
     id: 'general.smartCompactEnabled',
-    category: 'general',
+    category: 'runtime',
     title: 'Context compaction strategy',
     description:
       'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model and compaction mode apply to open conversations on the next compaction.',
   },
   {
     id: 'general.compactReserveTokens',
-    category: 'general',
+    category: 'runtime',
     title: 'Compaction reserve tokens',
     description:
       'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.',
   },
   {
     id: 'general.generationStallTimeout',
-    category: 'general',
+    category: 'runtime',
     title: 'Stop if no output',
   },
   {
     id: 'general.autoRetryLimit',
-    category: 'general',
+    category: 'runtime',
     title: 'Auto-retry on transient errors',
     description: 'Retry count after 429, 5xx or network errors; off, fixed count or unlimited',
   },
   {
     id: 'general.longCacheRetention',
-    category: 'general',
+    category: 'runtime',
     title: 'Long prompt cache (1 hour)',
     description:
       'Keep the prompt cache for 1 hour instead of 5 minutes. Saves a lot when turns are more than 5 minutes apart, since the cache no longer expires and gets rewritten every turn, but cache writes cost 2× instead of 1.25×, so rapid follow-ups tens of seconds apart cost more. Anthropic models only. Applies from the next request.',

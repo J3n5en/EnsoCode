@@ -444,6 +444,10 @@ export const zhTranslations: Record<string, string> = {
   System: '系统',
   Terminal: '终端',
   'Conversation display': '对话显示',
+  'Terminal & editor': '终端与编辑器',
+  'Runtime & sessions': '运行与会话',
+  Network: '网络',
+  Shell: '命令行',
   'Conversation typography': '会话排版',
   'Headings, tables and inline code scale with the body text': '标题、表格与行内代码按正文比例缩放',
   Body: '正文',
@@ -853,6 +857,8 @@ export const zhTranslations: Record<string, string> = {
   'Not a git repository.': '不是 git 仓库。',
   'Git diff is not available for this workspace.': '当前工作区不支持 Git diff。',
   'Terminal appearance': '终端外观',
+  'Color scheme, font, size and weight of side panel terminals':
+    '侧边栏终端的配色、终端字体、字号与字重',
   'Theme mode': '主题模式',
   // 背景图
   'Background image': '背景图',

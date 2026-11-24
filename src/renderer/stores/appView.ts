@@ -1,4 +1,8 @@
-import type { SettingsCategory, SettingsDeepLink } from '@shared/settingsDeepLink';
+import {
+  relocateSettingsLink,
+  type SettingsCategory,
+  type SettingsDeepLink,
+} from '@shared/settingsDeepLink';
 import { create } from 'zustand';
 
 /** 主窗口内的设置页。linkSeq 每来一条深链加一，同一链接重复打开也会再定位一次 */
@@ -28,9 +32,10 @@ export const useAppViewStore = create<AppViewState>(() => ({
 export function openSettings(link?: SettingsDeepLink | null): void {
   useAppViewStore.setState((state) => {
     if (!link) return state.settings ? state : { settings: { link: null, linkSeq: 0 } };
+    const target = relocateSettingsLink(link);
     return {
-      settings: { link, linkSeq: (state.settings?.linkSeq ?? 0) + 1 },
-      lastCategory: link.category,
+      settings: { link: target, linkSeq: (state.settings?.linkSeq ?? 0) + 1 },
+      lastCategory: target.category,
       mobileDetail: true,
     };
   });

@@ -11,6 +11,7 @@ import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { DevToolsSection } from './DevToolsSection';
 import {
   SettingsButton,
   SettingsPage,
@@ -52,6 +53,9 @@ export function LogsSettings() {
       <LoggingSwitches />
       <ErrorSummary />
       <LogExport />
+      <SettingsSection title={t('Troubleshooting')}>
+        <DevToolsSection />
+      </SettingsSection>
     </SettingsPage>
   );
 }

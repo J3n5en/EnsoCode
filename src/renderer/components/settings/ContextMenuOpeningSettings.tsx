@@ -19,6 +19,7 @@ import {
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsRow } from './kit';
 
 export function ContextMenuOpeningSettings() {
   const { t } = useI18n();
@@ -107,21 +108,22 @@ export function ContextMenuOpeningSettings() {
   };
 
   return (
-    <div className="space-y-2 rounded-md border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h5 className="text-sm font-medium">{t('Context menu opening')}</h5>
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          {t('Configure list')}
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {t(
-          'Select the opening methods shown in file link context menus. You can add multiple applications.'
-        )}
-      </p>
-      <p className="truncate text-xs text-muted-foreground" title={enabledNames.join(', ')}>
-        {summary}
-      </p>
+    <>
+      <SettingsRow
+        label={t('Context menu opening')}
+        description={
+          <>
+            {t(
+              'Select the opening methods shown in file link context menus. You can add multiple applications.'
+            )}
+            <span className="mt-0.5 block truncate" title={enabledNames.join(', ')}>
+              {summary}
+            </span>
+          </>
+        }
+      >
+        <SettingsButton onClick={() => setOpen(true)}>{t('Configure list')}</SettingsButton>
+      </SettingsRow>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogPopup zIndexLevel="nested">
           <DialogHeader>
@@ -141,7 +143,7 @@ export function ContextMenuOpeningSettings() {
             {items.map((item) => {
               const name = nameOf(item);
               return (
-                <div key={item.id} className="flex items-center gap-3 rounded-md border p-3">
+                <div key={item.id} className="flex items-center gap-3 border-border border-b py-3">
                   <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                     <Checkbox
                       checked={item.enabled}
@@ -182,13 +184,13 @@ export function ContextMenuOpeningSettings() {
             })}
           </DialogPanel>
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={() => void chooseApplication()}>
+            <SettingsButton disabled={busy} onClick={() => void chooseApplication()}>
               {t('Add application')}
-            </Button>
+            </SettingsButton>
             <Button onClick={() => setOpen(false)}>{t('Close')}</Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-    </div>
+    </>
   );
 }
