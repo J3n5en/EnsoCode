@@ -38,8 +38,11 @@ describe('parseSettingsDeepLink', () => {
     expect(parseSettingsDeepLink({ category: 'nope', rowId: 'x' })).toBeNull();
   });
 
-  it('缺失 rowId 返回 null', () => {
-    expect(parseSettingsDeepLink({ category: 'general' })).toBeNull();
+  it('只给分区时落到该分区根', () => {
+    expect(parseSettingsDeepLink({ category: 'logs' })).toEqual({
+      category: 'logs',
+      rowId: 'logs.root',
+    });
   });
 
   it('空字符串 rowId 返回 null', () => {
