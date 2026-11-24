@@ -80,6 +80,30 @@ function flashSettingsRow(rowId: string): void {
   });
 }
 
+const USER_SCROLL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+/** 分区内容可能异步变高：保存的位置以最终布局为准，窗口期内每次变高都重新设回去（否则滚动锚定会把它推偏）；用户一动或 2s 后放弃 */
+function restoreScrollTop(el: HTMLElement, top: number, onDone: () => void): () => void {
+  el.scrollTop = top;
+  if (top === 0 || typeof ResizeObserver === 'undefined') {
+    onDone();
+    return () => {};
+  }
+  const stop = () => {
+    observer.disconnect();
+    window.clearTimeout(timer);
+    for (const type of USER_SCROLL_INPUT) el.removeEventListener(type, stop);
+    onDone();
+  };
+  const observer = new ResizeObserver(() => {
+    el.scrollTop = top;
+  });
+  for (const child of el.children) observer.observe(child);
+  for (const type of USER_SCROLL_INPUT) el.addEventListener(type, stop, { passive: true });
+  const timer = window.setTimeout(stop, 2000);
+  return stop;
+}
+
 /** 嵌在主窗口里：返回按钮、侧栏宽度、窄屏两级由外层的设置路由掌管 */
 export interface EmbeddedSettings {
   initialCategory: SettingsCategory;
@@ -167,6 +191,36 @@ export function SettingsContent({
   }, []);
   const settingsCatalog = useSettingsCatalog(sshConnections);
 
+  const showList = !isMobile || mobileList;
+  const showContent = !isMobile || !mobileList;
+
+  // 内容区只有一个滚动容器：按分区记住各自的 scrollTop，换分区（或窄屏重新进入内容页）时恢复，没去过的从顶部开始
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const scrollPositions = React.useRef(new Map<SettingsCategory, number>());
+  const scrollKey = React.useRef<SettingsCategory | null>(null);
+  const restoring = React.useRef(false);
+  const flashPending = React.useRef(flashRowId);
+  flashPending.current = flashRowId;
+  React.useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!showContent || !el) return;
+    scrollKey.current = activeCategory;
+    // 深链/搜索命中要定位到行（本 effect 声明在 flash 之前，先执行），交给 flashSettingsRow，不用保存的位置覆盖
+    if (flashPending.current) {
+      el.scrollTop = 0;
+      return;
+    }
+    restoring.current = true;
+    const stop = restoreScrollTop(el, scrollPositions.current.get(activeCategory) ?? 0, () => {
+      restoring.current = false;
+    });
+    return stop;
+  }, [activeCategory, showContent]);
+  const rememberScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    if (restoring.current || !scrollKey.current) return;
+    scrollPositions.current.set(scrollKey.current, event.currentTarget.scrollTop);
+  };
+
   React.useLayoutEffect(() => {
     if (!flashRowId) return;
     flashSettingsRow(flashRowId);
@@ -226,8 +280,6 @@ export function SettingsContent({
     if (resolvedCategory !== activeCategory) setActiveCategory(resolvedCategory);
   }, [resolvedCategory, activeCategory]);
 
-  const showList = !isMobile || mobileList;
-  const showContent = !isMobile || !mobileList;
   const activeLabel = categories.find((c) => c.id === activeCategory)?.label;
   const shell = useShellChrome();
   const chromeKind = useWindowChromeKind();
@@ -363,6 +415,9 @@ export function SettingsContent({
         >
           {shell && !embedded && <ChromeRow data-enso="title-bar" />}
           <div
+            ref={scrollRef}
+            data-enso="settings-scroll"
+            onScroll={rememberScroll}
             className={cn(
               'min-h-0 flex-1 overflow-y-auto',
               isMobile ? 'px-4 pb-6' : shell && !embedded ? 'px-6 pb-6' : 'p-6'

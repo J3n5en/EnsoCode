@@ -92,7 +92,12 @@ import {
   closeActiveSidePanelTab,
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
-import { createViewTransition, prefersReducedMotion, type ViewSide } from '@/lib/viewTransition';
+import {
+  createViewTransition,
+  prefersReducedMotion,
+  type ViewSide,
+  viewLayerState,
+} from '@/lib/viewTransition';
 import { Z_INDEX } from '@/lib/z-index';
 import { pluginCommands, runPluginCommand } from '@/plugins/commands';
 import { resolvePluginKeybindings } from '@/plugins/keybindings';
@@ -498,8 +503,15 @@ export default function App() {
     setViewMotion(result.animating ? { top: result.top } : null);
   }, [settingsOpen, shownOpen, viewTransition, isMobile, botModeActive]);
   useEffect(() => () => viewTransition.finish(), [viewTransition]);
-  const settingsMounted = settingsOpen || shownOpen || viewMotion !== null;
-  const workbenchHidden = settingsOpen && shownOpen && viewMotion === null;
+  // 动画结束后 fill 一直顶着终态，等隐藏/卸载提交进 DOM 再撤销：两件事落在同一帧，中间不会露出旧层
+  useLayoutEffect(() => {
+    if (viewMotion === null) viewTransition.release();
+  }, [viewMotion, viewTransition]);
+  const { settingsMounted, workbenchHidden } = viewLayerState({
+    open: settingsOpen,
+    shown: shownOpen,
+    animating: viewMotion !== null,
+  });
   useLayoutEffect(() => setWorkbenchCovered(settingsMounted), [settingsMounted]);
   useEffect(() => {
     if (settingsOpen) setDrawerOpen(false);

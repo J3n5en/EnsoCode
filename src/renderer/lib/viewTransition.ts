@@ -32,10 +32,17 @@ export function createViewTransition(options: {
   onSettle: () => void;
 }) {
   let active: Active | null = null;
+  /** 已结束、还靠 fill 停在终态的动画：等调用方把新状态提交进 DOM 后再撤销 */
+  let settled: Animation[] = [];
+
+  const release = () => {
+    for (const animation of settled) animation.cancel();
+    settled = [];
+  };
 
   const settle = () => {
     if (!active) return;
-    for (const animation of active.animations) animation.cancel();
+    settled.push(...active.animations);
     active = null;
     options.onSettle();
   };
@@ -43,6 +50,7 @@ export function createViewTransition(options: {
   const run = (to: ViewSide, layers: Record<ViewSide, ViewLayers>): ViewTransitionResult => {
     if (options.reducedMotion()) {
       settle();
+      release();
       return { animating: false, top: to };
     }
     if (active) {
@@ -52,6 +60,7 @@ export function createViewTransition(options: {
       }
       return { animating: true, top: active.top };
     }
+    release();
     const from: ViewSide = to === 'settings' ? 'workbench' : 'settings';
     const shift = VIEW_TRANSITION.shift * (to === 'settings' ? 1 : -1);
     const timing = (easing: string): KeyframeAnimationOptions => ({
@@ -97,7 +106,23 @@ export function createViewTransition(options: {
     run,
     /** 进行中的目标一侧；没有动画时为 null */
     target: (): ViewSide | null => active?.to ?? null,
-    finish: settle,
+    /** onSettle 触发的状态提交进 DOM 之后调用（layout effect 里），与隐藏/卸载落在同一帧 */
+    release,
+    finish: () => {
+      settle();
+      release();
+    },
+  };
+}
+
+/** 切换那一次提交两层都要在场；退场的设置层留到动画结束，工作区动画结束才隐藏 */
+export function viewLayerState(state: { open: boolean; shown: boolean; animating: boolean }): {
+  settingsMounted: boolean;
+  workbenchHidden: boolean;
+} {
+  return {
+    settingsMounted: state.open || state.shown || state.animating,
+    workbenchHidden: state.open && state.shown && !state.animating,
   };
 }
 

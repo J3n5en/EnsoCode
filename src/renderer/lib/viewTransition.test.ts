@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createViewTransition, VIEW_TRANSITION, type ViewLayers } from './viewTransition';
+import {
+  createViewTransition,
+  VIEW_TRANSITION,
+  type ViewLayers,
+  viewLayerState,
+} from './viewTransition';
 
 interface FakeAnimation {
   keyframes: Keyframe[];
@@ -89,11 +94,42 @@ describe('设置进出过渡（§3.6）', () => {
     expect(translate(sbIn.keyframes)).toEqual(['translateX(-10px)', 'translateX(0px)']);
   });
 
-  it('结束后取消动画效果并通知一次', async () => {
+  it('新层第一帧就是起始关键帧：同步启动、fill 覆盖开始前，进场方从透明开始', () => {
+    const { log, layers, transition } = setup();
+    transition.run('settings', layers);
+    expect(log).toHaveLength(4);
+    for (const anim of log) expect(anim.options.fill).toBe('both');
+    const [, sbIn, , mainIn] = log;
+    expect(sbIn.keyframes[0].opacity).toBe(0);
+    expect(mainIn.keyframes[0].opacity).toBe(0);
+  });
+
+  it('结束时先通知、保留终态，等调用方提交新状态后 release 才撤销效果', async () => {
     const { log, layers, transition, onSettle, flush } = setup();
     transition.run('settings', layers);
     await flush();
     expect(onSettle).toHaveBeenCalledTimes(1);
+    // 通知到提交之间浏览器可能画一帧：此时撤销会让退场层以不透明状态闪一下
+    expect(log.some((a) => a.cancelled)).toBe(false);
+    transition.release();
+    expect(log.every((a) => a.cancelled)).toBe(true);
+    transition.release();
+  });
+
+  it('提交前又开始下一段：先撤销上一段残留再起新动画', async () => {
+    const { log, layers, transition, flush } = setup();
+    transition.run('settings', layers);
+    await flush();
+    transition.run('workbench', layers);
+    expect(log).toHaveLength(8);
+    expect(log.slice(0, 4).every((a) => a.cancelled)).toBe(true);
+    expect(log.slice(4).some((a) => a.cancelled)).toBe(false);
+  });
+
+  it('卸载时立即撤销', () => {
+    const { log, layers, transition } = setup();
+    transition.run('settings', layers);
+    transition.finish();
     expect(log.every((a) => a.cancelled)).toBe(true);
   });
 
@@ -148,5 +184,38 @@ describe('设置进出过渡（§3.6）', () => {
       settings: { sidebar: layers.settings.sidebar, main: null },
     });
     expect(log).toHaveLength(2);
+  });
+});
+
+describe('两层的挂载与隐藏', () => {
+  it('进入：动画期间工作区仍可见，结束后才隐藏', () => {
+    expect(viewLayerState({ open: true, shown: true, animating: true })).toEqual({
+      settingsMounted: true,
+      workbenchHidden: false,
+    });
+    expect(viewLayerState({ open: true, shown: true, animating: false })).toEqual({
+      settingsMounted: true,
+      workbenchHidden: true,
+    });
+  });
+
+  it('返回：退场的设置层等动画结束才卸载', () => {
+    expect(viewLayerState({ open: false, shown: false, animating: true }).settingsMounted).toBe(
+      true
+    );
+    expect(viewLayerState({ open: false, shown: false, animating: false })).toEqual({
+      settingsMounted: false,
+      workbenchHidden: false,
+    });
+  });
+
+  it('切换那一次提交两层都在场，动画才拿得到退场方', () => {
+    expect(viewLayerState({ open: false, shown: true, animating: false }).settingsMounted).toBe(
+      true
+    );
+    expect(viewLayerState({ open: true, shown: false, animating: false })).toEqual({
+      settingsMounted: true,
+      workbenchHidden: false,
+    });
   });
 });
