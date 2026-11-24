@@ -1243,9 +1243,12 @@ const electronAPI = {
   },
 
   files: {
-    /** 在 root 下按文件名/路径模糊搜索（@ 提及用） */
-    search: (root: string, query: string): Promise<{ relativePath: string; name: string }[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
+    /** 按会话的 @ 搜索根模糊搜索文件名/路径；根目录由 Main 按会话推导 */
+    search: (request: {
+      conversationId: string;
+      query: string;
+    }): Promise<{ relativePath: string; name: string }[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, request),
     /** 拖放浮窗收到的路径：Main 推 pending 提醒，renderer 主动取走 */
     takeShelfDrop: (): Promise<DropShelfDelivery[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.DROP_SHELF_TAKE),

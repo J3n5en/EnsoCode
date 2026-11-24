@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -397,6 +397,39 @@ describe('BackgroundTaskManager', () => {
       }
     }
   );
+
+  // 验收脚本 spawn 的 Electron 带 detached（独立会话），只杀根进程组会把它留成孤儿
+  it.skipIf(process.platform === 'win32').each([
+    ['输出直写文件', { detachable: true }],
+    ['管道', undefined],
+  ])('stop（%s）连带结束自立进程组的子孙进程', async (_kind, opts) => {
+    const { manager, ended } = makeManager({ killGraceMs: 200 });
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-bg-tree-'));
+    const script = path.join(dir, 'spawner.cjs');
+    writeFileSync(
+      script,
+      "const c = require('node:child_process').spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });\n" +
+        "console.log('grandchild=' + c.pid);\n" +
+        'setInterval(() => {}, 1000);\n'
+    );
+    const taskId = manager.start('s1', `"${process.execPath}" "${script}"`, dir, opts);
+    let grandchild = 0;
+    try {
+      await until(() => {
+        const match = /grandchild=(\d+)/.exec(manager.snapshot('s1')[0]?.tail ?? '');
+        grandchild = match ? Number(match[1]) : 0;
+        return grandchild > 0;
+      });
+      expect(processAlive(grandchild)).toBe(true);
+      manager.stop(taskId);
+      await until(() => ended.includes(taskId));
+      await until(() => !processAlive(grandchild), 3000).catch(() => {});
+      expect(processAlive(grandchild)).toBe(false);
+    } finally {
+      manager.stop(taskId);
+      if (grandchild > 0 && processAlive(grandchild)) process.kill(grandchild, 'SIGKILL');
+    }
+  });
 
   it('进程退出后等待 finalize，再由 task_output 返回最终 details', async () => {
     const { manager, ended } = makeManager();

@@ -44,6 +44,8 @@ interface SecretaryStoreState {
   focusedId: string | null;
   /** 切到某个秘书：面板、欢迎页与 IPC 默认都按它 */
   focus: (secretaryId: string) => void;
+  /** 向 Main 重读某个秘书的状态，覆盖手上这份 */
+  reload: (secretaryId?: string) => Promise<void>;
   /** 新建秘书：建好后切过去并打开它的欢迎页 */
   createSecretary: () => Promise<string | null>;
   resolving: Record<string, true>;
@@ -119,20 +121,18 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       secretary: states[secretaryId] ?? EMPTY_SECRETARY_STATE,
       welcomeOpen: false,
     });
-    if (!states[secretaryId]) {
-      void window.electronAPI.secretary
-        .getState(secretaryId)
-        .then((state) => {
-          set((current) => {
-            const next = { ...current.states, [secretaryId]: state };
-            return {
-              states: next,
-              ...(current.focusedId === secretaryId ? { secretary: state } : {}),
-            };
-          });
-        })
-        .catch(() => undefined);
-    }
+    if (!states[secretaryId]) void get().reload(secretaryId);
+  },
+
+  reload: async (secretaryId) => {
+    const id = secretaryId ?? get().focusedId;
+    if (!id) return;
+    const state = await window.electronAPI.secretary.getState(id).catch(() => null);
+    if (!state) return;
+    set((current) => ({
+      states: { ...current.states, [id]: state },
+      ...(current.focusedId === id ? { secretary: state } : {}),
+    }));
   },
 
   createSecretary: async () => {

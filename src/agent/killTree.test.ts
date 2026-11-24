@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { killProcessTree } from './killTree';
+import { killProcessTree, treeGroups } from './killTree';
 
 const fakeChild = (pid: number | undefined) => ({ pid, kill: vi.fn(() => true) });
 
@@ -47,7 +47,12 @@ describe('killProcessTree', () => {
     const child = fakeChild(99);
     const killGroup = vi.fn();
     const { spawn } = fakeSpawn();
-    killProcessTree(child, 'SIGTERM', { platform: 'darwin', spawn, killGroup });
+    killProcessTree(child, 'SIGTERM', {
+      platform: 'darwin',
+      spawn,
+      killGroup,
+      listProcesses: () => [],
+    });
     expect(killGroup).toHaveBeenCalledWith(-99, 'SIGTERM');
     expect(spawn).not.toHaveBeenCalled();
 
@@ -55,6 +60,7 @@ describe('killProcessTree', () => {
     killProcessTree(broken, 'SIGTERM', {
       platform: 'linux',
       spawn,
+      listProcesses: () => [],
       killGroup: () => {
         throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
       },
@@ -68,5 +74,40 @@ describe('killProcessTree', () => {
     killProcessTree(child, 'SIGKILL', { platform: 'win32', systemRoot: 'C:\\Windows', spawn });
     expect(spawn).not.toHaveBeenCalled();
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+});
+
+describe('treeGroups', () => {
+  const entry = (pid: number, ppid: number, pgid: number) => ({ pid, ppid, pgid });
+
+  it('包含后代自立的进程组和组里过继给 init 的成员，不含无关进程', () => {
+    const table = [
+      entry(10, 9, 10),
+      entry(11, 10, 10),
+      entry(12, 11, 12),
+      entry(13, 12, 12),
+      entry(14, 1, 12),
+      entry(15, 14, 15),
+      entry(20, 1, 20),
+    ];
+    expect(treeGroups(10, table, new Set(), 999).sort()).toEqual([10, 12, 15]);
+  });
+
+  it('根已退出时靠见过的组认回过继给 init 的后代；已无成员的组丢掉', () => {
+    const table = [entry(12, 1, 12), entry(13, 12, 12), entry(16, 13, 16), entry(20, 1, 20)];
+    expect(treeGroups(10, table, new Set([10, 12, 77]), 999).sort()).toEqual([10, 12, 16]);
+  });
+
+  it('不碰自己所在的组和 init，也不顺着它们扩散到别的进程', () => {
+    const table = [
+      entry(10, 9, 10),
+      entry(11, 10, 5),
+      entry(12, 10, 1),
+      entry(999, 1, 5),
+      entry(1000, 999, 1000),
+      entry(2, 1, 1),
+      entry(3, 2, 3),
+    ];
+    expect(treeGroups(10, table, new Set(), 999)).toEqual([10]);
   });
 });

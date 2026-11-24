@@ -77,7 +77,8 @@ export function removeComposerImage(
 }
 
 interface ComposerProps {
-  cwd?: string;
+  /** @ 文件搜索按这个会话的工作区搜（Main 推导根目录） */
+  mentionConversationId?: string;
   commands: SlashCommand[];
   running: boolean;
   busy: boolean;
@@ -138,7 +139,7 @@ const isTouchRemote = (): boolean =>
   Boolean(window.electronAPI?.remote) && window.matchMedia?.('(pointer: coarse)').matches === true;
 
 export function Composer({
-  cwd,
+  mentionConversationId,
   commands,
   running,
   busy,
@@ -264,7 +265,7 @@ export function Composer({
   useEffect(() => setUnsentDraft(draftHolder.current, hasDraft), [hasDraft]);
   useEffect(() => () => setUnsentDraft(draftHolder.current, false), []);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const mentionGroups = useMentionSearch(cwd, mentionQuery, chatCandidates);
+  const mentionGroups = useMentionSearch(mentionConversationId, mentionQuery, chatCandidates);
   const mentionItems = useMemo(
     () => flattenMentionRoot(mentionGroups, mentionQuery ?? ''),
     [mentionGroups, mentionQuery]
