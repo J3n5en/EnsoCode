@@ -446,6 +446,8 @@ export const zhTranslations: Record<string, string> = {
   'Conversation display': '对话显示',
   'Terminal & editor': '终端与编辑器',
   'Runtime & sessions': '运行与会话',
+  Network: '网络',
+  Shell: '命令行',
   'Conversation typography': '会话排版',
   'Headings, tables and inline code scale with the body text': '标题、表格与行内代码按正文比例缩放',
   Body: '正文',

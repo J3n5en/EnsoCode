@@ -874,7 +874,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "privacy.words",
   },
   {
-    "current": "false",
+    "current": "true",
     "effects": [
       {
         "api": [],
@@ -882,10 +882,72 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     ],
     "kind": "checkbox",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
-    "current": "true",
+    "current": {
+      "terminalFontWeight": "normal",
+    },
+    "effects": [
+      "{"store":{"terminalFontWeight":"100"},"api":[]}",
+      "{"store":{"terminalFontWeight":"200"},"api":[]}",
+      "{"store":{"terminalFontWeight":"300"},"api":[]}",
+      "{"store":{"terminalFontWeight":"400"},"api":[]}",
+      "{"store":{"terminalFontWeight":"500"},"api":[]}",
+      "{"store":{"terminalFontWeight":"600"},"api":[]}",
+      "{"store":{"terminalFontWeight":"700"},"api":[]}",
+      "{"store":{"terminalFontWeight":"800"},"api":[]}",
+      "{"store":{"terminalFontWeight":"900"},"api":[]}",
+      "{"store":{"terminalFontWeight":"bold"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "terminal.appearance",
+  },
+  {
+    "current": {
+      "terminalFontWeightBold": "500",
+    },
+    "effects": [
+      "{"store":{"terminalFontWeightBold":"100"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"200"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"300"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"400"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"600"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"700"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"800"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"900"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"bold"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "terminal.appearance",
+  },
+  {
+    "current": "14",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.appearance",
+  },
+  {
+    "current": "Dracula",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.appearance",
+  },
+  {
+    "current": "Dracula",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.appearance",
+  },
+  {
+    "current": "ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.appearance",
+  },
+  {
+    "current": "false",
     "effects": [
       {
         "api": [],
@@ -1065,69 +1127,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": null,
   },
   {
-    "current": {
-      "terminalFontWeight": "normal",
-    },
-    "effects": [
-      "{"store":{"terminalFontWeight":"100"},"api":[]}",
-      "{"store":{"terminalFontWeight":"200"},"api":[]}",
-      "{"store":{"terminalFontWeight":"300"},"api":[]}",
-      "{"store":{"terminalFontWeight":"400"},"api":[]}",
-      "{"store":{"terminalFontWeight":"500"},"api":[]}",
-      "{"store":{"terminalFontWeight":"600"},"api":[]}",
-      "{"store":{"terminalFontWeight":"700"},"api":[]}",
-      "{"store":{"terminalFontWeight":"800"},"api":[]}",
-      "{"store":{"terminalFontWeight":"900"},"api":[]}",
-      "{"store":{"terminalFontWeight":"bold"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "terminalFontWeightBold": "500",
-    },
-    "effects": [
-      "{"store":{"terminalFontWeightBold":"100"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"200"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"300"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"400"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"600"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"700"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"800"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"900"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"bold"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
     "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "14",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "Dracula",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "Dracula",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace",
     "effects": [],
     "kind": "input",
     "row": null,
@@ -2026,7 +2026,7 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
       },
     ],
     "kind": "checkbox",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": {
@@ -2045,7 +2045,7 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
       "{"store":{"terminalFontWeight":"bold"},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": {
@@ -2064,31 +2064,31 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
       "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": "14",
     "effects": [],
     "kind": "input",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": "Dracula",
     "effects": [],
     "kind": "input",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": "Dracula",
     "effects": [],
     "kind": "input",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": "ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace",
     "effects": [],
     "kind": "input",
-    "row": null,
+    "row": "terminal.appearance",
   },
   {
     "current": "100",
@@ -2152,5 +2152,6 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "general.windowsLocalShell",
   "general.worktreeRoot",
   "privacy.enabled",
+  "terminal.appearance",
 ]
 `;

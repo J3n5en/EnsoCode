@@ -7,7 +7,39 @@ import {
 import { useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
+import { SettingsRow, useSettingsRowControl } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
+
+function ReserveInput({
+  draft,
+  label,
+  onCommit,
+  onDraft,
+}: {
+  draft: string;
+  label: string;
+  onCommit: () => void;
+  onDraft: (value: string) => void;
+}) {
+  const a11y = useSettingsRowControl();
+  return (
+    <Input
+      {...a11y}
+      size="sm"
+      inputMode="numeric"
+      value={draft}
+      placeholder={String(COMPACT_RESERVE_TOKENS_DEFAULT)}
+      aria-label={label}
+      className={cn('w-[140px] max-w-full')}
+      onChange={(event) => onDraft(event.target.value)}
+      onBlur={() => void onCommit()}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') void onCommit();
+      }}
+    />
+  );
+}
 
 /** pi 全局 settings.json 的 compaction.reserveTokens；留空即删除该字段，跟随 pi 默认 */
 export function CompactReserveTokensSection() {
@@ -51,35 +83,27 @@ export function CompactReserveTokensSection() {
   };
 
   return (
-    <div
-      className="flex items-start justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.compactReserveTokens"
-    >
-      <div className="min-w-0">
-        <p className="text-sm">
+    <SettingsRow
+      rowId="general.compactReserveTokens"
+      label={
+        <>
           {t('Compaction reserve tokens')}
           <NewSessionBadge />
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.'
-          )}
-        </p>
-      </div>
-      <div className="w-32 shrink-0 space-y-1">
-        <Input
-          inputMode="numeric"
-          value={draft}
-          placeholder={String(COMPACT_RESERVE_TOKENS_DEFAULT)}
-          aria-label={t('Compaction reserve tokens')}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={() => void commit()}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') void commit();
-          }}
+        </>
+      }
+      description={t(
+        'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.'
+      )}
+    >
+      <div className="flex w-[140px] max-w-full flex-col items-end gap-1">
+        <ReserveInput
+          draft={draft}
+          label={t('Compaction reserve tokens')}
+          onDraft={setDraft}
+          onCommit={() => void commit()}
         />
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-right text-[12px] text-destructive">{error}</p>}
       </div>
-    </div>
+    </SettingsRow>
   );
 }

@@ -1,6 +1,5 @@
 import type { ThemeDefinition, ThemeKey, ThemePalette } from '@shared/theme/types';
 import { Puzzle } from 'lucide-react';
-import type * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -55,8 +54,6 @@ function ThemePreview({ palette }: { palette: ThemePalette }) {
   );
 }
 
-const CARD = 'overflow-hidden rounded-lg border text-left transition-shadow';
-
 export function ThemeGallery({
   themes,
   selected,
@@ -72,7 +69,7 @@ export function ThemeGallery({
 }) {
   const { t } = useI18n();
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,13.5rem),1fr))] gap-3">
       {themes.map((theme) => {
         const on = theme.id === selected;
         return (
@@ -80,16 +77,19 @@ export function ThemeGallery({
             type="button"
             key={theme.id}
             data-theme-card={theme.id}
+            data-settings-preview=""
             aria-pressed={on}
             onClick={() => onSelect(theme.id)}
             className={cn(
-              CARD,
-              'bg-card',
-              on ? 'border-transparent shadow-[0_0_0_2px_var(--brand)]' : 'hover:border-input'
+              'group relative flex w-full min-w-0 flex-col overflow-hidden text-left',
+              'rounded-md',
+              on
+                ? 'border border-transparent shadow-[0_0_0_2px_var(--brand)]'
+                : 'border border-border hover:border-input'
             )}
           >
             <ThemePreview palette={theme[mode]} />
-            <div className="flex items-center gap-1.5 border-t px-2.5 py-[7px] text-sm">
+            <div className="flex min-w-0 items-center gap-1.5 bg-background px-2.5 py-2 text-[13px]">
               <span className="truncate font-medium">{theme.name}</span>
               <span
                 className={cn(
@@ -112,8 +112,9 @@ export function ThemeGallery({
           type="button"
           onClick={onGetMore}
           className={cn(
-            CARD,
-            'flex min-h-[124px] flex-col items-center justify-center gap-1.5 border-dashed text-sm text-subtle-foreground hover:border-input hover:text-foreground'
+            'flex min-h-[124px] min-w-0 flex-col items-center justify-center gap-1.5 text-sm text-subtle-foreground hover:text-foreground',
+            'rounded-md',
+            'border border-dashed border-border hover:border-input'
           )}
         >
           <Puzzle className="size-[18px]" />
@@ -122,34 +123,4 @@ export function ThemeGallery({
       )}
     </div>
   );
-}
-
-/** 外观页的设置行：左侧标题与说明，右侧控件 */
-export function AppearanceRow({
-  rowId,
-  title,
-  description,
-  children,
-}: {
-  rowId?: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      data-settings-row={rowId}
-      className="flex min-h-12 items-center justify-between gap-4 px-3.5 py-2.5"
-    >
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{title}</p>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  );
-}
-
-export function AppearanceCard({ children }: { children: React.ReactNode }) {
-  return <div className="divide-y rounded-lg border bg-card">{children}</div>;
 }

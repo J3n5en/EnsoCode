@@ -9,16 +9,6 @@ import { countBoxesInSource } from './kit/boxes';
  * 迁到 kit/ 的页面一个都不许有；还没迁的列在白名单里，PR3 迁一页删一行。
  */
 const LEGACY = new Set([
-  // PR3a 应用组
-  'AppearanceSettings.tsx',
-  'CompactReserveTokensSection.tsx',
-  'ConfigSyncSettings.tsx',
-  'ContextMenuOpeningSettings.tsx',
-  'DevToolsSection.tsx',
-  'FileOpeningSettings.tsx',
-  'GeneralSettings.tsx',
-  'PrivacySettings.tsx',
-  'ThemeGallery.tsx',
   // PR3b 模型与智能体组
   'AgentTypesSettings.tsx',
   'ApprovalReviewerPicker.tsx',
@@ -38,7 +28,6 @@ const LEGACY = new Set([
   'ProviderModelRow.tsx',
   'ProviderSetupWizard.tsx',
   'ProvidersSettings.tsx',
-  'SmartCompactPicker.tsx',
   'SubagentModelsSettings.tsx',
   'TitleSummaryPicker.tsx',
   'VirtualModelsSettings.tsx',

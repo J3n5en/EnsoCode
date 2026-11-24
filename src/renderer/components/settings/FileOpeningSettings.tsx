@@ -18,8 +18,10 @@ import {
 } from '@/components/ui/select';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextMenuOpeningSettings } from './ContextMenuOpeningSettings';
+import { SettingsButton, SettingsRow, SettingsSection, TOUCH_TARGET } from './kit';
 
 type Target = FileOpenRule['target'];
 const TARGETS: Target[] = ['internal', 'reveal', 'system', 'application'];
@@ -58,7 +60,10 @@ function TargetPicker({
         if (TARGETS.includes(target as Target)) onChange(target as Target);
       }}
     >
-      <SelectTrigger className="w-52" aria-label={t('File opening')}>
+      <SelectTrigger
+        className={cn('w-[min(100%,13rem)]', TOUCH_TARGET)}
+        aria-label={t('File opening')}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectPopup>
@@ -176,28 +181,29 @@ export function FileOpeningSettings() {
   };
 
   return (
-    <section className="space-y-3" data-settings-row="appearance.fileOpening">
-      <div>
-        <h4 className="text-sm font-medium">{t('File opening')}</h4>
-        <p className="text-xs text-muted-foreground">
+    <SettingsSection
+      rowId="appearance.fileOpening"
+      title={t('File opening')}
+      description={
+        <>
           {t('Configure how local workspace file links open by extension.')}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'By default, supported files open inside EnsoCode; other files are revealed in the file manager.'
-          )}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {t('Executable and installer files are always revealed in the file manager.')}
-        </p>
-      </div>
+          <span className="mt-0.5 block">
+            {t(
+              'By default, supported files open inside EnsoCode; other files are revealed in the file manager.'
+            )}
+          </span>
+          <span className="mt-0.5 block">
+            {t('Executable and installer files are always revealed in the file manager.')}
+          </span>
+        </>
+      }
+    >
       <ContextMenuOpeningSettings />
       {rules.map((rule) => (
-        <div
+        <SettingsRow
           key={rule.extension}
-          className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2"
+          label={<span className="font-mono">{rule.extension}</span>}
         >
-          <span className="w-20 shrink-0 font-mono text-sm">{rule.extension}</span>
           <TargetPicker
             extension={rule.extension}
             value={rule.target}
@@ -211,19 +217,17 @@ export function FileOpeningSettings() {
           {rule.target === 'application' && !isExternalFileOpenBlocked(`file${rule.extension}`) && (
             <>
               <span
-                className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                className="min-w-0 max-w-full flex-1 truncate text-xs text-muted-foreground"
                 title={rule.applicationPath}
               >
                 {rule.applicationPath}
               </span>
-              <Button
-                variant="outline"
-                size="sm"
+              <SettingsButton
                 disabled={busy}
                 onClick={() => void chooseApplication((path) => update(rule, 'application', path))}
               >
                 {t('Choose application')}
-              </Button>
+              </SettingsButton>
             </>
           )}
           <Button
@@ -234,67 +238,63 @@ export function FileOpeningSettings() {
           >
             {t('Delete')}
           </Button>
-        </div>
+        </SettingsRow>
       ))}
-      <div className="space-y-2 rounded-md border p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            className="w-24"
-            value={extension}
-            placeholder=".md"
-            aria-label={t('File extension')}
-            disabled={busy}
-            onChange={(event) => {
-              setExtension(event.target.value);
-              setError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') add();
-            }}
-          />
-          <TargetPicker
-            extension={normalizedExtension ?? '.md'}
-            value={target}
-            disabled={busy}
-            onChange={(next) => {
-              setTarget(next);
-              setError(null);
-            }}
-          />
-          <Button variant="outline" size="sm" disabled={busy} onClick={add}>
-            {t('Add')}
-          </Button>
-        </div>
-        {target === 'application' &&
-          !isExternalFileOpenBlocked(`file${normalizedExtension ?? '.md'}`) && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  void chooseApplication((path) => {
-                    setApplicationPath(path);
-                    setError(null);
-                  })
-                }
-              >
-                {t('Choose application')}
-              </Button>
-              <span
-                className="min-w-0 truncate text-xs text-muted-foreground"
-                title={applicationPath}
-              >
-                {applicationPath}
-              </span>
-            </div>
-          )}
-        {error && (
-          <p role="alert" className="text-xs text-destructive">
-            {error}
-          </p>
-        )}
+      <div className="flex flex-wrap items-center gap-2 py-3">
+        <Input
+          className="w-24 max-w-full"
+          value={extension}
+          placeholder=".md"
+          aria-label={t('File extension')}
+          disabled={busy}
+          onChange={(event) => {
+            setExtension(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') add();
+          }}
+        />
+        <TargetPicker
+          extension={normalizedExtension ?? '.md'}
+          value={target}
+          disabled={busy}
+          onChange={(next) => {
+            setTarget(next);
+            setError(null);
+          }}
+        />
+        <SettingsButton disabled={busy} onClick={add}>
+          {t('Add')}
+        </SettingsButton>
       </div>
-    </section>
+      {target === 'application' &&
+        !isExternalFileOpenBlocked(`file${normalizedExtension ?? '.md'}`) && (
+          <div className="flex min-w-0 flex-wrap items-center gap-2 pb-3">
+            <SettingsButton
+              disabled={busy}
+              onClick={() =>
+                void chooseApplication((path) => {
+                  setApplicationPath(path);
+                  setError(null);
+                })
+              }
+            >
+              {t('Choose application')}
+            </SettingsButton>
+            <span
+              className="min-w-0 truncate text-xs text-muted-foreground"
+              title={applicationPath}
+            >
+              {applicationPath}
+            </span>
+          </div>
+        )}
+      {error && (
+        <p role="alert" className="pb-3 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </SettingsSection>
   );
 }

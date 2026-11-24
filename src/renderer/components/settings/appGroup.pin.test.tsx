@@ -133,14 +133,13 @@ vi.mock('@/components/ui/radio-group', () => {
 });
 vi.mock('@/components/ui/slider', () => ({
   Slider: ({ value }: { value?: unknown }) => (
-    <div role="slider" data-pin-value={JSON.stringify(value)} />
+    <output data-pin-slider data-pin-value={JSON.stringify(value)} />
   ),
   SliderValue: () => null,
 }));
 
 let root: Root;
 let container: HTMLElement;
-let doc: Document;
 let store: typeof import('@/stores/settings').useSettingsStore;
 let pages: Record<string, React.ComponentType>;
 
@@ -162,7 +161,6 @@ beforeAll(async () => {
   const dom = parseHTML(
     '<!doctype html><html><head></head><body><div id="root"></div></body></html>'
   );
-  doc = dom.document as unknown as Document;
   const record =
     (path: string) =>
     (...args: unknown[]) => {
@@ -212,13 +210,11 @@ beforeAll(async () => {
   root = createRoot(container);
   await act(async () =>
     root.render(
-      <>
-        {Object.entries(pages).map(([id, Page]) => (
-          <section key={id} data-pin-page={id}>
-            <Page />
-          </section>
-        ))}
-      </>
+      Object.entries(pages).map(([id, Page]) => (
+        <section key={id} data-pin-page={id}>
+          <Page />
+        </section>
+      ))
     )
   );
   await act(async () => new Promise((r) => setTimeout(r, 20)));
@@ -317,7 +313,7 @@ async function probe(): Promise<Control[]> {
         .sort(),
     });
   }
-  for (const el of find('[role="slider"]')) {
+  for (const el of find('[data-pin-slider]')) {
     out.push({
       row: rowOf(el),
       kind: 'slider',

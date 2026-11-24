@@ -148,12 +148,12 @@ describe('groupCategories', () => {
   });
 });
 
-describe('appearance search rows', () => {
-  it('会话排版登记在外观页', () => {
+describe('conversation search rows', () => {
+  it('会话排版登记在对话显示页', () => {
     expect(
       buildSettingsCatalog().find((entry) => entry.id === 'appearance.chatTypography')
     ).toMatchObject({
-      category: 'appearance',
+      category: 'conversation',
       title: 'Conversation typography',
     });
   });

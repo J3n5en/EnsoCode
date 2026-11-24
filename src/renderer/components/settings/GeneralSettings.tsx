@@ -1,115 +1,65 @@
-import { AUTO_RETRY_LIMIT_OPTIONS, UNLIMITED_AUTO_RETRY } from '@shared/autoRetry';
 import { CA_CERT_EXTENSIONS, type CaCertError, type CaCertStatus } from '@shared/caCert';
 import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { ShellIntegration } from '@shared/shellIntegration';
-import { GENERATION_STALL_TIMEOUT_MINUTES } from '@shared/stallTimeout';
-import { type TerminalShell, terminalShellsForPlatform } from '@shared/terminalShell';
 import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
 import { isPrereleaseVersion, type UpdateChannel } from '@shared/updater/channel';
 import { isAutoRestartMode } from '@shared/updater/idleRestart';
-import type { WindowsLocalShell } from '@shared/windowsLocalShell';
-import { isAbsolutePathLike } from '@shared/worktreeRoot';
 import * as React from 'react';
 import { ManualInstallActions } from '@/components/app/ManualInstallActions';
 import { ReleaseNotesDialog } from '@/components/app/ReleaseNotesDialog';
 import { restartToUpdate } from '@/components/app/restartToUpdate';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { isRemoteClient } from '@/lib/remoteClient';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
-import {
-  AUTO_ARCHIVE_IDLE_DAYS,
-  AUTO_DELETE_ARCHIVED_DAYS,
-} from '@/stores/settings/autoArchiveIdleDays';
-import { CompactReserveTokensSection } from './CompactReserveTokensSection';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
-import { DevToolsSection } from './DevToolsSection';
-import { NewSessionBadge } from './NewSessionBadge';
-import { SmartCompactPicker } from './SmartCompactPicker';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSwitch,
+  useSettingsRowControl,
+} from './kit';
 
-const TERMINAL_SHELL_LABELS: Record<Exclude<TerminalShell, 'auto'>, string> = {
-  cmd: 'Command Prompt',
-  powershell: 'Windows PowerShell',
-  pwsh: 'PowerShell 7 (pwsh)',
-  'git-bash': 'Git Bash',
-  zsh: 'zsh',
-  bash: 'bash',
-  fish: 'fish',
-};
+function RowTextInput({ className, ...props }: React.ComponentProps<typeof Input>) {
+  const a11y = useSettingsRowControl();
+  return <Input size="sm" {...a11y} {...props} className={cn('w-[220px] max-w-full', className)} />;
+}
 
 export function GeneralSettings() {
   const { language, setLanguage } = useSettingsStore();
   const { t } = useI18n();
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h3 className="text-lg font-medium">{t('General')}</h3>
-        <p className="text-sm text-muted-foreground">{t('General application settings')}</p>
-      </div>
-
-      <section className="space-y-3">
-        <h4 className="border-b pb-2 text-base font-semibold">{t('Application')}</h4>
-        <div className="flex items-center gap-3" data-settings-row="general.language">
-          <span className="text-sm font-medium">{t('Language')}</span>
-          <Select
-            items={{ en: 'English', zh: '简体中文' }}
+    <SettingsPage title={t('General')} description={t('General application settings')}>
+      <SettingsSection title={t('Application')}>
+        <SettingsRow rowId="general.language" label={t('Language')}>
+          <SettingsSelect
             value={language}
-            onValueChange={(v) => setLanguage(v as 'en' | 'zh')}
-          >
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              <SelectItem value="en">English</SelectItem>
-              <SelectItem value="zh">简体中文</SelectItem>
-            </SelectPopup>
-          </Select>
-        </div>
+            onValueChange={setLanguage}
+            options={[
+              { value: 'en', label: 'English' },
+              { value: 'zh', label: '简体中文' },
+            ]}
+          />
+        </SettingsRow>
         <NotificationSection />
+      </SettingsSection>
+
+      <SettingsSection title={t('Network')}>
         <ProxySection />
         <CaCertSection />
-        <ConfigSyncSettings />
-        <UpdateSection />
-      </section>
+      </SettingsSection>
 
-      <section className="space-y-3">
-        <h4 className="border-b pb-2 text-base font-semibold">{t('Agent runtime')}</h4>
-        <GenerationStallTimeoutRow />
-        <AutoRetryLimitRow />
-        <LongCacheRetentionRow />
-        <SmartCompactPicker />
-        <CompactReserveTokensSection />
-      </section>
-
-      <section className="space-y-3">
-        <h4 className="border-b pb-2 text-base font-semibold">{t('Sessions & worktrees')}</h4>
-        <AutoArchiveSection />
-        <ActiveRetentionMinutesRow />
-        <WorktreeRootSection />
-      </section>
-
-      <section className="space-y-3">
-        <h4 className="border-b pb-2 text-base font-semibold">{t('Terminal')}</h4>
-        <WindowsLocalShellSection />
-        <TerminalShellSection />
-      </section>
+      <ConfigSyncSettings />
+      <UpdateSection />
 
       {window.electronAPI.env.platform === 'darwin' && (
-        <section className="space-y-3">
-          <h4 className="border-b pb-2 text-base font-semibold">{t('Integrations')}</h4>
+        <SettingsSection title={t('Integrations')}>
           <ShellIntegrationRow
             kind="ensoCommand"
             title={t("'enso' terminal command")}
@@ -124,11 +74,9 @@ export function GeneralSettings() {
               'Right-click a folder in Finder and choose Services > Open with EnsoCode.'
             )}
           />
-        </section>
+        </SettingsSection>
       )}
-
-      <DevToolsSection />
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -176,24 +124,11 @@ function ShellIntegrationRow({
     }
   };
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row={`general.${kind}`}
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="shrink-0"
-        disabled={busy}
-        onClick={() => void toggle()}
-      >
+    <SettingsRow rowId={`general.${kind}`} label={title} description={description}>
+      <SettingsButton disabled={busy} onClick={() => void toggle()}>
         {busy ? t('In progress…') : t(installed ? 'Uninstall' : 'Install')}
-      </Button>
-    </div>
+      </SettingsButton>
+    </SettingsRow>
   );
 }
 
@@ -202,438 +137,15 @@ function NotificationSection() {
   const notifyMainAgentOnly = useSettingsStore((s) => s.notifyMainAgentOnly);
   const setNotifyMainAgentOnly = useSettingsStore((s) => s.setNotifyMainAgentOnly);
   return (
-    <SwitchRow
+    <SettingsRow
       rowId="general.notifyMainAgentOnly"
-      title={t('Notify only for the main agent')}
+      label={t('Notify only for the main agent')}
       description={t(
         'Skip coworker completion and failure notifications on this computer and the paired phone. Questions and approvals still notify.'
       )}
-      checked={notifyMainAgentOnly}
-      onChange={setNotifyMainAgentOnly}
-    />
-  );
-}
-
-function GenerationStallTimeoutRow() {
-  const { t } = useI18n();
-  const generationStallTimeoutMin = useSettingsStore((s) => s.generationStallTimeoutMin);
-  const setGenerationStallTimeoutMin = useSettingsStore((s) => s.setGenerationStallTimeoutMin);
-  return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.generationStallTimeout"
     >
-      <div className="min-w-0">
-        <p className="text-sm">{t('Stop if no output')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Abort and retry the run when no tokens or tool results arrive for this long. Thinking counts as output.'
-          )}
-        </p>
-      </div>
-      <Select
-        items={Object.fromEntries(
-          GENERATION_STALL_TIMEOUT_MINUTES.map((value) => [
-            String(value),
-            value === 0 ? t('Never') : t('{{count}} min', { count: value }),
-          ])
-        )}
-        value={String(generationStallTimeoutMin)}
-        onValueChange={(value) => setGenerationStallTimeoutMin(Number(value))}
-      >
-        <SelectTrigger className="w-28">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {GENERATION_STALL_TIMEOUT_MINUTES.map((value) => (
-            <SelectItem key={value} value={String(value)}>
-              {value === 0 ? t('Never') : t('{{count}} min', { count: value })}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
-  );
-}
-
-function AutoRetryLimitRow() {
-  const { t } = useI18n();
-  const autoRetryLimit = useSettingsStore((s) => s.autoRetryLimit);
-  const setAutoRetryLimit = useSettingsStore((s) => s.setAutoRetryLimit);
-  const autoRetryOptions = AUTO_RETRY_LIMIT_OPTIONS.some((value) => value === autoRetryLimit)
-    ? [...AUTO_RETRY_LIMIT_OPTIONS]
-    : [...AUTO_RETRY_LIMIT_OPTIONS, autoRetryLimit].sort((a, b) =>
-        a === UNLIMITED_AUTO_RETRY ? 1 : b === UNLIMITED_AUTO_RETRY ? -1 : a - b
-      );
-  const autoRetryLabel = (value: number) =>
-    value === 0
-      ? t('Off')
-      : value === UNLIMITED_AUTO_RETRY
-        ? t('Unlimited')
-        : t('{{count}} times', { count: value });
-  return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.autoRetryLimit"
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{t('Auto-retry on transient errors')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Retry with backoff (up to 60s apart) after 429, 5xx or network errors. Quota and billing errors are never retried. Unlimited keeps retrying until you cancel.'
-          )}
-        </p>
-      </div>
-      <Select
-        items={Object.fromEntries(
-          autoRetryOptions.map((value) => [String(value), autoRetryLabel(value)])
-        )}
-        value={String(autoRetryLimit)}
-        onValueChange={(value) => setAutoRetryLimit(Number(value))}
-      >
-        <SelectTrigger className="w-28">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {autoRetryOptions.map((value) => (
-            <SelectItem key={value} value={String(value)}>
-              {autoRetryLabel(value)}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
-  );
-}
-
-function LongCacheRetentionRow() {
-  const { t } = useI18n();
-  const longCacheRetention = useSettingsStore((s) => s.longCacheRetention);
-  const setLongCacheRetention = useSettingsStore((s) => s.setLongCacheRetention);
-  return (
-    <SwitchRow
-      rowId="general.longCacheRetention"
-      title={t('Long prompt cache (1 hour)')}
-      description={t(
-        'Keep the prompt cache for 1 hour instead of 5 minutes. Saves a lot when turns are more than 5 minutes apart, since the cache no longer expires and gets rewritten every turn, but cache writes cost 2× instead of 1.25×, so rapid follow-ups tens of seconds apart cost more. Anthropic models only. Applies from the next request.'
-      )}
-      checked={longCacheRetention}
-      onChange={setLongCacheRetention}
-    />
-  );
-}
-
-function ActiveRetentionMinutesRow() {
-  const { t } = useI18n();
-  const activeRetentionMinutes = useSettingsStore((s) => s.activeRetentionMinutes);
-  const setActiveRetentionMinutes = useSettingsStore((s) => s.setActiveRetentionMinutes);
-  const retentionLabel = (value: number) =>
-    value === 0 ? t('Off') : t('{{count}} min', { count: value });
-  return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.activeRetentionMinutes"
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{t('Keep in Active after last message')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Viewed conversations stay in Active for this long after their last message or your last open while still in Active, then leave. Unviewed ones stay until you open them.'
-          )}
-        </p>
-      </div>
-      <Select
-        items={Object.fromEntries(
-          ACTIVE_RETENTION_MINUTES.map((value) => [String(value), retentionLabel(value)])
-        )}
-        value={String(activeRetentionMinutes)}
-        onValueChange={(value) => setActiveRetentionMinutes(Number(value))}
-      >
-        <SelectTrigger className="w-28">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {ACTIVE_RETENTION_MINUTES.map((value) => (
-            <SelectItem key={value} value={String(value)}>
-              {retentionLabel(value)}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
-  );
-}
-
-function dayLabel(
-  t: (key: string, params?: Record<string, string | number>) => string,
-  value: number
-): string {
-  if (value === 0) return t('Never');
-  if (value === 1) return t('{{count}} day', { count: value });
-  return t('{{count}} days', { count: value });
-}
-
-function AutoArchiveSection() {
-  const { t } = useI18n();
-  const autoArchiveIdleDays = useSettingsStore((s) => s.autoArchiveIdleDays);
-  const setAutoArchiveIdleDays = useSettingsStore((s) => s.setAutoArchiveIdleDays);
-  const autoArchiveMergedWorktrees = useSettingsStore((s) => s.autoArchiveMergedWorktrees);
-  const setAutoArchiveMergedWorktrees = useSettingsStore((s) => s.setAutoArchiveMergedWorktrees);
-  const autoDeleteArchivedDays = useSettingsStore((s) => s.autoDeleteArchivedDays);
-  const setAutoDeleteArchivedDays = useSettingsStore((s) => s.setAutoDeleteArchivedDays);
-  return (
-    <div className="space-y-2">
-      <div
-        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-        data-settings-row="general.autoArchiveIdleDays"
-      >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Archive idle conversations')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Move conversations that have been idle this long into Archived. Does not delete them.'
-            )}
-          </p>
-        </div>
-        <Select
-          items={Object.fromEntries(
-            AUTO_ARCHIVE_IDLE_DAYS.map((value) => [String(value), dayLabel(t, value)])
-          )}
-          value={String(autoArchiveIdleDays)}
-          onValueChange={(value) => setAutoArchiveIdleDays(Number(value))}
-        >
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {AUTO_ARCHIVE_IDLE_DAYS.map((value) => (
-              <SelectItem key={value} value={String(value)}>
-                {dayLabel(t, value)}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
-      <SwitchRow
-        rowId="general.autoArchiveMergedWorktrees"
-        title={t('Clean up merged worktrees')}
-        description={t(
-          'When archiving idle conversations, also remove isolated worktrees that are merged and clean.'
-        )}
-        checked={autoArchiveMergedWorktrees}
-        onChange={setAutoArchiveMergedWorktrees}
-      />
-      <div
-        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-        data-settings-row="general.autoDeleteArchivedDays"
-      >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Delete archived conversations after')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Permanently delete conversations that have been archived longer than this. This cannot be undone. Choosing a positive value deletes already-overdue archived conversations immediately.'
-            )}
-          </p>
-        </div>
-        <Select
-          items={Object.fromEntries(
-            AUTO_DELETE_ARCHIVED_DAYS.map((value) => [String(value), dayLabel(t, value)])
-          )}
-          value={String(autoDeleteArchivedDays)}
-          onValueChange={(value) => setAutoDeleteArchivedDays(Number(value))}
-        >
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {AUTO_DELETE_ARCHIVED_DAYS.map((value) => (
-              <SelectItem key={value} value={String(value)}>
-                {dayLabel(t, value)}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
-    </div>
-  );
-}
-
-function TerminalShellSection() {
-  const { t } = useI18n();
-  const terminalShell = useSettingsStore((s) => s.terminalShell);
-  const setTerminalShell = useSettingsStore((s) => s.setTerminalShell);
-  const options = terminalShellsForPlatform(window.electronAPI.env.platform);
-  const labels = Object.fromEntries(
-    options.map((value) => [
-      value,
-      value === 'auto' ? t('System default') : TERMINAL_SHELL_LABELS[value],
-    ])
-  ) as Record<TerminalShell, string>;
-  return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.terminalShell"
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{t('Terminal shell')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t('Applies to new side panel terminals. SSH projects keep the remote login shell.')}
-        </p>
-      </div>
-      <Select
-        items={labels}
-        value={terminalShell}
-        onValueChange={(value) => setTerminalShell(value as TerminalShell)}
-      >
-        <SelectTrigger className="w-56">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {options.map((value) => (
-            <SelectItem key={value} value={value}>
-              {labels[value]}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
-  );
-}
-
-function WorktreeRootSection() {
-  const { t } = useI18n();
-  const worktreeRoot = useSettingsStore((s) => s.worktreeRoot);
-  const setWorktreeRoot = useSettingsStore((s) => s.setWorktreeRoot);
-  const [draft, setDraft] = React.useState(worktreeRoot);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    setDraft(worktreeRoot);
-  }, [worktreeRoot]);
-
-  const commit = (value: string) => {
-    const next = value.trim();
-    if (next && !isAbsolutePathLike(next)) {
-      setError(t('Enter an absolute path'));
-      return;
-    }
-    setError(null);
-    setWorktreeRoot(next);
-  };
-
-  const browse = async () => {
-    const dir = await window.electronAPI.dialog.selectDirectory();
-    if (dir) {
-      setDraft(dir);
-      commit(dir);
-    }
-  };
-
-  return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.worktreeRoot"
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{t('Worktree root directory')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Where isolated session worktrees are created. Leave empty to use the app data directory. Existing worktrees stay where they are.'
-          )}
-        </p>
-      </div>
-      <div className="w-72 shrink-0 space-y-1">
-        <div className="flex items-center gap-2">
-          <Input
-            value={draft}
-            placeholder={t('Default location')}
-            onChange={(event) => setDraft(event.target.value)}
-            onBlur={() => commit(draft)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') commit(draft);
-            }}
-          />
-          <Button variant="outline" size="sm" className="shrink-0" onClick={() => void browse()}>
-            {t('Browse')}
-          </Button>
-        </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-function WindowsLocalShellSection() {
-  const { t } = useI18n();
-  const windowsLocalShell = useSettingsStore((s) => s.windowsLocalShell);
-  const setWindowsLocalShell = useSettingsStore((s) => s.setWindowsLocalShell);
-  const labels: Record<WindowsLocalShell, string> = {
-    auto: t('Windows default (PowerShell)'),
-    powershell: t('PowerShell'),
-    bash: t('Git Bash'),
-  };
-  return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="general.windowsLocalShell"
-    >
-      <div className="min-w-0">
-        <p className="text-sm">
-          {t('Windows local command shell')}
-          <NewSessionBadge />
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Only the Windows local agent command tool. SSH and other platforms stay on bash. Takes effect on the next session.'
-          )}
-        </p>
-      </div>
-      <Select
-        items={labels}
-        value={windowsLocalShell}
-        onValueChange={(value) => setWindowsLocalShell(value as WindowsLocalShell)}
-      >
-        <SelectTrigger className="w-56">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {(Object.keys(labels) as WindowsLocalShell[]).map((value) => (
-            <SelectItem key={value} value={value}>
-              {labels[value]}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
-  );
-}
-
-export function SwitchRow({
-  title,
-  description,
-  checked,
-  onChange,
-  rowId,
-  children,
-}: {
-  title: string;
-  description: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  rowId?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-md border px-3 py-2.5" data-settings-row={rowId}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm">{title}</p>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-        <Switch checked={checked} onCheckedChange={(value) => onChange(value === true)} />
-      </div>
-      {children ? <div className="mt-2">{children}</div> : null}
-    </div>
+      <SettingsSwitch checked={notifyMainAgentOnly} onCheckedChange={setNotifyMainAgentOnly} />
+    </SettingsRow>
   );
 }
 
@@ -671,39 +183,25 @@ function ProxySection() {
   };
 
   return (
-    <div className="space-y-3" data-settings-row="general.proxy">
-      <div>
-        <h4 className="text-sm font-medium">{t('Network proxy')}</h4>
-        <p className="text-xs text-muted-foreground">
-          {t('Used by model requests, the built-in browser, and agent tools')}
-        </p>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="text-sm font-medium">{t('Proxy mode')}</span>
-        <Select
-          items={{
-            system: t('Follow system proxy'),
-            none: t('No proxy'),
-            custom: t('Custom proxy'),
-          }}
+    <div data-settings-row="general.proxy">
+      <SettingsRow
+        label={t('Network proxy')}
+        description={t('Used by model requests, the built-in browser, and agent tools')}
+      >
+        <SettingsSelect
           value={proxyMode}
-          onValueChange={(value) => changeMode(value as ProxyMode)}
-        >
-          <SelectTrigger className="w-56">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="system">{t('Follow system proxy')}</SelectItem>
-            <SelectItem value="none">{t('No proxy')}</SelectItem>
-            <SelectItem value="custom">{t('Custom proxy')}</SelectItem>
-          </SelectPopup>
-        </Select>
-      </div>
+          onValueChange={changeMode}
+          options={[
+            { value: 'system', label: t('Follow system proxy') },
+            { value: 'none', label: t('No proxy') },
+            { value: 'custom', label: t('Custom proxy') },
+          ]}
+        />
+      </SettingsRow>
       {proxyMode === 'custom' && (
-        <div className="flex items-start gap-3">
-          <span className="pt-1.5 text-sm font-medium">{t('Proxy URL')}</span>
-          <div className="min-w-0 space-y-1">
-            <Input
+        <SettingsRow label={t('Proxy URL')}>
+          <div className="flex w-full max-w-[220px] flex-col items-end gap-1">
+            <RowTextInput
               value={draft}
               placeholder="http://127.0.0.1:7890"
               onChange={(event) => setDraft(event.target.value)}
@@ -712,9 +210,9 @@ function ProxySection() {
                 if (event.key === 'Enter') commitUrl();
               }}
             />
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="text-right text-[12px] text-destructive">{error}</p>}
           </div>
-        </div>
+        </SettingsRow>
       )}
     </div>
   );
@@ -781,43 +279,54 @@ function CaCertSection() {
   };
 
   return (
-    <div className="space-y-3" data-settings-row="general.caCert">
-      <div>
-        <h4 className="text-sm font-medium">{t('Custom CA certificate')}</h4>
-        <p className="text-xs text-muted-foreground">
+    <SettingsRow
+      rowId="general.caCert"
+      label={t('Custom CA certificate')}
+      description={
+        <>
           {t(
             'Trust an extra CA (PEM file) for model endpoints signed by a private CA. TLS verification stays on.'
           )}
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick()}>
-          {t('Choose certificate file')}
-        </Button>
-        {customCaCertPath && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void apply('')}>
-            {t('Clear')}
-          </Button>
-        )}
-      </div>
-      {status?.error ? (
-        <p className="break-all text-xs text-destructive">
-          {t('Certificate file unavailable ({{reason}}): {{path}}', {
-            reason: errorText[status.error],
-            path: status.settingPath,
-          })}
-        </p>
-      ) : (
-        <p className="break-all text-xs text-muted-foreground">{statusText()}</p>
+          {status?.error ? (
+            <span className="mt-1 block break-all text-destructive">
+              {t('Certificate file unavailable ({{reason}}): {{path}}', {
+                reason: errorText[status.error],
+                path: status.settingPath,
+              })}
+            </span>
+          ) : (
+            statusText() && <span className="mt-1 block break-all">{statusText()}</span>
+          )}
+          <span className="mt-1 block">
+            {t(
+              'Changes restart the agent process right away (running turns are interrupted). Requests made by the app main process take effect after restarting the app.'
+            )}
+          </span>
+        </>
+      }
+    >
+      <SettingsButton disabled={busy} onClick={() => void pick()}>
+        {t('Choose certificate file')}
+      </SettingsButton>
+      {customCaCertPath && (
+        <SettingsButton variant="ghost" disabled={busy} onClick={() => void apply('')}>
+          {t('Clear')}
+        </SettingsButton>
       )}
-      <p className="text-xs text-muted-foreground">
-        {t(
-          'Changes restart the agent process right away (running turns are interrupted). Requests made by the app main process take effect after restarting the app.'
-        )}
-      </p>
-    </div>
+    </SettingsRow>
   );
 }
+
+function serverModeText(
+  mode: ServerUpdateMode | undefined,
+  t: ReturnType<typeof useI18n>['t']
+): string {
+  if (mode === 'npm') return t('Server updates install the new version with npm and restart.');
+  return t('This server must be updated on the machine itself.');
+}
+
+/** 打包时由 vite 注入的 app 版本(见 electron.vite.config.ts define);dev 下取 package.json */
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'dev';
 
 /** 更新小节:当前版本 + 检查按钮 + 状态/进度 + 自动下载开关 */
 function UpdateSection() {
@@ -898,63 +407,48 @@ function UpdateSection() {
   const busy = status?.status === 'checking' || status?.status === 'downloading';
 
   return (
-    <div className="space-y-3" data-settings-row="general.updates">
-      <div>
-        <h4 className="text-sm font-medium">{t('Updates')}</h4>
-        <p className="text-xs text-muted-foreground">
-          {server ? serverModeText(server.mode, t) : t('Application update settings')}
-        </p>
-      </div>
-      <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
-        <div className="min-w-0">
-          <p className="text-sm">
+    <SettingsSection
+      rowId="general.updates"
+      title={t('Updates')}
+      description={server ? serverModeText(server.mode, t) : t('Application update settings')}
+    >
+      <SettingsRow
+        label={
+          <>
             {t('Current version')} · {APP_VERSION}
-          </p>
-          {text && (
-            <p
-              className={cn(
-                'mt-0.5 text-xs text-muted-foreground',
-                !status?.manualInstall && 'truncate'
-              )}
-            >
-              {text}
-            </p>
-          )}
-        </div>
+          </>
+        }
+        description={
+          text ? (
+            <span className={cn('block', !status?.manualInstall && 'truncate')}>{text}</span>
+          ) : undefined
+        }
+      >
         {hasNotes && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setNotesOpen(true)}
-            className="ml-auto shrink-0"
-          >
+          <SettingsButton variant="ghost" onClick={() => setNotesOpen(true)}>
             {t('Release notes')}
-          </Button>
+          </SettingsButton>
         )}
         {status?.manualInstall ? (
           <ManualInstallActions manualInstall={status.manualInstall} />
         ) : status?.status === 'downloaded' ? (
-          <Button size="sm" onClick={() => void restartToUpdate(t)} className="shrink-0">
+          <SettingsButton variant="default" onClick={() => void restartToUpdate(t)}>
             {t('Restart to update')}
-          </Button>
+          </SettingsButton>
         ) : canDownload && status?.status === 'available' ? (
-          <Button
-            size="sm"
+          <SettingsButton
+            variant="default"
             onClick={() => void window.electronAPI.updater.downloadUpdate()}
-            className="shrink-0"
           >
             {t('Download update')}
-          </Button>
+          </SettingsButton>
         ) : (
-          <Button
-            variant="outline"
-            size="sm"
+          <SettingsButton
             disabled={busy}
             onClick={() => void window.electronAPI.updater.checkForUpdates()}
-            className="shrink-0"
           >
             {t('Check for updates')}
-          </Button>
+          </SettingsButton>
         )}
         <ReleaseNotesDialog
           open={notesOpen}
@@ -962,23 +456,15 @@ function UpdateSection() {
           status={status}
           canDownload={canDownload}
         />
-      </div>
+      </SettingsRow>
       {server?.canRestart && (
-        <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm">{t('Restart server')}</p>
-            <p className="text-xs text-muted-foreground">
-              {t('Running tasks are interrupted; this page reconnects after the server is back.')}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setConfirmRestart(true)}
-            className="shrink-0"
-          >
-            {t('Restart')}
-          </Button>
+        <SettingsRow
+          label={t('Restart server')}
+          description={t(
+            'Running tasks are interrupted; this page reconnects after the server is back.'
+          )}
+        >
+          <SettingsButton onClick={() => setConfirmRestart(true)}>{t('Restart')}</SettingsButton>
           <ConfirmDialog
             open={confirmRestart}
             onOpenChange={setConfirmRestart}
@@ -992,30 +478,25 @@ function UpdateSection() {
               void window.electronAPI.updater.restart();
             }}
           />
-        </div>
+        </SettingsRow>
       )}
-      <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
-        <div className="min-w-0">
-          <p className="text-sm">{t('Automatic updates')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t('Download and install updates automatically')}
-          </p>
-        </div>
-        <Switch
+      <SettingsRow
+        label={t('Automatic updates')}
+        description={t('Download and install updates automatically')}
+      >
+        <SettingsSwitch
           checked={autoUpdate}
           onCheckedChange={(checked) => {
             setAutoUpdate(checked);
             void window.electronAPI.updater.setAutoUpdateEnabled(checked);
           }}
         />
-      </div>
-      <div
-        className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2.5 ${autoUpdate ? '' : 'opacity-60'}`}
-      >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Restart automatically to apply updates')}</p>
-          <p className="text-xs text-muted-foreground">
-            {autoRestartForUpdate === 'immediate'
+      </SettingsRow>
+      <div className={autoUpdate ? undefined : 'opacity-60'}>
+        <SettingsRow
+          label={t('Restart automatically to apply updates')}
+          description={
+            autoRestartForUpdate === 'immediate'
               ? t(
                   "Restart as soon as the update is downloaded, even while agents are running or messages are queued. The restart happens after the current tool finishes, and running sessions keep going afterwards. It still waits while you're using the window (input in the last 2 minutes), while an input box has an unsent draft, or while a question or approval is pending."
                 )
@@ -1023,82 +504,59 @@ function UpdateSection() {
                 ? t(
                     'After the update is downloaded, restart automatically if no agent is running, nothing is queued, and there are no pending questions or approvals. The idle state must last 5 minutes, and a focused window also blocks it.'
                   )
-                : t('Only notify when an update is ready; never restart automatically.')}
-          </p>
-        </div>
-        <Select
-          items={{
-            off: t('Off'),
-            idle: t('When idle'),
-            immediate: t("Don't wait for idle"),
-          }}
-          value={autoRestartForUpdate}
-          disabled={!autoUpdate}
-          onValueChange={(value) => {
-            if (!isAutoRestartMode(value)) return;
-            setAutoRestartForUpdate(value);
-            void window.electronAPI.updater.setAutoRestartMode(value);
-          }}
+                : t('Only notify when an update is ready; never restart automatically.')
+          }
         >
-          <SelectTrigger className="w-32 shrink-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="off">{t('Off')}</SelectItem>
-            <SelectItem value="idle">{t('When idle')}</SelectItem>
-            <SelectItem value="immediate">{t("Don't wait for idle")}</SelectItem>
-          </SelectPopup>
-        </Select>
+          <SettingsSelect
+            value={autoRestartForUpdate}
+            disabled={!autoUpdate}
+            onValueChange={(value) => {
+              if (!isAutoRestartMode(value)) return;
+              setAutoRestartForUpdate(value);
+              void window.electronAPI.updater.setAutoRestartMode(value);
+            }}
+            options={[
+              { value: 'off', label: t('Off') },
+              { value: 'idle', label: t('When idle') },
+              { value: 'immediate', label: t("Don't wait for idle") },
+            ]}
+          />
+        </SettingsRow>
       </div>
       {host?.host === 'desktop' && (
-        <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm">{t('Update channel')}</p>
-            <p className="text-xs text-muted-foreground">
+        <SettingsRow
+          label={t('Update channel')}
+          description={
+            <>
               {updateChannel === 'beta'
                 ? t(
                     'Beta builds come from the latest main branch and may be unstable. You get whichever of beta and stable is newer.'
                   )
                 : t('Only stable releases.')}
-            </p>
-            {updateChannel === 'stable' && isPrereleaseVersion(APP_VERSION) && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t(
-                  "You're on a beta build. Switching to stable doesn't downgrade; you'll move to the next stable release once it's out."
-                )}
-              </p>
-            )}
-          </div>
-          <Select
-            items={{ stable: t('Stable'), beta: t('Beta') }}
+              {updateChannel === 'stable' && isPrereleaseVersion(APP_VERSION) && (
+                <span className="mt-0.5 block">
+                  {t(
+                    "You're on a beta build. Switching to stable doesn't downgrade; you'll move to the next stable release once it's out."
+                  )}
+                </span>
+              )}
+            </>
+          }
+        >
+          <SettingsSelect
             value={updateChannel}
             onValueChange={(value) => {
               const channel: UpdateChannel = value === 'beta' ? 'beta' : 'stable';
               setUpdateChannel(channel);
               void window.electronAPI.updater.setChannel(channel);
             }}
-          >
-            <SelectTrigger className="w-32 shrink-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              <SelectItem value="stable">{t('Stable')}</SelectItem>
-              <SelectItem value="beta">{t('Beta')}</SelectItem>
-            </SelectPopup>
-          </Select>
-        </div>
+            options={[
+              { value: 'stable', label: t('Stable') },
+              { value: 'beta', label: t('Beta') },
+            ]}
+          />
+        </SettingsRow>
       )}
-    </div>
+    </SettingsSection>
   );
 }
-
-function serverModeText(
-  mode: ServerUpdateMode | undefined,
-  t: ReturnType<typeof useI18n>['t']
-): string {
-  if (mode === 'npm') return t('Server updates install the new version with npm and restart.');
-  return t('This server must be updated on the machine itself.');
-}
-
-/** 打包时由 vite 注入的 app 版本(见 electron.vite.config.ts define);dev 下取 package.json */
-const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'dev';

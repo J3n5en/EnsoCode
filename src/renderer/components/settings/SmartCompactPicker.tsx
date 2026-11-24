@@ -5,17 +5,10 @@ import {
 } from '@shared/compactStrategy';
 import { SMART_COMPACT_MODES, type SmartCompactMode } from '@shared/smartCompactMode';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
-import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useI18n } from '@/i18n';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsRow, SettingsSelect } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
 const MODE_LABEL: Record<SmartCompactMode, string> = {
@@ -32,7 +25,7 @@ const STRATEGY_LABEL: Record<CompactStrategy, string> = {
   'continuous-memory': 'Continuous memory (experimental)',
 };
 
-/** 验证式智能压缩：开关 + 档位 + 独立摘要模型（null = 跟随当前会话模型）。 */
+/** 验证式智能压缩：策略 + 档位 + 独立摘要模型（null = 跟随当前会话模型）。 */
 export function SmartCompactPicker() {
   const { t } = useI18n();
   const storedStrategy = useSettingsStore((state) => state.compactStrategy);
@@ -51,80 +44,56 @@ export function SmartCompactPicker() {
   const selectedModel = selectedProvider?.models.find((entry) => entry.id === model?.modelId);
 
   return (
-    <section
-      className="space-y-2 rounded-lg border bg-card p-3"
-      data-settings-row="general.smartCompactEnabled"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h4 className="font-medium text-sm">
+    <div data-settings-row="general.smartCompactEnabled">
+      <SettingsRow
+        label={
+          <>
             {t('Context compaction strategy')}
             <NewSessionBadge />
-          </h4>
-          <p className="mt-0.5 text-muted-foreground text-xs">
-            {t(
-              'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model and compaction mode apply to open conversations on the next compaction.'
-            )}
-          </p>
-        </div>
-        <Select
-          items={Object.fromEntries(
-            COMPACT_STRATEGIES.map((value) => [value, t(STRATEGY_LABEL[value])])
-          )}
+          </>
+        }
+        description={t(
+          'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model and compaction mode apply to open conversations on the next compaction.'
+        )}
+      >
+        <SettingsSelect
+          width="wide"
           value={strategy}
-          onValueChange={(value) => setStrategy(value as CompactStrategy)}
-        >
-          <SelectTrigger className="w-52">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {COMPACT_STRATEGIES.map((value) => (
-              <SelectItem key={value} value={value}>
-                {t(STRATEGY_LABEL[value])}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
+          onValueChange={setStrategy}
+          options={COMPACT_STRATEGIES.map((value) => ({
+            value,
+            label: t(STRATEGY_LABEL[value]),
+          }))}
+        />
+      </SettingsRow>
 
       {(strategy === 'smart' || strategy === 'codex-native') && (
-        <div className="flex items-center justify-between gap-4" data-smart-compact-mode={mode}>
-          <div className="min-w-0">
-            <p className="text-muted-foreground text-xs">{t('Compaction mode')}</p>
-            <p className="mt-0.5 text-muted-foreground/80 text-[11px]">
-              {t(
-                'Mode changes summary budget and how much recent tail to keep. It does not decide whether compact runs.'
-              )}
-            </p>
-          </div>
-          <Select
-            items={Object.fromEntries(
-              SMART_COMPACT_MODES.map((value) => [value, t(MODE_LABEL[value])])
+        <div data-smart-compact-mode={mode}>
+          <SettingsRow
+            label={t('Compaction mode')}
+            description={t(
+              'Mode changes summary budget and how much recent tail to keep. It does not decide whether compact runs.'
             )}
-            value={mode}
-            onValueChange={(value) => setMode(value as SmartCompactMode)}
           >
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {SMART_COMPACT_MODES.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {t(MODE_LABEL[value])}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+            <SettingsSelect
+              value={mode}
+              onValueChange={setMode}
+              options={SMART_COMPACT_MODES.map((value) => ({
+                value,
+                label: t(MODE_LABEL[value]),
+              }))}
+            />
+          </SettingsRow>
         </div>
       )}
 
       {enabled && (
-        <div className="space-y-2">
-          <p className="font-medium text-sm">
+        <div className="border-border border-b py-3">
+          <p className="font-medium text-[13px]">
             {t(strategy === 'continuous-memory' ? 'Background memory model' : 'Summary model')}
           </p>
           {candidates.length > 0 && (
-            <div className="w-full min-w-0">
+            <div className="mt-2 w-full min-w-0">
               <ModelPicker
                 providers={candidates}
                 providerId={selectedProvider?.id ?? ''}
@@ -142,17 +111,17 @@ export function SmartCompactPicker() {
             </div>
           )}
           {model && (!selectedProvider || !selectedModel) && (
-            <p className="text-muted-foreground text-xs">
+            <p className="mt-1 text-[12px] text-muted-foreground">
               {t('Selected model is unavailable — falls back to the session model.')}
             </p>
           )}
           {model && (
-            <Button variant="ghost" size="sm" className="self-start" onClick={() => setModel(null)}>
+            <SettingsButton variant="ghost" className="mt-1" onClick={() => setModel(null)}>
               {t('Follow session model')}
-            </Button>
+            </SettingsButton>
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

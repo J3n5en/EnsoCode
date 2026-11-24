@@ -8,21 +8,20 @@ import {
 } from '@shared/privacyMask/settings';
 import { RefreshCw } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
-import { SwitchRow } from './GeneralSettings';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSwitch,
+} from './kit';
 
 const ACTION_LABELS: Record<MaskAction, string> = {
   mask: 'Mask',
@@ -37,9 +36,9 @@ const KIND_LABELS: Record<PersonalKind, string> = {
   ip: 'IP address',
 };
 const ACTION_TONE: Record<MaskAction, string> = {
-  mask: 'text-sky-600 dark:text-sky-400',
-  warn: 'text-amber-600 dark:text-amber-400',
-  block: 'text-red-600 dark:text-red-400',
+  mask: 'text-info',
+  warn: 'text-warning',
+  block: 'text-destructive-text',
 };
 const RANGES = [1, 7, 30] as const;
 const RANGE_LABEL: Record<(typeof RANGES)[number], string> = { 1: 'Today', 7: '7D', 30: '30D' };
@@ -58,29 +57,25 @@ function distinctHits(record: PrivacyMaskRecord): string {
 }
 
 function ActionSelect({
+  label,
   value,
   onChange,
 }: {
+  label: string;
   value: MaskAction;
   onChange: (value: MaskAction) => void;
 }) {
   const { t } = useI18n();
-  const items: Record<string, string> = Object.fromEntries(
-    (Object.keys(ACTION_LABELS) as MaskAction[]).map((a) => [a, t(ACTION_LABELS[a])])
-  );
   return (
-    <Select items={items} value={value} onValueChange={(v) => onChange(v as MaskAction)}>
-      <SelectTrigger className="w-32">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectPopup>
-        {Object.entries(items).map(([k, label]) => (
-          <SelectItem key={k} value={k}>
-            {label}
-          </SelectItem>
-        ))}
-      </SelectPopup>
-    </Select>
+    <SettingsSelect
+      aria-label={label}
+      value={value}
+      onValueChange={onChange}
+      options={(Object.keys(ACTION_LABELS) as MaskAction[]).map((action) => ({
+        value: action,
+        label: t(ACTION_LABELS[action]),
+      }))}
+    />
   );
 }
 
@@ -101,24 +96,15 @@ function ListField({
   const [draft, setDraft] = React.useState(value.join('\n'));
   React.useEffect(() => setDraft(value.join('\n')), [value]);
   return (
-    <div className="space-y-1.5" data-settings-row={rowId}>
-      <p className="text-sm">{label}</p>
-      <p className="text-xs text-muted-foreground">{hint}</p>
+    <div data-settings-row={rowId} className="min-w-0">
+      <SettingsRow label={label} description={hint} />
       <Textarea
         rows={3}
+        className="my-2"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => onCommit(draft.split('\n'))}
       />
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">{title}</p>
-      {children}
     </div>
   );
 }
@@ -128,39 +114,41 @@ function TryIt({ settings }: { settings: PrivacyMaskSettings }) {
   const [input, setInput] = React.useState('');
   const result = React.useMemo(() => previewMask(input, settings), [input, settings]);
   return (
-    <Section title={t('Try it')}>
-      <p className="text-xs text-muted-foreground">
-        {t('Runs locally. Nothing is remembered or sent anywhere.')}
-      </p>
-      <Textarea
-        rows={3}
-        value={input}
-        placeholder={t('Paste some text, e.g. an .env file')}
-        onChange={(e) => setInput(e.target.value)}
-      />
-      {input && (
-        <>
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
-            {result.text}
-          </pre>
-          <ul className="space-y-0.5 text-xs">
-            {result.report.hits.map((h) => (
-              <li key={`${h.token}-${h.action}`} className="flex gap-2">
-                <span className={cn('font-medium', ACTION_TONE[h.action])}>
-                  {t(ACTION_LABELS[h.action])}
-                </span>
-                <span>{h.kind}</span>
-                <span className="text-muted-foreground">{h.preview}</span>
-                {h.count > 1 && <span className="text-muted-foreground">×{h.count}</span>}
-              </li>
-            ))}
-            {result.report.hits.length === 0 && (
-              <li className="text-muted-foreground">{t('Nothing matched')}</li>
-            )}
-          </ul>
-        </>
-      )}
-    </Section>
+    <SettingsSection
+      title={t('Try it')}
+      description={t('Runs locally. Nothing is remembered or sent anywhere.')}
+    >
+      <div className="min-w-0 border-border border-b py-3">
+        <Textarea
+          rows={3}
+          value={input}
+          placeholder={t('Paste some text, e.g. an .env file')}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        {input && (
+          <div data-settings-preview className="mt-3 space-y-1">
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs">
+              {result.text}
+            </pre>
+            <ul className="space-y-0.5 text-xs">
+              {result.report.hits.map((h) => (
+                <li key={`${h.token}-${h.action}`} className="flex gap-2">
+                  <span className={cn('font-medium', ACTION_TONE[h.action])}>
+                    {t(ACTION_LABELS[h.action])}
+                  </span>
+                  <span>{h.kind}</span>
+                  <span className="text-muted-foreground">{h.preview}</span>
+                  {h.count > 1 && <span className="text-muted-foreground">×{h.count}</span>}
+                </li>
+              ))}
+              {result.report.hits.length === 0 && (
+                <li className="text-muted-foreground">{t('Nothing matched')}</li>
+              )}
+            </ul>
+          </div>
+        )}
+      </div>
+    </SettingsSection>
   );
 }
 
@@ -209,31 +197,31 @@ function Records() {
   };
 
   return (
-    <Section title={t('Records')}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex gap-1">
+    <SettingsSection
+      title={t('Records')}
+      actions={
+        <>
           {RANGES.map((r) => (
-            <Button
+            <SettingsButton
               key={r}
-              size="sm"
               variant={r === days ? 'secondary' : 'ghost'}
               onClick={() => setDays(r)}
             >
               {t(RANGE_LABEL[r])}
-            </Button>
+            </SettingsButton>
           ))}
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => void load(days)}
-          disabled={loading}
-          aria-label={t('Refresh')}
-        >
-          <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-4 text-sm">
+          <SettingsButton
+            variant="ghost"
+            onClick={() => void load(days)}
+            disabled={loading}
+            aria-label={t('Refresh')}
+          >
+            <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+          </SettingsButton>
+        </>
+      }
+    >
+      <div className="flex flex-wrap gap-4 border-border border-b py-3 text-[13px]">
         {(Object.keys(ACTION_LABELS) as MaskAction[]).map((a) => (
           <span key={a}>
             <span className={ACTION_TONE[a]}>{t(ACTION_LABELS[a])}</span>{' '}
@@ -242,22 +230,22 @@ function Records() {
         ))}
       </div>
       {totals.byKind.length > 0 && (
-        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-2 border-border border-b py-3 text-xs text-muted-foreground">
           {totals.byKind.map(([kind, n]) => (
-            <span key={kind} className="rounded bg-muted px-1.5 py-0.5">
+            <span key={kind} className="rounded-md bg-muted px-1.5 py-0.5">
               {kind} {n}
             </span>
           ))}
         </div>
       )}
-      <div className="max-h-80 overflow-auto">
-        <table className="w-full text-xs">
-          <thead className="text-left text-muted-foreground">
-            <tr>
-              <th className="py-1 pr-2 font-normal">{t('Requested at')}</th>
-              <th className="py-1 pr-2 font-normal">{t('Source')}</th>
-              <th className="py-1 pr-2 font-normal">{t('Model')}</th>
-              <th className="py-1 font-normal">{t('Hits')}</th>
+      <div className="max-h-80 min-w-0 overflow-auto">
+        <table className="w-max min-w-full text-left text-xs">
+          <thead className="text-muted-foreground">
+            <tr className="border-border border-b">
+              <th className="py-2 pr-2 font-normal">{t('Requested at')}</th>
+              <th className="py-2 pr-2 font-normal">{t('Source')}</th>
+              <th className="py-2 pr-2 font-normal">{t('Model')}</th>
+              <th className="py-2 font-normal">{t('Hits')}</th>
             </tr>
           </thead>
           <tbody>
@@ -265,13 +253,13 @@ function Records() {
               const strongest = strongestAction(r.report);
               const key = `${r.at}:${r.sessionId ?? r.source}:${r.model}:${r.report.hits.map((h) => h.token).join(',')}`;
               return (
-                <tr key={key} className="border-t align-top">
-                  <td className="py-1 pr-2 whitespace-nowrap tabular-nums">
+                <tr key={key} className="border-border border-b align-top">
+                  <td className="py-2 pr-2 whitespace-nowrap tabular-nums">
                     {new Date(r.at).toLocaleString()}
                   </td>
-                  <td className="py-1 pr-2">{sourceLabel(r)}</td>
-                  <td className="py-1 pr-2 break-all">{r.model}</td>
-                  <td className={cn('py-1', strongest && ACTION_TONE[strongest])}>
+                  <td className="py-2 pr-2">{sourceLabel(r)}</td>
+                  <td className="py-2 pr-2 break-all">{r.model}</td>
+                  <td className={cn('py-2', strongest && ACTION_TONE[strongest])}>
                     {distinctHits(r)}
                     {r.report.blocked && ` · ${t('Request blocked')}`}
                   </td>
@@ -281,10 +269,12 @@ function Records() {
           </tbody>
         </table>
         {records?.length === 0 && (
-          <p className="py-4 text-center text-xs text-muted-foreground">{t('No records yet')}</p>
+          <p className="border-border border-b py-4 text-center text-xs text-muted-foreground">
+            {t('No records yet')}
+          </p>
         )}
       </div>
-    </Section>
+    </SettingsSection>
   );
 }
 
@@ -296,75 +286,94 @@ export function PrivacySettings() {
   const patch = (next: Partial<PrivacyMaskSettings>) => setSettings({ ...settings, ...next });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium">{t('Privacy')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            'Replace API keys and personal data with placeholders before requests leave this device, and restore them in replies. Original values stay in memory on this device only.'
-          )}
-        </p>
-      </div>
-      <SwitchRow
-        rowId="privacy.enabled"
-        title={t('Privacy masking')}
-        description={t('Applies to chats, compaction, bot members and helper requests.')}
-        checked={settings.enabled}
-        onChange={(enabled) => patch({ enabled })}
-      />
+    <SettingsPage
+      title={t('Privacy')}
+      description={t(
+        'Replace API keys and personal data with placeholders before requests leave this device, and restore them in replies. Original values stay in memory on this device only.'
+      )}
+    >
+      <SettingsSection>
+        <SettingsRow
+          rowId="privacy.enabled"
+          label={t('Privacy masking')}
+          description={t('Applies to chats, compaction, bot members and helper requests.')}
+        >
+          <SettingsSwitch
+            checked={settings.enabled}
+            onCheckedChange={(enabled) => patch({ enabled: enabled === true })}
+          />
+        </SettingsRow>
+      </SettingsSection>
       {settings.enabled && (
         <>
-          <Section title={t('Secrets')}>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                {t('API keys, tokens, private keys, passwords in URLs and config files.')}
-              </p>
+          <SettingsSection
+            title={t('Secrets')}
+            description={t('API keys, tokens, private keys, passwords in URLs and config files.')}
+            actions={
               <ActionSelect
+                label={t('Secrets')}
                 value={settings.secrets.action}
                 onChange={(action) => patch({ secrets: { ...settings.secrets, action } })}
               />
-            </div>
-            <SwitchRow
+            }
+          >
+            <SettingsRow
               rowId="privacy.secrets"
-              title={t('Detect secrets')}
+              label={t('Detect secrets')}
               description={t('Recommended. Covers common vendor key formats.')}
-              checked={settings.secrets.enabled}
-              onChange={(enabled) => patch({ secrets: { ...settings.secrets, enabled } })}
-            />
-            <SwitchRow
+            >
+              <SettingsSwitch
+                checked={settings.secrets.enabled}
+                onCheckedChange={(enabled) =>
+                  patch({ secrets: { ...settings.secrets, enabled: enabled === true } })
+                }
+              />
+            </SettingsRow>
+            <SettingsRow
               rowId="privacy.shape"
-              title={t('Send look-alike keys')}
+              label={t('Send look-alike keys')}
               description={t(
                 'Replace keys with fake keys of the same format instead of placeholders, so the model treats them as real keys.'
               )}
-              checked={settings.secrets.shape}
-              onChange={(shape) => patch({ secrets: { ...settings.secrets, shape } })}
-            />
-          </Section>
+            >
+              <SettingsSwitch
+                checked={settings.secrets.shape}
+                onCheckedChange={(shape) =>
+                  patch({ secrets: { ...settings.secrets, shape: shape === true } })
+                }
+              />
+            </SettingsRow>
+          </SettingsSection>
 
-          <Section title={t('Personal data')}>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                {t('Emails, phone numbers, ID and bank card numbers, IP addresses.')}
-              </p>
+          <SettingsSection
+            title={t('Personal data')}
+            description={t('Emails, phone numbers, ID and bank card numbers, IP addresses.')}
+            actions={
               <ActionSelect
+                label={t('Personal data')}
                 value={settings.personal.action}
                 onChange={(action) => patch({ personal: { ...settings.personal, action } })}
               />
-            </div>
-            <SwitchRow
+            }
+          >
+            <SettingsRow
               rowId="privacy.personal"
-              title={t('Detect personal data')}
+              label={t('Detect personal data')}
               description={t(
                 'Matches are validated (checksums, real domains) to limit false hits.'
               )}
-              checked={settings.personal.enabled}
-              onChange={(enabled) => patch({ personal: { ...settings.personal, enabled } })}
-            />
+            >
+              <SettingsSwitch
+                checked={settings.personal.enabled}
+                onCheckedChange={(enabled) =>
+                  patch({ personal: { ...settings.personal, enabled: enabled === true } })
+                }
+              />
+            </SettingsRow>
             {settings.personal.enabled && (
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-x-4 gap-y-2 border-border border-b py-3">
                 {PERSONAL_KINDS.map((kind) => (
-                  <label key={kind} className="flex items-center gap-1.5 text-sm">
+                  <label key={kind} className="flex items-center gap-1.5 text-[13px]">
                     <Checkbox
                       checked={settings.personal.kinds.includes(kind)}
                       onCheckedChange={(checked) =>
@@ -383,18 +392,19 @@ export function PrivacySettings() {
                 ))}
               </div>
             )}
-          </Section>
+          </SettingsSection>
 
-          <Section title={t('Custom rules')}>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                {t('Words and patterns specific to your work.')}
-              </p>
+          <SettingsSection
+            title={t('Custom rules')}
+            description={t('Words and patterns specific to your work.')}
+            actions={
               <ActionSelect
+                label={t('Custom rules')}
                 value={settings.custom.action}
                 onChange={(action) => patch({ custom: { ...settings.custom, action } })}
               />
-            </div>
+            }
+          >
             <ListField
               rowId="privacy.words"
               label={t('Words')}
@@ -409,9 +419,9 @@ export function PrivacySettings() {
               value={settings.custom.rules}
               onCommit={(rules) => patch({ custom: { ...settings.custom, rules } })}
             />
-          </Section>
+          </SettingsSection>
 
-          <Section title={t('Allow list')}>
+          <SettingsSection title={t('Allow list')}>
             <ListField
               rowId="privacy.allow"
               label={t('Never mask')}
@@ -419,12 +429,12 @@ export function PrivacySettings() {
               value={settings.allow}
               onCommit={(allow) => patch({ allow })}
             />
-          </Section>
+          </SettingsSection>
 
           <TryIt settings={settings} />
         </>
       )}
       <Records />
-    </div>
+    </SettingsPage>
   );
 }

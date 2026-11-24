@@ -6,6 +6,7 @@ export {
   SettingsSelect,
   SettingsStepper,
   SettingsSwitch,
+  TOUCH_TARGET,
 } from './controls';
 export { SettingsDangerAction } from './danger';
 export {

@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
-import { SwitchRow } from './GeneralSettings';
+import { SettingsRow, SettingsSwitch } from './kit';
 
 /** 实验功能开关集中在这里；功能自己的设置放各自的分页 */
 export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void }) {
@@ -24,49 +24,52 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
         </p>
       </div>
       <div className="space-y-2">
-        <SwitchRow
+        <SettingsRow
           rowId="experimental.botMode"
-          title={t('Bot mode')}
+          label={t('Bot mode')}
           description={t(
             'Adds a Code | Bot switch to the sidebar. Create members with their own persona, model and tools, and chat with them alone or in groups.'
           )}
-          checked={botModeEnabled}
-          onChange={setBotModeEnabled}
-        />
+        >
+          <SettingsSwitch checked={botModeEnabled} onCheckedChange={setBotModeEnabled} />
+        </SettingsRow>
         {botModeEnabled && (
           <Button variant="outline" size="sm" onClick={onOpenBots}>
             {t('Bot mode settings')}
           </Button>
         )}
-        <SwitchRow
+        <SettingsRow
           rowId="experimental.scratchSessions"
-          title={t('Temporary chats')}
+          label={t('Temporary chats')}
           description={t(
             'Chats that are not tied to a project. Tools follow your global settings.'
           )}
-          checked={scratchSessionsEnabled}
-          onChange={setScratchSessionsEnabled}
-        />
+        >
+          <SettingsSwitch
+            checked={scratchSessionsEnabled}
+            onCheckedChange={setScratchSessionsEnabled}
+          />
+        </SettingsRow>
         {isMac && (
-          <SwitchRow
+          <SettingsRow
             rowId="experimental.dropShelf"
-            title={t('Drop shelf')}
+            label={t('Drop shelf')}
             description={t(
               'When you drag files in Finder, a small panel appears at the top right of the screen. Drop them on it to reference them in the current conversation, or drop folders to open them as projects, even when EnsoCode is minimized or in the tray.'
             )}
-            checked={dropShelfEnabled}
-            onChange={setDropShelfEnabled}
-          />
+          >
+            <SettingsSwitch checked={dropShelfEnabled} onCheckedChange={setDropShelfEnabled} />
+          </SettingsRow>
         )}
-        <SwitchRow
+        <SettingsRow
           rowId="experimental.secretary"
-          title={t('Secretary')}
+          label={t('Secretary')}
           description={t(
             'A global agent that watches your projects and sessions, creates sessions to do the work, and reports results back to you.'
           )}
-          checked={secretaryEnabled}
-          onChange={setSecretaryEnabled}
-        />
+        >
+          <SettingsSwitch checked={secretaryEnabled} onCheckedChange={setSecretaryEnabled} />
+        </SettingsRow>
       </div>
     </div>
   );

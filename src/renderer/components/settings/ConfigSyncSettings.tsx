@@ -3,7 +3,6 @@ import {
   CircleAlert,
   CircleCheck,
   Download,
-  FileArchive,
   Info,
   Loader2,
   LockKeyhole,
@@ -38,6 +37,7 @@ import { Label } from '@/components/ui/label';
 import { Radio, RadioGroup } from '@/components/ui/radio-group';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsRow, SettingsSection } from './kit';
 
 type ImportPhase = 'password' | 'preview' | 'success';
 
@@ -91,67 +91,53 @@ export function ConfigSyncSettings() {
   };
 
   return (
-    <section className="space-y-3" data-settings-row="general.configSync">
-      <div>
-        <h4 className="text-sm font-medium">{t('Configuration transfer')}</h4>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Move models, presets, agent types, skills, MCP servers and instruction files between devices.'
-          )}
-        </p>
-      </div>
-
-      <div className="rounded-md border px-3 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <FileArchive className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{t('Portable Enso configuration')}</p>
-              <p className="text-xs text-muted-foreground">
-                {t('Export a package or preview one before importing it.')}
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" size="sm" disabled={openingImport} onClick={startImport}>
-              {openingImport ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              {t('Import configuration')}
-            </Button>
-            <Button size="sm" disabled={openingImport} onClick={startExport}>
-              <Upload className="h-3.5 w-3.5" />
-              {t('Export configuration')}
-            </Button>
-          </div>
-        </div>
-        <div className="mt-3 flex items-start gap-2 border-t pt-3 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <p>
+    <SettingsSection
+      rowId="general.configSync"
+      title={t('Configuration transfer')}
+      description={t(
+        'Move models, presets, agent types, skills, MCP servers and instruction files between devices.'
+      )}
+    >
+      <SettingsRow
+        label={t('Portable Enso configuration')}
+        description={
+          <>
+            {t('Export a package or preview one before importing it.')}{' '}
             {t(
               'OAuth login sessions are never transferred. Skill, instruction, and system prompt contents require an encrypted export.'
             )}
-          </p>
-        </div>
-        {openImportMessage && (
-          <p
-            className={
-              openImportMessage.kind === 'error'
-                ? 'mt-2 text-xs text-destructive'
-                : 'mt-2 text-xs text-muted-foreground'
-            }
-            role={openImportMessage.kind === 'error' ? 'alert' : 'status'}
-          >
-            {openImportMessage.text}
-          </p>
-        )}
-      </div>
+          </>
+        }
+      >
+        <SettingsButton disabled={openingImport} onClick={() => void startImport()}>
+          {openingImport ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+          {t('Import configuration')}
+        </SettingsButton>
+        <SettingsButton variant="default" disabled={openingImport} onClick={startExport}>
+          <Upload className="h-3.5 w-3.5" />
+          {t('Export configuration')}
+        </SettingsButton>
+      </SettingsRow>
+      {openImportMessage && (
+        <p
+          className={
+            openImportMessage.kind === 'error'
+              ? 'border-border border-b py-2 text-[12px] text-destructive'
+              : 'border-border border-b py-2 text-[12px] text-muted-foreground'
+          }
+          role={openImportMessage.kind === 'error' ? 'alert' : 'status'}
+        >
+          {openImportMessage.text}
+        </p>
+      )}
 
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       {importFile && <ImportDialog file={importFile} onClose={() => setImportFile(null)} />}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -274,7 +260,7 @@ function ExportDialog({
                 </AlertDescription>
               </Alert>
 
-              <label className="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5">
+              <label className="flex cursor-pointer items-start gap-3 border-border border-b py-3">
                 <Checkbox
                   checked={includeSecrets}
                   onCheckedChange={(checked) => {
@@ -311,7 +297,7 @@ function ExportDialog({
               )}
 
               {includeSecrets && (
-                <div className="space-y-3 rounded-md border px-3 py-3">
+                <div className="space-y-3 border-border border-t py-3">
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <LockKeyhole className="h-4 w-4 text-muted-foreground" />
                     {t('Encryption password')}
@@ -571,7 +557,7 @@ function ImportDialog({
                 className="grid gap-2 sm:grid-cols-2"
                 aria-label={t('Import mode')}
               >
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5">
+                <label className="flex cursor-pointer items-start gap-2.5 border-border border-b py-3">
                   <Radio value="merge" disabled={busy !== null} />
                   <span>
                     <span className="block text-sm font-medium">{t('Merge')}</span>
@@ -580,7 +566,7 @@ function ImportDialog({
                     </span>
                   </span>
                 </label>
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5">
+                <label className="flex cursor-pointer items-start gap-2.5 border-border border-b py-3">
                   <Radio value="replace" disabled={busy !== null} />
                   <span>
                     <span className="block text-sm font-medium">{t('Replace')}</span>
@@ -593,17 +579,17 @@ function ImportDialog({
             </div>
 
             {busy === 'preview' && (
-              <div className="flex items-center justify-center gap-2 rounded-md border border-dashed py-10">
+              <div className="flex items-center justify-center gap-2 py-6">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">{t('Preparing preview…')}</span>
               </div>
             )}
 
             {!busy && summary && (
-              <div className="overflow-hidden rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-xs text-muted-foreground">
-                    <tr>
+              <div className="min-w-0 overflow-x-auto">
+                <table className="w-max min-w-full text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr className="border-border border-b">
                       <th scope="col" className="px-3 py-2 text-left font-medium">
                         {t('Category')}
                       </th>
@@ -625,7 +611,7 @@ function ImportDialog({
                     {CATEGORIES.map(({ category, label }) => {
                       const row = summary.find((item) => item.category === category);
                       return (
-                        <tr key={category} className="border-t first:border-t-0">
+                        <tr key={category} className="border-border border-t">
                           <th scope="row" className="px-3 py-2 text-left font-medium">
                             {t(label)}
                           </th>
