@@ -19,7 +19,7 @@ interface AskBarProps {
 export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBarProps) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
-  const questionRef = useRef<HTMLSpanElement>(null);
+  const questionRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [text, setText] = useState('');
   // 正文没滚到底时底部渐隐，提示还有内容
@@ -157,40 +157,42 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
           }
         }}
       >
-        <div className="flex min-h-5 items-start gap-2">
-          <MessageCircleQuestion className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
-          <span
-            ref={questionRef}
-            data-enso="ask-question"
-            className={cn(
-              'min-w-0 flex-1 self-stretch overflow-y-auto overscroll-contain text-xs leading-relaxed whitespace-pre-wrap',
-              moreBelow &&
-                '[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)]'
-            )}
-          >
-            {active.question}
-          </span>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <MessageCircleQuestion className="h-3.5 w-3.5 shrink-0 text-blue-500" />
           {active.relay && (
             <span
               data-enso="ask-relay"
-              className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+              className="min-w-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground [overflow-wrap:anywhere]"
             >
               {t('Handed to {{name}}', { name: active.relay.name })}
             </span>
           )}
-          <button
-            type="button"
-            onClick={fold}
-            className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            {t('Later')}
-          </button>
-          <RequestCountdown remainingMs={remainingMs} expiredLabel="Timed out · no answer" />
-          {asks.length > 1 && (
-            <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-              1/{asks.length}
-            </span>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={fold}
+              className="rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {t('Later')}
+            </button>
+            <RequestCountdown remainingMs={remainingMs} expiredLabel="Timed out · no answer" />
+            {asks.length > 1 && (
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                1/{asks.length}
+              </span>
+            )}
+          </div>
+        </div>
+        <div
+          ref={questionRef}
+          data-enso="ask-question"
+          className={cn(
+            'mt-1.5 min-h-5 min-w-0 overflow-y-auto overscroll-contain text-xs leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]',
+            moreBelow &&
+              '[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)]'
           )}
+        >
+          {active.question}
         </div>
         {options && options.length > 0 && (
           <div
@@ -215,7 +217,7 @@ export function AskBar({ asks, onAnswer, clockOffset, autoFocus = true }: AskBar
                       {shortcut}
                     </span>
                   )}
-                  <span className="min-w-0 flex-1">{option}</span>
+                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{option}</span>
                   {option === recommended && (
                     <span className="shrink-0 rounded bg-success/15 px-1.5 text-[10px] text-success">
                       {t('Recommended')}
