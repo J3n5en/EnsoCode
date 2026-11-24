@@ -480,7 +480,8 @@ export const zhTranslations: Record<string, string> = {
   '{{count}} untracked files will be permanently deleted and cannot be recovered.':
     '{{count}} 个未跟踪文件将被永久删除，删除后无法恢复。',
   'Tracked files are not changed.': '已跟踪文件不受影响。',
-  '{{count}} conflicted files are skipped.': '跳过 {{count}} 个冲突文件。',
+  'Resolve conflicts first.': '请先解决冲突。',
+  '{{count}} conflicted': '{{count}} 个冲突',
   'Discard and delete {{count}} untracked files': '放弃修改并删除 {{count}} 个未跟踪文件',
   'Delete {{count}} untracked files': '删除 {{count}} 个未跟踪文件',
   'Commit message': '提交信息',

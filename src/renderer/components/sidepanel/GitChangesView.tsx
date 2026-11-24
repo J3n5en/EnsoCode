@@ -43,7 +43,6 @@ type BulkDiscard = {
   kind: 'all' | 'untracked';
   tracked: string[];
   untracked: string[];
-  skipped: number;
 };
 
 export function GitChangesView({
@@ -256,10 +255,10 @@ export function GitChangesView({
     files: group.files.filter((file) => file.path.toLowerCase().includes(filter)),
   }));
   const visibleCount = visibleGroups.reduce((count, group) => count + group.files.length, 0);
-  // 冲突文件 git restore 会失败，与单文件入口一致不纳入批量放弃
-  const discardable = groups[1].files.filter((file) => file.status !== 'conflicted');
+  // 有冲突时 Main 会整批拒绝写操作，批量入口直接禁用
+  const conflicted = groups[1].files.filter((file) => file.status === 'conflicted').length;
+  const trackedPaths = groups[1].files.map((file) => file.path);
   const untrackedPaths = groups[2].files.map((file) => file.path);
-  const conflicted = groups[1].files.length - discardable.length;
   const bulkDescription = bulkDiscard
     ? [
         bulkDiscard.tracked.length > 0 &&
@@ -272,8 +271,6 @@ export function GitChangesView({
             count: bulkDiscard.untracked.length,
           }),
         bulkDiscard.kind === 'untracked' && t('Tracked files are not changed.'),
-        bulkDiscard.skipped > 0 &&
-          t('{{count}} conflicted files are skipped.', { count: bulkDiscard.skipped }),
       ]
         .filter(Boolean)
         .join(' ')
@@ -427,45 +424,47 @@ export function GitChangesView({
                   <MenuItem
                     variant="destructive"
                     data-discard-option="all"
-                    disabled={discardable.length + untrackedPaths.length === 0}
+                    disabled={conflicted > 0 || trackedPaths.length + untrackedPaths.length === 0}
                     onClick={() =>
                       setBulkDiscard({
                         kind: 'all',
-                        tracked: discardable.map((file) => file.path),
+                        tracked: trackedPaths,
                         untracked: untrackedPaths,
-                        skipped: conflicted,
                       })
                     }
                   >
                     <span className="flex flex-col">
                       {t('Discard all')}
                       <span className="text-[11px] text-muted-foreground">
-                        {t(
-                          'Discard {{tracked}} tracked changes, delete {{untracked}} untracked files',
-                          { tracked: discardable.length, untracked: untrackedPaths.length }
-                        )}
+                        {conflicted > 0
+                          ? t('Resolve conflicts first.')
+                          : t(
+                              'Discard {{tracked}} tracked changes, delete {{untracked}} untracked files',
+                              { tracked: trackedPaths.length, untracked: untrackedPaths.length }
+                            )}
                       </span>
                     </span>
                   </MenuItem>
                   <MenuItem
                     variant="destructive"
                     data-discard-option="untracked"
-                    disabled={untrackedPaths.length === 0}
+                    disabled={conflicted > 0 || untrackedPaths.length === 0}
                     onClick={() =>
                       setBulkDiscard({
                         kind: 'untracked',
                         tracked: [],
                         untracked: untrackedPaths,
-                        skipped: 0,
                       })
                     }
                   >
                     <span className="flex flex-col">
                       {t('Discard untracked')}
                       <span className="text-[11px] text-muted-foreground">
-                        {t('Permanently delete {{count}} untracked files', {
-                          count: untrackedPaths.length,
-                        })}
+                        {conflicted > 0
+                          ? t('Resolve conflicts first.')
+                          : t('Permanently delete {{count}} untracked files', {
+                              count: untrackedPaths.length,
+                            })}
                       </span>
                     </span>
                   </MenuItem>
@@ -513,6 +512,9 @@ export function GitChangesView({
                   if (group.files.length === 0) return null;
                   // 搜索命中时强制展开，免得结果被折叠挡住
                   const expanded = Boolean(filter) || !collapsed[group.id];
+                  const hiddenConflicts = expanded
+                    ? 0
+                    : group.files.filter((file) => file.status === 'conflicted').length;
                   return (
                     <section key={group.id} data-git-group={group.id} className="mb-2 last:mb-0">
                       <div className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-muted-foreground">
@@ -527,6 +529,11 @@ export function GitChangesView({
                         >
                           <span className="min-w-0 truncate">{group.title}</span>
                           <span className="shrink-0 font-normal">· {group.files.length}</span>
+                          {hiddenConflicts > 0 && (
+                            <span className="shrink-0 font-normal text-destructive">
+                              {t('{{count}} conflicted', { count: hiddenConflicts })}
+                            </span>
+                          )}
                           {expanded ? (
                             <ChevronDown className="size-3 shrink-0" />
                           ) : (
@@ -709,13 +716,23 @@ export function GitChangesView({
         }
         onConfirm={() => {
           if (bulkDiscard) {
-            void perform('Discard', () =>
-              window.electronAPI.git.discard({
+            const { tracked, untracked } = bulkDiscard;
+            // 分两次调用：已跟踪那批不放行删除，确认期间若有文件变成未跟踪，Main 会拒绝而不是删掉
+            void perform('Discard', async () => {
+              if (tracked.length) {
+                const result = await window.electronAPI.git.discard({
+                  ...request,
+                  paths: tracked,
+                  confirmUntracked: false,
+                });
+                if (!result.ok || !untracked.length) return result;
+              }
+              return window.electronAPI.git.discard({
                 ...request,
-                paths: [...bulkDiscard.tracked, ...bulkDiscard.untracked],
-                confirmUntracked: bulkDiscard.untracked.length > 0,
-              })
-            );
+                paths: untracked,
+                confirmUntracked: true,
+              });
+            });
           }
         }}
       />

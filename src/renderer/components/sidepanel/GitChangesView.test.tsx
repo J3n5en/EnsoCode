@@ -244,6 +244,16 @@ const mixed = () =>
     ],
     [{ path: 'src/s.ts', status: 'modified' }]
   );
+const clean = () =>
+  statusWith(
+    [
+      { path: 'src/m.ts', status: 'modified' },
+      { path: 'src/d.ts', status: 'deleted' },
+      { path: 'new/a.ts', status: 'untracked' },
+      { path: 'new/b.ts', status: 'untracked' },
+    ],
+    [{ path: 'src/s.ts', status: 'modified' }]
+  );
 const q = (selector: string) => container.querySelector(selector) as HTMLElement | null;
 const groupToggle = (id: string) => q(`[data-git-group="${id}"] [aria-expanded]`);
 const option = (id: string) => q(`[data-discard-option="${id}"]`) as HTMLButtonElement | null;
@@ -295,28 +305,72 @@ describe('GitChangesView 分组折叠', () => {
     expect(groupToggle('staged')?.getAttribute('aria-expanded')).toBe('true');
     expect(q('[data-git-file="src/s.ts"]')).not.toBeNull();
   });
+
+  it('收起的组里有冲突文件时，标题上提示冲突数', async () => {
+    harness.git.status.mockResolvedValue(
+      statusWith(
+        [{ path: 'src/c.ts', status: 'conflicted' }],
+        [
+          { path: 'src/s.ts', status: 'modified' },
+          { path: 'src/c.ts', status: 'conflicted' },
+        ]
+      )
+    );
+    await render();
+    expect(groupToggle('staged')?.textContent).toContain('1 conflicted');
+    expect(groupToggle('unstaged')?.textContent).not.toContain('conflicted');
+    await click(groupToggle('unstaged'));
+    expect(groupToggle('unstaged')?.textContent).toContain('1 conflicted');
+  });
 });
 
 describe('GitChangesView 放弃入口', () => {
-  it('放弃所有：确认后一次调用，传全部已跟踪未暂存（跳过冲突）+ 未跟踪，confirmUntracked 为 true', async () => {
-    harness.git.status.mockResolvedValue(mixed());
+  it('放弃所有：已跟踪与未跟踪分开调用，只有未跟踪那次 confirmUntracked 为 true', async () => {
+    harness.git.status.mockResolvedValue(clean());
     await render();
     await click(option('all'));
     expect(harness.git.discard).not.toHaveBeenCalled();
     const statusCalls = harness.git.status.mock.calls.length;
     await click(q('[data-confirm-ok]'));
-    expect(harness.git.discard).toHaveBeenCalledTimes(1);
-    expect(harness.git.discard).toHaveBeenCalledWith({
-      conversationId: 'a',
-      projectId: 'project',
-      paths: ['src/m.ts', 'src/d.ts', 'new/a.ts', 'new/b.ts'],
-      confirmUntracked: true,
-    });
+    expect(harness.git.discard.mock.calls).toEqual([
+      [
+        {
+          conversationId: 'a',
+          projectId: 'project',
+          paths: ['src/m.ts', 'src/d.ts'],
+          confirmUntracked: false,
+        },
+      ],
+      [
+        {
+          conversationId: 'a',
+          projectId: 'project',
+          paths: ['new/a.ts', 'new/b.ts'],
+          confirmUntracked: true,
+        },
+      ],
+    ]);
     expect(harness.git.status.mock.calls.length).toBeGreaterThan(statusCalls);
   });
 
-  it('放弃所有的确认文案分别写明已跟踪修改数量与未跟踪文件数量（不可恢复）', async () => {
+  it('放弃所有：已跟踪部分被拒绝时不再删除未跟踪文件', async () => {
+    harness.git.status.mockResolvedValue(clean());
+    harness.git.discard.mockResolvedValueOnce({ ok: false, error: 'stale' });
+    await render();
+    await click(option('all'));
+    await click(q('[data-confirm-ok]'));
+    expect(harness.git.discard).toHaveBeenCalledTimes(1);
+  });
+
+  it('有冲突文件时放弃所有与放弃跟踪都禁用（Main 会整批拒绝）', async () => {
     harness.git.status.mockResolvedValue(mixed());
+    await render();
+    expect(option('all')?.disabled).toBe(true);
+    expect(option('untracked')?.disabled).toBe(true);
+  });
+
+  it('放弃所有的确认文案分别写明已跟踪修改数量与未跟踪文件数量（不可恢复）', async () => {
+    harness.git.status.mockResolvedValue(clean());
     await render();
     await click(option('all'));
     const description = q('[data-confirm-description]')?.textContent ?? '';
@@ -328,7 +382,7 @@ describe('GitChangesView 放弃入口', () => {
   });
 
   it('放弃跟踪：只传未跟踪文件', async () => {
-    harness.git.status.mockResolvedValue(mixed());
+    harness.git.status.mockResolvedValue(clean());
     await render();
     await click(option('untracked'));
     expect(q('[data-confirm-description]')?.textContent).toContain(
