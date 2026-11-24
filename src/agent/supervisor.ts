@@ -1306,7 +1306,9 @@ export class SessionSupervisor {
       }
       if (busy && item.ifIdle) continue;
       if (!this.reminders.take(item.id)) continue;
-      texts.push(reminderNotice(item));
+      texts.push(
+        reminderNotice(item, this.reminders.missedWhileDown(item.id) ? Date.now() : undefined)
+      );
       chain = Math.max(chain, item.chain);
     }
     if (texts.length === 0) return;

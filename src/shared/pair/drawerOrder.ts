@@ -50,17 +50,42 @@ export function orderProjectSessions<T extends Orderable>(sessions: readonly T[]
   ]);
 }
 
-/** 桌面 Active 栏目：运行 / 待提问 / 失败 / 未读 / 子会话在跑 */
-export function isDrawerActive(
-  session: { status: string; unread?: boolean; pendingAskCount?: number },
-  hasRunningChild: boolean
-): boolean {
-  const tone = conversationDotTone({
-    status: session.status,
+interface DrawerSession {
+  status: string;
+  unread?: boolean;
+  pendingAskCount?: number;
+  queueFailed?: string;
+  parked?: 'reminder' | 'upstream';
+  goal?: { status: string };
+}
+
+function drawerTone(session: DrawerSession, hasRunningChild: boolean) {
+  return conversationDotTone({
+    status: session.queueFailed ? 'failed' : session.status,
     unread: session.unread,
     pendingAskCount: session.pendingAskCount,
     hasRunningChild,
-    queued: session.status === 'queued',
+    queued: (session.status === 'queued' && !session.queueFailed) || session.parked === 'upstream',
+    hasPendingReminder: session.parked === 'reminder',
   });
-  return tone !== 'idle';
+}
+
+/** 桌面 Active 栏目：运行 / 待提问 / 失败 / 未读 / 子会话在跑 / 续跑中 / 排队 / 等上游恢复 / 等提醒 */
+export function isDrawerActive(session: DrawerSession, hasRunningChild: boolean): boolean {
+  return drawerTone(session, hasRunningChild) !== 'idle' || session.goal?.status === 'active';
+}
+
+/** 桌面 activeConversationIds 同语义：排队、等上游恢复、等提醒排在其余活跃会话之后，两档各按活跃倒序。 */
+export function orderDrawerActive<T extends Orderable & DrawerSession>(
+  sessions: readonly T[],
+  hasRunningChild: (id: string) => boolean
+): T[] {
+  const active = sortByActivity(
+    sessions.filter((session) => isDrawerActive(session, hasRunningChild(session.id)))
+  );
+  const parked = (session: T) => {
+    const tone = drawerTone(session, hasRunningChild(session.id));
+    return tone === 'queued' || tone === 'reminder';
+  };
+  return [...active.filter((s) => !parked(s)), ...active.filter(parked)];
 }

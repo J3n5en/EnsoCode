@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isDrawerActive, orderPinned, orderProjectSessions, sortByActivity } from './drawerOrder';
+import {
+  isDrawerActive,
+  orderDrawerActive,
+  orderPinned,
+  orderProjectSessions,
+  sortByActivity,
+} from './drawerOrder';
 
 const s = (id: string, updatedAt?: number, pinned?: boolean) => ({
   id,
@@ -72,5 +78,29 @@ describe('isDrawerActive', () => {
 
   it('空闲且已读不算活跃', () => {
     expect(isDrawerActive({ status: 'idle' }, false)).toBe(false);
+  });
+
+  it('等提醒 / 等上游恢复 / 续跑中算活跃，goal 结束后不算', () => {
+    expect(isDrawerActive({ status: 'idle', parked: 'reminder' }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'idle', parked: 'upstream' }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'idle', goal: { status: 'active' } }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'idle', goal: { status: 'completed' } }, false)).toBe(false);
+  });
+});
+
+describe('orderDrawerActive', () => {
+  it('只留活跃的；等提醒、排队、等上游恢复排在后面，各档按活跃倒序', () => {
+    const out = orderDrawerActive(
+      [
+        { ...s('remind', 9), status: 'idle', parked: 'reminder' as const },
+        { ...s('queued', 8), status: 'queued' },
+        { ...s('run', 1), status: 'running' },
+        { ...s('cont', 2), status: 'idle', goal: { status: 'active' as const } },
+        { ...s('idle', 7), status: 'idle' },
+        { ...s('child', 3), status: 'idle' },
+      ],
+      (id) => id === 'child'
+    );
+    expect(out.map((x) => x.id)).toEqual(['child', 'cont', 'run', 'remind', 'queued']);
   });
 });

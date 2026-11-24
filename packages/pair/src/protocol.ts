@@ -246,6 +246,8 @@ export interface CatalogEntry {
   queuePosition?: number;
   /** 自动启动失败的原因。status 仍是 queued，避免旧客户端把未知状态丢掉 */
   queueFailed?: string;
+  /** 空闲挂起：等提醒（未到点 remind_me）或等上游恢复；抽屉据此留在「活跃中」，旧客户端忽略 */
+  parked?: 'reminder' | 'upstream';
   /** 完成后未查看：桌面绿点、手机灰点 */
   unread?: boolean;
   /** 挂起的 ask_user 数：抽屉「活跃中」与桌面 waiting 色点同口径 */

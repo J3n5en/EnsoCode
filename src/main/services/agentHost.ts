@@ -53,6 +53,7 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
+import { reminderReviveDelay } from '@shared/reminders';
 import { appUserImageDirs } from '@shared/secretary/imageView';
 import {
   SECRETARY_ALWAYS_ENABLED_TOOLS,
@@ -197,6 +198,7 @@ import {
   writeRestartManifest,
 } from './restartManifest';
 import { bundledRtkPath } from './rtkBinary';
+import { readAllSessionReminders } from './sessionReminders';
 import { pickSubagentModelRefs, type SubagentModelRef } from './subagentModels';
 import { readStoredSystemPrompt } from './systemPromptStore';
 import { titleModelCandidates } from './titleSummary';
@@ -332,6 +334,8 @@ let workerExited = false;
  * 随应用退出又停掉，交接清单就此用掉，新版本里任务凭空消失（2026-11-23 更新重启现场）
  */
 let quitStopped = false;
+/** worker 意外退出后为挂着的提醒拉起它：提醒定时器在 worker 里，没有 worker 就没人到点叫醒 */
+let reminderRevive: ReturnType<typeof setTimeout> | undefined;
 const gracefulRestart = new GracefulWorkerRestart<WorkerProcess>();
 /** 不可闲置回收的会话，按来源（桌面查看 / 手机订阅）分桶；worker 重启后需重发并集 */
 const pinnedBySource = new Map<string, readonly string[]>();
@@ -378,6 +382,8 @@ function sweepMcpServers(exitedWorker?: number): void {
 
 export function startAgentWorker(options: { restartCheckpointFile?: string } = {}): void {
   if (worker || quitStopped) return;
+  clearTimeout(reminderRevive);
+  reminderRevive = undefined;
   sweepMcpServers();
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
@@ -609,7 +615,22 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
     // 超时退出时 worker 收尾落的断点先写成清单：订阅者收到退出事件时就知道哪些会话重启后接着跑
     if (current && quitCheckpoint) writePendingLateManifest(quitCheckpoint);
     onEvent?.({ type: 'worker-exited', detail });
+    if (current && !quitStopped) scheduleReminderRevive();
   });
+}
+
+function scheduleReminderRevive(): void {
+  const dueAts = Object.values(readAllSessionReminders(path.join(agentDataDir(), 'sessions')))
+    .flat()
+    .map((item) => item.dueAt);
+  const delay = reminderReviveDelay(dueAts, Date.now());
+  if (delay === undefined) return;
+  clearTimeout(reminderRevive);
+  reminderRevive = setTimeout(() => {
+    reminderRevive = undefined;
+    if (!worker && workerExited && !quitStopped) startAgentWorker();
+  }, delay);
+  reminderRevive.unref?.();
 }
 
 /** worker 输出必须持续读走（否则管道写满会卡住 worker）；保留尾部供退出时落日志，dev 照常转到终端 */

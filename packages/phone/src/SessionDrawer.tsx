@@ -7,7 +7,7 @@ import {
 } from '@enso/pair';
 import { archiveScopeForTab, filterArchivedByScope } from '@shared/archiveScope';
 import {
-  isDrawerActive,
+  orderDrawerActive,
   orderPinned,
   orderProjectSessions,
   sortByActivity,
@@ -221,8 +221,9 @@ export function SessionDrawer({
   const inSlice = (c: CatalogEntry) => !c.projectId || slicedIdSet.has(c.projectId);
   const hasRunningChild = (id: string) =>
     catalog.some((child) => child.parentId === id && child.status === 'running');
-  const activeSessions = sortByActivity(
-    topLevel.filter((c) => !isArchived(c) && inSlice(c) && isDrawerActive(c, hasRunningChild(c.id)))
+  const activeSessions = orderDrawerActive(
+    topLevel.filter((c) => !isArchived(c) && inSlice(c)),
+    hasRunningChild
   );
   const pinnedSessions = orderPinned(
     topLevel.filter((c) => c.pinned && !isArchived(c) && inSlice(c)),
