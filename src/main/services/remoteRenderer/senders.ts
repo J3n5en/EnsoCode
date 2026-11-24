@@ -232,11 +232,13 @@ export class RemoteSender extends EventEmitter {
    * 续上新连接，从浏览器已应用的 seq 之后补发。
    * 所需帧已移出窗口，或浏览器声称收到过宿主没发过的帧，返回 false（调用方应销毁并让浏览器重载）。
    */
-  resume(deliver: Deliver, appliedSeq?: number): boolean {
+  /** beforeReplay 在确认能续上、补发之前调用：调用方借此先回 rpc-ready */
+  resume(deliver: Deliver, appliedSeq?: number, beforeReplay?: () => void): boolean {
     this.deliver = deliver;
     const from = appliedSeq ?? (this.suspended ? this.suspendedAfter : this.seq);
     this.suspended = false;
     if (from < this.evictedThrough || from > this.seq) return false;
+    beforeReplay?.();
     for (const { seq, frame } of this.retained) if (seq > from) deliver(frame);
     return true;
   }

@@ -40,6 +40,29 @@ describe('RemoteSender seq replay', () => {
     expect(seqs(next)).toEqual([2, 3]);
   });
 
+  it('续上时先让调用方回 ready 再补发：慢链路上 ready 不排在几 MB 重放后面', () => {
+    const { sender } = setup();
+    sender.send('a');
+    sender.send('b');
+    const order: string[] = [];
+    const resumed = sender.resume(
+      (frame) => order.push(`seq${(frame as { seq?: number }).seq}`),
+      0,
+      () => order.push('ready')
+    );
+    expect(resumed).toBe(true);
+    expect(order).toEqual(['ready', 'seq1', 'seq2']);
+    const rejected: string[] = [];
+    expect(
+      sender.resume(
+        () => {},
+        9,
+        () => rejected.push('ready')
+      )
+    ).toBe(false);
+    expect(rejected).toEqual([]);
+  });
+
   it('keeps buffering while suspended and replays after the browser position', () => {
     const { sender, first } = setup();
     sender.send('a');
