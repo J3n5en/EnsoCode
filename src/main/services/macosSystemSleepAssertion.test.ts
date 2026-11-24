@@ -11,13 +11,14 @@ class FakeCaffeinateProcess extends EventEmitter {
 }
 
 const silentLogger = { warn: () => {} };
+const waitForApp = ['-w', String(process.pid)];
 
 describe('MacosSystemSleepAssertion', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('在 macOS 上用 idle + system sleep 启动 caffeinate', () => {
+  it('在 macOS 上用 idle + system sleep 启动 caffeinate，并随 app 进程退出', () => {
     const child = new FakeCaffeinateProcess();
     const spawn = vi.fn(() => child);
     const assertion = new MacosSystemSleepAssertion({
@@ -27,7 +28,7 @@ describe('MacosSystemSleepAssertion', () => {
 
     assertion.start('phone-online');
 
-    expect(spawn).toHaveBeenCalledWith('/usr/bin/caffeinate', ['-i', '-s'], {
+    expect(spawn).toHaveBeenCalledWith('/usr/bin/caffeinate', [...waitForApp, '-i', '-s'], {
       stdio: 'ignore',
       windowsHide: true,
     });
@@ -43,7 +44,7 @@ describe('MacosSystemSleepAssertion', () => {
 
     assertion.start('pair-keep-alive', { preventDisplaySleep: true });
 
-    expect(spawn).toHaveBeenCalledWith('/usr/bin/caffeinate', ['-d', '-i', '-s'], {
+    expect(spawn).toHaveBeenCalledWith('/usr/bin/caffeinate', [...waitForApp, '-d', '-i', '-s'], {
       stdio: 'ignore',
       windowsHide: true,
     });
@@ -62,10 +63,14 @@ describe('MacosSystemSleepAssertion', () => {
     assertion.start('pair-keep-alive', { preventDisplaySleep: true });
 
     expect(first.kill).toHaveBeenCalledTimes(1);
-    expect(spawn).toHaveBeenLastCalledWith('/usr/bin/caffeinate', ['-d', '-i', '-s'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
+    expect(spawn).toHaveBeenLastCalledWith(
+      '/usr/bin/caffeinate',
+      [...waitForApp, '-d', '-i', '-s'],
+      {
+        stdio: 'ignore',
+        windowsHide: true,
+      }
+    );
   });
 
   it('非 macOS 不拉起进程', () => {
