@@ -77,7 +77,43 @@ describe('secretaryDigest', () => {
       }),
       NOW
     );
-    expect(digest.today).toEqual({ dispatched: 5, completed: 2, failed: 1 });
+    expect(digest.today).toEqual({ dispatched: 5, completed: 2, failed: 1, earlier: 0 });
+  });
+
+  it('完成与失败只数今天派出的会话的最终状态；之前派出或接手的完成另算', () => {
+    const digest = secretaryDigest(
+      board({
+        running: [
+          // 上一轮结束后又被追加目标、正在跑：不算完成
+          session('again', { state: 'running', result: 'turn-ended', resultAt: TODAY + 1 }),
+        ],
+        done: [
+          session('ok', { result: 'goal-complete', resultAt: TODAY + 2 }),
+          // 失败后重试成功：最终是完成，不再算失败
+          session('retried', { result: 'goal-complete', resultAt: TODAY + 3 }),
+          session('bad', { result: 'failed', resultAt: TODAY + 4 }),
+          // 昨天派出、今天才完成
+          session('cross-day', {
+            startedAt: YESTERDAY,
+            stateSince: YESTERDAY,
+            result: 'goal-complete',
+            resultAt: TODAY + 5,
+          }),
+          // 昨天派出完成过，今天追加目标又完成、再手动标完成：仍是一件
+          session('twice', {
+            startedAt: YESTERDAY,
+            stateSince: YESTERDAY,
+            result: 'goal-complete',
+            resultAt: TODAY + 6,
+            manual: true,
+          }),
+          // 接手用户的会话不算派出
+          session('taken', { takeover: true, result: 'goal-complete', resultAt: TODAY + 7 }),
+        ],
+      }),
+      NOW
+    );
+    expect(digest.today).toEqual({ dispatched: 4, completed: 2, failed: 1, earlier: 3 });
   });
 
   it('计数取各组条数与待办数', () => {

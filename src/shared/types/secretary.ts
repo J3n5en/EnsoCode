@@ -834,7 +834,10 @@ export interface SecretaryDailyItem {
 
 export interface SecretaryDailyCounts {
   dispatched: number;
+  /** 完成列的会话数，含 completedEarlier */
   completed: number;
+  /** 完成里不是当天派出的：之前派出或接手的会话 */
+  completedEarlier: number;
   failed: number;
   needsYou: number;
   todosDone: number;

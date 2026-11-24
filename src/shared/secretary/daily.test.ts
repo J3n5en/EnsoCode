@@ -153,6 +153,7 @@ describe('一天的看板投影', () => {
     expect(daily.counts).toEqual({
       dispatched: 1,
       completed: 1,
+      completedEarlier: 0,
       failed: 1,
       needsYou: 1,
       todosDone: 1,
@@ -177,6 +178,49 @@ describe('一天的看板投影', () => {
     });
     expect(daily.groups).toEqual([]);
     expect(daily.counts.completed).toBe(0);
+  });
+
+  it('完成按会话去重，其中之前派出或接手的单独计数', () => {
+    const manualDone = (hour: number) => ({
+      kind: 'goal-complete' as const,
+      turn: 1,
+      at: at(15, hour),
+      manual: true as const,
+    });
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        // 今天派出：完成后追加目标又完成一次
+        record({ at: at(15, 10) }),
+        record({ at: at(15, 16) }),
+        // 今天派出：先失败，重试后完成
+        record({ at: at(15, 11), conversationId: 'c2', kind: 'failed' }),
+        record({ at: at(15, 12), conversationId: 'c2' }),
+        // 昨天派出、今天才完成
+        record({ at: at(15, 13), conversationId: 'c3' }),
+        // 今天派出：goal-complete 后又被手动标完成
+        record({ at: at(15, 14), conversationId: 'c5' }),
+      ],
+      dispatched: [
+        dispatch(),
+        dispatch({ conversationId: 'c2' }),
+        dispatch({ conversationId: 'c3', createdAt: at(14, 22) }),
+        dispatch({
+          conversationId: 'c4',
+          takeover: { grantedAt: at(15, 9), via: 'user' },
+          lastResult: manualDone(14),
+        }),
+        dispatch({ conversationId: 'c5', lastResult: manualDone(15) }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.counts).toMatchObject({
+      dispatched: 3,
+      completed: 5,
+      completedEarlier: 2,
+      failed: 0,
+    });
   });
 
   it('完成行带摘要、分支与提交号；认不出就不给字段', () => {

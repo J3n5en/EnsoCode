@@ -58,7 +58,15 @@ function daily(day: string): SecretaryDaily {
   return {
     day,
     today: day === '2026-05-20',
-    counts: { dispatched: 2, completed: 1, failed: 0, needsYou: 1, todosDone: 0, merged: 0 },
+    counts: {
+      dispatched: 2,
+      completed: 1,
+      completedEarlier: 0,
+      failed: 0,
+      needsYou: 1,
+      todosDone: 0,
+      merged: 0,
+    },
     groups: [
       {
         key: 'done',
