@@ -7,6 +7,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer, request, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -61,6 +63,39 @@ describe('server platform', () => {
     worker.postMessage({ n: 1 });
     expect(await echoed).toEqual({ echo: { n: 1 } });
     worker.kill();
+  });
+
+  it('分区会话按 setProxy 规则真实生效：direct 直连，proxyRules 经该代理', async () => {
+    const listen = (server: Server) =>
+      new Promise<number>((resolve) =>
+        server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+      );
+    const target = createServer((_req, res) => res.end('ok'));
+    const hits: string[] = [];
+    const proxy = createServer((req, res) => {
+      const url = new URL(req.url ?? '');
+      hits.push(url.host);
+      request(url, { headers: req.headers }, (reply) => reply.pipe(res)).end();
+    });
+    const targetUrl = `http://127.0.0.1:${await listen(target)}/`;
+    const proxyUrl = `http://127.0.0.1:${await listen(proxy)}`;
+    try {
+      const direct = platform.session.fromPartition('enso-provider-proxy:direct');
+      await direct.setProxy({ mode: 'direct' });
+      expect(await (await direct.fetch(targetUrl)).text()).toBe('ok');
+      expect(hits).toEqual([]);
+
+      const custom = platform.session.fromPartition('enso-provider-proxy:custom-test');
+      expect(platform.session.fromPartition('enso-provider-proxy:custom-test')).toBe(custom);
+      await custom.setProxy({ proxyRules: proxyUrl });
+      expect(await (await custom.fetch(targetUrl)).text()).toBe('ok');
+      expect(hits).toEqual([new URL(targetUrl).host]);
+    } finally {
+      for (const server of [target, proxy]) {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    }
   });
 });
 

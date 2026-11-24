@@ -320,6 +320,8 @@ describe('scheduled API-key provider model refresh', () => {
     { baseUrl: 'https://other.example/v1' },
     { apiKey: 'different-key' },
     { headers: { 'X-Tenant': 'other' } },
+    { proxy: { mode: 'none' as const } },
+    { proxy: { mode: 'custom' as const, url: 'http://127.0.0.1:7890' } },
     { enabled: false },
     { autoFetchModels: false },
     null,
@@ -377,6 +379,31 @@ describe('scheduled API-key provider model refresh', () => {
     expect(app.fetchModels).toHaveBeenCalledTimes(1);
   });
 
+  it('passes the provider proxy, cancels on proxy edits and skips a corrupt proxy', async () => {
+    const custom = { mode: 'custom' as const, url: 'http://127.0.0.1:7890' };
+    const app = setup([provider('chat', { proxy: custom })]);
+    const first = Promise.withResolvers<ListModelsResult>();
+    app.fetchModels.mockReturnValueOnce(first.promise).mockResolvedValue({ ok: true, models: [] });
+    app.refresh.sync();
+    expect(app.fetchModels.mock.calls[0]?.[0].proxy).toEqual(custom);
+
+    app.setProviders([provider('chat', { proxy: { mode: 'none' } })]);
+    app.refresh.sync();
+    expect(app.fetchModels.mock.calls[0]?.[1].aborted).toBe(true);
+    expect(app.fetchModels.mock.calls[1]?.[0].proxy).toEqual({ mode: 'none' });
+
+    app.setProviders([provider('chat')]);
+    app.refresh.sync();
+    expect(app.fetchModels.mock.calls[2]?.[0].proxy).toBeUndefined();
+
+    app.setProviders([
+      provider('chat', { proxy: { mode: 'custom', url: 'bad' } as unknown as typeof custom }),
+    ]);
+    app.refresh.sync();
+    expect(app.fetchModels).toHaveBeenCalledTimes(3);
+    expect(app.fetchModels.mock.calls[2]?.[1].aborted).toBe(true);
+  });
+
   it('merges into the latest provider list after concurrent user edits', async () => {
     const app = setup([provider('chat'), provider('deleted')]);
     const result = Promise.withResolvers<ListModelsResult>();
@@ -423,6 +450,17 @@ describe('keeping background additions across stale renderer writes', () => {
     expect(keepRefreshedProviderModels([refreshed], [moved])).toEqual([
       { ...moved, knownModelIds: refreshed.knownModelIds, modelRefreshStatus: { ok: true, at: 1 } },
     ]);
+  });
+
+  it('does not restore models fetched through a proxy the write replaced', () => {
+    const viaProxy = { ...refreshed, proxy: { mode: 'none' as const } };
+    const followGlobal = { ...base };
+    expect(keepRefreshedProviderModels([viaProxy], [followGlobal])).toEqual([
+      { ...base, knownModelIds: refreshed.knownModelIds, modelRefreshStatus: { ok: true, at: 1 } },
+    ]);
+    expect(keepRefreshedProviderModels([viaProxy], [{ ...base, proxy: { mode: 'none' } }])).toEqual(
+      [viaProxy]
+    );
   });
 
   it('leaves added, removed and never-refreshed providers to the renderer write', () => {

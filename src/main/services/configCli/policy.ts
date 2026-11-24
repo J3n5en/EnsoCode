@@ -6,6 +6,7 @@ import {
   MIN_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
   normalizeProviderModelRefreshIntervalHours,
 } from '@shared/providers/modelRefreshInterval';
+import { redactProxyUrlCredentials } from '@shared/providers/providerProxy';
 import { isValidProxyUrl, PROXY_MODES } from '@shared/proxy';
 import { isRecentModelList, MAX_RECENT_MODELS } from '@shared/recentModels';
 
@@ -39,9 +40,9 @@ const WRITE_DENIED = new Set([
 const ENTRY_LEVEL_DENIED = new Set(['skills', 'instructions']);
 /**
  * 决定 API Key 发往哪里的 provider 字段只能在设置页改：CLI 可被任意本机进程或代理调用，
- * 改了端点会让自动拉取立刻带着 key 请求新地址。
+ * 改了端点或代理会让自动拉取立刻带着 key 请求新地址 / 经新出口。
  */
-const PROVIDER_ENDPOINT_FIELDS = new Set(['api', 'baseUrl', 'headers']);
+const PROVIDER_ENDPOINT_FIELDS = new Set(['api', 'baseUrl', 'headers', 'proxy']);
 const isProviderEndpointPath = (segs: readonly string[]): boolean =>
   segs[0] === 'providers' && segs.length >= 3 && PROVIDER_ENDPOINT_FIELDS.has(segs[2]);
 /** 启动时读入、UI 另走专用 IPC 的项：只改设置不会生效 */
@@ -135,16 +136,31 @@ function assignIn(container: unknown, segs: string[], value: unknown): unknown {
   throw new Error(`Cannot descend into "${seg}"`);
 }
 
-/** 深拷贝并把密钥类键的值换成 HIDDEN（空值保留，表示未设置） */
+/** 深拷贝并把密钥类键的值换成 HIDDEN（空值保留，表示未设置）；provider 代理地址去掉账密 */
 export function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value).map(([name, item]) => [
       name,
-      isSecretName(name) ? (item === '' || item == null ? item : HIDDEN) : redact(item),
+      isSecretName(name)
+        ? item === '' || item == null
+          ? item
+          : HIDDEN
+        : name === 'proxy' && isRecord(item) && typeof item.url === 'string'
+          ? { ...item, url: redactProxyUrlCredentials(item.url) }
+          : redact(item),
     ])
   );
+}
+
+/** 直接读 `providers.<id>.proxy` / `.proxy.url` 时同样隐去账密 */
+function redactAt(segs: readonly string[], value: unknown): unknown {
+  if (segs[0] === 'providers' && segs[2] === 'proxy') {
+    if (segs.length === 3) return (redact({ proxy: value }) as { proxy: unknown }).proxy;
+    if (segs[3] === 'url' && typeof value === 'string') return redactProxyUrlCredentials(value);
+  }
+  return redact(value);
 }
 
 function deniedKeyIn(value: unknown): string | null {
@@ -241,7 +257,7 @@ export function describeConfig(state: Record<string, unknown>, fields: readonly 
         'install/uninstall skills or instructions (replace or add/remove entries)',
         'read or write project/session data (projects, projectGroups)',
         'change file paths, shells or executable commands',
-        'change a provider endpoint (providers.<id>.api, baseUrl, headers; use the Settings page)',
+        'change a provider endpoint (providers.<id>.api, baseUrl, headers, proxy; use the Settings page)',
         'read or write secrets (use the Settings page)',
         'overwrite a parent object whose old or new value contains secret/path/command keys',
       ],
@@ -318,7 +334,7 @@ export function getConfig(
   }
   const { found, value } = lookup(state, segs);
   if (!found) return { ok: false, error: `Key not found: ${segs.join('.')}` };
-  return { ok: true, key: segs.join('.'), value: redact(value) };
+  return { ok: true, key: segs.join('.'), value: redactAt(segs, value) };
 }
 
 export function listConfig(

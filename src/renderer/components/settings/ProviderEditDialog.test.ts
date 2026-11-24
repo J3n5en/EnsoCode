@@ -86,6 +86,42 @@ function metadata(accounts: OauthAccount[]): OauthProviderInfo[] {
 }
 
 describe('API key provider drafts', () => {
+  it('透传已有代理，保存跟随全局时显式清掉 proxy；代理变化不补回后台新增模型', () => {
+    const provider: ModelProvider = {
+      ...fixed,
+      oauthAccountKey: undefined,
+      apiKey: 'test-key',
+      baseUrl: 'https://chat.example/v1',
+      proxy: { mode: 'custom', url: 'http://127.0.0.1:7890' },
+    };
+    harness.providers = [provider];
+    renderToStaticMarkup(createElement(ProviderEditDialog, { provider, onClose: vi.fn() }));
+    const initial = harness.formProps.initialValue as Record<string, unknown>;
+    expect(initial.proxy).toEqual(provider.proxy);
+
+    const added = { id: 'new-in-background', enabled: true };
+    harness.providers = [{ ...provider, models: [...provider.models, added] }];
+    const save = harness.formProps.onSave as (
+      value: unknown,
+      seenModelIds: ReadonlySet<string>
+    ) => void;
+    const seen = new Set(provider.models.map((model) => model.id));
+
+    save({ ...initial, proxy: undefined }, seen);
+    let patch = harness.updateProvider.mock.calls.at(-1)?.[1];
+    expect(patch).toHaveProperty('proxy', undefined);
+    expect(patch.models).toEqual(provider.models);
+
+    save({ ...initial, proxy: { mode: 'custom', url: ' http://127.0.0.1:7890' } }, seen);
+    patch = harness.updateProvider.mock.calls.at(-1)?.[1];
+    expect(patch.models).toEqual([...provider.models, added]);
+
+    save({ ...initial, proxy: { mode: 'none' } }, seen);
+    patch = harness.updateProvider.mock.calls.at(-1)?.[1];
+    expect(patch.proxy).toEqual({ mode: 'none' });
+    expect(patch.models).toEqual(provider.models);
+  });
+
   it.each([
     {
       initialEnabled: undefined,

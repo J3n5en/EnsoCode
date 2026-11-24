@@ -5,6 +5,7 @@ import {
   normalizeProviderModelRefreshIntervalHours,
 } from '@shared/providers/modelRefreshInterval';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
+import { parseProviderProxy } from '@shared/providers/providerProxy';
 import type {
   FetchedModel,
   ListModelsResult,
@@ -58,7 +59,7 @@ function appendUnseenModels(
   return { models: [...models, ...fresh], knownModelIds: [...known] };
 }
 
-const REQUEST_FIELDS = ['api', 'baseUrl', 'apiKey', 'headers'] as const;
+const REQUEST_FIELDS = ['api', 'baseUrl', 'apiKey', 'headers', 'proxy'] as const;
 
 /**
  * 渲染端可能带着 Main 后台追加之前的旧快照写回。快照的 knownModelIds 就是它的基线：
@@ -139,11 +140,15 @@ function refreshTarget(value: unknown) {
   ) {
     return;
   }
+  // 坏代理不刷新：退回全局代理会把 key 发到用户没选的出口
+  const proxy = parseProviderProxy(provider.proxy);
+  if (proxy === null) return;
   const config: ProviderApiConfig = {
     api,
     apiKey: provider.apiKey,
     baseUrl,
     headers: parseProviderHeaders(provider.headers, { warn: false }),
+    proxy,
   };
   return {
     id,

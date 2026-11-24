@@ -198,3 +198,46 @@ describe('registerCustomProviderModels headers', () => {
     expect(next.status).toBe('apply');
   });
 });
+
+describe('自定义 provider 的独立代理', () => {
+  beforeEach(() => {
+    resetCustomProviderRegistryForTests();
+  });
+
+  it('解析推送：合法代理透传，坏代理整条丢弃；代理变化不算相同推送', () => {
+    const parsed = parseWorkerCustomProviders([
+      { ...provider([{ id: 'a' }]), proxy: { mode: 'none' } },
+      { ...provider([{ id: 'b' }]), settingsId: 'bad', proxy: { mode: 'custom', url: 'nope' } },
+      { ...provider([{ id: 'c' }]), settingsId: 'follow' },
+    ]);
+    expect(parsed?.map((item) => item.settingsId)).toEqual(['settings-1', 'follow']);
+    expect(parsed?.[0]?.proxy).toEqual({ mode: 'none' });
+    expect(parsed?.[1]).not.toHaveProperty('proxy');
+
+    const first = previewModelDirectoryPush(undefined, snapshot, [provider([{ id: 'a' }])]);
+    if (first.status !== 'apply') throw new Error('expected apply');
+    const next = previewModelDirectoryPush(first.parsed, snapshot, [
+      { ...provider([{ id: 'a' }]), proxy: { mode: 'custom', url: 'http://127.0.0.1:1' } },
+    ]);
+    expect(next.status).toBe('apply');
+  });
+
+  it('同端点不同代理注册成不同 provider，并只包装带代理的那个', () => {
+    const { runtime, registerProvider } = mockRuntime();
+    const endpoint = {
+      api: 'openai-completions' as const,
+      baseUrl: 'https://gw.example/v1',
+      apiKey: 'sk-push',
+    };
+    installPushedCustomProviders(runtime, [
+      provider([{ id: 'a' }]),
+      { ...provider([{ id: 'a' }]), proxy: { mode: 'none' } },
+    ]);
+    const ids = registerProvider.mock.calls.map((call) => call[0]);
+    expect(ids).toEqual([
+      providerKeyFor(endpoint),
+      providerKeyFor({ ...endpoint, proxy: { mode: 'none' } }),
+    ]);
+    expect(new Set(ids).size).toBe(2);
+  });
+});

@@ -39,6 +39,7 @@ describe('config sync portable preference contract', () => {
       modelRefreshIntervalHours: 48,
       knownModelIds: ['deleted'],
       modelRefreshStatus: { ok: true, at: 1 },
+      proxy: { mode: 'custom', url: 'http://user:pass@127.0.0.1:7890' },
     };
     const localProvider = { ...provider, ...device };
     for (const [field, value] of Object.entries(device)) {

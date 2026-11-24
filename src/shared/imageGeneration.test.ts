@@ -52,6 +52,18 @@ describe('生图模型标记', () => {
 });
 
 describe('生图配置', () => {
+  it('服务商独立代理随配置下发；坏代理不出配置，不退回全局代理', () => {
+    const ref = { providerId: 'p', modelId: 'image' };
+    const proxy = { mode: 'custom' as const, url: 'http://127.0.0.1:7890' };
+    const config = resolveImageGenerationConfig(ref, [{ ...provider, proxy }]).config;
+    expect(config).toMatchObject({ proxy });
+    expect(parseImageGenerationConfig(config)).toEqual(config);
+    expect(
+      parseImageGenerationConfig({ ...config, proxy: { mode: 'custom', url: 'x' } })
+    ).toBeNull();
+    const bad = { ...provider, proxy: { mode: 'custom', url: 'socks5://h:1' } } as never;
+    expect(resolveImageGenerationConfig(ref, [bad]).config).toBeNull();
+  });
   it.each([
     null,
     { ...provider, models: null },

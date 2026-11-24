@@ -1,9 +1,11 @@
+import type { Api, Provider } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { findCatalogModelById, resolveCustomModelCapabilities } from '@shared/modelCatalog';
 import { type ModelDirectorySnapshot, parseModelDirectorySnapshot } from '@shared/modelDirectory';
 import { findModelsDevModel, mergeCatalogEntry } from '@shared/modelsDevCatalog';
 import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { escapePiConfigValue, parseProviderHeaders } from '@shared/providers/providerHeaders';
+import { type ProviderProxyConfig, parseProviderProxy } from '@shared/providers/providerProxy';
 import type { WorkerCustomProvider } from '@shared/types/agent';
 import {
   MODEL_API_KINDS,
@@ -18,6 +20,7 @@ import { version } from '../../package.json';
 import { resolveCustomModelCompat, selectCatalogEntryForCompat } from './customModelCompat';
 import { modelsDevModelsFromEnv } from './modelsDevCache';
 import { withOpenAIResponsesRouting } from './openaiResponsesRouting';
+import { runWithProviderProxy, withCallerHooks } from './proxyEnv';
 import { withRequestBodyBudget } from './requestBodyBudget';
 import { providerKeyFor } from './smartCompact';
 
@@ -42,6 +45,7 @@ export interface CustomProviderEndpoint {
   baseUrl: string;
   apiKey: string;
   headers?: Record<string, string>;
+  proxy?: ProviderProxyConfig;
 }
 
 export interface ModelDirectoryPushState {
@@ -107,6 +111,9 @@ function parseWorkerCustomProvider(value: unknown): WorkerCustomProvider | undef
     if (model) models.push(model);
   }
   const headers = parseProviderHeaders(raw.headers);
+  // 坏代理整条丢弃：降级成跟随全局会把本该直连 / 专用代理的请求发到别处
+  const proxy = parseProviderProxy(raw.proxy);
+  if (proxy === null) return undefined;
   return {
     settingsId: raw.settingsId,
     name: raw.name,
@@ -115,6 +122,7 @@ function parseWorkerCustomProvider(value: unknown): WorkerCustomProvider | undef
     apiKey: raw.apiKey,
     models,
     ...(headers ? { headers } : {}),
+    ...(proxy ? { proxy } : {}),
   };
 }
 
@@ -150,6 +158,7 @@ function providerFingerprint(provider: WorkerCustomProvider) {
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     ...(provider.headers ? { headers: provider.headers } : {}),
+    ...(provider.proxy ? { proxy: provider.proxy } : {}),
     models: provider.models.map((model) => ({
       id: model.id,
       ...(model.label !== undefined ? { label: model.label } : {}),
@@ -282,11 +291,56 @@ export function registerCustomProviderModels(
   });
   const registered = runtime.getProvider(providerId);
   if (!registered) throw new Error(`provider not found after register: ${providerId}`);
+  const proxied = withProviderProxy(registered, provider.proxy);
   runtime.registerNativeProvider(
     provider.api === 'openai-responses'
-      ? withOpenAIResponsesRouting(withRequestBodyBudget(registered))
-      : withRequestBodyBudget(registered)
+      ? withOpenAIResponsesRouting(withRequestBodyBudget(proxied))
+      : withRequestBodyBudget(proxied)
   );
+}
+
+/**
+ * 在 provider 出口建立代理上下文：complete / completeSimple 经 Models 走同一 stream / streamSimple，
+ * 流对象返回后 SDK 内部的异步 fetch 与重试经 AsyncLocalStorage 继承同一代理。
+ * 不改 options.fetch：Google 适配器会拒绝非 globalThis.fetch。
+ */
+export function withProviderProxy(
+  provider: Provider,
+  proxy: ProviderProxyConfig | undefined
+): Provider {
+  if (!proxy) return provider;
+  const { fetchDeferred, cancelDeferred } = provider;
+  return {
+    ...provider,
+    stream(model, context, options) {
+      const hooked = withCallerHooks(options);
+      return runWithProviderProxy(proxy, () => provider.stream<Api>(model, context, hooked));
+    },
+    streamSimple(model, context, options) {
+      const hooked = withCallerHooks(options);
+      return runWithProviderProxy(proxy, () => provider.streamSimple(model, context, hooked));
+    },
+    ...(fetchDeferred
+      ? {
+          fetchDeferred: (model, handle, options) => {
+            const hooked = withCallerHooks(options);
+            return runWithProviderProxy(proxy, () =>
+              fetchDeferred.call(provider, model, handle, hooked)
+            );
+          },
+        }
+      : {}),
+    ...(cancelDeferred
+      ? {
+          cancelDeferred: (model, handle, options) => {
+            const hooked = withCallerHooks(options);
+            return runWithProviderProxy(proxy, () =>
+              cancelDeferred.call(provider, model, handle, hooked)
+            );
+          },
+        }
+      : {}),
+  };
 }
 
 export function installPushedCustomProviders(
@@ -296,6 +350,8 @@ export function installPushedCustomProviders(
   for (const provider of providers) {
     if (!isModelApiKind(provider.api)) continue;
     const headers = parseProviderHeaders(provider.headers);
+    const proxy = parseProviderProxy(provider.proxy);
+    if (proxy === null) continue;
     registerCustomProviderModels(
       runtime,
       {
@@ -303,6 +359,7 @@ export function installPushedCustomProviders(
         baseUrl: provider.baseUrl,
         apiKey: provider.apiKey,
         ...(headers ? { headers } : {}),
+        ...(proxy ? { proxy } : {}),
       },
       provider.models,
       { accumulateOnly: true }

@@ -82,6 +82,7 @@ describe('config sync sender-bound import flow', () => {
           models: [{ id: 'model' }],
           autoFetchModels: true,
           modelRefreshIntervalHours: 48,
+          proxy: { mode: 'custom', url: 'http://user:pass@127.0.0.1:7890' },
         },
       ];
       const entry = {
@@ -108,8 +109,15 @@ describe('config sync sender-bound import flow', () => {
         expect(exported.subagentModels).toEqual([entry, neighbor]);
         expect(exported.providers[0]).not.toHaveProperty('autoFetchModels');
         expect(exported.providers[0]).not.toHaveProperty('modelRefreshIntervalHours');
+        expect(exported.providers[0]).not.toHaveProperty('proxy');
+        expect(readFileSync(file).toString('latin1')).not.toContain('user:pass');
         settings.patchSettingsState('providers', [
-          { ...providers[0], autoFetchModels: false, modelRefreshIntervalHours: 72 },
+          {
+            ...providers[0],
+            autoFetchModels: false,
+            modelRefreshIntervalHours: 72,
+            proxy: { mode: 'none' },
+          },
         ]);
         settings.patchSettingsState('subagentModels', [{ ...entry, enabled: true }, neighbor]);
         const opened = await service.openImportForSender(50, file);
@@ -127,7 +135,12 @@ describe('config sync sender-bound import flow', () => {
         expect(persisted['enso-settings'].state.subagentModels).toEqual([entry, neighbor]);
         expect(persisted['enso-settings'].state.subagentModelsEnabled).toBe(true);
         expect(persisted['enso-settings'].state.providers).toEqual([
-          { ...providers[0], autoFetchModels: false, modelRefreshIntervalHours: 72 },
+          {
+            ...providers[0],
+            autoFetchModels: false,
+            modelRefreshIntervalHours: 72,
+            proxy: { mode: 'none' },
+          },
         ]);
       } finally {
         settings.patchSettingsState('subagentModels', []);

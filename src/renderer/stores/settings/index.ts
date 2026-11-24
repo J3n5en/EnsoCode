@@ -586,6 +586,8 @@ export const useSettingsStore = create<SettingsState>()(
             if (p.id !== id) return p;
             const next = { ...p, ...updates };
             if ('headers' in updates && updates.headers === undefined) delete next.headers;
+            // 跟随全局代理不落 proxy 字段
+            if ('proxy' in updates && updates.proxy === undefined) delete next.proxy;
             return next;
           }),
         }));
