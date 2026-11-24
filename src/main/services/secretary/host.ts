@@ -376,7 +376,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   /** 结构化结果的只读核验。轮次结束时还没落定就先挂起收尾。 */
   const goalVerifies = new Map<string, GoalVerifySlot>();
   const goalVerifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** 因后台任务暂不归档时最近记过的审计：同一批任务只记一次 */
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
   let patrolAt: number | undefined;
   /** 下一次遗留任务巡检的时间；与进行中巡检分开计时，没有进行中的会话也照常扫 */
@@ -532,8 +531,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (!woke && live.length === 0) continue;
         ports.unarchive(conversationId);
         delete record.autoArchivedAt;
-        // 因为任务还在跑才收回的：任务都结束后要能再归档一次
-        if (!woke) delete record.autoArchiveResultAt;
         ports.audit?.({
           at: now,
           secretaryConversationId: record.secretaryConversationId,
@@ -1075,7 +1072,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     return true;
   }
 
-  /** 只重算自动归档；ids 缺省为全部派出会话 */
+  /** 只补判以前自动归档的会话要不要收回；ids 缺省为全部派出会话 */
   function sweepArchive(ids: readonly string[] | undefined, now: number): void {
     const file = withEventStamps(ports.file());
     if (!syncAutoArchive(file, ids ?? Object.keys(file.dispatched), ports.rows(), now)) return;
@@ -1202,7 +1199,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
-      // 没打开的会话（重启认回的命令）任务变了：只重算它的自动归档
+      // 没打开的会话（重启认回的命令）任务变了：只补判它要不要收回归档
       if (event.type === 'unopened-background-tasks') {
         sweepArchive([event.sessionId], ports.now());
         return;
@@ -1772,7 +1769,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       // 一次性任务错过就在启动时补投一次
       if (fireSchedules(file, now)) changed = true;
-      // 升级前已经完成、还堆在活跃中的派出会话：启动时补归档一次
+      // 以前自动归档、启动时仍有后台任务的派出会话：收回到活跃中
       if (syncAutoArchive(file, Object.keys(file.dispatched), ports.rows(), now)) changed = true;
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
