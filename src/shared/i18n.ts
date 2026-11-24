@@ -2135,6 +2135,15 @@ export const zhTranslations: Record<string, string> = {
   'New plugin logs are not recorded while off. Existing log files are kept.':
     '当前不会记录新的插件日志，已有日志文件不会删除。',
   'Enable plugin logging': '开启插件日志',
+  'Record app logs': '记录应用日志',
+  'Off by default. Write main process and agent logs to disk. Files needed for restart recovery are always kept.':
+    '默认关闭。开启后将主进程与 Agent 日志写入磁盘；重启恢复等功能需要的文件始终照常保存。',
+  'App logging is off': '应用日志未开启',
+  'New app logs are not recorded while off. Existing logs are kept below.':
+    '当前不会记录新的应用日志，已有日志不会删除，仍在下方显示。',
+  'Enable app logging': '开启应用日志',
+  'App logging is off. The export only includes logs recorded earlier.':
+    '应用日志未开启，导出只包含之前已记录的日志。',
   '{{name}} tried to message another session and was blocked':
     '插件 {{name}} 想向其他会话发消息，已拦截',
   'Turn on': '去开启',

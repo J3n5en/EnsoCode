@@ -243,6 +243,7 @@ const initialState = {
   updateChannel: DEFAULT_UPDATE_CHANNEL,
   pluginAutoUpdate: true,
   pluginLoggingEnabled: false,
+  appLoggingEnabled: false,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
   customCaCertPath: '',
@@ -473,6 +474,8 @@ export const useSettingsStore = create<SettingsState>()(
         set({ pluginAutoUpdate: pluginAutoUpdate !== false }),
       setPluginLoggingEnabled: (pluginLoggingEnabled) =>
         set({ pluginLoggingEnabled: pluginLoggingEnabled === true }),
+      setAppLoggingEnabled: (appLoggingEnabled) =>
+        set({ appLoggingEnabled: appLoggingEnabled === true }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
       setCustomCaCertPath: (customCaCertPath) => set({ customCaCertPath }),
@@ -1301,6 +1304,9 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (typeof s.pluginLoggingEnabled !== 'boolean') {
           useSettingsStore.setState({ pluginLoggingEnabled: false });
+        }
+        if (typeof s.appLoggingEnabled !== 'boolean') {
+          useSettingsStore.setState({ appLoggingEnabled: false });
         }
         const sshTimeoutSeconds = normalizeSshTimeoutSeconds(s.sshTimeoutSeconds);
         if (sshTimeoutSeconds !== s.sshTimeoutSeconds) {

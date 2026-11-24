@@ -34,6 +34,7 @@ import {
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import { AGENT_COMPACTION_LOG } from '@shared/agentWorkerExit';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
 import { snapshotMainConversation } from '@shared/btw';
@@ -1781,6 +1782,10 @@ export class SessionSupervisor {
     }
     if (command.type === 'set-long-cache-retention') {
       this.longCacheRetention = command.enabled;
+      return;
+    }
+    if (command.type === 'set-app-logging') {
+      setAppLoggingEnabled(command.enabled);
       return;
     }
     if (command.type === 'set-privacy-masking') {

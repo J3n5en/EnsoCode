@@ -239,6 +239,20 @@ describe('settings广播策略', () => {
     reloaded.flushSettings();
   });
 
+  it('应用日志开关是本机字段，写入即切换 Main 落盘', async () => {
+    vi.resetModules();
+    const settings = await import('./settings');
+    const { isAppLoggingEnabled } = await import('@shared/appLogFile');
+    expect(settings.SETTINGS_STATE_FIELDS).toContain('appLoggingEnabled');
+    expect(settings.CONFIG_SYNC_COMMIT_FIELDS).not.toContain('appLoggingEnabled');
+    expect(isAppLoggingEnabled()).toBe(false);
+    expect(settings.patchSettingsState('appLoggingEnabled', true)).toMatchObject({ ok: true });
+    expect(isAppLoggingEnabled()).toBe(true);
+    expect(settings.patchSettingsState('appLoggingEnabled', false)).toMatchObject({ ok: true });
+    expect(isAppLoggingEnabled()).toBe(false);
+    settings.flushSettings();
+  });
+
   it('插件日志开关是本机字段，变化时热通知插件服务', async () => {
     vi.resetModules();
     mocks.pluginLogs.setLoggingEnabled.mockClear();

@@ -1575,6 +1575,8 @@ export type AgentCommand =
   | { type: 'set-auto-retry-limit'; limit: number }
   /** 长缓存：会话请求对 Anthropic Messages 模型用 1h prompt cache，下一次请求生效 */
   | { type: 'set-long-cache-retention'; enabled: boolean }
+  /** 「记录应用日志」热切换：worker 的 agent.log / compaction.log 是否落盘 */
+  | { type: 'set-app-logging'; enabled: boolean }
   /** 设置里禁用的内置预设：worker 执行与工具说明都按它过滤 */
   | { type: 'set-disabled-workflow-presets'; ids: string[] }
   /** 设置变更后 Main 按会话推送当前禁用的内置工具；worker 只增删已注册的可热切工具 */
@@ -4427,6 +4429,11 @@ const agentCommandParsers = {
       : null;
   },
   'set-long-cache-retention': (value: Record<string, unknown>): AgentCommand | null => {
+    return hasExactKeys(value, ['type', 'enabled']) && typeof value.enabled === 'boolean'
+      ? (value as unknown as AgentCommand)
+      : null;
+  },
+  'set-app-logging': (value: Record<string, unknown>): AgentCommand | null => {
     return hasExactKeys(value, ['type', 'enabled']) && typeof value.enabled === 'boolean'
       ? (value as unknown as AgentCommand)
       : null;

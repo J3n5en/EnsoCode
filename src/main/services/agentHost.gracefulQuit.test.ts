@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AGENT_WORKER_EXIT_LOG } from '@shared/agentWorkerExit';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import {
   RESTART_CHECKPOINT_ENV,
   RESTART_CHECKPOINT_FILE,
@@ -155,6 +156,7 @@ function bootWithSession(): number {
 }
 
 beforeEach(() => {
+  setAppLoggingEnabled(true);
   fork.userData = mkdtempSync(path.join(tmpdir(), 'enso-graceful-quit-'));
   mkdirSync(dataDir(), { recursive: true });
 });

@@ -222,6 +222,8 @@ export interface SettingsState {
   pluginAutoUpdate: boolean;
   /** 记录插件控制台与运行日志到磁盘；缺省关，只在本机 */
   pluginLoggingEnabled: boolean;
+  /** 记录应用日志（main.log / agent.log 等）到磁盘；缺省关，只在本机 */
+  appLoggingEnabled: boolean;
 
   /** 网络代理：系统 / 直连 / 自定义；缺省 system */
   proxyMode: ProxyMode;
@@ -451,6 +453,7 @@ export interface SettingsState {
   setUpdateChannel: (value: UpdateChannel) => void;
   setPluginAutoUpdate: (value: boolean) => void;
   setPluginLoggingEnabled: (enabled: boolean) => void;
+  setAppLoggingEnabled: (enabled: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;
   setCustomCaCertPath: (path: string) => void;
