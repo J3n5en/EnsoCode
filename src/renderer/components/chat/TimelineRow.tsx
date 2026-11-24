@@ -2320,6 +2320,38 @@ function UserMeta({
   );
 }
 
+/** 轮次末尾收起：开关与 UserMeta 顶部收起一致 */
+export function TurnCollapseFooter({
+  turnKey,
+  canCollapse,
+  collapsed,
+  onToggleTurn,
+}: {
+  turnKey: string;
+  canCollapse?: boolean;
+  collapsed?: boolean;
+  onToggleTurn?: (key: string, collapsed: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
+  if (!autoCollapseTurns || !canCollapse || !onToggleTurn || collapsed) return null;
+  return (
+    <button
+      type="button"
+      data-enso="turn-collapse"
+      data-quote-skip=""
+      onClick={() => onToggleTurn(turnKey, true)}
+      className={cn(
+        'mt-1 flex min-h-6 select-none items-center gap-1 text-[12px] transition-colors hover:text-foreground [@media(hover:none)]:min-h-10 [@media(hover:none)]:pr-3',
+        SUBTLE_TEXT
+      )}
+    >
+      <ChevronUp className="h-3 w-3" />
+      <span>{t('Collapse')}</span>
+    </button>
+  );
+}
+
 /** assistant 正文：markdown + hover 操作条（复制 / 时间 / 该轮耗时·TTFT·tok/s） */
 function TextRow({
   item,
@@ -2446,6 +2478,22 @@ function findScrollContainer(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/** 收起后行头若已滚出视口，把它拉回视口内；scroller 缺省时向上查找滚动容器 */
+export function restoreRowIntoView(
+  row: HTMLElement,
+  scroller: HTMLElement | null = findScrollContainer(row)
+): void {
+  if (!scroller) {
+    if (row.getBoundingClientRect().top < 0) row.scrollIntoView?.({ block: 'nearest' });
+    return;
+  }
+  const delta = thinkingCollapseScrollDelta(
+    row.getBoundingClientRect(),
+    scroller.getBoundingClientRect()
+  );
+  if (delta !== 0) scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
+}
+
 /** Think 行：仅在 expandLiveReasoning 时流式展开、结束收起；手动点击覆盖默认 */
 function ThinkingRow({
   itemKey,
@@ -2470,18 +2518,7 @@ function ThinkingRow({
   useLayoutEffect(() => {
     if (expanded || !restoreScrollRef.current) return;
     restoreScrollRef.current = false;
-    const row = rowRef.current;
-    if (!row) return;
-    const scroller = findScrollContainer(row);
-    if (!scroller) {
-      if (row.getBoundingClientRect().top < 0) row.scrollIntoView?.({ block: 'nearest' });
-      return;
-    }
-    const delta = thinkingCollapseScrollDelta(
-      row.getBoundingClientRect(),
-      scroller.getBoundingClientRect()
-    );
-    if (delta !== 0) scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
+    if (rowRef.current) restoreRowIntoView(rowRef.current);
   }, [expanded]);
 
   return (
