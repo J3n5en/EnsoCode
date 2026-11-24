@@ -98,6 +98,25 @@ describe('DeskTunnel', () => {
     expect(received).toEqual(['["a"]', '["b"]', '["c"]']);
   });
 
+  it('重连后等 ready 期间补发帧在按序应用：不重新 hello', () => {
+    const listen = { addEventListener: () => {} };
+    vi.stubGlobal('document', { ...listen, visibilityState: 'visible' });
+    vi.stubGlobal('window', listen);
+    const { tunnel, cid } = createOnlineTunnel();
+    tunnel.start();
+    mockState.events?.onState('offline');
+    mockState.events?.onState('online');
+    mockState.sent = [];
+    for (let seq = 1; seq <= 6; seq++) {
+      mockState.events?.onRemoteFrame?.({ type: 'rpc-event', cid, ch: 'evt', args: [seq], seq });
+      vi.advanceTimersByTime(2_000);
+    }
+    expect(hellos()).toHaveLength(0);
+    vi.advanceTimersByTime(6_000);
+    expect(hellos()).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
   it('切链后 1.5s 快速补发每缺口仅触发一次，随后退回 8s 常规窗口', () => {
     const { cid } = createOnlineTunnel();
     mockState.events?.onTransport?.('relay');

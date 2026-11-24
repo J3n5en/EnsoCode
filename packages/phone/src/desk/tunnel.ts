@@ -42,6 +42,8 @@ interface Slot {
   ready: boolean;
   everReady: boolean;
   helloAt: number;
+  /** 上次按序应用推进的时刻：宿主仍在送达 */
+  appliedAt?: number;
   queue: RemoteToHost[];
   pending: Map<
     number,
@@ -262,7 +264,7 @@ export class DeskTunnel {
         if (
           !needsRehello(
             now,
-            { ready: slot.ready, helloAt: slot.helloAt, pendingAt },
+            { ready: slot.ready, helloAt: slot.helloAt, pendingAt, appliedAt: slot.appliedAt },
             this.lastBulk,
             this.linkAt
           )
@@ -327,7 +329,9 @@ export class DeskTunnel {
   }
 
   private ordered(slot: Slot, frame: Sequenced): void {
+    const before = slot.stream.applied;
     for (const ready of slot.stream.push(frame.seq, frame)) this.apply(slot, ready);
+    if (slot.stream.applied > before) slot.appliedAt = Date.now();
     if (slot.stream.overflowed) {
       this.reset(slot);
       return;
