@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
 import { encodeClaudeProjectDir } from './claudeCode';
+import type { ScannedSession } from './types';
 
 const parseLine = (line: string): Record<string, unknown> | null => {
   try {
@@ -63,7 +64,7 @@ export function readFactorySession(filePath: string): { title: string; messages:
 export function listFactorySessions(
   projectPath: string,
   home = process.env.HOME ?? ''
-): ExternalSession[] {
+): ScannedSession[] {
   const dir = path.join(home, '.factory', 'sessions', encodeClaudeProjectDir(projectPath));
   let files: string[];
   try {
@@ -71,7 +72,7 @@ export function listFactorySessions(
   } catch {
     return [];
   }
-  const sessions: ExternalSession[] = [];
+  const sessions: ScannedSession[] = [];
   for (const file of files) {
     const filePath = path.join(dir, file);
     const { title, messages } = readFactorySession(filePath);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
+import type { ScannedSession } from './types';
 
 const parseLine = (line: string): Record<string, unknown> | null => {
   try {
@@ -61,7 +62,7 @@ export function readCursorSession(filePath: string): { title: string; messages: 
 export function listCursorSessions(
   projectPath: string,
   home = process.env.HOME ?? ''
-): ExternalSession[] {
+): ScannedSession[] {
   const dir = path.join(
     home,
     '.cursor',
@@ -75,7 +76,7 @@ export function listCursorSessions(
   } catch {
     return [];
   }
-  const sessions: ExternalSession[] = [];
+  const sessions: ScannedSession[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const filePath = path.join(dir, entry.name, `${entry.name}.jsonl`);
