@@ -107,8 +107,14 @@ describe('providerApi 按服务商代理发请求', () => {
     expect(sessions).toHaveLength(2);
     expect(sessions[0]?.partition).toMatch(/^enso-provider-proxy:custom-[0-9a-f]{16}$/);
     expect(sessions[0]?.partition).not.toBe(sessions[1]?.partition);
-    expect(sessions[0]?.setProxy).toHaveBeenCalledWith({ proxyRules: 'http://127.0.0.1:7890' });
-    expect(sessions[1]?.setProxy).toHaveBeenCalledWith({ proxyRules: 'http://127.0.0.1:7891' });
+    expect(sessions[0]?.setProxy).toHaveBeenCalledWith({
+      proxyRules: 'http://127.0.0.1:7890',
+      proxyBypassRules: '<-loopback>',
+    });
+    expect(sessions[1]?.setProxy).toHaveBeenCalledWith({
+      proxyRules: 'http://127.0.0.1:7891',
+      proxyBypassRules: '<-loopback>',
+    });
     expect(sessions[0]?.fetch).toHaveBeenCalledTimes(2);
     expect(netFetch).not.toHaveBeenCalled();
   });

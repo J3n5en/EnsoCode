@@ -97,6 +97,7 @@ export interface PlatformSession {
   setProxy(config: {
     mode?: 'direct' | 'system' | 'auto_detect' | 'fixed_servers' | 'pac_script';
     proxyRules?: string;
+    proxyBypassRules?: string;
   }): Promise<void>;
   resolveProxy(url: string): Promise<string>;
   clearCache(): Promise<void>;

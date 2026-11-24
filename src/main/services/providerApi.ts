@@ -82,8 +82,13 @@ function proxySession(proxy: ProviderProxyConfig): Promise<PlatformSession> {
     return cached;
   }
   const target = session.fromPartition(`${PROXY_PARTITION_PREFIX}${key}`);
+  // Chromium 默认对 loopback 隐式绕过代理；worker 的 ProxyAgent 不绕过，这里取消绕过保持一致
   const ready = target
-    .setProxy(proxy.mode === 'none' ? { mode: 'direct' } : { proxyRules: proxy.url })
+    .setProxy(
+      proxy.mode === 'none'
+        ? { mode: 'direct' }
+        : { proxyRules: proxy.url, proxyBypassRules: '<-loopback>' }
+    )
     .then(() => target);
   ready.catch(() => {
     if (proxySessions.get(key) === ready) proxySessions.delete(key);

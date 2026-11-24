@@ -40,7 +40,8 @@ export function sameProviderProxy(left: unknown, right: unknown): boolean {
   return a.mode === b.mode && (a.mode === 'none' || a.url === (b as { url: string }).url);
 }
 
-const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi;
+// 贪婪匹配到授权段最后一个 @：密码里未编码的 @ 不能漏出半截
+const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]+@/gi;
 
 /** 把文本里所有 `scheme://user:pass@` 的账密替换为 `***`，其余原样保留。 */
 export function redactProxyUrlCredentials(text: string): string {

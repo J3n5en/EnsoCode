@@ -47,12 +47,12 @@ describe('providerKeyFor', () => {
     expect(
       providerKeyFor({ ...endpoint, proxy: { mode: 'custom', url: ' http://127.0.0.1:7890 ' } })
     ).toBe(customA);
-    // 坏值按跟随全局处理，与未配置同身份
+    // 坏值不能借用跟随全局的身份：worker 里残留的旧注册不能被它命中
     expect(
       providerKeyFor({
         ...endpoint,
         proxy: { mode: 'custom', url: 'bad' } as unknown as { mode: 'none' },
       })
-    ).toBe(providerKeyFor(endpoint));
+    ).not.toBe(providerKeyFor(endpoint));
   });
 });

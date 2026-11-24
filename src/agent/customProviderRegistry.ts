@@ -20,7 +20,7 @@ import { version } from '../../package.json';
 import { resolveCustomModelCompat, selectCatalogEntryForCompat } from './customModelCompat';
 import { modelsDevModelsFromEnv } from './modelsDevCache';
 import { withOpenAIResponsesRouting } from './openaiResponsesRouting';
-import { runWithProviderProxy } from './proxyEnv';
+import { runWithProviderProxy, withCallerHooks } from './proxyEnv';
 import { withRequestBodyBudget } from './requestBodyBudget';
 import { providerKeyFor } from './smartCompact';
 
@@ -313,23 +313,31 @@ export function withProviderProxy(
   return {
     ...provider,
     stream(model, context, options) {
-      return runWithProviderProxy(proxy, () => provider.stream<Api>(model, context, options));
+      const hooked = withCallerHooks(options);
+      return runWithProviderProxy(proxy, () => provider.stream<Api>(model, context, hooked));
     },
     streamSimple(model, context, options) {
-      return runWithProviderProxy(proxy, () => provider.streamSimple(model, context, options));
+      const hooked = withCallerHooks(options);
+      return runWithProviderProxy(proxy, () => provider.streamSimple(model, context, hooked));
     },
     ...(fetchDeferred
       ? {
-          fetchDeferred: (model, handle, options) =>
-            runWithProviderProxy(proxy, () => fetchDeferred.call(provider, model, handle, options)),
+          fetchDeferred: (model, handle, options) => {
+            const hooked = withCallerHooks(options);
+            return runWithProviderProxy(proxy, () =>
+              fetchDeferred.call(provider, model, handle, hooked)
+            );
+          },
         }
       : {}),
     ...(cancelDeferred
       ? {
-          cancelDeferred: (model, handle, options) =>
-            runWithProviderProxy(proxy, () =>
-              cancelDeferred.call(provider, model, handle, options)
-            ),
+          cancelDeferred: (model, handle, options) => {
+            const hooked = withCallerHooks(options);
+            return runWithProviderProxy(proxy, () =>
+              cancelDeferred.call(provider, model, handle, hooked)
+            );
+          },
         }
       : {}),
   };

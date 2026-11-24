@@ -11,7 +11,7 @@ import {
 } from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
-import { normalizeProviderProxy, sameProviderProxy } from '@shared/providers/providerProxy';
+import { parseProviderProxy, sameProviderProxy } from '@shared/providers/providerProxy';
 import type { MemoryOp } from '@shared/types/agent';
 import { effectiveDisabledBuiltinTools } from '@shared/types/builtinTools';
 import type { ModelProvider } from '@shared/types/llm';
@@ -189,9 +189,10 @@ export function syncMemoryEmbeddingFromSettings(state: Record<string, unknown>):
         (key, params) => translate(locale, key, params)
       )
     : null;
-  const proxy = normalizeProviderProxy(selected?.proxy);
+  // 坏代理不给凭证：不能退回全局代理把记忆正文发到用户没选的出口
+  const proxy = parseProviderProxy(selected?.proxy);
   const credentials: RemoteEmbeddingOptions | null =
-    remote && !issue && selected
+    remote && !issue && selected && proxy !== null
       ? { baseUrl: selected.baseUrl, apiKey: selected.apiKey, ...(proxy ? { proxy } : {}) }
       : null;
   const previous = config.remoteCredentials?.();

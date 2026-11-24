@@ -994,6 +994,11 @@ describe('memoryHost embedding 配置与生命周期', () => {
     syncMemoryEmbeddingFromSettings(withProxy());
     await (await getMemoryEmbedder())!.embed('global again', 'query');
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // 坏代理不发请求，不退回全局 fetch
+    syncMemoryEmbeddingFromSettings(withProxy({ mode: 'custom', url: 'socks5://127.0.0.1:1' }));
+    await (await getMemoryEmbedder())?.embed('bad proxy', 'query').catch(() => {});
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it.each([

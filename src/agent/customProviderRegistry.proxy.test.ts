@@ -93,7 +93,11 @@ describe('自定义 provider 代理经 dispatcher 生效（真实网络）', () 
     applyWorkerProxyEnv({ HTTP_PROXY: globalProxy.url, http_proxy: null, NO_PROXY: '' });
   });
 
-  async function runGoogle(proxy: ProviderProxyConfig | undefined, simple = false) {
+  async function runGoogle(
+    proxy: ProviderProxyConfig | undefined,
+    simple = false,
+    extra: Record<string, unknown> = {}
+  ) {
     const { runtime, native } = runtimeWith({
       stream: googleApi.stream as Provider['stream'],
       streamSimple: googleApi.streamSimple as Provider['streamSimple'],
@@ -121,7 +125,9 @@ describe('自定义 provider 代理经 dispatcher 生效（真实网络）', () 
       maxTokens: 100,
     } as Model<Api>;
     const call = simple ? registered.streamSimple : registered.stream;
-    return call.call(registered, model, context as never, { apiKey: 'test-key' } as never).result();
+    return call
+      .call(registered, model, context as never, { apiKey: 'test-key', ...extra } as never)
+      .result();
   }
 
   it('Google 适配器在单商代理下不报「Custom fetch」且经该代理发出', async () => {
@@ -149,6 +155,24 @@ describe('自定义 provider 代理经 dispatcher 生效（真实网络）', () 
     ]);
     expect(custom.hits).toHaveLength(2);
     expect(globalProxy.hits).toEqual([]);
+  });
+
+  it('onPayload / onResponse 等调用方钩子回到调用方上下文，钩子里的请求不串到该服务商代理', async () => {
+    let hookCalls = 0;
+    const hookFetch = async () => {
+      hookCalls++;
+      await (await fetch(`${targetBase}/hook`)).text();
+    };
+    await runGoogle({ mode: 'custom', url: custom.url }, false, {
+      onPayload: async () => {
+        await hookFetch();
+        return undefined;
+      },
+      onResponse: hookFetch,
+    });
+    expect(custom.hits).toHaveLength(1);
+    expect(hookCalls).toBeGreaterThan(0);
+    expect(globalProxy.hits).toHaveLength(hookCalls);
   });
 
   it('跟随全局时 withProviderProxy 原样返回，不额外包装', () => {

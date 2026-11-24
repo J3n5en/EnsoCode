@@ -246,6 +246,8 @@ export interface VirtualClassifierCredentials {
   apiKey?: string;
   /** System One 兼容网关地址；缺省用 pi catalog 内置地址 */
   baseUrl?: string;
+  /** API Key 供应商的独立代理；缺省跟随全局代理 */
+  proxy?: ProviderProxyConfig;
 }
 
 export interface VirtualSpawnClassifier {
@@ -3238,11 +3240,12 @@ function parseVirtualSpawnClassifier(value: unknown): boolean {
 function parseClassifierCredentials(value: unknown): value is VirtualClassifierCredentials {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ['provider', 'modelId', 'apiKey', 'baseUrl']) &&
+    hasOnlyKeys(value, ['provider', 'modelId', 'apiKey', 'baseUrl', 'proxy']) &&
     isNonEmptyString(value.provider) &&
     isNonEmptyString(value.modelId) &&
     (value.apiKey === undefined || typeof value.apiKey === 'string') &&
-    (value.baseUrl === undefined || isNonEmptyString(value.baseUrl))
+    (value.baseUrl === undefined || isNonEmptyString(value.baseUrl)) &&
+    (value.proxy === undefined || Boolean(parseProviderProxy(value.proxy)))
   );
 }
 

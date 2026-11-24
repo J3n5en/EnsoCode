@@ -38,6 +38,7 @@ vi.mock('./modelDirectory', () => ({
 import {
   agentTypeRegistrySnapshot,
   configuredAgentTypes,
+  customProvidersForWorker,
   expectedAgentTypeToolIds,
   readSettingsState,
   rememberParentToolProfile,
@@ -161,7 +162,9 @@ describe('resolveWebSearchConfig', () => {
       },
     };
     const degraded = resolveModelSelection(provider.id, 'local-model', new Set());
-    expect(degraded.ok && degraded.selection.config).not.toHaveProperty('proxy');
+    // 坏代理整单拒绝，不能静默退回全局代理
+    expect(degraded.ok).toBe(false);
+    expect(customProvidersForWorker()).toEqual([]);
   });
 });
 
@@ -1139,6 +1142,20 @@ describe('resolveApprovalReviewer', () => {
       ok: true,
       source: { classifier: { provider: 'typesafe', modelId: 'jev-latest', apiKey: 'jev-key' } },
     });
+  });
+
+  it('分类器供应商的独立代理随凭证下发；坏代理不下发分类器', () => {
+    const proxy = { mode: 'custom' as const, url: 'http://127.0.0.1:7890' };
+    withReviewer([{ ...jev, proxy }], { providerId: 'jev', modelId: 'jev-latest' });
+    expect(resolveApprovalReviewer(new Set())).toMatchObject({
+      ok: true,
+      source: { classifier: { modelId: 'jev-latest', proxy } },
+    });
+    withReviewer([{ ...jev, proxy: { mode: 'custom', url: 'socks5://h:1' } as never }], {
+      providerId: 'jev',
+      modelId: 'jev-latest',
+    });
+    expect(resolveApprovalReviewer(new Set()).ok).toBe(false);
   });
 
   it('托管开关只对分类器代审生效', () => {

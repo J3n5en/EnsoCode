@@ -31,6 +31,23 @@ export function runWithProviderProxy<T>(proxy: ProviderProxyConfig | undefined, 
   return providerProxyContext.run(proxy, fn);
 }
 
+const CALLER_HOOKS = ['onPayload', 'onResponse', 'onProviderStreamEvent'] as const;
+
+/** 调用方钩子（扩展的 before_provider_request 等）回到调用方上下文执行，钩子里的请求不继承服务商代理。 */
+export function withCallerHooks<T>(options: T): T {
+  if (!options || typeof options !== 'object') return options;
+  const caller = AsyncLocalStorage.snapshot();
+  const record = options as Record<string, unknown>;
+  const wrapped: Record<string, unknown> = { ...record };
+  for (const name of CALLER_HOOKS) {
+    const hook = record[name];
+    if (typeof hook === 'function') {
+      wrapped[name] = (...args: unknown[]) => caller(() => hook(...args));
+    }
+  }
+  return wrapped as T;
+}
+
 /**
  * worker 启动自举：按 fork 时继承的 HTTP_PROXY / NO_PROXY 装 undici dispatcher。
  * Node fetch 默认不读代理 env；main 在 worker 存在前下发的 set-proxy-env 又会被丢，

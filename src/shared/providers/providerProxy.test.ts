@@ -81,6 +81,12 @@ describe('redactProxyUrlCredentials', () => {
     expect(redactProxyUrlCredentials('http://127.0.0.1:7890')).toBe('http://127.0.0.1:7890');
   });
 
+  it('密码里未编码的 @ 也整段隐藏，不漏出半截', () => {
+    expect(redactProxyUrlCredentials('via http://user:p@ss@127.0.0.1:7890/x failed')).toBe(
+      'via http://***@127.0.0.1:7890/x failed'
+    );
+  });
+
   it('识别地址是否带凭据', () => {
     expect(proxyUrlHasCredentials('http://u:p@h:1')).toBe(true);
     expect(proxyUrlHasCredentials('http://u@h:1')).toBe(true);

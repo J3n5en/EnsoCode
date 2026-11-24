@@ -6,6 +6,7 @@ import { BlockList, isIP } from 'node:net';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ImageGenerationConfig, ImageGenItem } from '@shared/imageGeneration';
+import { runWithProviderProxy } from '../proxyEnv';
 import type { ConfirmOutsideImage } from '../tools/sendImage';
 import { isPublicAddress, validateFetchUrl } from '../tools/webFetch';
 import { imageDownloadDispatcher } from './downloadDispatcher';
@@ -313,11 +314,9 @@ export async function generate(
     }
     const base = config.baseUrl.replace(/\/+$/, '');
     const jsonRequest = async (url: string, init: RequestInit) => {
-      const response = await (deps.fetch ?? imageFetch)(url, {
-        ...init,
-        signal,
-        redirect: 'error',
-      });
+      const response = await runWithProviderProxy(config.proxy, () =>
+        (deps.fetch ?? imageFetch)(url, { ...init, signal, redirect: 'error' })
+      );
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
         throw new HttpFailure(response.status);

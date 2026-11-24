@@ -1,4 +1,5 @@
 import { DEFAULT_BASE_URLS, withVersionSegment } from './providerCatalog';
+import { type ProviderProxyConfig, parseProviderProxy } from './providers/providerProxy';
 import type { ModelEntry, ModelProvider } from './types';
 
 export type ImageGenerationProtocol = 'openai' | 'openai-compatible' | 'gemini';
@@ -8,6 +9,8 @@ export interface ImageGenerationConfig {
   protocol: ImageGenerationProtocol;
   baseUrl: string;
   apiKey: string;
+  /** 所选服务商的独立代理；缺省跟随全局代理 */
+  proxy?: ProviderProxyConfig;
 }
 export interface ImageGenerationState {
   config: ImageGenerationConfig | null;
@@ -46,11 +49,12 @@ export function parseImageGenerationConfig(value: unknown): ImageGenerationConfi
   if (!raw) return null;
   if (
     Object.keys(raw).some(
-      (key) => !['providerId', 'modelId', 'protocol', 'baseUrl', 'apiKey'].includes(key)
+      (key) => !['providerId', 'modelId', 'protocol', 'baseUrl', 'apiKey', 'proxy'].includes(key)
     )
   )
     return null;
   const { providerId, modelId, protocol, baseUrl, apiKey } = raw;
+  const proxy = parseProviderProxy(raw.proxy);
   if (
     typeof providerId !== 'string' ||
     !providerId.trim() ||
@@ -60,10 +64,11 @@ export function parseImageGenerationConfig(value: unknown): ImageGenerationConfi
     !apiKey.trim() ||
     typeof baseUrl !== 'string' ||
     !validUrl(baseUrl) ||
-    (protocol !== 'openai' && protocol !== 'openai-compatible' && protocol !== 'gemini')
+    (protocol !== 'openai' && protocol !== 'openai-compatible' && protocol !== 'gemini') ||
+    proxy === null
   )
     return null;
-  return { providerId, modelId, protocol, baseUrl, apiKey };
+  return { providerId, modelId, protocol, baseUrl, apiKey, ...(proxy ? { proxy } : {}) };
 }
 function providerConfig(provider: ModelProvider, modelId: string): ImageGenerationConfig | null {
   if (
@@ -111,6 +116,8 @@ function providerConfig(provider: ModelProvider, modelId: string): ImageGenerati
     protocol,
     baseUrl,
     apiKey: provider.apiKey,
+    // 坏代理在解析时整单拒绝，不退回全局代理
+    ...(provider.proxy !== undefined ? { proxy: provider.proxy } : {}),
   });
 }
 

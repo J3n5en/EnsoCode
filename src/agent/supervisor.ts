@@ -291,7 +291,7 @@ import {
 import { createProjectSettingsManager } from './projectCode';
 import { projectMessage } from './projection';
 import { promptCatalogExtension } from './promptCatalog';
-import { applyWorkerProxyEnv } from './proxyEnv';
+import { applyWorkerProxyEnv, runWithProviderProxy } from './proxyEnv';
 import { withReadTruncationMeta } from './readTruncation';
 import { enqueueReminder, REMINDER_QUEUE_LIMIT } from './reminderQueue';
 import { createReminderTools, REMINDER_RETRY_MS, ReminderStore, reminderNotice } from './reminders';
@@ -6834,13 +6834,15 @@ export class SessionSupervisor {
           session.gate.snapshot().some((item) => item.requestId === info.requestId)
         )?.messages ?? []
       );
-      const result = await runtime.classify(
-        model,
-        buildApprovalClassifierRequest(
-          { tool: info.tool, kind: info.kind, summary: info.summary, recentMessages },
-          { managed }
-        ),
-        { signal: combined, ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}) }
+      const result = await runWithProviderProxy(credentials.proxy, () =>
+        runtime.classify(
+          model,
+          buildApprovalClassifierRequest(
+            { tool: info.tool, kind: info.kind, summary: info.summary, recentMessages },
+            { managed }
+          ),
+          { signal: combined, ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}) }
+        )
       );
       if (result.stopReason !== 'stop') {
         return {
@@ -6985,22 +6987,24 @@ export class SessionSupervisor {
     try {
       const runtime = await this.getRuntime();
       const model = resolveClassifierModel(runtime, command.classifier);
-      const result = await runtime.classify(
-        model,
-        {
-          state: command.state as never,
-          questions: {
-            choice: {
-              type: 'choice',
-              instructions: command.instructions,
-              criteria: command.criteria,
+      const result = await runWithProviderProxy(command.classifier.proxy, () =>
+        runtime.classify(
+          model,
+          {
+            state: command.state as never,
+            questions: {
+              choice: {
+                type: 'choice',
+                instructions: command.instructions,
+                criteria: command.criteria,
+              },
             },
           },
-        },
-        {
-          signal: AbortSignal.any([userAbort.signal, timeout.signal]),
-          ...(command.classifier.apiKey ? { apiKey: command.classifier.apiKey } : {}),
-        }
+          {
+            signal: AbortSignal.any([userAbort.signal, timeout.signal]),
+            ...(command.classifier.apiKey ? { apiKey: command.classifier.apiKey } : {}),
+          }
+        )
       );
       const answer = result.answers.choice;
       if (result.stopReason !== 'stop' || answer?.type !== 'choice') {

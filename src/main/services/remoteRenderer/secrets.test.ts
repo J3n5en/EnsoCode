@@ -1,5 +1,12 @@
+import { isValidProxyUrl } from '@shared/proxy';
 import { describe, expect, it } from 'vitest';
-import { containsSentinel, REMOTE_SECRET_SENTINEL, redactSecrets, restoreSecrets } from './secrets';
+import {
+  containsSentinel,
+  REMOTE_SECRET_SENTINEL,
+  redactSecrets,
+  resolveProviderProbeSecret,
+  restoreSecrets,
+} from './secrets';
 
 const disk = {
   'enso-settings': {
@@ -52,5 +59,35 @@ describe('remote settings secrets', () => {
       {}
     );
     expect(restored.providers[0].apiKey).toBe('');
+  });
+
+  it('服务商代理地址里的账密不发给远端，原样写回时还原', () => {
+    const proxied = {
+      providers: [
+        { id: 'p', apiKey: 'k', proxy: { mode: 'custom', url: 'http://user:pa55@127.0.0.1:7890' } },
+        { id: 'q', apiKey: 'k', proxy: { mode: 'custom', url: 'http://127.0.0.1:7891' } },
+      ],
+    };
+    const redacted = redactSecrets(proxied);
+    expect(JSON.stringify(redacted)).not.toMatch(/user|pa55/);
+    expect(redacted.providers[0].proxy.mode).toBe('custom');
+    expect(isValidProxyUrl(redacted.providers[0].proxy.url)).toBe(true);
+    expect(redacted.providers[1].proxy.url).toBe('http://127.0.0.1:7891');
+    expect(restoreSecrets(redacted, proxied)).toEqual(proxied);
+  });
+
+  it('远端探测只在端点与代理都和宿主一致时回填 key 与代理账密', () => {
+    const stored = {
+      api: 'openai-completions',
+      baseUrl: 'http://gw.local/v1',
+      apiKey: 'real-key',
+      proxy: { mode: 'custom', url: 'http://user:pa55@127.0.0.1:7890' },
+    };
+    const remote = { ...redactSecrets(stored) };
+    expect(resolveProviderProbeSecret(remote, [stored])).toEqual(stored);
+    const hijack = { ...remote, proxy: { mode: 'custom', url: 'http://evil.example:8080' } };
+    expect(resolveProviderProbeSecret(hijack, [stored])).toMatchObject({ apiKey: '' });
+    const typed = { ...hijack, apiKey: 'own-key' };
+    expect(resolveProviderProbeSecret(typed, [stored])).toEqual(typed);
   });
 });
