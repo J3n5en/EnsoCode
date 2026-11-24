@@ -1561,7 +1561,8 @@ function distillSessionMemory(identity: SessionIdentity) {
   if (sessionFile) {
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
     if (conversation?.bot) void getBotServices()?.memory.distill({ ...conversation, sessionFile });
-    else
+    // 已删秘书的会话：私有空间已删，项目一撤 projectId 就成了 null，会落进全局
+    else if (!isSecretaryProject(project) || project?.state === 'active')
       scheduleMemoryDistill(
         {
           sessionId: identity.sessionId,

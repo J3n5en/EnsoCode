@@ -811,15 +811,16 @@ export function registerSecretaryHandlers(): void {
     if (!ctx) return { ok: false, error: 'not-found' };
     // 二次确认：界面先拿预览、用户再点一次确认，才会带上这个标记
     if (parsed.confirmed !== true) return { ok: false, error: 'confirmation-required' };
-    const host = hosts.get(ctx.id);
-    host?.stop();
-    hosts.delete(ctx.id);
-    resumeFailureSubscriptions.get(ctx.id)?.();
-    resumeFailureSubscriptions.delete(ctx.id);
-    statePublishers.delete(ctx.id);
-    await contacts?.remove(ctx.id, true);
     const result = await deleteSecretary(ctx, {
       forget: (conversationId) => driver?.forget(conversationId),
+      stop: async () => {
+        hosts.get(ctx.id)?.stop();
+        hosts.delete(ctx.id);
+        resumeFailureSubscriptions.get(ctx.id)?.();
+        resumeFailureSubscriptions.delete(ctx.id);
+        statePublishers.delete(ctx.id);
+        await contacts?.remove(ctx.id, true);
+      },
     });
     notifySecretariesChanged();
     broadcastState();

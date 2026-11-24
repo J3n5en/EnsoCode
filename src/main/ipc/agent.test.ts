@@ -2112,6 +2112,23 @@ describe('压缩完成触发记忆整理', () => {
     );
   });
 
+  it('秘书会话结束：秘书还在就进它的私有空间；秘书已删（隐藏项目已撤）就不再蒸馏，不落进全局', () => {
+    conversation();
+    const project = vi.spyOn(getSourceAuthorityRegistry()!, 'project');
+    const secretary = { projectId: 'p', kind: 'secretary', canonicalPath: '/s', version: 1 };
+    project.mockReturnValue({ ...secretary, state: 'active' } as never);
+    emit({ type: 'parent-ended' });
+    expect(mocks.scheduleMemoryDistill).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'conv-1', projectId: 'p' }),
+      { continueFromLastJob: true }
+    );
+    mocks.scheduleMemoryDistill.mockClear();
+    project.mockReturnValue({ ...secretary, state: 'removed' } as never);
+    emit({ type: 'parent-ended' });
+    expect(mocks.scheduleMemoryDistill).not.toHaveBeenCalled();
+    project.mockRestore();
+  });
+
   it('调度失败（服务超时 / 退出）只记一条结构化 warn，不留未处理的 rejection', async () => {
     conversation();
     const unhandled = vi.fn();

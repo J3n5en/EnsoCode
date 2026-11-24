@@ -90,23 +90,24 @@ export async function deletePreview(
 export interface DeleteSecretaryPorts {
   /** 撤掉派出会话的续跑与看门狗：无人管理后不再由 Main 驱动 */
   forget(conversationId: string): void;
+  /** 停它的回传宿主与联系方式：同步段先停宿主，返回的 promise 等联系方式收尾 */
+  stop(): Promise<void>;
 }
 
 /**
  * 删除秘书：它管理的会话变为无人管理（派发记录随秘书文件删除、会话行上的派出归属清掉，
  * 会话本身不删）；它自己的秘书会话与隐藏项目移除；私有记忆删除；目录删除。
- * 调用方先停掉它的回传宿主与联系方式。登记一删就算删除成立，之后的清理失败只记日志；
+ * 登记删除是提交点：它失败什么都不动；之后的清理失败只记日志。
  * 秘书会话的释放并行发出、不等结果，避免逐个等超时。
  */
 export async function deleteSecretary(
   ctx: SecretaryContext,
   ports: DeleteSecretaryPorts
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const store = new SecretaryStore(ctx.dir);
-  const records = Object.values(store.dispatch().dispatched);
   const settings = await import('../../ipc/settings');
   const agent = await import('../../ipc/agent');
   const authority = agent.getSourceAuthorityRegistry();
+  const records = Object.values(new SecretaryStore(ctx.dir).dispatch().dispatched);
   const attempt = (label: string, run: () => void) => {
     try {
       run();
@@ -114,17 +115,27 @@ export async function deleteSecretary(
       console.warn(`[secretary] delete: ${label} failed:`, error);
     }
   };
-  for (const record of records) {
-    attempt('forget', () => ports.forget(record.conversationId));
-    // 提问不再转给一个已经不存在的秘书：恢复成直接问用户
-    attempt('ask relay', () => agent.setAskRelayFromMain(record.conversationId, undefined));
-  }
   const managed = new Set(records.map((record) => record.conversationId));
   const own = new Set(
     (authority?.projection().conversations ?? [])
       .filter((conversation) => conversation.projectId === ctx.projectId)
       .map((conversation) => conversation.conversationId)
   );
+  // 读派发记录到这里都在同一同步段，宿主插不进来改它
+  try {
+    secretaryRegistry().remove(ctx.id);
+  } catch (error) {
+    console.warn('[secretary] delete: removing registry entry failed:', error);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  const stopped = ports.stop().catch((error: unknown) => {
+    console.warn('[secretary] delete: stopping host or contacts failed:', error);
+  });
+  for (const record of records) {
+    attempt('forget', () => ports.forget(record.conversationId));
+    // 提问不再转给一个已经不存在的秘书：恢复成直接问用户
+    attempt('ask relay', () => agent.setAskRelayFromMain(record.conversationId, undefined));
+  }
   // 释放命令在移除隐藏项目前同步发出（之后会话身份就查不到了），结果不等
   const releases = [...own].map(async (conversationId) => {
     if (agent.isRootSessionAlive(conversationId)) {
@@ -156,12 +167,13 @@ export async function deleteSecretary(
       state.order = state.order.filter((id) => !own.has(id));
     })
   );
-  try {
-    secretaryRegistry().remove(ctx.id);
-  } catch (error) {
-    console.warn('[secretary] delete: removing registry entry failed:', error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
+  const projectId = ctx.projectId;
+  if (projectId) attempt('hidden project', () => authority?.removeSecretaryProject(projectId));
+  attempt('forget project', () => forgetSecretaryProject(ctx.id));
+  attempt('forget profile', () => forgetSecretaryProfile(ctx.id));
+  attempt('forget handlers', () => forgetSecretaryHandlers(ctx.id));
+  // 联系方式停稳了再删目录：免得它收尾时把 contact.json 写回来
+  await stopped;
   const targets =
     ctx.id === DEFAULT_SECRETARY_ID
       ? DEFAULT_OWNED_FILES.map((name) => path.join(ctx.dir, name))
@@ -169,9 +181,6 @@ export async function deleteSecretary(
   for (const target of targets) {
     attempt('removing files', () => rmSync(target, { recursive: true, force: true }));
   }
-  attempt('forget project', () => forgetSecretaryProject(ctx.id));
-  attempt('forget profile', () => forgetSecretaryProfile(ctx.id));
-  attempt('forget handlers', () => forgetSecretaryHandlers(ctx.id));
   attempt('audit', () =>
     appendAudit(secretaryRegistry().dir(DEFAULT_SECRETARY_ID), {
       at: Date.now(),
@@ -182,9 +191,7 @@ export async function deleteSecretary(
       detail: `sessions=${records.length}`,
     })
   );
-  if (ctx.projectId) {
-    const projectId = ctx.projectId;
-    attempt('hidden project', () => authority?.removeSecretaryProject(projectId));
+  if (projectId) {
     try {
       const { projectSpaceId } = await import('../memory/types');
       const { removeMemorySpace } = await import('../memoryCleanup');
