@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
+import type { ScannedSession } from './types';
 
 /** 扫描的会话文件数量上限（按 mtime 取最近的） */
 const MAX_FILES = 2000;
@@ -138,9 +139,9 @@ export function listCodexSessions(
   projectPath: string,
   home = os.homedir(),
   maxFiles = MAX_FILES
-): ExternalSession[] {
+): ScannedSession[] {
   const files = listRolloutFiles(path.join(home, '.codex', 'sessions'), maxFiles);
-  const sessions: ExternalSession[] = [];
+  const sessions: ScannedSession[] = [];
   for (const file of files) {
     const sessionCwd = cwdOfSession(file.path);
     if (!sessionCwd || !sameProjectPath(sessionCwd, projectPath)) continue;
