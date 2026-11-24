@@ -86,6 +86,33 @@ describe('TitleBar centered content', () => {
   });
 });
 
+describe('TitleBar drag region', () => {
+  // macOS 原生命中测试不认 drag 祖先里的 no-drag 例外：拖拽区只能是不包含任何可交互元素的独立空元素
+  const dragSpacer = /<div aria-hidden="true" class="drag-region[^"]*"><\/div>/;
+  const leading = createElement('button', { type: 'button', 'data-testid': 'lead' });
+  const actions = createElement('button', { type: 'button' }, 'act');
+
+  it.each(['darwin', 'win32', 'linux'] as const)(
+    '%s: header itself is not draggable and an empty spacer carries the drag',
+    (platform) => {
+      setPlatform(platform);
+      const html = render({ leading, actions });
+      const header = html.match(/<header[^>]*>/)?.[0] ?? '';
+      expect(header).not.toContain('drag-region');
+      expect(html).toMatch(dragSpacer);
+      expect(html.match(/drag-region/g)).toHaveLength(1);
+    }
+  );
+
+  it('spacer fills the gap between leading and actions without overlapping them', () => {
+    setPlatform('darwin');
+    const html = render({ leading, actions });
+    expect(html.match(dragSpacer)?.[0]).toContain('flex-1');
+    expect(html.indexOf('data-testid="lead"')).toBeLessThan(html.search(dragSpacer));
+    expect(html.search(dragSpacer)).toBeLessThan(html.indexOf('>act<'));
+  });
+});
+
 describe('TitleBar on narrow viewports (remote browser)', () => {
   it('drops traffic-light inset, native caption inset and custom caption buttons', () => {
     mobile = true;

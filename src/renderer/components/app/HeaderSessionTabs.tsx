@@ -115,6 +115,7 @@ export function HeaderSessionTabs({ onNew }: { onNew: () => void }) {
           </button>
         </>
       )}
+      <div aria-hidden className="drag-region h-full min-w-2 flex-1" />
     </div>
   );
 }

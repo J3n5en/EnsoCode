@@ -178,6 +178,22 @@ describe('HeaderSessionTabs 空状态', () => {
   });
 });
 
+describe('HeaderSessionTabs 拖拽区', () => {
+  it('标签与新建按钮之后留出独立的空拖拽区，可交互元素都不在拖拽区内', async () => {
+    harness.state.conversations = { a: conversation('a') };
+    harness.state.activeIds = ['a'];
+    harness.state.order = ['a'];
+    harness.state.activeId = 'a';
+    await render();
+    await act(async () => publish());
+    expect(tabIds()).toEqual(['a']);
+    const spacer = container.querySelector('[data-enso="header-session-tabs"]')?.lastElementChild;
+    expect(spacer?.classList.contains('drag-region')).toBe(true);
+    expect(spacer?.childElementCount).toBe(0);
+    expect(container.querySelector('.drag-region button, .drag-region [role]')).toBeNull();
+  });
+});
+
 describe('HeaderSessionTabs 移出标签', () => {
   it('点移出后标签从顶栏消失，并记录到 dismissed', async () => {
     harness.state.conversations = { a: conversation('a'), b: conversation('b') };
