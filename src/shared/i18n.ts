@@ -1985,6 +1985,7 @@ export const zhTranslations: Record<string, string> = {
   'Synthesized from': '合成自',
   'Related versions': '相关版本',
   'Delete permanently': '永久删除',
+  'Deleting…': '删除中…',
   'Delete this memory permanently?': '永久删除这条记忆?',
   'All space types': '全部空间类型',
   'Recorded {{date}}': '记录于 {{date}}',

@@ -641,7 +641,10 @@ export function SecretarySettings() {
             secretaryId={current}
             onOpenChange={setDeleteOpen}
             onDeleted={() => {
-              setSelected(undefined);
+              const deleted = current;
+              const rest = secretaries.filter((entry) => entry.id !== deleted);
+              setSecretaries(rest);
+              setSelected(rest[0]?.id);
               void loadList();
             }}
           />

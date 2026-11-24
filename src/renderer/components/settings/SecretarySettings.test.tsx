@@ -28,6 +28,15 @@ vi.mock('@/components/secretary/SecretaryProfileForm', () => ({
 vi.mock('@/components/secretary/SecretaryResetDialog', () => ({
   SecretaryResetDialog: () => null,
 }));
+const deleteProps = vi.hoisted(() => ({
+  current: null as { secretaryId: string; onDeleted?: () => void } | null,
+}));
+vi.mock('@/components/secretary/SecretaryDeleteDialog', () => ({
+  SecretaryDeleteDialog: (props: { secretaryId: string; onDeleted?: () => void }) => {
+    deleteProps.current = props;
+    return null;
+  },
+}));
 vi.mock('./PresetsSettings', () => ({ PickList: () => null }));
 
 /** 裁切弹窗与读文件都换成可控桩：这里只验上传状态机，不验 canvas */
@@ -77,6 +86,7 @@ function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile 
 }
 
 const api = {
+  list: vi.fn(async () => [] as { id: string; name: string | null }[]),
   getProfile: vi.fn(),
   saveProfile: vi.fn(),
   setAvatar: vi.fn(),
@@ -86,6 +96,8 @@ let root: Root | undefined;
 let container: HTMLElement;
 
 beforeEach(() => {
+  api.list.mockReset();
+  api.list.mockImplementation(async () => []);
   api.getProfile.mockReset();
   api.saveProfile.mockReset();
   api.setAvatar.mockReset();
@@ -95,7 +107,6 @@ beforeEach(() => {
   Object.assign(dom.window, {
     electronAPI: {
       secretary: {
-        list: async () => [],
         onListChanged: () => () => {},
         ...api,
         listSchedules: async () => ({ ok: true, schedules: [] }),
@@ -397,5 +408,34 @@ describe('设置 → 秘书：头像上传', () => {
     await pick('fake.gif', 'image/gif', 4, Uint8Array.of(137, 80, 78, 71));
     expect(cropSource()).toBe('data:fake.gif');
     expect(api.setAvatar).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('设置 → 秘书：删除后切换', () => {
+  it('删除后立刻从列表摘掉，选中落到剩下的第一个，并加载它自己的档案', async () => {
+    api.list.mockResolvedValueOnce([
+      { id: 's-b', name: 'B' },
+      { id: 's-a', name: 'A' },
+      { id: 's-c', name: 'C' },
+    ]);
+    api.getProfile.mockImplementation(async (id: string) => ({
+      ok: true,
+      profile: { ...profile(3), name: id === 's-b' ? 'B' : id === 's-a' ? 'A' : 'C' },
+      persona: '',
+    }));
+    await mount();
+    expect(deleteProps.current?.secretaryId).toBe('s-b');
+    expect((formProps.current?.initialDraft as { name: string } | undefined)?.name).toBe('B');
+
+    // 重拉列表迟迟不回：界面也不能停在已删除的那个上
+    api.list.mockImplementation(() => new Promise(() => {}));
+    await act(async () => deleteProps.current?.onDeleted?.());
+    const picks = [...container.querySelectorAll('[data-enso="secretary-settings-pick"]')].map(
+      (el) => el.getAttribute('data-secretary-id')
+    );
+    expect(picks).toEqual(['s-a', 's-c']);
+    expect(deleteProps.current?.secretaryId).toBe('s-a');
+    expect(api.getProfile).toHaveBeenLastCalledWith('s-a');
+    expect((formProps.current?.initialDraft as { name: string } | undefined)?.name).toBe('A');
   });
 });
