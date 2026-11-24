@@ -42,7 +42,7 @@ import type {
 import { formatRetryClock, type GoalUpstreamRetry } from '@shared/upstreamRecovery';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
-import { autoArchivable, autoArchived, liveTasks } from './autoArchive';
+import { autoArchived, liveTasks } from './autoArchive';
 import type { SecretaryContactPort } from './contact/service';
 import {
   type DeliveryPorts,
@@ -178,11 +178,11 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   verifyGoalResult?(conversationId: string, result: GoalResult): Promise<GoalResultCheck[]>;
   /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
   reportPeerTodos?(): boolean;
-  /** 派出会话收口后自动归档：和用户手动归档写同一份会话行；缺省表示不自动归档 */
+  /** 派出会话自动归档已回退，Main 不再调用；端口留作以后复用 */
   archive?(conversationId: string, at: number): void;
-  /** 自动归档的会话被唤醒：收回归档 */
+  /** 以前自动归档的会话被唤醒：收回归档 */
   unarchive?(conversationId: string): void;
-  /** 用户此刻正开着这个会话：先不收走，切走后再归档 */
+  /** 用户此刻正开着这个会话；自动归档回退后暂不使用 */
   viewed?(conversationId: string): boolean;
 }
 
@@ -195,7 +195,7 @@ export interface SecretaryHost {
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
   /** 冷启动没能按恢复清单接着跑这个会话：照常报失败 */
   onRestartResumeFailed(conversationId: string, error: string, now?: number): void;
-  /** 当前打开的会话变了：之前因为正开着而没收走的已完成会话，这时归档 */
+  /** 当前打开的会话变了：补判以前自动归档的会话是否要收回 */
   sweepAutoArchive(now?: number): void;
   recover(): void;
   start(): void;
@@ -377,7 +377,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   const goalVerifies = new Map<string, GoalVerifySlot>();
   const goalVerifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 因后台任务暂不归档时最近记过的审计：同一批任务只记一次 */
-  const archiveHolds = new Map<string, string>();
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
   let patrolAt: number | undefined;
   /** 下一次遗留任务巡检的时间；与进行中巡检分开计时，没有进行中的会话也照常扫 */
@@ -509,9 +508,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   }
 
   /**
-   * 派出会话 goal-complete 收口就归档；自动归档的会话重新跑起来就收回。
-   * 正开着的会话先不收走；用户手动归档或手动取消归档的不碰。返回是否改了记录。
-   * 后台任务以 Main 的任务表为准：还有没结束的就不收，已自动归档的收回；表还没报上来时两样都不做。
+   * 自动归档已回退：派出会话完成后不再收进归档。
+   * 只处理以前自动归档的会话：重新跑起来或还有没结束的后台任务就收回；用户手动归档的不碰。返回是否改了记录。
+   * 任务表还没报上来时不按空表判断。
    */
   function syncAutoArchive(
     file: SecretaryDispatchFile,
@@ -520,7 +519,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     now: number,
     woken: ReadonlySet<string> = new Set()
   ): boolean {
-    if (!ports.archive) return false;
+    if (!ports.unarchive) return false;
     const reported = ports.tasksReported?.() ?? true;
     let changed = false;
     for (const conversationId of ids) {
@@ -531,7 +530,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (autoArchived(record, row)) {
         const woke = woken.has(conversationId);
         if (!woke && live.length === 0) continue;
-        ports.unarchive?.(conversationId);
+        ports.unarchive(conversationId);
         delete record.autoArchivedAt;
         // 因为任务还在跑才收回的：任务都结束后要能再归档一次
         if (!woke) delete record.autoArchiveResultAt;
@@ -551,40 +550,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         delete record.autoArchivedAt;
         changed = true;
       }
-      if (ports.viewed?.(conversationId)) continue;
-      const status = ports.status(conversationId);
-      if (!autoArchivable(record, row, status, reminderPending(conversationId, now))) {
-        archiveHolds.delete(conversationId);
-        continue;
-      }
-      if (!reported || live.length > 0) {
-        const detail = reported
-          ? `background tasks running: ${taskList(live)}`
-          : 'background tasks not reported yet';
-        if (archiveHolds.get(conversationId) === detail) continue;
-        archiveHolds.set(conversationId, detail);
-        ports.audit?.({
-          at: now,
-          secretaryConversationId: record.secretaryConversationId,
-          op: 'auto_archive_held',
-          targetId: conversationId,
-          ok: true,
-          detail,
-        });
-        continue;
-      }
-      archiveHolds.delete(conversationId);
-      ports.archive(conversationId, now);
-      record.autoArchivedAt = now;
-      record.autoArchiveResultAt = record.lastResult?.at;
-      ports.audit?.({
-        at: now,
-        secretaryConversationId: record.secretaryConversationId,
-        op: 'auto_archive',
-        targetId: conversationId,
-        ok: true,
-      });
-      changed = true;
     }
     return changed;
   }
