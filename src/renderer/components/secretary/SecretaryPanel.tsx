@@ -1,6 +1,6 @@
 import type { SecretaryScheduleView } from '@shared/types/secretary';
 import { Settings } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
@@ -39,6 +39,7 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
       : state.secretary
   );
   const focusProposal = useSecretaryStore((state) => state.focusProposal);
+  const reload = useSecretaryStore((state) => state.reload);
   const [tab, setTab] = useState<Tab>('workbench');
   const [runningOpen, setRunningOpen] = useState(false);
   const [schedules, setSchedules] = useState<SecretaryScheduleView[]>([]);
@@ -58,7 +59,7 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
   }, [focusProposal]);
 
   const view = secretarySectionView(secretary, t);
-  if (!view) return null;
+  if (!view) return <SecretaryPanelPending onReload={() => void reload(secretaryId)} />;
 
   const badge: Record<Tab, number> = {
     workbench: view.needsYou,
@@ -156,6 +157,32 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/** 面板拿到的秘书状态还没启用（未读到或读到旧的）：给出提示并主动重读，不留一整块白 */
+function SecretaryPanelPending({ onReload }: { onReload: () => void }) {
+  const { t } = useI18n();
+  const reloadRef = useRef(onReload);
+  reloadRef.current = onReload;
+  useEffect(() => {
+    reloadRef.current();
+  }, []);
+  return (
+    <div
+      data-enso="secretary-panel-pending"
+      className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center"
+    >
+      <p className="text-[12.5px] text-muted-foreground">{t('Loading secretary…')}</p>
+      <button
+        type="button"
+        data-enso="secretary-panel-reload"
+        onClick={onReload}
+        className="rounded-md border border-border px-3 py-1 text-[12px] text-muted-foreground hover:text-foreground"
+      >
+        {t('Retry')}
+      </button>
     </div>
   );
 }
