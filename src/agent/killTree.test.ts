@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { killProcessTree, treeGroups } from './killTree';
+import { killProcessTree, ownGroupDescendants, treeGroups } from './killTree';
 
 const fakeChild = (pid: number | undefined) => ({ pid, kill: vi.fn(() => true) });
 
@@ -109,5 +109,21 @@ describe('treeGroups', () => {
       entry(3, 2, 3),
     ];
     expect(treeGroups(10, table, new Set(), 999)).toEqual([10]);
+  });
+});
+
+describe('ownGroupDescendants', () => {
+  const entry = (pid: number, ppid: number, pgid: number) => ({ pid, ppid, pgid });
+
+  it('只列根的后代里和自己同组的进程，不含根、自己和别的同组进程', () => {
+    const table = [
+      entry(999, 1, 5),
+      entry(10, 999, 5),
+      entry(11, 10, 5),
+      entry(12, 11, 12),
+      entry(13, 12, 5),
+      entry(20, 999, 5),
+    ];
+    expect(ownGroupDescendants(10, table, 999).sort()).toEqual([11, 13]);
   });
 });

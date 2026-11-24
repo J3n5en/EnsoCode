@@ -131,6 +131,7 @@ import {
 } from '@shared/virtualModels';
 import { parseWebSearchChain, type WebSearchChainEntry } from '@shared/webSearchChain';
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
+import { MCP_SERVER_REGISTRY_DIR, sweepOrphanMcpServers } from '../../agent/mcpStdio';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
 import {
@@ -366,8 +367,18 @@ export function customWorkflowPresetDir(): string {
   return path.join(agentDataDir(), 'workflows');
 }
 
+/** worker 没来得及收尾的 stdio MCP server（被强杀、随应用被直接结束）：按 worker 的登记清扫 */
+function sweepMcpServers(exitedWorker?: number): void {
+  try {
+    sweepOrphanMcpServers(path.join(agentDataDir(), MCP_SERVER_REGISTRY_DIR), exitedWorker);
+  } catch (error) {
+    console.error('[agent] sweep MCP servers failed:', error);
+  }
+}
+
 export function startAgentWorker(options: { restartCheckpointFile?: string } = {}): void {
   if (worker || quitStopped) return;
+  sweepMcpServers();
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: AGENT_WORKER_SERVICE_NAME,
@@ -550,6 +561,7 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
       if (!swap.swap) parentInstanceIds.clear();
     }
     const dataDir = agentDataDir();
+    sweepMcpServers(childPid);
     const crash = takeAgentWorkerCrash(dataDir, childPid);
     // 换代、主动停掉（已不是当前 worker）、退出应用 / 安装更新时终止，都是预期退出；崩溃一律算异常
     const expectedStop = swap.swap || !current || quitStopped;

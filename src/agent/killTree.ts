@@ -88,9 +88,33 @@ export function treeGroups(
   return [...groups];
 }
 
+/** 根的后代里和自己同组的进程：不能向自己的组发信号，只能逐个发（没 detached 的子进程派生的孙进程） */
+export function ownGroupDescendants(
+  rootPid: number,
+  table: readonly ProcessEntry[],
+  selfPid = process.pid
+): number[] {
+  const own = table.find((entry) => entry.pid === selfPid)?.pgid;
+  if (own === undefined) return [];
+  const children = new Map<number, ProcessEntry[]>();
+  for (const entry of table) children.set(entry.ppid, [...(children.get(entry.ppid) ?? []), entry]);
+  const found: number[] = [];
+  const seen = new Set<number>([rootPid]);
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    for (const child of children.get(queue.pop() as number) ?? []) {
+      if (seen.has(child.pid) || child.pid <= 1 || child.pid === selfPid) continue;
+      seen.add(child.pid);
+      queue.push(child.pid);
+      if (child.pgid === own) found.push(child.pid);
+    }
+  }
+  return found;
+}
+
 /**
- * POSIX：向 treeGroups 算出的每个进程组发信号，见过的组记进 known。macOS 的 SIGKILL 先 SIGSTOP 冻住
- * （与 pi 前台中止一致，防 `a; b` 在取消时起 b）。根进程组发不出去时退回 fallback。
+ * POSIX：向 treeGroups 算出的每个进程组发信号，见过的组记进 known；和自己同组的后代逐个发。
+ * macOS 的 SIGKILL 先 SIGSTOP 冻住（与 pi 前台中止一致，防 `a; b` 在取消时起 b）。根进程组发不出去时退回 fallback。
  */
 export function signalProcessTree(
   rootPid: number,
@@ -103,23 +127,29 @@ export function signalProcessTree(
     } catch {}
   }
 ): void {
-  const killGroup = deps.killGroup ?? ((pid, sig) => process.kill(pid, sig));
-  const send = (group: number, sig: NodeJS.Signals) => {
+  const kill = deps.killGroup ?? ((pid, sig) => process.kill(pid, sig));
+  const send = (target: number, sig: NodeJS.Signals) => {
     try {
-      killGroup(-group, sig);
+      kill(target, sig);
       return true;
     } catch {
       return false;
     }
   };
   const freeze = (deps.platform ?? process.platform) === 'darwin' && signal === 'SIGKILL';
-  if (freeze) send(rootPid, 'SIGSTOP');
-  const groups = treeGroups(rootPid, (deps.listProcesses ?? listProcesses)(), known);
+  if (freeze) send(-rootPid, 'SIGSTOP');
+  const table = (deps.listProcesses ?? listProcesses)();
+  const groups = treeGroups(rootPid, table, known);
+  const strays = ownGroupDescendants(rootPid, table);
   for (const group of groups) known.add(group);
-  if (freeze) for (const group of groups) send(group, 'SIGSTOP');
-  for (const group of groups) {
-    if (!send(group, signal) && group === rootPid) fallback();
+  if (freeze) {
+    for (const group of groups) send(-group, 'SIGSTOP');
+    for (const pid of strays) send(pid, 'SIGSTOP');
   }
+  for (const group of groups) {
+    if (!send(-group, signal) && group === rootPid) fallback();
+  }
+  for (const pid of strays) send(pid, signal);
 }
 
 const knownGroups = new WeakMap<KillableChild, Set<number>>();
