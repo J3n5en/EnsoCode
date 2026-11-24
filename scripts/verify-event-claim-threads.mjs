@@ -1149,7 +1149,7 @@ async function run(cdp, plugin) {
     githubCommentWrites()
   );
 
-  step('看板能看到认领和已合并的需求线程');
+  step('看板能看到已合并的需求线程');
   const board = await page(`
     const fresh = await window.electronAPI.secretary.getState(${JSON.stringify(setup.secretaryId)});
     const store = window.__stores.secretary;
@@ -1172,7 +1172,6 @@ async function run(cdp, plugin) {
     const node = document.querySelector('[data-enso=secretary-threads]');
     return JSON.stringify({
       threads: fresh.board?.threads ?? [],
-      claims: fresh.board?.claims ?? [],
       dom: node?.innerText ?? null,
     });
   `);
@@ -1182,11 +1181,6 @@ async function run(cdp, plugin) {
   assert(Boolean(threadOnBoard), 'T8: secretaryState.board.threads 有 PR #123 且 merged', {
     threads: board.threads,
   });
-  assert(
-    (board.claims ?? []).some((claim) => claim.sessionId === sessions.sessionA),
-    'T8: secretaryState.board.claims 有会话 A 的认领',
-    board.claims
-  );
   assert(
     typeof board.dom === 'string' && board.dom.includes('#123') && board.dom.includes('merged'),
     'T8: 看板 DOM data-enso=secretary-threads 可见 #123 与 merged',

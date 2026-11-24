@@ -446,32 +446,7 @@ describe('工作台投影', () => {
     });
     expect(board.needsYou.map((card) => card.kind)).toEqual(['proposal', 'session']);
     expect(board.needsYou[1]).toMatchObject({ conversationId: 'waiting', state: 'waiting' });
-    expect(board.claims).toBeUndefined();
     expect(board.threads).toBeUndefined();
-    const claimed = buildBoard(file, {
-      rows: {
-        waiting: { id: 'waiting', title: '等审批', sessionFile: '/tmp/w.jsonl' },
-        running: { id: 'running', title: '在跑', sessionFile: '/tmp/r.jsonl' },
-        done: { id: 'done', title: '做完', sessionFile: '/tmp/d.jsonl' },
-      },
-      statuses: { waiting, running, done: idle },
-      projects,
-      todos: [],
-      claims: [
-        {
-          key: 'tg:-1:1',
-          sessionId: 'running',
-          sessionTitle: '在跑',
-          pluginId: 'tg',
-          claimedAt: 1,
-          lastHeartbeatAt: 2,
-          active: true,
-        },
-      ],
-    });
-    expect(claimed.claims).toEqual([
-      expect.objectContaining({ key: 'tg:-1:1', sessionTitle: '在跑' }),
-    ]);
     const threaded = buildBoard(file, {
       rows: { running: { id: 'running', title: '在跑', sessionFile: '/tmp/r.jsonl' } },
       statuses: { running },
@@ -502,6 +477,65 @@ describe('工作台投影', () => {
     expect(board.done.map((card) => (card.kind === 'session' ? card.conversationId : ''))).toEqual([
       'done',
     ]);
+  });
+
+  it('已归档、标记完成、needsUser 已清掉的会话不算需要你处理', () => {
+    const goalResult = (needsUser: string[]) => ({
+      result: { summary: '做完了', needsUser },
+      at: 1,
+    });
+    const file = emptyFile({
+      dispatched: {
+        failed: record({
+          conversationId: 'failed',
+          lastState: 'idle',
+          lastResult: { kind: 'failed', turn: 1, at: 5 },
+        }),
+        archived: record({
+          conversationId: 'archived',
+          lastState: 'idle',
+          lastResult: { kind: 'failed', turn: 1, at: 5 },
+        }),
+        marked: record({
+          conversationId: 'marked',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5, manual: true },
+        }),
+        cleared: record({
+          conversationId: 'cleared',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5, dismissed: true },
+          goalResult: goalResult(['合并吗']),
+        } as Partial<DispatchRecord>),
+        empty: record({
+          conversationId: 'empty',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5 },
+          goalResult: goalResult([]),
+        } as Partial<DispatchRecord>),
+      },
+    });
+    const row = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: id,
+      sessionFile: `/tmp/${id}.jsonl`,
+      ...extra,
+    });
+    const board = buildBoard(file, {
+      rows: {
+        failed: row('failed'),
+        archived: row('archived', { archived: true, archivedAt: 6 }),
+        marked: row('marked'),
+        cleared: row('cleared'),
+        empty: row('empty'),
+      },
+      statuses: { failed: idle, archived: idle, marked: idle, cleared: idle, empty: idle },
+      projects,
+      todos: [],
+    });
+    expect(
+      board.needsYou.map((card) => (card.kind === 'session' ? card.conversationId : card.kind))
+    ).toEqual(['failed']);
   });
 
   it('有别名时卡片项目名用别名', () => {

@@ -417,7 +417,11 @@ describe('SecretaryPanel', () => {
     expect(container.querySelector('[data-enso="secretary-running"]')).toBeNull();
 
     click('[data-enso="secretary-running-toggle"]');
-    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      ),
+    ];
     expect(rows).toHaveLength(3);
     expect(text('[data-enso="secretary-running"]')).toContain('[In progress]3');
     expect(rows[0].textContent).toContain('[Running]');
@@ -446,7 +450,11 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      ),
+    ];
     expect(rows).toHaveLength(1);
     expect(rows[0].querySelector('[data-enso="secretary-running-badge"]')?.textContent).toBe(
       '[Stalled, no activity]'
@@ -475,7 +483,11 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      ),
+    ];
     expect(rows).toHaveLength(1);
     expect(rows[0].querySelector('[data-enso="secretary-running-badge"]')?.textContent).toBe(
       '[Waiting on subagent]'
@@ -508,7 +520,11 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      ),
+    ];
     expect(rows).toHaveLength(1);
     const list = container.querySelector('[data-enso="secretary-running"]')?.textContent ?? '';
     expect(list).toContain('在跑的活');
@@ -523,8 +539,14 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    const expand = () => container.querySelector('[data-enso="secretary-running-expand"]');
-    const row = () => container.querySelector('[data-enso="secretary-running-row"]');
+    const expand = () =>
+      container.querySelector(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-expand"]'
+      );
+    const row = () =>
+      container.querySelector(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      );
     expect(expand()?.getAttribute('aria-expanded')).toBe('false');
     expect(row()?.textContent).not.toContain('Started ');
 
@@ -552,7 +574,9 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    const model = container.querySelector('[data-enso="secretary-running-model"]');
+    const model = container.querySelector(
+      '[data-enso="secretary-running"] [data-enso="secretary-running-model"]'
+    );
     expect(model?.textContent).toContain('opus');
   });
 
@@ -563,7 +587,9 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    const row = container.querySelector('[data-enso="secretary-running-row"]');
+    const row = container.querySelector(
+      '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+    );
     expect(row?.querySelector('[data-slot="hover-actions"]')).not.toBeNull();
 
     click('[data-enso="secretary-running-mark-done"]');
@@ -575,7 +601,9 @@ describe('SecretaryPanel', () => {
     await render(createElement(SecretaryRunningList));
     await flush();
     expect(text('[data-enso="secretary-running"]')).toBe('[In progress]0[Nothing running]');
-    expect(container.querySelector('[data-enso="secretary-running-row"]')).toBeNull();
+    expect(
+      container.querySelector('[data-enso="secretary-running"] [data-enso="secretary-running-row"]')
+    ).toBeNull();
   });
 
   it('Main 推送新状态后展开的列表跟着变', async () => {
@@ -583,14 +611,22 @@ describe('SecretaryPanel', () => {
     await render(<SecretaryPanel />);
     await flush();
     click('[data-enso="secretary-running-toggle"]');
-    expect(container.querySelectorAll('[data-enso="secretary-running-row"]')).toHaveLength(1);
+    expect(
+      container.querySelectorAll(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      )
+    ).toHaveLength(1);
 
     h.board = h.secretary.board = board({
       running: [sessionCard('c1', { title: '第一件' }), sessionCard('c2', { title: '第二件' })],
     });
     await render(<SecretaryPanel />);
     await flush();
-    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-enso="secretary-running"] [data-enso="secretary-running-row"]'
+      ),
+    ];
     expect(rows).toHaveLength(2);
     expect(text('[data-enso="secretary-running"]')).toContain('[In progress]2');
     expect(text('[data-enso="secretary-summary"]')).toContain('2 running');
