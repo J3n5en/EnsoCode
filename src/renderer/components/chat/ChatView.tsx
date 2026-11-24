@@ -23,7 +23,11 @@ import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDire
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { usePendingReminder } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
-import { selectChatChrome, selectEmptyChatState } from '@/stores/sessions/chatChrome';
+import {
+  chatWorkspacePath,
+  selectChatChrome,
+  selectEmptyChatState,
+} from '@/stores/sessions/chatChrome';
 import { selectChatCandidateConversations } from '@/stores/sessions/sidebarDirectory';
 import { useSettingsStore } from '@/stores/settings';
 import { usePluginSlashCommands } from '../../plugins/commands';
@@ -302,7 +306,7 @@ export function ChatView() {
     ['planning', 'awaiting_review'].includes(planPhase(chrome?.planState));
   const running = chrome?.status === 'running';
   const busy = chrome?.busy === true;
-  const toolCwd = chrome?.parentWorktreePath ?? project?.path;
+  const toolCwd = chatWorkspacePath(chrome, project);
 
   const activateParent = useCallback(() => {
     if (
@@ -371,7 +375,7 @@ export function ChatView() {
               <WorkspaceBadge
                 project={project}
                 conversationId={chrome.parentId}
-                path={chrome.parentWorktreePath ?? project.path}
+                path={toolCwd ?? project.path}
                 branch={branch}
                 openDisabled={chrome.parentWorktreeMissing}
               >
