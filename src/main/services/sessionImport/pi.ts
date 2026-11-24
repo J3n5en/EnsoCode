@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
+import type { ScannedSession } from './types';
 
 const MAX_FILES = 2000;
 const MAX_DEPTH = 4;
@@ -104,8 +105,8 @@ function listPiV3Sessions(
   sessionsDir: string,
   projectPath: string,
   maxFiles: number
-): ExternalSession[] {
-  const sessions: ExternalSession[] = [];
+): ScannedSession[] {
+  const sessions: ScannedSession[] = [];
   for (const file of listJsonlFiles(sessionsDir, maxFiles)) {
     if (cwdOfSession(file.path) !== projectPath) continue;
     const { title, messages } = readPiV3Session(file.path);
@@ -125,7 +126,7 @@ export function listPiSessions(
   projectPath: string,
   home = process.env.HOME ?? '',
   maxFiles = MAX_FILES
-): ExternalSession[] {
+): ScannedSession[] {
   return listPiV3Sessions(path.join(home, '.pi', 'agent', 'sessions'), projectPath, maxFiles);
 }
 
@@ -134,6 +135,6 @@ export function listOhMyPiSessions(
   projectPath: string,
   home = process.env.HOME ?? '',
   maxFiles = MAX_FILES
-): ExternalSession[] {
+): ScannedSession[] {
   return listPiV3Sessions(path.join(home, '.omp', 'agent', 'sessions'), projectPath, maxFiles);
 }

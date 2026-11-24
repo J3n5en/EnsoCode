@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
+import type { ScannedSession } from './types';
 
 const readJson = (filePath: string): Record<string, unknown> | null => {
   try {
@@ -73,7 +74,7 @@ export function readOpencodeSession(sessionFile: string): {
 export function listOpencodeSessions(
   projectPath: string,
   home = process.env.HOME ?? ''
-): ExternalSession[] {
+): ScannedSession[] {
   const storage = path.join(home, '.local', 'share', 'opencode', 'storage');
   const projectIds = listDir(path.join(storage, 'project'))
     .filter((name) => name.endsWith('.json'))
@@ -82,7 +83,7 @@ export function listOpencodeSessions(
       return data?.worktree === projectPath && typeof data.id === 'string' ? data.id : null;
     })
     .filter((id): id is string => Boolean(id));
-  const sessions: ExternalSession[] = [];
+  const sessions: ScannedSession[] = [];
   for (const projectId of projectIds) {
     const sessionDir = path.join(storage, 'session', projectId);
     for (const name of listDir(sessionDir).filter((n) => n.endsWith('.json'))) {
