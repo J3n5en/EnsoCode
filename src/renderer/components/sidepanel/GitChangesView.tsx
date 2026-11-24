@@ -507,7 +507,7 @@ export function GitChangesView({
                   )}
                 </InputGroup>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+              <div className="relative min-h-0 flex-1 overflow-y-auto px-1 pb-1">
                 {visibleGroups.map((group) => {
                   if (group.files.length === 0) return null;
                   // 搜索命中时强制展开，免得结果被折叠挡住
