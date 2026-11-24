@@ -13,6 +13,7 @@ import { formatRetryClock } from '@shared/upstreamRecovery';
 import {
   ArrowUpRight,
   CheckCircle2,
+  ChevronRight,
   Coffee,
   Pencil,
   Plus,
@@ -801,6 +802,9 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
   const problem = board.todos.filter((todo) => todo.phase === 'problem');
   const open = board.todos.filter((todo) => (todo.phase ?? 'todo') === 'todo');
   const reopenIds = new Set([...active, ...problem].map((todo) => todo.id));
+  const triage = board.done.filter(
+    (card): card is SecretarySessionCard => card.kind === 'session' && card.triage === true
+  );
 
   return (
     <div data-enso="secretary-workbench" className="flex flex-col gap-3 px-3 py-3">
@@ -909,6 +913,7 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
           )}
         </section>
       )}
+      {triage.length > 0 && <TriageSection cards={triage} />}
       {board.running.length > 0 && (
         <section
           ref={runningRef}
@@ -1021,6 +1026,57 @@ function TodoGroup({
         <span className="ml-1 tabular-nums">{count}</span>
       </h3>
       {children}
+    </section>
+  );
+}
+
+/** needsUser 还在等秘书筛选的完成卡：默认收起，不计入「需要你」 */
+function TriageSection({ cards }: { cards: readonly SecretarySessionCard[] }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <section data-enso="secretary-triage" className="flex flex-col">
+      <button
+        type="button"
+        data-enso="secretary-triage-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex items-center gap-1 px-1.5 pb-1 text-left text-[12px] text-subtle-foreground hover:text-foreground"
+      >
+        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
+        {t('With secretary')}
+        <span className="tabular-nums">· {cards.length}</span>
+      </button>
+      {open &&
+        cards.map((card) => (
+          <button
+            key={card.conversationId}
+            type="button"
+            data-enso="secretary-triage-card"
+            onClick={() => openSessionPeek(card.conversationId, { title: card.title })}
+            className={cn(
+              HOVER_ROW_CLASS,
+              'flex flex-col gap-0.5 rounded-lg px-1.5 py-1 text-left'
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-1.5 text-[12.5px]">
+              <span className="min-w-0 flex-1 truncate">{card.title}</span>
+              <span className="shrink-0 rounded bg-muted px-1.5 text-[11px] text-muted-foreground">
+                {card.projectName}
+              </span>
+            </span>
+            {(card.needsUser ?? []).map((item) => (
+              <span
+                key={item}
+                data-enso="secretary-triage-item"
+                title={item}
+                className="line-clamp-1 break-words text-[12px] text-muted-foreground"
+              >
+                {item}
+              </span>
+            ))}
+          </button>
+        ))}
     </section>
   );
 }

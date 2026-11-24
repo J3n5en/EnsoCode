@@ -29,7 +29,7 @@ describe('buildSecretarySystemPrompt', () => {
     const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
     const results = prompt.split('\n').find((line) => line.startsWith('Results:')) ?? '';
     expect(results).toContain('followUps');
-    expect(results).toMatch(/needsUser[^.]*only the user/i);
+    expect(results).toMatch(/Escalate only what the user personally/);
     expect(results).toContain('result_mark_done');
   });
 
@@ -40,6 +40,15 @@ describe('buildSecretarySystemPrompt', () => {
     expect(results).toMatch(/always pass relatesTo/);
     expect(results).toMatch(/needsUserIndex/);
     expect(results).toMatch(/do not call result_mark_done for it/);
+  });
+
+  it('needsUser 先经秘书筛选：自己办完 mark done，只有用户本人必须做的才升级，30 分钟没处理自动给用户', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
+    const results = prompt.split('\n').find((line) => line.startsWith('Results:')) ?? '';
+    expect(results).toMatch(/do not reach the user's needs-you list until you triage them/);
+    expect(results).toMatch(/Escalate only what the user personally has to decide or do by hand/);
+    expect(results).toContain('needs_user_escalate');
+    expect(results).toMatch(/30 minutes/);
   });
 
   it('称呼按档案写进提示词，没设置时不写称呼（默认）', () => {

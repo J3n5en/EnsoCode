@@ -10,7 +10,7 @@ import type {
   SecretaryTodo,
 } from '../types/secretary';
 import { DONE_NEEDS_USER_LABEL } from './feed';
-import { type GoalResultView, hasNeedsUser, needsUserItems } from './goalResult';
+import { type GoalResultView, hasNeedsUser, needsUserItems, shownNeedsUser } from './goalResult';
 
 /** 结果记录（daily.jsonl）保留天数；派发记录与待办不清理，审计按体积轮转 */
 export const DAILY_RETENTION_DAYS = 180;
@@ -160,6 +160,8 @@ export interface DailyInput {
   projectName?: (projectId: string) => string;
   earliest?: string;
   retentionDays?: number;
+  /** 秘书会话还在：派出会话的完成结果先交给它筛选 needsUser；缺省表示不筛选 */
+  secretaryLive?: (conversationId: string) => boolean;
 }
 
 function newestFirst(left: SecretaryDailyItem, right: SecretaryDailyItem): number {
@@ -421,11 +423,30 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     const effectiveCleared = Boolean(
       effectiveResult?.manual || effectiveResult?.dismissed || archived
     );
-    const column = effectiveResult
+    let column: SessionColumn | 'running' | null = effectiveResult
       ? columnOf(effectiveResult.kind, effectiveGoalResult, effectiveCleared)
       : running || record.lastResult === undefined
         ? 'running'
         : 'done';
+    // 派出会话的完成结果先经秘书：还在筛选的归「秘书处理中」，升级过的只留升级的条目
+    if (column === 'needsYou' && effectiveResult?.kind === 'goal-complete') {
+      const shown = shownNeedsUser(
+        effectiveGoalResult,
+        input.secretaryLive?.(record.secretaryConversationId) ?? false,
+        input.now
+      );
+      if (shown.triaging) {
+        column = 'withSecretary';
+        delete card.needsUser;
+        if (card.label === DONE_NEEDS_USER_LABEL) card.label = RESULT_LABEL['goal-complete'];
+      } else {
+        card.needsUser = shown.items;
+        if (effectiveGoalResult) {
+          const { answers: _answers, ...rest } = effectiveGoalResult;
+          card.goalResult = shown.answers.length > 0 ? { ...rest, answers: shown.answers } : rest;
+        }
+      }
+    }
     // 已完成但还有没结束的后台任务：卡片标出来，并给一个停止遗留任务的操作
     if (column === 'done' && record.leftoverTasks)
       card.leftover = { count: record.leftoverTasks.count };

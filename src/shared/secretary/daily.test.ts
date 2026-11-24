@@ -1257,3 +1257,64 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
     ).toBeUndefined();
   });
 });
+
+describe('needsUser 先经秘书筛选', () => {
+  const doneAt = at(15, 10);
+  const needs = {
+    at: doneAt,
+    result: { summary: '做完了', needsUser: ['删临时文件', '在 Mac 上点确认'] },
+  };
+  const daily = (now: number, extra: Partial<DispatchRecord> = {}, live = true) =>
+    buildSecretaryDaily({
+      day: '2024-05-15',
+      now,
+      results: [record({ at: doneAt, goalResult: needs })],
+      dispatched: [
+        dispatch({
+          lastResult: { kind: 'goal-complete', turn: 1, at: doneAt },
+          goalResult: needs,
+          ...extra,
+        }),
+      ],
+      todos: [],
+      audit: [],
+      secretaryLive: () => live,
+    });
+  const column = (board: ReturnType<typeof daily>, key: string) =>
+    board.groups.find((g) => g.key === key)?.items ?? [];
+
+  it('秘书在、未升级：进「秘书处理中」，不计入「需要你」', () => {
+    const board = daily(doneAt + 5 * 60_000);
+    expect(board.counts.needsYou).toBe(0);
+    expect(column(board, 'needsYou')).toEqual([]);
+    expect(column(board, 'withSecretary').map((i) => i.conversationId)).toEqual(['c1']);
+    expect(column(board, 'withSecretary')[0]).not.toHaveProperty('needsUser');
+  });
+
+  it('升级后只显示升级的那条（改写后的文字）；超时或秘书不在时照旧全部显示', () => {
+    const escalated = daily(doneAt + 5 * 60_000, {
+      goalResult: { ...needs, escalations: [{ index: 1, text: '在 Mac 顶栏点确认', at: doneAt }] },
+    });
+    expect(escalated.counts.needsYou).toBe(1);
+    expect(column(escalated, 'needsYou')[0]?.needsUser).toEqual(['在 Mac 顶栏点确认']);
+
+    const late = daily(doneAt + 30 * 60_000);
+    expect(column(late, 'needsYou')[0]?.needsUser).toEqual(['删临时文件', '在 Mac 上点确认']);
+
+    const gone = daily(doneAt + 5 * 60_000, {}, false);
+    expect(gone.counts.needsYou).toBe(1);
+  });
+
+  it('没有派发记录的会话（用户自己的）照旧直接进「需要你」', () => {
+    const board = buildSecretaryDaily({
+      day: '2024-05-15',
+      now: doneAt + 60_000,
+      results: [record({ at: doneAt, goalResult: needs })],
+      dispatched: [],
+      todos: [],
+      audit: [],
+      secretaryLive: () => true,
+    });
+    expect(board.counts.needsYou).toBe(1);
+  });
+});

@@ -652,6 +652,8 @@ export type SecretaryCard =
       needsUser?: readonly string[];
       /** 用户已答复的条目（秘书带关联转问）：index 对应 needsUser 的位置 */
       needsUserAnswers?: readonly NeedsUserAnswer[];
+      /** needsUser 还在等秘书筛选：卡片留在 done，工作台列在「秘书处理中」，不计入「需要你」 */
+      triage?: true;
       /** goal-complete 的 summary（已脱敏）。点「知道了」后仍保留，手动标完成不带 */
       summary?: string;
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */

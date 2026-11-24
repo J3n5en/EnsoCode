@@ -30,6 +30,7 @@ import {
   dismissPending,
   dismissResult,
   dispatchPortsFor,
+  escalateNeedsUser,
   listTakeovers,
   listUntracked,
   loadPendingAttachments,
@@ -435,6 +436,9 @@ function hostPortsFor(
           error instanceof Error ? error.message : String(error)
         );
       });
+    },
+    escalateNeedsUser: (link, text) => {
+      escalateNeedsUser(dispatchPorts, link, text, 'ask');
     },
     publish: () => broadcastState(),
     now: () => Date.now(),

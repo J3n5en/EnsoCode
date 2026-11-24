@@ -10,10 +10,12 @@ import {
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
 import {
   answerGoalResultNeedsUser,
+  escalateGoalResultNeedsUser,
+  type GoalResultView,
   hasNeedsUser,
   needsUserItems,
+  shownNeedsUser,
   stripGoalResultNeedsUser,
-  unansweredNeedsUserCount,
 } from '@shared/secretary/goalResult';
 import { probeImageView, readImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
@@ -56,6 +58,7 @@ import {
   type ClosedGoal,
   type DispatchDraft,
   type DispatchModelRef,
+  type DispatchRecord,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
   type PendingProblem,
@@ -104,6 +107,7 @@ import {
   pendingUpdate,
   proposalUpdate,
   SETTLED_RESULTS,
+  secretaryLiveIn,
   takeoverViews,
   untrackedViews,
 } from './results';
@@ -348,6 +352,7 @@ const DISPATCH_OPS = [
   'session_unarchive',
   'result_mark_done',
   'result_mark_undo',
+  'needs_user_escalate',
   'session_answer',
   'session_takeover_propose',
   'todo_list',
@@ -2356,6 +2361,33 @@ export function createSecretaryDispatchHandlers(
       return markResultOp(ports, ctx, params, 'undo');
     },
 
+    /** 筛选过的 needsUser：确实要用户亲手做或决定的那条升级进「需要你」 */
+    async needs_user_escalate(params, ctx) {
+      const { conversationId, needsUserIndex, text } = params;
+      const extra = Object.keys(params).filter((key) => !ESCALATE_FIELDS.includes(key));
+      if (
+        extra.length > 0 ||
+        typeof conversationId !== 'string' ||
+        !conversationId.trim() ||
+        typeof needsUserIndex !== 'number' ||
+        !Number.isInteger(needsUserIndex) ||
+        needsUserIndex < 0 ||
+        (text !== undefined && typeof text !== 'string')
+      ) {
+        return {
+          ok: false,
+          error: `invalid arguments: pass conversationId (string), needsUserIndex (integer N from needs-user[N]) and optionally text (string); allowed fields: ${ESCALATE_FIELDS.join(', ')}`,
+        };
+      }
+      const link = { conversationId: conversationId.trim(), needsUserIndex };
+      const result = escalateNeedsUser(ports, link, text, 'secretary');
+      if (!result.ok) {
+        auditFailure(ports, ctx, 'needs_user_escalate', result.error, link.conversationId);
+        return { ok: false, error: ESCALATE_REFUSALS[result.error] ?? result.error };
+      }
+      return { ok: true, result: { status: 'escalated', ...link } };
+    },
+
     async session_answer(params, ctx) {
       const conversationId = stringParam(params, 'conversationId');
       if (!conversationId)
@@ -2997,10 +3029,73 @@ export async function markResult(
 export type AnswerNeedsUserResult = { ok: true; cleared: boolean } | { ok: false; error: string };
 
 const ANSWER_MAX_CHARS = 500;
+const ESCALATE_TEXT_MAX_CHARS = 300;
+const ESCALATE_FIELDS: readonly string[] = ['conversationId', 'needsUserIndex', 'text'];
+
+const ESCALATE_REFUSALS: Record<string, string> = {
+  'not-found':
+    'refused (not-found): only a session you dispatched or track has needsUser items to escalate',
+  'nothing-pending':
+    'refused (nothing-pending): this session has no unsettled goal-complete result with needsUser; a goal-blocked result already goes to the user directly',
+  'bad-index': 'refused (bad-index): needsUserIndex is past the end of the needs-user[N] list',
+};
+
+/** 只认没收口的 goal-complete：goal-blocked 的 needsUser 不经筛选，答了也不能记成完成 */
+function pendingNeedsUser(record: DispatchRecord): GoalResultView | undefined {
+  const result = record.lastResult;
+  const pending =
+    result !== undefined &&
+    result.kind === 'goal-complete' &&
+    !result.manual &&
+    !result.dismissed &&
+    hasNeedsUser(record.goalResult);
+  return pending ? record.goalResult : undefined;
+}
+
+/**
+ * 秘书把一条 needsUser 升级给用户：卡片进「需要你」，显示改写后的文字。
+ * 秘书带 relatesTo 提问时宿主也走这里（via ask），不用秘书再调工具。
+ */
+export function escalateNeedsUser(
+  ports: SecretaryDispatchPorts,
+  link: AskRelatesTo,
+  text?: string,
+  via: 'secretary' | 'ask' = 'secretary'
+): { ok: true } | { ok: false; error: string } {
+  const { conversationId, needsUserIndex } = link;
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return { ok: false, error: 'not-found' };
+  const view = pendingNeedsUser(record);
+  if (!view) return { ok: false, error: 'nothing-pending' };
+  const count = needsUserItems(view).length;
+  if (needsUserIndex !== undefined && needsUserIndex >= count)
+    return { ok: false, error: 'bad-index' };
+  const now = ports.now();
+  const rewritten = text ? redactSecrets(text.trim()).slice(0, ESCALATE_TEXT_MAX_CHARS) : '';
+  record.goalResult = escalateGoalResultNeedsUser(
+    view,
+    needsUserIndex,
+    rewritten || undefined,
+    now
+  );
+  ports.saveDispatch(file);
+  const targets = needsUserIndex === undefined ? [...Array(count).keys()] : [needsUserIndex];
+  ports.audit({
+    at: now,
+    secretaryConversationId: record.secretaryConversationId,
+    op: 'needs_user_escalate',
+    targetId: conversationId,
+    ok: true,
+    detail: [`${via} #${targets.join(',')}`, rewritten].filter(Boolean).join(': '),
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
 
 /**
  * 秘书带 relatesTo 转问的 needsUser 被用户答复：答复记到那份结果上，卡片标出已答复；
- * 全部条目都答了就按 result_mark_done 收口，不用秘书再手动标。
+ * 答复同时算升级；「需要你」里显示的条目都答了就按 result_mark_done 收口，不用秘书再手动标。
  * 只认 goal-complete：goal-blocked 的活没干完，答了也不能记成完成。
  * 提问之后才到的新结果不认这次答复，免得旧问题的答案落到新条目上。
  */
@@ -3011,27 +3106,25 @@ export async function answerNeedsUser(
   askedAt: number
 ): Promise<AnswerNeedsUserResult> {
   const { conversationId, needsUserIndex } = link;
+  const rows = await ports.rows();
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
   if (!record) return { ok: false, error: 'not-found' };
-  const result = record.lastResult;
-  const pending =
-    result !== undefined &&
-    result.kind === 'goal-complete' &&
-    !result.manual &&
-    !result.dismissed &&
-    record.goalResult !== undefined &&
-    hasNeedsUser(record.goalResult);
-  if (!pending || !record.goalResult) return { ok: false, error: 'nothing-pending' };
-  if (record.goalResult.at > askedAt) return { ok: false, error: 'stale' };
-  const count = needsUserItems(record.goalResult).length;
+  const view = pendingNeedsUser(record);
+  if (!view) return { ok: false, error: 'nothing-pending' };
+  if (view.at > askedAt) return { ok: false, error: 'stale' };
+  const count = needsUserItems(view).length;
   if (needsUserIndex !== undefined && needsUserIndex >= count)
     return { ok: false, error: 'bad-index' };
   const now = ports.now();
   const text = redactSecrets(answer.trim()).slice(0, ANSWER_MAX_CHARS);
-  record.goalResult = answerGoalResultNeedsUser(record.goalResult, needsUserIndex, text, now);
-  ports.saveDispatch(file);
   const targets = needsUserIndex === undefined ? [...Array(count).keys()] : [needsUserIndex];
+  const escalated = new Set((view.escalations ?? []).map((item) => item.index));
+  const withEscalation = targets
+    .filter((target) => !escalated.has(target))
+    .reduce((next, target) => escalateGoalResultNeedsUser(next, target, undefined, now), view);
+  record.goalResult = answerGoalResultNeedsUser(withEscalation, needsUserIndex, text, now);
+  ports.saveDispatch(file);
   ports.audit({
     at: now,
     secretaryConversationId: record.secretaryConversationId,
@@ -3040,7 +3133,12 @@ export async function answerNeedsUser(
     ok: true,
     detail: `#${targets.join(',')}: ${text}`,
   });
-  if (unansweredNeedsUserCount(record.goalResult) > 0) {
+  const shown = shownNeedsUser(
+    record.goalResult,
+    secretaryLiveIn(rows, record.secretaryConversationId),
+    now
+  );
+  if (shown.answers.length < shown.items.length) {
     notifySecretaryChanged();
     return { ok: true, cleared: false };
   }

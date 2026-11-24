@@ -2369,6 +2369,61 @@ describe('联系方式转发', () => {
     expect(answered).toEqual([{ link: relatesTo, answer: '清理', askedAt: 5 }]);
   });
 
+  it('秘书带关联提问时就把那条 needsUser 升级给用户；不带关联、非秘书会话不升级', () => {
+    const base = harness({ secretaryIds: ['sec-1'] });
+    const escalated: unknown[] = [];
+    const host = createSecretaryHost({
+      ...base.ports,
+      escalateNeedsUser: (link, text) => {
+        escalated.push({ link, text });
+      },
+    });
+    const request = (sessionId: string, ask: Record<string, unknown>) =>
+      ({
+        type: 'ask-request',
+        identity: { sessionId, generation: 'g1' },
+        seq: 1,
+        ask: { requestId: 'ask-9', question: '要清理孤儿进程吗？', ...ask },
+      }) as unknown as RendererAgentEvent;
+    const relatesTo = { conversationId: 'c1', needsUserIndex: 0 };
+
+    host.onAgentEvent(request('sec-1', {}), []);
+    host.onAgentEvent(request('c1', { relatesTo }), []);
+    expect(escalated).toEqual([]);
+
+    host.onAgentEvent(request('sec-1', { relatesTo }), []);
+    expect(escalated).toEqual([{ link: relatesTo, text: '要清理孤儿进程吗？' }]);
+  });
+
+  it('needsUser 筛选到点没处理：tick 重新发布一次工作台，让兜底卡片出现', () => {
+    const h = harness({
+      file: {
+        dispatched: {
+          c1: {
+            conversationId: 'c1',
+            projectId: 'p1',
+            secretaryConversationId: 'sec-1',
+            createdAt: 0,
+            turn: 1,
+            lastState: 'idle',
+            lastEventAt: 0,
+            lastResult: { kind: 'goal-complete', turn: 1, at: 1_000 },
+            goalResult: { at: 1_000, result: { needsUser: ['删临时文件'] } },
+          },
+        },
+      },
+    });
+    h.state.statuses.c1 = { state: 'idle', pendingAsks: 0, pendingApprovals: 0 };
+    h.host.tick(1_000 + 10 * 60_000);
+    const before = h.state.published;
+    h.host.tick(1_000 + 20 * 60_000);
+    expect(h.state.published).toBe(before);
+    h.host.tick(1_000 + 30 * 60_000);
+    expect(h.state.published).toBe(before + 1);
+    h.host.tick(1_000 + 31 * 60_000);
+    expect(h.state.published).toBe(before + 1);
+  });
+
   it('秘书自己会话里的提问、收尾与审批都转发；别的会话不转发', () => {
     const h = harness({ secretaryIds: ['sec-1'] });
     const secretaryEvent = (type: string, extra: Record<string, unknown> = {}) =>

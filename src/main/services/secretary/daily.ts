@@ -12,6 +12,7 @@ import { readSessionReminders } from '../sessionReminders';
 import { readAudit } from './audit';
 import { readDailyRecords } from './dailyLog';
 import { projectAliasesFromSettings, secretaryProjectName } from './projectLabel';
+import { secretaryLiveIn } from './results';
 import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 
@@ -80,6 +81,7 @@ export async function buildDaily(ports: SecretaryDailyPorts, day: string): Promi
     session,
     ...(ports.reminders ? { reminders: ports.reminders } : {}),
     projectName,
+    secretaryLive: (conversationId) => secretaryLiveIn(rows, conversationId),
     ...(earliest ? { earliest } : {}),
     retentionDays: DAILY_RETENTION_DAYS,
   });

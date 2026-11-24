@@ -88,6 +88,9 @@ const NEEDS_USER_WORDING_ONLY = process.argv.includes('--needs-user-wording-only
 // 只跑 needsUser 与秘书提问的关联：秘书 ask_user 带 relatesTo，用户在提问卡上答复后卡片先标已答复、答完移出。
 // 整体 3 分钟硬超时，截图存到 /tmp/needs-user-link-*.png
 const NEEDS_USER_LINK_ONLY = process.argv.includes('--needs-user-link-only');
+// 只跑 needsUser 先经秘书筛选：未处理的收在「秘书处理中」、秘书升级后进「需要你」、超时兜底照旧显示。
+// 整体 3 分钟硬超时，截图存到 /tmp/needs-user-triage-*.png
+const NEEDS_USER_TRIAGE_ONLY = process.argv.includes('--needs-user-triage-only');
 // 只跑插件联系渠道连续发送失败：错误原因上卡片、连续失败后暂停推送，截图存到 /tmp/contact-channel-error-*.png
 const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
 // 只跑「确认技能提案后秘书收到更新」：只唤醒一轮，不出现 Request aborted
@@ -779,6 +782,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (NEEDS_USER_LINK_ONLY) {
     await verifyNeedsUserLink(cdp, setup);
+    return;
+  }
+  if (NEEDS_USER_TRIAGE_ONLY) {
+    await verifyNeedsUserTriage(cdp, setup);
     return;
   }
   if (CONTACT_CHANNEL_ERROR_ONLY) {
@@ -7253,6 +7260,21 @@ async function verifyNeedsUserWording(cdp, setup) {
     '收口'
   );
   assert(marked.text !== null, 'needsUser 措辞: 秘书 result_mark_done 一条', marked);
+  // 派出会话的 needsUser 先经秘书筛选：两条都升级，卡片才进「需要你」
+  for (const index of [0, 1]) {
+    const escalated = await secretaryTool(
+      cdp,
+      setup,
+      'needs_user_escalate',
+      { conversationId: ids.live, needsUserIndex: index },
+      '升级'
+    );
+    assert(
+      String(escalated.text).includes('escalated'),
+      `needsUser 措辞: 升级第 ${index} 条`,
+      escalated
+    );
+  }
 
   const board = await page(`
     S().selectConversation(${JSON.stringify(setup.secretaryId)});
@@ -7326,6 +7348,145 @@ async function verifyNeedsUserWording(cdp, setup) {
     });
   }
   log('  shots /tmp/needs-user-wording-{board,card}.png');
+}
+
+async function verifyNeedsUserTriage(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== needsUser 先经秘书筛选：秘书处理中 → 升级进需要你 → 超时兜底');
+  const result = {
+    summary: '插件已上架，部署完成',
+    needsUser: ['手动删除临时文件 /tmp/enso-upload', '在 Mac 上点一下顶栏按钮确认'],
+  };
+  const dispatch = directDispatcher(page, setup);
+  const titles = { pending: '上架插件', escalated: '部署 relay', late: '清理构建缓存' };
+  const ids = {};
+  for (const [key, title] of Object.entries(titles)) {
+    const created = await dispatch('session_create', {
+      projectId: setup.projectId,
+      prompt: '做完就收尾',
+      title,
+      goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了', result })}]]`,
+    });
+    assert(created.ok, `needsUser 筛选: 会话「${title}」建成`, created);
+    ids[key] = created.conversationId;
+  }
+  for (const id of Object.values(ids)) {
+    await waitFor(
+      () => {
+        const found = readJson(dispatchFile).dispatched[id];
+        return found?.lastResult?.kind === 'goal-complete' && found.goalResult?.result?.needsUser;
+      },
+      `goal-complete with needsUser ${id}`,
+      60_000,
+      300
+    );
+  }
+
+  // 打开右侧工作台、关掉动画、展开「秘书处理中」；等 ready(状态) 成立后返回两个区域的内容
+  const board = (ready) =>
+    page(`
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+    document.head.appendChild(style);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+    }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    const panel = await until(() => onScreen() && visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const read = () => {
+      const root = visiblePanel();
+      const toggle = root?.querySelector('[data-enso=secretary-triage-toggle]');
+      if (toggle && toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+      const needs = root?.querySelector('[data-enso=secretary-needs-you]');
+      return {
+        stat: Number(root?.querySelector('[data-enso=secretary-stat][data-target=needs-you] div')?.innerText ?? NaN),
+        needsYouCards: needs?.querySelectorAll('[data-enso=secretary-card]').length ?? 0,
+        needsYou: needs?.innerText ?? '',
+        needsItems: [...(needs?.querySelectorAll('[data-enso=secretary-card-needs-user-item]') ?? [])].map((n) => n.innerText),
+        triage: toggle?.innerText ?? '',
+        triageCards: [...(root?.querySelectorAll('[data-enso=secretary-triage-card]') ?? [])].map((n) => n.innerText),
+      };
+    };
+    const state = await until(() => { const s = read(); return (${ready})(s) ? s : null; }, 80000);
+    await sleep(400);
+    visiblePanel()?.querySelector('[data-enso=secretary-stats]')?.scrollIntoView({ block: 'start' });
+    await sleep(200);
+    return JSON.stringify({ ok: Boolean(state), ...(state ?? read()) });
+  `);
+  const has = (text, title) => text.includes(title);
+
+  const pending = await board(
+    `(s) => s.triageCards.length === 3 && !s.needsYou.includes(${JSON.stringify(titles.pending)})`
+  );
+  log(`  pending ${JSON.stringify(pending)}`);
+  assert(pending.ok, 'needsUser 筛选: 三条完成结果都在「秘书处理中 · 3」，不进「需要你」', pending);
+  assert(
+    pending.stat === pending.needsYouCards,
+    'needsUser 筛选: 「等你处理」计数和列表一致',
+    pending
+  );
+  await cdp.shot('/tmp/needs-user-triage-pending.png');
+
+  const escalated = await secretaryTool(
+    cdp,
+    setup,
+    'needs_user_escalate',
+    { conversationId: ids.escalated, needsUserIndex: 1, text: '在 Mac 顶栏点一下「确认」按钮' },
+    '升级给用户'
+  );
+  assert(
+    String(escalated.text).includes('escalated'),
+    'needsUser 筛选: 秘书 needs_user_escalate 成功',
+    escalated
+  );
+  const afterEscalate = await board(
+    `(s) => s.needsYou.includes(${JSON.stringify(titles.escalated)}) && s.triageCards.length === 2`
+  );
+  log(`  escalated ${JSON.stringify(afterEscalate)}`);
+  assert(
+    afterEscalate.ok &&
+      afterEscalate.needsItems.length === 1 &&
+      afterEscalate.needsItems[0] === '需要你：在 Mac 顶栏点一下「确认」按钮',
+    'needsUser 筛选: 升级后只这一条以改写文字进「需要你」',
+    afterEscalate
+  );
+  assert(
+    afterEscalate.stat === afterEscalate.needsYouCards && afterEscalate.stat >= 1,
+    'needsUser 筛选: 升级后计数和列表一致',
+    afterEscalate
+  );
+  await cdp.shot('/tmp/needs-user-triage-escalated.png');
+
+  // 筛选期改成几秒后到点：不靠任何秘书动作，只等每分钟的 tick 重新发布
+  const file = readJson(dispatchFile);
+  file.dispatched[ids.late].goalResult.at = Date.now() - 30 * 60_000 + 3_000;
+  writeFileSync(dispatchFile, JSON.stringify(file));
+  const late = await board(
+    `(s) => s.needsYou.includes(${JSON.stringify(titles.late)}) && s.triageCards.length === 1`
+  );
+  log(`  late ${JSON.stringify(late)}`);
+  assert(late.ok, 'needsUser 筛选: 超过 30 分钟没处理，兜底进「需要你」', late);
+  assert(
+    has(late.needsYou, result.needsUser[0]) && late.stat === late.needsYouCards,
+    'needsUser 筛选: 兜底显示原条目，计数和列表一致',
+    late
+  );
+  await cdp.shot('/tmp/needs-user-triage-fallback.png');
+  log('  shots /tmp/needs-user-triage-{pending,escalated,fallback}.png');
 }
 
 async function verifyWorkbenchCounts(cdp, setup) {
@@ -9609,6 +9770,12 @@ if (NEEDS_USER_WORDING_ONLY) {
 if (NEEDS_USER_LINK_ONLY) {
   setTimeout(() => {
     console.error('\nFAIL needs-user-link: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
+if (NEEDS_USER_TRIAGE_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL needs-user-triage: 3 分钟硬超时');
     void finish(124);
   }, 180_000).unref();
 }

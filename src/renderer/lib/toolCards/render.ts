@@ -57,6 +57,7 @@ const GROUP_TITLES: Record<string, string> = {
   session_unarchive: 'Unarchived {{count}} sessions',
   result_mark_done: 'Marked {{count}} sessions done',
   result_mark_undo: 'Undid {{count}} marks',
+  needs_user_escalate: 'Escalated {{count}} items to you',
   session_answer: 'Answered {{count}} questions',
   session_create: 'Created {{count}} sessions',
   todo_item_dispatch: 'Dispatched {{count}} to-dos',

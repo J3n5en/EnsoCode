@@ -195,6 +195,33 @@ describe('SecretaryWorkbench 结果卡', () => {
     expect(h.calls).toContainEqual({ name: 'dismissResult', args: 'c1' });
   });
 
+  it('needsUser 还在等秘书筛选的卡：收在「秘书处理中 · N」里，展开才看到条目，不计入「需要你」', async () => {
+    h.board = {
+      ...board([]),
+      done: [
+        sessionCard({
+          state: 'idle',
+          result: 'goal-complete',
+          triage: true,
+          needsUser: ['删临时文件'],
+        }),
+      ],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    expect(container.querySelector('[data-enso="secretary-needs-you"]')).toBeNull();
+    const toggle = container.querySelector('[data-enso="secretary-triage-toggle"]');
+    expect(toggle?.textContent).toContain('· 1');
+    expect(container.querySelector('[data-enso="secretary-triage-item"]')).toBeNull();
+    act(() => {
+      (toggle as unknown as HTMLElement).click();
+    });
+    expect(container.querySelector('[data-enso="secretary-triage-item"]')?.textContent).toBe(
+      '删临时文件'
+    );
+    const stats = container.querySelector('[data-enso="secretary-stats"]');
+    expect(stats?.textContent).toContain('0');
+  });
+
   it('「打开会话」跳过去后，目标会话给返回秘书', async () => {
     h.board = board([sessionCard({ result: 'failed' })]);
     await render(<SecretaryWorkbench name="小安" />);
