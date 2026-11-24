@@ -2611,6 +2611,8 @@ export const zhTranslations: Record<string, string> = {
   'All requests to this provider connect directly, ignoring the global and system proxy.':
     '该服务商的所有请求都直连，不走全局或系统代理。',
   'All requests to this provider go through this proxy.': '该服务商的所有请求都经这个代理发送。',
+  'Show proxy URL': '显示代理地址',
+  'Hide proxy URL': '隐藏代理地址',
   'Add header': '添加请求头',
   'Remove header': '移除请求头',
   'Header values can only contain tab and single-byte characters (no Chinese, newlines, or NUL).':

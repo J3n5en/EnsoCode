@@ -15,6 +15,7 @@ import {
   normalizeProviderProxy,
   type ProviderProxyConfig,
   type ProviderProxyMode,
+  proxyUrlHasCredentials,
 } from '@shared/providers/providerProxy';
 import { isValidProxyUrl } from '@shared/proxy';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
@@ -163,6 +164,7 @@ export function ProviderApiForm({
   );
   const proxyUrlId = React.useId();
   const proxyErrorId = React.useId();
+  const [showProxyUrl, setShowProxyUrl] = React.useState(false);
   // 生效中的独立代理与请求头一样默认展开，避免用户看不到
   const [advancedOpen, setAdvancedOpen] = React.useState(
     () => Object.keys(initialValue.headers ?? {}).length > 0 || initialProxy !== undefined
@@ -233,6 +235,8 @@ export function ProviderApiForm({
   });
   const headersInvalid = headerNameInvalid || headerValueInvalid;
   const proxyInvalid = !oauth && proxyMode === 'custom' && !isValidProxyUrl(proxyUrl);
+  // 代理账密与 API Key 一样默认遮住
+  const proxyHasCredentials = proxyUrlHasCredentials(proxyUrl.trim());
   const proxy: ProviderProxyConfig | undefined =
     oauth || proxyInvalid
       ? undefined
@@ -532,17 +536,35 @@ export function ProviderApiForm({
                   {proxyMode === 'custom' && (
                     <>
                       <FieldLabel htmlFor={proxyUrlId}>{t('Proxy URL')}</FieldLabel>
-                      <Input
-                        id={proxyUrlId}
-                        render={<input id={proxyUrlId} />}
-                        data-slot="provider-proxy-url"
-                        value={proxyUrl}
-                        placeholder="http://127.0.0.1:7890"
-                        spellCheck={false}
-                        aria-invalid={proxyInvalid || undefined}
-                        aria-describedby={proxyInvalid ? proxyErrorId : undefined}
-                        onInput={(event) => setProxyUrl(event.currentTarget.value)}
-                      />
+                      <div className="relative w-full">
+                        <Input
+                          id={proxyUrlId}
+                          render={<input id={proxyUrlId} />}
+                          data-slot="provider-proxy-url"
+                          type={proxyHasCredentials && !showProxyUrl ? 'password' : 'text'}
+                          value={proxyUrl}
+                          placeholder="http://127.0.0.1:7890"
+                          spellCheck={false}
+                          className={proxyHasCredentials ? '[&_input]:pr-10' : undefined}
+                          aria-invalid={proxyInvalid || undefined}
+                          aria-describedby={proxyInvalid ? proxyErrorId : undefined}
+                          onInput={(event) => setProxyUrl(event.currentTarget.value)}
+                        />
+                        {proxyHasCredentials && (
+                          <button
+                            type="button"
+                            aria-label={t(showProxyUrl ? 'Hide proxy URL' : 'Show proxy URL')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            onClick={() => setShowProxyUrl((visible) => !visible)}
+                          >
+                            {showProxyUrl ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                       {proxyInvalid ? (
                         <p id={proxyErrorId} role="alert" className="text-destructive text-xs">
                           {t('Enter an http(s) proxy URL')}

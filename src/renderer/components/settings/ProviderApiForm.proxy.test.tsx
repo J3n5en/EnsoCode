@@ -58,6 +58,15 @@ describe('ProviderApiForm 独立代理（静态渲染）', () => {
   it('OAuth 条目不显示代理设置', () => {
     expect(render({ proxy: { mode: 'none' } }, true)).not.toContain('provider-proxy');
   });
+
+  it('带账密的代理地址默认按密码框遮住，不带账密的照常显示', () => {
+    const input = (url: string) =>
+      parseHTML(render({ proxy: { mode: 'custom', url } })).document.querySelector(
+        '[data-slot="provider-proxy-url"]'
+      );
+    expect(input('http://user:secret@127.0.0.1:7890')?.getAttribute('type')).toBe('password');
+    expect(input('http://127.0.0.1:7890')?.getAttribute('type')).toBe('text');
+  });
 });
 
 describe('ProviderApiForm 独立代理（交互）', () => {
@@ -159,6 +168,15 @@ describe('ProviderApiForm 独立代理（交互）', () => {
       expect.objectContaining({ proxy: draft }),
       expect.any(Set)
     );
+  });
+
+  it('带账密的代理地址可点眼睛显示明文', async () => {
+    const ui = await mount({ proxy: { mode: 'custom', url: 'http://user:secret@127.0.0.1:7890' } });
+    const input = () => ui.container.querySelector('[data-slot="provider-proxy-url"]');
+    expect(input()?.getAttribute('type')).toBe('password');
+    const reveal = ui.container.querySelector<HTMLButtonElement>('[aria-label="Show proxy URL"]');
+    await act(async () => reveal?.click());
+    expect(input()?.getAttribute('type')).toBe('text');
   });
 
   it.each([
