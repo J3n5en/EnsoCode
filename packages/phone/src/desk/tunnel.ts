@@ -159,8 +159,9 @@ export class DeskTunnel {
         onTransport: (transport) => {
           this.note(`transport ${transport}`);
           this.link.onTransport?.(transport);
-          // 切通道瞬间旧通道上的帧可能丢：立即按 seq 补，不等缺口或未决请求超时
-          if (this.online) this.resync();
+          // 直连掉了，在途帧可能丢在上面：立即按 seq 补。升级到直连时中继仍在送、没丢东西，
+          // 补发会让宿主把在途大帧再排一遍（启动期实测 500KB 结果被重放两遍）
+          if (this.online && transport === 'relay') this.resync();
         },
         onRtt: (rttMs) => this.link.onRtt?.(rttMs),
         onPushConfig: (key) => this.link.onPushConfig?.(key),
@@ -230,7 +231,8 @@ export class DeskTunnel {
     if (this.online !== was) {
       for (const slot of this.slots.values()) slot.ready = false;
       if (this.online) {
-        this.linkAt = Date.now();
+        // 重连才可能把帧丢在旧链路上；首次上线的缺口只是大帧分片与小帧乱序
+        if ([...this.slots.values()].some((slot) => slot.everReady)) this.linkAt = Date.now();
         // 先声明会回报进度，宿主随即对大帧限流
         this.ack();
         this.flushByes();
