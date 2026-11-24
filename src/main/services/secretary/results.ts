@@ -528,6 +528,8 @@ export interface BoardInput {
   todos: readonly SecretaryTodo[];
   aliases?: Readonly<Record<string, string>>;
   threads?: readonly SecretaryDemandThreadView[];
+  /** 秘书功能关着时 needsUser 不等筛选；缺省按开着 */
+  secretaryEnabled?: boolean;
 }
 
 function boardSubagents(
@@ -551,13 +553,14 @@ function boardSubagents(
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
-/** 秘书会话还在（没删没归档）：结果能先交给它筛选 */
+/** 秘书功能开着、秘书会话还在（没删没归档）：结果能先交给它筛选 */
 export function secretaryLiveIn(
   rows: Readonly<Record<string, Record<string, unknown>>>,
-  conversationId: string
+  conversationId: string,
+  enabled = true
 ): boolean {
   const row = rows[conversationId];
-  return Boolean(row) && row.archived !== true;
+  return enabled && Boolean(row) && row.archived !== true;
 }
 
 /** 工作台投影：与 session_list 同源（会话行 + 会话状态 + 项目），不另建一份任务数据 */
@@ -566,7 +569,8 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     const project = input.projects.find((candidate) => candidate.projectId === projectId);
     return secretaryProjectName(project, input.aliases);
   };
-  const secretaryLive = (conversationId: string) => secretaryLiveIn(input.rows, conversationId);
+  const secretaryLive = (conversationId: string) =>
+    secretaryLiveIn(input.rows, conversationId, input.secretaryEnabled ?? true);
 
   const needsYou: SecretaryCard[] = Object.values(file.proposals)
     .filter((proposal) => proposal.status === 'pending')

@@ -261,6 +261,101 @@ describe('feedEvents 完成条目', () => {
     });
   });
 
+  it('needsUser 还在秘书处理中：会话卡片与活动条目都标「完成 · 秘书处理中」，正文只给 summary', () => {
+    const triaging = goal({ triage: true, needsUser: ['手动删除临时文件'], summary: '部署完成' });
+    const direct = feedEvents(board({ done: [triaging] }));
+    expect(direct.find((event) => event.id === 'session:c1')).toMatchObject({
+      label: 'Done · with secretary',
+      tone: 'ok',
+      detail: '部署完成',
+    });
+    const history = feedEvents(
+      board({
+        done: [triaging],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            needsUser: ['手动删除临时文件'],
+            summary: '部署完成',
+          },
+        ],
+      })
+    );
+    expect(history.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Done · with secretary',
+      detail: '部署完成',
+    });
+    expect(zhTranslations['Done · with secretary']).toBe('完成 · 秘书处理中');
+  });
+
+  it('秘书升级后活动条目按卡片现在给用户看的条目显示，不用完成当时的原文', () => {
+    const events = feedEvents(
+      board({
+        needsYou: [goal({ needsUser: ['在 Mac 顶栏点一下确认'] })],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            needsUser: ['手动删除临时文件', '在 Mac 上点一下顶栏按钮'],
+          },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Done · needs you',
+      detail: '在 Mac 顶栏点一下确认',
+    });
+  });
+
+  it('秘书 result_mark_done 收口后，之前那条完成动态是普通完成', () => {
+    const events = feedEvents(
+      board({
+        done: [goal({ resultAt: 30, manual: true })],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            needsUser: ['手动删除临时文件'],
+            summary: '部署完成',
+          },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: '部署完成',
+    });
+  });
+
+  it('秘书续跑后旧的完成结果被撤下：之前那条完成动态不再说「需要你」', () => {
+    const events = feedEvents(
+      board({
+        done: [goal({ result: undefined, resultAt: undefined })],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            needsUser: ['手动删除临时文件'],
+            summary: '部署完成',
+          },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: '部署完成',
+    });
+  });
+
   it('会话投影没有 needsUser 但有 summary 时正文是 summary', () => {
     const events = feedEvents(board({ done: [goal({ summary: '已合并上架' })] }));
     expect(events.find((event) => event.id === 'session:c1')).toMatchObject({

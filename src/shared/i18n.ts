@@ -3955,6 +3955,7 @@ export const zhTranslations: Record<string, string> = {
   Started: '开始执行',
   'Goal complete': '目标完成',
   'Done · needs you': '完成 · 需要你',
+  'Done · with secretary': '完成 · 秘书处理中',
   'Needs you: {{item}}': '需要你：{{item}}',
   'Turn ended': '这一轮结束',
   Stalled: '停滞',

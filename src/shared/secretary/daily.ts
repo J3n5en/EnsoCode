@@ -10,7 +10,13 @@ import type {
   SecretaryTodo,
 } from '../types/secretary';
 import { DONE_NEEDS_USER_LABEL } from './feed';
-import { type GoalResultView, hasNeedsUser, needsUserItems, shownNeedsUser } from './goalResult';
+import {
+  type GoalResultView,
+  hasNeedsUser,
+  needsUserItems,
+  shownNeedsUser,
+  stripGoalResultNeedsUser,
+} from './goalResult';
 
 /** 结果记录（daily.jsonl）保留天数；派发记录与待办不清理，审计按体积轮转 */
 export const DAILY_RETENTION_DAYS = 180;
@@ -192,6 +198,8 @@ interface Terminal {
   goalResult?: GoalResultView;
   manual?: true;
   dismissed?: true;
+  /** 之后会话又跑过（秘书续跑等）：这份完成结果的 needsUser 不再等用户 */
+  superseded?: true;
 }
 
 /**
@@ -281,7 +289,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     const record = result?.record;
     const goalResult = result?.goalResult ?? record?.goalResult;
     const cleared = Boolean(
-      result?.manual || result?.dismissed || session(conversationId).archived
+      result?.manual || result?.dismissed || result?.superseded || session(conversationId).archived
     );
     const needsUser =
       !cleared && result?.kind === 'goal-complete' ? needsUserItems(goalResult) : [];
@@ -352,10 +360,20 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     if (record.takeover && !result && !running) continue;
     if (!result && !within(record.createdAt)) continue;
     placed.add(record.conversationId);
+    // 秘书续跑后这一轮以 turn-ended 收尾：旧完成的 needsUser 已被续跑接手，不再等用户
+    if (
+      result?.kind === 'goal-complete' &&
+      !result.manual &&
+      record.lastResult?.kind === 'turn-ended' &&
+      record.lastResult.at > result.at
+    )
+      result = { ...result, superseded: true };
     const goal = record.goal?.split('\n')[0]?.trim();
     const effectiveGoalResult = result?.goalResult ?? result?.record?.goalResult;
     const archived = session(record.conversationId).archived === true;
-    const resultCleared = Boolean(result?.manual || result?.dismissed || archived);
+    const resultCleared = Boolean(
+      result?.manual || result?.dismissed || result?.superseded || archived
+    );
     // 移出只影响看板：记录还在，但哪一列都不进
     if (record.dismissedFromBoard === true && !result) continue;
     // 主动停止（秘书 session_stop 或用户中止）：
@@ -421,7 +439,10 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     // 当天没有终态结果时：真在跑、或从来没报过结果的才进「进行中」。
     // 报过结果、这一轮又没给新结果的会话，活已经干完，不能一直挂在进行中。
     const effectiveCleared = Boolean(
-      effectiveResult?.manual || effectiveResult?.dismissed || archived
+      effectiveResult?.manual ||
+        effectiveResult?.dismissed ||
+        effectiveResult?.superseded ||
+        archived
     );
     let column: SessionColumn | 'running' | null = effectiveResult
       ? columnOf(effectiveResult.kind, effectiveGoalResult, effectiveCleared)
@@ -438,6 +459,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       if (shown.triaging) {
         column = 'withSecretary';
         delete card.needsUser;
+        const stripped = stripGoalResultNeedsUser(card.goalResult);
+        if (stripped) card.goalResult = stripped;
+        else delete card.goalResult;
         if (card.label === DONE_NEEDS_USER_LABEL) card.label = RESULT_LABEL['goal-complete'];
       } else {
         card.needsUser = shown.items;

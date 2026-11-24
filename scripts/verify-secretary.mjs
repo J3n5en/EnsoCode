@@ -91,6 +91,9 @@ const NEEDS_USER_LINK_ONLY = process.argv.includes('--needs-user-link-only');
 // 只跑 needsUser 先经秘书筛选：未处理的收在「秘书处理中」、秘书升级后进「需要你」、超时兜底照旧显示。
 // 整体 3 分钟硬超时，截图存到 /tmp/needs-user-triage-*.png
 const NEEDS_USER_TRIAGE_ONLY = process.argv.includes('--needs-user-triage-only');
+// 只跑筛选的动态流与开关：秘书处理中的动态不说「需要你」、升级与收口后的动态、关掉秘书立即进「需要你」。
+// 整体 3 分钟硬超时，截图存到 /tmp/needs-user-triage2-*.png
+const NEEDS_USER_TRIAGE2_ONLY = process.argv.includes('--needs-user-triage2-only');
 // 只跑插件联系渠道连续发送失败：错误原因上卡片、连续失败后暂停推送，截图存到 /tmp/contact-channel-error-*.png
 const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
 // 只跑「确认技能提案后秘书收到更新」：只唤醒一轮，不出现 Request aborted
@@ -786,6 +789,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (NEEDS_USER_TRIAGE_ONLY) {
     await verifyNeedsUserTriage(cdp, setup);
+    return;
+  }
+  if (NEEDS_USER_TRIAGE2_ONLY) {
+    await verifyNeedsUserTriageFeed(cdp, setup);
     return;
   }
   if (CONTACT_CHANNEL_ERROR_ONLY) {
@@ -7489,6 +7496,167 @@ async function verifyNeedsUserTriage(cdp, setup) {
   log('  shots /tmp/needs-user-triage-{pending,escalated,fallback}.png');
 }
 
+async function verifyNeedsUserTriageFeed(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== needsUser 筛选的动态流：秘书处理中 → 升级 / 收口 → 关掉秘书立即进需要你');
+  const result = {
+    summary: '插件已上架，部署完成',
+    needsUser: ['手动删除临时文件 /tmp/enso-upload', '在 Mac 上点一下顶栏按钮确认'],
+  };
+  const dispatch = directDispatcher(page, setup);
+  const titles = { pending: '上架插件', escalated: '部署 relay', marked: '清理构建缓存' };
+  const ids = {};
+  for (const [key, title] of Object.entries(titles)) {
+    const created = await dispatch('session_create', {
+      projectId: setup.projectId,
+      prompt: '做完就收尾',
+      title,
+      goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了', result })}]]`,
+    });
+    assert(created.ok, `动态流: 会话「${title}」建成`, created);
+    ids[key] = created.conversationId;
+  }
+  for (const id of Object.values(ids)) {
+    await waitFor(
+      () => {
+        const found = readJson(dispatchFile).dispatched[id];
+        return found?.lastResult?.kind === 'goal-complete' && found.goalResult?.result?.needsUser;
+      },
+      `goal-complete with needsUser ${id}`,
+      60_000,
+      300
+    );
+  }
+
+  // 打开右侧工作台、关掉动画；等 ready(状态) 成立后返回各会话的动态行与「需要你」
+  const view = (ready) =>
+    page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+    document.head.appendChild(style);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+    }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    const panel = await until(() => onScreen() && visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const ids = ${JSON.stringify(ids)};
+    const read = () => {
+      const root = visiblePanel();
+      const rows = [...(root?.querySelectorAll('[data-enso=secretary-feed-event]') ?? [])];
+      const feed = {};
+      for (const [key, id] of Object.entries(ids))
+        feed[key] = rows.filter((row) => row.dataset.id?.includes(id)).map((row) => row.innerText.replace(/\\s+/g, ' '));
+      return { feed, needsYou: root?.querySelector('[data-enso=secretary-needs-you]')?.innerText ?? '' };
+    };
+    const state = await until(() => { const s = read(); return (${ready})(s) ? s : null; }, 30000);
+    const first = visiblePanel()?.querySelector('[data-enso=secretary-feed-event]');
+    first?.scrollIntoView({ block: 'start' });
+    await sleep(400);
+    return JSON.stringify({ ok: Boolean(state), ...(state ?? read()) });
+  `);
+  const all = (rows) => rows.join(' | ');
+
+  const pending = await view(
+    `(s) => Object.values(s.feed).every((rows) => rows.some((row) => row.includes('完成 · 秘书处理中')))`
+  );
+  log(`  pending ${JSON.stringify(pending)}`);
+  assert(
+    pending.ok &&
+      Object.values(pending.feed).every((rows) => !all(rows).includes('完成 · 需要你')) &&
+      Object.values(pending.feed).every((rows) => all(rows).includes(result.summary)),
+    '动态流: 秘书处理中的三条标「完成 · 秘书处理中」，正文是 summary，不说「需要你」',
+    pending
+  );
+  await cdp.shot('/tmp/needs-user-triage2-pending.png');
+
+  const escalated = await secretaryTool(
+    cdp,
+    setup,
+    'needs_user_escalate',
+    { conversationId: ids.escalated, needsUserIndex: 1, text: '在 Mac 顶栏点一下「确认」按钮' },
+    '升级给用户'
+  );
+  assert(String(escalated.text).includes('escalated'), '动态流: 秘书升级一条', escalated);
+  const marked = await secretaryTool(
+    cdp,
+    setup,
+    'result_mark_done',
+    { conversationId: ids.marked },
+    '收口'
+  );
+  assert(marked.text !== null, '动态流: 秘书 result_mark_done 一条', marked);
+  const settled = await view(
+    `(s) => s.feed.escalated.join(' | ').includes('完成 · 需要你') && !s.feed.marked.join(' | ').includes('秘书处理中')`
+  );
+  log(`  settled ${JSON.stringify(settled)}`);
+  assert(
+    settled.ok &&
+      all(settled.feed.escalated).includes('完成 · 需要你 · 在 Mac 顶栏点一下「确认」按钮') &&
+      !all(settled.feed.escalated).includes(result.needsUser[0]),
+    '动态流: 升级后标「完成 · 需要你」，只给改写后的那条',
+    settled
+  );
+  assert(
+    !all(settled.feed.marked).includes('需要你') && all(settled.feed.marked).includes('目标完成'),
+    '动态流: 秘书收口的显示成普通完成',
+    settled
+  );
+  assert(
+    all(settled.feed.pending).includes('完成 · 秘书处理中') &&
+      !settled.needsYou.includes(titles.pending),
+    '动态流: 没处理的仍在秘书处理中',
+    settled
+  );
+  await cdp.shot('/tmp/needs-user-triage2-settled.png');
+
+  // 关掉秘书功能：还在筛选期的那条立即进「需要你」，不等 30 分钟
+  const disabled = await page(`
+    SET().setSecretaryEnabled(false);
+    let resolved = null;
+    for (let end = Date.now() + 15000; !resolved && Date.now() < end; await sleep(300)) {
+      const state = await window.electronAPI.secretary.getState();
+      const hit = state.board.needsYou.find((card) => card.conversationId === ${JSON.stringify(ids.pending)});
+      if (state.enabled === false && hit) resolved = state;
+    }
+    return JSON.stringify({
+      ok: Boolean(resolved),
+      needsYou: (resolved?.board.needsYou ?? []).map((card) => ({ title: card.title, needsUser: card.needsUser ?? [], triage: card.triage ?? false })),
+    });
+  `);
+  log(`  disabled ${JSON.stringify(disabled)}`);
+  assert(disabled.ok, '开关: 关掉秘书后筛选期内的 needsUser 立即进「需要你」', disabled);
+  const restored = await page(`
+    SET().setSecretaryEnabled(true);
+    await sleep(1500);
+    return JSON.stringify({ ok: true });
+  `);
+  assert(restored.ok, '开关: 重新打开秘书', restored);
+  const reopened = await view(`(s) => s.feed.pending.join(' | ').includes('完成 · 秘书处理中')`);
+  assert(
+    reopened.ok && !reopened.needsYou.includes(titles.pending),
+    '开关: 重新打开后，30 分钟内的回到秘书处理中',
+    reopened
+  );
+  await cdp.shot('/tmp/needs-user-triage2-reopened.png');
+  log('  shots /tmp/needs-user-triage2-{pending,settled,reopened}.png');
+}
+
 async function verifyWorkbenchCounts(cdp, setup) {
   const page = cdp.json.bind(cdp);
   log('== 工作台今日战报：按会话计数，之前派出或接手的完成另算');
@@ -9776,6 +9944,12 @@ if (NEEDS_USER_LINK_ONLY) {
 if (NEEDS_USER_TRIAGE_ONLY) {
   setTimeout(() => {
     console.error('\nFAIL needs-user-triage: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
+if (NEEDS_USER_TRIAGE2_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL needs-user-triage2: 3 分钟硬超时');
     void finish(124);
   }, 180_000).unref();
 }

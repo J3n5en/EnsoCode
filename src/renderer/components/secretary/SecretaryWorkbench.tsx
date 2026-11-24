@@ -802,7 +802,8 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
   const problem = board.todos.filter((todo) => todo.phase === 'problem');
   const open = board.todos.filter((todo) => (todo.phase ?? 'todo') === 'todo');
   const reopenIds = new Set([...active, ...problem].map((todo) => todo.id));
-  const triage = board.done.filter(
+  // 等审批的会话因审批进「需要你」，它完成结果里的 needsUser 仍在秘书手里
+  const triage = [...board.needsYou, ...board.done].filter(
     (card): card is SecretarySessionCard => card.kind === 'session' && card.triage === true
   );
 

@@ -72,6 +72,45 @@ describe('parseDailyRequest', () => {
 });
 
 describe('buildDaily', () => {
+  it('秘书功能关着：派出会话的 needsUser 不进「秘书处理中」，直接进「需要你」', async () => {
+    const now = at(15, 20);
+    appendDailyRecord(dir, {
+      at: now - 60_000,
+      conversationId: 'c1',
+      kind: 'goal-complete',
+      projectId: 'p1',
+    });
+    const file = dispatchFile({
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 'sec',
+          createdAt: now - 120_000,
+          turn: 1,
+          lastState: 'idle',
+          stateSince: now - 60_000,
+          lastResult: { kind: 'goal-complete', turn: 1, at: now - 60_000 },
+          goalResult: { at: now - 60_000, result: { needsUser: ['删临时文件'] } },
+        } as SecretaryDispatchFile['dispatched'][string],
+      },
+    });
+    const rows = () => ({
+      c1: { id: 'c1', title: '重构登录流程', projectId: 'p1' },
+      sec: { id: 'sec', title: '秘书' },
+    });
+    const column = async (enabled: boolean) => {
+      const daily = await buildDaily(
+        ports({ dispatchFile: () => file, rows, secretaryEnabled: () => enabled }),
+        '2024-05-15'
+      );
+      return daily.groups.find((group) => group.items.some((item) => item.conversationId === 'c1'))
+        ?.key;
+    };
+    expect(await column(true)).toBe('withSecretary');
+    expect(await column(false)).toBe('needsYou');
+  });
+
   it('结果来自 daily.jsonl，标题与项目名取会话行', async () => {
     appendDailyRecord(dir, {
       at: at(15, 10),

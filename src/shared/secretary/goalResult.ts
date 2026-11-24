@@ -113,6 +113,12 @@ export function unansweredNeedsUserCount(view: GoalResultView | undefined): numb
 /** 秘书没在这段时间里升级或处理，needsUser 照旧直接给用户 */
 export const NEEDS_USER_TRIAGE_MS = 30 * 60_000;
 
+/** 秘书筛选的截止时间：从完成或秘书最后一次升级、用户最后一次答复算起 */
+export function needsUserTriageDeadline(view: GoalResultView): number {
+  const touched = [...(view.escalations ?? []), ...(view.answers ?? [])].map((item) => item.at);
+  return Math.max(view.at, ...touched) + NEEDS_USER_TRIAGE_MS;
+}
+
 /** 记下一次升级：index 缺省表示全部条目（保留原文），同一条再升级以新的为准 */
 export function escalateGoalResultNeedsUser(
   view: GoalResultView,
@@ -142,8 +148,8 @@ export interface ShownNeedsUser {
 
 /**
  * 用户此刻该看到哪些 needsUser。triage 表示这份结果先经秘书（派出或跟踪、秘书会话还在）。
- * 秘书升级过就只给升级的条目，其余算秘书处理掉；没升级且没超时就还在筛选；
- * 不经秘书或超时没处理，全部照旧给用户。
+ * 有升级了还没答的条目，只给升级的；升级的都答完（或没升级过）而还剩没处理的条目，
+ * 截止前回到秘书手里，超时全部给用户；不经秘书的全部照旧给用户。
  */
 export function shownNeedsUser(
   view: GoalResultView | undefined,
@@ -157,10 +163,15 @@ export function shownNeedsUser(
       .filter((item) => item.index < all.length)
       .map((item) => [item.index, item.text])
   );
-  const indexes =
-    triage && escalated.size > 0 ? [...escalated.keys()].sort((a, b) => a - b) : [...all.keys()];
-  if (triage && escalated.size === 0 && now < view.at + NEEDS_USER_TRIAGE_MS)
+  const answered = new Set((view.answers ?? []).map((item) => item.index));
+  const awaiting = [...escalated.keys()].some((index) => !answered.has(index));
+  const untouched = all.some((_, index) => !escalated.has(index) && !answered.has(index));
+  if (triage && !awaiting && untouched && now < needsUserTriageDeadline(view))
     return { triaging: true, items: [], answers: [] };
+  const indexes =
+    triage && (awaiting || !untouched)
+      ? [...escalated.keys()].sort((a, b) => a - b)
+      : [...all.keys()];
   const position = new Map(indexes.map((index, at) => [index, at]));
   return {
     triaging: false,

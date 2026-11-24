@@ -47,6 +47,8 @@ describe('buildSecretarySystemPrompt', () => {
     const results = prompt.split('\n').find((line) => line.startsWith('Results:')) ?? '';
     expect(results).toMatch(/do not reach the user's needs-you list until you triage them/);
     expect(results).toMatch(/Escalate only what the user personally has to decide or do by hand/);
+    expect(results).toMatch(/the card returns to with-secretary/);
+    expect(results).not.toMatch(/count as handled by you/);
     expect(results).toContain('needs_user_escalate');
     expect(results).toMatch(/30 minutes/);
   });

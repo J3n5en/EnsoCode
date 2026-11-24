@@ -1757,8 +1757,22 @@ describe('needsUser 先经秘书筛选', () => {
     });
   });
 
-  it('秘书升级了一条：只这一条以改写后的文字进「需要你」，没升级的算秘书处理掉', () => {
+  it('秘书升级了一条：只这一条以改写后的文字进「需要你」；答完后没升级的回到秘书处理中', () => {
     const board = boardOf({
+      need: need({
+        goalResult: {
+          at,
+          result: { needsUser: ['删临时文件', '在 Mac 上点确认'] },
+          escalations: [{ index: 1, text: '在 Mac 顶栏点一下确认', at: at + 1 }],
+        },
+      }),
+    });
+    expect(ids(board.needsYou)).toEqual(['need']);
+    expect(board.needsYou[0]).toMatchObject({ needsUser: ['在 Mac 顶栏点一下确认'] });
+    expect(board.needsYou[0]).not.toHaveProperty('triage');
+    expect(board.done).toEqual([]);
+
+    const answered = boardOf({
       need: need({
         goalResult: {
           at,
@@ -1768,13 +1782,8 @@ describe('needsUser 先经秘书筛选', () => {
         },
       }),
     });
-    expect(ids(board.needsYou)).toEqual(['need']);
-    expect(board.needsYou[0]).toMatchObject({
-      needsUser: ['在 Mac 顶栏点一下确认'],
-      needsUserAnswers: [{ index: 0, answer: '点了', at: at + 2 }],
-    });
-    expect(board.needsYou[0]).not.toHaveProperty('triage');
-    expect(board.done).toEqual([]);
+    expect(answered.needsYou).toEqual([]);
+    expect(answered.done[0]).toMatchObject({ conversationId: 'need', triage: true });
   });
 
   it('超过 30 分钟秘书没处理：照旧全部进「需要你」', () => {
@@ -1789,6 +1798,20 @@ describe('needsUser 先经秘书筛选', () => {
     expect(ids(boardOf({ need: need() }, { s1: { ...sec, archived: true } }).needsYou)).toEqual([
       'need',
     ]);
+  });
+
+  it('秘书功能关着：不等 30 分钟，立即进「需要你」', () => {
+    const board = buildBoard(emptyFile({ dispatched: { need: need() } }), {
+      rows: { need: { title: '需用户确认', sessionFile: '/s/need.jsonl' }, s1: sec },
+      statuses: { need: idle },
+      projects: [],
+      todos: [],
+      now: NOW,
+      secretaryEnabled: false,
+    });
+    expect(ids(board.needsYou)).toEqual(['need']);
+    expect(board.needsYou[0]).toMatchObject({ needsUser: ['删临时文件', '在 Mac 上点确认'] });
+    expect(board.needsYou[0]).not.toHaveProperty('triage');
   });
 
   it('goal-blocked 的 needsUser、实时审批与提问不经筛选，照旧直接进「需要你」', () => {
