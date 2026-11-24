@@ -246,6 +246,7 @@ function parseCatalogEntry(value: unknown): CatalogEntry | null {
   }
   if (typeof value.queueFailed === 'string' && value.queueFailed)
     out.queueFailed = value.queueFailed;
+  if (value.parked === 'reminder' || value.parked === 'upstream') out.parked = value.parked;
   if (typeof value.pinned === 'boolean') out.pinned = value.pinned;
   if (typeof value.archived === 'boolean') out.archived = value.archived;
   if (value.muted === true) out.muted = true;

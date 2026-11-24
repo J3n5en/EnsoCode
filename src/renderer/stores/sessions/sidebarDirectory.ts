@@ -4,6 +4,7 @@ import {
   userAskCount,
 } from '@shared/conversationDotTone';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
+import type { GoalUpstreamRetry } from '@shared/upstreamRecovery';
 
 export interface SidebarDirectoryEntry {
   id: string;
@@ -39,6 +40,8 @@ export interface SidebarDirectoryEntry {
   queued?: boolean;
   queuePosition?: number;
   queueFailed?: string;
+  /** 续跑中（active）与等上游恢复（waiting + retry）：活跃中判定与状态图标 */
+  goal?: { status: string; retry?: GoalUpstreamRetry };
 }
 
 type Source = {
@@ -71,6 +74,7 @@ type Source = {
   btwParentId?: string;
   secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
   queuedStart?: unknown;
+  goal?: { status: string; retry?: GoalUpstreamRetry };
 };
 
 function lastActiveAt(conversation: Source): number | undefined {
@@ -107,6 +111,14 @@ function project(conversation: Source, hasRunningChild: boolean): SidebarDirecto
     sessionFile: conversation.sessionFile,
     worktree: conversation.worktree,
     secretaryOrigin: conversation.secretaryOrigin,
+    ...(conversation.goal
+      ? {
+          goal: {
+            status: conversation.goal.status,
+            ...(conversation.goal.retry ? { retry: conversation.goal.retry } : {}),
+          },
+        }
+      : {}),
     ...(queued
       ? {
           queued: !queued.failed,

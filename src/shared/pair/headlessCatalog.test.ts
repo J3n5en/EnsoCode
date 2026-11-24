@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   catalogEntryFromPairSession,
+  catalogParked,
   catalogQueued,
   catalogQueueOverride,
   patchCatalogEntry,
@@ -70,5 +71,26 @@ describe('headless catalog', () => {
       )
     ).toEqual({ status: 'queued', queueFailed: 'full' });
     expect(catalogQueueOverride({ id: 'c' }, 1)).toBeUndefined();
+  });
+
+  it('空闲等待原因：等上游恢复优先，其次未到点提醒；运行中或提醒已过宽限期不标', () => {
+    const retry = {
+      reason: 'upstream' as const,
+      kind: 'transient' as const,
+      provider: 'x',
+      attempt: 1,
+      since: 1,
+      at: 2,
+      lastError: 'e',
+    };
+    const now = 1_000_000;
+    const soon = [{ dueAt: now + 60_000 }];
+    expect(catalogParked({ status: 'idle', goal: { status: 'waiting', retry } }, soon, now)).toBe(
+      'upstream'
+    );
+    expect(catalogParked({ status: 'idle' }, soon, now)).toBe('reminder');
+    expect(catalogParked({ status: 'running' }, soon, now)).toBeUndefined();
+    expect(catalogParked({ status: 'idle' }, [{ dueAt: now - 10 * 60_000 }], now)).toBeUndefined();
+    expect(catalogParked({ status: 'idle' }, undefined, now)).toBeUndefined();
   });
 });

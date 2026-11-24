@@ -2,7 +2,7 @@ import { toPairProjectEntry } from '@enso/pair';
 import { conversationCwd } from '@shared/conversationCwd';
 import { userAskCount } from '@shared/conversationDotTone';
 import { normalizeLocale, translate } from '@shared/i18n';
-import { catalogQueueOverride } from '@shared/pair/headlessCatalog';
+import { catalogParked, catalogQueueOverride } from '@shared/pair/headlessCatalog';
 import { catalogSyncFingerprint, pairJsonFingerprint } from '@shared/pair/metaSync';
 import { projectDisplayName } from '@shared/projectName';
 import { queuePositions } from '@shared/secretary/queuedSession';
@@ -15,6 +15,7 @@ import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders'
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { pairProviderSyncPlan } from '@/stores/pairCatalogProviders';
 import { catalogHiddenProjectIds, catalogListedProject } from '@/stores/pairCatalogVisibility';
+import { useSessionRemindersStore } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
 import { lastActiveAt } from '@/stores/sessions/pinned';
 import { setPairViewedSession } from '@/stores/sessions/unread';
@@ -78,9 +79,12 @@ function buildPayload(): PairCatalogPayload {
     .filter((skill) => skill.enabled !== false)
     .map((skill) => ({ name: `/skill:${skill.name}`, description: skill.description }));
   const positions = queuePositions(sessions.conversations as unknown as Record<string, unknown>);
+  const reminders = useSessionRemindersStore.getState().byConversation;
+  const now = Date.now();
   // 冷会话桌面不留消息正文：用量与占用都取 session-meta（worker 按完整记录算），不按 c.messages 算
   const toEntry = (c: Conversation) => {
     const queue = catalogQueueOverride(c, positions.get(c.id));
+    const parked = catalogParked(c, reminders[c.id], now);
     const context = resolveContextUsage(c.occupancy, c.contextWindow);
     const entry = {
       id: c.id,
@@ -125,6 +129,7 @@ function buildPayload(): PairCatalogPayload {
             },
           }
         : {}),
+      ...(parked ? { parked } : {}),
       ...(slashCommands.length ? { slashCommands } : {}),
       ...(context ? { context } : {}),
       ...(c.usageTotals ? { usageTotals: c.usageTotals } : {}),
@@ -244,6 +249,9 @@ export function bindPairCatalogSync(): void {
   });
   useOauthCredentialStore.subscribe((state, prev) => {
     if (state.snapshot !== prev.snapshot) schedulePush();
+  });
+  useSessionRemindersStore.subscribe((state, prev) => {
+    if (state.byConversation !== prev.byConversation) schedulePush();
   });
   useModelDirectoryStore.subscribe((state, prev) => {
     if (state.snapshot !== prev.snapshot) schedulePush();
