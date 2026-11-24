@@ -17,6 +17,7 @@ import { access } from 'node:fs/promises';
 import { constants as osConstants } from 'node:os';
 import path from 'node:path';
 import { type BashOperations, getShellConfig } from '@earendil-works/pi-coding-agent';
+import { signalProcessTree } from '../killTree';
 
 /**
  * 能活过 worker 的命令进程（本地 POSIX）：detached 独立会话，stdin 关闭，stdout/stderr 直写
@@ -201,20 +202,9 @@ export const defaultRunProbe: RunProbe = {
   matches: runIdentityMatches,
 };
 
-/** 杀整个进程组；macOS 先 SIGSTOP 再 SIGKILL，与 pi 前台中止一致（防 `a; b` 在取消时起 b） */
-export function killRunGroup(pid: number, signal: NodeJS.Signals): void {
-  if (process.platform === 'darwin' && signal === 'SIGKILL') {
-    try {
-      process.kill(-pid, 'SIGSTOP');
-    } catch {}
-  }
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    try {
-      process.kill(pid, signal);
-    } catch {}
-  }
+/** 杀整个进程组，连同自立门户的后代（signalProcessTree）；known 跨多轮记住见过的组 */
+export function killRunGroup(pid: number, signal: NodeJS.Signals, known?: Set<number>): void {
+  signalProcessTree(pid, signal, known);
 }
 
 /** 从 offset 起跟读输出文件；文件不在时只是读不到 */
@@ -325,6 +315,7 @@ export function spawnFileBacked(input: {
   };
   if (child.pid !== undefined) writeRunMeta(input.dir, files);
   const tail = new FileTail(outputFile, 0);
+  const groups = new Set<number>();
   let released = false;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -366,7 +357,7 @@ export function spawnFileBacked(input: {
     readError: () => tail.error,
     done,
     kill: (signal) => {
-      if (child.pid !== undefined) killRunGroup(child.pid, signal);
+      if (child.pid !== undefined) killRunGroup(child.pid, signal, groups);
     },
     release: () => {
       if (!released) {
@@ -394,6 +385,7 @@ export function attachFileBacked(
   probe: RunProbe = defaultRunProbe
 ): FileBackedRun {
   const tail = new FileTail(run.outputFile, offset);
+  const groups = new Set<number>();
   writeRunMeta(dir, run);
   let released = false;
   let ticks = 0;
@@ -429,7 +421,7 @@ export function attachFileBacked(
     readError: () => tail.error,
     done,
     kill: (signal) => {
-      if (probe.matches(run.pid, run)) killRunGroup(run.pid, signal);
+      if (probe.matches(run.pid, run)) killRunGroup(run.pid, signal, groups);
     },
     release: () => {
       if (!released) {
