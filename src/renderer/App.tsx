@@ -723,7 +723,7 @@ export default function App() {
                 {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
                 {backgroundTasksOpen && <BackgroundTasksPage />}
               </div>
-              {/* 收起时也常驻占位：条件挂载会让开合首帧聊天区先跳一次宽度。gap 按外壳形态取，不随开合变 */}
+              {/* 收起时也常驻：条件挂载会让开合首帧聊天区先跳一次宽度。gap 按外壳形态取，不随开合变 */}
               {!sideFullscreen && !isMobile && (
                 <ResizeHandle
                   gap={desktopShell && !titleRowPanel}

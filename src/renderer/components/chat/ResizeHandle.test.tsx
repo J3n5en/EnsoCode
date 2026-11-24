@@ -11,10 +11,15 @@ const render = (props: { gap?: boolean; inactive?: boolean }) => {
 const widthOf = (classes: string[]) => classes.filter((c) => /^w-/.test(c));
 
 describe('ResizeHandle 常驻（面板收起时）', () => {
-  it.each([false, true])('收起与展开占位宽度一致：开合首帧聊天区不跳宽（gap=%s）', (gap) => {
-    const widths = widthOf(render({ gap }).outer);
+  it('1px 分隔线：收起与展开占位宽度一致，开合首帧聊天区不跳宽', () => {
+    const widths = widthOf(render({}).outer);
     expect(widths).toHaveLength(1);
-    expect(widthOf(render({ gap, inactive: true }).outer)).toEqual(widths);
+    expect(widthOf(render({ inactive: true }).outer)).toEqual(widths);
+  });
+
+  it('8px 画布缝：收起时不占位，否则收起态右边距成 16px，与底边 8px 不对称', () => {
+    expect(widthOf(render({ gap: true }).outer)).toEqual(['w-[8px]']);
+    expect(widthOf(render({ gap: true, inactive: true }).outer)).toEqual(['w-0']);
   });
 
   it('收起时不可交互、不可见', () => {

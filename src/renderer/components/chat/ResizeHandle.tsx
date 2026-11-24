@@ -11,7 +11,10 @@ interface ResizeHandleProps {
   gap?: boolean;
   /** 零宽、不画线，命中区只落在右侧卡片边缘：左侧贴边的是侧栏滚动条，不能被手柄盖住 */
   edge?: boolean;
-  /** 面板收起时仍占位（宽度不变）但隐藏且不可交互：条件挂载会让开合首帧聊天区先跳宽 */
+  /**
+   * 面板收起时隐藏且不可交互。1px 线仍占位：条件挂载会让开合首帧聊天区先跳宽；
+   * 8px 缝不占位：否则收起态右边距叠成 16px，与底边 8px 不对称
+   */
   inactive?: boolean;
 }
 
@@ -55,7 +58,7 @@ export function ResizeHandle({
       className={cn(
         // z-20：命中区伸进相邻卡片，否则后绘制的卡片会把指针吃掉
         'relative z-20 shrink-0',
-        edge ? 'w-0' : gap ? 'w-[8px]' : 'w-px bg-border',
+        edge || (gap && inactive) ? 'w-0' : gap ? 'w-[8px]' : 'w-px bg-border',
         inactive && 'pointer-events-none invisible'
       )}
     >
