@@ -1,5 +1,6 @@
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import {
+  ArrowLeft,
   BarChart3,
   Bot,
   BotMessageSquare,
@@ -79,9 +80,30 @@ function flashSettingsRow(rowId: string): void {
   });
 }
 
-export function SettingsContent() {
+/** 嵌在主窗口里：返回按钮、侧栏宽度、窄屏两级由外层的设置路由掌管 */
+export interface EmbeddedSettings {
+  initialCategory: SettingsCategory;
+  onCategoryChange: (category: SettingsCategory) => void;
+  mobileDetail: boolean;
+  onMobileDetailChange: (detail: boolean) => void;
+  onBack: () => void;
+  navWidth: number;
+  footer?: React.ReactNode;
+}
+
+export function SettingsContent({
+  link = null,
+  linkSeq = 0,
+  embedded,
+}: {
+  link?: SettingsDeepLink | null;
+  linkSeq?: number;
+  embedded?: EmbeddedSettings;
+}) {
   const { t } = useI18n();
-  const [activeCategory, setActiveCategory] = React.useState<SettingsCategory>('general');
+  const [activeCategory, setActiveCategory] = React.useState<SettingsCategory>(
+    () => link?.category ?? embedded?.initialCategory ?? 'general'
+  );
   const [flashRowId, setFlashRowId] = React.useState<string | null>(null);
   const [pluginInstallUrl, setPluginInstallUrl] = React.useState<string | null>(null);
   const [focusPluginId, setFocusPluginId] = React.useState<string | null>(null);
@@ -90,7 +112,10 @@ export function SettingsContent() {
   const [memoryRevision, setMemoryRevision] = React.useState(0);
   // 窄屏下分类列表与内容逐级进入
   const isMobile = useIsMobile();
-  const [mobileList, setMobileList] = React.useState(true);
+  const [ownMobileList, setOwnMobileList] = React.useState(true);
+  const mobileList = embedded ? !embedded.mobileDetail : ownMobileList;
+  const setMobileList = (list: boolean) =>
+    embedded ? embedded.onMobileDetailChange(!list) : setOwnMobileList(list);
   const [settingsQuery, setSettingsQuery] = React.useState('');
   const [sshConnections, setSshConnections] = React.useState<Array<{ id: string; name: string }>>(
     []
@@ -108,21 +133,22 @@ export function SettingsContent() {
     () => useSettingsStore.persist?.hasHydrated?.() ?? true
   );
 
-  const applyLink = React.useCallback((link: SettingsDeepLink) => {
+  // linkSeq 变了就重新定位（同一链接重复打开也要再闪一次）
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 按 linkSeq 触发
+  React.useEffect(() => {
+    if (!link) return;
     setActiveCategory(link.category);
-    setMobileList(false);
+    if (!embedded) setOwnMobileList(false);
     setFlashRowId(link.rowId);
     if (link.pluginInstallUrl) setPluginInstallUrl(link.pluginInstallUrl);
     setFocusPluginId(link.pluginId ?? null);
     setMarketQuery(link.marketQuery ?? null);
-  }, []);
+  }, [linkSeq]);
 
+  const onCategoryChange = embedded?.onCategoryChange;
   React.useEffect(() => {
-    void window.electronAPI.window.consumeSettingsDeepLink().then((link) => {
-      if (link) applyLink(link);
-    });
-    return window.electronAPI.window.onSettingsDeepLink(applyLink);
-  }, [applyLink]);
+    onCategoryChange?.(activeCategory);
+  }, [activeCategory, onCategoryChange]);
 
   React.useEffect(() => {
     let active = true;
@@ -214,13 +240,37 @@ export function SettingsContent() {
           data-enso="settings-nav"
           className={cn(
             'flex min-h-0 shrink-0 flex-col',
-            isMobile ? 'w-full' : shell ? 'w-56' : 'w-56 border-r'
+            isMobile ? 'w-full' : embedded ? '' : shell ? 'w-56' : 'w-56 border-r'
           )}
+          style={embedded && !isMobile ? { width: embedded.navWidth } : undefined}
         >
-          {shell && chromeKind === 'mac' && (
+          {shell && !embedded && chromeKind === 'mac' && (
             <div aria-hidden className="drag-region -mb-2 h-[44px] shrink-0" />
           )}
-          <div className={cn('sticky top-0 z-10 px-2 pt-2', !shell && 'bg-background')}>
+          {embedded && (
+            <div className={cn('flex shrink-0 items-center px-2', isMobile ? 'h-12' : 'h-9')}>
+              <button
+                type="button"
+                data-enso="settings-back"
+                onClick={embedded.onBack}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent/50',
+                  isMobile ? 'h-11 pl-1.5' : 'h-8 pl-1'
+                )}
+                title={t('Back to workspace')}
+                aria-label={t('Back to workspace')}
+              >
+                <ArrowLeft className="h-4 w-4 text-muted-foreground" />
+                {t('Settings')}
+              </button>
+              {!isMobile && (
+                <span className="ml-auto pr-1 text-[11px] text-muted-foreground">Esc</span>
+              )}
+            </div>
+          )}
+          <div
+            className={cn('sticky top-0 z-10 px-2 pt-2', !shell && !embedded && 'bg-background')}
+          >
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -233,7 +283,7 @@ export function SettingsContent() {
                   setSettingsQuery('');
                 }}
                 placeholder={t('Search settings')}
-                className="h-8 w-full rounded-md border bg-transparent pr-2 pl-7 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-8 w-full max-md:h-10 max-md:text-base rounded-md border bg-transparent pr-2 pl-7 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
           </div>
@@ -246,7 +296,13 @@ export function SettingsContent() {
                   <div className="px-2 pb-1.5 text-xs font-semibold text-foreground/55">
                     {t(group.label)}
                   </div>
-                  <div className="space-y-0.5 rounded-lg bg-muted/60 p-1">
+                  <div
+                    className={cn(
+                      'space-y-0.5',
+                      // 主窗口桌面形态与工作区侧栏一致：平铺，不再套一层分组底
+                      (!embedded || isMobile) && 'rounded-lg bg-muted/60 p-1'
+                    )}
+                  >
                     {group.items.map((category) => (
                       <div key={category.id}>
                         <button
@@ -289,6 +345,7 @@ export function SettingsContent() {
               ))
             )}
           </div>
+          {embedded?.footer}
         </nav>
       )}
 
@@ -298,21 +355,25 @@ export function SettingsContent() {
           data-enso="settings-content"
           className={cn(
             'flex min-w-0 flex-1 flex-col',
-            shell && 'my-[8px] mr-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
+            embedded && !isMobile
+              ? 'mr-[8px] mb-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
+              : shell &&
+                  'my-[8px] mr-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
           )}
         >
-          {shell && <ChromeRow data-enso="title-bar" />}
+          {shell && !embedded && <ChromeRow data-enso="title-bar" />}
           <div
             className={cn(
               'min-h-0 flex-1 overflow-y-auto',
-              isMobile ? 'px-4 pb-6' : shell ? 'px-6 pb-6' : 'p-6'
+              isMobile ? 'px-4 pb-6' : shell && !embedded ? 'px-6 pb-6' : 'p-6'
             )}
           >
             {isMobile && (
               <button
                 type="button"
+                data-enso="settings-detail-back"
                 onClick={() => setMobileList(true)}
-                className="sticky top-0 z-10 -mx-4 mb-3 flex w-[calc(100%+2rem)] items-center gap-1 border-b bg-background px-2 py-2.5 text-sm font-medium"
+                className="sticky top-0 z-10 -mx-4 mb-3 flex min-h-11 w-[calc(100%+2rem)] items-center gap-1 border-b bg-background px-2 py-2.5 text-sm font-medium"
               >
                 <ChevronLeft className="h-5 w-5 text-muted-foreground" />
                 {activeLabel ? t(activeLabel) : null}

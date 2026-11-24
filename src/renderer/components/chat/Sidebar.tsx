@@ -173,6 +173,7 @@ import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import { openSettings } from '@/stores/appView';
 import { closeBackgroundTasks } from '@/stores/backgroundTasksView';
 import { useSecretaryStore } from '@/stores/secretary';
 import { usePendingReminder, useSessionRemindersStore } from '@/stores/sessionReminders';
@@ -1123,7 +1124,7 @@ export function Sidebar({
           <button
             type="button"
             data-enso="settings-button"
-            onClick={() => window.electronAPI.window.openSettings()}
+            onClick={() => openSettings()}
             className={ICON_BUTTON_CLASS}
             title={t('Settings')}
           >
@@ -1244,7 +1245,7 @@ export function Sidebar({
                   void useSecretaryStore.getState().newSecretaryConversation();
                 }}
                 onOpenSettings={() =>
-                  void window.electronAPI.window.openSettings({
+                  openSettings({
                     category: 'secretary',
                     rowId: 'secretary.root',
                   })
@@ -2042,7 +2043,7 @@ export function Sidebar({
           <button
             type="button"
             data-enso="settings-button"
-            onClick={() => window.electronAPI.window.openSettings()}
+            onClick={() => openSettings()}
             className={ICON_BUTTON_CLASS}
             title={t('Settings')}
             aria-label={t('Settings')}

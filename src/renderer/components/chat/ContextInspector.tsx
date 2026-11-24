@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useI18n } from '@/i18n';
 import { openSidePanelFile } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
+import { openSettings } from '@/stores/appView';
 import { useSessionsStore } from '@/stores/sessions';
 import { forkDepth, MAX_FORK_DEPTH } from '@/stores/sessions/conversationRewind';
 import { formatTokens } from '@/stores/sessions/stats';
@@ -198,7 +199,7 @@ export function ContextInspector({
                         if (!conversationId) return;
                         openSidePanelFile(conversationId, to.rel);
                       } else {
-                        void window.electronAPI.window.openSettings(to.link);
+                        openSettings(to.link);
                       }
                       onNavigate?.();
                     };

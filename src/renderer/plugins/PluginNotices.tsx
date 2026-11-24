@@ -2,6 +2,7 @@ import { pluginFocusSettingsLink } from '@shared/extensionPlugins/pluginProtocol
 import { useEffect } from 'react';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { openSettings } from '@/stores/appView';
 import { describePluginNotice } from './pluginNotice';
 
 export function PluginNotices() {
@@ -19,9 +20,7 @@ export function PluginNotices() {
                 {
                   label: t(view.actionKey),
                   onClick: () => {
-                    void window.electronAPI.window.openSettings(
-                      pluginFocusSettingsLink(view.pluginId)
-                    );
+                    openSettings(pluginFocusSettingsLink(view.pluginId));
                   },
                 },
               ],

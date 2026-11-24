@@ -49,6 +49,7 @@ import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import { openSettings } from '@/stores/appView';
 import { useBotPendingCount, useBotsStore } from '@/stores/bots';
 import { isActiveDelegation, pendingOwners } from '@/stores/bots/delegations';
 import {
@@ -487,7 +488,7 @@ export function BotSidebar({
           <button
             type="button"
             className={ICON_BUTTON_CLASS}
-            onClick={() => void window.electronAPI.window.openSettings()}
+            onClick={() => openSettings()}
             title={t('Settings')}
           >
             <Settings className="h-4 w-4" />

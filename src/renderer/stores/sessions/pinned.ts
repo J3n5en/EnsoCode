@@ -420,6 +420,18 @@ export function waitingConversationCount(
     .length;
 }
 
+/** 设置页底部状态条:运行中会话数,等你处理的会话(同 Dock 角标口径) */
+export function workbenchActivity(
+  order: readonly string[],
+  conversations: Conversations
+): { running: number; waitingIds: string[] } {
+  const waitingIds = order.filter(
+    (id) => conversations[id]?.muted !== true && isWaiting(id, conversations)
+  );
+  const running = order.filter((id) => dotTone(id, conversations) === 'running').length;
+  return { running, waitingIds };
+}
+
 const DAY_MS = 86_400_000;
 
 /**

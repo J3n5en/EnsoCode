@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { openSettings } from '@/stores/appView';
 import { useBotPendingCount, useBotsStore } from '@/stores/bots';
 import { BotChatView } from './BotChatView';
 import { seedBotDraft } from './BotComposer';
@@ -161,7 +162,7 @@ export function BotView({ sidebarWidth, collapsed, onToggleCollapse, onResize }:
           <button
             type="button"
             className={RAIL_BUTTON}
-            onClick={() => void window.electronAPI.window.openSettings()}
+            onClick={() => openSettings()}
             title={t('Settings')}
           >
             <Settings className="h-4 w-4" />

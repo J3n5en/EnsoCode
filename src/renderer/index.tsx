@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
+import { useAppViewStore } from '@/stores/appView';
 import App from './App';
 import { DiffWorkerPool } from './components/chat/DiffWorkerPool';
 import { syncOverlayGuard } from './lib/overlayGuard';
@@ -27,6 +28,7 @@ if (import.meta.env.DEV) {
     remoteNodes: useRemoteNodesStore,
     bots: useBotsStore,
     secretary: useSecretaryStore,
+    appView: useAppViewStore,
   };
 }
 

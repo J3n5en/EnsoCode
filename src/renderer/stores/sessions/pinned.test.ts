@@ -11,6 +11,7 @@ import {
   sortProjectsByActivity,
   staleArchivedConversationIds,
   waitingConversationCount,
+  workbenchActivity,
 } from './pinned';
 
 type CandidateHelpers = {
@@ -861,6 +862,18 @@ describe('等你处理优先', () => {
     expect(waitingConversationCount(order, live)).toBe(2);
     expect(waitingConversationCount([], live)).toBe(0);
     expect(waitingConversationCount(['missing'], live)).toBe(0);
+  });
+
+  it('设置页底部状态：数运行中与等你处理的会话，点它要打开的是第一个等你处理的', () => {
+    const live = withWaiting({
+      a: { status: 'running' },
+      b: { spawning: true },
+      c: ask,
+      d: { pendingApprovals: [{ requestId: 'x' }] },
+      e: { ...ask, muted: true },
+    });
+    expect(workbenchActivity(order, live)).toEqual({ running: 2, waitingIds: ['d', 'c'] });
+    expect(workbenchActivity(order, conversations)).toEqual({ running: 0, waitingIds: [] });
   });
 
   it('待审批同样算等你处理', () => {

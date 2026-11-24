@@ -8,6 +8,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from 'react';
+import { useWorkbenchCovered } from '@/stores/appView';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelShown } from '@/stores/sidePanel';
 
@@ -60,7 +61,9 @@ export function PanelVisibilityProvider({
   // dockview 的 isVisible = tab 在分组里被选中且分组未被隐藏；isActive 还要求所在分组是激活分组
   const isActive = useSyncExternalStore(subscribe, () => api.isActive);
   const isVisible = useSyncExternalStore(subscribe, () => api.isVisible);
-  const visible = current && open && isVisible;
+  // 设置页盖住工作区时面板不在屏幕上，窗口级快捷键与轮询都要让开
+  const covered = useWorkbenchCovered();
+  const visible = current && open && isVisible && !covered;
   const value = useMemo(() => ({ visible, active: visible && isActive }), [visible, isActive]);
   return (
     <PanelVisibilityContext.Provider value={value}>{children}</PanelVisibilityContext.Provider>
