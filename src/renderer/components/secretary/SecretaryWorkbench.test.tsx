@@ -1,5 +1,5 @@
 import type { FeedEvent } from '@shared/secretary/feed';
-import type { SecretaryBoard, SecretaryCard, SecretaryClaimView } from '@shared/types/secretary';
+import type { SecretaryBoard, SecretaryCard } from '@shared/types/secretary';
 import { parseHTML } from 'linkedom';
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -204,32 +204,131 @@ describe('SecretaryWorkbench 结果卡', () => {
     expect(dismissButton()).toBeNull();
   });
 
-  it('有对象认领时列出对象和会话，没有认领则不显示', async () => {
-    const claim: SecretaryClaimView = {
-      key: 'github:acme/app#1:review',
-      sessionId: 'c1',
-      sessionTitle: '写 hello.txt',
-      pluginId: 'github',
-      label: 'PR 审查',
-      claimedAt: NOW - 60_000,
-      lastHeartbeatAt: NOW - 5_000,
-      active: true,
-    };
-    h.board = { ...board([sessionCard()]), claims: [claim] };
-    await render(<SecretaryWorkbench name="小安" />);
-    const section = container.querySelector('[data-enso="secretary-claims"]');
-    expect(section?.textContent).toContain('[Object claims]');
-    expect(section?.textContent).toContain('PR 审查');
-    expect(section?.textContent).toContain('github:acme/app#1:review');
-    expect(section?.textContent).toContain('写 hello.txt');
-    expect(section?.textContent).toContain('github');
-    act(() => {
-      (container.querySelector('[data-enso="secretary-claim"]') as HTMLElement).click();
-    });
-    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
-    h.board = board([sessionCard()]);
+  it('工作台不展示对象认领，即使状态里还带着认领', async () => {
+    h.board = {
+      ...board([sessionCard()]),
+      claims: [
+        {
+          key: 'github:acme/app#1:closed',
+          sessionId: 'c1',
+          sessionTitle: '写 hello.txt',
+          pluginId: 'enso.github',
+          label: 'PR 审查',
+          claimedAt: NOW - 60_000,
+          lastHeartbeatAt: NOW - 5_000,
+          active: true,
+        },
+      ],
+    } as SecretaryBoard;
     await render(<SecretaryWorkbench name="小安" />);
     expect(container.querySelector('[data-enso="secretary-claims"]')).toBeNull();
+    expect(container.textContent).not.toContain('github:acme/app#1:closed');
+    expect(container.textContent).not.toContain('PR 审查');
+  });
+
+  it('计数卡下面先是需要你处理，再是进行中，然后才是需求线程、待办和动态', async () => {
+    h.board = {
+      ...board([sessionCard({ result: 'failed' })]),
+      running: [
+        sessionCard({ conversationId: 'r1', title: '在跑一', state: 'running' }),
+        sessionCard({ conversationId: 'r2', title: '在跑二', state: 'running' }),
+      ],
+      threads: [
+        {
+          id: 'dt-1',
+          channel: 'telegram',
+          chatId: '-100',
+          messageId: '42',
+          summary: '修登录',
+          requesterIsOwner: true,
+          sessionId: 'c1',
+          sessionTitle: '写 hello.txt',
+          status: 'open',
+          milestones: [],
+          createdAt: NOW - 1000,
+          updatedAt: NOW - 1000,
+        },
+      ],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    const order = Array.from(
+      container.querySelectorAll('[data-enso="secretary-workbench"] > [data-enso]')
+    ).map((el) => el.getAttribute('data-enso'));
+    expect(order).toEqual([
+      'secretary-stats',
+      'secretary-needs-you',
+      'secretary-workbench-running',
+      'secretary-threads',
+      'secretary-todos',
+      'secretary-feed',
+    ]);
+    const running = container.querySelector('[data-enso="secretary-workbench-running"]');
+    expect(
+      Array.from(running?.querySelectorAll('[data-enso="secretary-running-row"]') ?? []).map((el) =>
+        el.getAttribute('data-conversation')
+      )
+    ).toEqual(['r1', 'r2']);
+  });
+
+  it('计数卡的数字等于下面列出的条数', async () => {
+    h.board = {
+      ...board([
+        sessionCard({ conversationId: 'n1', result: 'failed' }),
+        sessionCard({ conversationId: 'n2', state: 'waiting', result: 'needs-user' }),
+      ]),
+      running: [sessionCard({ conversationId: 'r1', state: 'running' })],
+      todos: [{ id: 't1', text: '买牛奶', createdAt: NOW - 1000, updatedAt: NOW - 1000 }],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    const stat = (target: string) =>
+      container.querySelector(`[data-enso="secretary-stat"][data-target="${target}"]`)
+        ?.firstElementChild?.textContent;
+    expect(stat('needs-you')).toBe(
+      String(container.querySelectorAll('[data-enso="secretary-card"]').length)
+    );
+    expect(stat('needs-you')).toBe('2');
+    expect(stat('running')).toBe(
+      String(
+        container.querySelectorAll(
+          '[data-enso="secretary-workbench-running"] [data-enso="secretary-running-row"]'
+        ).length
+      )
+    );
+    expect(stat('running')).toBe('1');
+    expect(stat('todos')).toBe(
+      String(
+        container.querySelectorAll('[data-enso="secretary-todos"] [data-enso="secretary-todo"]')
+          .length
+      )
+    );
+  });
+
+  it('点计数卡滚到对应列表', async () => {
+    h.board = {
+      ...board([sessionCard({ result: 'failed' })]),
+      running: [sessionCard({ conversationId: 'r1', state: 'running' })],
+    };
+    await render(<SecretaryWorkbench name="小安" />);
+    const targets = {
+      'needs-you': 'secretary-needs-you',
+      running: 'secretary-workbench-running',
+      todos: 'secretary-todos',
+    } as const;
+    for (const [target, section] of Object.entries(targets)) {
+      const node = container.querySelector(`[data-enso="${section}"]`) as unknown as {
+        scrollIntoView: (options?: unknown) => void;
+      };
+      const scrolled = vi.fn();
+      node.scrollIntoView = scrolled;
+      act(() => {
+        (
+          container.querySelector(
+            `[data-enso="secretary-stat"][data-target="${target}"]`
+          ) as HTMLElement
+        ).click();
+      });
+      expect(scrolled).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('有需求线程时列出来源、PR 和负责会话，没有则不显示', async () => {

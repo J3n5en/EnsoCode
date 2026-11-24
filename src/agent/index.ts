@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { installConsoleLog } from '@shared/appLogFile';
+import { APP_LOGGING_ENV, installConsoleLog, setAppLoggingEnabled } from '@shared/appLogFile';
 import { RESTART_CHECKPOINT_ENV } from '@shared/gracefulRestart';
 import { parseAgentCommand } from '@shared/types/agent';
 import { rejectUnparsableCommand } from './commandRejection';
@@ -21,6 +21,8 @@ if (!dataDir) {
   throw new Error('ENSO_AGENT_DATA_DIR is required');
 }
 installCrashRecord(dataDir);
+setAppLoggingEnabled(process.env[APP_LOGGING_ENV] === '1');
+delete process.env[APP_LOGGING_ENV];
 installConsoleLog(path.join(dataDir, 'logs', 'agent.log'), 'agent');
 
 // 只给这一代 worker 用：工具里起的子进程不该继承

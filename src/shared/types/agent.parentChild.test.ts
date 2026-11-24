@@ -228,6 +228,15 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  it('set-app-logging 只接受布尔 enabled', () => {
+    expect(parseAgentCommand({ type: 'set-app-logging', enabled: false })).toEqual({
+      type: 'set-app-logging',
+      enabled: false,
+    });
+    expect(parseAgentCommand({ type: 'set-app-logging', enabled: 1 })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-app-logging', enabled: true, extra: 1 })).toBeNull();
+  });
+
   it('set-disabled-workflow-presets 只接受合法 id 数组', () => {
     expect(
       parseAgentCommand({ type: 'set-disabled-workflow-presets', ids: ['parallel-review'] })

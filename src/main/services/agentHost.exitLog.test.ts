@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AGENT_WORKER_EXIT_LOG } from '@shared/agentWorkerExit';
 import { classifyWorkerExitLevel, parseStampedLog } from '@shared/appLog';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('../../agent/index?modulePath', () => ({ default: '/tmp/agent.js' }));
@@ -44,6 +45,7 @@ import { startAgentWorker, stopAgentWorker, stopAgentWorkerForQuit } from './age
 
 fork.userData = mkdtempSync(path.join(tmpdir(), 'enso-exitlog-'));
 mkdirSync(path.join(fork.userData, 'agent'));
+setAppLoggingEnabled(true);
 afterAll(() => rmSync(fork.userData, { recursive: true, force: true }));
 
 let error: ReturnType<typeof vi.spyOn>;

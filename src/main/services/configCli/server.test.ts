@@ -368,7 +368,14 @@ describe('config CLI socket', () => {
     expect((await state()).quoteSelectionButton).toBe(false);
   });
 
-  it('插件日志开关热生效可写，只接受布尔值', async () => {
+  it('应用日志与插件日志开关热生效可写，只接受布尔值', async () => {
+    expect(await config({ action: 'set', key: 'appLoggingEnabled', value: 'true' })).toMatchObject({
+      ok: false,
+    });
+    expect(await config({ action: 'set', key: 'appLoggingEnabled', value: true })).toEqual({
+      ok: true,
+    });
+    expect((await state()).appLoggingEnabled).toBe(true);
     expect(
       await config({ action: 'set', key: 'pluginLoggingEnabled', value: 'true' })
     ).toMatchObject({ ok: false });
