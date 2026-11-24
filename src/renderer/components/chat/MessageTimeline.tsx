@@ -18,6 +18,7 @@ import type { SecretaryFaceModel } from '@/components/secretary/useSecretaryFace
 import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
+import { overlayGuardActive } from '@/lib/overlayGuard';
 import { cn } from '@/lib/utils';
 import {
   type HistoryPageChrome,
@@ -462,15 +463,27 @@ export function MessageTimeline({
     const scroller = scrollerRef.current;
     const target = e.target as HTMLElement;
     if (!scroller?.contains(target) || target.closest?.(EDITABLE_TARGET)) return;
-    if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+    // 图片预览、Mermaid 全屏等模态浮层持有 overlay guard，Esc 归它们
+    if (overlayGuardActive() || document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+      return;
+    }
     const viewport = scroller.getBoundingClientRect();
     for (const row of navRows()) {
       const turn = turnSpans.owners.get(row.getAttribute('data-nav-key') ?? '');
       if (!turn) continue;
       const rect = row.getBoundingClientRect();
       if (rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
-      e.preventDefault();
-      collapseTurn(turn);
+      // 会话内搜索、侧栏全屏等窗口级 Esc 在 React 之后才执行：排到窗口监听最后，没人认领再收起
+      const native = e.nativeEvent;
+      window.addEventListener(
+        'keydown',
+        (event) => {
+          if (event !== native || event.defaultPrevented) return;
+          event.preventDefault();
+          collapseTurn(turn);
+        },
+        { once: true }
+      );
       return;
     }
   };

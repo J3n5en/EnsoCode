@@ -2,6 +2,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { acquireOverlayGuard, resetOverlayGuard, setOverlayGuardSink } from '@/lib/overlayGuard';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { MessageTimeline } from './MessageTimeline';
 
@@ -82,6 +83,8 @@ beforeEach(() => {
     }
   );
   settings.autoCollapseTurns = true;
+  // linkedom 的 window 首次 addEventListener 前不在事件路径里；真机 App 常驻窗口级 keydown 监听
+  window.addEventListener('keydown', () => {});
   container = window.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
 });
@@ -189,5 +192,31 @@ describe('MessageTimeline Esc 收起当前轮', () => {
     document.body.appendChild(dialog);
     expect(await pressEscape(scroller)).toBe(false);
     expect(collapsed()).toBe(false);
+  });
+
+  // 真实场景：点开消息里的图片预览或 Mermaid 全屏，按 Esc 只该关预览，不该顺带收起整轮
+  it('图片预览、Mermaid 全屏等模态浮层打开时不响应', async () => {
+    await mount();
+    setOverlayGuardSink(() => {});
+    acquireOverlayGuard();
+    try {
+      expect(await pressEscape(scroller)).toBe(false);
+      expect(collapsed()).toBe(false);
+    } finally {
+      resetOverlayGuard();
+    }
+  });
+
+  // 真实场景：会话内搜索开着、焦点在消息区，按 Esc 只该关搜索条（窗口级监听）
+  it('窗口级 Esc 处理（会话内搜索、侧栏全屏）已认领时不收起', async () => {
+    await mount();
+    const claim = (event: Event) => event.preventDefault();
+    window.addEventListener('keydown', claim);
+    try {
+      expect(await pressEscape(scroller)).toBe(true);
+      expect(collapsed()).toBe(false);
+    } finally {
+      window.removeEventListener('keydown', claim);
+    }
   });
 });

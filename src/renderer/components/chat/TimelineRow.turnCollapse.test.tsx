@@ -54,6 +54,14 @@ describe('轮次末尾收起入口', () => {
     expect(onToggleTurn).toHaveBeenCalledWith('4', true);
   });
 
+  // 手机浏览器打开 /desk 时没有 hover：24px 高的文字按钮难点中，触屏下加高到 40px；选中复制时不带入「收起」
+  it('触屏下加大点击区，且不参与文本选中', async () => {
+    await render({});
+    const classes = footer()?.className.split(/\s+/) ?? [];
+    expect(classes).toContain('[@media(hover:none)]:min-h-10');
+    expect(classes).toContain('select-none');
+  });
+
   it('关闭「回答完成后折叠过程」时不出现任何收起入口', async () => {
     settings.autoCollapseTurns = false;
     await render({});

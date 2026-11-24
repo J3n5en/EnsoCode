@@ -51,6 +51,10 @@ export function releaseOverlayGuard(): void {
   sync();
 }
 
+export function overlayGuardActive(): boolean {
+  return count > 0;
+}
+
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     if (active) sink(false);

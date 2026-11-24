@@ -2342,7 +2342,7 @@ export function TurnCollapseFooter({
       data-quote-skip=""
       onClick={() => onToggleTurn(turnKey, true)}
       className={cn(
-        'mt-1 flex min-h-6 select-none items-center gap-1 text-[12px] transition-colors hover:text-foreground',
+        'mt-1 flex min-h-6 select-none items-center gap-1 text-[12px] transition-colors hover:text-foreground [@media(hover:none)]:min-h-10 [@media(hover:none)]:pr-3',
         SUBTLE_TEXT
       )}
     >
