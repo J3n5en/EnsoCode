@@ -424,6 +424,9 @@ describe('会话自定提醒', () => {
     await spawnParent(second.supervisor, second.events, first.cwd);
     const reopened = mocks.sessions[0] as unknown as FakeSession;
     await until(() => promptTexts(reopened).some((text) => text.includes('RESTART-PING')));
+    expect(promptTexts(reopened).find((text) => text.includes('RESTART-PING'))).toMatch(
+      /while EnsoCode was restarting or not running.*delivered late/
+    );
     expect(first.disk().reminders).toEqual([]);
     await second.supervisor.shutdown();
 
@@ -437,6 +440,35 @@ describe('会话自定提醒', () => {
     await vi.advanceTimersByTimeAsync(500);
     const third0 = mocks.sessions[0] as unknown as FakeSession;
     expect(promptTexts(third0).some((text) => text.includes('RESTART-PING'))).toBe(false);
+  });
+
+  it('重启：没到点的提醒新一代按原时间触发，通知不标延迟', async () => {
+    fakeClock();
+    const first = await setup();
+    await round(first.parentSession, '定好了', () =>
+      first.parentRemind.execute('c1', { in: '5m', prompt: 'ONTIME-PING' })
+    );
+    await first.supervisor.shutdown();
+    vi.setSystemTime(NOW + 60_000);
+
+    mocks.sessions.length = 0;
+    mocks.loaderOptions.length = 0;
+    mocks.createAgentSession.mockClear();
+    const second = makeSupervisor(first.sessionDir, first.agentDir);
+    cleanup.push(() => second.supervisor.shutdown());
+    await spawnParent(second.supervisor, second.events, first.cwd);
+    const reopened = mocks.sessions[0] as unknown as FakeSession;
+    await vi.advanceTimersByTimeAsync(4 * 60_000 - 1_000);
+    expect(ofType(second.events, 'session-reminder-due')).toEqual([]);
+    expect(promptTexts(reopened).some((text) => text.includes('ONTIME-PING'))).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ofType(second.events, 'session-reminder-due')).toHaveLength(1);
+    second.supervisor.handleCommand({ type: 'reminders-fire', sessionId: 'parent' });
+    await until(() => promptTexts(reopened).some((text) => text.includes('ONTIME-PING')));
+    expect(promptTexts(reopened).find((text) => text.includes('ONTIME-PING'))).not.toMatch(
+      /delivered late/
+    );
+    expect(first.disk().reminders).toEqual([]);
   });
 
   it('reminders-clear（停止、删除）清掉根会话和它子代理的提醒，之后不再唤醒', async () => {
