@@ -648,7 +648,7 @@ describe('session_read', () => {
     expect(result.historyError).toBe('not-found');
   });
 
-  it('完成后被自动归档的派出会话仍可读；用户手动归档的仍 not-found', async () => {
+  it('以前被自动归档的派出会话仍可列出、可读并标 archived；用户手动归档的仍不可见', async () => {
     const handlers = createSecretaryReadHandlers(
       makePorts({
         projects: () => [project()],
@@ -672,8 +672,14 @@ describe('session_read', () => {
         { secretaryConversationId: 'sec-1' }
       )
     ).toEqual({ ok: false, error: 'not-found' });
-    const listed = await handlers.session_list({}, { secretaryConversationId: 'sec-1' });
-    expect(JSON.stringify(listed)).not.toContain('"auto"');
+    const rows = (await run(handlers.session_list)).sessions as {
+      conversationId: string;
+      archived?: true;
+    }[];
+    expect(rows.map((session) => [session.conversationId, session.archived])).toEqual([
+      ['auto', true],
+    ]);
+    await run(handlers.session_tasks, { conversationId: 'auto' });
   });
 
   it('child、已归档、未知会话与不可见项目一律 not-found', async () => {
