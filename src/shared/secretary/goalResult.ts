@@ -688,8 +688,23 @@ export const GOAL_RESULT_SCHEMA = {
         },
       },
     },
-    followUps: { type: 'array', maxItems: MAX_ITEMS, items: textSchema() },
-    needsUser: { type: 'array', maxItems: MAX_ITEMS, items: textSchema() },
+    followUps: {
+      type: 'array',
+      maxItems: MAX_ITEMS,
+      items: textSchema(),
+      description:
+        'Optional cleanup, suggestions and notes for the secretary. Nobody is required to act on them.',
+    },
+    needsUser: {
+      type: 'array',
+      maxItems: MAX_ITEMS,
+      items: textSchema(),
+      description:
+        'Only what the user must decide or do by hand; only the user can do it, not you or the secretary. ' +
+        'One short imperative sentence per item naming the action, e.g. "Decide whether to publish tgclient 0.7.1" ' +
+        'or "Delete /tmp/enso-relay-upload-59dc0c2 on server ali". Optional cleanup, suggestions and notes go in followUps. ' +
+        'Do not write relay phrasing such as "waiting for the secretary to ask the user". Omit it when nothing needs the user.',
+    },
     deploy: {
       type: 'object',
       additionalProperties: false,

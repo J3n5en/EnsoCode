@@ -298,6 +298,15 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
               </span>
             </div>
           )}
+          {card.summary && (
+            <p
+              data-enso="secretary-card-needs-user-summary"
+              title={card.summary}
+              className="line-clamp-1 break-words text-muted-foreground"
+            >
+              {card.summary}
+            </p>
+          )}
           <ul
             data-enso="secretary-card-needs-user"
             className="flex flex-col gap-0.5 text-foreground/90"
@@ -307,13 +316,9 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
                 key={item}
                 data-enso="secretary-card-needs-user-item"
                 title={item}
-                className={cn(
-                  'line-clamp-2 break-words',
-                  decisionNeeds.length > 1 &&
-                    'relative pl-3 before:absolute before:left-1 before:content-["·"] before:text-muted-foreground'
-                )}
+                className="line-clamp-2 break-words"
               >
-                {item}
+                {t('Needs you: {{item}}', { item })}
               </li>
             ))}
           </ul>
