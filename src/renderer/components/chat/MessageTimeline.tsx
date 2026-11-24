@@ -1,6 +1,6 @@
 import { withoutQuoteBlocks } from '@shared/quoteBlock';
 import { ArrowDown, LoaderCircle } from 'lucide-react';
-import type { CSSProperties, ReactNode, Ref } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactNode, Ref } from 'react';
 import {
   Component,
   memo,
@@ -18,6 +18,7 @@ import type { SecretaryFaceModel } from '@/components/secretary/useSecretaryFace
 import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
+import { overlayGuardActive } from '@/lib/overlayGuard';
 import { cn } from '@/lib/utils';
 import {
   type HistoryPageChrome,
@@ -38,7 +39,9 @@ import {
   isToolStepRow,
   ReplyHeader,
   RetryTurnButton,
+  restoreRowIntoView,
   TimelineRow,
+  TurnCollapseFooter,
 } from './TimelineRow';
 import { nextTimelineReveal } from './timelineReveal';
 import {
@@ -75,6 +78,40 @@ const AT_BOTTOM_THRESHOLD = 40;
 const INITIAL_TOP_MOST_ITEM_INDEX = { index: 'LAST', align: 'end' } as const;
 const VIEWPORT_OVERSCAN = { top: 600, bottom: 600 };
 const followChatOutput = (isAtBottom: boolean) => (isAtBottom ? 'auto' : false);
+
+interface TurnSpans {
+  /** 行 key → 所属轮次 key */
+  owners: ReadonlyMap<string, string>;
+  /** 轮次末行 key → 轮次 key */
+  ends: ReadonlyMap<string, string>;
+}
+const NO_TURN_SPANS: TurnSpans = { owners: new Map(), ends: new Map() };
+
+/** 已展开且可折叠的轮次范围：从该用户行到下一条用户行之前（与 prepareTimeline 的折叠范围一致） */
+function expandedCollapsibleTurns(folded: TimelineItem[]): TurnSpans {
+  const owners = new Map<string, string>();
+  const ends = new Map<string, string>();
+  let turn: string | null = null;
+  let last: string | null = null;
+  const close = () => {
+    if (turn && last) ends.set(last, turn);
+  };
+  for (const item of folded) {
+    if (item.kind === 'user') {
+      close();
+      turn = !item.collapsed && item.canCollapse === true ? item.key : null;
+      last = null;
+      if (turn) owners.set(item.key, turn);
+    } else if (turn) {
+      owners.set(item.key, turn);
+      last = item.key;
+    }
+  }
+  close();
+  return { owners, ends };
+}
+
+const EDITABLE_TARGET = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
 
 function TimelineList({ style, ...props }: ListProps) {
   const hidden = style?.visibility === 'hidden';
@@ -305,6 +342,12 @@ export function MessageTimeline({
       prev.get(key) === collapsed ? prev : new Map(prev).set(key, collapsed)
     );
   }, []);
+  const turnSpans = useMemo(
+    () => (autoCollapseTurns ? expandedCollapsibleTurns(folded) : NO_TURN_SPANS),
+    [autoCollapseTurns, folded]
+  );
+  /** 从轮次末尾或 Esc 收起后，待把该轮用户行拉回视口 */
+  const restoreTurnRef = useRef<string | null>(null);
 
   // 导航条数据：每条 user 轮次 + 其后首个回答摘要
   const navItems = useMemo(() => {
@@ -405,6 +448,44 @@ export function MessageTimeline({
   const markUserScroll = () => {
     holdUserScroll();
     releaseUserScroll();
+  };
+  const navRows = (): HTMLElement[] => [
+    ...(scrollerRef.current?.querySelectorAll<HTMLElement>('[data-nav-key]') ?? []),
+  ];
+  const collapseTurn = (key: string) => {
+    // 收起后的回位滚动属于用户操作，不能被贴底纠正拉回去
+    markUserScroll();
+    restoreTurnRef.current = key;
+    setTurnCollapsed(key, true);
+  };
+  const collapseTurnOnEscape = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || turnSpans.owners.size === 0) return;
+    const scroller = scrollerRef.current;
+    const target = e.target as HTMLElement;
+    if (!scroller?.contains(target) || target.closest?.(EDITABLE_TARGET)) return;
+    // 图片预览、Mermaid 全屏等模态浮层持有 overlay guard，Esc 归它们
+    if (overlayGuardActive() || document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+      return;
+    }
+    const viewport = scroller.getBoundingClientRect();
+    for (const row of navRows()) {
+      const turn = turnSpans.owners.get(row.getAttribute('data-nav-key') ?? '');
+      if (!turn) continue;
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
+      // 会话内搜索、侧栏全屏等窗口级 Esc 在 React 之后才执行：排到窗口监听最后，没人认领再收起
+      const native = e.nativeEvent;
+      window.addEventListener(
+        'keydown',
+        (event) => {
+          if (event !== native || event.defaultPrevented) return;
+          event.preventDefault();
+          collapseTurn(turn);
+        },
+        { once: true }
+      );
+      return;
+    }
   };
   /** 程序跳转（导航/搜索）主动离底：先解除跟随，否则离底会被当成内容收缩拉回底部 */
   const releaseFollow = () => {
@@ -509,6 +590,24 @@ export function MessageTimeline({
     pendingJumpRef.current = null;
     scrollToFoldedKey(key);
   }, [folded]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在 folded 重算后消费待回位轮次
+  useLayoutEffect(() => {
+    const key = restoreTurnRef.current;
+    if (!key) return;
+    restoreTurnRef.current = null;
+    const row = navRows().find((el) => el.getAttribute('data-nav-key') === key);
+    if (row) {
+      restoreRowIntoView(row, scrollerRef.current);
+      return;
+    }
+    const index = folded.findIndex((item) => item.key === key);
+    if (virtualize && index >= 0) {
+      virtuosoRef.current?.scrollToIndex({
+        index: virtuosoScrollIndex(firstItemIndex, index),
+        align: 'start',
+      });
+    }
+  }, [folded]);
 
   useImperativeHandle(ref, () => ({
     scrollToBottom,
@@ -574,6 +673,7 @@ export function MessageTimeline({
     const child = foldChildren.get(item.key);
     const revealAt = child && foldMotionRef.current.reveal.get(child.group);
     const revealing = child && revealAt !== undefined && now - revealAt < FOLD_MOTION_MS;
+    const endOfTurn = turnSpans.ends.get(item.key);
     return (
       <div
         key={item.key}
@@ -610,6 +710,14 @@ export function MessageTimeline({
             onToggleTurn={setTurnCollapsed}
           />
         </RowErrorBoundary>
+        {endOfTurn && (
+          <TurnCollapseFooter
+            turnKey={endOfTurn}
+            canCollapse
+            collapsed={false}
+            onToggleTurn={collapseTurn}
+          />
+        )}
       </div>
     );
   };
@@ -657,7 +765,10 @@ export function MessageTimeline({
           data-enso="timeline"
           className="@container relative min-h-24 flex-1"
           onWheel={markUserScroll}
-          onKeyDown={markUserScroll}
+          onKeyDown={(e) => {
+            markUserScroll();
+            collapseTurnOnEscape(e);
+          }}
           onTouchStart={(e) => {
             // 只认落在滚动容器内的触摸；点「回到底部」等浮层按钮不算，否则纠正循环首帧即中止
             if (scrollerRef.current?.contains(e.target as Node)) holdUserScroll();
