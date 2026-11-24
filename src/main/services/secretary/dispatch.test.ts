@@ -19,6 +19,7 @@ import type {
   SecretaryTodo,
   SecretaryToolDraft,
 } from '@shared/types/secretary';
+import { VIRTUAL_PROVIDER_ID, type VirtualModelEntry } from '@shared/virtualModels';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSecretaryTools, normalizeSecretaryParams } from '../../../agent/tools/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
@@ -42,6 +43,7 @@ import {
   stopLeftoverTasks,
   untrack,
 } from './dispatch';
+import { type DispatchModelDeps, resolveDispatchModel } from './dispatchModel';
 import {
   type FollowDeps,
   FollowingStore,
@@ -4093,6 +4095,80 @@ describe('派发时指定模型', () => {
     expect(h.audits.at(-1)).toMatchObject({
       op: 'todo_item_dispatch',
       detail: 'created · model anthropic/opus',
+    });
+  });
+
+  describe('虚拟模型', () => {
+    const AUTO_ID = '7b11a559-f632-4648-a52b-f0c2e536e19f';
+    const virtual = { providerId: VIRTUAL_PROVIDER_ID, modelId: AUTO_ID };
+    const providers = [{ id: 'max', name: 'Max', models: [{ id: 'opus' }] }];
+    const auto: VirtualModelEntry = {
+      id: AUTO_ID,
+      name: 'Auto',
+      enabled: true,
+      primary: { providerId: 'max', modelId: 'opus' },
+      fallbacks: [],
+    };
+
+    function virtualHarness(entries: VirtualModelEntry[] = [auto]) {
+      const h = harness({
+        profile: profile(),
+        todos: [{ id: 't1', text: '修构建', createdAt: 1, projectId: 'p1' } as SecretaryTodo],
+      });
+      const deps: DispatchModelDeps = {
+        providers,
+        virtualModels: entries,
+        resolve: (ref) =>
+          (
+            ref.providerId === VIRTUAL_PROVIDER_ID
+              ? entries.some((entry) => entry.id === ref.modelId && entry.enabled)
+              : ref.providerId === 'max' && ref.modelId === 'opus'
+          )
+            ? { ok: true, ref }
+            : { ok: false, error: 'Model is unavailable: model-missing' },
+        usable: () => true,
+      };
+      h.ports.resolveModel = (ref) => resolveDispatchModel(ref, deps);
+      h.handlers = createSecretaryDispatchHandlers(h.ports);
+      return h;
+    }
+
+    it('session_create 按名称指定虚拟模型：会话用的就是这个虚拟模型', async () => {
+      const h = virtualHarness();
+      const result = await run(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '修构建',
+        model: { providerId: VIRTUAL_PROVIDER_ID, modelId: 'Auto', thinkingLevel: 'high' },
+      });
+      expect(result).toMatchObject({ status: 'created', conversationId: 'new-1' });
+      expect(h.created[0]?.model).toEqual(virtual);
+      expect(h.created[0]?.thinkingLevel).toBe('high');
+      expect(h.file.dispatched['new-1']?.model).toEqual({ ...virtual, thinkingLevel: 'high' });
+    });
+
+    it('todo_item_dispatch 的 modelId 直接填虚拟模型 id', async () => {
+      const h = virtualHarness();
+      const result = await run(h.handlers.todo_item_dispatch, {
+        todoId: 't1',
+        model: { providerId: 'Auto', modelId: AUTO_ID },
+      });
+      expect(result).toMatchObject({ status: 'created', conversationId: 'new-1' });
+      expect(h.created[0]?.model).toEqual(virtual);
+      expect(h.file.dispatched['new-1']?.model).toEqual(virtual);
+    });
+
+    it('无效模型的报错清单里列出可用虚拟模型，不建会话', async () => {
+      const h = virtualHarness();
+      const result = await call(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '修构建',
+        model: { providerId: 'auto', modelId: 'auto' },
+      });
+      expect(result.ok).toBe(false);
+      expect((result as { error: string }).error).toContain(
+        `Auto (virtual model): providerId "${VIRTUAL_PROVIDER_ID}", modelId "${AUTO_ID}"`
+      );
+      expect(h.created).toEqual([]);
     });
   });
 });
