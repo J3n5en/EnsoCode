@@ -201,7 +201,7 @@ import {
   configurePairSessionHost,
   handlePairHeadlessAgentEvent,
 } from '../services/pairSessionHost';
-import { planReminderWake } from '../services/reminderWake';
+import { planReminderWake, reminderResumeFromAuthority } from '../services/reminderWake';
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
@@ -1040,6 +1040,15 @@ async function wakeForReminder(sessionId: string): Promise<void> {
   let result = await wakeColdRestartSession(sessionId, resumeRootFromRestartManifest);
   if (result.error === 'not in restart manifest' || result.error === 'already woken')
     result = await resumeRootFromMain(sessionId);
+  // 强杀丢掉 settings 投影里的会话行：权威注册表同步落盘，按它恢复
+  if (!result.ok && result.error === 'unknown session') {
+    const fromAuthority = reminderResumeFromAuthority({
+      sessionId,
+      authority: sourceAuthority?.conversation(sessionId),
+      cwd: authoritativeSpawnCwd(sessionId),
+    });
+    if (fromAuthority) result = await spawnRootFromMain(fromAuthority);
+  }
   console.log(`${tag}: resume ${result.ok ? 'ok' : `skipped: ${result.error}`}`);
 }
 
