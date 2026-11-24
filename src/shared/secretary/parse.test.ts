@@ -611,7 +611,7 @@ describe('parseDispatchFile', () => {
         keys: ['k1', 'k1'],
         attempt: 9,
         nextAttemptAt: 30,
-        settled: true,
+        started: true,
       },
     });
     expect(file.dispatched.c1?.turn).toBe(0);
@@ -622,7 +622,7 @@ describe('parseDispatchFile', () => {
       keys: ['k1'],
       attempt: 6,
       nextAttemptAt: 30,
-      settled: true,
+      started: true,
     });
     expect(parseDispatchFile({ inflight: { attempt: 0 } }).inflight).toBeUndefined();
     expect(
