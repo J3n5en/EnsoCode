@@ -314,6 +314,7 @@ export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true):
   // 语义色
   root.style.setProperty('--destructive', theme.red);
   root.style.setProperty('--destructive-foreground', '#ffffff');
+  root.style.setProperty('--destructive-text', theme.red);
 
   root.style.setProperty('--success', theme.green);
   root.style.setProperty('--success-foreground', '#ffffff');
@@ -359,6 +360,7 @@ export function clearTerminalThemeFromApp(): void {
     '--accent-foreground',
     '--destructive',
     '--destructive-foreground',
+    '--destructive-text',
     '--success',
     '--success-foreground',
     '--warning',

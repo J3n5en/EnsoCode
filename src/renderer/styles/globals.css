@@ -18,6 +18,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-text: var(--destructive-text);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
@@ -351,6 +352,13 @@ html.bg-image-enabled [data-slot='bot-card-button']:not(:hover) {
  */
 html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
   background-color: oklch(from var(--card) l c h / var(--bg-composer-alpha, 0.6));
+}
+
+:root {
+  --settings-content-max: 720px;
+  --settings-row-min: 56px;
+  --settings-section-gap: 40px;
+  --settings-control-h: 28px;
 }
 
 @keyframes settings-row-flash {

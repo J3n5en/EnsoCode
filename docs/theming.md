@@ -73,6 +73,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 | `--elevation-surface` | 浅色 `0 0 0 1px color-mix(in oklch, text 7%, transparent), 0 1px 3px rgb(0 0 0 / 0.04)`。深色 `0 0 0 1px color-mix(in oklch, text 6%, transparent), 0 2px 8px rgb(0 0 0 / 0.3)`。 |
 | `--destructive` | 浅色 `oklch(0.577 0.245 27.33)`。深色 `oklch(0.396 0.141 25.72)`。 |
 | `--destructive-foreground` | `oklch(0.985 0 0)` |
+| `--destructive-text` | 红色文字和描边。浅色同 `--destructive`。深色 `oklch(0.72 0.17 25)`，因为深色的 `--destructive` 当文字对比度不够。 |
 | `--success` | `oklch(0.527 0.154 150.07)` |
 | `--success-foreground` | `oklch(0.985 0 0)` |
 | `--warning` | `oklch(0.769 0.189 70.08)` |

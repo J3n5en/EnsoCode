@@ -1,5 +1,6 @@
 import { RotateCcw, X } from 'lucide-react';
 import * as React from 'react';
+import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { useI18n } from '@/i18n';
 import {
@@ -16,20 +17,45 @@ import { cn } from '@/lib/utils';
 import { type PluginCommandRef, pluginCommandRefs } from '@/plugins/commands';
 import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsPage, SettingsRow, SettingsSection } from './kit';
+import { TOUCH_TARGET } from './kit/controls';
+
+const CAPTURE_BUTTON =
+  'relative inline-flex h-(--settings-control-h) min-w-14 items-center justify-center rounded-md px-1.5 transition-colors pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:top-1/2 pointer-coarse:after:h-[44px] pointer-coarse:after:-translate-y-1/2';
+
+function IconAction({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      size="icon-xs"
+      variant="ghost"
+      title={title}
+      onClick={onClick}
+      className={cn('text-muted-foreground hover:text-foreground', TOUCH_TARGET)}
+    >
+      {children}
+    </Button>
+  );
+}
 
 export function KeybindingsSettings() {
   const { t } = useI18n();
   return (
-    <div className="space-y-6">
-      <div data-settings-row="shortcuts.root">
-        <h3 className="text-lg font-medium">{t('Shortcuts')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t('Click a shortcut to rebind it. Backspace removes it; Esc cancels.')}
-        </p>
-      </div>
+    <SettingsPage
+      rowId="shortcuts.root"
+      title={t('Shortcuts')}
+      description={t('Click a shortcut to rebind it. Backspace removes it; Esc cancels.')}
+    >
       <KeybindingsSection />
       <PluginKeybindingsSection />
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -91,78 +117,70 @@ function PluginKeybindingsSection() {
   };
 
   return (
-    <div className="space-y-2">
-      <h4 className="font-medium text-sm">插件命令</h4>
-      <div className="divide-y rounded-md border">
-        {rows.map(({ action, command, binding, custom, conflict }) => {
-          const isCapturing = capturing === action;
-          return (
-            <div key={action} className="flex items-center gap-3 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm">{command.title}</p>
-                <p className="text-muted-foreground text-xs">
-                  {command.pluginName}
-                  {conflict && !isCapturing && (
-                    <span className="ml-2 text-destructive">
-                      {t('Already used by "{{label}}"', { label: labelOf(conflict) })}
-                    </span>
-                  )}
-                </p>
-              </div>
-              {isCapturing && taken && (
-                <span className="text-destructive text-xs">
+    <SettingsSection title="插件命令">
+      {rows.map(({ action, command, binding, custom, conflict }) => {
+        const isCapturing = capturing === action;
+        return (
+          <SettingsRow
+            key={action}
+            label={command.title}
+            description={
+              <>
+                {command.pluginName}
+                {conflict && !isCapturing && (
+                  <span className="ml-2 text-destructive-text">
+                    {t('Already used by "{{label}}"', { label: labelOf(conflict) })}
+                  </span>
+                )}
+              </>
+            }
+            status={
+              isCapturing &&
+              taken && (
+                <span className="text-[12px] text-destructive-text">
                   {t('Already used by "{{label}}"', { label: labelOf(taken) })}
                 </span>
+              )
+            }
+          >
+            {binding && !isCapturing && (
+              <IconAction title={t('Remove shortcut')} onClick={() => setKeybinding(action, '')}>
+                <X className="h-3.5 w-3.5" />
+              </IconAction>
+            )}
+            {custom && !isCapturing && (
+              <IconAction title={t('Reset to default')} onClick={() => resetKeybinding(action)}>
+                <RotateCcw className="h-3.5 w-3.5" />
+              </IconAction>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setCapturing(action);
+                setTaken(null);
+              }}
+              onKeyDown={isCapturing ? (e) => capture(e, action, command.key) : undefined}
+              onBlur={() => isCapturing && stop()}
+              // biome-ignore lint/a11y/noAutofocus: 进入录制态即聚焦以捕获按键是预期交互
+              autoFocus={isCapturing}
+              className={cn(
+                CAPTURE_BUTTON,
+                isCapturing ? 'ring-1 ring-ring' : 'hover:bg-muted',
+                conflict && !isCapturing && 'opacity-50 line-through'
               )}
-              {binding && !isCapturing && (
-                <button
-                  type="button"
-                  title={t('Remove shortcut')}
-                  onClick={() => setKeybinding(action, '')}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+            >
+              {isCapturing ? (
+                <span className="text-muted-foreground text-xs">{t('Press shortcut…')}</span>
+              ) : binding ? (
+                <Kbd>{formatBinding(binding)}</Kbd>
+              ) : (
+                <span className="text-muted-foreground text-xs">{t('No shortcut')}</span>
               )}
-              {custom && !isCapturing && (
-                <button
-                  type="button"
-                  title={t('Reset to default')}
-                  onClick={() => resetKeybinding(action)}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setCapturing(action);
-                  setTaken(null);
-                }}
-                onKeyDown={isCapturing ? (e) => capture(e, action, command.key) : undefined}
-                onBlur={() => isCapturing && stop()}
-                // biome-ignore lint/a11y/noAutofocus: 进入录制态即聚焦以捕获按键是预期交互
-                autoFocus={isCapturing}
-                className={cn(
-                  'rounded-md px-1 py-0.5 transition-colors',
-                  isCapturing ? 'ring-1 ring-ring' : 'hover:bg-muted',
-                  conflict && !isCapturing && 'opacity-50 line-through'
-                )}
-              >
-                {isCapturing ? (
-                  <span className="text-muted-foreground text-xs">{t('Press shortcut…')}</span>
-                ) : binding ? (
-                  <Kbd>{formatBinding(binding)}</Kbd>
-                ) : (
-                  <span className="text-muted-foreground text-xs">{t('No shortcut')}</span>
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            </button>
+          </SettingsRow>
+        );
+      })}
+    </SettingsSection>
   );
 }
 
@@ -207,43 +225,37 @@ function KeybindingsSection() {
   };
 
   return (
-    <div className="divide-y rounded-md border">
+    <SettingsSection>
       {KEYBINDING_ACTIONS.map((action) => {
         const isCapturing = capturing === action;
         const isCustom = keybindings[action] !== undefined;
         const binding = bindings[action];
+        const hint = ACTION_HINT_KEYS[action];
         return (
-          <div key={action} className="flex items-center gap-3 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm">{t(ACTION_LABEL_KEYS[action])}</p>
-              {ACTION_HINT_KEYS[action] && (
-                <p className="text-muted-foreground text-xs">{t(ACTION_HINT_KEYS[action])}</p>
-              )}
-            </div>
-            {isCapturing && conflictWith && (
-              <span className="text-xs text-destructive">
-                {t('Already used by "{{label}}"', { label: t(ACTION_LABEL_KEYS[conflictWith]) })}
-              </span>
-            )}
+          <SettingsRow
+            key={action}
+            label={t(ACTION_LABEL_KEYS[action])}
+            description={hint && t(hint)}
+            status={
+              isCapturing &&
+              conflictWith && (
+                <span className="text-[12px] text-destructive-text">
+                  {t('Already used by "{{label}}"', {
+                    label: t(ACTION_LABEL_KEYS[conflictWith]),
+                  })}
+                </span>
+              )
+            }
+          >
             {binding && !isCapturing && (
-              <button
-                type="button"
-                title={t('Remove shortcut')}
-                onClick={() => setKeybinding(action, '')}
-                className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
+              <IconAction title={t('Remove shortcut')} onClick={() => setKeybinding(action, '')}>
                 <X className="h-3.5 w-3.5" />
-              </button>
+              </IconAction>
             )}
             {isCustom && !isCapturing && (
-              <button
-                type="button"
-                title={t('Reset to default')}
-                onClick={() => resetKeybinding(action)}
-                className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
+              <IconAction title={t('Reset to default')} onClick={() => resetKeybinding(action)}>
                 <RotateCcw className="h-3.5 w-3.5" />
-              </button>
+              </IconAction>
             )}
             <button
               type="button"
@@ -260,10 +272,7 @@ function KeybindingsSection() {
               }}
               // biome-ignore lint/a11y/noAutofocus: 进入录制态即聚焦以捕获按键是预期交互
               autoFocus={isCapturing}
-              className={cn(
-                'rounded-md px-1 py-0.5 transition-colors',
-                isCapturing ? 'ring-1 ring-ring' : 'hover:bg-muted'
-              )}
+              className={cn(CAPTURE_BUTTON, isCapturing ? 'ring-1 ring-ring' : 'hover:bg-muted')}
             >
               {isCapturing ? (
                 <span className="text-xs text-muted-foreground">{t('Press shortcut…')}</span>
@@ -273,9 +282,9 @@ function KeybindingsSection() {
                 <span className="text-xs text-muted-foreground">{t('No shortcut')}</span>
               )}
             </button>
-          </div>
+          </SettingsRow>
         );
       })}
-    </div>
+    </SettingsSection>
   );
 }

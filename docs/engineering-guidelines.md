@@ -80,6 +80,19 @@ pnpm typecheck && pnpm lint && pnpm test:changed
 - 冷会话清空 messages 后不能把空数组当作权威历史；重新 hydrate 前不得聚合或保存基于当前磁盘内容重建的旧快照。
 - Zustand 订阅要按字段选择，避免任意设置变化触发整页重渲染。
 
+## 设置页 UI
+
+设置页用 `src/renderer/components/settings/kit/` 里的组件拼，不自写行和分组：
+
+- 一层容器。页面已经在主区卡片里，页内不再画带边框或 `bg-card` 的框。分组是标题加行间 1px 分隔线，组间留白 40px。主题缩略图这类「内容本身是对象」的预览可以有框，元素上标 `data-settings-preview`，里面不能再套框。
+- 设置行是左边标签加一行说明、右边控件。控件桌面端 28px 高，用 kit 的 `SettingsSwitch`、`SettingsSelect`、`SettingsSegmented`、`SettingsInput`、`SettingsStepper`、`SettingsButton`，它们会把控件和标签、说明关联起来。
+- 服务商、插件、MCP 这类列表用 `SettingsExpandableRow`，展开后是缩进的 `SettingsSubRow`，不嵌卡片。
+- 危险操作放在页面最后一个 `SettingsSection tone="danger"`，用 `SettingsDangerAction`，一律先弹确认。红色文字和描边用 `--destructive-text`。
+- 文本框停止输入 600ms 或失焦即保存，行内显示「已保存」，不加保存按钮，也不弹 toast。
+- 窄屏（/desk 390 宽）控件会换到标签下一行并靠右，触屏点击区域不小于 44px。
+
+`components/settings/noNestedCards.test.ts` 会扫描设置页源码。还没迁移的页面在白名单里，迁完一页就删一行，白名单里的页面不再有框时测试会提醒删除。
+
 ## 扫描器与外部配置
 
 扫描器遵循“来源定位 / 格式读取 / 编排去重”三层结构。读取器是纯函数，格式错误返回空结果；单个来源失败不能阻断整体扫描。重复项应标记而不是静默丢弃，并在扫描、批量导入、store 落库三层拦截。

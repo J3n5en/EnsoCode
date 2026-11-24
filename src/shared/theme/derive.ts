@@ -8,6 +8,7 @@ const FIXED_TOKENS: Record<ThemeMode, ThemeTokens> = {
   light: {
     '--destructive': 'oklch(0.577 0.245 27.33)',
     '--destructive-foreground': 'oklch(0.985 0 0)',
+    '--destructive-text': 'oklch(0.577 0.245 27.33)',
     '--success': 'oklch(0.527 0.154 150.07)',
     '--success-foreground': 'oklch(0.985 0 0)',
     '--warning': 'oklch(0.769 0.189 70.08)',
@@ -20,6 +21,7 @@ const FIXED_TOKENS: Record<ThemeMode, ThemeTokens> = {
   dark: {
     '--destructive': 'oklch(0.396 0.141 25.72)',
     '--destructive-foreground': 'oklch(0.985 0 0)',
+    '--destructive-text': 'oklch(0.72 0.17 25)',
     '--success': 'oklch(0.527 0.154 150.07)',
     '--success-foreground': 'oklch(0.985 0 0)',
     '--warning': 'oklch(0.769 0.189 70.08)',
