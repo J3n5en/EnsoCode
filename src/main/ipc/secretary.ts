@@ -375,7 +375,7 @@ function viewedConversation(): string | null {
   return typeof store?.state?.activeId === 'string' ? store.state.activeId : null;
 }
 
-/** 当前打开的会话变了：之前因为正开着而没收走的已完成派出会话，这时归档 */
+/** 当前打开的会话变了：补判以前自动归档的派出会话要不要收回 */
 export function onViewedConversationChanged(sessionId: string | null): void {
   viewedSession = sessionId;
   for (const instance of hosts.values()) instance.sweepAutoArchive();
@@ -700,7 +700,7 @@ export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
   getEventClaimStore().onChanged(broadcastState);
   getDemandThreadStore().onChanged(broadcastState);
-  // worker 报完启动时的任务表：启动时没敢判的自动归档、被误归档的会话在这里补判
+  // worker 报完启动时的任务表：启动时没敢判的、以前自动归档仍有任务在跑的会话在这里补判收回
   backgroundTaskStates.onReported(() => {
     for (const instance of hosts.values()) instance.sweepAutoArchive();
   });

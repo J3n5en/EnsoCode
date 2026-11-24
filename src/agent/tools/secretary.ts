@@ -439,7 +439,7 @@ const SCHEMAS: Record<
   },
   session_list: {
     description:
-      'List root sessions across the projects you can see, newest first, with state and a short summary. Child sessions, archived sessions and other secretaries are excluded.',
+      'List root sessions across the projects you can see, newest first, with state and a short summary. Child sessions, sessions the user archived and other secretaries are excluded. A session you dispatched that an earlier version archived automatically when it finished is still listed, marked archived: true.',
     parameters: object({
       projectId: id('Optional: only sessions of this project'),
       limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Max rows (default 50)' },

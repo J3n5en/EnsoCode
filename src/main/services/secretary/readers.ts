@@ -132,6 +132,8 @@ interface ListedSession {
   goal?: { text: string; status: string };
   /** 排队会话：位次，或自动启动失败的原因 */
   queue?: { position: number } | { failed: string };
+  /** 以前完成后被 Main 自动归档、用户没再动过 */
+  archived?: true;
 }
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
@@ -205,14 +207,11 @@ export function visibleProjects(
 }
 
 /**
- * 秘书可见的会话：可见项目里的根会话，排除 child、bot、已归档与没有权威记录的残留行。
+ * 秘书可见的会话：可见项目里的根会话，排除 child、bot、用户归档与没有权威记录的残留行。
+ * 以前被 Main 自动归档的派出会话仍可见，免得秘书再也找不到它们。
  * 排序在调用方按需截断，保证 session_list 与 project_info 的最近活跃口径一致。
  */
-async function collect(
-  ports: SecretaryReadPorts,
-  /** session_read 读完成结果：放行 Main 自动归档的派出会话，用户手动归档的仍不可见 */
-  withAutoArchived = false
-): Promise<{
+async function collect(ports: SecretaryReadPorts): Promise<{
   projects: ProjectAuthority[];
   sessions: ListedSession[];
 }> {
@@ -227,11 +226,8 @@ async function collect(
   const positions = queuePositions(rows);
   for (const [conversationId, row] of Object.entries(rows)) {
     if (row.parentId !== undefined || row.btwParentId !== undefined) continue;
-    if (
-      row.archived === true &&
-      !(withAutoArchived && (await ports.autoArchived?.(conversationId, row)) === true)
-    )
-      continue;
+    const archived = row.archived === true;
+    if (archived && (await ports.autoArchived?.(conversationId, row)) !== true) continue;
     const projectId = typeof row.projectId === 'string' ? row.projectId : undefined;
     if (!projectId || !visibleIds.has(projectId)) continue;
     const authority = authorities.get(conversationId);
@@ -253,6 +249,7 @@ async function collect(
         : queued && position !== undefined
           ? { queue: { position } }
           : {}),
+      ...(archived ? { archived: true as const } : {}),
     });
   }
   sessions.sort(
@@ -461,6 +458,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           title: session.title,
           state: sessionState(session, status),
           ...queueFields(session),
+          ...(session.archived ? { archived: true } : {}),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
           ...(session.goal ? { goal: session.goal } : {}),
@@ -518,7 +516,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const entryId = stringParam(params, 'entryId');
       const target =
         entryId !== undefined ? { entryId } : index !== undefined ? { index } : undefined;
-      const { sessions } = await collect(ports, true);
+      const { sessions } = await collect(ports);
       const session = sessions.find((candidate) => candidate.conversationId === conversationId);
       if (!session) return notFound;
       // 全文模式：按 entryId（优先）或 index 读单条消息，按 offset 分页；只放行 user / assistant，工具输出不外泄
