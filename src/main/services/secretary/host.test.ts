@@ -1914,6 +1914,7 @@ describe('投递结算', () => {
     keys: ['sec1|turn-ended|0'],
     attempt: 1,
     nextAttemptAt: 0,
+    started: true,
   };
 
   function pending(): Partial<SecretaryDispatchFile> {
@@ -1979,6 +1980,22 @@ describe('投递结算', () => {
       } as unknown as RendererAgentEvent,
       []
     );
+    expect(h.state.file.inflight).toMatchObject({ attempt: 2, nextAttemptAt: 30_000 });
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it('这一批没进 worker（delivery-rejected）时按失败重投，别的投递的回执不算', () => {
+    const h = harness({ file: { ...pending(), inflight: { ...inflight, started: false } } });
+    const receipt = (type: string, deliveryId: string) =>
+      ({
+        type,
+        identity: { sessionId: 'sec1', generation: 'g' },
+        seq: 1,
+        deliveryId,
+      }) as unknown as RendererAgentEvent;
+    h.host.onAgentEvent(receipt('delivery-rejected', 'other'), []);
+    expect(h.state.file.inflight).toMatchObject({ attempt: 1 });
+    h.host.onAgentEvent(receipt('delivery-rejected', 'd1'), []);
     expect(h.state.file.inflight).toMatchObject({ attempt: 2, nextAttemptAt: 30_000 });
     expect(h.state.file.outbox).toHaveLength(1);
   });
@@ -2282,6 +2299,7 @@ describe('联系方式转发', () => {
       keys: ['k1'],
       attempt: 1,
       nextAttemptAt: 0,
+      started: true,
     };
     h.host.onAgentEvent(
       secretary({ turnId: 't9', digest: { userText: '回传', assistantText: '修好了' } }),

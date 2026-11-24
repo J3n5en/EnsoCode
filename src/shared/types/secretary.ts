@@ -511,7 +511,8 @@ export interface SecretaryDispatchFile {
     nextAttemptAt: number;
     /** 到点且会话刚变空闲时，留给紧随其后的 turn-completed 的窗口；过了才当结束事件丢失重投 */
     idleGraceUntil?: number;
-    settled?: boolean;
+    /** worker 回执这一批已上屏（delivery-settled）：之后的轮次结束才是投递这一轮的结局 */
+    started?: boolean;
   };
 }
 

@@ -107,15 +107,23 @@ function armRetry(
   ports.save(file);
 }
 
-/** 秘书这一轮结束时结算在途批次：只有正常结束才算投递成功 */
+export type DeliveryOutcome = 'started' | 'done' | 'failed';
+
+/** 结算在途批次：上屏了记下开始，投递那一轮正常结束才算成功 */
 export function settleDelivery(
   ports: DeliveryPorts,
   conversationId: string,
-  outcome: 'done' | 'failed',
+  outcome: DeliveryOutcome,
   now: number
 ): void {
   const inflight = ports.file().inflight;
   if (!inflight || inflight.secretaryConversationId !== conversationId) return;
+  if (outcome === 'started') {
+    const file = ports.file();
+    file.inflight = { ...inflight, started: true };
+    ports.save(file);
+    return;
+  }
   if (outcome === 'failed') {
     armRetry(ports, inflight.secretaryConversationId, inflight.keys, inflight.attempt, now);
     return;

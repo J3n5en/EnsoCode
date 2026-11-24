@@ -7014,7 +7014,7 @@ async function verifyProposalAbortedKind(cdp, setup, page, kind) {
       const id = ${JSON.stringify(proposed.id)};
       const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
       const textOf = (message) => (Array.isArray(message.content) ? message.content : []).filter((part) => part.type === 'text').map((part) => part.text).join('');
-      await S().send('用新工具 [[tool:my_abort_card {"text":"ok"}]]', { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, id);
+      await S().send('用新工具 [[call:my_abort_card {"text":"ok"}]]', { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, id);
       const result = await until(() => (S().conversations[id]?.messages ?? []).find((message) => message.toolName === 'my_abort_card') ?? null, 40000);
       await until(() => S().conversations[id]?.status === 'idle', 40000);
       return JSON.stringify({ text: result ? textOf(result) : null, isError: result?.isError === true });
