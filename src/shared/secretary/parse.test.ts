@@ -731,6 +731,46 @@ describe('parseDispatchFile', () => {
     expect(file.outbox[1]).toMatchObject({ kind: 'failed' });
     expect(file.outbox[1]).not.toHaveProperty('goalResult');
   });
+
+  it('动态的 needsUser 和 summary 读回来，坏字段丢掉但不丢条目', () => {
+    const extra = Array.from({ length: 22 }, (_, index) => `事项${index}`);
+    const file = parseDispatchFile({
+      activity: [
+        {
+          at: 1,
+          conversationId: 'c1',
+          kind: 'goal-complete',
+          text: 'noise',
+          needsUser: [' 确认 ', '', '   ', 1, '发版', ...extra],
+          summary: ' 已完成 ',
+        },
+        {
+          at: 2,
+          conversationId: 'c1',
+          kind: 'goal-complete',
+          text: 'plain',
+          needsUser: 'nope',
+          summary: '   ',
+        },
+        { at: 3, conversationId: 'c2', kind: 'not-a-kind', text: 'drop' },
+      ],
+    });
+    expect(file.activity).toHaveLength(2);
+    expect(file.activity?.[0]).toEqual({
+      at: 1,
+      conversationId: 'c1',
+      kind: 'goal-complete',
+      text: 'noise',
+      needsUser: ['确认', '发版', ...extra.slice(0, 18)],
+      summary: '已完成',
+    });
+    expect(file.activity?.[1]).toEqual({
+      at: 2,
+      conversationId: 'c1',
+      kind: 'goal-complete',
+      text: 'plain',
+    });
+  });
 });
 
 describe('parseTodos', () => {

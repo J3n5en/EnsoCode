@@ -480,6 +480,9 @@ export interface SecretaryActivity {
   conversationId: string;
   kind: SecretaryResultKind | 'seen';
   text: string;
+  /** goal-complete 当时的待决定事项和 summary。历史是那一刻的事实，「知道了」不回改 */
+  needsUser?: string[];
+  summary?: string;
 }
 
 export interface SecretaryDispatchFile {
@@ -636,6 +639,8 @@ export type SecretaryCard =
       resultAt?: number;
       /** 结构化结果里待用户处理的条目（已脱敏，未清除时展示） */
       needsUser?: readonly string[];
+      /** goal-complete 的 summary（已脱敏）。点「知道了」后仍保留，手动标完成不带 */
+      summary?: string;
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
       /** 会话空闲但挂着未到点的 remind_me 提醒：看板与工作台标「等提醒 · HH:MM」，不标「续跑中」 */

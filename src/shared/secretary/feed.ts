@@ -68,28 +68,54 @@ const STATE_FEED: Record<SessionCard['state'], Feed> = {
   queued: { tone: 'idle', label: 'Queued' },
 };
 
+/** 续跑、等提醒、正在跑时上一轮结果不算当前动态 */
+function settledKind(card: SessionCard): SecretaryResultKind | undefined {
+  if (card.pendingReminder && card.state !== 'running') return undefined;
+  if (card.continuing) return undefined;
+  if (!card.result || card.state === 'running') return undefined;
+  return card.result;
+}
+
+/**
+ * goal-complete 的标签和正文。有待决定事项就换标签并列条目；否则有 summary 就用 summary。
+ * 都没有时返回 undefined，调用方保持原来的标签和正文。
+ */
+function goalCompleteFeed(
+  facts: { needsUser?: readonly string[]; summary?: string },
+  base: Feed
+): { feed: Feed; detail: string } | undefined {
+  const needs = (facts.needsUser ?? [])
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (needs.length > 0) {
+    return { feed: { tone: 'ok', label: DONE_NEEDS_USER_LABEL }, detail: needs.join('；') };
+  }
+  const summary = facts.summary?.trim();
+  if (summary) return { feed: base, detail: summary };
+  return undefined;
+}
+
 /** 会话卡片对应的动态说明与发生时间：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */
 export function sessionFeed(card: SessionCard): Feed & { at: number } {
-  if (card.pendingReminder && card.state !== 'running') {
-    return { tone: 'idle', label: 'Waiting for reminder', at: card.stateSince };
+  const kind = settledKind(card);
+  if (!kind) {
+    if (card.pendingReminder && card.state !== 'running') {
+      return { tone: 'idle', label: 'Waiting for reminder', at: card.stateSince };
+    }
+    if (card.continuing) return { tone: 'run', label: 'In progress', at: card.stateSince };
+    return { ...STATE_FEED[card.state], at: card.stateSince };
   }
-  if (card.continuing) return { tone: 'run', label: 'In progress', at: card.stateSince };
-  if (
-    card.result === 'goal-complete' &&
-    card.state !== 'running' &&
-    (card.needsUser?.length ?? 0) > 0
-  ) {
-    return { tone: 'ok', label: DONE_NEEDS_USER_LABEL, at: card.resultAt ?? card.stateSince };
-  }
-  return card.result && card.state !== 'running'
-    ? { ...RESULT_FEED[card.result], at: card.resultAt ?? card.stateSince }
-    : { ...STATE_FEED[card.state], at: card.stateSince };
+  const overlay = kind === 'goal-complete' ? goalCompleteFeed(card, RESULT_FEED[kind]) : undefined;
+  return { ...(overlay?.feed ?? RESULT_FEED[kind]), at: card.resultAt ?? card.stateSince };
 }
 
 function sessionEvent(card: SessionCard): FeedEvent {
   const feed = sessionFeed(card);
+  const kind = settledKind(card);
+  const overlay = kind === 'goal-complete' ? goalCompleteFeed(card, RESULT_FEED[kind]) : undefined;
   const detail =
-    card.needsUser && card.needsUser.length > 0 ? card.needsUser.join('；') : card.lastText;
+    overlay?.detail ??
+    (card.needsUser && card.needsUser.length > 0 ? card.needsUser.join('；') : card.lastText);
   return {
     id: `session:${card.conversationId}`,
     at: feed.at,
@@ -138,18 +164,33 @@ function pendingEvent(card: Extract<SecretaryCard, { kind: 'pending' }>): FeedEv
 }
 
 function activityEvent(entry: SecretaryActivity, card: SessionCard | undefined): FeedEvent {
-  const feed =
+  const base: Feed =
     entry.kind === 'seen'
       ? { tone: 'idle' as const, label: 'Secretary saw this' }
       : RESULT_FEED[entry.kind];
+  const sameResult =
+    card !== undefined && card.result === entry.kind && card.resultAt === entry.at
+      ? card
+      : undefined;
+  const overlay =
+    entry.kind === 'goal-complete'
+      ? goalCompleteFeed(
+          {
+            needsUser: entry.needsUser ?? sameResult?.needsUser,
+            summary: entry.summary ?? sameResult?.summary,
+          },
+          base
+        )
+      : undefined;
+  const detail = overlay?.detail ?? entry.text;
   return {
     id: `activity:${entry.conversationId}:${entry.at}:${entry.kind}`,
     at: entry.at,
-    tone: feed.tone,
+    tone: overlay?.feed.tone ?? base.tone,
     projectName: card?.projectName ?? '',
     title: card?.title || entry.conversationId,
-    label: feed.label,
-    ...(entry.text ? { detail: entry.text } : {}),
+    label: overlay?.feed.label ?? base.label,
+    ...(detail ? { detail } : {}),
     conversationId: entry.conversationId,
   };
 }
@@ -159,13 +200,21 @@ export function compareFeed(left: FeedEvent, right: FeedEvent): number {
   return right.at - left.at || left.id.localeCompare(right.id);
 }
 
-/** 工作台动态的全量投影。分页在 pageFeed，这里不截断 */
+/** 工作台动态的全量投影。分页在 pageFeed，这里不截断。卡片当前结果已有活动历史时只留历史那条 */
 export function feedEvents(board: SecretaryBoard): FeedEvent[] {
   const sessions = [...board.needsYou, ...board.running, ...board.done].filter(
     (card): card is SessionCard => card.kind === 'session'
   );
   const cards = new Map(sessions.map((card) => [card.conversationId, card]));
+  const remembered = new Set(
+    (board.activity ?? []).map((entry) => `${entry.conversationId}:${entry.at}:${entry.kind}`)
+  );
+  const recorded = (card: SessionCard): boolean => {
+    const kind = settledKind(card);
+    return Boolean(kind) && remembered.has(`${card.conversationId}:${card.resultAt}:${kind}`);
+  };
   return [...board.needsYou, ...board.running, ...board.done]
+    .filter((card) => card.kind !== 'session' || !recorded(card))
     .map((card) =>
       card.kind === 'proposal'
         ? proposalEvent(card)

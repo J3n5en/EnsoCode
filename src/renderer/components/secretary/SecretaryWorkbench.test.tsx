@@ -378,6 +378,43 @@ describe('SecretaryWorkbench 动态行：停止与跳转', () => {
   });
 });
 
+describe('SecretaryWorkbench 动态正文', () => {
+  const body = () => container.querySelector('[data-enso="secretary-feed-expand"] .line-clamp-2');
+
+  function show(event: FeedEvent) {
+    h.board = {
+      needsYou: [],
+      running: [sessionCard({ state: 'idle', result: 'goal-complete' })],
+      todos: [],
+      done: [],
+    };
+    h.feed = [event];
+  }
+
+  it('title 是完整的标签和详情', async () => {
+    show(
+      feedEvent({
+        running: false,
+        tone: 'ok',
+        label: 'Goal complete',
+        detail: '是否合并；确认发版',
+      })
+    );
+    await render(<SecretaryWorkbench name="小安" />);
+    await act(async () => {});
+    expect(body()?.getAttribute('title')).toBe('[Goal complete] · 是否合并；确认发版');
+    expect(body()?.textContent).toBe('[Goal complete] · 是否合并；确认发版');
+  });
+
+  it('没有详情时 title 只有标签', async () => {
+    show(feedEvent({ running: false, tone: 'ok', label: 'Goal complete' }));
+    await render(<SecretaryWorkbench name="小安" />);
+    await act(async () => {});
+    expect(body()?.getAttribute('title')).toBe('[Goal complete]');
+    expect(body()?.textContent).toBe('[Goal complete]');
+  });
+});
+
 describe('SecretaryWorkbench 待办状态与会话状态一致', () => {
   it('运行中的待办只在「进行中」出现、不进「出问题」、不显示红字「会话已停止」', async () => {
     h.board = {

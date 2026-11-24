@@ -609,6 +609,11 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       (visibleResult.kind === 'goal-complete' || visibleResult.kind === 'goal-blocked')
         ? needsUserItems(record.goalResult).map((item) => redactSecrets(item))
         : [];
+    const summarySource = record.goalResult?.result.summary?.trim() ?? '';
+    const summary =
+      visibleResult?.kind === 'goal-complete' && !visibleResult.manual && summarySource
+        ? redactSecrets(summarySource).trim()
+        : '';
     // 巡检报过停住、之后没有新活动：进行中列表标「已停住」，等它真的动起来才消失
     const stalled =
       going &&
@@ -630,6 +635,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
       ...(visibleResult ? { result: visibleResult.kind, resultAt: visibleResult.at } : {}),
       ...(needsUser.length > 0 ? { needsUser } : {}),
+      ...(summary ? { summary } : {}),
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going &&
       state !== 'running' &&
