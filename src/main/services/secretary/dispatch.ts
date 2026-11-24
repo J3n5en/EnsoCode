@@ -55,7 +55,6 @@ import {
   REPLACEABLE_GOAL_STATUSES,
   type SecretaryAuditEntry,
   type SecretaryBoard,
-  type SecretaryClaimView,
   type SecretaryDailyRecord,
   type SecretaryDemandThreadView,
   type SecretaryDispatchFile,
@@ -73,7 +72,6 @@ import {
 } from '@shared/types/secretary';
 import { classifyUpstreamError, nextPendingRetryDelayMs } from '@shared/upstreamRecovery';
 import type { ObservedTask } from '../backgroundTaskTracker';
-import { peekEventClaimStore } from '../eventClaims';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
@@ -191,7 +189,6 @@ export interface SecretaryDispatchPorts {
   ownStatus?(conversationId: string): MaybePromise<SecretarySessionStatus>;
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
-  claims?(): MaybePromise<readonly SecretaryClaimView[]>;
   threads?(): MaybePromise<readonly SecretaryDemandThreadView[]>;
   createSession(request: MainSessionRequest): Promise<MainSessionResult>;
   prompt(
@@ -3057,7 +3054,6 @@ export interface SecretaryStatePorts {
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
   subagents?(conversationId: string): MaybePromise<readonly AgentRunProgress[]>;
   reminders?(conversationId: string): MaybePromise<readonly SessionReminder[]>;
-  claims?(): MaybePromise<readonly SecretaryClaimView[]>;
   threads?(): MaybePromise<readonly SecretaryDemandThreadView[]>;
 }
 
@@ -3127,7 +3123,6 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
       projects,
       aliases,
       todos: await ports.todos(),
-      claims: (await ports.claims?.()) ?? [],
       threads: (await ports.threads?.()) ?? [],
     }),
   };
@@ -3181,25 +3176,6 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
       (await import('../../ipc/agent')).observedSubagentProgress(conversationId),
     reminders: async (conversationId) =>
       (await import('../sessionReminders')).readSessionReminders(conversationId),
-    async claims() {
-      const store = peekEventClaimStore();
-      if (!store) return [];
-      const rows = await (await import('../../ipc/settings')).readPersistedConversations();
-      return store.list().map((claim) => {
-        const title = rows[claim.sessionId]?.title;
-        return {
-          key: claim.key,
-          sessionId: claim.sessionId,
-          sessionTitle: typeof title === 'string' && title.trim() ? title : claim.sessionId,
-          pluginId: claim.pluginId,
-          ...(claim.label !== undefined ? { label: claim.label } : {}),
-          ...(claim.group !== undefined ? { group: claim.group } : {}),
-          claimedAt: claim.claimedAt,
-          lastHeartbeatAt: claim.lastHeartbeatAt,
-          active: claim.active,
-        };
-      });
-    },
     async threads() {
       const rows = await (await import('../../ipc/settings')).readPersistedConversations();
       return (await import('../demandThreads')).secretaryDemandThreadViews(rows);

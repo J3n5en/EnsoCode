@@ -143,6 +143,8 @@ const CHANGE_LABEL: Record<string, string> = {
 export interface DailySessionMeta {
   title?: string;
   projectName?: string;
+  /** 会话已归档：它的结果不再算「需要你」 */
+  archived?: true;
 }
 
 export interface DailyInput {
@@ -273,7 +275,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     const meta = metaOf(conversationId, projectId);
     const record = result?.record;
     const goalResult = result?.goalResult ?? record?.goalResult;
-    const cleared = Boolean(result?.manual || result?.dismissed);
+    const cleared = Boolean(
+      result?.manual || result?.dismissed || session(conversationId).archived
+    );
     const needsUser =
       !cleared && result?.kind === 'goal-complete' ? needsUserItems(goalResult) : [];
     const label = result
@@ -281,7 +285,12 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
         ? DONE_NEEDS_USER_LABEL
         : RESULT_LABEL[result.kind]
       : undefined;
-    const summary = needsUser.length > 0 ? undefined : record ? summarize(record.text) : undefined;
+    const summary =
+      needsUser.length > 0
+        ? summarize(goalResult?.result.summary)
+        : record
+          ? summarize(record.text)
+          : undefined;
     return {
       id: `session:${conversationId}`,
       at,
@@ -338,7 +347,8 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     placed.add(record.conversationId);
     const goal = record.goal?.split('\n')[0]?.trim();
     const effectiveGoalResult = result?.goalResult ?? result?.record?.goalResult;
-    const resultCleared = Boolean(result?.manual || result?.dismissed);
+    const archived = session(record.conversationId).archived === true;
+    const resultCleared = Boolean(result?.manual || result?.dismissed || archived);
     // 移出只影响看板：记录还在，但哪一列都不进
     if (record.dismissedFromBoard === true && !result) continue;
     // 主动停止（秘书 session_stop 或用户中止）：
@@ -403,7 +413,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     };
     // 当天没有终态结果时：真在跑、或从来没报过结果的才进「进行中」。
     // 报过结果、这一轮又没给新结果的会话，活已经干完，不能一直挂在进行中。
-    const effectiveCleared = Boolean(effectiveResult?.manual || effectiveResult?.dismissed);
+    const effectiveCleared = Boolean(
+      effectiveResult?.manual || effectiveResult?.dismissed || archived
+    );
     const column = effectiveResult
       ? columnOf(effectiveResult.kind, effectiveGoalResult, effectiveCleared)
       : running || record.lastResult === undefined
@@ -430,7 +442,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     const column = columnOf(
       result.kind,
       result.goalResult ?? result.record?.goalResult,
-      Boolean(result.manual || result.dismissed)
+      Boolean(result.manual || result.dismissed || session(conversationId).archived)
     );
     if (!column) continue;
     columns[column].push(

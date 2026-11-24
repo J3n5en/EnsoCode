@@ -107,6 +107,9 @@ export const SETTINGS_DATA_COVERAGE = {
   pluginLoggingEnabled: excluded(
     'Device-local plugin logging diagnostics switch, not an Enso capability.'
   ),
+  appLoggingEnabled: excluded(
+    'Device-local app logging diagnostics switch, not an Enso capability.'
+  ),
   proxyMode: surfaces('general.proxy-mode'),
   customProxyUrl: surfaces('general.custom-proxy-url'),
   customCaCertPath: excluded('Device-local CA certificate file path for TLS trust.'),
@@ -305,6 +308,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setPluginLoggingEnabled: excluded(
     'Device-local plugin logging diagnostics switch, not an Enso capability.'
+  ),
+  setAppLoggingEnabled: excluded(
+    'Device-local app logging diagnostics switch, not an Enso capability.'
   ),
   setProxyMode: surfaces('general.proxy-mode'),
   setCustomProxyUrl: surfaces('general.custom-proxy-url'),

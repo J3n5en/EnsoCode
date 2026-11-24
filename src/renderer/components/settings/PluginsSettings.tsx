@@ -679,8 +679,6 @@ export function EnsoPluginsSettings({
   const { t } = useI18n();
   const pluginAutoUpdate = useSettingsStore((state) => state.pluginAutoUpdate !== false);
   const setPluginAutoUpdate = useSettingsStore((state) => state.setPluginAutoUpdate);
-  const pluginLoggingEnabled = useSettingsStore((state) => state.pluginLoggingEnabled === true);
-  const setPluginLoggingEnabled = useSettingsStore((state) => state.setPluginLoggingEnabled);
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const themeErrors = usePluginThemesStore((state) => state.errors);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
@@ -917,21 +915,6 @@ export function EnsoPluginsSettings({
           className="shrink-0"
           checked={pluginAutoUpdate}
           onCheckedChange={(on) => setPluginAutoUpdate(on)}
-        />
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0">
-          <span className="block">{t('Record plugin logs')}</span>
-          <span className="block text-muted-foreground text-xs">
-            {t(
-              'Off by default. Record plugin console output and runtime logs to disk. Startup failures and crashes are still shown.'
-            )}
-          </span>
-        </span>
-        <Switch
-          className="shrink-0"
-          checked={pluginLoggingEnabled}
-          onCheckedChange={(on) => setPluginLoggingEnabled(on)}
         />
       </label>
       <div className="space-y-2.5 rounded-lg border bg-muted/30 p-3">

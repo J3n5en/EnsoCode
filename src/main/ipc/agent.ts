@@ -3737,26 +3737,12 @@ export function registerAgentHandlers(): void {
     return listExternalSessions(projectPath);
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.SESSIONS_READ_EXTERNAL,
-    (_event, sourceId: unknown, sessionPath: unknown) => {
-      if (!isNonEmptyString(sourceId) || !isNonEmptyString(sessionPath)) return [];
-      return readExternalSession(sourceId, sessionPath);
-    }
+  // 只收扫描发放的令牌，路径与项目目录由 Main 取回并校验
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_READ_EXTERNAL, (_event, token: unknown) =>
+    readExternalSession(token)
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.SESSIONS_IMPORT_EXTERNAL,
-    (_event, sourceId: unknown, sessionPath: unknown, projectPath: unknown) => {
-      if (
-        !isNonEmptyString(sourceId) ||
-        !isNonEmptyString(sessionPath) ||
-        !isNonEmptyString(projectPath)
-      ) {
-        return null;
-      }
-      const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
-      return importExternalSession(sourceId, sessionPath, projectPath, sessionDir);
-    }
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_IMPORT_EXTERNAL, (_event, token: unknown) =>
+    importExternalSession(token, path.join(app.getPath('userData'), 'agent', 'sessions'))
   );
 }

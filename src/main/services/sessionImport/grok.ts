@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
+import type { SimpleMessage } from '@shared/types/sessionImport';
+import type { ScannedSession } from './types';
 
 const parseLine = (line: string): Record<string, unknown> | null => {
   try {
@@ -78,7 +79,7 @@ export function readGrokSession(filePath: string): { title: string; messages: Si
 export function listGrokSessions(
   projectPath: string,
   home = process.env.HOME ?? ''
-): ExternalSession[] {
+): ScannedSession[] {
   const dir = path.join(home, '.grok', 'sessions', encodeURIComponent(projectPath));
   let entries: fs.Dirent[];
   try {
@@ -86,7 +87,7 @@ export function listGrokSessions(
   } catch {
     return [];
   }
-  const sessions: ExternalSession[] = [];
+  const sessions: ScannedSession[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const filePath = path.join(dir, entry.name, 'chat_history.jsonl');

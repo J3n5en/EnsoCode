@@ -469,6 +469,21 @@ export const zhTranslations: Record<string, string> = {
   'Delete untracked file {{path}} permanently?': '永久删除未跟踪文件 {{path}}？',
   'Restore {{path}} to its staged version? Unstaged changes will be lost.':
     '将 {{path}} 恢复为暂存版本？未暂存的修改将丢失。',
+  'Discard…': '放弃…',
+  'Discard all': '放弃所有',
+  'Discard untracked': '放弃跟踪',
+  'Discard {{tracked}} tracked changes, delete {{untracked}} untracked files':
+    '丢弃 {{tracked}} 个已跟踪文件的修改，删除 {{untracked}} 个未跟踪文件',
+  'Permanently delete {{count}} untracked files': '永久删除 {{count}} 个未跟踪文件',
+  'Unstaged changes in {{count}} tracked files will be lost; the files are restored to their staged version.':
+    '{{count}} 个已跟踪文件的未暂存修改将丢失，文件本身保留并恢复为暂存版本。',
+  '{{count}} untracked files will be permanently deleted and cannot be recovered.':
+    '{{count}} 个未跟踪文件将被永久删除，删除后无法恢复。',
+  'Tracked files are not changed.': '已跟踪文件不受影响。',
+  'Resolve conflicts first.': '请先解决冲突。',
+  '{{count}} conflicted': '{{count}} 个冲突',
+  'Discard and delete {{count}} untracked files': '放弃修改并删除 {{count}} 个未跟踪文件',
+  'Delete {{count}} untracked files': '删除 {{count}} 个未跟踪文件',
   'Commit message': '提交信息',
   'Enter commit message…': '输入提交信息…',
   '{{count}} staged files': '已暂存 {{count}} 个文件',
@@ -2136,6 +2151,15 @@ export const zhTranslations: Record<string, string> = {
   'New plugin logs are not recorded while off. Existing log files are kept.':
     '当前不会记录新的插件日志，已有日志文件不会删除。',
   'Enable plugin logging': '开启插件日志',
+  'Record app logs': '记录应用日志',
+  'Off by default. Write main process and agent logs to disk. Files needed for restart recovery are always kept.':
+    '默认关闭。开启后将主进程与 Agent 日志写入磁盘；重启恢复等功能需要的文件始终照常保存。',
+  'App logging is off': '应用日志未开启',
+  'New app logs are not recorded while off. Existing logs are kept below.':
+    '当前不会记录新的应用日志，已有日志不会删除，仍在下方显示。',
+  'Enable app logging': '开启应用日志',
+  'App logging is off. The export only includes logs recorded earlier.':
+    '应用日志未开启，导出只包含之前已记录的日志。',
   '{{name}} tried to message another session and was blocked':
     '插件 {{name}} 想向其他会话发消息，已拦截',
   'Turn on': '去开启',
@@ -2505,6 +2529,10 @@ export const zhTranslations: Record<string, string> = {
     '从本地 AI 应用导入 {{name}} 项目下的对话历史。',
   'No sessions found for this project': '没有找到该项目的会话',
   'Select a session to preview': '选择一个会话预览',
+  'The session list is out of date. Please rescan.': '会话列表已过期，请重新扫描。',
+  'This session is outside the allowed folders and cannot be read.':
+    '该会话已不在允许的目录内，无法读取。',
+  'This session has no messages to import.': '该会话没有可导入的消息。',
   Untitled: '未命名',
   '{{count}} messages': '{{count}} 条消息',
   Import: '导入',
@@ -3237,8 +3265,6 @@ export const zhTranslations: Record<string, string> = {
   Planning: '思考',
   Busy: '执行',
   'Needs you': '等待',
-  'Object claims': '对象认领',
-  'Claimed by {{session}}': '由 {{session}} 认领',
   'Demand threads': '需求线程',
   'Thread owner': '绑定主人',
   'Thread external': '外部',
@@ -3920,7 +3946,8 @@ export const zhTranslations: Record<string, string> = {
   'Nothing dispatched today': '今天还没派活',
   Started: '开始执行',
   'Goal complete': '目标完成',
-  'Done · needs your decision': '完成 · 待你决定',
+  'Done · needs you': '完成 · 需要你',
+  'Needs you: {{item}}': '需要你：{{item}}',
   'Turn ended': '这一轮结束',
   Stalled: '停滞',
   'Stalled, no activity': '已停住',

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { AGENT_COMPACTION_LOG } from '@shared/agentWorkerExit';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -91,6 +92,8 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
 import { CheckpointManager } from './checkpoint/manager';
 import { recordCompactCancel } from './ensoCompact/cancel';
 import { SessionSupervisor, shouldCompactAfterModelSwitch } from './supervisor';
+
+setAppLoggingEnabled(true);
 
 const parent = {
   sessionId: 'parent',

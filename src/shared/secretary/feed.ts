@@ -46,8 +46,8 @@ type Feed = { tone: FeedTone; label: string };
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
-/** 目标已完成但结构化结果里仍有待用户拍板事项的卡片标签（i18n key） */
-export const DONE_NEEDS_USER_LABEL = 'Done · needs your decision';
+/** 目标已完成但结构化结果里仍有要用户本人处理的事（决定或动手分不清，用中性说法） */
+export const DONE_NEEDS_USER_LABEL = 'Done · needs you';
 
 const RESULT_FEED: Record<SecretaryResultKind, Feed> = {
   'goal-complete': { tone: 'ok', label: 'Goal complete' },

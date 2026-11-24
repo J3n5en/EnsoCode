@@ -6,6 +6,7 @@ import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import path from 'node:path';
 import { app } from '@platform';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import { registerIpcHandlers } from '../main/ipc';
 import { readSettings, startProviderModelRefresh } from '../main/ipc/settings';
 import {
@@ -170,6 +171,7 @@ async function serve(web: WebConfig | null): Promise<void> {
     | { state?: Record<string, unknown> }
     | undefined;
   const state = persisted?.state ?? {};
+  setAppLoggingEnabled(state.appLoggingEnabled === true);
   getProxyConfig().initFromConfig(state.proxyMode, state.customProxyUrl);
   getCaCertConfig().initFromConfig(state.customCaCertPath);
   startProviderModelRefresh();

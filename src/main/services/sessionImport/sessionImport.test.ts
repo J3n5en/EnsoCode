@@ -5,7 +5,13 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeClaudeProjectDir, listClaudeSessions, readClaudeSession } from './claudeCode';
 import { listCodexSessions, readCodexSession } from './codex';
-import { importExternalSession, listExternalSessions, readExternalSession } from './index';
+import {
+  importExternalSession,
+  listExternalSessions,
+  readExternalSession,
+  readSessionMessages,
+  scanExternalSessions,
+} from './index';
 import { listPiSessions } from './pi';
 import { writePiSession } from './piJsonl';
 
@@ -204,11 +210,7 @@ const grokSessionDir = (home: string, projectPath: string, id: string) => {
 
 describe('外部会话编排', () => {
   it('未知 sourceId 读取时返回空消息', () => {
-    expect(readExternalSession('nope', path.join(tmp, 'x.jsonl'))).toEqual([]);
-  });
-
-  it('未知 sourceId 导入时返回 null', () => {
-    expect(importExternalSession('nope', path.join(tmp, 'x.jsonl'), '/tmp/demo', tmp)).toBeNull();
+    expect(readSessionMessages('nope', path.join(tmp, 'x.jsonl'))).toEqual([]);
   });
 
   it('home 可注入，Grok 来源出现在列表里', () => {
@@ -218,7 +220,7 @@ describe('外部会话编排', () => {
       path.join(dir, 'chat_history.jsonl'),
       jsonl([{ type: 'user', content: '你好' }])
     );
-    const grok = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
+    const grok = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
     expect(grok?.sourceName).toBe('Grok CLI');
   });
 
@@ -231,7 +233,138 @@ describe('外部会话编排', () => {
     );
     vi.stubEnv('HOME', undefined);
     vi.spyOn(os, 'homedir').mockReturnValue(tmp);
-    expect(listExternalSessions(projectPath).map((source) => source.sourceId)).toContain('grok');
+    expect(scanExternalSessions(projectPath).map((source) => source.sourceId)).toContain('grok');
+  });
+});
+
+// 读取/导入曾直接收 renderer 传来的 sessionPath，等于能读、能导入任意文件；现在只认扫描发放的令牌
+describe('外部会话令牌边界', () => {
+  const projectPath = '/tmp/demo';
+  let home: string;
+  let claudeDir: string;
+  const claudeLines = (text: string) =>
+    jsonl([{ type: 'user', message: { role: 'user', content: text } }]);
+  const writeClaude = (name: string, text: string) => {
+    const file = path.join(claudeDir, name);
+    fs.writeFileSync(file, claudeLines(text));
+    return file;
+  };
+  const tokens = (now?: number) =>
+    listExternalSessions(projectPath, home, now).flatMap((source) =>
+      source.sessions.map((session) => session.token)
+    );
+
+  beforeEach(() => {
+    home = path.join(tmp, 'home');
+    claudeDir = path.join(home, '.claude', 'projects', encodeClaudeProjectDir(projectPath));
+    fs.mkdirSync(claudeDir, { recursive: true });
+  });
+
+  it('扫描结果只带不透明令牌，不暴露会话文件路径', () => {
+    const file = writeClaude('a.jsonl', '你好');
+    const sources = listExternalSessions(projectPath, home);
+    expect(JSON.stringify(sources)).not.toContain(file);
+    expect(JSON.stringify(sources)).not.toContain(home);
+    expect(sources[0]?.sessions[0]).toEqual({
+      token: expect.any(String),
+      title: '你好',
+      updatedAt: expect.any(Number),
+      messageCount: 1,
+    });
+  });
+
+  it('凭令牌能读取预览，也能导入成 pi 会话（cwd 取扫描时的项目）', () => {
+    writeClaude('a.jsonl', '构建挂了');
+    const [token] = tokens();
+    expect(readExternalSession(token)).toEqual({
+      ok: true,
+      messages: [{ role: 'user', text: '构建挂了', timestamp: undefined }],
+    });
+    const sessionDir = path.join(tmp, 'out');
+    fs.mkdirSync(sessionDir);
+    const imported = importExternalSession(token, sessionDir);
+    expect(imported).toEqual({
+      ok: true,
+      sessionFile: expect.stringContaining(sessionDir),
+      title: '构建挂了',
+      messageCount: 1,
+    });
+    if (!imported.ok) throw new Error('import failed');
+    const header = JSON.parse(fs.readFileSync(imported.sessionFile, 'utf-8').split('\n')[0]);
+    expect(header.cwd).toBe(projectPath);
+  });
+
+  it('直接传任意路径或未知值一律拒绝，提示重新扫描', () => {
+    const file = writeClaude('a.jsonl', '你好');
+    tokens();
+    const sessionDir = path.join(tmp, 'out');
+    fs.mkdirSync(sessionDir);
+    for (const forged of [file, '/etc/passwd', '', 'not-a-token', 42, null, { token: file }]) {
+      expect(readExternalSession(forged)).toEqual({ ok: false, error: 'rescan' });
+      expect(importExternalSession(forged, sessionDir)).toEqual({ ok: false, error: 'rescan' });
+    }
+    expect(fs.readdirSync(sessionDir)).toEqual([]);
+  });
+
+  it('旧式 (sourceId, sessionPath) 调用读不到也导入不了任意文件', () => {
+    const outside = path.join(tmp, 'secret.jsonl');
+    fs.writeFileSync(outside, claudeLines('机密'));
+    const sessionDir = path.join(tmp, 'out');
+    fs.mkdirSync(sessionDir);
+    const legacyRead = readExternalSession as (...args: unknown[]) => unknown;
+    const legacyImport = importExternalSession as (...args: unknown[]) => unknown;
+    expect(JSON.stringify(legacyRead('claude-code', outside))).not.toContain('机密');
+    legacyImport('claude-code', outside, projectPath, sessionDir);
+    expect(fs.readdirSync(sessionDir)).toEqual([]);
+  });
+
+  it('令牌过期后拒绝，重新扫描拿到的新令牌可用', () => {
+    writeClaude('a.jsonl', '你好');
+    const [stale] = tokens(1_000);
+    expect(readExternalSession(stale, 1_000 + 31 * 60_000)).toEqual({ ok: false, error: 'rescan' });
+    const [fresh] = tokens(1_000 + 31 * 60_000);
+    expect(readExternalSession(fresh, 1_000 + 32 * 60_000)).toMatchObject({ ok: true });
+  });
+
+  it('扫描后会话文件被换成指向根目录外的符号链接时拒绝', () => {
+    const file = writeClaude('a.jsonl', '你好');
+    const [token] = tokens();
+    const outside = path.join(tmp, 'secret.jsonl');
+    fs.writeFileSync(outside, claudeLines('机密'));
+    fs.rmSync(file);
+    fs.symlinkSync(outside, file);
+    const sessionDir = path.join(tmp, 'out');
+    fs.mkdirSync(sessionDir);
+    expect(readExternalSession(token)).toEqual({ ok: false, error: 'denied' });
+    expect(importExternalSession(token, sessionDir)).toEqual({ ok: false, error: 'denied' });
+    expect(fs.readdirSync(sessionDir)).toEqual([]);
+  });
+
+  it('项目目录本身是跳到根目录外的符号链接时，扫到的会话也拒绝读取', () => {
+    const outsideDir = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(outsideDir);
+    fs.writeFileSync(path.join(outsideDir, 'a.jsonl'), claudeLines('机密'));
+    fs.rmSync(claudeDir, { recursive: true });
+    fs.symlinkSync(outsideDir, claudeDir);
+    const [token] = tokens();
+    expect(readExternalSession(token)).toEqual({ ok: false, error: 'denied' });
+  });
+
+  it('根目录在用户目录下整体是符号链接（如 dotfiles 管理）时照常可读', () => {
+    const realClaude = path.join(tmp, 'dotfiles', 'claude');
+    fs.mkdirSync(path.dirname(realClaude), { recursive: true });
+    fs.renameSync(path.join(home, '.claude'), realClaude);
+    fs.symlinkSync(realClaude, path.join(home, '.claude'));
+    writeClaude('a.jsonl', '你好');
+    const [token] = tokens();
+    expect(readExternalSession(token)).toMatchObject({ ok: true });
+  });
+
+  it('扫描后文件被删除时提示重新扫描', () => {
+    const file = writeClaude('a.jsonl', '你好');
+    const [token] = tokens();
+    fs.rmSync(file);
+    expect(readExternalSession(token)).toEqual({ ok: false, error: 'rescan' });
   });
 });
 
@@ -248,7 +381,7 @@ describe('Grok CLI 会话', () => {
       path.join(dir, 'summary.json'),
       JSON.stringify({ session_summary: '排查构建失败', updated_at: '2026-09-01T00:00:00Z' })
     );
-    const grok = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
+    const grok = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
     expect(grok?.sessions).toEqual([
       expect.objectContaining({
         path: path.join(dir, 'chat_history.jsonl'),
@@ -268,7 +401,7 @@ describe('Grok CLI 会话', () => {
         { type: 'assistant', content: [{ type: 'text', text: '已修复' }] },
       ])
     );
-    expect(readExternalSession('grok', file)).toEqual([
+    expect(readSessionMessages('grok', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
     ]);
@@ -287,7 +420,7 @@ describe('Grok CLI 会话', () => {
         { type: 'user', content: '技能注入', synthetic_reason: 'skill' },
       ])
     );
-    expect(readExternalSession('grok', file)).toEqual([
+    expect(readSessionMessages('grok', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '真正的问题' }),
     ]);
   });
@@ -296,8 +429,8 @@ describe('Grok CLI 会话', () => {
     const dir = grokSessionDir(tmp, projectPath, 'sess-1');
     const file = path.join(dir, 'chat_history.jsonl');
     fs.writeFileSync(file, 'not-json\n{"type":"system"}\n');
-    expect(readExternalSession('grok', file)).toEqual([]);
-    expect(readExternalSession('grok', path.join(dir, 'missing.jsonl'))).toEqual([]);
+    expect(readSessionMessages('grok', file)).toEqual([]);
+    expect(readSessionMessages('grok', path.join(dir, 'missing.jsonl'))).toEqual([]);
   });
 
   it('只列出当前项目编码目录下的会话', () => {
@@ -311,7 +444,7 @@ describe('Grok CLI 会话', () => {
       path.join(other, 'chat_history.jsonl'),
       jsonl([{ type: 'user', content: 'b' }])
     );
-    const grok = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
+    const grok = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
     expect(grok?.sessions.map((s) => s.path)).toEqual([path.join(mine, 'chat_history.jsonl')]);
   });
 });
@@ -340,7 +473,7 @@ describe('Cursor 会话', () => {
   it('列出会话时给出 Cursor 来源、jsonl 绝对路径与首条 user 标题', () => {
     const file = cursorTranscript(tmp, projectPath, 'tr-1');
     fs.writeFileSync(file, jsonl([cursorTurn('user', '<user_query>修复登录问题</user_query>')]));
-    const cursor = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'cursor');
+    const cursor = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'cursor');
     expect(cursor?.sourceName).toBe('Cursor');
     expect(cursor?.sessions).toHaveLength(1);
     expect(cursor?.sessions[0].path).toBe(file);
@@ -353,7 +486,7 @@ describe('Cursor 会话', () => {
       file,
       jsonl([cursorTurn('user', '构建挂了'), cursorTurn('assistant', '已修复')])
     );
-    expect(readExternalSession('cursor', file)).toEqual([
+    expect(readSessionMessages('cursor', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
     ]);
@@ -370,7 +503,7 @@ describe('Cursor 会话', () => {
         ),
       ])
     );
-    expect(readExternalSession('cursor', file)).toEqual([
+    expect(readSessionMessages('cursor', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '真正的问题' }),
     ]);
   });
@@ -384,7 +517,7 @@ describe('Cursor 会话', () => {
         cursorTurn('assistant', '收到'),
       ])
     );
-    expect(readExternalSession('cursor', file)).toEqual([
+    expect(readSessionMessages('cursor', file)).toEqual([
       expect.objectContaining({ role: 'assistant', text: '收到' }),
     ]);
   });
@@ -392,8 +525,8 @@ describe('Cursor 会话', () => {
   it('损坏的 jsonl 与缺失文件都返回空消息且不抛错', () => {
     const file = cursorTranscript(tmp, projectPath, 'tr-1');
     fs.writeFileSync(file, 'not-json\n{"role":"user"}\n');
-    expect(readExternalSession('cursor', file)).toEqual([]);
-    expect(readExternalSession('cursor', path.join(path.dirname(file), 'missing.jsonl'))).toEqual(
+    expect(readSessionMessages('cursor', file)).toEqual([]);
+    expect(readSessionMessages('cursor', path.join(path.dirname(file), 'missing.jsonl'))).toEqual(
       []
     );
   });
@@ -403,7 +536,7 @@ describe('Cursor 会话', () => {
     fs.writeFileSync(mine, jsonl([cursorTurn('user', 'a')]));
     const other = cursorTranscript(tmp, '/tmp/other', 'tr-2');
     fs.writeFileSync(other, jsonl([cursorTurn('user', 'b')]));
-    const cursor = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'cursor');
+    const cursor = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'cursor');
     expect(cursor?.sessions.map((s) => s.path)).toEqual([mine]);
   });
 });
@@ -427,7 +560,7 @@ describe('pi / oh-my-pi 会话', () => {
   it('列出 .pi 下 cwd 匹配的会话，来源为 pi，path 是 jsonl 本身', () => {
     const file = piSessionFile(tmp, '.pi', '-tmp-demo', 's1');
     fs.writeFileSync(file, jsonl([piHeader(projectPath), piTurn('user', [piText('hi')])]));
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi');
     expect(source?.sourceName).toBe('pi');
     expect(source?.sessions.map((s) => s.path)).toEqual([file]);
   });
@@ -435,7 +568,7 @@ describe('pi / oh-my-pi 会话', () => {
   it('列出 .omp 下同样形状的会话，来源为 oh-my-pi', () => {
     const file = piSessionFile(tmp, '.omp', '-project-billcom-web', 's1');
     fs.writeFileSync(file, jsonl([piHeader(projectPath), piTurn('user', [piText('hi')])]));
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'oh-my-pi');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'oh-my-pi');
     expect(source?.sourceName).toBe('oh-my-pi');
     expect(source?.sessions.map((s) => s.path)).toEqual([file]);
   });
@@ -450,7 +583,7 @@ describe('pi / oh-my-pi 会话', () => {
         piTurn('user', [piText('先看看导入')]),
       ])
     );
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi');
     expect(source?.sessions[0].title).toBe('重构导入流程');
   });
 
@@ -464,7 +597,7 @@ describe('pi / oh-my-pi 会话', () => {
         piTurn('user', [piText('先看看导入')]),
       ])
     );
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi');
     expect(source?.sessions[0].title).toContain('先看看导入');
   });
 
@@ -478,7 +611,7 @@ describe('pi / oh-my-pi 会话', () => {
         piTurn('assistant', [{ type: 'thinking', thinking: '想想' }, piText('已修复')]),
       ])
     );
-    expect(readExternalSession('pi', file)).toEqual([
+    expect(readSessionMessages('pi', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
     ]);
@@ -494,7 +627,7 @@ describe('pi / oh-my-pi 会话', () => {
         piTurn('assistant', [piText('在')]),
       ])
     );
-    expect(readExternalSession('oh-my-pi', file).map((m) => m.text)).toEqual(['你好', '在']);
+    expect(readSessionMessages('oh-my-pi', file).map((m) => m.text)).toEqual(['你好', '在']);
   });
 
   // pi 按项目分目录；名称靠前的其他项目目录先被遍历，旧会话数已达上限时当前项目的新会话不能被截掉
@@ -513,14 +646,14 @@ describe('pi / oh-my-pi 会话', () => {
   it('目录名像当前项目但 header cwd 不匹配时不出现', () => {
     const file = piSessionFile(tmp, '.pi', '-tmp-demo', 's1');
     fs.writeFileSync(file, jsonl([piHeader('/tmp/other'), piTurn('user', [piText('hi')])]));
-    expect(listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi')).toBeUndefined();
+    expect(scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'pi')).toBeUndefined();
   });
 
   it('损坏的 jsonl 与缺失文件都返回空消息且不抛错', () => {
     const file = piSessionFile(tmp, '.pi', '-tmp-demo', 's1');
     fs.writeFileSync(file, `not-json\n${JSON.stringify(piHeader(projectPath))}\n`);
-    expect(readExternalSession('pi', file)).toEqual([]);
-    expect(readExternalSession('pi', path.join(path.dirname(file), 'missing.jsonl'))).toEqual([]);
+    expect(readSessionMessages('pi', file)).toEqual([]);
+    expect(readSessionMessages('pi', path.join(path.dirname(file), 'missing.jsonl'))).toEqual([]);
   });
 });
 
@@ -542,7 +675,7 @@ describe('Factory 会话', () => {
         piTurn('user', [piText('hi')]),
       ])
     );
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'factory');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'factory');
     expect(source?.sourceName).toBe('Factory');
     expect(source?.sessions.map((s) => s.path)).toEqual([file]);
     expect(source?.sessions[0].title).toBe('排查构建失败');
@@ -558,7 +691,7 @@ describe('Factory 会话', () => {
         piTurn('assistant', [piText('已修复')]),
       ])
     );
-    expect(readExternalSession('factory', file)).toEqual([
+    expect(readSessionMessages('factory', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
     ]);
@@ -574,7 +707,7 @@ describe('Factory 会话', () => {
         piTurn('assistant', [piText('收到')]),
       ])
     );
-    expect(readExternalSession('factory', file)).toEqual([
+    expect(readSessionMessages('factory', file)).toEqual([
       expect.objectContaining({ role: 'assistant', text: '收到' }),
     ]);
   });
@@ -582,8 +715,8 @@ describe('Factory 会话', () => {
   it('损坏的 jsonl 与缺失文件都返回空消息且不抛错', () => {
     const file = factorySessionFile(tmp, projectPath, 'u-1');
     fs.writeFileSync(file, 'not-json\n{"type":"session_start","title":"t"}\n');
-    expect(readExternalSession('factory', file)).toEqual([]);
-    expect(readExternalSession('factory', path.join(path.dirname(file), 'x.jsonl'))).toEqual([]);
+    expect(readSessionMessages('factory', file)).toEqual([]);
+    expect(readSessionMessages('factory', path.join(path.dirname(file), 'x.jsonl'))).toEqual([]);
   });
 
   it('只列出当前项目编码目录下的会话', () => {
@@ -603,7 +736,7 @@ describe('Factory 会话', () => {
         piTurn('user', [piText('b')]),
       ])
     );
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'factory');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'factory');
     expect(source?.sessions.map((s) => s.path)).toEqual([mine]);
   });
 });
@@ -666,7 +799,7 @@ describe('OpenCode 会话', () => {
       title: '排查构建失败',
       turns: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }],
     });
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'opencode');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'opencode');
     expect(source?.sourceName).toBe('OpenCode');
     expect(source?.sessions.map((s) => s.path)).toEqual([sessionFile]);
     expect(source?.sessions[0].title).toBe('排查构建失败');
@@ -690,7 +823,7 @@ describe('OpenCode 会话', () => {
         },
       ],
     });
-    expect(readExternalSession('opencode', sessionFile)).toEqual([
+    expect(readSessionMessages('opencode', sessionFile)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
     ]);
@@ -712,7 +845,7 @@ describe('OpenCode 会话', () => {
       parentID: 'ses1',
       turns: [{ role: 'user', parts: [{ type: 'text', text: 'b' }] }],
     });
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'opencode');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'opencode');
     expect(source?.sessions.map((s) => s.path)).toEqual([parent]);
   });
 
@@ -731,7 +864,7 @@ describe('OpenCode 会话', () => {
       title: '其他项目',
       turns: [{ role: 'user', parts: [{ type: 'text', text: 'b' }] }],
     });
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'opencode');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'opencode');
     expect(source?.sessions.map((s) => s.path)).toEqual([mine]);
   });
 
@@ -740,9 +873,9 @@ describe('OpenCode 会话', () => {
     const broken = path.join(storage, 'session', 'prj1', 'bad.json');
     fs.mkdirSync(path.dirname(broken), { recursive: true });
     fs.writeFileSync(broken, '{not json');
-    expect(readExternalSession('opencode', broken)).toEqual([]);
+    expect(readSessionMessages('opencode', broken)).toEqual([]);
     expect(
-      readExternalSession('opencode', path.join(storage, 'session', 'prj1', 'x.json'))
+      readSessionMessages('opencode', path.join(storage, 'session', 'prj1', 'x.json'))
     ).toEqual([]);
   });
 });
@@ -769,7 +902,7 @@ describe('Gemini CLI 会话', () => {
     });
     const file = geminiChatFile(tmp, 'demo-slug', 'session-a.jsonl');
     fs.writeFileSync(file, geminiTurns);
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
     expect(source?.sourceName).toBe('Gemini CLI');
     expect(source?.sessions.map((s) => s.path)).toEqual([file]);
     expect(source?.sessions[0].title).toContain('构建挂了');
@@ -778,14 +911,14 @@ describe('Gemini CLI 会话', () => {
   it('没有 projects.json 时认 sha256 哈希目录', () => {
     const file = geminiChatFile(tmp, geminiHash(projectPath), 'session-b.jsonl');
     fs.writeFileSync(file, geminiTurns);
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
     expect(source?.sessions.map((s) => s.path)).toEqual([file]);
   });
 
   it('读取时把 string 与 text parts 两种 content 都转成文本轮次', () => {
     const file = geminiChatFile(tmp, geminiHash(projectPath), 'session-b.jsonl');
     fs.writeFileSync(file, geminiTurns);
-    expect(readExternalSession('gemini-cli', file)).toEqual([
+    expect(readSessionMessages('gemini-cli', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
     ]);
@@ -814,7 +947,7 @@ describe('Gemini CLI 会话', () => {
         content: [{ text: '想想', thought: true }, { text: '已修复' }],
       },
     ]);
-    expect(readExternalSession('gemini-cli', file)).toEqual([
+    expect(readSessionMessages('gemini-cli', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '先看日志' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
@@ -830,7 +963,7 @@ describe('Gemini CLI 会话', () => {
       { id: 'u2', type: 'user', content: [{ text: '然后呢' }] },
       { id: 'g1', type: 'gemini', content: '先看日志', tokens: { total: 3 } },
     ]);
-    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+    expect(readSessionMessages('gemini-cli', file).map((m) => m.text)).toEqual([
       '构建挂了',
       '先看日志',
       '然后呢',
@@ -849,7 +982,7 @@ describe('Gemini CLI 会话', () => {
       { id: 'u3', type: 'user', content: [{ text: '第二问' }] },
       { id: 'g3', type: 'gemini', content: '第二答' },
     ]);
-    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+    expect(readSessionMessages('gemini-cli', file).map((m) => m.text)).toEqual([
       '第一问',
       '第一答',
       '第二问',
@@ -875,7 +1008,7 @@ describe('Gemini CLI 会话', () => {
         },
       },
     ]);
-    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+    expect(readSessionMessages('gemini-cli', file).map((m) => m.text)).toEqual([
       '压缩摘要',
       '好的，继续',
       '最近的问题',
@@ -899,7 +1032,7 @@ describe('Gemini CLI 会话', () => {
       { id: 'm3', type: 'user', content: '第二问' },
       { $patch: { updates: [{ id: 'm2', content: [{ text: '第一答（已更新）' }] }] } },
     ]);
-    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+    expect(readSessionMessages('gemini-cli', file).map((m) => m.text)).toEqual([
       '第一问',
       '第一答（已更新）',
       '第二问',
@@ -915,7 +1048,7 @@ describe('Gemini CLI 会话', () => {
       kind: 'subagent',
       messages: [{ type: 'user', content: '子代理' }],
     });
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
     expect(source?.sessions.map((s) => s.path)).toEqual([normal]);
   });
 
@@ -927,16 +1060,16 @@ describe('Gemini CLI 会话', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, '.project_root'), projectPath);
     expect(
-      listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli')
+      scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli')
     ).toBeUndefined();
   });
 
   it('损坏的 jsonl 与缺失文件都返回空消息且不抛错', () => {
     const file = geminiChatFile(tmp, geminiHash(projectPath), 'session-bad.jsonl');
     fs.writeFileSync(file, 'not-json\n{"type":"system"}\n');
-    expect(readExternalSession('gemini-cli', file)).toEqual([]);
+    expect(readSessionMessages('gemini-cli', file)).toEqual([]);
     expect(
-      readExternalSession('gemini-cli', path.join(path.dirname(file), 'session-x.jsonl'))
+      readSessionMessages('gemini-cli', path.join(path.dirname(file), 'session-x.jsonl'))
     ).toEqual([]);
   });
 
@@ -948,7 +1081,7 @@ describe('Gemini CLI 会话', () => {
     fs.writeFileSync(mine, geminiTurns);
     fs.writeFileSync(geminiChatFile(tmp, 'other-slug', 'session-c.jsonl'), geminiTurns);
     fs.writeFileSync(geminiChatFile(tmp, geminiHash('/tmp/other'), 'session-d.jsonl'), geminiTurns);
-    const source = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
+    const source = scanExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'gemini-cli');
     expect(source?.sessions.map((s) => s.path)).toEqual([mine]);
   });
 });

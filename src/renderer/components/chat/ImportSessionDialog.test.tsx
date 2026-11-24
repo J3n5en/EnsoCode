@@ -39,8 +39,8 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-const session = (path: string, title: string) => ({
-  path,
+const session = (token: string, title: string) => ({
+  token,
   title,
   updatedAt: 0,
   messageCount: 1,
@@ -56,6 +56,7 @@ let root: Root;
 let container: HTMLElement;
 const scan = vi.fn();
 const read = vi.fn();
+const importSession = vi.fn();
 const render = (value: unknown) =>
   act(async () =>
     root.render(createElement(ImportSessionDialog, { project: value as never, onClose: vi.fn() }))
@@ -75,7 +76,10 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   scan.mockReset();
   read.mockReset();
-  Object.assign(window, { electronAPI: { sessionImport: { scan, read, import: vi.fn() } } });
+  importSession.mockReset();
+  Object.assign(window, {
+    electronAPI: { sessionImport: { scan, read, import: importSession } },
+  });
   container = window.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
 });
@@ -92,14 +96,16 @@ describe('ImportSessionDialog 预览与扫描的先后', () => {
     ]);
     const big = deferred<unknown>();
     const small = deferred<unknown>();
-    read.mockImplementation((_source: string, path: string) =>
-      path === '/x.jsonl' ? big.promise : small.promise
+    read.mockImplementation((token: string) =>
+      token === '/x.jsonl' ? big.promise : small.promise
     );
     await render(project('a'));
     await click('Big X');
     await click('Small Y');
-    await act(async () => small.resolve([{ role: 'user', text: 'from Y' }]));
-    await act(async () => big.resolve([{ role: 'user', text: 'from X' }]));
+    await act(async () =>
+      small.resolve({ ok: true, messages: [{ role: 'user', text: 'from Y' }] })
+    );
+    await act(async () => big.resolve({ ok: true, messages: [{ role: 'user', text: 'from X' }] }));
     expect(container.textContent).toContain('from Y');
     expect(container.textContent).not.toContain('from X');
   });
@@ -116,5 +122,32 @@ describe('ImportSessionDialog 预览与扫描的先后', () => {
     await act(async () => first.resolve([source([session('/a.jsonl', 'Session of A')])]));
     expect(container.textContent).toContain('Session of B');
     expect(container.textContent).not.toContain('Session of A');
+  });
+});
+
+describe('ImportSessionDialog 只传扫描令牌', () => {
+  it('预览与导入只把令牌交给 Main', async () => {
+    scan.mockResolvedValue([source([session('tok-1', 'Only')])]);
+    read.mockResolvedValue({ ok: true, messages: [{ role: 'user', text: 'hi' }] });
+    importSession.mockResolvedValue({ ok: false, error: 'empty' });
+    await render(project('a'));
+    await click('Only');
+    await click('Import');
+    expect(read).toHaveBeenCalledWith('tok-1');
+    expect(importSession).toHaveBeenCalledWith('tok-1');
+    expect(container.textContent).toContain('This session has no messages to import.');
+  });
+
+  it('令牌过期时提示重新扫描，点重新扫描后刷新列表', async () => {
+    scan.mockResolvedValueOnce([source([session('stale', 'Old')])]);
+    scan.mockResolvedValueOnce([source([session('fresh', 'New')])]);
+    read.mockResolvedValue({ ok: false, error: 'rescan' });
+    await render(project('a'));
+    await click('Old');
+    expect(container.textContent).toContain('The session list is out of date. Please rescan.');
+    await click('Rescan');
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('New');
+    expect(container.textContent).not.toContain('out of date');
   });
 });

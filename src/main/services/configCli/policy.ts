@@ -273,6 +273,8 @@ function validateField(field: string, value: unknown): string | null {
     return 'quoteSelectionButton must be a boolean';
   if (field === 'pluginLoggingEnabled' && typeof value !== 'boolean')
     return 'pluginLoggingEnabled must be a boolean';
+  if (field === 'appLoggingEnabled' && typeof value !== 'boolean')
+    return 'appLoggingEnabled must be a boolean';
   if (field === 'recentModels' && !isRecentModelList(value))
     return `recentModels must be at most ${MAX_RECENT_MODELS} unique { providerId, modelId } entries`;
   if (
