@@ -1,11 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { mcpHeaders } from '@shared/mcpConfig';
 import type { OccupancyTool } from '@shared/occupancy';
 import type { McpServerEntry } from '@shared/types';
 import { assignMcpToolNames } from '../../agent/mcpNames';
+import { createStdioTransport } from '../../agent/mcpStdio';
 import { getMcpToolCatalog } from './mcpToolCatalog';
 
 const PROBE_TIMEOUT_MS = 8_000;
@@ -36,7 +36,7 @@ function transport(server: McpServerEntry) {
   switch (server.transport) {
     case 'stdio': {
       if (!server.command) throw new Error('stdio server missing command');
-      return new StdioClientTransport({
+      return createStdioTransport({
         command: server.command,
         args: server.args ?? [],
         env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },

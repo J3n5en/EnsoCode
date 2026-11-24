@@ -50,6 +50,7 @@
 | [mcp-oauth-worker-refresh.md](mcp-oauth-worker-refresh.md) | 远程 MCP 授权过一阵就变「需要授权」，token 正常、有效期长的 MCP 不受影响 |
 | [restart-recovered-task-unopened-session.md](restart-recovered-task-unopened-session.md) | 优雅重启后后台命令还在跑，点开会话看不到任务条，发一句话才出现 |
 | [bg-task-output-empty.md](bg-task-output-empty.md) | 后台任务展开「输出」总是「(暂无输出)」，进程在跑、日志里有内容 |
+| [mcp-server-orphans.md](mcp-server-orphans.md) | 应用退出 / 更新后 HopperMCPServer、`npm exec` 等 stdio MCP server 成孤儿，旧版 crashpad_handler 退不掉 |
 
 ## 共同教训
 
