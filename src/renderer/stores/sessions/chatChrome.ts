@@ -83,6 +83,18 @@ export function chatWorkspacePath(
   );
 }
 
+/** 输入框 @ 搜索与状态栏「工作目录」的根：临时会话是会话目录，其余仍是项目根（不跟 worktree） */
+export function chatProjectRoot(
+  ownerId: string,
+  project: { kind?: string; path: string }
+): string | undefined {
+  if (project.kind !== 'scratch') return project.path;
+  return (
+    conversationCwd({ kind: 'scratch', canonicalPath: project.path, conversationId: ownerId }) ??
+    undefined
+  );
+}
+
 type SessionsSlice = {
   activeId: string | null;
   conversations: Record<string, Conversation | undefined>;

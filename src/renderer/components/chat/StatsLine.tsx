@@ -39,6 +39,7 @@ import { Z_INDEX } from '@/lib/z-index';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import type { Conversation } from '@/stores/sessions';
 import { useSessionsStore } from '@/stores/sessions';
+import { chatProjectRoot } from '@/stores/sessions/chatChrome';
 import { computeStats, formatDuration } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextInspector } from './ContextInspector';
@@ -382,9 +383,9 @@ function buildSegmentValues(
   };
 
   const project = projects.find((p) => p.id === conversation.projectId);
-  if (project) {
-    const base = projectBasename(project.path);
-    values.cwd = { compact: base, full: project.path };
+  const root = project && chatProjectRoot(conversation.parentId ?? conversation.id, project);
+  if (root) {
+    values.cwd = { compact: projectBasename(root), full: root };
   }
 
   if (conversation.title.trim().length > 0) {
