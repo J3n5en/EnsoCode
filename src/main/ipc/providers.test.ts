@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   respondOauthPrompt: vi.fn(() => true),
   cancelOauthLogin: vi.fn(() => true),
   reopenOauthLogin: vi.fn(() => true),
+  listModels: vi.fn(async () => ({ ok: true, models: [] })),
+  testProvider: vi.fn(async () => ({ ok: true, latencyMs: 1, message: 'm' })),
 }));
 
 vi.mock('electron', () => ({
@@ -39,7 +41,10 @@ vi.mock('../services/oauthProviders', () => ({
   respondOauthPrompt: mocks.respondOauthPrompt,
   startOauthLogin: mocks.startOauthLogin,
 }));
-vi.mock('../services/providerApi', () => ({ listModels: vi.fn(), testProvider: vi.fn() }));
+vi.mock('../services/providerApi', () => ({
+  listModels: mocks.listModels,
+  testProvider: mocks.testProvider,
+}));
 vi.mock('../services/providerScan', () => ({
   collectImport: vi.fn(),
   scanLocalProviders: vi.fn(),
@@ -144,5 +149,59 @@ describe('OAuth flow IPC ownership', () => {
 
     await prompt({ sender }, { locator, requestId: 'prompt-1', value: '' });
     expect(mocks.respondOauthPrompt).toHaveBeenCalledWith(locator, 'prompt-1', '');
+  });
+});
+
+describe('providers:list-models / test 代理参数校验', () => {
+  const config = { api: 'openai-completions', apiKey: 'k', baseUrl: 'https://x.example/v1' };
+  const handler = (channel: string) => {
+    const found = mocks.handlers.get(channel);
+    if (!found) throw new Error(`${channel} not registered`);
+    return found;
+  };
+
+  beforeEach(() => {
+    mocks.listModels.mockClear();
+    mocks.testProvider.mockClear();
+  });
+
+  it('合法代理原样透传（去空白），缺省不带 proxy 键', async () => {
+    await handler(IPC_CHANNELS.PROVIDERS_LIST_MODELS)({}, config);
+    expect(mocks.listModels).toHaveBeenLastCalledWith(config);
+    await handler(IPC_CHANNELS.PROVIDERS_LIST_MODELS)(
+      {},
+      { ...config, proxy: { mode: 'custom', url: ' http://127.0.0.1:7890 ' } }
+    );
+    expect(mocks.listModels).toHaveBeenLastCalledWith({
+      ...config,
+      proxy: { mode: 'custom', url: 'http://127.0.0.1:7890' },
+    });
+    await handler(IPC_CHANNELS.PROVIDERS_TEST)({}, { ...config, proxy: { mode: 'none' } }, 'm');
+    expect(mocks.testProvider).toHaveBeenLastCalledWith(
+      { ...config, proxy: { mode: 'none' } },
+      'm'
+    );
+  });
+
+  it.each([
+    null,
+    'none',
+    { mode: 'global' },
+    { mode: 'custom', url: '' },
+    { mode: 'custom', url: 'socks5://127.0.0.1:1080' },
+    { mode: 'none', extra: 1 },
+  ])('非法代理 %j 直接拒绝，不调用服务', async (proxy) => {
+    expect(await handler(IPC_CHANNELS.PROVIDERS_LIST_MODELS)({}, { ...config, proxy })).toEqual({
+      ok: false,
+      models: [],
+      error: 'Invalid config',
+    });
+    expect(await handler(IPC_CHANNELS.PROVIDERS_TEST)({}, { ...config, proxy })).toEqual({
+      ok: false,
+      latencyMs: 0,
+      message: 'Invalid config',
+    });
+    expect(mocks.listModels).not.toHaveBeenCalled();
+    expect(mocks.testProvider).not.toHaveBeenCalled();
   });
 });

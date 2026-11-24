@@ -970,6 +970,37 @@ describe('memoryHost embedding 配置与生命周期', () => {
     ]);
   });
 
+  it('所选服务商的独立代理透传给远程 embedding，改代理即重建 provider', async () => {
+    const withProxy = (proxy?: unknown) => ({
+      ...remoteSettings(),
+      providers: [{ id: 'p', baseUrl: 'https://old.invalid', apiKey: 'old-key', proxy }],
+    });
+    syncMemoryEmbeddingFromSettings(withProxy());
+    await (await getMemoryEmbedder())!.embed('global', 'query');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // 直连走 undici 专用 dispatcher，不再经全局 fetch
+    const { providerProxyDispatcher } = await import('@shared/providers/providerProxyDispatcher');
+    const direct = providerProxyDispatcher({ mode: 'none' });
+    const dispatch = vi.spyOn(direct, 'dispatch').mockImplementation(() => {
+      throw new Error('blocked in test');
+    });
+    syncMemoryEmbeddingFromSettings(withProxy({ mode: 'none' }));
+    await expect((await getMemoryEmbedder())!.embed('direct', 'query')).rejects.toThrow();
+    expect(dispatch).toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // 回到跟随全局：全局 fetch 重新被使用
+    syncMemoryEmbeddingFromSettings(withProxy());
+    await (await getMemoryEmbedder())!.embed('global again', 'query');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // 坏代理不发请求，不退回全局 fetch
+    syncMemoryEmbeddingFromSettings(withProxy({ mode: 'custom', url: 'socks5://127.0.0.1:1' }));
+    await (await getMemoryEmbedder())?.embed('bad proxy', 'query').catch(() => {});
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     {
       name: '未选择服务商',

@@ -225,3 +225,49 @@ describe('createRemoteEmbeddingProvider', () => {
     expect(p.spec.dim).toBe(2);
   });
 });
+
+describe('remote embedding 服务商代理', () => {
+  it('配置了独立代理时经该代理发送（真实网络）', async () => {
+    const { createServer, request } = await import('node:http');
+    const hits: string[] = [];
+    const target = createServer((req, res) => {
+      req.resume();
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: [{ index: 0, embedding: [1, 2] }] }));
+    });
+    const proxy = createServer((req, res) => {
+      const url = new URL(req.url ?? '');
+      hits.push(url.host);
+      const upstream = request(url, { method: req.method, headers: req.headers }, (reply) => {
+        res.writeHead(reply.statusCode ?? 502, reply.headers);
+        reply.pipe(res);
+      });
+      req.pipe(upstream);
+    });
+    const listen = (server: typeof target) =>
+      new Promise<number>((resolve) =>
+        server.listen(0, '127.0.0.1', () =>
+          resolve((server.address() as import('node:net').AddressInfo).port)
+        )
+      );
+    const targetPort = await listen(target);
+    const proxyPort = await listen(proxy);
+    try {
+      const provider = createRemoteEmbeddingProvider(spec, {
+        baseUrl: `http://127.0.0.1:${targetPort}/v1`,
+        apiKey: 'k',
+        proxy: { mode: 'custom', url: `http://127.0.0.1:${proxyPort}` },
+        retryDelayMs: 0,
+        maxAttempts: 1,
+      });
+      const [vector] = await provider.embed(['hello'], 'query');
+      expect(Array.from(vector ?? [])).toEqual([1, 2]);
+      expect(hits).toEqual([`127.0.0.1:${targetPort}`]);
+    } finally {
+      for (const server of [target, proxy]) {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    }
+  });
+});

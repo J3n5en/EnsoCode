@@ -97,11 +97,14 @@ export interface PlatformSession {
   setProxy(config: {
     mode?: 'direct' | 'system' | 'auto_detect' | 'fixed_servers' | 'pac_script';
     proxyRules?: string;
+    proxyBypassRules?: string;
   }): Promise<void>;
   resolveProxy(url: string): Promise<string>;
   clearCache(): Promise<void>;
   clearCodeCaches(options: { urls?: string[] }): Promise<void>;
   clearStorageData(): Promise<void>;
+  /** 按本会话的代理规则发请求（桌面为 Chromium 网络栈） */
+  fetch(input: string | Request, init?: RequestInit): Promise<Response>;
 }
 
 export interface PlatformSessions {

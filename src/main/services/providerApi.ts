@@ -1,13 +1,20 @@
+import { createHash } from 'node:crypto';
 import { addAbortListener } from 'node:events';
 import { classify } from '@earendil-works/pi-ai/api/typesafe-system-one';
 import { typesafeProvider } from '@earendil-works/pi-ai/providers/typesafe';
-import { net } from '@platform';
+import { net, type PlatformSession, session } from '@platform';
 import { positiveFiniteNumber } from '@shared/modelCatalog';
 import {
   DEFAULT_BASE_URLS,
   isClassifierOnlyProvider,
   withVersionSegment,
 } from '@shared/providerCatalog';
+import {
+  type ProviderProxyConfig,
+  proxyUrlHasCredentials,
+  redactProxyUrlCredentials,
+} from '@shared/providers/providerProxy';
+import { providerProxyFetch } from '@shared/providers/providerProxyDispatcher';
 import type {
   FetchedModel,
   ListModelsResult,
@@ -53,22 +60,80 @@ async function waitForProxy(ready: Promise<boolean>, signal?: AbortSignal | null
   }
 }
 
-async function request(url: string, init: RequestInit): Promise<Response> {
+const PROXY_PARTITION_PREFIX = 'enso-provider-proxy:';
+/** 每个自定义代理一个内存分区；上限防止反复改地址无限累积会话。 */
+const MAX_PROXY_SESSIONS = 16;
+const proxySessions = new Map<string, Promise<PlatformSession>>();
+
+export function resetProviderProxySessionsForTests(): void {
+  proxySessions.clear();
+}
+
+/** 无 persist: 前缀的内存分区，按分区只 setProxy 一次；失败的初始化下次重试。 */
+function proxySession(proxy: ProviderProxyConfig): Promise<PlatformSession> {
+  const key =
+    proxy.mode === 'none'
+      ? 'direct'
+      : `custom-${createHash('sha256').update(proxy.url).digest('hex').slice(0, 16)}`;
+  const cached = proxySessions.get(key);
+  if (cached) {
+    proxySessions.delete(key);
+    proxySessions.set(key, cached);
+    return cached;
+  }
+  const target = session.fromPartition(`${PROXY_PARTITION_PREFIX}${key}`);
+  // Chromium 默认对 loopback 隐式绕过代理；worker 的 ProxyAgent 不绕过，这里取消绕过保持一致
+  const ready = target
+    .setProxy(
+      proxy.mode === 'none'
+        ? { mode: 'direct' }
+        : { proxyRules: proxy.url, proxyBypassRules: '<-loopback>' }
+    )
+    .then(() => target);
+  ready.catch(() => {
+    if (proxySessions.get(key) === ready) proxySessions.delete(key);
+  });
+  proxySessions.set(key, ready);
+  if (proxySessions.size > MAX_PROXY_SESSIONS) {
+    proxySessions.delete(proxySessions.keys().next().value as string);
+  }
+  return ready;
+}
+
+async function request(
+  url: string,
+  init: RequestInit,
+  proxy: ProviderProxyConfig | undefined
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const outbound = {
+    ...init,
+    signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
+  };
   try {
-    // Node/undici TLS 指纹会被 Cloudflare 拦成 403 挑战页（done.5111online.uk 已踩过）；
-    // 聊天能通是因为 worker 装了系统代理。主进程拉模型必须走 Chromium net.fetch。
-    // 动态 import：避免 providerApi → proxyConfig → agentHost 把 worker 入口拖进无关测试。
-    const { getProxyConfig } = await import('./proxyConfig');
-    await waitForProxy(getProxyConfig().whenReady(), init.signal);
-    return await net.fetch(url, {
-      ...init,
-      signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
-    });
+    if (!proxy) {
+      // Node/undici TLS 指纹会被 Cloudflare 拦成 403 挑战页（done.5111online.uk 已踩过）；
+      // 聊天能通是因为 worker 装了系统代理。主进程拉模型必须走 Chromium net.fetch。
+      // 动态 import：避免 providerApi → proxyConfig → agentHost 把 worker 入口拖进无关测试。
+      const { getProxyConfig } = await import('./proxyConfig');
+      await waitForProxy(getProxyConfig().whenReady(), init.signal);
+      return await net.fetch(url, outbound);
+    }
+    // Chromium 代理规则不带账密，带凭据的代理只能交给 undici ProxyAgent
+    if (proxy.mode === 'custom' && proxyUrlHasCredentials(proxy.url)) {
+      return await (providerProxyFetch(proxy) as typeof fetch)(url, outbound);
+    }
+    return await (await proxySession(proxy)).fetch(url, outbound);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** 错误文案去掉 API Key 与代理账密 */
+function redactFailure(config: ProviderApiConfig, message: string): string {
+  const proxyUrl = config.proxy?.mode === 'custom' ? config.proxy.url : undefined;
+  return redactProxyUrlCredentials(createSecretSet([config.apiKey], proxyUrl).redactError(message));
 }
 
 function httpError(response: Response): string {
@@ -126,7 +191,11 @@ export async function listModels(
     }
     headers = withProviderHeaders(headers, config.headers);
 
-    let response = await request(url, { headers, redirect: 'manual', signal: signalWithTimeout });
+    let response = await request(
+      url,
+      { headers, redirect: 'manual', signal: signalWithTimeout },
+      config.proxy
+    );
     if (
       response.status === 401 &&
       config.api === 'anthropic-messages' &&
@@ -137,11 +206,15 @@ export async function listModels(
         Authorization: `Bearer ${key}`,
         'anthropic-version': ANTHROPIC_VERSION,
       };
-      response = await request(url, {
-        headers: withProviderHeaders(retryHeaders, config.headers),
-        redirect: 'manual',
-        signal: signalWithTimeout,
-      });
+      response = await request(
+        url,
+        {
+          headers: withProviderHeaders(retryHeaders, config.headers),
+          redirect: 'manual',
+          signal: signalWithTimeout,
+        },
+        config.proxy
+      );
     }
 
     if (!response.ok) {
@@ -159,8 +232,7 @@ export async function listModels(
     const models = extractModelEntries(config.api, data as Record<string, unknown>);
     return { ok: true, models };
   } catch (error) {
-    const secrets = createSecretSet([config.apiKey]);
-    return { ok: false, models: [], error: secrets.redactError(toMessage(error)) };
+    return { ok: false, models: [], error: redactFailure(config, toMessage(error)) };
   }
 }
 
@@ -298,7 +370,7 @@ export async function testProvider(
         apiKey: config.apiKey.trim(),
         maxRetries: 0,
         timeoutMs: TIMEOUT_MS,
-        fetch: (url, init) => request(String(url), { ...init, redirect: 'manual' }),
+        fetch: (url, init) => request(String(url), { ...init, redirect: 'manual' }, config.proxy),
       }
     );
     return {
@@ -307,7 +379,7 @@ export async function testProvider(
       message:
         result.stopReason === 'stop'
           ? 'Connected'
-          : createSecretSet([config.apiKey]).redactError(result.errorMessage ?? 'Failed'),
+          : redactFailure(config, result.errorMessage ?? 'Failed'),
     };
   }
 
@@ -365,16 +437,19 @@ export async function testProvider(
     }
 
     headers = withProviderHeaders(headers, config.headers);
-    const response = await request(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    const response = await request(
+      url,
+      { method: 'POST', headers, body: JSON.stringify(body) },
+      config.proxy
+    );
     const latencyMs = Date.now() - started;
     if (!response.ok) return { ok: false, latencyMs, message: httpError(response) };
     return { ok: true, latencyMs, message: model };
   } catch (error) {
-    const secrets = createSecretSet([config.apiKey]);
     return {
       ok: false,
       latencyMs: Date.now() - started,
-      message: secrets.redactError(toMessage(error)),
+      message: redactFailure(config, toMessage(error)),
     };
   }
 }

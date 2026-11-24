@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { providerKeyFor } from '@shared/providers/providerKey';
 import type { McpServerEntry, ModelProvider } from '@shared/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { botToAgentType } from './bots/botAgentType';
@@ -37,6 +38,7 @@ vi.mock('./modelDirectory', () => ({
 import {
   agentTypeRegistrySnapshot,
   configuredAgentTypes,
+  customProvidersForWorker,
   expectedAgentTypeToolIds,
   readSettingsState,
   rememberParentToolProfile,
@@ -128,6 +130,41 @@ describe('resolveWebSearchConfig', () => {
       { providerId: `enso-${host}-${key}`, modelId: 'gpt-shared' },
       { providerId: 'anthropic#2', modelId: 'claude-shared' },
     ]);
+  });
+
+  it('带独立代理的 API Key 供应商：spawn 配置与 worker 注册身份都带上代理', () => {
+    const provider: ModelProvider = {
+      id: 'direct-uuid',
+      name: 'Intranet',
+      api: 'openai-completions',
+      baseUrl: 'http://10.0.0.2/v1',
+      apiKey: 'intranet-secret',
+      enabled: true,
+      models: [{ id: 'local-model' }],
+      proxy: { mode: 'none' },
+    };
+    settingsMock.value = {
+      'enso-settings': {
+        state: {
+          providers: [provider],
+          webSearchChain: [{ providerId: provider.id, modelId: 'local-model' }],
+        },
+      },
+    };
+    const selected = resolveModelSelection(provider.id, 'local-model', new Set());
+    expect(selected.ok && selected.selection.config.proxy).toEqual({ mode: 'none' });
+    expect(resolveWebSearchConfig().chain[0]?.providerId).toBe(providerKeyFor(provider));
+    expect(providerKeyFor(provider)).not.toBe(providerKeyFor({ ...provider, proxy: undefined }));
+
+    settingsMock.value = {
+      'enso-settings': {
+        state: { providers: [{ ...provider, proxy: { mode: 'custom', url: 'bad' } }] },
+      },
+    };
+    const degraded = resolveModelSelection(provider.id, 'local-model', new Set());
+    // 坏代理整单拒绝，不能静默退回全局代理
+    expect(degraded.ok).toBe(false);
+    expect(customProvidersForWorker()).toEqual([]);
   });
 });
 
@@ -1105,6 +1142,20 @@ describe('resolveApprovalReviewer', () => {
       ok: true,
       source: { classifier: { provider: 'typesafe', modelId: 'jev-latest', apiKey: 'jev-key' } },
     });
+  });
+
+  it('分类器供应商的独立代理随凭证下发；坏代理不下发分类器', () => {
+    const proxy = { mode: 'custom' as const, url: 'http://127.0.0.1:7890' };
+    withReviewer([{ ...jev, proxy }], { providerId: 'jev', modelId: 'jev-latest' });
+    expect(resolveApprovalReviewer(new Set())).toMatchObject({
+      ok: true,
+      source: { classifier: { modelId: 'jev-latest', proxy } },
+    });
+    withReviewer([{ ...jev, proxy: { mode: 'custom', url: 'socks5://h:1' } as never }], {
+      providerId: 'jev',
+      modelId: 'jev-latest',
+    });
+    expect(resolveApprovalReviewer(new Set()).ok).toBe(false);
   });
 
   it('托管开关只对分类器代审生效', () => {

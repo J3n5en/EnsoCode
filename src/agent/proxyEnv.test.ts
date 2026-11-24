@@ -7,6 +7,9 @@ const undiciMocks = vi.hoisted(() => ({
   EnvHttpProxyAgent: vi.fn(function EnvHttpProxyAgent() {
     return {};
   }),
+  Dispatcher: class Dispatcher {},
+  ProxyAgent: vi.fn(),
+  fetch: vi.fn(),
   setGlobalDispatcher: vi.fn(),
 }));
 

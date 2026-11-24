@@ -2,6 +2,7 @@ import type { Api, ClassifierModel, Message, Model } from '@earendil-works/pi-ai
 import type { ModelRouteRequest, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import type { VirtualClassifierCredentials, VirtualSpawnClassifier } from '@shared/types';
+import { runWithProviderProxy } from './proxyEnv';
 import type {
   VirtualChooser,
   VirtualMembers,
@@ -133,19 +134,21 @@ function piClassify(runtime: ModelRuntime, config: VirtualClassifierCredentials)
   if (config.provider.includes('#')) ensureAccountProvider(runtime, config.provider);
   return async (input, previous, signal) => {
     const model = resolveClassifierModel(runtime, config);
-    const result = await runtime.classify(
-      model,
-      {
-        state: { previousTier: previous ?? null, request: input },
-        questions: {
-          complexity: {
-            type: 'choice',
-            instructions: 'How demanding is this request for a coding agent?',
-            criteria: CRITERIA,
+    const result = await runWithProviderProxy(config.proxy, () =>
+      runtime.classify(
+        model,
+        {
+          state: { previousTier: previous ?? null, request: input },
+          questions: {
+            complexity: {
+              type: 'choice',
+              instructions: 'How demanding is this request for a coding agent?',
+              criteria: CRITERIA,
+            },
           },
         },
-      },
-      { signal, ...(config.apiKey ? { apiKey: config.apiKey } : {}) }
+        { signal, ...(config.apiKey ? { apiKey: config.apiKey } : {}) }
+      )
     );
     if (result.stopReason !== 'stop') throw new Error(result.errorMessage ?? result.stopReason);
     const answer = result.answers.complexity;

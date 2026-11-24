@@ -24,6 +24,8 @@ export const PROVIDER_DEVICE_FIELDS = [
   'modelRefreshIntervalHours',
   'knownModelIds',
   'modelRefreshStatus',
+  // 与顶层 customProxyUrl 一致：代理是本机网络配置，可能带账密
+  'proxy',
 ] as const;
 
 export const CONFIG_SYNC_PROVIDER_OMISSIONS = [

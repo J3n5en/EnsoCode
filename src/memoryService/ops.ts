@@ -13,6 +13,7 @@ import type {
   TreeQuery,
 } from '@shared/memory/graphDto';
 import { CRYSTALLIZE_PROMPT, INSIGHT_PROMPT, withMemoryLanguage } from '@shared/memory/prompts';
+import { parseProviderProxy } from '@shared/providers/providerProxy';
 import type { MemoryOp } from '@shared/types/agent';
 import { appendMemoryAudit } from '../main/services/memory/audit';
 import { createCrystal } from '../main/services/memory/crystal';
@@ -458,14 +459,29 @@ function applyMemoryServiceConfig(key: string, value: unknown): void {
         modelId: string;
         autoDownload: boolean;
         remoteIssue?: string | null;
-        remoteCredentials?: { apiKey: string; baseUrl: string; organization?: string };
+        remoteCredentials?: {
+          apiKey: string;
+          baseUrl: string;
+          organization?: string;
+          proxy?: unknown;
+        };
         idleMinutes?: number;
       };
+      // 坏代理不发请求：不能退回全局代理把记忆正文发到用户没选的出口
+      const proxy = parseProviderProxy(v.remoteCredentials?.proxy);
+      const credentials =
+        v.remoteCredentials && proxy !== null
+          ? {
+              apiKey: v.remoteCredentials.apiKey,
+              baseUrl: v.remoteCredentials.baseUrl,
+              ...(proxy ? { proxy } : {}),
+            }
+          : undefined;
       core.configureMemoryEmbedding({
         modelId: v.modelId,
         autoDownload: v.autoDownload === true,
         remoteIssue: v.remoteIssue ?? null,
-        remoteCredentials: v.remoteCredentials ? () => v.remoteCredentials ?? null : undefined,
+        remoteCredentials: credentials ? () => credentials : undefined,
       });
       break;
     }

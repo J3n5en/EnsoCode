@@ -22,7 +22,7 @@ import { withoutConversations } from './conversationSync';
 import { type RemoteLink, setRemoteHostHooks } from './hostHooks';
 import { installIpcRegistry, registeredHandler, registeredListeners } from './ipcRegistry';
 import { resumeGrace } from './resumeGrace';
-import { REMOTE_SECRET_SENTINEL, redactSecrets, restoreSecrets } from './secrets';
+import { redactSecrets, resolveProviderProbeSecret, restoreSecrets } from './secrets';
 import {
   addRemoteSender,
   getRemoteSender,
@@ -130,16 +130,9 @@ function settingsState(): Record<string, unknown> {
   return store?.state ?? {};
 }
 
-/** 远端表单里已有 provider 的 key 是哨兵：按 api+baseUrl 换回宿主真值 */
 function resolveProviderSecret(config: unknown): unknown {
-  if (!config || typeof config !== 'object') return config;
-  const c = config as Record<string, unknown>;
-  if (c.apiKey !== REMOTE_SECRET_SENTINEL) return config;
-  const providers = Array.isArray(settingsState().providers)
-    ? (settingsState().providers as Record<string, unknown>[])
-    : [];
-  const match = providers.find((p) => p.api === c.api && p.baseUrl === c.baseUrl);
-  return { ...c, apiKey: typeof match?.apiKey === 'string' ? match.apiKey : '' };
+  const providers = settingsState().providers;
+  return resolveProviderProbeSecret(config, Array.isArray(providers) ? providers : []);
 }
 
 function prepareArgs(channel: string, args: unknown[]): unknown[] {

@@ -5,6 +5,7 @@ import {
   parseStartOauthWizardRequest,
 } from '@shared/oauthFlow';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
+import { parseProviderProxy } from '@shared/providers/providerProxy';
 import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { listClassifierModels } from '../services/classifierModels';
@@ -31,11 +32,15 @@ function toApiConfig(input: unknown): ProviderApiConfig | null {
     return null;
   }
   const headers = parseProviderHeaders((input as Record<string, unknown>).headers);
+  // 坏代理整单拒绝：不能静默退回全局代理把请求发到用户没选的出口
+  const proxy = parseProviderProxy((input as Record<string, unknown>).proxy);
+  if (proxy === null) return null;
   return {
     api: api as ProviderApiConfig['api'],
     apiKey,
     baseUrl,
     ...(headers ? { headers } : {}),
+    ...(proxy ? { proxy } : {}),
   };
 }
 

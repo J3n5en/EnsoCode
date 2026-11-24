@@ -52,6 +52,7 @@ import { parsePrivacyMaskSettings } from '@shared/privacyMask/settings';
 import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
+import { parseProviderProxy } from '@shared/providers/providerProxy';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { reminderReviveDelay } from '@shared/reminders';
 import { appUserImageDirs } from '@shared/secretary/imageView';
@@ -1423,11 +1424,15 @@ function classifierCredentialsFor(
   } else if (!provider.apiKey) {
     return undefined;
   }
+  // 坏代理不下发分类器：不能退回全局代理
+  const proxy = provider.oauthAccountKey ? undefined : parseProviderProxy(provider.proxy);
+  if (proxy === null) return undefined;
   return {
     provider: piProvider,
     modelId,
     ...(provider.oauthAccountKey ? {} : { apiKey: provider.apiKey }),
     ...(baseUrl ? { baseUrl } : {}),
+    ...(proxy ? { proxy } : {}),
   };
 }
 
@@ -1446,6 +1451,9 @@ function resolvePhysicalModelSelection(
   }
   const provider = providers.find((entry) => entry.id === providerId);
   if (!provider) return { ok: false, error: 'Model provider is unavailable.' };
+  if (!provider.oauthAccountKey && parseProviderProxy(provider.proxy) === null) {
+    return { ok: false, error: 'Model provider proxy configuration is invalid.' };
+  }
   const config = spawnModelConfig(provider, modelId);
   return {
     ok: true,
@@ -3381,7 +3389,7 @@ function bindModelDirectoryListener(): void {
   });
 }
 
-function customProvidersForWorker(): WorkerCustomProvider[] {
+export function customProvidersForWorker(): WorkerCustomProvider[] {
   const out: WorkerCustomProvider[] = [];
   for (const item of providersFromSettings()) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
@@ -3398,6 +3406,9 @@ function customProvidersForWorker(): WorkerCustomProvider[] {
     }
     if (!Array.isArray(provider.models)) continue;
     const headers = parseProviderHeaders(provider.headers);
+    // 坏代理整条不下发：降级成跟随全局会把请求发到用户没选的出口
+    const proxy = parseProviderProxy(provider.proxy);
+    if (proxy === null) continue;
     out.push({
       settingsId: provider.id,
       name: provider.name,
@@ -3406,6 +3417,7 @@ function customProvidersForWorker(): WorkerCustomProvider[] {
       apiKey: provider.apiKey,
       models: provider.models,
       ...(headers ? { headers } : {}),
+      ...(proxy ? { proxy } : {}),
     });
   }
   return out;
@@ -3464,6 +3476,8 @@ function spawnModelConfig(
     throw new Error('Invalid ChatGPT OAuth pool configuration.');
   const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
   const headers = parseProviderHeaders(provider.headers);
+  // 订阅条目不支持独立代理；坏值已在 resolvePhysicalModelSelection 拒绝
+  const proxy = provider.oauthAccountKey ? undefined : parseProviderProxy(provider.proxy);
   return {
     api: provider.api,
     baseUrl: provider.baseUrl,
@@ -3471,6 +3485,7 @@ function spawnModelConfig(
     modelId,
     settingsProviderId: provider.id,
     ...(headers ? { headers } : {}),
+    ...(proxy ? { proxy } : {}),
     ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
     ...(isOauthAccountPool(provider) ? { oauthAccountPool: provider.oauthAccountPool } : {}),
     // 统一目录后 OAuth 条目 models 只承载稀疏用户覆盖（enabled/别名/能力/档位），
