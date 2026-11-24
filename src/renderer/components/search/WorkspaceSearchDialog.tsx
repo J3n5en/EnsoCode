@@ -97,6 +97,7 @@ const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   bots: 'Bot mode',
   botTemplates: 'Bot templates',
   secretary: 'Secretary',
+  contacts: 'Contacts & owner',
 };
 
 function Highlighted({ text, query }: { text: string; query: string }) {

@@ -446,6 +446,10 @@ export const zhTranslations: Record<string, string> = {
   'Conversation display': '对话显示',
   'Terminal & editor': '终端与编辑器',
   'Runtime & sessions': '运行与会话',
+  'Contacts & owner': '联系方式与主人',
+  'Contact channels': '联系渠道',
+  'Where the secretary can be reached and where it pushes updates.':
+    '秘书能在哪里被联系到、往哪里推送。',
   Network: '网络',
   Shell: '命令行',
   'Conversation typography': '会话排版',

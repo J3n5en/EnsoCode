@@ -345,6 +345,19 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     description: 'Daily brief, to-do reminders and one-off or recurring prompts.',
   },
   {
+    id: 'contacts.owner',
+    category: 'contacts',
+    title: 'Owner identity',
+    description:
+      'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.',
+  },
+  {
+    id: 'contacts.channels',
+    category: 'contacts',
+    title: 'Contact channels',
+    description: 'Where the secretary can be reached and where it pushes updates.',
+  },
+  {
     id: 'secretary.reset',
     category: 'secretary',
     title: 'Reset the secretary and start over',

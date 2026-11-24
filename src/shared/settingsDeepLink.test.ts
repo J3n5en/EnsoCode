@@ -168,3 +168,37 @@ describe('拆分后的旧深链', () => {
     ).toEqual({ category: 'runtime', rowId: 'general.autoArchiveIdleDays' });
   });
 });
+
+describe('秘书组的旧深链', () => {
+  it('秘书页与它的行升为一级后照常落地，联系方式与主人可以直接打开', () => {
+    for (const rowId of [
+      'secretary.root',
+      'secretary.profile',
+      'secretary.dispatchLimit',
+      'secretary.reset',
+    ]) {
+      expect(parseSettingsDeepLink({ category: 'secretary', rowId })).toEqual({
+        category: 'secretary',
+        rowId,
+      });
+    }
+    expect(parseSettingsDeepLink({ category: 'secretary' })).toEqual({
+      category: 'secretary',
+      rowId: 'secretary.root',
+    });
+    expect(
+      parseSettingsDeepLink({ category: 'experimental', rowId: 'experimental.secretary' })
+    ).toEqual({
+      category: 'experimental',
+      rowId: 'experimental.secretary',
+    });
+    expect(parseSettingsDeepLink({ category: 'contacts' })).toEqual({
+      category: 'contacts',
+      rowId: 'contacts.root',
+    });
+    expect(parseSettingsDeepLink({ category: 'contacts', rowId: 'contacts.owner' })).toEqual({
+      category: 'contacts',
+      rowId: 'contacts.owner',
+    });
+  });
+});

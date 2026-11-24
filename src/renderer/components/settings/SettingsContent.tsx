@@ -7,6 +7,7 @@ import {
   Brain,
   ChevronLeft,
   ChevronRight,
+  ContactRound,
   FileText,
   FlaskConical,
   Gauge,
@@ -43,6 +44,7 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { BotSettings } from './BotSettings';
 import { BotTemplatesSettings } from './BotTemplatesSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
+import { ContactsSettings } from './ContactsSettings';
 import { ConversationSettings } from './ConversationSettings';
 import type { SettingsCategory } from './constants';
 import { DevicesSettings } from './DevicesSettings';
@@ -264,9 +266,10 @@ export function SettingsContent({
     { id: 'resources', icon: Gauge, label: 'Resources' },
     { id: 'logs', icon: ScrollText, label: 'Logs' },
     { id: 'experimental', icon: FlaskConical, label: 'Experimental' },
+    { id: 'secretary', icon: MessagesSquare, label: 'Secretary' },
+    { id: 'contacts', icon: ContactRound, label: 'Contacts & owner' },
     { id: 'bots', icon: BotMessageSquare, label: 'Bot mode', sub: true },
     { id: 'botTemplates', icon: LayoutTemplate, label: 'Bot templates', sub: true },
-    { id: 'secretary', icon: MessagesSquare, label: 'Secretary', sub: true },
   ];
   const categories = visibleCategories(
     allCategories,
@@ -488,6 +491,7 @@ export function SettingsContent({
             {activeCategory === 'bots' && <BotSettings />}
             {activeCategory === 'botTemplates' && <BotTemplatesSettings />}
             {activeCategory === 'secretary' && <SecretarySettings />}
+            {activeCategory === 'contacts' && <ContactsSettings />}
           </div>
         </div>
       )}
