@@ -22,6 +22,7 @@ import { withoutConversations } from './conversationSync';
 import { type RemoteLink, setRemoteHostHooks } from './hostHooks';
 import { installIpcRegistry, registeredHandler, registeredListeners } from './ipcRegistry';
 import { resumeGrace } from './resumeGrace';
+import { trimSecretaryResult } from './secretaryTrim';
 import { redactSecrets, resolveProviderProbeSecret, restoreSecrets } from './secrets';
 import {
   addRemoteSender,
@@ -155,7 +156,7 @@ function prepareArgs(channel: string, args: unknown[]): unknown[] {
 function prepareResult(channel: string, result: unknown): unknown {
   return channel === IPC_CHANNELS.SETTINGS_READ
     ? redactSecrets(withoutConversations(result))
-    : result;
+    : trimSecretaryResult(channel, result);
 }
 
 const deliverer = (link: RemoteLink) => (frame: HostToRemote) => link.send(frame);
