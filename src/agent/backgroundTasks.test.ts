@@ -197,13 +197,9 @@ describe('resolveBackgroundLaunch', () => {
   });
 
   it('工具名为 powershell 且无 transform 时,带上 resolvePowerShell 给出的 file/argsPrefix', () => {
-    const result = resolveBackgroundLaunch(
-      'powershell',
-      'Get-Process',
-      'C:\\proj',
-      undefined,
-      () => ({ shell: 'pwsh.exe', args: ['-NoProfile', '-Command'] })
-    );
+    const result = resolveBackgroundLaunch('powershell', 'Get-Process', 'C:\\proj', undefined, {
+      resolvePowerShell: () => ({ shell: 'pwsh.exe', args: ['-NoProfile', '-Command'] }),
+    });
     expect(result).toEqual({
       command: 'Get-Process',
       cwd: 'C:\\proj',
@@ -212,8 +208,8 @@ describe('resolveBackgroundLaunch', () => {
     });
   });
 
-  it('工具名为 bash 且无 transform 时,只回原样 command/cwd', () => {
-    const result = resolveBackgroundLaunch('bash', 'echo hi', '/tmp');
+  it.each(['linux', 'darwin'])('%s 下 bash 且无 transform 时,只回原样 command/cwd', (platform) => {
+    const result = resolveBackgroundLaunch('bash', 'echo hi', '/tmp', undefined, { platform });
     expect(result).toEqual({ command: 'echo hi', cwd: '/tmp' });
   });
 
@@ -224,7 +220,7 @@ describe('resolveBackgroundLaunch', () => {
       'Write-Output ENSO_NATIVE_STARTED; exit 23',
       'C:\\proj',
       undefined,
-      () => ({ shell: 'powershell.exe', args })
+      { resolvePowerShell: () => ({ shell: 'powershell.exe', args }) }
     );
     expect(result).toEqual({
       command: 'Write-Output ENSO_NATIVE_STARTED; exit 23',

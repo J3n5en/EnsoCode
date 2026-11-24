@@ -3,7 +3,11 @@ import { createWriteStream, mkdirSync, statSync, type WriteStream } from 'node:f
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
-import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import {
+  getPowerShellConfig,
+  getShellConfig,
+  type ToolDefinition,
+} from '@earendil-works/pi-coding-agent';
 import { SHELL_READ_HINT, SHELL_SLEEP_HINT, SHELL_TIMEOUT_HINT } from '@shared/shellHints';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
 import type { BackgroundTaskInfo, BackgroundTaskKeep } from '@shared/types/agent';
@@ -295,6 +299,8 @@ export class BackgroundTaskManager {
     spawnOpts?: {
       file?: string;
       argsPrefix?: string[];
+      /** stdin：命令写进 stdin 而不是追加在 argv（WSL 的 System32\bash.exe，与前台一致） */
+      commandTransport?: 'argv' | 'stdin';
       displayCommand?: string;
       details?: unknown;
       finalize?: () => Promise<unknown>;
@@ -1306,21 +1312,32 @@ export function backgroundSpawnMode(platform: string): {
 function spawnBackground(
   command: string,
   cwd: string,
-  spawnOpts?: { file?: string; argsPrefix?: string[]; env?: NodeJS.ProcessEnv }
+  spawnOpts?: {
+    file?: string;
+    argsPrefix?: string[];
+    commandTransport?: 'argv' | 'stdin';
+    env?: NodeJS.ProcessEnv;
+  }
 ) {
   const env = spawnOpts?.env ?? process.env;
   // stdin 关闭与前台（pi bash）一致：读 stdin 立即 EOF，交互提示 fail-fast 而不是挂到让位点；远程包装即 ssh -n
-  const stdio: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
   const mode = backgroundSpawnMode(process.platform);
   if (spawnOpts?.file) {
-    return spawn(spawnOpts.file, [...(spawnOpts.argsPrefix ?? []), command], {
+    const viaStdin = spawnOpts.commandTransport === 'stdin';
+    const args = spawnOpts.argsPrefix ?? [];
+    const child = spawn(spawnOpts.file, viaStdin ? [...args] : [...args, command], {
       cwd,
       env,
       ...mode,
-      stdio,
+      stdio: [viaStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
+    if (viaStdin) {
+      child.stdin?.on('error', () => {});
+      child.stdin?.end(command);
+    }
+    return child;
   }
-  return spawn(command, { shell: true, cwd, env, ...mode, stdio });
+  return spawn(command, { shell: true, cwd, env, ...mode, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 export { processAlive };
@@ -1330,19 +1347,37 @@ export type BackgroundLaunch = {
   cwd: string;
   file?: string;
   argsPrefix?: string[];
+  commandTransport?: 'argv' | 'stdin';
 };
+
+type ShellConfig = { shell: string; args: string[]; commandTransport?: 'argv' | 'stdin' };
 
 export function resolveBackgroundLaunch(
   toolName: string,
   command: string,
   cwd: string,
   transform?: (command: string, cwd: string) => { command: string; cwd: string },
-  resolvePowerShell?: () => { shell: string; args: string[] }
+  deps: {
+    platform?: string;
+    resolvePowerShell?: () => ShellConfig;
+    resolveBash?: () => ShellConfig;
+  } = {}
 ): BackgroundLaunch {
   if (transform) return transform(command, cwd);
   if (toolName === 'powershell') {
-    const ps = (resolvePowerShell ?? getPowerShellConfig)();
+    const ps = (deps.resolvePowerShell ?? getPowerShellConfig)();
     return { command, cwd, file: ps.shell, argsPrefix: [...ps.args] };
+  }
+  // Windows 不能落到 shell:true 的 cmd.exe：与前台 bash 同一 getShellConfig（Git Bash / MSYS2 / WSL）
+  if ((deps.platform ?? process.platform) === 'win32') {
+    const bash = (deps.resolveBash ?? (() => getShellConfig()))();
+    return {
+      command,
+      cwd,
+      file: bash.shell,
+      argsPrefix: [...bash.args],
+      commandTransport: bash.commandTransport,
+    };
   }
   return { command, cwd };
 }
@@ -1582,6 +1617,7 @@ export function withBackground(
           taskId = manager.start(sessionId, launch.command, launch.cwd, {
             file: launch.file,
             argsPrefix: launch.argsPrefix,
+            commandTransport: launch.commandTransport,
             displayCommand: hooks ? record.command : undefined,
             details: prepared.details,
             finalize: prepared.finalize,
