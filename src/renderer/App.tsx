@@ -479,10 +479,11 @@ export default function App() {
       onSettle: () => setViewMotion(null),
     })
   );
-  const settingsShownRef = useRef(settingsOpen);
+  // 上一次提交时显示的一侧：切换的这一帧两层都要在场，动画才能拿到退场方的元素
+  const [shownOpen, setShownOpen] = useState(settingsOpen);
   useLayoutEffect(() => {
-    if (settingsShownRef.current === settingsOpen) return;
-    settingsShownRef.current = settingsOpen;
+    if (shownOpen === settingsOpen) return;
+    setShownOpen(settingsOpen);
     const layer = settingsLayerRef.current;
     const slot = (name: string) => layer?.querySelector(`[data-enso="${name}"]`) ?? null;
     const result = viewTransition.run(settingsOpen ? 'settings' : 'workbench', {
@@ -495,10 +496,10 @@ export default function App() {
         : { sidebar: slot('settings-nav'), main: slot('settings-content') },
     });
     setViewMotion(result.animating ? { top: result.top } : null);
-  }, [settingsOpen, viewTransition, isMobile, botModeActive]);
+  }, [settingsOpen, shownOpen, viewTransition, isMobile, botModeActive]);
   useEffect(() => () => viewTransition.finish(), [viewTransition]);
-  const settingsMounted = settingsOpen || viewMotion !== null;
-  const workbenchHidden = settingsOpen && viewMotion === null;
+  const settingsMounted = settingsOpen || shownOpen || viewMotion !== null;
+  const workbenchHidden = settingsOpen && shownOpen && viewMotion === null;
   useLayoutEffect(() => setWorkbenchCovered(settingsMounted), [settingsMounted]);
   useEffect(() => {
     if (settingsOpen) setDrawerOpen(false);
