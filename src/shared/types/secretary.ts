@@ -1049,6 +1049,8 @@ export interface SecretaryContactState {
   /** 渠道卡片：Telegram 内置固定第一位，插件渠道跟在后面 */
   channels: SecretaryContactChannelView[];
   telegram: SecretaryContactTelegram;
+  /** 主人身份：GitHub 账号，以及非主人消息要不要硬拦 */
+  owner: { githubLogins: string[]; externalConfirm: boolean };
 }
 
 export type SecretaryContactChannelStatus = 'unconfigured' | 'pending' | 'connected' | 'error';

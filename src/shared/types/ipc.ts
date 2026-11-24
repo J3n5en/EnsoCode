@@ -98,6 +98,8 @@ export const IPC_CHANNELS = {
   SECRETARY_CONTACT_TEST: 'secretary:contact-test',
   /** 秘书联系方式：扩权开关 */
   SECRETARY_CONTACT_SETTINGS: 'secretary:contact-settings',
+  /** 秘书联系方式：读本机 gh 登录名，只做建议，不写入 */
+  SECRETARY_CONTACT_GITHUB_SUGGEST: 'secretary:contact-github-suggest',
   /** 秘书联系方式：手机关注的任务，取消一项或全清 */
   SECRETARY_CONTACT_FOLLOWING: 'secretary:contact-following',
   /** 秘书联系方式：拉一个 Telegram 群的论坛话题给设置页勾选 */

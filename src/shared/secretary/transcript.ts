@@ -71,18 +71,23 @@ export function wrapPluginDelivery(
   const source = `plugin:${pluginId}`;
   const head = `<untrusted-content source="${source}">`;
   const tail = '</untrusted-content>';
-  const inner =
-    text.startsWith(head) && text.endsWith(tail)
-      ? text.slice(head.length, text.length - tail.length)
-      : null;
+  const role = meta?.role;
+  const open = meta?.sender
+    ? senderOpenTag(source, meta.sender, role ?? 'external')
+    : role
+      ? `<untrusted-content source="${source}" role="${role}">`
+      : head;
+  // 只认旧插件的裸包裹头，或与宿主这次判定完全相同的头；自带别的 role/sender 一律当正文转义
+  const own = [head, open].find((tag) => text.startsWith(tag) && text.endsWith(tail));
+  const inner = own ? text.slice(own.length, text.length - tail.length) : null;
   const body = inner !== null && !inner.includes(END_TAG) ? inner : text;
-  if (!meta?.sender) return wrapUntrusted(source, body);
+  if (open === head) return wrapUntrusted(source, body);
   const escaped = body
     .split(END_TAG)
     .join('<\\/untrusted-content')
     .split(OPEN_TAG)
     .join('<\\untrusted-content');
-  return `${senderOpenTag(source, meta.sender, meta.role ?? 'external')}${escaped}</untrusted-content>`;
+  return `${open}${escaped}</untrusted-content>`;
 }
 
 const HOST_WRAP = /^<untrusted-content(?:\s[^<>\n]*)?>([\s\S]*)<\/untrusted-content>$/u;

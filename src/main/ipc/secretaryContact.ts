@@ -24,6 +24,7 @@ import { redactSecrets } from '../services/memory/distill';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { createContactCommands } from '../services/secretary/contact/commands';
+import { suggestGithubLogin } from '../services/secretary/contact/githubSuggest';
 import { TelegramHub } from '../services/secretary/contact/hub';
 import {
   connectPluginChannels,
@@ -136,7 +137,7 @@ function readToken(request: unknown): string | undefined {
 
 function readFlag(
   request: unknown,
-  key: 'allowCardConfirm' | 'allowMemory' | 'enabled'
+  key: 'allowCardConfirm' | 'allowMemory' | 'enabled' | 'externalConfirm'
 ): boolean | null {
   if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
   const value = (request as Record<string, unknown>)[key];
@@ -190,6 +191,13 @@ function readTelegramGroupScope(request: unknown): { chatId: string; scope: unkn
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const { chatId, scope } = raw as Record<string, unknown>;
   return typeof chatId === 'string' ? { chatId, scope } : null;
+}
+
+/** { githubLogins: string[] }。缺这键就不是这份设置；值本身交给 service 校验 */
+function readGithubLogins(request: unknown): { value: unknown } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  if (!Object.hasOwn(request, 'githubLogins')) return null;
+  return { value: (request as Record<string, unknown>).githubLogins };
 }
 
 /** 没有服务时给界面的空视图：不含 token */
@@ -306,6 +314,8 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       const telegramOwnerIds = new Set<string>();
       const telegramPrivateChatIds = new Set<string>();
       const channelOwnerIds = new Map<string, Set<string>>();
+      const githubLogins = new Set<string>();
+      let externalConfirm = false;
       for (const service of services.values()) {
         const bindings = service.ownerBindings();
         if (bindings.telegramOwnerId) telegramOwnerIds.add(bindings.telegramOwnerId);
@@ -317,11 +327,15 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
           for (const peer of channel.peers) peers.add(peer);
           channelOwnerIds.set(key, peers);
         }
+        for (const login of bindings.githubLogins) githubLogins.add(login);
+        if (bindings.externalConfirm) externalConfirm = true;
       }
       const bindings: OwnerBindings = {
         telegramOwnerIds,
         telegramPrivateChatIds,
         channelOwnerIds,
+        githubLogins,
+        externalConfirm,
       };
       return bindings;
     });
@@ -524,6 +538,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
             enabled: false,
             channels: [],
             telegram: { ...(state?.telegram ?? emptyTelegramView()), status: 'unbound' },
+            owner: state?.owner ?? { githubLogins: [], externalConfirm: false },
           };
         }
         return { ...service.state(), secretaryId: resolveSecretaryRequest(secretaryId)?.id };
@@ -595,17 +610,26 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
           if (route) return service.removeTelegramRoute(route.chatId, route.topicId);
           const scope = readTelegramGroupScope(request);
           if (scope) return service.setTelegramGroupScope(scope.chatId, scope.scope);
+          const logins = readGithubLogins(request);
+          if (logins) return service.setGithubLogins(logins.value);
           const enabled = readFlag(request, 'enabled');
           const cards = readFlag(request, 'allowCardConfirm');
           const memory = readFlag(request, 'allowMemory');
-          if (enabled === null && cards === null && memory === null)
+          const externalConfirm = readFlag(request, 'externalConfirm');
+          if (enabled === null && cards === null && memory === null && externalConfirm === null)
             return { ok: false, error: 'invalid request' };
           if (enabled !== null) await service.setEnabled(enabled);
           if (cards !== null) service.setAllowCardConfirm(cards);
           if (memory !== null) service.setAllowMemory(memory);
+          if (externalConfirm !== null) service.setExternalConfirm(externalConfirm);
           return { ok: true };
         }
       );
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_GITHUB_SUGGEST, async (event) => {
+        if (!isEditor(event.sender.id)) return { login: null };
+        return { login: await suggestGithubLogin() };
+      });
 
       // 手机关注的任务：取消一项或全清；列表跟着联系方式状态一起推
       ipcMain.handle(

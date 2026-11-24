@@ -49,6 +49,7 @@ import {
   telegramUrlButtonSupported,
 } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
+import { githubLoginsInput } from '@shared/secretary/githubLogin';
 import { TELEGRAM_INBOUND, wrapInboundMessage } from '@shared/secretary/inbound';
 import { type InboundImageLine, inboundImageNotice } from '@shared/secretary/inboundImages';
 import {
@@ -121,7 +122,8 @@ export type ContactError =
   | 'invalid-topic'
   | 'route-conflict'
   | 'channel-owned'
-  | 'channel-paused';
+  | 'channel-paused'
+  | 'invalid-github-login';
 
 export type ContactResult = { ok: true } | { ok: false; error: ContactError };
 
@@ -447,6 +449,7 @@ export class ContactService implements SecretaryContactPort {
       enabled: file.enabled,
       channels: this.registry.list().map((entry) => this.channelView(entry)),
       telegram: { ...this.telegram.view(), following: followingViews(this.followingList()) },
+      owner: { githubLogins: file.githubLogins, externalConfirm: file.externalConfirm },
     };
   }
 
@@ -455,6 +458,8 @@ export class ContactService implements SecretaryContactPort {
     telegramOwnerId?: string;
     telegramPrivateChatId?: string;
     channelPeers: Array<{ channelId: string; peers: string[] }>;
+    githubLogins: string[];
+    externalConfirm: boolean;
   } {
     const file = this.store.file();
     const owner = contactOwnerId(file);
@@ -466,6 +471,8 @@ export class ContactService implements SecretaryContactPort {
         .list()
         .filter((entry) => entry.meta.id !== TELEGRAM_CHANNEL_ID && entry.status === 'connected')
         .map((entry) => ({ channelId: entry.meta.id, peers: [...entry.peers] })),
+      githubLogins: file.githubLogins.map((login) => login.toLowerCase()),
+      externalConfirm: file.externalConfirm,
     };
   }
 
@@ -831,6 +838,23 @@ export class ContactService implements SecretaryContactPort {
     this.audit('contact_settings', true, `enabled=${on}`);
     if (!on) this.stopTyping();
     await this.syncTelegramRunning();
+    this.ports.publish();
+  }
+
+  /** 空数组是解绑。非法 login 整单拒绝，不改已保存的 */
+  setGithubLogins(raw: unknown): ContactResult {
+    const parsed = githubLoginsInput(raw);
+    if (!parsed.ok) return { ok: false, error: 'invalid-github-login' };
+    this.store.save({ ...this.store.file(), githubLogins: parsed.logins });
+    this.audit('contact_settings', true, `githubLogins=${parsed.logins.length}`);
+    this.ports.publish();
+    return { ok: true };
+  }
+
+  setExternalConfirm(value: boolean): void {
+    const on = value === true;
+    this.store.save({ ...this.store.file(), externalConfirm: on });
+    this.audit('contact_settings', true, `externalConfirm=${on}`);
     this.ports.publish();
   }
 

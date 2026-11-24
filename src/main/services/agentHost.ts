@@ -2311,6 +2311,9 @@ export function registerPluginSessionBridge(
         text,
         ...(decision?.origin ? { origin: decision.origin } : {}),
         ...(sender ? { sender } : {}),
+        ...(typeof decision?.ownerConfirm === 'boolean'
+          ? { ownerConfirm: decision.ownerConfirm }
+          : {}),
         ...(images.length ? { images } : {}),
       });
       if (!sent.ok) return { ok: false, error: sent.error ?? '无法注入消息' };

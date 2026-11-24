@@ -53,6 +53,7 @@ function contactState(groups: SecretaryContactState['telegram']['groups']): Secr
       poll: { state: 'running' },
       secure: true,
     },
+    owner: { githubLogins: [], externalConfirm: false },
   };
 }
 
@@ -185,6 +186,62 @@ describe('连不上 api.telegram.org 提示', () => {
       ).click();
     });
     expect(errorBanner()).toContain(UNREACHABLE);
+  });
+});
+
+describe('主人身份', () => {
+  const setInput = async (selector: string, value: string) => {
+    const input = container.querySelector(selector) as HTMLInputElement;
+    const key = Object.keys(input).find((name) => name.startsWith('__reactProps'));
+    const props = (key ? (input as unknown as Record<string, unknown>)[key] : null) as {
+      onChange?: (event: { target: { value: string } }) => void;
+    } | null;
+    await act(async () => {
+      props?.onChange?.({ target: { value } });
+    });
+  };
+
+  it('联系方式关掉也显示；保存才提交账号，填入不保存，确认开关单独提交', async () => {
+    const suggest = vi.fn(async () => ({ login: 'J3n5en' }));
+    (
+      window as unknown as {
+        electronAPI: { secretary: { contactGithubSuggest: typeof suggest } };
+      }
+    ).electronAPI.secretary.contactGithubSuggest = suggest;
+    state = {
+      ...contactState([]),
+      enabled: false,
+      owner: { githubLogins: [], externalConfirm: false },
+    };
+    await render('sec-a');
+    expect(container.querySelector('[data-enso="secretary-contact-owner"]')).not.toBeNull();
+    expect(container.textContent).toContain('J3n5en');
+    const fill = container.querySelector(
+      '[data-enso="secretary-contact-github-fill"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      fill.click();
+    });
+    expect(contactSettings).not.toHaveBeenCalled();
+    expect(
+      (container.querySelector('[data-enso="secretary-contact-github-logins"]') as HTMLInputElement)
+        .value
+    ).toBe('J3n5en');
+    await setInput('[data-enso="secretary-contact-github-logins"]', 'J3n5en, octocat');
+    await act(async () => {
+      (
+        container.querySelector('[data-enso="secretary-contact-github-save"]') as HTMLButtonElement
+      ).click();
+    });
+    expect(contactSettings).toHaveBeenCalledWith({ githubLogins: ['J3n5en', 'octocat'] }, 'sec-a');
+    await act(async () => {
+      (
+        container.querySelector(
+          '[data-enso="secretary-contact-external-confirm"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    expect(contactSettings).toHaveBeenLastCalledWith({ externalConfirm: true }, 'sec-a');
   });
 });
 

@@ -56,6 +56,7 @@ const ERROR_TEXT: Record<string, string> = {
   'invalid-chat-id': 'Group chat IDs are numbers, e.g. -1001234567890',
   'channel-paused': 'Pushes to this channel are paused after repeated failures',
   'invalid sender': 'Not allowed from this window',
+  'invalid-github-login': 'That is not a GitHub login',
 };
 
 const STEP_CLASS = 'rounded-xl border border-border px-3 py-2.5';
@@ -396,6 +397,161 @@ function ChannelCard({
           {children}
         </div>
       )}
+    </div>
+  );
+}
+
+function OwnerIdentity({
+  owner,
+  secretaryId,
+  busy,
+  error,
+  run,
+}: {
+  owner: SecretaryContactState['owner'];
+  secretaryId?: string;
+  busy: boolean;
+  error: string | null;
+  run: (action: () => Promise<{ ok: boolean; error?: string }>) => void;
+}) {
+  const { t } = useI18n();
+  const saved = owner.githubLogins.join(', ');
+  const bound = owner.githubLogins.length > 0;
+  const [draft, setDraft] = useState(saved);
+  const [dirty, setDirty] = useState(false);
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dirty) setDraft(saved);
+  }, [saved, dirty]);
+
+  useEffect(() => {
+    if (bound) {
+      setSuggestion(null);
+      return;
+    }
+    const suggest = window.electronAPI.secretary.contactGithubSuggest;
+    if (!suggest) return;
+    let alive = true;
+    void suggest().then((result) => {
+      if (alive) setSuggestion(result.login);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [bound]);
+
+  const fill = (login: string) => {
+    setDirty(true);
+    setDraft((current) => {
+      const parts = current.split(/[\s,]+/).filter(Boolean);
+      if (parts.some((part) => part.toLowerCase() === login.toLowerCase())) return current;
+      return parts.length > 0 ? `${parts.join(', ')}, ${login}` : login;
+    });
+  };
+
+  return (
+    <div data-enso="secretary-contact-owner" className={STEP_CLASS}>
+      <div className="text-[12.5px] font-medium">{t('Owner identity')}</div>
+      <p className="mt-1 text-[11.5px] text-muted-foreground">
+        {t(
+          'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.'
+        )}
+      </p>
+      <label
+        className="mt-2 block text-[12px] text-muted-foreground"
+        htmlFor="secretary-github-logins"
+      >
+        {t('GitHub accounts')}
+      </label>
+      <input
+        id="secretary-github-logins"
+        data-enso="secretary-contact-github-logins"
+        value={draft}
+        disabled={busy}
+        placeholder={t('Comma or space separated')}
+        className="mt-1 w-full rounded-lg border border-border bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-foreground/40"
+        onChange={(event) => {
+          setDirty(true);
+          setDraft(event.target.value);
+        }}
+      />
+      {suggestion && (
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <span className="min-w-0 text-[11.5px] text-muted-foreground">
+            {t('Detected the gh login {{login}} on this machine', { login: suggestion })}
+          </span>
+          <button
+            type="button"
+            data-enso="secretary-contact-github-fill"
+            disabled={busy}
+            className={BUTTON_CLASS}
+            onClick={() => fill(suggestion)}
+          >
+            {t('Fill in')}
+          </button>
+        </div>
+      )}
+      <button
+        type="button"
+        data-enso="secretary-contact-github-save"
+        disabled={busy}
+        className={cn(PRIMARY_CLASS, 'mt-2')}
+        onClick={() => {
+          const githubLogins = draft
+            .split(/[\s,]+/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+          run(async () => {
+            const result = await window.electronAPI.secretary.contactSettings(
+              { githubLogins },
+              secretaryId
+            );
+            if (result.ok) setDirty(false);
+            return result;
+          });
+        }}
+      >
+        {t('Save GitHub accounts')}
+      </button>
+      {error === 'invalid-github-login' && (
+        <p className="mt-1 text-[11.5px] text-destructive">{t('That is not a GitHub login')}</p>
+      )}
+      <div className="mt-3 text-[12px] text-muted-foreground">
+        {t('Messages that are not from you')}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          data-enso="secretary-contact-external-agent"
+          aria-pressed={!owner.externalConfirm}
+          disabled={busy}
+          className={cn(BUTTON_CLASS, !owner.externalConfirm && 'bg-muted')}
+          onClick={() => {
+            if (!owner.externalConfirm) return;
+            run(() =>
+              window.electronAPI.secretary.contactSettings({ externalConfirm: false }, secretaryId)
+            );
+          }}
+        >
+          {t('Let the agent decide')}
+        </button>
+        <button
+          type="button"
+          data-enso="secretary-contact-external-confirm"
+          aria-pressed={owner.externalConfirm}
+          disabled={busy}
+          className={cn(BUTTON_CLASS, owner.externalConfirm && 'bg-muted')}
+          onClick={() => {
+            if (owner.externalConfirm) return;
+            run(() =>
+              window.electronAPI.secretary.contactSettings({ externalConfirm: true }, secretaryId)
+            );
+          }}
+        >
+          {t('Require your confirmation')}
+        </button>
+      </div>
     </div>
   );
 }
@@ -942,6 +1098,14 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
           }
         />
       </div>
+
+      <OwnerIdentity
+        owner={state.owner}
+        secretaryId={secretaryId}
+        busy={busy}
+        error={error}
+        run={run}
+      />
 
       {!state.enabled ? (
         <p className="px-1 text-[11.5px] text-subtle-foreground">
