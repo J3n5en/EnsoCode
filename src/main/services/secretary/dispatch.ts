@@ -3109,7 +3109,8 @@ export function escalateNeedsUser(
 
 /**
  * 秘书带 relatesTo 转问的 needsUser 被用户答复：答复记到那份结果上，卡片标出已答复；
- * 答复同时算升级；「需要你」里显示的条目都答了就按 result_mark_done 收口，不用秘书再手动标。
+ * 答复同时算升级；全部条目都答了就按 result_mark_done 收口，不用秘书再手动标；
+ * 还剩没升级的条目时回到秘书手里，由它接着问、升级或手动收口。
  * 只认 goal-complete：goal-blocked 的活没干完，答了也不能记成完成。
  * 提问之后才到的新结果不认这次答复，免得旧问题的答案落到新条目上。
  */
@@ -3156,7 +3157,7 @@ export async function answerNeedsUser(
     ),
     now
   );
-  if (shown.answers.length < shown.items.length) {
+  if (shown.triaging || shown.answers.length < shown.items.length) {
     notifySecretaryChanged();
     return { ok: true, cleared: false };
   }

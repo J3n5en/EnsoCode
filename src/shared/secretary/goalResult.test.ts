@@ -3,9 +3,40 @@ import {
   formatGoalResultChecks,
   formatGoalResultClaims,
   GOAL_RESULT_SCHEMA,
+  NEEDS_USER_TRIAGE_MS,
+  needsUserTriageDeadline,
   parseGoalResult,
   parseGoalResultView,
+  shownNeedsUser,
 } from './goalResult';
+
+describe('shownNeedsUser：升级的条目答完后', () => {
+  const view = {
+    at: 0,
+    result: { needsUser: ['删临时文件', '是否清理孤儿进程'] },
+    escalations: [{ index: 1, at: 10 * 60_000 }],
+    answers: [{ index: 1, answer: '清理', at: 20 * 60_000 }],
+  };
+
+  it('还有没升级也没答的条目：回到秘书手里，截止时间从最后一次处理算', () => {
+    expect(needsUserTriageDeadline(view)).toBe(20 * 60_000 + NEEDS_USER_TRIAGE_MS);
+    expect(shownNeedsUser(view, true, 45 * 60_000)).toEqual({
+      triaging: true,
+      items: [],
+      answers: [],
+    });
+    expect(shownNeedsUser(view, true, 51 * 60_000)).toEqual({
+      triaging: false,
+      items: ['删临时文件', '是否清理孤儿进程'],
+      answers: [{ index: 1, answer: '清理', at: 20 * 60_000 }],
+    });
+  });
+
+  it('升级的还没答：超时也只给升级的条目', () => {
+    const pending = { ...view, answers: undefined };
+    expect(shownNeedsUser(pending, true, 120 * 60_000).items).toEqual(['是否清理孤儿进程']);
+  });
+});
 
 const full = {
   summary: 'shipped',

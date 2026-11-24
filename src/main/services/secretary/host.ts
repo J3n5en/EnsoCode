@@ -9,8 +9,8 @@ import {
   type GoalResultCheck,
   type GoalResultView,
   hasNeedsUser,
-  NEEDS_USER_TRIAGE_MS,
   needsUserItems,
+  needsUserTriageDeadline,
   parseGoalResultView,
 } from '@shared/secretary/goalResult';
 import {
@@ -1689,9 +1689,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const triageEnded = records.some((record) => {
         const result = record.lastResult;
         if (result?.kind !== 'goal-complete' || result.manual || result.dismissed) return false;
-        if (!hasNeedsUser(record.goalResult) || record.goalResult?.escalations?.length)
-          return false;
-        const deadline = (record.goalResult?.at ?? 0) + NEEDS_USER_TRIAGE_MS;
+        if (!record.goalResult || !hasNeedsUser(record.goalResult)) return false;
+        const deadline = needsUserTriageDeadline(record.goalResult);
         return deadline <= now && (lastTickAt === undefined || lastTickAt < deadline);
       });
       lastTickAt = now;

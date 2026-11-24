@@ -1289,6 +1289,19 @@ describe('needsUser 先经秘书筛选', () => {
     expect(column(board, 'needsYou')).toEqual([]);
     expect(column(board, 'withSecretary').map((i) => i.conversationId)).toEqual(['c1']);
     expect(column(board, 'withSecretary')[0]).not.toHaveProperty('needsUser');
+    expect(column(board, 'withSecretary')[0]?.goalResult?.result.needsUser).toBeUndefined();
+    expect(column(board, 'withSecretary')[0]?.goalResult?.result.summary).toBe('做完了');
+  });
+
+  it('秘书续跑撤下了旧结果、这一轮以 turn-ended 收尾：旧的 needsUser 不再进「需要你」', () => {
+    const board = daily(doneAt + 60 * 60_000, {
+      lastResult: { kind: 'turn-ended', turn: 2, at: doneAt + 10 * 60_000 },
+      goalResult: undefined,
+    });
+    expect(board.counts.needsYou).toBe(0);
+    expect(column(board, 'needsYou')).toEqual([]);
+    expect(column(board, 'done').map((i) => i.conversationId)).toEqual(['c1']);
+    expect(column(board, 'done')[0]).not.toHaveProperty('needsUser');
   });
 
   it('升级后只显示升级的那条（改写后的文字）；超时或秘书不在时照旧全部显示', () => {

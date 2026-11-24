@@ -334,6 +334,28 @@ describe('feedEvents 完成条目', () => {
     });
   });
 
+  it('秘书续跑后旧的完成结果被撤下：之前那条完成动态不再说「需要你」', () => {
+    const events = feedEvents(
+      board({
+        done: [goal({ result: undefined, resultAt: undefined })],
+        activity: [
+          {
+            at: 20,
+            conversationId: 'c1',
+            kind: 'goal-complete',
+            text: noise,
+            needsUser: ['手动删除临时文件'],
+            summary: '部署完成',
+          },
+        ],
+      })
+    );
+    expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
+      label: 'Goal complete',
+      detail: '部署完成',
+    });
+  });
+
   it('会话投影没有 needsUser 但有 summary 时正文是 summary', () => {
     const events = feedEvents(board({ done: [goal({ summary: '已合并上架' })] }));
     expect(events.find((event) => event.id === 'session:c1')).toMatchObject({

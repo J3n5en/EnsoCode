@@ -184,9 +184,8 @@ function activityEvent(entry: SecretaryActivity, card: SessionCard | undefined):
     card !== undefined && card.result === entry.kind && card.resultAt === entry.at
       ? card
       : undefined;
-  // 之后被秘书或答复收口（手动完成）：当时的 needsUser 已处理，按普通完成显示
-  const settledLater =
-    card !== undefined && card.manual === true && (card.resultAt ?? 0) > entry.at;
+  // 会话已不再挂着这份结果（被收口、续跑撤下或有了新结果）：当时的 needsUser 已不用用户处理
+  const settledLater = card !== undefined && sameResult === undefined;
   const current = sameResult?.needsUser && sameResult.needsUser.length > 0 ? sameResult : undefined;
   const overlay =
     entry.kind === 'goal-complete'
