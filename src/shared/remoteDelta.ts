@@ -13,6 +13,8 @@ const IF_NONE = '__ensoIfNone';
 const CACHED = '__ensoCached';
 const UPSERT_RESET = '__ensoUpsertReset';
 export const UPSERT_MARK = '__ensoUpsert';
+/** 事件只带标识：远端据此走缓存重读（宿主回 same/增量），不必每次接收整份大状态 */
+export const REREAD_MARK = '__ensoReread';
 
 const DELTA_RATIO = 0.5;
 const UPSERT_BASES = 32;

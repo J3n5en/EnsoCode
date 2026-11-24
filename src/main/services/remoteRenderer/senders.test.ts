@@ -7,6 +7,7 @@ import {
   RemoteSender,
   remoteLeaderId,
   remoteSenders,
+  SECRETARY_COALESCE_MS,
   SETTINGS_COALESCE_MS,
   STREAM_COALESCE_MS,
   staleRemoteSenders,
@@ -348,6 +349,40 @@ describe('RemoteSender settings change coalesce', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('RemoteSender secretary state', () => {
+  const state = (secretaryId: string, n: number) => ({ secretaryId, n, board: 'x'.repeat(1000) });
+  const decoded = (frames: HostToRemote[]) =>
+    frames.map((frame) => [
+      (frame as { ch?: string }).ch,
+      decodeRemoteValue<unknown[]>((frame as { args: unknown }).args),
+    ]);
+
+  it('主界面只收按秘书合并的重读通知，不再每次推整份状态', () => {
+    vi.useFakeTimers();
+    try {
+      const { sender, first } = setup();
+      sender.send('secretary:state-changed', state('s1', 1));
+      sender.send('secretary:state-changed', state('s2', 1));
+      sender.send('secretary:state-changed', state('s1', 2));
+      expect(first).toHaveLength(0);
+      vi.advanceTimersByTime(SECRETARY_COALESCE_MS);
+      expect(decoded(first)).toEqual([
+        ['secretary:state-changed', [{ __ensoReread: 's1' }]],
+        ['secretary:state-changed', [{ __ensoReread: 's2' }]],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('设置窗口读不到秘书状态：仍推整份', () => {
+    const first: HostToRemote[] = [];
+    const sender = new RemoteSender('pair', 'cid', 'settings', (frame) => first.push(frame));
+    sender.send('secretary:state-changed', state('s1', 1));
+    expect(decoded(first)).toEqual([['secretary:state-changed', [state('s1', 1)]]]);
   });
 });
 
