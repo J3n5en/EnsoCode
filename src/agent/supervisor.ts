@@ -251,6 +251,7 @@ import {
 } from './goalVerifier';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
 import { type ContextMessage, sanitizeContextMessages } from './imageContext';
+import { localReadOperations } from './localReadOperations';
 import { installLongCacheRetention } from './longCacheRetention';
 import { McpManager } from './mcp';
 import { partitionMcpNamespaces } from './mcpNames';
@@ -3045,7 +3046,14 @@ export class SessionSupervisor {
               grep: createRemoteGrepToolDefinition(cwd, sshExecutor) as unknown as Def,
             }
           : {
-              read: withPathHints(wrapRead(createReadToolDefinition(cwd) as unknown as Def), cwd),
+              read: withPathHints(
+                wrapRead(
+                  createReadToolDefinition(cwd, {
+                    operations: localReadOperations,
+                  }) as unknown as Def
+                ),
+                cwd
+              ),
               grep: withPathHints(createGrepToolDefinition(cwd) as unknown as Def, cwd),
             };
       // grep 显式指向密钥文件时同样会把内容带回来（pi 的 grep 带 --hidden），与 read 一起受底线约束
