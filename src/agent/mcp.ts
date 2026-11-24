@@ -2,7 +2,6 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { extractWWWAuthenticateParams } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { MCP_OAUTH_REFRESH_SKEW_MS, mcpOAuthFingerprint } from '@shared/mcpOAuth';
 import {
@@ -19,6 +18,7 @@ import type {
   McpWorkerEvent,
 } from '@shared/types/agent';
 import { assignMcpToolNames, mcpNamespaceName, oneLine } from './mcpNames';
+import { createStdioTransport } from './mcpStdio';
 
 const INSTRUCTIONS_MAX = 2000;
 
@@ -34,6 +34,8 @@ export interface McpManagerOptions {
   emit(event: McpWorkerEvent): void;
   /** 请 Main 续期 access token（refresh_token 只在 Main）；rejected = 被拒 token 的指纹 */
   refreshOAuth?(serverId: string, rejected?: string): Promise<McpOAuthRefreshResult>;
+  /** stdio server 的 pid 登记目录：worker 被强杀后 Main 据此清扫 */
+  processRegistryDir?(): string | undefined;
 }
 
 /**
@@ -624,12 +626,15 @@ export class McpManager {
     switch (server.transport) {
       case 'stdio': {
         if (!server.command) throw new Error('stdio server missing command');
-        return new StdioClientTransport({
-          command: server.command,
-          args: server.args ?? [],
-          // 不带 process.env 的话子进程连 PATH 都没有
-          env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },
-        });
+        return createStdioTransport(
+          {
+            command: server.command,
+            args: server.args ?? [],
+            // 不带 process.env 的话子进程连 PATH 都没有
+            env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },
+          },
+          this.options.processRegistryDir?.()
+        );
       }
       case 'http': {
         if (!server.url) throw new Error('http server missing url');

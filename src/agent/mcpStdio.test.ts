@@ -70,7 +70,7 @@ async function startFakeServer(registryDir?: string) {
   const script = path.join(dir, 'server.mjs');
   const pidFile = path.join(dir, 'pids.json');
   writeFileSync(script, FAKE_SERVER);
-  const manager = new McpManager({ emit: () => {}, processRegistryDir: registryDir });
+  const manager = new McpManager({ emit: () => {}, processRegistryDir: () => registryDir });
   const tools = await manager.toolsFor([
     { name: 'fake', transport: 'stdio', command: process.execPath, args: [script, pidFile] },
   ]);
@@ -127,7 +127,9 @@ describe.runIf(posix)('sweepOrphanMcpServers', () => {
     );
     leader.unref();
     spawned.push(leader.pid as number);
-    expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8') !== '', 3_000)).toBe(true);
+    expect(
+      await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8') !== '', 3_000)
+    ).toBe(true);
     const member = Number(readFileSync(pidFile, 'utf8'));
     spawned.push(member);
     return { leader: leader.pid as number, member };
@@ -184,5 +186,21 @@ describe.runIf(posix)('sweepOrphanMcpServers', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(alive(leader) && alive(member)).toBe(true);
     expect(readdirSync(registry)).toHaveLength(1);
+  });
+
+  it('刚报告退出的登记者即使还在进程表里也照样清扫（应用退出时 Electron 先报 exit）', async () => {
+    const registry = tempDir();
+    const { leader, member } = await orphanTree();
+    const starts = startTimes();
+    recordMcpServer(registry, {
+      pid: leader,
+      started: starts.get(leader) as string,
+      owner: { pid: process.pid, started: starts.get(process.pid) as string },
+      command: 'fake',
+    });
+
+    sweepOrphanMcpServers(registry, process.pid);
+
+    expect(await until(() => !alive(leader) && !alive(member), 3_000)).toBe(true);
   });
 });

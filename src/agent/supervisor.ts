@@ -253,6 +253,7 @@ import { type ContextMessage, sanitizeContextMessages } from './imageContext';
 import { installLongCacheRetention } from './longCacheRetention';
 import { McpManager } from './mcp';
 import { partitionMcpNamespaces } from './mcpNames';
+import { MCP_SERVER_REGISTRY_DIR } from './mcpStdio';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { microcompactExtension } from './microcompact';
@@ -989,6 +990,8 @@ export class SessionSupervisor {
   private readonly mcp = new McpManager({
     emit: (event) => this.options.emit(event),
     refreshOAuth: (serverId, rejected) => this.requestMcpOAuthRefresh(serverId, rejected),
+    processRegistryDir: () =>
+      this.options.dataDir && path.join(this.options.dataDir, MCP_SERVER_REGISTRY_DIR),
   });
   private readonly mcpOAuthPending = new Map<string, (result: McpOAuthRefreshResult) => void>();
   /** 插件经 Main 发起的宿主 MCP 调用，按 requestId 可取消 */
