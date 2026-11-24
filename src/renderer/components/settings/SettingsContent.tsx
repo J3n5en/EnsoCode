@@ -299,8 +299,8 @@ export function SettingsContent({
                   <div
                     className={cn(
                       'space-y-0.5',
-                      // 主窗口桌面形态与工作区侧栏一致：平铺，不再套一层分组底
-                      (!embedded || isMobile) && 'rounded-lg bg-muted/60 p-1'
+                      // 主窗口里与工作区侧栏一致：平铺，不再套一层分组底
+                      !embedded && 'rounded-lg bg-muted/60 p-1'
                     )}
                   >
                     {group.items.map((category) => (

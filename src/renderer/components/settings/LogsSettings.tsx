@@ -7,19 +7,19 @@ import {
 } from '@shared/appLog';
 import { ChevronRight, Download, RefreshCw } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSegmented,
+  SettingsSelect,
+  SettingsSwitch,
+} from './kit';
 
 const SOURCE_LABELS: Record<AppLogSource, string> = {
   main: 'Main process',
@@ -45,39 +45,14 @@ const HOUR_LABELS: Record<ExportHours, string> = {
 export function LogsSettings() {
   const { t } = useI18n();
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium">{t('Logs')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t('Recent errors and log export. API keys, tokens and passwords are masked.')}
-        </p>
-      </div>
+    <SettingsPage
+      title={t('Logs')}
+      description={t('Recent errors and log export. API keys, tokens and passwords are masked.')}
+    >
       <LoggingSwitches />
       <ErrorSummary />
       <LogExport />
-    </div>
-  );
-}
-
-function LoggingSwitch({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (on: boolean) => void;
-}) {
-  return (
-    <label className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
-      <span className="min-w-0">
-        <span className="block">{label}</span>
-        <span className="block text-muted-foreground text-xs">{description}</span>
-      </span>
-      <Switch className="shrink-0" checked={checked} onCheckedChange={onChange} />
-    </label>
+    </SettingsPage>
   );
 }
 
@@ -88,24 +63,24 @@ function LoggingSwitches() {
   const pluginLogging = useSettingsStore((state) => state.pluginLoggingEnabled === true);
   const setPluginLogging = useSettingsStore((state) => state.setPluginLoggingEnabled);
   return (
-    <section className="divide-y rounded-md border">
-      <LoggingSwitch
+    <SettingsSection>
+      <SettingsRow
         label={t('Record app logs')}
         description={t(
           'Off by default. Write main process and agent logs to disk. Files needed for restart recovery are always kept.'
         )}
-        checked={appLogging}
-        onChange={setAppLogging}
-      />
-      <LoggingSwitch
+      >
+        <SettingsSwitch checked={appLogging} onCheckedChange={setAppLogging} />
+      </SettingsRow>
+      <SettingsRow
         label={t('Record plugin logs')}
         description={t(
           'Off by default. Record plugin console output and runtime logs to disk. Startup failures and crashes are still shown.'
         )}
-        checked={pluginLogging}
-        onChange={setPluginLogging}
-      />
-    </section>
+      >
+        <SettingsSwitch checked={pluginLogging} onCheckedChange={setPluginLogging} />
+      </SettingsRow>
+    </SettingsSection>
   );
 }
 
@@ -141,61 +116,52 @@ function ErrorSummary() {
   }, [level, load]);
 
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h4 className="text-sm font-medium">{t('Recent errors')}</h4>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={level === 'error' ? 'secondary' : 'ghost'}
-            onClick={() => setLevel('error')}
-          >
-            {t('Errors only')}
-          </Button>
-          <Button
-            size="sm"
-            variant={level === 'warn' ? 'secondary' : 'ghost'}
-            onClick={() => setLevel('warn')}
-          >
-            {t('Warnings and errors')}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
+    <SettingsSection
+      title={t('Recent errors')}
+      actions={
+        <>
+          <SettingsSegmented
+            aria-label={t('Recent errors')}
+            value={level}
+            onValueChange={setLevel}
+            options={[
+              { value: 'error', label: t('Errors only') },
+              { value: 'warn', label: t('Warnings and errors') },
+            ]}
+          />
+          <SettingsButton
             aria-label={t('Refresh')}
             disabled={loading}
             onClick={() => void load(level)}
           >
             <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          </Button>
-        </div>
-      </div>
+          </SettingsButton>
+        </>
+      }
+    >
       {!appLogging && (
-        <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm">{t('App logging is off')}</p>
-            <p className="text-muted-foreground text-xs">
-              {t('New app logs are not recorded while off. Existing logs are kept below.')}
-            </p>
-          </div>
-          <Button size="sm" variant="outline" onClick={() => setAppLogging(true)}>
+        <SettingsRow
+          label={t('App logging is off')}
+          description={t('New app logs are not recorded while off. Existing logs are kept below.')}
+        >
+          <SettingsButton onClick={() => setAppLogging(true)}>
             {t('Enable app logging')}
-          </Button>
-        </div>
+          </SettingsButton>
+        </SettingsRow>
       )}
       {rows && rows.length === 0 ? (
-        <p className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
+        <p className="border-border border-b py-6 text-center text-[13px] text-muted-foreground">
           {t('No errors recorded.')}
         </p>
       ) : (
-        <ul className="divide-y rounded-md border">
+        <ul>
           {(rows ?? []).map(({ key, entry }) => {
             const open = expanded === key;
             return (
-              <li key={key}>
+              <li key={key} className="border-border border-b">
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent/50"
+                  className="-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] hover:bg-accent/50"
                   aria-expanded={open}
                   onClick={() => setExpanded(open ? null : key)}
                 >
@@ -221,7 +187,7 @@ function ErrorSummary() {
                   <span className="min-w-0 flex-1 truncate">{entry.message}</span>
                 </button>
                 {open && (
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all bg-muted/40 px-3 py-2 font-mono text-xs">
+                  <pre className="mb-3 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 px-3 py-2 font-mono text-xs">
                     {entry.detail}
                   </pre>
                 )}
@@ -230,7 +196,7 @@ function ErrorSummary() {
           })}
         </ul>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -265,43 +231,31 @@ function LogExport() {
   };
 
   return (
-    <section className="space-y-3">
-      <div>
-        <h4 className="text-sm font-medium">{t('Export logs')}</h4>
-        <p className="text-sm text-muted-foreground">
-          {t('Pack logs from the selected period into a zip file for troubleshooting.')}
-        </p>
-        {!appLogging && (
-          <p className="text-muted-foreground text-xs">
-            {t('App logging is off. The export only includes logs recorded earlier.')}
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <Select
-          items={Object.fromEntries(LOG_EXPORT_HOURS.map((h) => [String(h), t(HOUR_LABELS[h])]))}
+    <SettingsSection
+      title={t('Export logs')}
+      description={t('Pack logs from the selected period into a zip file for troubleshooting.')}
+    >
+      <SettingsRow
+        label={t('Time range')}
+        description={
+          appLogging
+            ? undefined
+            : t('App logging is off. The export only includes logs recorded earlier.')
+        }
+      >
+        <SettingsSelect
           value={String(hours)}
           onValueChange={(value) => {
             const next = LOG_EXPORT_HOURS.find((h) => String(h) === value);
             if (next) setHours(next);
           }}
-        >
-          <SelectTrigger size="sm" className="w-40" aria-label={t('Time range')}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {LOG_EXPORT_HOURS.map((h) => (
-              <SelectItem key={h} value={String(h)}>
-                {t(HOUR_LABELS[h])}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        <Button size="sm" disabled={busy} onClick={() => void run()}>
-          <Download className="mr-1.5 h-3.5 w-3.5" />
+          options={LOG_EXPORT_HOURS.map((h) => ({ value: String(h), label: t(HOUR_LABELS[h]) }))}
+        />
+        <SettingsButton variant="default" disabled={busy} onClick={() => void run()}>
+          <Download className="h-3.5 w-3.5" />
           {busy ? t('Exporting...') : t('Export')}
-        </Button>
-      </div>
-    </section>
+        </SettingsButton>
+      </SettingsRow>
+    </SettingsSection>
   );
 }

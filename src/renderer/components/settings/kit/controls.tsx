@@ -1,0 +1,246 @@
+import * as React from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from '@/components/ui/number-field';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
+import { useSettingsRow, useSettingsRowControl } from './layout';
+
+export interface SettingsOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+const HEIGHT = 'sm:h-(--settings-control-h) sm:min-h-(--settings-control-h)';
+const WIDTH = { default: 'w-[220px]', wide: 'w-[280px]' } as const;
+
+export function SettingsSwitch({
+  checked,
+  onCheckedChange,
+  disabled,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Switch
+      {...useSettingsRowControl()}
+      checked={checked}
+      onCheckedChange={onCheckedChange}
+      disabled={disabled}
+      className="relative pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-11 pointer-coarse:after:-translate-1/2"
+    />
+  );
+}
+
+export function SettingsButton({ className, ...props }: React.ComponentProps<typeof Button>) {
+  return <Button size="sm" variant="outline" className={cn(HEIGHT, className)} {...props} />;
+}
+
+export function SettingsSelect<T extends string>({
+  value,
+  onValueChange,
+  options,
+  width = 'default',
+  disabled,
+  'aria-label': ariaLabel,
+}: {
+  value: T;
+  onValueChange: (value: T) => void;
+  options: readonly SettingsOption<T>[];
+  width?: keyof typeof WIDTH;
+  disabled?: boolean;
+  'aria-label'?: string;
+}) {
+  const a11y = useSettingsRowControl();
+  return (
+    <Select
+      items={Object.fromEntries(options.map((option) => [option.value, option.label]))}
+      value={value}
+      disabled={disabled}
+      onValueChange={(next) => {
+        const hit = options.find((option) => option.value === next);
+        if (hit) onValueChange(hit.value);
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        {...a11y}
+        aria-label={ariaLabel}
+        className={cn(WIDTH[width], 'max-w-full', HEIGHT)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectPopup>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
+}
+
+/** 两到四个互斥选项；方向键在选项间移动 */
+export function SettingsSegmented<T extends string>({
+  value,
+  onValueChange,
+  options,
+  'aria-label': ariaLabel,
+}: {
+  value: T;
+  onValueChange: (value: T) => void;
+  options: readonly SettingsOption<T>[];
+  'aria-label'?: string;
+}) {
+  const a11y = useSettingsRowControl();
+  const move = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = (index + step + options.length) % options.length;
+    onValueChange(options[next].value);
+    const siblings = event.currentTarget.parentElement?.querySelectorAll('button');
+    (siblings?.[next] as HTMLButtonElement | undefined)?.focus();
+  };
+  return (
+    <div
+      role="radiogroup"
+      {...a11y}
+      aria-label={ariaLabel}
+      className="flex h-(--settings-control-h) max-w-full items-center gap-0.5 overflow-x-auto rounded-md bg-muted p-0.5"
+    >
+      {options.map((option, index) => {
+        const on = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={on ? 0 : -1}
+            onClick={() => onValueChange(option.value)}
+            onKeyDown={(event) => move(event, index)}
+            className={cn(
+              'relative h-6 shrink-0 whitespace-nowrap rounded-[4px] px-2.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:top-1/2 pointer-coarse:after:h-11 pointer-coarse:after:-translate-y-1/2',
+              on
+                ? 'bg-background text-foreground shadow-xs ring-1 ring-border'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 即时生效：停止输入 600ms 或失焦时保存，并在行内提示「已保存」 */
+export function SettingsInput({
+  value,
+  onCommit,
+  placeholder,
+  type = 'text',
+  width = 'default',
+  debounceMs = 600,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'url' | 'password';
+  width?: keyof typeof WIDTH;
+  debounceMs?: number;
+}) {
+  const a11y = useSettingsRowControl();
+  const row = useSettingsRow();
+  const [draft, setDraft] = React.useState(value);
+  const committed = React.useRef(value);
+  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  React.useEffect(() => {
+    committed.current = value;
+    setDraft(value);
+  }, [value]);
+  React.useEffect(() => () => clearTimeout(timer.current), []);
+  const commit = (next: string) => {
+    clearTimeout(timer.current);
+    if (next === committed.current) return;
+    committed.current = next;
+    onCommit(next);
+    row?.markSaved();
+  };
+  return (
+    <Input
+      {...a11y}
+      size="sm"
+      type={type}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(event) => {
+        const next = event.currentTarget.value;
+        setDraft(next);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => commit(next), debounceMs);
+      }}
+      onBlur={() => commit(draft)}
+      className={cn(
+        WIDTH[width],
+        'max-w-full max-sm:[&>input]:h-[42px] max-sm:[&>input]:leading-[42px] sm:[&>input]:h-[26px] sm:[&>input]:leading-[26px]'
+      )}
+    />
+  );
+}
+
+export function SettingsStepper({
+  value,
+  onValueChange,
+  min,
+  max,
+  step = 1,
+}: {
+  value: number;
+  onValueChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  const { id, ...a11y } = useSettingsRowControl();
+  const row = useSettingsRow();
+  return (
+    <NumberField
+      id={id}
+      size="sm"
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      onValueChange={(next) => {
+        if (next === null || next === value) return;
+        onValueChange(next);
+        row?.markSaved();
+      }}
+      className="w-[120px] max-w-full"
+    >
+      <NumberFieldGroup>
+        <NumberFieldDecrement />
+        <NumberFieldInput {...a11y} className="sm:h-[26px] sm:leading-[26px]" />
+        <NumberFieldIncrement />
+      </NumberFieldGroup>
+    </NumberField>
+  );
+}

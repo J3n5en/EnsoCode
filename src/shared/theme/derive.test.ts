@@ -39,6 +39,15 @@ describe('deriveThemeTokens', () => {
     }
   });
 
+  it('危险文字色两种模式都有值：浅色同 --destructive，深色提亮到能当文字用', () => {
+    const light = deriveThemeTokens(enso.light, 'light');
+    const dark = deriveThemeTokens(enso.dark, 'dark');
+    expect(light['--destructive-text']).toBe(light['--destructive']);
+    const lightness = (v: string) => Number(/^oklch\(([\d.]+)/.exec(v)?.[1]);
+    expect(lightness(dark['--destructive-text'])).toBeGreaterThanOrEqual(0.65);
+    expect(lightness(dark['--destructive'])).toBeLessThan(0.5);
+  });
+
   it('调色板直接映射到对应语义变量', () => {
     const p = enso.dark;
     const tokens = deriveThemeTokens(p, 'dark');

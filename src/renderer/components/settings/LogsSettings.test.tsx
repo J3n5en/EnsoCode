@@ -3,6 +3,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { findNestedBoxes } from './kit/boxes';
 import { LogsSettings } from './LogsSettings';
 
 const harness = vi.hoisted(() => ({
@@ -31,14 +32,18 @@ vi.mock('@/components/ui/switch', () => ({
   Switch: ({
     checked,
     onCheckedChange,
+    className: _className,
+    ...rest
   }: {
     checked?: boolean;
     onCheckedChange?: (v: boolean) => void;
-  }) => (
+    className?: string;
+  } & Record<string, unknown>) => (
     <button
       type="button"
       aria-pressed={checked === true}
       onClick={() => onCheckedChange?.(checked !== true)}
+      {...rest}
     />
   ),
 }));
@@ -120,12 +125,15 @@ afterEach(async () => {
 });
 
 describe('LogsSettings', () => {
+  /** 按标签找控件：只认 label 与控件的 id 关联 */
   const toggle = (label: string) => {
     const row = [...container.querySelectorAll('label')].find((el) =>
       el.textContent?.includes(label)
     );
     expect(row, label).not.toBeUndefined();
-    return row?.querySelector('button[aria-pressed]') as HTMLElement;
+    const control = container.querySelector(`[id="${row?.getAttribute('for')}"]`);
+    expect(control?.getAttribute('aria-labelledby')).toBe(row?.id);
+    return control as HTMLElement;
   };
 
   it('顶部有应用日志、插件日志两个独立开关，各写各的设置项', async () => {
@@ -189,5 +197,15 @@ describe('LogsSettings', () => {
     harness.exportLogs.mockResolvedValue({ ok: true, cancelled: true });
     await act(async () => button('Export').click());
     expect(harness.addToast).not.toHaveBeenCalled();
+  });
+
+  it('页面里没有卡片套卡片（含展开的堆栈与日志关闭提示）', async () => {
+    harness.appLoggingEnabled = false;
+    await mount();
+    await act(async () => button('[mcp] connect failed').click());
+    expect(findNestedBoxes(container)).toEqual([]);
+    harness.errors.mockResolvedValue([]);
+    await act(async () => button('Refresh').click());
+    expect(findNestedBoxes(container)).toEqual([]);
   });
 });
