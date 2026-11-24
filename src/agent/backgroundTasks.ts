@@ -313,11 +313,13 @@ export class BackgroundTaskManager {
   ): string {
     const taskId = this.reserveId(sessionId);
     const run =
-      spawnOpts?.detachable && !spawnOpts.file && process.platform !== 'win32'
+      spawnOpts?.detachable &&
+      spawnOpts.file &&
+      spawnOpts.commandTransport !== 'stdin' &&
+      process.platform !== 'win32'
         ? spawnFileBacked({
-            // 与 spawn(command, { shell: true }) 同一个 shell
-            shell: '/bin/sh',
-            args: ['-c'],
+            shell: spawnOpts.file,
+            args: spawnOpts.argsPrefix ?? [],
             command,
             cwd,
             env: spawnOpts.env,
@@ -1358,7 +1360,6 @@ export function resolveBackgroundLaunch(
   cwd: string,
   transform?: (command: string, cwd: string) => { command: string; cwd: string },
   deps: {
-    platform?: string;
     resolvePowerShell?: () => ShellConfig;
     resolveBash?: () => ShellConfig;
   } = {}
@@ -1368,18 +1369,15 @@ export function resolveBackgroundLaunch(
     const ps = (deps.resolvePowerShell ?? getPowerShellConfig)();
     return { command, cwd, file: ps.shell, argsPrefix: [...ps.args] };
   }
-  // Windows 不能落到 shell:true 的 cmd.exe：与前台 bash 同一 getShellConfig（Git Bash / MSYS2 / WSL）
-  if ((deps.platform ?? process.platform) === 'win32') {
-    const bash = (deps.resolveBash ?? (() => getShellConfig()))();
-    return {
-      command,
-      cwd,
-      file: bash.shell,
-      argsPrefix: [...bash.args],
-      commandTransport: bash.commandTransport,
-    };
-  }
-  return { command, cwd };
+  // 与前台 bash 同一 getShellConfig：不落到 shell:true 的 cmd.exe / /bin/sh（Linux 上常是 dash）
+  const bash = (deps.resolveBash ?? (() => getShellConfig()))();
+  return {
+    command,
+    cwd,
+    file: bash.shell,
+    argsPrefix: [...bash.args],
+    commandTransport: bash.commandTransport,
+  };
 }
 
 const asRecord = (params: unknown): Record<string, unknown> =>

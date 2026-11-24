@@ -1345,7 +1345,11 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
   it('未打开会话里的任务也能停：按会话 id 寻址，别的会话停不了，不开会话', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-task-stop-unopened-'));
     const { events, supervisor } = await startSupervisor(dataDir);
-    const taskId = bgTasksOf(supervisor).start('other', 'sleep 30', dataDir, { detachable: true });
+    const taskId = bgTasksOf(supervisor).start('other', 'sleep 30', dataDir, {
+      detachable: true,
+      file: '/bin/bash',
+      argsPrefix: ['-c'],
+    });
     const status = () =>
       ofType(events, 'unopened-background-tasks')
         .filter((event) => event.sessionId === 'other')
