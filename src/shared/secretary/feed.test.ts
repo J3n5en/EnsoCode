@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { zhTranslations } from '../i18n';
 import type { SecretaryBoard, SecretaryCard } from '../types/secretary';
 import {
   appendFeedPage,
+  DONE_NEEDS_USER_LABEL,
   type FeedEvent,
   feedEvents,
   mergeFeedHead,
@@ -163,7 +165,13 @@ describe('feedEvents 完成条目', () => {
     };
   };
 
-  it('活动条目带 needsUser 时换成待决定标签，正文是条目而不是噪声', () => {
+  it('needsUser 标签是中性的「完成 · 需要你」，不说成「待你决定」', () => {
+    expect(DONE_NEEDS_USER_LABEL).toBe('Done · needs you');
+    expect(zhTranslations[DONE_NEEDS_USER_LABEL]).toBe('完成 · 需要你');
+    expect(Object.values(zhTranslations)).not.toContain('完成 · 待你决定');
+  });
+
+  it('活动条目带 needsUser 时换成「完成 · 需要你」标签，正文是条目而不是噪声', () => {
     const events = feedEvents(
       board({
         done: [goal()],
@@ -179,7 +187,7 @@ describe('feedEvents 完成条目', () => {
       })
     );
     expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
-      label: 'Done · needs your decision',
+      label: 'Done · needs you',
       tone: 'ok',
       detail: '是否合并；确认发版',
     });
@@ -239,7 +247,7 @@ describe('feedEvents 完成条目', () => {
       })
     );
     expect(events.find((event) => event.id === 'activity:c1:20:goal-complete')).toMatchObject({
-      label: 'Done · needs your decision',
+      label: 'Done · needs you',
       tone: 'ok',
       detail: '是否合并；确认发版',
     });

@@ -579,6 +579,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     if (!row) continue;
     // 用户从看板上移出：记录与会话都还在，只是不再占工作台的列
     if (record.dismissedFromBoard === true) continue;
+    const archived = row.archived === true;
     const status = input.statuses[record.conversationId];
     const hasSubagents = (input.subagents?.[record.conversationId]?.length ?? 0) > 0;
     const pendingReminder = nextPendingReminder(
@@ -601,6 +602,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
         ? undefined
         : record.lastResult;
     const needsUser =
+      !archived &&
       visibleResult &&
       !visibleResult.dismissed &&
       !visibleResult.manual &&
@@ -669,7 +671,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       continue;
     }
     // 归档了就是用户已经处理过，不再占「需要你处理」
-    const needsYouNow = row.archived !== true && sessionNeedsUser(record, state);
+    const needsYouNow = !archived && sessionNeedsUser(record, state);
     if (needsYouNow) needsYou.push(card);
     else if (going) running.push(card);
     else done.push(card);

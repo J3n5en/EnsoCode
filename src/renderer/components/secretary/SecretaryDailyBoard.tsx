@@ -285,6 +285,15 @@ function DailyCard({
         </span>
         {needsUser ? (
           <>
+            {item.summary && (
+              <span
+                data-enso="secretary-daily-needs-user-summary"
+                title={item.summary}
+                className="mt-[4px] block line-clamp-1 break-words text-[12px] text-muted-foreground"
+              >
+                {item.summary}
+              </span>
+            )}
             <ul
               data-enso="secretary-daily-needs-user"
               className="mt-[4px] flex flex-col gap-0.5 text-[12px] text-foreground/90"
@@ -294,13 +303,9 @@ function DailyCard({
                   key={entry}
                   data-enso="secretary-daily-needs-user-item"
                   title={entry}
-                  className={cn(
-                    'line-clamp-2 break-words',
-                    needsUser.length > 1 &&
-                      'relative pl-3 before:absolute before:left-1 before:content-["·"] before:text-muted-foreground'
-                  )}
+                  className="line-clamp-2 break-words"
                 >
-                  {entry}
+                  {t('Needs you: {{item}}', { item: entry })}
                 </li>
               ))}
             </ul>
