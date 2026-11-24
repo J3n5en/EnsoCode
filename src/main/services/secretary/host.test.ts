@@ -2319,6 +2319,35 @@ describe('联系方式转发', () => {
     expect(h.state.notifications).toEqual([]);
   });
 
+  it('秘书带关联转问 needsUser、用户答复后交给 answerNeedsUser；不带关联、非用户收尾、非秘书会话都不交', () => {
+    const base = harness({ secretaryIds: ['sec-1'] });
+    const answered: unknown[] = [];
+    const host = createSecretaryHost({
+      ...base.ports,
+      answerNeedsUser: (link, answer) => {
+        answered.push({ link, answer });
+      },
+    });
+    const resolved = (sessionId: string, extra: Record<string, unknown>) =>
+      ({
+        type: 'ask-resolved',
+        identity: { sessionId, generation: 'g1' },
+        seq: 1,
+        requestId: 'ask-9',
+        ...extra,
+      }) as unknown as RendererAgentEvent;
+    const relatesTo = { conversationId: 'c1', needsUserIndex: 0 };
+
+    host.onAgentEvent(resolved('sec-1', { by: 'user', answer: '清理' }), []);
+    host.onAgentEvent(resolved('sec-1', { by: 'timeout', answer: '清理', relatesTo }), []);
+    host.onAgentEvent(resolved('sec-1', { relatesTo }), []);
+    host.onAgentEvent(resolved('c1', { by: 'user', answer: '清理', relatesTo }), []);
+    expect(answered).toEqual([]);
+
+    host.onAgentEvent(resolved('sec-1', { by: 'user', answer: '清理', relatesTo }), []);
+    expect(answered).toEqual([{ link: relatesTo, answer: '清理' }]);
+  });
+
   it('秘书自己会话里的提问、收尾与审批都转发；别的会话不转发', () => {
     const h = harness({ secretaryIds: ['sec-1'] });
     const secretaryEvent = (type: string, extra: Record<string, unknown> = {}) =>

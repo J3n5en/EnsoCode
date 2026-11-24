@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSecretaryTools, normalizeSecretaryParams } from '../../../agent/tools/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import {
+  answerNeedsUser,
   buildSecretaryState,
   createSecretaryDispatchHandlers,
   dismissPending,
@@ -4810,5 +4811,85 @@ describe('手动标完成写入 daily、新 goal 才解除锁定与停止清旧�
     await call(h2.handlers.session_stop, { conversationId: 'c1' });
     expect(h2.file.dispatched.c1.stoppedAt).toBe(NOW);
     expect(h2.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+  });
+});
+
+describe('answerNeedsUser：秘书带关联转问的 needsUser 被用户答复', () => {
+  const rows = {
+    c1: { id: 'c1', title: '清理孤儿进程', sessionFile: '/s/c1.jsonl', driver: 'main' },
+  };
+  const withNeeds = (needsUser: string[]) => {
+    const file = dispatchedFile('c1', 'idle');
+    file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: NOW - 10_000 };
+    file.dispatched.c1.goalResult = {
+      at: NOW - 10_000,
+      result: { summary: '做完了', commits: ['abc1234'], needsUser },
+    };
+    return harness({ file, rows, statuses: { c1: idle } });
+  };
+  const needsYou = (file: SecretaryDispatchFile) =>
+    buildBoard(file, { rows, statuses: { c1: idle }, projects: [localProject()], todos: [] })
+      .needsYou;
+
+  it('唯一一条被答复后卡片自动移出需要你，效果等同 result_mark_done', async () => {
+    const h = withNeeds(['是否清理孤儿进程']);
+    expect(needsYou(h.file)).toHaveLength(1);
+
+    expect(await answerNeedsUser(h.ports, { conversationId: 'c1' }, '清理')).toEqual({
+      ok: true,
+      cleared: true,
+    });
+    expect(needsYou(h.file)).toEqual([]);
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+    expect(h.file.dispatched.c1.goalResult?.result).toEqual({
+      summary: '做完了',
+      commits: ['abc1234'],
+    });
+    expect(h.audits.map((entry) => [entry.op, entry.detail])).toEqual([
+      ['needs_user_answered', '#0: 清理'],
+      ['result_mark_done', 'answered'],
+    ]);
+  });
+
+  it('多条只答一条：卡片留在需要你并标出哪条已答复、答复是什么；答完剩下的才移出', async () => {
+    const h = withNeeds(['是否清理孤儿进程', '是否发版']);
+
+    expect(
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '先不发')
+    ).toEqual({ ok: true, cleared: false });
+    const [card] = needsYou(h.file);
+    expect(card).toMatchObject({
+      kind: 'session',
+      needsUser: ['是否清理孤儿进程', '是否发版'],
+      needsUserAnswers: [{ index: 1, answer: '先不发', at: NOW }],
+    });
+    // 落盘再读回来仍在
+    expect(parseDispatchFile(JSON.parse(JSON.stringify(h.file))).dispatched.c1.goalResult).toEqual(
+      h.file.dispatched.c1.goalResult
+    );
+
+    expect(
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 0 }, '清理')
+    ).toEqual({ ok: true, cleared: true });
+    expect(needsYou(h.file)).toEqual([]);
+  });
+
+  it('越界、已点「知道了」或未跟踪的会话不动卡片', async () => {
+    const h = withNeeds(['是否清理孤儿进程']);
+    expect(
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 3 }, '清理')
+    ).toEqual({ ok: false, error: 'bad-index' });
+    expect(await answerNeedsUser(h.ports, { conversationId: 'zz' }, '清理')).toEqual({
+      ok: false,
+      error: 'not-found',
+    });
+    expect(needsYou(h.file)).toHaveLength(1);
+
+    expect(dismissResult(h.ports, 'c1')).toEqual({ ok: true });
+    expect(await answerNeedsUser(h.ports, { conversationId: 'c1' }, '清理')).toEqual({
+      ok: false,
+      error: 'nothing-pending',
+    });
+    expect(h.file.dispatched.c1.lastResult?.manual).toBeUndefined();
   });
 });

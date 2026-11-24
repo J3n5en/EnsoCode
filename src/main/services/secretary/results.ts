@@ -609,6 +609,10 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       (visibleResult.kind === 'goal-complete' || visibleResult.kind === 'goal-blocked')
         ? needsUserItems(record.goalResult).map((item) => redactSecrets(item))
         : [];
+    const needsUserAnswers =
+      needsUser.length > 0
+        ? (record.goalResult?.answers ?? []).filter((item) => item.index < needsUser.length)
+        : [];
     const summarySource = record.goalResult?.result.summary?.trim() ?? '';
     const summary =
       visibleResult?.kind === 'goal-complete' && !visibleResult.manual && summarySource
@@ -635,6 +639,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
       ...(visibleResult ? { result: visibleResult.kind, resultAt: visibleResult.at } : {}),
       ...(needsUser.length > 0 ? { needsUser } : {}),
+      ...(needsUserAnswers.length > 0 ? { needsUserAnswers } : {}),
       ...(summary ? { summary } : {}),
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going &&

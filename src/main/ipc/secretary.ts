@@ -25,6 +25,7 @@ import { appendDailyRecord } from '../services/secretary/dailyLog';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import { resolveTarget } from '../services/secretary/deliveries';
 import {
+  answerNeedsUser,
   buildSecretaryState,
   dismissPending,
   dismissResult,
@@ -427,6 +428,14 @@ function hostPortsFor(
     },
     isSecretaryConversation: (conversationId) =>
       secretaryIdOfConversation(conversationId) === ctx.id,
+    answerNeedsUser: (link, answer) => {
+      void answerNeedsUser(dispatchPorts, link, answer).catch((error: unknown) => {
+        console.warn(
+          '[secretary] needsUser answer failed:',
+          error instanceof Error ? error.message : String(error)
+        );
+      });
+    },
     publish: () => broadcastState(),
     now: () => Date.now(),
     backgroundStalls: (now) => driver?.watch(now) ?? [],
