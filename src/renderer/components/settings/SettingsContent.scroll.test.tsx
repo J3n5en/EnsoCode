@@ -32,6 +32,20 @@ vi.mock('./AppearanceSettings', () => ({ AppearanceSettings: harness.page('appea
 vi.mock('./BotSettings', () => ({ BotSettings: harness.page('bots') }));
 vi.mock('./BotTemplatesSettings', () => ({ BotTemplatesSettings: harness.page('botTemplates') }));
 vi.mock('./BuiltinToolsSettings', () => ({ BuiltinToolsSettings: harness.page('tools') }));
+vi.mock('./ContactsSettings', () => ({ ContactsSettings: harness.page('contacts') }));
+vi.mock('./ConversationSettings', () => ({
+  ConversationSettings: ({ revealRowId }: { revealRowId?: string | null }) => (
+    <div data-page="conversation">
+      <div data-settings-row="conversation.row">conversation</div>
+      {revealRowId === 'appearance.liveActivityFoldDelaySec' ? (
+        <div data-settings-row="appearance.liveActivityFoldDelaySec">delay</div>
+      ) : null}
+    </div>
+  ),
+}));
+vi.mock('./RuntimeSettings', () => ({ RuntimeSettings: harness.page('runtime') }));
+vi.mock('./TerminalSettings', () => ({ TerminalSettings: harness.page('terminal') }));
+
 vi.mock('./DevicesSettings', () => ({ DevicesSettings: harness.page('phone') }));
 vi.mock('./ExperimentalSettings', () => ({ ExperimentalSettings: harness.page('experimental') }));
 vi.mock('./GeneralSettings', () => ({ GeneralSettings: harness.page('general') }));
@@ -150,6 +164,34 @@ describe('设置分区各自的滚动位置', () => {
     expect(container.querySelector('[data-page="logs"]')).toBeTruthy();
     expect(hits).toEqual(['logs.row']);
     expect(top()).toBe(42);
+  });
+
+  it('目标行被父开关藏起时先临时展开再定位，不改设置', async () => {
+    const hits: string[] = [];
+    const proto = Object.getPrototypeOf(container) as { scrollIntoView?: unknown };
+    const original = proto.scrollIntoView;
+    proto.scrollIntoView = function (this: HTMLElement) {
+      hits.push(this.getAttribute('data-settings-row') ?? '');
+    };
+    try {
+      await act(async () =>
+        root.render(
+          <SettingsContent
+            link={{ category: 'conversation', rowId: 'appearance.liveActivityFoldDelaySec' }}
+            linkSeq={1}
+          />
+        )
+      );
+    } finally {
+      proto.scrollIntoView = original;
+    }
+    expect(container.querySelector('[data-page="conversation"]')).toBeTruthy();
+    expect(hits).toEqual(['appearance.liveActivityFoldDelaySec']);
+    expect(
+      container
+        .querySelector('[data-settings-row="appearance.liveActivityFoldDelaySec"]')
+        ?.getAttribute('data-settings-flash')
+    ).toBe('true');
   });
 
   it('导航列表有自己的滚动容器，不在内容滚动容器里', async () => {

@@ -231,7 +231,7 @@ function Toggle({
   );
 }
 
-export function ConversationSettings() {
+export function ConversationSettings({ revealRowId }: { revealRowId?: string | null } = {}) {
   const { t } = useI18n();
   const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
   const setOpenChangesOnFileEdit = useSettingsStore((s) => s.setOpenChangesOnFileEdit);
@@ -336,7 +336,7 @@ export function ConversationSettings() {
           checked={collapseLiveActivity}
           onChange={setCollapseLiveActivity}
         />
-        {collapseLiveActivity ? (
+        {collapseLiveActivity || revealRowId === 'appearance.liveActivityFoldDelaySec' ? (
           <LiveFoldDelayRow
             seconds={liveActivityFoldDelaySec}
             onCommit={setLiveActivityFoldDelaySec}

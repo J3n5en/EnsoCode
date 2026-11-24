@@ -76,16 +76,24 @@ import { TerminalSettings } from './TerminalSettings';
 import { UsageSettings } from './UsageSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
-function flashSettingsRow(rowId: string): void {
-  window.requestAnimationFrame(() => {
+/** 行可能要等父项展开或异步数据才出现：短时间内反复找，找到再滚过去并闪一下 */
+function flashSettingsRow(rowId: string): () => void {
+  let attempts = 0;
+  let timer = 0;
+  const tryFlash = () => {
     const el = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
-    if (!(el instanceof HTMLElement)) return;
-    el.scrollIntoView({ block: 'center' });
-    el.dataset.settingsFlash = 'true';
-    window.setTimeout(() => {
-      delete el.dataset.settingsFlash;
-    }, 1600);
-  });
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ block: 'center' });
+      el.dataset.settingsFlash = 'true';
+      window.setTimeout(() => {
+        delete el.dataset.settingsFlash;
+      }, 1600);
+      return;
+    }
+    if (attempts++ < 12) timer = window.setTimeout(tryFlash, 50);
+  };
+  tryFlash();
+  return () => window.clearTimeout(timer);
 }
 
 const USER_SCROLL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
@@ -231,9 +239,12 @@ export function SettingsContent({
 
   React.useLayoutEffect(() => {
     if (!flashRowId) return;
-    flashSettingsRow(flashRowId);
+    const stop = flashSettingsRow(flashRowId);
     const timer = window.setTimeout(() => setFlashRowId(null), 1600);
-    return () => window.clearTimeout(timer);
+    return () => {
+      stop();
+      window.clearTimeout(timer);
+    };
   }, [flashRowId]);
 
   const allCategories: Array<{
@@ -451,7 +462,7 @@ export function SettingsContent({
             {activeCategory === 'appearance' && (
               <AppearanceSettings onOpenPlugins={() => openCategory('plugins')} />
             )}
-            {activeCategory === 'conversation' && <ConversationSettings />}
+            {activeCategory === 'conversation' && <ConversationSettings revealRowId={flashRowId} />}
             {activeCategory === 'terminal' && <TerminalSettings />}
             {activeCategory === 'runtime' && <RuntimeSettings />}
             {activeCategory === 'providers' && <ProvidersSettings />}
