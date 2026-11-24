@@ -7,7 +7,7 @@ import { SHELL_LIMITS } from '@shared/shellLimits';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type BackgroundTaskManager, withBackground } from '../backgroundTasks';
 import { ForegroundDetachedError } from '../foregroundCommand';
-import { toBashRuntimePath, withRtkOptimization } from './index';
+import { isRtkCompatibleWindowsBash, toBashRuntimePath, withRtkOptimization } from './index';
 import { bindPowerShellRtk } from './powershell';
 
 const tempDirs: string[] = [];
@@ -1087,4 +1087,167 @@ if (process.argv[2] === 'gain') process.stdout.write(JSON.stringify({ summary: {
     },
     60_000
   );
+});
+
+describe('Windows bash 类型与 RTK', () => {
+  it.each([
+    [{ shell: 'C:\\Windows\\System32\\bash.exe', commandTransport: 'stdin' as const }],
+    [{ shell: 'C:\\Windows\\System32\\bash.exe' }],
+    [{ shell: 'C:\\WINDOWS\\Sysnative\\bash.exe' }],
+    [{ shell: 'c:/windows/SYSTEM32/BASH.EXE' }],
+    [{ shell: 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe' }],
+    [{ shell: 'C:\\Windows\\System32\\wsl.exe' }],
+    [{ shell: 'D:\\any\\bash.exe', commandTransport: 'stdin' as const }],
+    [{ shell: 'C:\\cygwin64\\bin\\bash.exe' }],
+    [{ shell: 'C:/cygwin/bin/bash.exe' }],
+    [{ shell: 'D:\\tools\\Cygwin32\\bin\\bash.exe' }],
+  ])('WSL / Cygwin bash 不兼容 MSYS 路径：%o', (config) => {
+    expect(isRtkCompatibleWindowsBash(config)).toBe(false);
+  });
+
+  it.each([
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    'D:\\Dev\\Git\\usr\\bin\\bash.exe',
+    'D:\\Tools\\Git\\bin\\bash.exe',
+    'D:\\scoop\\apps\\git\\current\\bin\\bash.exe',
+    'C:\\Users\\me\\scoop\\apps\\git\\current\\usr\\bin\\bash.exe',
+    'C:/Program Files/Git/bin/bash.exe',
+    'd:/tools/git/BIN/BASH.EXE',
+    'C:\\msys64\\usr\\bin\\bash.exe',
+    'D:\\cygwin-tools\\Git\\bin\\bash.exe',
+    'C:\\cygwin64\\home\\me\\PortableGit\\bin\\bash.exe',
+    'C:/cygwin/opt/msys64/usr/bin/bash.exe',
+  ])('Git Bash / MSYS2 保持兼容：%s', (shell) => {
+    expect(isRtkCompatibleWindowsBash({ shell, commandTransport: 'argv' })).toBe(true);
+    expect(isRtkCompatibleWindowsBash({ shell })).toBe(true);
+  });
+
+  const logRtk = (logPath: string) =>
+    fakeRtk(`
+const fs = require('node:fs');
+fs.appendFileSync(${JSON.stringify(logPath)}, process.argv[2] + '\\n');
+if (process.argv[2] === 'rewrite') { process.stdout.write('rtk git status'); process.exit(3); }
+if (process.argv[2] === 'gain') process.stdout.write(JSON.stringify({ summary: { total_commands: 1, total_input: 10, total_output: 5 } }));
+`);
+
+  it.each([
+    ['C:\\Windows\\System32\\bash.exe', 'stdin' as const, 'git status'],
+    ['C:\\Windows\\Sysnative\\bash.exe', 'stdin' as const, 'git status'],
+    ['C:\\cygwin64\\bin\\bash.exe', undefined, 'git status'],
+    ['C:\\Windows\\System32\\bash.exe', 'stdin' as const, 'rtk recall abc123'],
+  ])(
+    'Windows 命中 %s 时透传原命令，不 rewrite 也不建临时目录（%s %s）',
+    async (shell, commandTransport, command) => {
+      const logPath = path.join(tempDir('enso-rtk-log-'), 'calls.txt');
+      const binaryPath = logRtk(logPath);
+      const dataDir = tempDir('enso-rtk-data-');
+      const { definition, calls } = baseTool();
+      const resolveBashShell = vi.fn(() => ({ shell, args: ['-s'], commandTransport }));
+      const wrapped = withRtkOptimization(definition, {
+        binaryPath,
+        dataDir,
+        cwd: process.cwd(),
+        platform: 'win32',
+        resolveBashShell,
+      });
+
+      const result = await execute(wrapped, command);
+
+      expect(resolveBashShell).toHaveBeenCalled();
+      expect(calls).toEqual([{ command }]);
+      expect(result.details).toEqual({
+        existing: true,
+        rtk: { status: 'bypassed', originalCommand: command, reason: 'unsupported-shell' },
+      });
+      expect(existsSync(logPath)).toBe(false);
+      expect(existsSync(path.join(dataDir, 'calls'))).toBe(false);
+    }
+  );
+
+  it('resolveBashShell 抛错时安全 bypass，原命令交给下层 bash 工具报错', async () => {
+    const logPath = path.join(tempDir('enso-rtk-log-'), 'calls.txt');
+    const binaryPath = logRtk(logPath);
+    const dataDir = tempDir('enso-rtk-data-');
+    const { definition, calls } = baseTool();
+    const wrapped = withRtkOptimization(definition, {
+      binaryPath,
+      dataDir,
+      cwd: process.cwd(),
+      platform: 'win32',
+      resolveBashShell: () => {
+        throw new Error('No bash shell found');
+      },
+    });
+
+    const result = await execute(wrapped, 'git status');
+
+    expect(calls).toEqual([{ command: 'git status' }]);
+    expect(result.details).toMatchObject({
+      rtk: { status: 'bypassed', reason: 'shell-unavailable' },
+    });
+    expect(existsSync(logPath)).toBe(false);
+    expect(existsSync(path.join(dataDir, 'calls'))).toBe(false);
+  });
+
+  it.each([
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'D:\\Dev\\Git\\usr\\bin\\bash.exe',
+    'C:\\msys64\\usr\\bin\\bash.exe',
+  ])('Windows 命中 Git Bash / MSYS2（%s）时照常 rewrite', async (shell) => {
+    const logPath = path.join(tempDir('enso-rtk-log-'), 'calls.txt');
+    const binaryPath = logRtk(logPath);
+    const { definition, calls } = baseTool();
+    const wrapped = withRtkOptimization(definition, {
+      binaryPath,
+      dataDir: tempDir('enso-rtk-data-'),
+      cwd: process.cwd(),
+      platform: 'win32',
+      resolveBashShell: () => ({ shell, args: ['-c'] }),
+    });
+
+    const result = await execute(wrapped, 'git status');
+
+    expect(String(calls[0].command)).toContain('rtk() {');
+    expect(String(calls[0].command)).toMatch(/rtk git status$/);
+    expect(result.details).toMatchObject({ rtk: { status: 'compressed' } });
+    expect(readFileSync(logPath, 'utf8')).toBe('rewrite\ngain\n');
+    expect(toBashRuntimePath('C:\\Users\\me\\enso\\resources\\rtk\\rtk.exe', 'win32')).toBe(
+      '/c/Users/me/enso/resources/rtk/rtk.exe'
+    );
+  });
+
+  it('非 Windows 与 PowerShell 不解析 bash 类型', async () => {
+    const binaryPath = logRtk(path.join(tempDir('enso-rtk-log-'), 'calls.txt'));
+    const resolveBashShell = vi.fn(() => ({
+      shell: 'C:\\Windows\\System32\\bash.exe',
+      args: ['-s'],
+      commandTransport: 'stdin' as const,
+    }));
+    const bash = baseTool();
+    const posix = withRtkOptimization(bash.definition, {
+      binaryPath,
+      dataDir: tempDir('enso-rtk-data-'),
+      cwd: process.cwd(),
+      platform: 'linux',
+      resolveBashShell,
+    });
+    const pwsh = baseTool('powershell');
+    const powershell = withRtkOptimization(pwsh.definition, {
+      binaryPath,
+      dataDir: tempDir('enso-rtk-data-'),
+      cwd: process.cwd(),
+      platform: 'win32',
+      shell: 'powershell',
+      resolveBashShell,
+    });
+
+    await expect(execute(posix, 'git status')).resolves.toMatchObject({
+      details: { rtk: { status: 'compressed' } },
+    });
+    await expect(execute(powershell, 'git status')).resolves.toMatchObject({
+      details: { rtk: { status: 'compressed' } },
+    });
+    expect(resolveBashShell).not.toHaveBeenCalled();
+  });
 });

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { getShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { RtkToolStats } from '@shared/rtk';
 import { attachBackgroundCommandHooks, type PreparedBackgroundCommand } from '../backgroundTasks';
 import { ForegroundDetachedError } from '../foregroundCommand';
@@ -19,6 +19,11 @@ const DEFAULT_REWRITE_TIMEOUT_MS = 3_000;
 const DEFAULT_GAIN_TIMEOUT_MS = 3_000;
 const MAX_PROCESS_OUTPUT = 1_000_000;
 
+interface BashShellConfig {
+  shell: string;
+  commandTransport?: 'argv' | 'stdin';
+}
+
 export interface RtkOptimizationOptions {
   binaryPath?: string;
   dataDir: string;
@@ -26,6 +31,9 @@ export interface RtkOptimizationOptions {
   remote?: boolean;
   enabled?: boolean;
   shell?: 'bash' | 'powershell';
+  platform?: string;
+  /** 与本地 bash 工具同一解析依据（sessionShell 未传 shellPath） */
+  resolveBashShell?: () => BashShellConfig;
   rewriteTimeoutMs?: number;
   gainTimeoutMs?: number;
 }
@@ -135,6 +143,29 @@ function processEnv(paths: RuntimePaths): NodeJS.ProcessEnv {
 const quoteBash = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 const quotePowerShell = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
+/** RTK 的 /c/... 路径与环境变量透传只对 Git Bash / MSYS2 成立；WSL、Cygwin 不兼容 */
+export function isRtkCompatibleWindowsBash(config: BashShellConfig): boolean {
+  if (config.commandTransport === 'stdin') return false;
+  const segments = path.win32.normalize(config.shell).toLowerCase().split('\\');
+  const name = segments.at(-1) ?? '';
+  if (name === 'wsl.exe' || name === 'wsl') return false;
+  // Cygwin 的 bash 固定在 <安装根>\bin\bash.exe；只看安装根，嵌在 cygwin 目录里的 Git Bash 不误判
+  if (segments.at(-2) === 'bin' && /^cygwin(?:32|64)?$/.test(segments.at(-3) ?? '')) return false;
+  return !segments.some(
+    (segment) => segment === 'system32' || segment === 'sysnative' || segment === 'windowsapps'
+  );
+}
+
+function unsupportedBashReason(options: RtkOptimizationOptions): string | undefined {
+  try {
+    return isRtkCompatibleWindowsBash((options.resolveBashShell ?? (() => getShellConfig()))())
+      ? undefined
+      : 'unsupported-shell';
+  } catch {
+    return 'shell-unavailable';
+  }
+}
+
 export function toBashRuntimePath(value: string, platform: string = process.platform): string {
   if (platform !== 'win32') return value;
   const normalized = value.replaceAll('\\', '/');
@@ -142,12 +173,15 @@ export function toBashRuntimePath(value: string, platform: string = process.plat
   return drive ? `/${drive[1].toLowerCase()}/${drive[2]}` : normalized;
 }
 
-function bashBinaryPaths(binaryPath: string): { binary: string; directory: string } {
+function bashBinaryPaths(
+  binaryPath: string,
+  platform: string
+): { binary: string; directory: string } {
   const directory =
-    process.platform === 'win32' ? path.win32.dirname(binaryPath) : path.dirname(binaryPath);
+    platform === 'win32' ? path.win32.dirname(binaryPath) : path.dirname(binaryPath);
   return {
-    binary: toBashRuntimePath(binaryPath),
-    directory: toBashRuntimePath(directory),
+    binary: toBashRuntimePath(binaryPath, platform),
+    directory: toBashRuntimePath(directory, platform),
   };
 }
 
@@ -155,7 +189,8 @@ function runtimeCommand(
   command: string,
   binaryPath: string,
   paths: RuntimePaths,
-  shell: 'bash' | 'powershell'
+  shell: 'bash' | 'powershell',
+  platform: string
 ): string {
   if (shell === 'powershell') {
     const assignments = [
@@ -183,7 +218,7 @@ function runtimeCommand(
   ]
     .map(([key, value]) => `${key}=${quoteBash(value)}`)
     .join('; ');
-  const bashBinary = bashBinaryPaths(binaryPath);
+  const bashBinary = bashBinaryPaths(binaryPath, platform);
   const pathSetup =
     `if [ -n "\${PATH:-}" ]; then PATH=${quoteBash(bashBinary.directory)}:"$PATH"; ` +
     `else PATH=${quoteBash(bashBinary.directory)}; fi; export PATH; `;
@@ -381,6 +416,11 @@ async function prepareCommand(
   if (!options.binaryPath || !path.isAbsolute(options.binaryPath)) {
     return immediate(command, withReason('unavailable', command, 'binary-unavailable'));
   }
+  const platform = options.platform ?? process.platform;
+  if (shell === 'bash' && platform === 'win32') {
+    const reason = unsupportedBashReason(options);
+    if (reason) return immediate(command, withReason('bypassed', command, reason));
+  }
   if (shell !== 'powershell' && isAlreadyRtk(command) && !isReadonlyRtkCommand(command)) {
     return immediate(command, withReason('bypassed', command, 'already-rtk'));
   }
@@ -420,7 +460,7 @@ async function prepareCommand(
   if (isReadonlyRtkCommand(command)) {
     const rtk = withReason('bypassed', command, 'readonly-rtk');
     return {
-      command: runtimeCommand(command, options.binaryPath, paths, shell),
+      command: runtimeCommand(command, options.binaryPath, paths, shell, platform),
       details: details(rtk),
       finalize: async () => {
         await cleanup();
@@ -588,7 +628,7 @@ async function prepareCommand(
     return finalized;
   };
   return {
-    command: runtimeCommand(rewrittenCommand, options.binaryPath, paths, shell),
+    command: runtimeCommand(rewrittenCommand, options.binaryPath, paths, shell, platform),
     details: details(pending),
     finalize,
   };
