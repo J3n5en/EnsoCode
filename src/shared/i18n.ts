@@ -447,6 +447,7 @@ export const zhTranslations: Record<string, string> = {
   'Terminal & editor': '终端与编辑器',
   'Runtime & sessions': '运行与会话',
   'Contacts & owner': '联系方式与主人',
+  'Secretary & contacts': '秘书与联系',
   'Contact channels': '联系渠道',
   'Manage in Settings': '在设置里管理',
   'Contacts and owner identity are managed in Settings.': '联系方式和主人身份改在设置里管理。',

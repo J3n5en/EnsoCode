@@ -102,6 +102,14 @@ beforeEach(() => {
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('CSS', { escape: (s: string) => s });
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+  );
   vi.stubGlobal('HTMLElement', dom.window.HTMLElement);
   Object.assign(dom.window, {
     requestAnimationFrame: (cb: FrameRequestCallback) => {
@@ -162,7 +170,7 @@ describe('设置分区各自的滚动位置', () => {
       proto.scrollIntoView = original;
     }
     expect(container.querySelector('[data-page="logs"]')).toBeTruthy();
-    expect(hits).toEqual(['logs.row']);
+    expect(hits[0]).toBe('logs.row');
     expect(top()).toBe(42);
   });
 
@@ -186,7 +194,7 @@ describe('设置分区各自的滚动位置', () => {
       proto.scrollIntoView = original;
     }
     expect(container.querySelector('[data-page="conversation"]')).toBeTruthy();
-    expect(hits).toEqual(['appearance.liveActivityFoldDelaySec']);
+    expect(hits[0]).toBe('appearance.liveActivityFoldDelaySec');
     expect(
       container
         .querySelector('[data-settings-row="appearance.liveActivityFoldDelaySec"]')

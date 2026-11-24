@@ -77,16 +77,29 @@ import { UsageSettings } from './UsageSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
 /** 行可能要等父项展开或异步数据才出现：短时间内反复找，找到再滚过去并闪一下 */
-function flashSettingsRow(rowId: string): () => void {
+function flashSettingsRow(rowId: string, cancelRestore: () => void): () => void {
   let attempts = 0;
   let timer = 0;
   const tryFlash = () => {
     const el = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
     if (el instanceof HTMLElement) {
-      el.scrollIntoView({ block: 'center' });
-      el.dataset.settingsFlash = 'true';
+      // 分区异步加载时会整段重渲染，第一次拿到的元素会被换掉，所以每次重新找
+      let left = 3;
+      const center = () => {
+        const row = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
+        if (row instanceof HTMLElement) {
+          row.scrollIntoView({ block: 'center', behavior: 'instant' });
+          row.dataset.settingsFlash = 'true';
+        }
+        if (--left <= 0) window.clearInterval(follow);
+      };
+      cancelRestore();
+      center();
+      const follow = window.setInterval(center, 400);
       window.setTimeout(() => {
-        delete el.dataset.settingsFlash;
+        window.clearInterval(follow);
+        const row = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
+        if (row instanceof HTMLElement) delete row.dataset.settingsFlash;
       }, 1600);
       return;
     }
@@ -215,6 +228,7 @@ export function SettingsContent({
   const scrollPositions = React.useRef(new Map<SettingsCategory, number>());
   const scrollKey = React.useRef<SettingsCategory | null>(null);
   const restoring = React.useRef(false);
+  const scrollRestore = React.useRef<(() => void) | null>(null);
   const flashPending = React.useRef(flashRowId);
   flashPending.current = flashRowId;
   React.useLayoutEffect(() => {
@@ -224,13 +238,18 @@ export function SettingsContent({
     // 深链/搜索命中要定位到行（本 effect 声明在 flash 之前，先执行），交给 flashSettingsRow，不用保存的位置覆盖
     if (flashPending.current) {
       el.scrollTop = 0;
+      restoring.current = false;
       return;
     }
     restoring.current = true;
     const stop = restoreScrollTop(el, scrollPositions.current.get(activeCategory) ?? 0, () => {
       restoring.current = false;
     });
-    return stop;
+    scrollRestore.current = stop;
+    return () => {
+      scrollRestore.current = null;
+      stop();
+    };
   }, [activeCategory, showContent]);
   const rememberScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (restoring.current || !scrollKey.current) return;
@@ -239,12 +258,8 @@ export function SettingsContent({
 
   React.useLayoutEffect(() => {
     if (!flashRowId) return;
-    const stop = flashSettingsRow(flashRowId);
-    const timer = window.setTimeout(() => setFlashRowId(null), 1600);
-    return () => {
-      stop();
-      window.clearTimeout(timer);
-    };
+    // flashRowId 留着：被父开关藏起的行靠它临时展开，清掉会把刚定位到的行又卸掉
+    return flashSettingsRow(flashRowId, () => scrollRestore.current?.());
   }, [flashRowId]);
 
   const allCategories: Array<{

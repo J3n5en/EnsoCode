@@ -212,7 +212,7 @@ describe('Secretary page', () => {
     const groupOf = (id: SettingsCategory) =>
       SETTINGS_GROUPS.find((g) => g.categories.includes(id));
     expect(groupOf('secretary')?.categories).toEqual(['secretary', 'contacts']);
-    expect(groupOf('secretary')?.label).toBe('Secretary');
+    expect(groupOf('secretary')?.label).toBe('Secretary & contacts');
     expect(groupOf('experimental')?.categories).not.toContain('secretary');
     const ids = (on: boolean) =>
       groupCategories(

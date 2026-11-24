@@ -46,7 +46,7 @@ export const SETTINGS_GROUPS: readonly {
   },
   {
     id: 'secretary',
-    label: 'Secretary',
+    label: 'Secretary & contacts',
     categories: ['secretary', 'contacts'],
   },
   {
