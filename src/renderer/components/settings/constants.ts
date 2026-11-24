@@ -1,30 +1,7 @@
 import type { ModelApiKind } from '@shared/types';
 import type { FontWeight } from '@/stores/settings';
 
-export type SettingsCategory =
-  | 'general'
-  | 'shortcuts'
-  | 'appearance'
-  | 'providers'
-  | 'skills'
-  | 'plugins'
-  | 'mcp'
-  | 'instructions'
-  | 'presets'
-  | 'agents'
-  | 'workflows'
-  | 'tools'
-  | 'memory'
-  | 'privacy'
-  | 'phone'
-  | 'ssh'
-  | 'usage'
-  | 'resources'
-  | 'logs'
-  | 'experimental'
-  | 'bots'
-  | 'botTemplates'
-  | 'secretary';
+export type { SettingsCategory } from '@shared/settingsDeepLink';
 
 /** API 协议取值 → 设置页展示名；列表徽章与编辑弹窗共用。 */
 export const API_KIND_LABELS: Record<ModelApiKind, string> = {

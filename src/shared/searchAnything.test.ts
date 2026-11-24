@@ -11,6 +11,7 @@ import {
   searchBrowserTabs,
   searchSettingsEntries,
 } from './searchAnything';
+import { relocateSettingsLink, type SettingsCategory } from './settingsDeepLink';
 
 function tab(
   overrides: Partial<BrowserSearchTab> & Pick<BrowserSearchTab, 'tabId'>
@@ -246,27 +247,32 @@ describe('buildSettingsCatalog', () => {
     }
   });
 
-  it('对话显示条目归外观页', () => {
-    const catalog = buildSettingsCatalog();
-    const moved = [
-      'openChangesOnFileEdit',
-      'compactReadOnlyTools',
-      'expandLiveEdits',
-      'expandLiveReasoning',
-      'autoCollapseTurns',
-      'collapseCompletedActivity',
-      'collapseLiveActivity',
-      'liveActivityFoldDelaySec',
-      'pinUnfinishedTodos',
-      'headerSessionTabs',
-      'navRailSide',
-    ];
-    for (const suffix of moved) {
-      expect(catalog.find((entry) => entry.id === `appearance.${suffix}`)?.category).toBe(
-        'appearance'
-      );
-      expect(catalog.some((entry) => entry.id === `general.${suffix}`)).toBe(false);
+  it('拆页后每个条目都指向行现在所在的分区（与深链改落一致）', () => {
+    for (const entry of buildSettingsCatalog()) {
+      expect(
+        relocateSettingsLink({ category: entry.category as SettingsCategory, rowId: entry.id })
+          .category,
+        entry.id
+      ).toBe(entry.category);
     }
+    const categoryOf = (id: string) => buildSettingsCatalog().find((e) => e.id === id)?.category;
+    expect(categoryOf('appearance.headerSessionTabs')).toBe('conversation');
+    expect(categoryOf('appearance.chatTypography')).toBe('conversation');
+    expect(categoryOf('appearance.navRailSide')).toBe('appearance');
+    expect(categoryOf('general.terminalShell')).toBe('terminal');
+    expect(categoryOf('general.autoArchiveIdleDays')).toBe('runtime');
+    expect(categoryOf('general.proxy')).toBe('general');
+  });
+
+  it('搜「代理」「终端字体」「归档闲置」命中新位置', () => {
+    const catalog = buildSettingsCatalog();
+    const hits = (query: string) =>
+      searchSettingsEntries(catalog, query, {
+        translate: (text) => getTranslation('zh', text),
+      }).map((e) => `${e.category}:${e.id}`);
+    expect(hits('代理')).toContain('general:general.proxy');
+    expect(hits('终端字体')).toContain('terminal:terminal.appearance');
+    expect(hits('归档闲置')).toContain('runtime:general.autoArchiveIdleDays');
   });
 
   it('Bot 设置迁到「实验」与「Bot 模式」页，通用页不再有旧条目', () => {

@@ -242,8 +242,20 @@ const API_PROPS: Record<string, unknown> = { 'electronAPI.env.platform': 'darwin
 async function APP_GROUP_PAGES(): Promise<Record<string, React.ComponentType>> {
   const { GeneralSettings } = await import('./GeneralSettings');
   const { AppearanceSettings } = await import('./AppearanceSettings');
+  const { ConversationSettings } = await import('./ConversationSettings');
+  const { TerminalSettings } = await import('./TerminalSettings');
+  const { RuntimeSettings } = await import('./RuntimeSettings');
   const { PrivacySettings } = await import('./PrivacySettings');
-  return { general: GeneralSettings, appearance: AppearanceSettings, privacy: PrivacySettings };
+  const { DevToolsSection } = await import('./DevToolsSection');
+  return {
+    general: GeneralSettings,
+    appearance: AppearanceSettings,
+    conversation: ConversationSettings,
+    terminal: TerminalSettings,
+    runtime: RuntimeSettings,
+    privacy: PrivacySettings,
+    devTools: DevToolsSection,
+  };
 }
 
 type Control = { row: string | null; kind: string; current: unknown; effects: unknown[] };

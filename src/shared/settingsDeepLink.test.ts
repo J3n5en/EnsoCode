@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSettingsDeepLink } from './settingsDeepLink';
+import { parseSettingsDeepLink, relocateSettingsLink } from './settingsDeepLink';
 
 describe('parseSettingsDeepLink', () => {
   it('解析合法深链', () => {
@@ -113,5 +113,58 @@ describe('插件市场搜索深链', () => {
     expect(
       parseSettingsDeepLink({ category: 'secretary', rowId: 'x', marketQuery: 'contact' })
     ).toBeNull();
+  });
+});
+describe('拆分后的旧深链', () => {
+  const MOVED: [string, string][] = [
+    ['general.generationStallTimeout', 'runtime'],
+    ['general.autoRetryLimit', 'runtime'],
+    ['general.longCacheRetention', 'runtime'],
+    ['general.smartCompactEnabled', 'runtime'],
+    ['general.compactReserveTokens', 'runtime'],
+    ['general.autoArchiveIdleDays', 'runtime'],
+    ['general.autoArchiveMergedWorktrees', 'runtime'],
+    ['general.autoDeleteArchivedDays', 'runtime'],
+    ['general.activeRetentionMinutes', 'runtime'],
+    ['general.worktreeRoot', 'runtime'],
+    ['general.terminalShell', 'terminal'],
+    ['general.windowsLocalShell', 'terminal'],
+    ['appearance.fileOpening', 'terminal'],
+    ['appearance.chatTypography', 'conversation'],
+    ['appearance.openChangesOnFileEdit', 'conversation'],
+    ['appearance.compactReadOnlyTools', 'conversation'],
+    ['appearance.expandLiveEdits', 'conversation'],
+    ['appearance.expandLiveReasoning', 'conversation'],
+    ['appearance.autoCollapseTurns', 'conversation'],
+    ['appearance.quoteSelectionButton', 'conversation'],
+    ['appearance.collapseCompletedActivity', 'conversation'],
+    ['appearance.collapseLiveActivity', 'conversation'],
+    ['appearance.liveActivityFoldDelaySec', 'conversation'],
+    ['appearance.pinUnfinishedTodos', 'conversation'],
+    ['appearance.headerSessionTabs', 'conversation'],
+  ];
+
+  it.each(MOVED)('%s 落到 %s，行号不变（继续闪那一行）', (rowId, category) => {
+    const oldCategory = rowId.split('.')[0];
+    expect(parseSettingsDeepLink({ category: oldCategory, rowId })).toEqual({ category, rowId });
+  });
+
+  it('没挪的行和旧分区根照常解析', () => {
+    for (const rowId of ['general.language', 'general.proxy', 'appearance.theme', 'general.root']) {
+      const category = rowId.split('.')[0];
+      expect(parseSettingsDeepLink({ category, rowId })).toEqual({ category, rowId });
+    }
+  });
+
+  it('新分区可以直接打开', () => {
+    for (const category of ['conversation', 'terminal', 'runtime']) {
+      expect(parseSettingsDeepLink({ category })).toEqual({ category, rowId: `${category}.root` });
+    }
+  });
+
+  it('应用内直接打开的链接（不经过 main）同样改落新分区', () => {
+    expect(
+      relocateSettingsLink({ category: 'general', rowId: 'general.autoArchiveIdleDays' })
+    ).toEqual({ category: 'runtime', rowId: 'general.autoArchiveIdleDays' });
   });
 });

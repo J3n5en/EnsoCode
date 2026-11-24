@@ -26,12 +26,12 @@ export const SETTINGS_GROUPS: readonly {
   {
     id: 'app',
     label: 'Application',
-    categories: ['general', 'appearance', 'shortcuts', 'privacy'],
+    categories: ['general', 'appearance', 'conversation', 'terminal', 'shortcuts', 'privacy'],
   },
   {
     id: 'agent',
     label: 'Models & agents',
-    categories: ['providers', 'presets', 'agents', 'instructions', 'memory'],
+    categories: ['providers', 'presets', 'agents', 'instructions', 'memory', 'runtime'],
   },
   {
     id: 'extensions',

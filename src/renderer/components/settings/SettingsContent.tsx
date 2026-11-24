@@ -13,6 +13,7 @@ import {
   Keyboard,
   Layers,
   LayoutTemplate,
+  MessageSquareText,
   MessagesSquare,
   Palette,
   Plug,
@@ -24,7 +25,9 @@ import {
   Shield,
   Smartphone,
   Sparkles,
+  SquareTerminal,
   Terminal,
+  Timer,
   Workflow,
   Wrench,
 } from 'lucide-react';
@@ -40,6 +43,7 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { BotSettings } from './BotSettings';
 import { BotTemplatesSettings } from './BotTemplatesSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
+import { ConversationSettings } from './ConversationSettings';
 import type { SettingsCategory } from './constants';
 import { DevicesSettings } from './DevicesSettings';
 import { ExperimentalSettings } from './ExperimentalSettings';
@@ -56,6 +60,7 @@ import { PresetsSettings } from './PresetsSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { ResourcesSettings } from './ResourcesSettings';
+import { RuntimeSettings } from './RuntimeSettings';
 import { SecretarySettings } from './SecretarySettings';
 import { SkillsSettings } from './SkillsSettings';
 import { SshSettings } from './SshSettings';
@@ -65,6 +70,7 @@ import {
   searchCategories,
   visibleCategories,
 } from './settingsCategories';
+import { TerminalSettings } from './TerminalSettings';
 import { UsageSettings } from './UsageSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
@@ -238,6 +244,9 @@ export function SettingsContent({
     { id: 'general', icon: Settings, label: 'General' },
     { id: 'shortcuts', icon: Keyboard, label: 'Shortcuts' },
     { id: 'appearance', icon: Palette, label: 'Appearance' },
+    { id: 'conversation', icon: MessageSquareText, label: 'Conversation display' },
+    { id: 'terminal', icon: SquareTerminal, label: 'Terminal & editor' },
+    { id: 'runtime', icon: Timer, label: 'Runtime & sessions' },
     { id: 'providers', icon: Server, label: 'Model Providers' },
     { id: 'presets', icon: Layers, label: 'Presets' },
     { id: 'agents', icon: Bot, label: 'Agent types' },
@@ -439,6 +448,9 @@ export function SettingsContent({
             {activeCategory === 'appearance' && (
               <AppearanceSettings onOpenPlugins={() => openCategory('plugins')} />
             )}
+            {activeCategory === 'conversation' && <ConversationSettings />}
+            {activeCategory === 'terminal' && <TerminalSettings />}
+            {activeCategory === 'runtime' && <RuntimeSettings />}
             {activeCategory === 'providers' && <ProvidersSettings />}
             {activeCategory === 'skills' && <SkillsSettings />}
             {activeCategory === 'plugins' && (
