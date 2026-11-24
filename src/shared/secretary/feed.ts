@@ -200,13 +200,21 @@ export function compareFeed(left: FeedEvent, right: FeedEvent): number {
   return right.at - left.at || left.id.localeCompare(right.id);
 }
 
-/** 工作台动态的全量投影。分页在 pageFeed，这里不截断 */
+/** 工作台动态的全量投影。分页在 pageFeed，这里不截断。卡片当前结果已有活动历史时只留历史那条 */
 export function feedEvents(board: SecretaryBoard): FeedEvent[] {
   const sessions = [...board.needsYou, ...board.running, ...board.done].filter(
     (card): card is SessionCard => card.kind === 'session'
   );
   const cards = new Map(sessions.map((card) => [card.conversationId, card]));
+  const remembered = new Set(
+    (board.activity ?? []).map((entry) => `${entry.conversationId}:${entry.at}:${entry.kind}`)
+  );
+  const recorded = (card: SessionCard): boolean => {
+    const kind = settledKind(card);
+    return Boolean(kind) && remembered.has(`${card.conversationId}:${card.resultAt}:${kind}`);
+  };
   return [...board.needsYou, ...board.running, ...board.done]
+    .filter((card) => card.kind !== 'session' || !recorded(card))
     .map((card) =>
       card.kind === 'proposal'
         ? proposalEvent(card)

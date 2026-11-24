@@ -273,4 +273,40 @@ describe('feedEvents 完成条目', () => {
       detail: '确认',
     });
   });
+
+  it('同一会话同一次结果只出一条：活动历史在时不再重复投影会话卡片', () => {
+    const events = feedEvents(
+      board({
+        done: [goal({ needsUser: ['是否合并'] })],
+        activity: [
+          { at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise },
+          { at: 9, conversationId: 'c1', kind: 'goal-complete', text: noise },
+        ],
+      })
+    );
+    expect(events.map((event) => event.id)).toEqual([
+      'activity:c1:20:goal-complete',
+      'activity:c1:9:goal-complete',
+    ]);
+  });
+
+  it('卡片已有新结果或在跑时，旧的活动历史和会话卡片各出一条', () => {
+    const newer = feedEvents(
+      board({
+        done: [goal({ result: 'turn-ended', resultAt: 30 })],
+        activity: [{ at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise }],
+      })
+    );
+    expect(newer.map((event) => event.id)).toEqual(['session:c1', 'activity:c1:20:goal-complete']);
+    const running = feedEvents(
+      board({
+        running: [goal({ state: 'running', stateSince: 25 })],
+        activity: [{ at: 20, conversationId: 'c1', kind: 'goal-complete', text: noise }],
+      })
+    );
+    expect(running.map((event) => event.id)).toEqual([
+      'session:c1',
+      'activity:c1:20:goal-complete',
+    ]);
+  });
 });
