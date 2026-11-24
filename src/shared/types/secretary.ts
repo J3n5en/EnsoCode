@@ -347,6 +347,11 @@ export interface ClosedGoal {
   note?: string;
 }
 
+/** 秘书经 Main 归档的来源。旧版 Main 自动归档不在这里，靠 autoArchivedAt 认 */
+export const SECRETARY_ARCHIVE_VIAS = ['session_archive', 'cleanup_apply'] as const;
+
+export type SecretaryArchiveVia = (typeof SECRETARY_ARCHIVE_VIAS)[number];
+
 export interface DispatchRecord {
   conversationId: string;
   projectId: string;
@@ -424,6 +429,11 @@ export interface DispatchRecord {
   autoArchivedAt?: number;
   /** 已经自动归档过的那次结果（lastResult.at）：用户手动取消归档后，同一次结果不再归档 */
   autoArchiveResultAt?: number;
+  /**
+   * 秘书经 session_archive 或 cleanup_apply 归档的时刻与来源，等于会话行 archivedAt 才算。
+   * 用户取消后再手动归档会对不上，按用户归档处理。
+   */
+  secretaryArchived?: { at: number; via: SecretaryArchiveVia };
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
   patrol?: { reason: PatrolReason; turn: number; at: number };
   /**

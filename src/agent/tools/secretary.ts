@@ -136,6 +136,11 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     arrays: ['ids'],
     aliases: { sessionId: 'conversationId', conversationIds: 'ids', id: 'ids' },
   },
+  session_unarchive: {
+    keys: ['conversationId', 'ids'],
+    arrays: ['ids'],
+    aliases: { sessionId: 'conversationId', conversationIds: 'ids', id: 'ids' },
+  },
   result_mark_done: {
     keys: ['conversationId'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
@@ -649,6 +654,20 @@ const SCHEMAS: Record<
         minItems: 1,
         maxItems: 20,
         description: 'Session ids to archive in one call, at most 20',
+      },
+    }),
+  },
+  session_unarchive: {
+    description:
+      'Pull back sessions you dispatched or track, and only ones you archived (session_archive, cleanup_apply, or the older automatic archive). Pass one conversationId or up to 20 ids. A session the user archived by hand returns archived-by-user and must not be retried; ask the user to unarchive it. Unarchiving is the same as the user unarchiving it by hand: it returns to its place in the sidebar and shows up in session_list. You can session_send afterwards, and a finished session can continue with a goal. The call is audited per session and returns one row per id: status unarchived, skipped or failed, with the reason. Already deleted, not archived, not a session you manage, or in a project you cannot see are skipped.',
+    parameters: object({
+      conversationId: id('Session id from session_list or session_tasks'),
+      ids: {
+        type: 'array',
+        items: { type: 'string', minLength: 1, maxLength: SECRETARY_ID_MAX },
+        minItems: 1,
+        maxItems: 20,
+        description: 'Session ids to unarchive in one call, at most 20',
       },
     }),
   },
