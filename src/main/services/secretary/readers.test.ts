@@ -672,20 +672,14 @@ describe('session_read', () => {
         { secretaryConversationId: 'sec-1' }
       )
     ).toEqual({ ok: false, error: 'not-found' });
-    const listed = await handlers.session_list({}, { secretaryConversationId: 'sec-1' });
-    const rows = (listed.result as { sessions: { conversationId: string; archived?: true }[] })
-      .sessions;
+    const rows = (await run(handlers.session_list)).sessions as {
+      conversationId: string;
+      archived?: true;
+    }[];
     expect(rows.map((session) => [session.conversationId, session.archived])).toEqual([
       ['auto', true],
     ]);
-    expect(
-      (
-        await handlers.session_tasks(
-          { conversationId: 'auto' },
-          { secretaryConversationId: 'sec-1' }
-        )
-      ).ok
-    ).toBe(true);
+    await run(handlers.session_tasks, { conversationId: 'auto' });
   });
 
   it('child、已归档、未知会话与不可见项目一律 not-found', async () => {
