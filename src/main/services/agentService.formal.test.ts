@@ -712,7 +712,8 @@ async function step(w: World, cfg: Parameters<typeof actions>[1], label: string)
   const action = actions(w, cfg).find(([l]) => l === label);
   if (!action) throw new Error(`回放不确定：${label} 不可用`);
   await action[1]();
-  for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
+  // 被测代码只用 Promise 不排宏任务，一次 setImmediate 前微任务已全部清空；多等几轮在负载下按轮次放大耗时
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 /** 深度优先：第一个后继在活着的世界上继续走，其余后继从头回放真实代码（闭包与 promise 无法克隆） */
