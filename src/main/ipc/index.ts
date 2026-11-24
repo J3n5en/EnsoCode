@@ -15,6 +15,7 @@ import { registerExtensionPluginHandlers } from './extensionPlugins';
 import { registerFileHandlers } from './files';
 import { registerFilesWorkspaceHandlers } from './filesWorkspace';
 import { registerGitHandlers } from './git';
+import { registerGitCommitMessageHandlers } from './gitCommitMessage';
 import { registerMcpHandlers } from './mcp';
 import { registerMemoryHandlers } from './memory';
 import { registerModelDirectoryHandlers } from './modelDirectory';
@@ -52,6 +53,7 @@ export function registerIpcHandlers(): void {
   registerFileHandlers();
   registerFilesWorkspaceHandlers();
   registerGitHandlers();
+  registerGitCommitMessageHandlers();
   registerChangesHandlers();
   registerMcpHandlers();
   registerPairHandlers();

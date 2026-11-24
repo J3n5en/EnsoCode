@@ -330,6 +330,10 @@ export interface SettingsState {
   titleSummaryEnabled: boolean;
   /** 标题总结独立模型；null = 跟随全局默认模型 */
   titleSummaryModel: DefaultModelRef | null;
+  /** Git 提交面板「AI 生成」用的模型；null = 未配置 */
+  gitCommitModel: DefaultModelRef | null;
+  /** 是否使用自定义提示词；正文存 userData/git-commit-prompt.txt，不进 settings */
+  gitCommitPromptCustomized: boolean;
   imageGenerationModel: DefaultModelRef | null;
   /** 记忆提炼模型；null = 跟随标题模型 → 全局默认的既有回退链 */
   memoryDistillModel: DefaultModelRef | null;
@@ -526,6 +530,8 @@ export interface SettingsState {
   setTitleSummaryEnabled: (value: boolean) => void;
   /** 设置标题总结独立模型；null = 回到跟随全局默认 */
   setTitleSummaryModel: (model: DefaultModelRef | null) => void;
+  setGitCommitModel: (model: DefaultModelRef | null) => void;
+  setGitCommitPromptCustomized: (value: boolean) => void;
   setImageGenerationModel: (model: DefaultModelRef | null) => void;
   /** 记忆提炼独立模型；null = 回落到标题模型 → 全局默认 */
   setMemoryDistillModel: (model: DefaultModelRef | null) => void;

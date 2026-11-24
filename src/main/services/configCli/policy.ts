@@ -26,7 +26,7 @@ const UNSAFE_SEGMENT = new Set(['__proto__', 'prototype', 'constructor']);
 
 /** 项目/会话数据由 Main 权威投影维护，CLI 不读不写 */
 const READ_DENIED = new Set(['projects', 'projectGroups']);
-/** 写入即改文件路径或可执行入口 */
+/** 写入即改文件路径或可执行入口；或与 Main 管理的本机文件配对、只能经设置页专用 IPC 改的标记 */
 const WRITE_DENIED = new Set([
   'worktreeRoot',
   'backgroundImagePath',
@@ -35,6 +35,7 @@ const WRITE_DENIED = new Set([
   'windowsLocalShell',
   'fileOpenRules',
   'contextMenuOpen',
+  'gitCommitPromptCustomized',
 ]);
 /** 整体替换或增删条目等同安装/卸载；条目内字段（如 enabled）仍可写 */
 const ENTRY_LEVEL_DENIED = new Set(['skills', 'instructions']);

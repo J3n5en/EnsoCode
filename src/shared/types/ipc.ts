@@ -481,6 +481,11 @@ export const IPC_CHANNELS = {
   GIT_FETCH: 'git:fetch',
   GIT_PULL: 'git:pull',
   GIT_PUSH: 'git:push',
+  GIT_GENERATE_COMMIT_MESSAGE: 'git:generate-commit-message',
+  GIT_GENERATE_COMMIT_MESSAGE_ABORT: 'git:generate-commit-message-abort',
+  GIT_COMMIT_PROMPT_READ: 'git:commit-prompt-read',
+  GIT_COMMIT_PROMPT_WRITE: 'git:commit-prompt-write',
+  GIT_COMMIT_PROMPT_RESET: 'git:commit-prompt-reset',
 
   // Changes 面板「Session」模式的编辑前快照（主进程按会话落盘）
   CHANGES_SNAPSHOTS_READ: 'changes:snapshots-read',

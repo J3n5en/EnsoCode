@@ -401,6 +401,38 @@ export class GitRepository {
     return { ok: true, path: file, oldText, newText };
   }
 
+  /** 生成提交信息用的只读 diff：staged 与 unstaged（未跟踪文件只列路径）；禁用外部 diff / textconv */
+  async changeDiffs(): Promise<{ staged: string; unstaged: string }> {
+    const diff = (extra: string[]) =>
+      run(
+        this.cwd,
+        [
+          '-c',
+          'core.quotePath=false',
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--no-textconv',
+          ...extra,
+        ],
+        32_000_000
+      ).then((output) => output.toString('utf8'));
+    const [staged, tracked, status] = await Promise.all([
+      diff(['--cached']),
+      diff([]),
+      this.status(),
+    ]);
+    const untracked = status.unstaged
+      .filter((file) => file.status === 'untracked')
+      .map((file) => `new untracked file: ${file.path}`);
+    return {
+      staged,
+      unstaged: untracked.length
+        ? `${tracked}${tracked ? '\n' : ''}${untracked.join('\n')}\n`
+        : tracked,
+    };
+  }
+
   async history(
     skip = 0,
     limit = 30,

@@ -57,6 +57,21 @@ describe('Git 版本管理', () => {
     expect(git(repo, 'log', '-1', '--format=%s')).toBe('首个提交');
   });
 
+  it('changeDiffs 分别给出 staged / unstaged diff，未跟踪文件只列路径', async () => {
+    const repository = await GitRepository.open(repo);
+    expect(await repository.changeDiffs()).toEqual({ staged: '', unstaged: '' });
+    writeFileSync(join(repo, 'a.txt'), 'first\n');
+    await repository.stage(['a.txt']);
+    writeFileSync(join(repo, 'a.txt'), 'first\nsecond\n');
+    writeFileSync(join(repo, 'new.txt'), 'secret body\n');
+    const diffs = await repository.changeDiffs();
+    expect(diffs.staged).toContain('+first');
+    expect(diffs.staged).not.toContain('second');
+    expect(diffs.unstaged).toContain('+second');
+    expect(diffs.unstaged).toContain('new untracked file: new.txt');
+    expect(diffs.unstaged).not.toContain('secret body');
+  });
+
   it('同一文件的暂存与未暂存内容独立展示，丢弃仅恢复到索引', async () => {
     writeFileSync(join(repo, 'a.txt'), 'base\n');
     git(repo, 'add', '.');

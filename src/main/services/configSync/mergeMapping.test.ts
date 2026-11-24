@@ -58,6 +58,17 @@ describe('config sync merge identity and reference mapping', () => {
       expect.objectContaining({ id: 'local', models: [{ id: 'model-1', imageGeneration: true }] })
     );
   });
+  it('导入 Git Commit 生成模型时映射本机服务 ID', () => {
+    const result = planImport(
+      current({ providers: [provider('local', 'Provider', 'key')] }),
+      bundle({
+        providers: [provider('remote', 'provider')],
+        gitCommitModel: { providerId: 'remote', modelId: 'model-1' },
+      }),
+      'merge'
+    );
+    expect(result.state.gitCommitModel).toEqual({ providerId: 'local', modelId: 'model-1' });
+  });
   it.each(['merge', 'replace'] as const)(
     '%s 导入未带 systemPromptId 的匹配预设时显式恢复默认提示词',
     (mode) => {
