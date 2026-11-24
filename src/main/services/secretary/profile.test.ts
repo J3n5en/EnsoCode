@@ -275,6 +275,30 @@ describe('保存后的副作用', () => {
     expect(h.released).toEqual(['sec-1', 'sec-2']);
   });
 
+  // 投递刚发出时 worker 还没报 running：只看状态会把这次投递的模型请求中止（Request aborted）
+  it('会话正在接回传投递时不释放，等投递这一轮结束', async () => {
+    const h = harness();
+    const delivering = {
+      deliveryId: 'd1',
+      secretaryConversationId: 'sec-1',
+      keys: ['k1'],
+      attempt: 1,
+      nextAttemptAt: NOW + 30_000,
+    };
+    h.file.inflight = delivering;
+    await h.service.releaseSessions();
+    expect(h.released).toEqual([]);
+
+    // 上一轮结束时宿主先结算、紧接着投出下一批：这一轮结束也不能释放
+    h.file.inflight = { ...delivering, deliveryId: 'd2' };
+    await h.service.onTurnEnded('sec-1');
+    expect(h.released).toEqual([]);
+
+    delete h.file.inflight;
+    await h.service.onTurnEnded('sec-1');
+    expect(h.released).toEqual(['sec-1']);
+  });
+
   it('改称呼后新会话的提示词用新称呼', async () => {
     const h = harness({ profile: { ...baseProfile(), addressAs: 'J 哥' }, conversations: [] });
     await h.service.save({ addressAs: '哥哥' }, null);

@@ -640,7 +640,7 @@ export function notifySecretaryChanged(): void {
 }
 
 /**
- * 用户点了确认：立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick。
+ * 用户点了确认或提案执行完：立刻把进展投给秘书，不等下一分钟的 tick。
  * 由 IPC 层注册，避免本模块静态依赖回传宿主。
  */
 let acceptedListener: (() => void) | null = null;
@@ -2610,6 +2610,7 @@ async function finishProposal(
     detail: outcome.ok ? 'succeeded' : (outcome.error ?? 'failed'),
   });
   notifySecretaryChanged();
+  notifyProposalAccepted();
   return { ok: true, proposal: transitioned.proposal };
 }
 
@@ -2656,7 +2657,15 @@ export async function resolveProposal(
   file.proposals[proposalId] = transitioned.proposal;
   // 点了就推：确认先推「已确认，正在执行」，取消直接推「已取消」。
   // 等执行完再推，秘书会以为卡还没被点，于是又提一张。
-  file.outbox = enqueueUpdate(file.outbox, proposalUpdate(transitioned.proposal, now));
+  // 档案、技能、工具只是写盘，转眼就完，且写完要释放秘书会话：只推终态，否则释放会中止这次投递
+  const writesKit =
+    action === 'confirm' &&
+    (transitioned.proposal.kind === 'profile' ||
+      transitioned.proposal.kind === 'skill' ||
+      transitioned.proposal.kind === 'tool');
+  if (!writesKit) {
+    file.outbox = enqueueUpdate(file.outbox, proposalUpdate(transitioned.proposal, now));
+  }
   ports.saveDispatch(file);
   ports.audit({
     at: now,
@@ -2673,7 +2682,7 @@ export async function resolveProposal(
     return { ok: true, proposal: transitioned.proposal };
   }
   // 立刻投递，不等下一分钟的 tick
-  notifyProposalAccepted();
+  if (!writesKit) notifyProposalAccepted();
   // 档案提案走同一套状态机，确认后才写入；拒绝不写
   if (transitioned.proposal.kind === 'profile') {
     const applied = await ports.applyProfile(
