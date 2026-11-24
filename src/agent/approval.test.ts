@@ -1244,6 +1244,33 @@ describe('完全放行与临时目录守卫边界', () => {
     expect((error as Error).message).toMatch(/no user available to approve/i);
   });
 
+  it('无人值守派出会话删除 /tmp 下明确子路径（含 ssh 远端）直接执行，删 Temp 根仍拒绝', async () => {
+    for (const command of [
+      'rm -rf /tmp/ali-deploy /tmp/ali-deploy-build.log',
+      "ssh -o BatchMode=yes ali 'rm -rf /tmp/enso-relay-upload-59dc0c2; ls -d /tmp/enso-relay-upload* 2>/dev/null'",
+    ]) {
+      for (const mode of ['full', 'supervised'] as const) {
+        const { infos, execute, promise } = await runWith({
+          mode,
+          autoReject: true,
+          command,
+        });
+        const error = await promise.then(
+          () => undefined,
+          (e: Error) => e
+        );
+        expect(infos, command).toHaveLength(0);
+        expect(error?.message ?? '', command).not.toContain('temp-root-delete');
+        if (mode === 'full') expect(execute, command).toHaveBeenCalledOnce();
+      }
+    }
+    for (const command of ['rm -rf /tmp', "ssh ali 'rm -rf /tmp/*'"]) {
+      const { execute, promise } = await runWith({ mode: 'full', autoReject: true, command });
+      await expect(promise, command).rejects.toThrow('enso.windows:temp-root-delete');
+      expect(execute, command).not.toHaveBeenCalled();
+    }
+  });
+
   it('普通（非完全放行）模式：删除 /tmp/<具体子目录> 与 $TMPDIR/<具体子目录> 行为不变，仍走审批', async () => {
     const dcgRmGeneral: CommandGuard = async () => ({
       ruleId: 'core.filesystem:rm-rf-general',
