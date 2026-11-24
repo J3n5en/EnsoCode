@@ -290,9 +290,7 @@ function pngSize(file) {
 
 function measureExpr(scope) {
   const pick =
-    scope === 'secretary'
-      ? `document.querySelector('[data-enso="secretary-panel"]')`
-      : 'document';
+    scope === 'secretary' ? `document.querySelector('[data-enso="secretary-panel"]')` : 'document';
   return `(() => {
     const root = ${pick};
     const panel = document.querySelector('[data-enso="secretary-panel"]');
@@ -533,11 +531,10 @@ async function readMetrics(cdp, scope) {
 function layoutErrors(name, metrics, viewport) {
   const errors = [];
   if (metrics.visibility !== 'visible') errors.push(`${name}: visibility=${metrics.visibility}`);
-  if (
-    Math.abs(metrics.vw - viewport.width) > 2 ||
-    Math.abs(metrics.vh - viewport.height) > 2
-  ) {
-    errors.push(`${name}: 视口 ${metrics.vw}x${metrics.vh} 不是 ${viewport.width}x${viewport.height}`);
+  if (Math.abs(metrics.vw - viewport.width) > 2 || Math.abs(metrics.vh - viewport.height) > 2) {
+    errors.push(
+      `${name}: 视口 ${metrics.vw}x${metrics.vh} 不是 ${viewport.width}x${viewport.height}`
+    );
   }
   if (!metrics.ask) errors.push(`${name}: 没有可见的提问卡片`);
   if (!(metrics.content > 0) || !(metrics.questionW >= metrics.content * 0.9)) {
@@ -557,7 +554,10 @@ function layoutErrors(name, metrics, viewport) {
       `${name}: 正文横向溢出 scroll=${metrics.scrollWidth} client=${metrics.clientWidth}`
     );
   }
-  if (!metrics.questionText?.includes('21300eec') || !metrics.questionText.includes('/very/long/path/')) {
+  if (
+    !metrics.questionText?.includes('21300eec') ||
+    !metrics.questionText.includes('/very/long/path/')
+  ) {
     errors.push(`${name}: 正文不是注入的长问题`);
   }
   if (name.startsWith('secretary') && !metrics.inPanel) {
@@ -821,9 +821,7 @@ async function main() {
     console.table(rows.map((row) => row.table));
     const errors = rows.flatMap((row) => layoutErrors(row.name, row.metrics, row.viewport));
     if (!(wide.metrics.sideW > narrow.metrics.sideW + 80)) {
-      errors.push(
-        `秘书宽侧栏 ${wide.metrics.sideW} 没有明显宽于窄侧栏 ${narrow.metrics.sideW}`
-      );
+      errors.push(`秘书宽侧栏 ${wide.metrics.sideW} 没有明显宽于窄侧栏 ${narrow.metrics.sideW}`);
     }
     assert.deepEqual(errors, []);
     log('PASS');
