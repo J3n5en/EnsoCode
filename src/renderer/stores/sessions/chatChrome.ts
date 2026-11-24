@@ -83,7 +83,7 @@ export function chatWorkspacePath(
   );
 }
 
-/** 输入框 @ 搜索与状态栏「工作目录」的根：临时会话是会话目录，其余仍是项目根（不跟 worktree） */
+/** 状态栏「工作目录」：临时会话是会话目录，其余仍是项目根（不跟 worktree），与 Main 的 @ 搜索根同规则 */
 export function chatProjectRoot(
   ownerId: string,
   project: { kind?: string; path: string }

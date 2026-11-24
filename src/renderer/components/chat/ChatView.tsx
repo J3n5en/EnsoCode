@@ -24,7 +24,6 @@ import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthC
 import { usePendingReminder } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
 import {
-  chatProjectRoot,
   chatWorkspacePath,
   selectChatChrome,
   selectEmptyChatState,
@@ -490,7 +489,7 @@ export function ChatView() {
             )}
           </div>
           <Composer
-            cwd={project ? chatProjectRoot(chrome.parentId, project) : undefined}
+            mentionConversationId={project ? chrome.parentId : undefined}
             chatCandidates={chatCandidates}
             commands={slashCommands}
             running={running}

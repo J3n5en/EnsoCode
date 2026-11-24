@@ -155,7 +155,7 @@ import {
   wakeColdRestartSession,
 } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
-import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
+import { mentionSearchRoot, spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { getDemandThreadRouter } from '../services/demandThreadRouter';
 import {
   demandRequesterIsOwner,
@@ -3715,9 +3715,17 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.AGENT_REMINDERS_LIST, () => readAllSessionReminders());
 
-  ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, root: unknown, query: unknown) => {
-    if (!isNonEmptyString(root) || typeof query !== 'string') return [];
-    return searchFiles(root, query);
+  // 只收会话标识，根目录由 Main 推导；子会话/coworker 归到父会话的工作区
+  ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, request: unknown) => {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) return [];
+    const { conversationId, query, ...rest } = request as Record<string, unknown>;
+    if (!isNonEmptyString(conversationId) || typeof query !== 'string' || Object.keys(rest).length)
+      return [];
+    const root = mentionSearchRoot(
+      getSourceAuthorityRegistry(),
+      agentSessionIndex.workspaceRoot(conversationId)
+    );
+    return root ? searchFiles(root, query) : [];
   });
 
   // 不收任意路径（那等于开放任意文件读取，远端同样可调）：工作区相对路径、会话写过的外部文件，或任务日志

@@ -255,7 +255,7 @@ export function BtwView({
           <MessageQueue conversationId={sessionId} queued={conversation?.queuedMessages ?? []} />
           <Composer
             isolated
-            cwd={project?.path}
+            mentionConversationId={project ? parentConversationId : undefined}
             commands={slashCommands}
             running={running}
             busy={busy}

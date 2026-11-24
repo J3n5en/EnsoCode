@@ -159,15 +159,15 @@ export function groupMentionCandidates(
 }
 
 export interface MentionSearchOptions {
-  /** 替代按 cwd 搜索（Bot 输入框：Main 按 chatId 推导根目录）；须是稳定引用 */
+  /** 替代按会话搜索（Bot 输入框：Main 按 chatId 推导根目录）；须是稳定引用 */
   searchFiles?: (query: string) => Promise<readonly FileHit[]>;
   /** false = 不拉 agent 类型候选 */
   agents?: boolean;
 }
 
-/** Agent 候选来自 Main 的注册表快照；文件搜索仍限定在 cwd 内。 */
+/** Agent 候选来自 Main 的注册表快照；文件搜索根由 Main 按 conversationId 推导。 */
 export function useMentionSearch(
-  cwd: string | undefined,
+  conversationId: string | undefined,
   query: string | null,
   chats: readonly ChatMentionCandidate[] = [],
   options: MentionSearchOptions = {}
@@ -198,13 +198,16 @@ export function useMentionSearch(
   }, [pickerOpen, withAgents]);
 
   useEffect(() => {
-    if (query === null || (!cwd && !searchFiles)) {
+    if (query === null || (!conversationId && !searchFiles)) {
       setFiles([]);
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      (searchFiles ? searchFiles(query) : window.electronAPI.files.search(cwd as string, query))
+      (searchFiles
+        ? searchFiles(query)
+        : window.electronAPI.files.search({ conversationId: conversationId as string, query })
+      )
         .then((hits) => {
           if (!cancelled) setFiles(toFileMentionCandidates(hits));
         })
@@ -216,7 +219,7 @@ export function useMentionSearch(
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [cwd, query, searchFiles]);
+  }, [conversationId, query, searchFiles]);
 
   return useMemo(
     () =>
