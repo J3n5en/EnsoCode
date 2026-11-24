@@ -3,7 +3,10 @@ export function planReminderWake(input: {
   row: Record<string, unknown> | null | undefined;
   alive: boolean;
   lifecycle?: string;
+  /** 权威注册表里会话还在（settings 投影丢了也不算删除） */
+  known?: boolean;
 }): 'clear' | 'fire' | 'resume' {
-  if (!input.row || input.row.archived === true || input.lifecycle === 'ended') return 'clear';
+  if (input.row?.archived === true || input.lifecycle === 'ended') return 'clear';
+  if (!input.row && !input.known) return 'clear';
   return input.alive ? 'fire' : 'resume';
 }

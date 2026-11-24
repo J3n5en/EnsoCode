@@ -1024,6 +1024,7 @@ async function wakeForReminder(sessionId: string): Promise<void> {
     row: readPersistedConversation(sessionId),
     alive: agentSessionIndex.isAlive(sessionId),
     lifecycle: sourceAuthority?.conversation(sessionId)?.lifecycle,
+    known: Boolean(sourceAuthority?.conversation(sessionId)),
   });
   const tag = `[reminder] due ${sessionId.slice(0, 8)}`;
   if (plan === 'clear') {
