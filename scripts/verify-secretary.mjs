@@ -82,6 +82,9 @@ const QUEUED_ONLY = process.argv.includes('--queued-only');
 const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contact-only');
 // 只跑 setup + 结构化完成结果段：goal_complete 带 result → 宿主核验 → 回传、看板与结果弹窗
 const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
+// 只跑「完成 · 需要你」卡片措辞：needsUser 前缀、summary 灰字，已归档与 result_mark_done 的不进「需要你」。
+// 整体 3 分钟硬超时，截图存到 /tmp/needs-user-wording-*.png
+const NEEDS_USER_WORDING_ONLY = process.argv.includes('--needs-user-wording-only');
 // 只跑插件联系渠道连续发送失败：错误原因上卡片、连续失败后暂停推送，截图存到 /tmp/contact-channel-error-*.png
 const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
 // 只跑「确认技能提案后秘书收到更新」：只唤醒一轮，不出现 Request aborted
@@ -755,6 +758,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (GOAL_RESULT_ONLY) {
     await verifyGoalResult(cdp, setup);
+    return;
+  }
+  if (NEEDS_USER_WORDING_ONLY) {
+    await verifyNeedsUserWording(cdp, setup);
     return;
   }
   if (CONTACT_CHANNEL_ERROR_ONLY) {
@@ -7115,6 +7122,129 @@ async function verifyGoalResult(cdp, setup) {
   log('  shots /tmp/structured-result-{board,card,dialog}.png');
 }
 
+async function verifyNeedsUserWording(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 完成 · 需要你：needsUser 前缀与 summary，已归档 / result_mark_done 不进「需要你」');
+  const result = {
+    summary: 'relay 已部署到 59dc0c231，6 个端点都是 200',
+    needsUser: ['在服务器 ali 删除 /tmp/enso-relay-upload-59dc0c2', '决定是否上架 tgclient 0.7.1'],
+    followUps: ['本机 /tmp/ali-deploy 可以顺手清掉'],
+  };
+  const dispatch = directDispatcher(page, setup);
+  const titles = { live: '部署阿里 relay', archived: '已归档的部署', marked: '秘书已收口的部署' };
+  const ids = {};
+  for (const [key, title] of Object.entries(titles)) {
+    const created = await dispatch('session_create', {
+      projectId: setup.projectId,
+      prompt: '做完就收尾',
+      title,
+      goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了', result })}]]`,
+    });
+    assert(created.ok, `needsUser 措辞: 会话「${title}」建成`, created);
+    ids[key] = created.conversationId;
+  }
+  for (const id of Object.values(ids)) {
+    await waitFor(
+      () => {
+        const found = readJson(dispatchFile).dispatched[id];
+        return found?.lastResult?.kind === 'goal-complete' && found.goalResult?.result?.needsUser;
+      },
+      `goal-complete with needsUser ${id}`,
+      60_000,
+      300
+    );
+  }
+  const archived = await secretaryTool(
+    cdp,
+    setup,
+    'session_archive',
+    { conversationId: ids.archived },
+    '归档'
+  );
+  assert(String(archived.text).includes('"archived"'), 'needsUser 措辞: 秘书归档一条', archived);
+  const marked = await secretaryTool(
+    cdp,
+    setup,
+    'result_mark_done',
+    { conversationId: ids.marked },
+    '收口'
+  );
+  assert(marked.text !== null, 'needsUser 措辞: 秘书 result_mark_done 一条', marked);
+
+  const board = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+    document.head.appendChild(style);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+    }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    const panel = await until(() => onScreen() && visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const section = await until(() => {
+      const node = visiblePanel()?.querySelector('[data-enso=secretary-needs-you]');
+      return node?.innerText.includes(${JSON.stringify(titles.live)}) ? node : null;
+    }, 20000);
+    section?.scrollIntoView({ block: 'center' });
+    await sleep(400);
+    const card = section?.querySelector('[data-enso=secretary-card]');
+    const rect = section?.getBoundingClientRect();
+    return JSON.stringify({
+      text: section?.innerText ?? null,
+      summary: card?.querySelector('[data-enso=secretary-card-needs-user-summary]')?.innerText ?? null,
+      items: [...(card?.querySelectorAll('[data-enso=secretary-card-needs-user-item]') ?? [])].map(
+        (node) => node.innerText
+      ),
+      rect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+    });
+  `);
+  log(`  needs-you ${JSON.stringify(board)}`);
+  assert(
+    typeof board.text === 'string' &&
+      board.text.includes('完成 · 需要你') &&
+      !board.text.includes('待你决定'),
+    'needsUser 措辞: 标签是「完成 · 需要你」',
+    board
+  );
+  assert(board.summary === result.summary, 'needsUser 措辞: needsUser 上方有 summary 灰字', board);
+  assert(
+    board.items.length === 2 && board.items.every((item) => item.startsWith('需要你：')),
+    'needsUser 措辞: 每条以「需要你：」开头',
+    board
+  );
+  assert(
+    !board.text.includes(titles.archived) && !board.text.includes(titles.marked),
+    'needsUser 措辞: 已归档与 result_mark_done 的不在「需要你」',
+    board
+  );
+  await cdp.shot('/tmp/needs-user-wording-board.png');
+  if (board.rect) {
+    const pad = 12;
+    await cdp.shotClip('/tmp/needs-user-wording-card.png', {
+      x: Math.max(0, board.rect.x - pad),
+      y: Math.max(0, board.rect.y - pad),
+      width: board.rect.width + pad * 2,
+      height: board.rect.height + pad * 2,
+    });
+  }
+  log('  shots /tmp/needs-user-wording-{board,card}.png');
+}
+
 /**
  * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
  * session_send attachments 交过去，目标会话时间线上出现图片引用。
@@ -8707,6 +8837,13 @@ process.on('unhandledRejection', (error) => {
   console.error(error);
   void finish(1);
 });
+
+if (NEEDS_USER_WORDING_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL needs-user-wording: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
 
 main()
   .then(async () => {

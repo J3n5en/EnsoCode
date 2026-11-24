@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
+import { isAppLoggingEnabled, setAppLoggingEnabled } from '@shared/appLogFile';
 import { diffConversations, isEmptyConversationsStore } from '@shared/conversationsPatch';
 import {
   type ContextMenuOpen,
@@ -99,6 +100,7 @@ export const SETTINGS_STATE_FIELDS = [
   'updateChannel',
   'pluginAutoUpdate',
   'pluginLoggingEnabled',
+  'appLoggingEnabled',
   'proxyMode',
   'customProxyUrl',
   'customCaCertPath',
@@ -235,6 +237,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'longCacheRetention',
   'pluginAutoUpdate',
   'pluginLoggingEnabled',
+  'appLoggingEnabled',
   'proxyMode',
   'customProxyUrl',
   'customCaCertPath',
@@ -523,6 +526,13 @@ function scheduleWrite(
       void import('./bots').then(({ syncBotDiscussMode }) => syncBotDiscussMode()).catch(() => {});
     }
     const nextPluginLogging = settingsStateOf(data).pluginLoggingEnabled === true;
+    const nextAppLogging = settingsStateOf(data).appLoggingEnabled === true;
+    if (isAppLoggingEnabled() !== nextAppLogging) {
+      setAppLoggingEnabled(nextAppLogging);
+      void import('../services/agentHost')
+        .then(({ pushAppLogging }) => pushAppLogging())
+        .catch(() => {});
+    }
     if ((settingsStateOf(previous).pluginLoggingEnabled === true) !== nextPluginLogging) {
       void import('../services/extensionPlugins')
         .then(({ peekExtensionPlugins }) =>

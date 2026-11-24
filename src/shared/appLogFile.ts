@@ -5,6 +5,19 @@ import { type AppLogLevel, type AppLogSource, formatAppLogLine, inferLogSource }
 
 export const APP_LOG_MAX_BYTES = 2 * 1024 * 1024;
 export const APP_LOG_KEEP = 3;
+/** Main fork worker 时下发的初始开关（'1' 为开） */
+export const APP_LOGGING_ENV = 'ENSO_APP_LOGGING';
+
+/** 「记录应用日志」在本进程的落盘开关：缺省关；Main 读设置、worker 读 env 与 set-app-logging 命令 */
+let appLoggingEnabled = false;
+
+export function setAppLoggingEnabled(enabled: boolean): void {
+  appLoggingEnabled = enabled;
+}
+
+export function isAppLoggingEnabled(): boolean {
+  return appLoggingEnabled;
+}
 
 /** 单写者的滚动日志：main.log 超过上限依次挪成 main.1.log … main.<keep>.log，最老的丢弃。写失败静默 */
 export class RotatingLogFile {
@@ -71,8 +84,8 @@ const CONSOLE_LEVELS: [
 ];
 
 /**
- * 把 console 输出同时写进结构化滚动日志（原输出照旧）。打包版 Main 与 worker 的 stdout 没人看，
- * 这是它们唯一的落盘渠道。返回卸载函数。
+ * 应用日志开启时把 console 输出同时写进结构化滚动日志（原输出照旧）。打包版 Main 与 worker 的
+ * stdout 没人看，这是它们唯一的落盘渠道。返回卸载函数。
  */
 export function installConsoleLog(
   file: string,
@@ -87,7 +100,7 @@ export function installConsoleLog(
     const original = target[method];
     target[method] = (...args: unknown[]) => {
       original.apply(target, args);
-      if (writing) return;
+      if (writing || !appLoggingEnabled) return;
       writing = true;
       try {
         const text = format(...args);

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
 import { describeAgentWorkerExit } from '@shared/agentWorkerExit';
+import { APP_LOGGING_ENV, isAppLoggingEnabled } from '@shared/appLogFile';
 import {
   type ApprovalAllowThreshold,
   DEFAULT_APPROVAL_ALLOW_THRESHOLD,
@@ -388,6 +389,7 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
       ...(options.restartCheckpointFile
         ? { [RESTART_CHECKPOINT_ENV]: options.restartCheckpointFile }
         : {}),
+      [APP_LOGGING_ENV]: isAppLoggingEnabled() ? '1' : '0',
       ENSO_AGENT_DATA_DIR: agentDataDir(),
       // 编码会话的 image_view 白名单：应用存放用户图片的目录（bot-chats/<chatId>/media）
       ENSO_USER_IMAGE_DIRS: appUserImageDirs(app.getPath('userData')).join(path.delimiter),
@@ -3247,6 +3249,15 @@ export function pushLongCacheRetention(): void {
   worker.postMessage({
     type: 'set-long-cache-retention',
     enabled: readSettingsState()?.longCacheRetention === true,
+  } satisfies AgentCommand);
+}
+
+/** worker 跟随 Main 当前的应用日志开关 */
+export function pushAppLogging(): void {
+  if (!worker || !workerReady) return;
+  worker.postMessage({
+    type: 'set-app-logging',
+    enabled: isAppLoggingEnabled(),
   } satisfies AgentCommand);
 }
 

@@ -1,7 +1,7 @@
 /** 外部应用的会话条目（列表展示用） */
 export interface ExternalSession {
-  /** 会话文件绝对路径，作为唯一标识 */
-  path: string;
+  /** Main 扫描时发放的不透明令牌；读取与导入只认它，路径留在 Main */
+  token: string;
   title: string;
   updatedAt: number;
   messageCount: number;
@@ -30,3 +30,14 @@ export interface SimpleMessage {
   text: string;
   timestamp?: number;
 }
+
+/** rescan：令牌未知、过期或文件已不在，需重新扫描；denied：文件已落到允许的根目录之外 */
+export type ExternalSessionError = 'rescan' | 'denied';
+
+export type ExternalSessionReadResult =
+  | { ok: true; messages: SimpleMessage[] }
+  | { ok: false; error: ExternalSessionError };
+
+export type ExternalSessionImportResult =
+  | { ok: true; sessionFile: string; title: string; messageCount: number }
+  | { ok: false; error: ExternalSessionError | 'empty' };

@@ -15,9 +15,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/stores/settings';
 
 const SOURCE_LABELS: Record<AppLogSource, string> = {
   main: 'Main process',
@@ -50,14 +52,67 @@ export function LogsSettings() {
           {t('Recent errors and log export. API keys, tokens and passwords are masked.')}
         </p>
       </div>
+      <LoggingSwitches />
       <ErrorSummary />
       <LogExport />
     </div>
   );
 }
 
+function LoggingSwitch({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+      <span className="min-w-0">
+        <span className="block">{label}</span>
+        <span className="block text-muted-foreground text-xs">{description}</span>
+      </span>
+      <Switch className="shrink-0" checked={checked} onCheckedChange={onChange} />
+    </label>
+  );
+}
+
+function LoggingSwitches() {
+  const { t } = useI18n();
+  const appLogging = useSettingsStore((state) => state.appLoggingEnabled === true);
+  const setAppLogging = useSettingsStore((state) => state.setAppLoggingEnabled);
+  const pluginLogging = useSettingsStore((state) => state.pluginLoggingEnabled === true);
+  const setPluginLogging = useSettingsStore((state) => state.setPluginLoggingEnabled);
+  return (
+    <section className="divide-y rounded-md border">
+      <LoggingSwitch
+        label={t('Record app logs')}
+        description={t(
+          'Off by default. Write main process and agent logs to disk. Files needed for restart recovery are always kept.'
+        )}
+        checked={appLogging}
+        onChange={setAppLogging}
+      />
+      <LoggingSwitch
+        label={t('Record plugin logs')}
+        description={t(
+          'Off by default. Record plugin console output and runtime logs to disk. Startup failures and crashes are still shown.'
+        )}
+        checked={pluginLogging}
+        onChange={setPluginLogging}
+      />
+    </section>
+  );
+}
+
 function ErrorSummary() {
   const { t } = useI18n();
+  const appLogging = useSettingsStore((state) => state.appLoggingEnabled === true);
+  const setAppLogging = useSettingsStore((state) => state.setAppLoggingEnabled);
   const [level, setLevel] = React.useState<LogSummaryLevel>('error');
   const [rows, setRows] = React.useState<{ key: string; entry: AppLogEntry }[] | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -115,6 +170,19 @@ function ErrorSummary() {
           </Button>
         </div>
       </div>
+      {!appLogging && (
+        <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="text-sm">{t('App logging is off')}</p>
+            <p className="text-muted-foreground text-xs">
+              {t('New app logs are not recorded while off. Existing logs are kept below.')}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setAppLogging(true)}>
+            {t('Enable app logging')}
+          </Button>
+        </div>
+      )}
       {rows && rows.length === 0 ? (
         <p className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
           {t('No errors recorded.')}
@@ -168,6 +236,7 @@ function ErrorSummary() {
 
 function LogExport() {
   const { t } = useI18n();
+  const appLogging = useSettingsStore((state) => state.appLoggingEnabled === true);
   const [hours, setHours] = React.useState<ExportHours>(DEFAULT_LOG_EXPORT_HOURS);
   const [busy, setBusy] = React.useState(false);
 
@@ -202,6 +271,11 @@ function LogExport() {
         <p className="text-sm text-muted-foreground">
           {t('Pack logs from the selected period into a zip file for troubleshooting.')}
         </p>
+        {!appLogging && (
+          <p className="text-muted-foreground text-xs">
+            {t('App logging is off. The export only includes logs recorded earlier.')}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <Select

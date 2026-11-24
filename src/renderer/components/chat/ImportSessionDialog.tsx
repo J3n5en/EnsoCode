@@ -1,5 +1,9 @@
 import type { Project } from '@shared/types';
-import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
+import type {
+  ExternalSessionError,
+  ExternalSessionSource,
+  SimpleMessage,
+} from '@shared/types/sessionImport';
 import { Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -22,21 +26,31 @@ interface ImportSessionDialogProps {
   onClose: () => void;
 }
 
+const ERROR_TEXT: Record<ExternalSessionError | 'empty', string> = {
+  rescan: 'The session list is out of date. Please rescan.',
+  denied: 'This session is outside the allowed folders and cannot be read.',
+  empty: 'This session has no messages to import.',
+};
+
 /** 从本地 AI 应用导入该项目下的会话历史 */
 export function ImportSessionDialog({ project, onClose }: ImportSessionDialogProps) {
   const { t } = useI18n();
   const [sources, setSources] = useState<ExternalSessionSource[] | null>(null);
-  const [selected, setSelected] = useState<{ sourceId: string; path: string } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [preview, setPreview] = useState<SimpleMessage[] | null>(null);
+  const [error, setError] = useState<ExternalSessionError | 'empty' | null>(null);
   const [importing, setImporting] = useState(false);
+  const [scanRound, setScanRound] = useState(0);
 
   // 扫描与预览读取不可取消，先发后到的结果会盖掉当前项目 / 当前选中项：只认本次 effect 的结果
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scanRound 只用来触发重新扫描
   useEffect(() => {
     if (!project) return;
     let alive = true;
     setSources(null);
     setSelected(null);
     setPreview(null);
+    setError(null);
     window.electronAPI.sessionImport
       .scan(project.path)
       .then((next) => {
@@ -48,7 +62,7 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
     return () => {
       alive = false;
     };
-  }, [project]);
+  }, [project, scanRound]);
 
   useEffect(() => {
     if (!selected) {
@@ -57,10 +71,13 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
     }
     let alive = true;
     setPreview(null);
+    setError(null);
     window.electronAPI.sessionImport
-      .read(selected.sourceId, selected.path)
-      .then((next) => {
-        if (alive) setPreview(next);
+      .read(selected)
+      .then((result) => {
+        if (!alive) return;
+        setPreview(result.ok ? result.messages : []);
+        if (!result.ok) setError(result.error);
       })
       .catch(() => {
         if (alive) setPreview([]);
@@ -74,15 +91,13 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
     if (!project || !selected) return;
     setImporting(true);
     try {
-      const result = await window.electronAPI.sessionImport.import(
-        selected.sourceId,
-        selected.path,
-        project.path
-      );
-      if (result) {
-        void useSessionsStore.getState().addImportedConversation(project.id, result);
-        onClose();
+      const result = await window.electronAPI.sessionImport.import(selected);
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
+      void useSessionsStore.getState().addImportedConversation(project.id, result);
+      onClose();
     } finally {
       setImporting(false);
     }
@@ -119,14 +134,12 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
                     </p>
                     {source.sessions.map((session) => (
                       <button
-                        key={session.path}
+                        key={session.token}
                         type="button"
-                        onClick={() =>
-                          setSelected({ sourceId: source.sourceId, path: session.path })
-                        }
+                        onClick={() => setSelected(session.token)}
                         className={cn(
                           'w-full px-2.5 py-1.5 text-left',
-                          selected?.path === session.path ? 'bg-muted' : 'hover:bg-muted/50'
+                          selected === session.token ? 'bg-muted' : 'hover:bg-muted/50'
                         )}
                       >
                         <p className="truncate text-xs">{session.title || t('Untitled')}</p>
@@ -175,6 +188,14 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
         </DialogPanel>
 
         <DialogFooter>
+          {error && (
+            <p className="mr-auto self-center text-xs text-destructive">{t(ERROR_TEXT[error])}</p>
+          )}
+          {error === 'rescan' && (
+            <Button variant="outline" onClick={() => setScanRound((round) => round + 1)}>
+              {t('Rescan')}
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>
             {t('Cancel')}
           </Button>

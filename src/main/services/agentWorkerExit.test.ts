@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AGENT_WORKER_CRASH_FILE, AGENT_WORKER_EXIT_LOG } from '@shared/agentWorkerExit';
+import { setAppLoggingEnabled } from '@shared/appLogFile';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   AGENT_WORKER_SERVICE_NAME,
@@ -13,6 +14,7 @@ import {
 
 let dir: string;
 beforeEach(() => {
+  setAppLoggingEnabled(true);
   dir = mkdtempSync(path.join(tmpdir(), 'worker-exit-'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

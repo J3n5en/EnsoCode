@@ -533,7 +533,7 @@ describe('SecretaryDailyBoard', () => {
     );
   });
 
-  it('需要你列中 goal-complete 带 needsUser 的卡片展示 needsUser 列表与非「目标完成」标签，完成列不再残留 needsUser 徽标', async () => {
+  it('需要你列中 goal-complete 带 needsUser 的卡片：中性标签、summary 灰字、每条「需要你：」前缀，完成列不再残留 needsUser 徽标', async () => {
     const longNeed = '确认宿主发版后是否立即合并上架并同步通知团队';
     h.daily[TODAY] = daily({
       groups: [
@@ -543,8 +543,8 @@ describe('SecretaryDailyBoard', () => {
             item({
               id: 's-decision',
               conversationId: 'c-decision',
-              label: 'Done · needs your decision',
-              summary: undefined,
+              label: 'Done · needs you',
+              summary: 'Review 完成',
               detail: 'channel: "github" }`。未改动 wrapUntrusted',
               tracked: true,
               needsUser: ['是否合并上架 #62', longNeed],
@@ -577,13 +577,19 @@ describe('SecretaryDailyBoard', () => {
     });
     await render(createElement(SecretaryDailyBoard));
     const needCard = container.querySelector('[data-group="needsYou"] [data-item="s-decision"]');
-    expect(needCard?.textContent).toContain('[Done · needs your decision]');
+    expect(needCard?.textContent).toContain('[Done · needs you]');
     expect(needCard?.textContent).not.toContain('[Goal complete]');
     expect(needCard?.textContent).not.toContain('wrapUntrusted');
+    expect(
+      needCard?.querySelector('[data-enso="secretary-daily-needs-user-summary"]')?.textContent
+    ).toBe('Review 完成');
     const needItems = Array.from(
       needCard?.querySelectorAll('[data-enso="secretary-daily-needs-user-item"]') ?? []
     );
-    expect(needItems.map((el) => el.textContent)).toEqual(['是否合并上架 #62', longNeed]);
+    expect(needItems.map((el) => el.textContent)).toEqual([
+      'Needs you: 是否合并上架 #62',
+      `Needs you: ${longNeed}`,
+    ]);
     expect(needItems[1]?.getAttribute('title')).toBe(longNeed);
     expect(needCard?.querySelector('[data-enso="secretary-goal-needs-user"]')).toBeNull();
 
