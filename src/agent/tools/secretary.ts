@@ -149,6 +149,17 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     keys: ['conversationId'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
+  needs_user_escalate: {
+    keys: ['conversationId', 'needsUserIndex', 'text'],
+    numbers: ['needsUserIndex'],
+    aliases: {
+      sessionId: 'conversationId',
+      id: 'conversationId',
+      index: 'needsUserIndex',
+      needsUser: 'needsUserIndex',
+      message: 'text',
+    },
+  },
   session_answer: {
     keys: ['conversationId', 'askId', 'answer'],
     aliases: { sessionId: 'conversationId', id: 'askId', requestId: 'askId' },
@@ -673,7 +684,7 @@ const SCHEMAS: Record<
   },
   result_mark_done: {
     description:
-      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. A blocked or paused goal on the session is closed with it, so a later session_send with goal is not refused; result_mark_undo puts that goal back. Only sessions you dispatched or track are accepted; nothing else in the session is touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone. A needsUser card you put to the user through ask_user with relatesTo clears itself once answered, so do not mark it.',
+      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. A blocked or paused goal on the session is closed with it, so a later session_send with goal is not refused; result_mark_undo puts that goal back. Only sessions you dispatched or track are accepted; nothing else in the session is touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone. Also use it after you settled every needs-user[N] item of a goal-complete yourself, so the card leaves "with secretary" and lands in done. A needsUser card you put to the user through ask_user with relatesTo clears itself once answered, so do not mark it.',
     parameters: object({ conversationId: id('Session id from session_list or the board') }, [
       'conversationId',
     ]),
@@ -684,6 +695,27 @@ const SCHEMAS: Record<
     parameters: object({ conversationId: id('Session id from session_list or the board') }, [
       'conversationId',
     ]),
+  },
+  needs_user_escalate: {
+    description:
+      'Put one needs-user[N] item of a goal-complete result in front of the user without asking a question, for something only they can do by hand (for example "click confirm in the Mac title bar"). needsUser items of sessions you dispatched or track first wait for you under "with secretary" and do not reach the user\'s "needs you" list until you escalate them. Escalate only what the user personally has to decide or do; once you escalate any item, the items you did not escalate count as handled by you. Pass text to reword the item as one plain sentence saying what the user should do; the card shows it as "Needs you: <text>". When you need an answer instead, use ask_user with relatesTo, which escalates the item too. Items nobody escalates or settles reach the user on their own after 30 minutes. The call is audited.',
+    parameters: object(
+      {
+        conversationId: id('Session id shown as session:<id> in the result update'),
+        needsUserIndex: {
+          type: 'integer',
+          minimum: 0,
+          description: 'N from the needs-user[N] line',
+        },
+        text: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 300,
+          description: 'Optional: the item reworded as one plain sentence of what the user must do',
+        },
+      },
+      ['conversationId', 'needsUserIndex']
+    ),
   },
   session_answer: {
     description:

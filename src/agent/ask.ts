@@ -170,9 +170,9 @@ const RELATES_TO_SCHEMA = {
   type: 'object',
   description:
     'Set this when the question relays a needsUser item from a session you dispatched or track ' +
-    '(the needs-user[N] lines of its goal-complete result). When the user answers, the host ' +
-    'marks that item answered and clears the card once every item is answered, so do not call ' +
-    'result_mark_done for it.',
+    '(the needs-user[N] lines of its goal-complete result). Asking escalates that item into the ' +
+    "user's needs-you list. When the user answers, the host marks it answered and clears the card " +
+    'once every escalated item is answered, so do not call result_mark_done for it.',
   properties: {
     conversationId: { type: 'string', description: 'The session id shown as session:<id>' },
     needsUserIndex: {

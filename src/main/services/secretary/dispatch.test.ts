@@ -30,6 +30,7 @@ import {
   createSecretaryDispatchHandlers,
   dismissPending,
   dismissResult,
+  escalateNeedsUser,
   grantTakeover,
   listTakeovers,
   listUntracked,
@@ -5084,5 +5085,100 @@ describe('answerNeedsUser：秘书带关联转问的 needsUser 被用户答复',
       error: 'nothing-pending',
     });
     expect(blocked.file.dispatched.c1.lastResult?.manual).toBeUndefined();
+  });
+});
+
+describe('needs_user_escalate：秘书筛选后把 needsUser 升级给用户', () => {
+  const rows = {
+    c1: { id: 'c1', title: '清理孤儿进程', sessionFile: '/s/c1.jsonl', driver: 'main' },
+    'sec-1': { id: 'sec-1', title: '秘书', sessionFile: '/s/sec-1.jsonl' },
+  };
+  const withNeeds = (needsUser: string[]) => {
+    const file = dispatchedFile('c1', 'idle');
+    file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: NOW - 10_000 };
+    file.dispatched.c1.goalResult = { at: NOW - 10_000, result: { summary: '做完了', needsUser } };
+    return harness({ file, rows, statuses: { c1: idle } });
+  };
+  const boardOf = (file: SecretaryDispatchFile) =>
+    buildBoard(file, {
+      rows,
+      statuses: { c1: idle },
+      projects: [localProject()],
+      todos: [],
+      now: NOW,
+    });
+
+  it('升级前在「秘书处理中」；升级后改写文字进「需要你」，审计记一笔', async () => {
+    const h = withNeeds(['删临时文件', '在 Mac 上点确认']);
+    expect(boardOf(h.file).needsYou).toEqual([]);
+    expect(
+      await call(h.handlers.needs_user_escalate, {
+        conversationId: 'c1',
+        needsUserIndex: 1,
+        text: '在 Mac 顶栏点一下确认',
+      })
+    ).toEqual({
+      ok: true,
+      result: { status: 'escalated', conversationId: 'c1', needsUserIndex: 1 },
+    });
+    const [card] = boardOf(h.file).needsYou;
+    expect(card).toMatchObject({ conversationId: 'c1', needsUser: ['在 Mac 顶栏点一下确认'] });
+    expect(h.audits.at(-1)).toMatchObject({ op: 'needs_user_escalate', targetId: 'c1', ok: true });
+    // 落盘再读回来仍在
+    expect(parseDispatchFile(JSON.parse(JSON.stringify(h.file))).dispatched.c1.goalResult).toEqual(
+      h.file.dispatched.c1.goalResult
+    );
+  });
+
+  it('越界、没有待处理的 needsUser 都拒绝', async () => {
+    const h = withNeeds(['删临时文件']);
+    const bad = await call(h.handlers.needs_user_escalate, {
+      conversationId: 'c1',
+      needsUserIndex: 3,
+    });
+    expect(bad.ok).toBe(false);
+    expect(await escalateNeedsUser(h.ports, { conversationId: 'zz', needsUserIndex: 0 })).toEqual({
+      ok: false,
+      error: 'not-found',
+    });
+    h.file.dispatched.c1.lastResult = { kind: 'goal-blocked', turn: 1, at: NOW - 10_000 };
+    expect(await escalateNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 0 })).toEqual({
+      ok: false,
+      error: 'nothing-pending',
+    });
+  });
+
+  it('result_mark_done 后进完成，不再算秘书处理中', async () => {
+    const h = withNeeds(['删临时文件']);
+    await call(h.handlers.result_mark_done, { conversationId: 'c1' });
+    const board = boardOf(h.file);
+    expect(board.needsYou).toEqual([]);
+    expect(board.done[0]).toMatchObject({ conversationId: 'c1' });
+    expect(board.done[0]).not.toHaveProperty('triage');
+  });
+
+  it('带关联转问时算升级：答完升级的那条就收口，没升级的不拦着', async () => {
+    const h = withNeeds(['删临时文件', '是否清理孤儿进程']);
+    expect(
+      await escalateNeedsUser(
+        h.ports,
+        { conversationId: 'c1', needsUserIndex: 1 },
+        '要清理孤儿进程吗？',
+        'ask'
+      )
+    ).toEqual({ ok: true });
+    expect(boardOf(h.file).needsYou).toHaveLength(1);
+    expect(
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '清理', NOW)
+    ).toEqual({ ok: true, cleared: true });
+    expect(boardOf(h.file).needsYou).toEqual([]);
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+  });
+
+  it('提问时没记到升级，答复本身也算升级', async () => {
+    const h = withNeeds(['删临时文件', '是否清理孤儿进程']);
+    expect(
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '清理', NOW)
+    ).toEqual({ ok: true, cleared: true });
   });
 });

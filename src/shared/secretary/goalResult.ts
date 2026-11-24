@@ -61,11 +61,20 @@ export interface NeedsUserAnswer {
   at: number;
 }
 
+/** 秘书把某条 needsUser 升级给用户；text 是改写后给用户看的一句话，缺省用原文 */
+export interface NeedsUserEscalation {
+  index: number;
+  text?: string;
+  at: number;
+}
+
 export interface GoalResultView {
   result: GoalResult;
   checks?: GoalResultCheck[];
   /** 秘书带关联转问后用户的答复；属于这一份结果，新结果整体替换时自然清空 */
   answers?: NeedsUserAnswer[];
+  /** 秘书筛选后升级给用户的条目；同样随新结果整体替换 */
+  escalations?: NeedsUserEscalation[];
   at: number;
 }
 
@@ -101,13 +110,75 @@ export function unansweredNeedsUserCount(view: GoalResultView | undefined): numb
   return needsUserItems(view).filter((_, index) => !answered.has(index)).length;
 }
 
+/** 秘书没在这段时间里升级或处理，needsUser 照旧直接给用户 */
+export const NEEDS_USER_TRIAGE_MS = 30 * 60_000;
+
+/** 记下一次升级：index 缺省表示全部条目（保留原文），同一条再升级以新的为准 */
+export function escalateGoalResultNeedsUser(
+  view: GoalResultView,
+  index: number | undefined,
+  text: string | undefined,
+  at: number
+): GoalResultView {
+  const count = needsUserItems(view).length;
+  const targets = index === undefined ? [...Array(count).keys()] : [index];
+  const kept = (view.escalations ?? []).filter((item) => !targets.includes(item.index));
+  const added = targets.map((target) => ({
+    index: target,
+    ...(index !== undefined && text ? { text } : {}),
+    at,
+  }));
+  return { ...view, escalations: [...kept, ...added].sort((a, b) => a.index - b.index) };
+}
+
+export interface ShownNeedsUser {
+  /** 此刻还在等秘书筛选：不进「需要你」 */
+  triaging: boolean;
+  /** 给用户看的条目，升级过的用改写后的文字 */
+  items: string[];
+  /** 答复按 items 里的位置重新编号 */
+  answers: NeedsUserAnswer[];
+}
+
+/**
+ * 用户此刻该看到哪些 needsUser。triage 表示这份结果先经秘书（派出或跟踪、秘书会话还在）。
+ * 秘书升级过就只给升级的条目，其余算秘书处理掉；没升级且没超时就还在筛选；
+ * 不经秘书或超时没处理，全部照旧给用户。
+ */
+export function shownNeedsUser(
+  view: GoalResultView | undefined,
+  triage: boolean,
+  now: number
+): ShownNeedsUser {
+  const all = needsUserItems(view);
+  if (!view || all.length === 0) return { triaging: false, items: [], answers: [] };
+  const escalated = new Map(
+    (view.escalations ?? [])
+      .filter((item) => item.index < all.length)
+      .map((item) => [item.index, item.text])
+  );
+  const indexes =
+    triage && escalated.size > 0 ? [...escalated.keys()].sort((a, b) => a - b) : [...all.keys()];
+  if (triage && escalated.size === 0 && now < view.at + NEEDS_USER_TRIAGE_MS)
+    return { triaging: true, items: [], answers: [] };
+  const position = new Map(indexes.map((index, at) => [index, at]));
+  return {
+    triaging: false,
+    items: indexes.map((index) => escalated.get(index) || all[index]),
+    answers: (view.answers ?? []).flatMap((answer) => {
+      const at = position.get(answer.index);
+      return at === undefined ? [] : [{ ...answer, index: at }];
+    }),
+  };
+}
+
 /** 清除已处理的 needsUser 与答复，保留 PR/commit/checks 等客观事实；无剩余内容时返回 undefined */
 export function stripGoalResultNeedsUser(
   view: GoalResultView | undefined
 ): GoalResultView | undefined {
-  if (!view?.result.needsUser && !view?.answers) return view;
+  if (!view?.result.needsUser && !view?.answers && !view?.escalations) return view;
   const { needsUser: _needsUser, ...rest } = view.result;
-  const { answers: _answers, ...base } = view;
+  const { answers: _answers, escalations: _escalations, ...base } = view;
   const hasRest = Object.keys(rest).length > 0 || (view.checks?.length ?? 0) > 0;
   if (!hasRest) return undefined;
   return { ...base, result: rest };
@@ -512,6 +583,8 @@ export function parseGoalResultView(raw: unknown): GoalResultView | undefined {
   const view: GoalResultView = { result: parsed.value, at: raw.at };
   const answers = parseAnswers(raw.answers);
   if (answers.length > 0) view.answers = answers;
+  const escalations = parseEscalations(raw.escalations);
+  if (escalations.length > 0) view.escalations = escalations;
   if (!Array.isArray(raw.checks)) return view;
   const checks = raw.checks.flatMap((item) => {
     const check = parseCheck(item);
@@ -529,6 +602,18 @@ function parseAnswers(raw: unknown): NeedsUserAnswer[] {
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return [];
     if (typeof answer !== 'string' || typeof at !== 'number' || !Number.isFinite(at)) return [];
     return [{ index, answer: answer.slice(0, MAX_TEXT), at }];
+  });
+}
+
+function parseEscalations(raw: unknown): NeedsUserEscalation[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_ITEMS).flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const { index, text, at } = item;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return [];
+    if (typeof at !== 'number' || !Number.isFinite(at)) return [];
+    if (text !== undefined && typeof text !== 'string') return [];
+    return [{ index, ...(text ? { text: text.slice(0, MAX_TEXT) } : {}), at }];
   });
 }
 

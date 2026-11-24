@@ -22,6 +22,7 @@ export const SECRETARY_OPS = [
   'session_unarchive',
   'result_mark_done',
   'result_mark_undo',
+  'needs_user_escalate',
   'session_answer',
   'session_takeover_propose',
   'image_view',

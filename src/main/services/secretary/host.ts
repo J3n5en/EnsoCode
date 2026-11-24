@@ -9,6 +9,7 @@ import {
   type GoalResultCheck,
   type GoalResultView,
   hasNeedsUser,
+  NEEDS_USER_TRIAGE_MS,
   needsUserItems,
   parseGoalResultView,
 } from '@shared/secretary/goalResult';
@@ -145,6 +146,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   isSecretaryConversation?(conversationId: string): boolean;
   /** 秘书带关联转问的 needsUser 被用户答复：记下答复，全部答完收口卡片；缺省表示不处理 */
   answerNeedsUser?(link: AskRelatesTo, answer: string, askedAt: number): void;
+  /** 秘书带关联提问：那条 needsUser 同时升级进「需要你」；缺省表示不处理 */
+  escalateNeedsUser?(link: AskRelatesTo, text: string | undefined): void;
   publish(): void;
   now(): number;
   /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
@@ -395,6 +398,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   const pendingComplete = new Set<string>();
   /** 启动恢复时按恢复清单放行、正在等待恢复成活轮次的会话 → 放行时刻 */
   const coldResumePending = new Map<string, number>();
+  /** 上一次 tick：needsUser 的筛选期在两次 tick 之间到点时重新发布一次工作台 */
+  let lastTickAt: number | undefined;
   /** 结构化结果的只读核验。轮次结束时还没落定就先挂起收尾。 */
   const goalVerifies = new Map<string, GoalVerifySlot>();
   const goalVerifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1235,6 +1240,17 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       if (
         sessionId &&
+        event.type === 'ask-request' &&
+        event.ask?.relatesTo &&
+        ports.isSecretaryConversation?.(sessionId)
+      ) {
+        ports.escalateNeedsUser?.(
+          event.ask.relatesTo,
+          event.ask.relatesTo.needsUserIndex === undefined ? undefined : event.ask.question
+        );
+      }
+      if (
+        sessionId &&
         event.type === 'ask-resolved' &&
         event.by === 'user' &&
         event.relatesTo &&
@@ -1656,7 +1672,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
       const reported = ports.reportPeerTodos?.() ?? false;
-      if (changed || todosChanged || reported) ports.publish();
+      const triageEnded = records.some((record) => {
+        const result = record.lastResult;
+        if (result?.kind !== 'goal-complete' || result.manual || result.dismissed) return false;
+        if (!hasNeedsUser(record.goalResult) || record.goalResult?.escalations?.length)
+          return false;
+        const deadline = (record.goalResult?.at ?? 0) + NEEDS_USER_TRIAGE_MS;
+        return deadline <= now && (lastTickAt === undefined || lastTickAt < deadline);
+      });
+      lastTickAt = now;
+      if (changed || todosChanged || reported || triageEnded) ports.publish();
       // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
       syncSystemSchedules(ports, ports.profile(), ports.todos());
       flush(now);

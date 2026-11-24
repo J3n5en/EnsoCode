@@ -131,7 +131,8 @@ export function createGoalTools(
         'While a goal runs, nobody is watching each step: do not stop at analysis or a plan; ' +
         'when something is ambiguous, take the most likely reading, state the assumption, and keep going. ' +
         'Optional result carries structured evidence (pull requests, commits, checks, screenshots) for a read-only host check; a plain summary still completes the goal. ' +
-        'result.needsUser puts the card in front of the user: list only what they must decide or do by hand, one imperative sentence each; optional cleanup and suggestions go in result.followUps.',
+        'result.needsUser lists only what the user must decide or do by hand, one imperative sentence each; optional cleanup and suggestions go in result.followUps. ' +
+        'For a session dispatched or tracked by a secretary, needsUser goes to the secretary first, which handles what it can and passes on the rest, so write it as it is and do not inflate it.',
       'summary',
       'What was accomplished, with concrete evidence (files changed, tests passing, etc.)',
       true

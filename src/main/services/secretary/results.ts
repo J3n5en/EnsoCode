@@ -8,6 +8,7 @@ import {
   formatGoalResultClaims,
   hasNeedsUser,
   needsUserItems,
+  shownNeedsUser,
 } from '@shared/secretary/goalResult';
 import { queuedStartOf, queuePositions } from '@shared/secretary/queuedSession';
 import { wrapUntrusted } from '@shared/secretary/transcript';
@@ -550,12 +551,22 @@ function boardSubagents(
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
+/** 秘书会话还在（没删没归档）：结果能先交给它筛选 */
+export function secretaryLiveIn(
+  rows: Readonly<Record<string, Record<string, unknown>>>,
+  conversationId: string
+): boolean {
+  const row = rows[conversationId];
+  return Boolean(row) && row.archived !== true;
+}
+
 /** 工作台投影：与 session_list 同源（会话行 + 会话状态 + 项目），不另建一份任务数据 */
 export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): SecretaryBoard {
   const projectName = (projectId: string): string => {
     const project = input.projects.find((candidate) => candidate.projectId === projectId);
     return secretaryProjectName(project, input.aliases);
   };
+  const secretaryLive = (conversationId: string) => secretaryLiveIn(input.rows, conversationId);
 
   const needsYou: SecretaryCard[] = Object.values(file.proposals)
     .filter((proposal) => proposal.status === 'pending')
@@ -601,18 +612,22 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       going && record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)
         ? undefined
         : record.lastResult;
-    const needsUser =
+    const pendingNeeds =
       !archived &&
       visibleResult &&
       !visibleResult.dismissed &&
       !visibleResult.manual &&
-      (visibleResult.kind === 'goal-complete' || visibleResult.kind === 'goal-blocked')
-        ? needsUserItems(record.goalResult).map((item) => redactSecrets(item))
-        : [];
-    const needsUserAnswers =
-      needsUser.length > 0
-        ? (record.goalResult?.answers ?? []).filter((item) => item.index < needsUser.length)
-        : [];
+      (visibleResult.kind === 'goal-complete' || visibleResult.kind === 'goal-blocked');
+    // 派出或跟踪的完成结果先经秘书筛选；goal-blocked 照旧直接给用户
+    const shown = shownNeedsUser(
+      pendingNeeds ? record.goalResult : undefined,
+      visibleResult?.kind === 'goal-complete' && secretaryLive(record.secretaryConversationId),
+      now
+    );
+    const needsUser = (shown.triaging ? needsUserItems(record.goalResult) : shown.items).map(
+      (item) => redactSecrets(item)
+    );
+    const needsUserAnswers = shown.answers;
     const summarySource = record.goalResult?.result.summary?.trim() ?? '';
     const summary =
       visibleResult?.kind === 'goal-complete' && !visibleResult.manual && summarySource
@@ -640,6 +655,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(visibleResult ? { result: visibleResult.kind, resultAt: visibleResult.at } : {}),
       ...(needsUser.length > 0 ? { needsUser } : {}),
       ...(needsUserAnswers.length > 0 ? { needsUserAnswers } : {}),
+      ...(shown.triaging ? { triage: true as const } : {}),
       ...(summary ? { summary } : {}),
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going &&
@@ -676,7 +692,8 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       continue;
     }
     // 归档了就是用户已经处理过，不再占「需要你处理」
-    const needsYouNow = !archived && sessionNeedsUser(record, state);
+    const needsYouNow =
+      !archived && (state === 'waiting' || (!shown.triaging && sessionNeedsUser(record, state)));
     if (needsYouNow) needsYou.push(card);
     else if (going) running.push(card);
     else done.push(card);

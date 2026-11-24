@@ -1715,3 +1715,94 @@ describe('排队会话', () => {
     expect(wokenCard?.kind === 'session' ? wokenCard.continuing : undefined).toBeUndefined();
   });
 });
+
+describe('needsUser 先经秘书筛选', () => {
+  const NOW = 100 * MINUTE;
+  const at = NOW - 5 * MINUTE;
+  const sec = { title: '秘书', sessionFile: '/s/s1.jsonl' };
+  const need = (extra: Partial<DispatchRecord> = {}) =>
+    record({
+      conversationId: 'need',
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 1, at },
+      goalResult: {
+        at,
+        result: { summary: '做完了', needsUser: ['删临时文件', '在 Mac 上点确认'] },
+      },
+      ...extra,
+    });
+  const boardOf = (
+    dispatched: Record<string, DispatchRecord>,
+    rows: Record<string, Record<string, unknown>> = { s1: sec },
+    now = NOW
+  ) =>
+    buildBoard(emptyFile({ dispatched }), {
+      rows: { need: { title: '需用户确认', sessionFile: '/s/need.jsonl' }, ...rows },
+      statuses: { need: idle },
+      projects: [],
+      todos: [],
+      now,
+    });
+  const ids = (cards: readonly { kind: string }[]) =>
+    cards.map((card) => ('conversationId' in card ? card.conversationId : card.kind));
+
+  it('秘书在、未升级：不进「需要你」，作为「秘书处理中」留在 done 里并带原条目', () => {
+    const board = boardOf({ need: need() });
+    expect(board.needsYou).toEqual([]);
+    expect(board.done).toHaveLength(1);
+    expect(board.done[0]).toMatchObject({
+      conversationId: 'need',
+      triage: true,
+      needsUser: ['删临时文件', '在 Mac 上点确认'],
+    });
+  });
+
+  it('秘书升级了一条：只这一条以改写后的文字进「需要你」，没升级的算秘书处理掉', () => {
+    const board = boardOf({
+      need: need({
+        goalResult: {
+          at,
+          result: { needsUser: ['删临时文件', '在 Mac 上点确认'] },
+          escalations: [{ index: 1, text: '在 Mac 顶栏点一下确认', at: at + 1 }],
+          answers: [{ index: 1, answer: '点了', at: at + 2 }],
+        },
+      }),
+    });
+    expect(ids(board.needsYou)).toEqual(['need']);
+    expect(board.needsYou[0]).toMatchObject({
+      needsUser: ['在 Mac 顶栏点一下确认'],
+      needsUserAnswers: [{ index: 0, answer: '点了', at: at + 2 }],
+    });
+    expect(board.needsYou[0]).not.toHaveProperty('triage');
+    expect(board.done).toEqual([]);
+  });
+
+  it('超过 30 分钟秘书没处理：照旧全部进「需要你」', () => {
+    const board = boardOf({ need: need() }, { s1: sec }, at + 30 * MINUTE);
+    expect(ids(board.needsYou)).toEqual(['need']);
+    expect(board.needsYou[0]).toMatchObject({ needsUser: ['删临时文件', '在 Mac 上点确认'] });
+    expect(board.done).toEqual([]);
+  });
+
+  it('秘书会话已删或已归档：直接进「需要你」', () => {
+    expect(ids(boardOf({ need: need() }, {}).needsYou)).toEqual(['need']);
+    expect(ids(boardOf({ need: need() }, { s1: { ...sec, archived: true } }).needsYou)).toEqual([
+      'need',
+    ]);
+  });
+
+  it('goal-blocked 的 needsUser、实时审批与提问不经筛选，照旧直接进「需要你」', () => {
+    const blocked = boardOf({
+      need: need({ lastResult: { kind: 'goal-blocked', turn: 1, at } }),
+    });
+    expect(ids(blocked.needsYou)).toEqual(['need']);
+    const asking = buildBoard(emptyFile({ dispatched: { need: need() } }), {
+      rows: { need: { title: '提问中', sessionFile: '/s/need.jsonl' }, s1: sec },
+      statuses: { need: waiting },
+      projects: [],
+      todos: [],
+      now: NOW,
+    });
+    expect(ids(asking.needsYou)).toEqual(['need']);
+  });
+});
