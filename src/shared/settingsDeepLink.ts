@@ -47,7 +47,7 @@ const CATEGORY_SET = new Set<string>(SETTINGS_CATEGORIES);
 export function parseSettingsDeepLink(raw: unknown): SettingsDeepLink | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const category = (raw as { category?: unknown }).category;
-  const rowId = (raw as { rowId?: unknown }).rowId;
+  const rowId = (raw as { rowId?: unknown }).rowId ?? `${String(category)}.root`;
   if (typeof category !== 'string' || !CATEGORY_SET.has(category)) return null;
   if (typeof rowId !== 'string' || !rowId) return null;
   const pluginInstallUrl = (raw as { pluginInstallUrl?: unknown }).pluginInstallUrl;
