@@ -1443,6 +1443,59 @@ describe('排队会话', () => {
     expect(board.done[0]).not.toHaveProperty('needsUser');
   });
 
+  it('goal-complete 会话卡带 summary：知道了之后仍在，手动标完成和空白不带', () => {
+    const secret = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+    const file = emptyFile({
+      dispatched: {
+        done: record({
+          conversationId: 'done',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 10 },
+          goalResult: { at: 10, result: { summary: `  已合并 ${secret}  ` } },
+        }),
+        dismissed: record({
+          conversationId: 'dismissed',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 11, dismissed: true },
+          goalResult: { at: 11, result: { summary: 'PR 已合', needsUser: ['是否上架'] } },
+        }),
+        manual: record({
+          conversationId: 'manual',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 12, manual: true },
+          goalResult: { at: 12, result: { summary: '手动那条', needsUser: ['旧提示'] } },
+        }),
+        blank: record({
+          conversationId: 'blank',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 13 },
+          goalResult: { at: 13, result: { summary: '   ' } },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        done: { title: '完成', sessionFile: '/s/done.jsonl' },
+        dismissed: { title: '已知', sessionFile: '/s/dismissed.jsonl' },
+        manual: { title: '手动', sessionFile: '/s/manual.jsonl' },
+        blank: { title: '空白', sessionFile: '/s/blank.jsonl' },
+      },
+      statuses: { done: idle, dismissed: idle, manual: idle, blank: idle },
+      projects,
+      todos: [],
+    });
+    const card = (id: string) =>
+      [...board.needsYou, ...board.done].find(
+        (item) => item.kind === 'session' && item.conversationId === id
+      );
+    expect(card('done')).toMatchObject({ summary: '已合并 [REDACTED]' });
+    expect(JSON.stringify(card('done'))).not.toContain(secret);
+    expect(card('dismissed')).toMatchObject({ summary: 'PR 已合' });
+    expect(card('dismissed')).not.toHaveProperty('needsUser');
+    expect(card('manual')).not.toHaveProperty('summary');
+    expect(card('blank')).not.toHaveProperty('summary');
+  });
+
   it('运行中的会话（无待审批/提问）即使带历史残留结果也进「进行中」，不进「需要你处理」', () => {
     const file = emptyFile({
       dispatched: {

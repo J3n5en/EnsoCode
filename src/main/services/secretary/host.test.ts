@@ -3334,6 +3334,32 @@ describe('结构化目标结果', () => {
     expect(archived[0]?.[3]).toMatchObject({ goalResult: { result, checks } });
   });
 
+  it('goal-complete 带 goalResult 时，动态末条记下 needsUser 和 summary', () => {
+    const secret = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('goal-signal', {
+        kind: 'complete',
+        note: 'ok',
+        result: {
+          summary: `shipped ${secret}`,
+          needsUser: [`确认 ${secret}`],
+        },
+      }),
+      []
+    );
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    const last = h.state.file.activity?.at(-1);
+    expect(last).toMatchObject({
+      kind: 'goal-complete',
+      conversationId: 'c1',
+      needsUser: ['确认 [REDACTED]'],
+      summary: 'shipped [REDACTED]',
+    });
+    expect(JSON.stringify(last)).not.toContain(secret);
+  });
+
   it('核验一直不返回时，到点仍记完成并标核验超时', async () => {
     vi.useFakeTimers();
     try {
