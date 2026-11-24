@@ -6,6 +6,7 @@ import {
   ownedByRoot,
   parseReminderFile,
   REMINDER_LABEL_MAX,
+  REMINDER_LATE_MS,
   REMINDER_MAX_CHAIN,
   REMINDER_MAX_PER_OWNER,
   REMINDER_MIN_DELAY_MS,
@@ -25,6 +26,8 @@ export class ReminderStore {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private retryAt: number | undefined;
   private disposed = false;
+  /** 加载时就已过点的：重启或 worker 停着期间到点 */
+  private readonly lateAtLoad: ReadonlySet<string>;
 
   constructor(
     private readonly file: string,
@@ -36,7 +39,17 @@ export class ReminderStore {
       raw = JSON.parse(readFileSync(file, 'utf8'));
     } catch {}
     this.data = parseReminderFile(raw);
+    const loadedAt = Date.now();
+    this.lateAtLoad = new Set(
+      this.data.reminders
+        .filter((item) => loadedAt - item.dueAt > REMINDER_LATE_MS)
+        .map((item) => item.id)
+    );
     this.arm();
+  }
+
+  missedWhileDown(id: string): boolean {
+    return this.lateAtLoad.has(id);
   }
 
   list(owner: string): SessionReminder[] {
@@ -391,10 +404,14 @@ export function createReminderTools(
 }
 
 /** 到点注入的文本：标明是自己用 remind_me 定的，原样附上 prompt */
-export function reminderNotice(reminder: SessionReminder): string {
+export function reminderNotice(reminder: SessionReminder, deliveredLateAt?: number): string {
+  const late =
+    deliveredLateAt === undefined
+      ? ''
+      : ` It came due while EnsoCode was restarting or not running, so it is delivered late (now ${localIso(deliveredLateAt)}).`;
   return [
     `Reminder ${reminder.id}${reminder.label ? ` "${reminder.label}"` : ''} is due: you set it yourself with remind_me ` +
-      `at ${localIso(reminder.createdAt)}, due ${localIso(reminder.dueAt)}. Your note:`,
+      `at ${localIso(reminder.createdAt)}, due ${localIso(reminder.dueAt)}.${late} Your note:`,
     reminder.prompt,
   ].join('\n');
 }
