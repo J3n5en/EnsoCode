@@ -53,6 +53,7 @@ export function SecretaryDeleteDialog({
   React.useEffect(() => {
     if (!open) return;
     setStep('preview');
+    setBusy(false);
     setError(null);
     setPreview(null);
     void window.electronAPI.secretary.deletePreview(secretaryId).then((result) => {
@@ -64,17 +65,17 @@ export function SecretaryDeleteDialog({
   const confirm = async () => {
     setBusy(true);
     setError(null);
-    try {
-      const result = await window.electronAPI.secretary.deleteSecretary(secretaryId, true);
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      onOpenChange(false);
-      onDeleted?.();
-    } finally {
+    const result = await window.electronAPI.secretary
+      .deleteSecretary(secretaryId, true)
+      .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+    if (!result.ok) {
+      setError(result.error);
       setBusy(false);
+      return;
     }
+    // 成功后保持「删除中…」直到弹窗卸下或再次打开，关闭动画期间不闪回可点的按钮
+    onOpenChange(false);
+    onDeleted?.();
   };
 
   const empty =

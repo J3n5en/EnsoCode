@@ -113,6 +113,30 @@ describe('删除秘书弹窗：进行中反馈', () => {
     expect(onDeleted).toHaveBeenCalledTimes(1);
   });
 
+  it('删除成功后弹窗关闭动画期间仍是「删除中…」，不会闪回可点的「永久删除」；再次打开才复位', async () => {
+    await act(async () => button('secretary-delete-confirm')?.click());
+    await act(async () => finish({ ok: true }));
+    // 父组件已收到 onOpenChange(false)，但关闭动画还没放完，弹窗仍在屏上
+    expect(button('secretary-delete-confirm')?.textContent).toBe('Deleting…');
+    expect(button('secretary-delete-confirm')?.disabled).toBe(true);
+    expect(button('secretary-delete-cancel')?.disabled).toBe(true);
+
+    const render = (open: boolean) =>
+      root.render(
+        <SecretaryDeleteDialog
+          open={open}
+          secretaryId="s-b"
+          onOpenChange={onOpenChange}
+          onDeleted={onDeleted}
+        />
+      );
+    await act(async () => render(false));
+    await act(async () => render(true));
+    await act(async () => button('secretary-delete-next')?.click());
+    expect(button('secretary-delete-confirm')?.textContent).toBe('Delete permanently');
+    expect(button('secretary-delete-confirm')?.disabled).toBe(false);
+  });
+
   it('删除失败时恢复按钮并显示错误', async () => {
     await act(async () => button('secretary-delete-confirm')?.click());
     await act(async () => finish({ ok: false, error: 'disk full' }));
