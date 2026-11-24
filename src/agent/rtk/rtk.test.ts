@@ -1094,6 +1094,7 @@ describe('Windows bash 类型与 RTK', () => {
     [{ shell: 'C:\\Windows\\System32\\bash.exe', commandTransport: 'stdin' as const }],
     [{ shell: 'C:\\Windows\\System32\\bash.exe' }],
     [{ shell: 'C:\\WINDOWS\\Sysnative\\bash.exe' }],
+    [{ shell: 'c:/windows/SYSTEM32/BASH.EXE' }],
     [{ shell: 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe' }],
     [{ shell: 'C:\\Windows\\System32\\wsl.exe' }],
     [{ shell: 'D:\\any\\bash.exe', commandTransport: 'stdin' as const }],
@@ -1110,7 +1111,13 @@ describe('Windows bash 类型与 RTK', () => {
     'D:\\Dev\\Git\\usr\\bin\\bash.exe',
     'D:\\Tools\\Git\\bin\\bash.exe',
     'D:\\scoop\\apps\\git\\current\\bin\\bash.exe',
+    'C:\\Users\\me\\scoop\\apps\\git\\current\\usr\\bin\\bash.exe',
+    'C:/Program Files/Git/bin/bash.exe',
+    'd:/tools/git/BIN/BASH.EXE',
     'C:\\msys64\\usr\\bin\\bash.exe',
+    'D:\\cygwin-tools\\Git\\bin\\bash.exe',
+    'C:\\cygwin64\\home\\me\\PortableGit\\bin\\bash.exe',
+    'C:/cygwin/opt/msys64/usr/bin/bash.exe',
   ])('Git Bash / MSYS2 保持兼容：%s', (shell) => {
     expect(isRtkCompatibleWindowsBash({ shell, commandTransport: 'argv' })).toBe(true);
     expect(isRtkCompatibleWindowsBash({ shell })).toBe(true);

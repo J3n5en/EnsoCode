@@ -149,12 +149,10 @@ export function isRtkCompatibleWindowsBash(config: BashShellConfig): boolean {
   const segments = path.win32.normalize(config.shell).toLowerCase().split('\\');
   const name = segments.at(-1) ?? '';
   if (name === 'wsl.exe' || name === 'wsl') return false;
+  // Cygwin 的 bash 固定在 <安装根>\bin\bash.exe；只看安装根，嵌在 cygwin 目录里的 Git Bash 不误判
+  if (segments.at(-2) === 'bin' && /^cygwin(?:32|64)?$/.test(segments.at(-3) ?? '')) return false;
   return !segments.some(
-    (segment) =>
-      segment === 'system32' ||
-      segment === 'sysnative' ||
-      segment === 'windowsapps' ||
-      /^cygwin(?:32|64)?$/.test(segment)
+    (segment) => segment === 'system32' || segment === 'sysnative' || segment === 'windowsapps'
   );
 }
 
