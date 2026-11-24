@@ -93,6 +93,7 @@ import {
 import { type PrivacyMaskSettings, parsePrivacyMaskSettings } from '../privacyMask/settings';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
 import { parseProviderHeaders } from '../providers/providerHeaders';
+import { type ProviderProxyConfig, parseProviderProxy } from '../providers/providerProxy';
 import type { SessionReminderSummary } from '../reminders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
@@ -163,6 +164,7 @@ export interface WorkerCustomProvider {
   apiKey: string;
   models: ModelEntry[];
   headers?: Record<string, string>;
+  proxy?: ProviderProxyConfig;
 }
 
 /** 会话状态。waiting/done 属权限门与 subagent 刀，M1 不引入 */
@@ -233,6 +235,8 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
   oauthAccountPool?: { accountKeys: string[] };
   /** 该供应商的额外 HTTP 请求头。空表不下发。 */
   headers?: Record<string, string>;
+  /** API Key 供应商的独立代理；缺省跟随全局代理。 */
+  proxy?: ProviderProxyConfig;
 }
 
 /** pi catalog 里的分类器 provider/model 与凭证 */
@@ -3287,6 +3291,7 @@ function parsePhysicalSpawnModelConfig(value: unknown): SpawnModelConfig | null 
       'contextWindow',
       'maxTokens',
       'headers',
+      'proxy',
     ]) ||
     !MODEL_API_KINDS.includes(value.api as ModelApiKind) ||
     typeof value.baseUrl !== 'string' ||
@@ -3297,10 +3302,13 @@ function parsePhysicalSpawnModelConfig(value: unknown): SpawnModelConfig | null 
     (value.oauthAccountPool !== undefined &&
       (!parseOauthAccountPool(value.oauthAccountPool) ||
         !isCodexAccountKey(value.oauthAccountKey) ||
-        value.apiKey !== ''))
+        value.apiKey !== '')) ||
+    (value.proxy !== undefined &&
+      (value.oauthAccountKey !== undefined || !parseProviderProxy(value.proxy)))
   ) {
     return null;
   }
+  if (value.proxy !== undefined) value.proxy = parseProviderProxy(value.proxy);
   if (value.headers !== undefined) {
     const headers = parseProviderHeaders(value.headers);
     if (headers) value.headers = headers;

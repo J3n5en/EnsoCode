@@ -53,6 +53,13 @@ const MAPPED_I18N_KEYS = [
   'Thinking level',
   'Context',
   'Max tokens',
+  // ProviderApiForm.PROXY_MODE_LABELS + PROXY_MODE_HINTS
+  'Follow global proxy',
+  'No proxy (direct)',
+  'Custom proxy',
+  'Uses the network proxy in Settings → General.',
+  'All requests to this provider connect directly, ignoring the global and system proxy.',
+  'All requests to this provider go through this proxy.',
   // GeneralSettings.ACTION_LABEL_KEYS
   'Toggle sidebar',
   'Toggle side panel',

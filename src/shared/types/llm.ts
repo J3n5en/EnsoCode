@@ -1,3 +1,5 @@
+import type { ProviderProxyConfig } from '../providers/providerProxy';
+
 /** 模型 API 协议类型，值域对齐 pi sdk 的 Api，便于后续直接接入 */
 export const MODEL_API_KINDS = [
   'openai-completions',
@@ -87,6 +89,8 @@ export interface ModelProvider {
   oauthAccountPool?: { accountKeys: string[] };
   /** 发给该供应商的额外 HTTP 请求头。空表不持久化。 */
   headers?: Record<string, string>;
+  /** 仅 API Key 条目：该供应商的独立代理；缺省跟随全局代理，不持久化该字段。 */
+  proxy?: ProviderProxyConfig;
 }
 
 /** provider 是否具备可用凭证（API key 或订阅账号） */

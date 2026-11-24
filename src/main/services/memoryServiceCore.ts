@@ -11,6 +11,7 @@ import {
 } from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
+import { normalizeProviderProxy, sameProviderProxy } from '@shared/providers/providerProxy';
 import type { MemoryOp } from '@shared/types/agent';
 import { effectiveDisabledBuiltinTools } from '@shared/types/builtinTools';
 import type { ModelProvider } from '@shared/types/llm';
@@ -188,13 +189,17 @@ export function syncMemoryEmbeddingFromSettings(state: Record<string, unknown>):
         (key, params) => translate(locale, key, params)
       )
     : null;
-  const credentials =
-    remote && !issue && selected ? { baseUrl: selected.baseUrl, apiKey: selected.apiKey } : null;
+  const proxy = normalizeProviderProxy(selected?.proxy);
+  const credentials: RemoteEmbeddingOptions | null =
+    remote && !issue && selected
+      ? { baseUrl: selected.baseUrl, apiKey: selected.apiKey, ...(proxy ? { proxy } : {}) }
+      : null;
   const previous = config.remoteCredentials?.();
   const sameCredentials =
     !remote ||
     (credentials?.baseUrl === previous?.baseUrl &&
       credentials?.apiKey === previous?.apiKey &&
+      sameProviderProxy(credentials?.proxy, previous?.proxy) &&
       remoteIssue === (config.remoteIssue ?? null));
   // 保存值快照而非 providers 引用：原地编辑也能识别变更，且无关设置不释放本地大模型。
   const next = { modelId, autoDownload, remoteCredentials: () => credentials, remoteIssue };

@@ -8,11 +8,15 @@ import { EventEmitter } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import type { ProviderProxyConfig } from '@shared/providers/providerProxy';
+import { providerProxyFetch } from '@shared/providers/providerProxyDispatcher';
+import { isValidProxyUrl } from '@shared/proxy';
 import type {
   IpcHandler,
   IpcListener,
   PlatformApp,
   PlatformPathName,
+  PlatformSession,
   ProcessMetric,
   WillQuitEvent,
   WorkerForkOptions,
@@ -196,15 +200,43 @@ export const safeStorage = {
 export const powerMonitor = { on: () => undefined };
 export const powerSaveBlocker = { start: () => 1, stop: () => undefined };
 
-const inertSession = {
-  setProxy: async () => undefined,
-  resolveProxy: async () => 'DIRECT',
-  clearCache: async () => undefined,
-  clearCodeCaches: async () => undefined,
-  clearStorageData: async () => undefined,
-};
+/** 没有 Chromium 会话：分区会话记下 setProxy 规则，fetch 换成对应的 undici dispatcher */
+function nodeSession(): PlatformSession {
+  let proxy: ProviderProxyConfig | undefined;
+  return {
+    setProxy: async (config) => {
+      proxy =
+        config.mode === 'direct'
+          ? { mode: 'none' }
+          : config.proxyRules && isValidProxyUrl(config.proxyRules)
+            ? { mode: 'custom', url: config.proxyRules.trim() }
+            : undefined;
+    },
+    resolveProxy: async () => 'DIRECT',
+    clearCache: async () => undefined,
+    clearCodeCaches: async () => undefined,
+    clearStorageData: async () => undefined,
+    fetch: (input, init) => (providerProxyFetch(proxy) ?? globalThis.fetch)(input, init),
+  };
+}
 
-export const session = { defaultSession: inertSession, fromPartition: () => inertSession };
+const defaultSession: PlatformSession = {
+  ...nodeSession(),
+  setProxy: async () => undefined,
+};
+const partitions = new Map<string, PlatformSession>();
+
+export const session = {
+  defaultSession,
+  fromPartition: (partition: string) => {
+    let target = partitions.get(partition);
+    if (!target) {
+      target = nodeSession();
+      partitions.set(partition, target);
+    }
+    return target;
+  },
+};
 export const net = { fetch: globalThis.fetch.bind(globalThis) };
 
 class ForkedWorker extends EventEmitter {

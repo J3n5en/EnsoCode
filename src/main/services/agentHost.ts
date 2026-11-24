@@ -52,6 +52,7 @@ import { parsePrivacyMaskSettings } from '@shared/privacyMask/settings';
 import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
+import { normalizeProviderProxy } from '@shared/providers/providerProxy';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { reminderReviveDelay } from '@shared/reminders';
 import { appUserImageDirs } from '@shared/secretary/imageView';
@@ -3398,6 +3399,7 @@ function customProvidersForWorker(): WorkerCustomProvider[] {
     }
     if (!Array.isArray(provider.models)) continue;
     const headers = parseProviderHeaders(provider.headers);
+    const proxy = normalizeProviderProxy(provider.proxy);
     out.push({
       settingsId: provider.id,
       name: provider.name,
@@ -3406,6 +3408,7 @@ function customProvidersForWorker(): WorkerCustomProvider[] {
       apiKey: provider.apiKey,
       models: provider.models,
       ...(headers ? { headers } : {}),
+      ...(proxy ? { proxy } : {}),
     });
   }
   return out;
@@ -3464,6 +3467,8 @@ function spawnModelConfig(
     throw new Error('Invalid ChatGPT OAuth pool configuration.');
   const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
   const headers = parseProviderHeaders(provider.headers);
+  // 订阅条目不支持独立代理
+  const proxy = provider.oauthAccountKey ? undefined : normalizeProviderProxy(provider.proxy);
   return {
     api: provider.api,
     baseUrl: provider.baseUrl,
@@ -3471,6 +3476,7 @@ function spawnModelConfig(
     modelId,
     settingsProviderId: provider.id,
     ...(headers ? { headers } : {}),
+    ...(proxy ? { proxy } : {}),
     ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
     ...(isOauthAccountPool(provider) ? { oauthAccountPool: provider.oauthAccountPool } : {}),
     // 统一目录后 OAuth 条目 models 只承载稀疏用户覆盖（enabled/别名/能力/档位），

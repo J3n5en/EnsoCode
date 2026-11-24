@@ -1,3 +1,5 @@
+import type { ProviderProxyConfig } from '@shared/providers/providerProxy';
+import { providerProxyFetch } from '@shared/providers/providerProxyDispatcher';
 import type { EmbedKind } from '../types';
 import { withPrefix } from './prefix';
 import type { EmbeddingModelSpec, EmbeddingProvider } from './types';
@@ -8,6 +10,8 @@ export interface RemoteEmbeddingOptions {
   apiKey: string;
   /** `remote:<model>` 里的 model；缺省从 spec.id 剥前缀 */
   model?: string;
+  /** 所选服务商的独立代理；缺省跟随进程全局代理 */
+  proxy?: ProviderProxyConfig;
   fetch?: typeof fetch;
   timeoutMs?: number;
   maxAttempts?: number;
@@ -40,7 +44,7 @@ export function createRemoteEmbeddingProvider(
   spec: EmbeddingModelSpec,
   opts: RemoteEmbeddingOptions
 ): EmbeddingProvider {
-  const doFetch = opts.fetch ?? fetch;
+  const doFetch = opts.fetch ?? providerProxyFetch(opts.proxy) ?? fetch;
   const url = embeddingsUrl(opts.baseUrl);
   const model = remoteModelName(spec, opts.model);
   const maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;

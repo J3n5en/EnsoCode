@@ -53,6 +53,13 @@ writeFileSync(
             models: [{ id: 'm1' }],
           },
           { id: 'p-invalid', apiKey: SECRET, modelRefreshIntervalHours: '24' },
+          {
+            id: 'p-proxy',
+            apiKey: SECRET,
+            baseUrl: 'https://intranet.example/v1',
+            proxy: { mode: 'custom', url: 'http://alice:proxy-pass@10.0.0.1:3128' },
+            models: [],
+          },
         ],
         mcpServers: [
           {
@@ -218,6 +225,45 @@ describe('config CLI socket', () => {
       ).toEqual({ ok: true });
       settings.patchSettingsState('providers', before);
     }
+  });
+
+  it('供应商独立代理不可经 CLI 写入，读取时隐去代理账密', async () => {
+    const original = { mode: 'custom', url: 'http://alice:proxy-pass@10.0.0.1:3128' };
+    for (const [key, value] of [
+      ['providers.p-proxy.proxy', { mode: 'custom', url: 'http://attacker.example:8080' }],
+      ['providers.p-proxy.proxy.url', 'http://attacker.example:8080'],
+      ['providers.p-proxy.proxy.mode', 'none'],
+      ['providers.p1.proxy', { mode: 'none' }],
+    ] as const) {
+      const reply = await config({ action: 'set', key, value });
+      expect(reply).toMatchObject({ ok: false });
+      expect(String(reply.error)).toMatch(/decides where the API key is sent/);
+    }
+    const stored = ((await state()).providers as Record<string, unknown>[]).find(
+      (entry) => entry.id === 'p-proxy'
+    );
+    expect(stored?.proxy).toEqual(original);
+
+    const redacted = { mode: 'custom', url: 'http://***@10.0.0.1:3128' };
+    expect(await config({ action: 'get', key: 'providers.p-proxy' })).toMatchObject({
+      ok: true,
+      value: { apiKey: '***', proxy: redacted },
+    });
+    expect(await config({ action: 'get', key: 'providers.p-proxy.proxy' })).toEqual({
+      ok: true,
+      key: 'providers.p-proxy.proxy',
+      value: redacted,
+    });
+    expect(await config({ action: 'get', key: 'providers.p-proxy.proxy.url' })).toMatchObject({
+      ok: true,
+      value: redacted.url,
+    });
+    const listed = JSON.stringify(await config({ action: 'list', prefix: 'providers' }));
+    expect(listed).not.toContain('proxy-pass');
+    expect(listed).toContain('http://***@10.0.0.1:3128');
+    expect((await config({ action: 'schema' })).keys).toContainEqual(
+      expect.objectContaining({ path: 'providers.<id>.proxy.url', writable: false })
+    );
   });
 
   it.skipIf(process.platform === 'win32')('socket 与 token 文件只给本人读写', () => {

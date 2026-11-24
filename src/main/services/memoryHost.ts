@@ -16,6 +16,7 @@ import { normalizeLocale, translate } from '@shared/i18n';
 import type { ForgettingSettings } from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
+import { normalizeProviderProxy } from '@shared/providers/providerProxy';
 import type { MemoryOp } from '@shared/types/agent';
 import type { ModelProvider } from '@shared/types/llm';
 import type { Complete, DistillJob } from './memory/distill';
@@ -310,8 +311,11 @@ export function syncMemoryEmbeddingFromSettings(state: Record<string, unknown>):
         (key, params) => translate(locale, key, params)
       )
     : null;
+  const proxy = normalizeProviderProxy(selected?.proxy);
   const credentials: RemoteEmbeddingOptions | null =
-    remote && !issue && selected ? { baseUrl: selected.baseUrl, apiKey: selected.apiKey } : null;
+    remote && !issue && selected
+      ? { baseUrl: selected.baseUrl, apiKey: selected.apiKey, ...(proxy ? { proxy } : {}) }
+      : null;
   client.configure({
     embedding: {
       modelId,

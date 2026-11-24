@@ -42,19 +42,23 @@ export const net = {
 };
 export class WebContentsView {}
 export const session = {
-  fromPartition: () => ({
-    setProxy: async () => {},
+  fromPartition: (_partition: string) => ({
+    setProxy: async (_config: unknown) => {},
     resolveProxy: async () => 'DIRECT',
     clearCache: async () => {},
     clearCodeCaches: async () => {},
     clearStorageData: async () => {},
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+      globalThis.fetch(input, init)) as typeof fetch,
   }),
   defaultSession: {
-    setProxy: async () => {},
+    setProxy: async (_config: unknown) => {},
     resolveProxy: async () => 'DIRECT',
     clearCache: async () => {},
     clearCodeCaches: async () => {},
     clearStorageData: async () => {},
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+      globalThis.fetch(input, init)) as typeof fetch,
   },
 };
 export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };

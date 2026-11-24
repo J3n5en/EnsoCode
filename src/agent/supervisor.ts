@@ -7545,6 +7545,7 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
       baseUrl: model.baseUrl,
       apiKey: model.apiKey,
       ...(model.headers ? { headers: model.headers } : {}),
+      ...(model.proxy ? { proxy: model.proxy } : {}),
     },
     [entry]
   );

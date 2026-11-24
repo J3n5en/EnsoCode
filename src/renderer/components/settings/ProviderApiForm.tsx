@@ -11,6 +11,12 @@ import {
   isSendableHeaderValue,
   normalizeProviderHeaders,
 } from '@shared/providers/providerHeaders';
+import {
+  normalizeProviderProxy,
+  type ProviderProxyConfig,
+  type ProviderProxyMode,
+} from '@shared/providers/providerProxy';
+import { isValidProxyUrl } from '@shared/proxy';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types/llm';
 import {
@@ -62,6 +68,8 @@ export interface ProviderApiFormValue {
   baseUrl: string;
   models: ModelEntry[];
   headers?: Record<string, string>;
+  /** 缺省跟随全局代理 */
+  proxy?: ProviderProxyConfig;
   autoFetchModels?: boolean;
   modelRefreshIntervalHours?: number;
 }
@@ -92,6 +100,17 @@ const refreshIntervalRange = {
 };
 
 type HeaderDraft = { key: string; name: string; value: string };
+
+const PROXY_MODE_LABELS: Record<ProviderProxyMode, string> = {
+  global: 'Follow global proxy',
+  none: 'No proxy (direct)',
+  custom: 'Custom proxy',
+};
+const PROXY_MODE_HINTS: Record<ProviderProxyMode, string> = {
+  global: 'Uses the network proxy in Settings → General.',
+  none: 'All requests to this provider connect directly, ignoring the global and system proxy.',
+  custom: 'All requests to this provider go through this proxy.',
+};
 
 function headerDrafts(headers: Record<string, string> | undefined): HeaderDraft[] {
   return Object.entries(headers ?? {}).map(([name, value]) => ({
@@ -135,8 +154,18 @@ export function ProviderApiForm({
     () => new Set(initialValue.models.map((model) => model.id))
   );
   const [headerRows, setHeaderRows] = React.useState(() => headerDrafts(initialValue.headers));
+  const initialProxy = normalizeProviderProxy(initialValue.proxy);
+  const [proxyMode, setProxyMode] = React.useState<ProviderProxyMode>(
+    initialProxy?.mode ?? 'global'
+  );
+  const [proxyUrl, setProxyUrl] = React.useState(
+    initialProxy?.mode === 'custom' ? initialProxy.url : ''
+  );
+  const proxyUrlId = React.useId();
+  const proxyErrorId = React.useId();
+  // 生效中的独立代理与请求头一样默认展开，避免用户看不到
   const [advancedOpen, setAdvancedOpen] = React.useState(
-    () => Object.keys(initialValue.headers ?? {}).length > 0
+    () => Object.keys(initialValue.headers ?? {}).length > 0 || initialProxy !== undefined
   );
   const [newModel, setNewModel] = React.useState('');
   const [filter, setFilter] = React.useState('');
@@ -203,6 +232,15 @@ export function ProviderApiForm({
     return value !== '' && !isSendableHeaderValue(value);
   });
   const headersInvalid = headerNameInvalid || headerValueInvalid;
+  const proxyInvalid = !oauth && proxyMode === 'custom' && !isValidProxyUrl(proxyUrl);
+  const proxy: ProviderProxyConfig | undefined =
+    oauth || proxyInvalid
+      ? undefined
+      : proxyMode === 'none'
+        ? { mode: 'none' }
+        : proxyMode === 'custom'
+          ? { mode: 'custom', url: proxyUrl.trim() }
+          : undefined;
   const classifierOnly = isClassifierOnlyProvider({ api, baseUrl: baseUrl.trim(), catalogId });
   const showModelRefresh = !oauth && !classifierOnly && providerEnabled;
   const refreshIntervalHours = Number(refreshInterval);
@@ -222,9 +260,19 @@ export function ProviderApiForm({
     apiKey: apiKey.trim(),
     baseUrl: baseUrl.trim(),
     ...(headers ? { headers } : {}),
+    ...(proxy ? { proxy } : {}),
+  };
+
+  /** 选了自定义代理但地址无效时不发请求，展开高级区让错误可见 */
+  const blockedByProxy = () => {
+    if (!proxyInvalid) return false;
+    setAdvancedOpen(true);
+    setStatus({ ok: false, text: t('Enter an http(s) proxy URL') });
+    return true;
   };
 
   const handleFetchModels = async () => {
+    if (!oauthAccountKey && blockedByProxy()) return;
     setBusy('fetch');
     setStatus(null);
     if (oauthAccountKey) {
@@ -277,6 +325,7 @@ export function ProviderApiForm({
   };
 
   const handleTest = async () => {
+    if (blockedByProxy()) return;
     setBusy('test');
     setStatus(null);
     const target = availableTestModel || undefined;
@@ -455,6 +504,53 @@ export function ProviderApiForm({
                 />
               </CollapsibleTrigger>
               <CollapsibleContent>
+                <Field className="items-stretch border-t px-3 py-3" data-field="provider-proxy">
+                  <FieldLabel>{t('Proxy')}</FieldLabel>
+                  <Select
+                    items={{
+                      global: t(PROXY_MODE_LABELS.global),
+                      none: t(PROXY_MODE_LABELS.none),
+                      custom: t(PROXY_MODE_LABELS.custom),
+                    }}
+                    value={proxyMode}
+                    onValueChange={(value) => setProxyMode(value as ProviderProxyMode)}
+                  >
+                    <SelectTrigger className="w-full" data-slot="provider-proxy-mode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
+                      {(['global', 'none', 'custom'] as const).map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          {t(PROXY_MODE_LABELS[mode])}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground" data-slot="provider-proxy-hint">
+                    {t(PROXY_MODE_HINTS[proxyMode])}
+                  </p>
+                  {proxyMode === 'custom' && (
+                    <>
+                      <FieldLabel htmlFor={proxyUrlId}>{t('Proxy URL')}</FieldLabel>
+                      <Input
+                        id={proxyUrlId}
+                        render={<input id={proxyUrlId} />}
+                        data-slot="provider-proxy-url"
+                        value={proxyUrl}
+                        placeholder="http://127.0.0.1:7890"
+                        spellCheck={false}
+                        aria-invalid={proxyInvalid || undefined}
+                        aria-describedby={proxyInvalid ? proxyErrorId : undefined}
+                        onInput={(event) => setProxyUrl(event.currentTarget.value)}
+                      />
+                      {proxyInvalid ? (
+                        <p id={proxyErrorId} role="alert" className="text-destructive text-xs">
+                          {t('Enter an http(s) proxy URL')}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </Field>
                 <Field className="items-stretch border-t px-3 py-3">
                   <FieldLabel>{t('Request headers')}</FieldLabel>
                   {headerRows.map((row) => {
@@ -722,7 +818,13 @@ export function ProviderApiForm({
           </Button>
           <Button
             size="sm"
-            disabled={saveDisabled || !name.trim() || headersInvalid || refreshIntervalInvalid}
+            disabled={
+              saveDisabled ||
+              !name.trim() ||
+              headersInvalid ||
+              proxyInvalid ||
+              refreshIntervalInvalid
+            }
             onClick={() =>
               onSave(
                 {
@@ -732,6 +834,7 @@ export function ProviderApiForm({
                   baseUrl: baseUrl.trim(),
                   models: commitPendingModel(models, newModel),
                   headers,
+                  proxy,
                   ...(showModelRefresh && refreshIntervalValid
                     ? { autoFetchModels, modelRefreshIntervalHours: refreshIntervalHours }
                     : {}),

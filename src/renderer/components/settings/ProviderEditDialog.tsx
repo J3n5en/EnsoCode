@@ -6,6 +6,7 @@ import {
 } from '@shared/modelDirectory';
 import { unionProviderModels } from '@shared/providerIdentity';
 import { normalizeProviderModelRefreshIntervalHours } from '@shared/providers/modelRefreshInterval';
+import { sameProviderProxy } from '@shared/providers/providerProxy';
 import type { ModelProvider, OauthProviderInfo, ProviderApiConfig } from '@shared/types';
 import { useEffect, useMemo, useState } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -141,6 +142,7 @@ function sameProviderRequest(left: ProviderApiConfig, right: ProviderApiConfig):
     left.api === right.api &&
     left.apiKey.trim() === right.apiKey.trim() &&
     left.baseUrl.trim().replace(/\/+$/, '') === right.baseUrl.trim().replace(/\/+$/, '') &&
+    sameProviderProxy(left.proxy, right.proxy) &&
     leftHeaders.length === Object.keys(rightHeaders).length &&
     leftHeaders.every(
       ([name, value]) => Object.hasOwn(rightHeaders, name) && rightHeaders[name] === value
@@ -186,6 +188,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                 baseUrl: provider.baseUrl,
                 models: materializedModels ?? provider.models,
                 headers: provider.headers,
+                proxy: provider.proxy,
                 autoFetchModels: provider.autoFetchModels,
                 modelRefreshIntervalHours: provider.modelRefreshIntervalHours,
               }}

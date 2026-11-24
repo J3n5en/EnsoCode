@@ -67,6 +67,16 @@ describe('fetchProviderModels', () => {
     );
   });
 
+  it('拉模型带上供应商独立代理，跟随全局时不带', async () => {
+    listModels.mockResolvedValue({ ok: true, models: [] });
+    await fetchProviderModels(apiProvider({ proxy: { mode: 'none' } }));
+    expect(listModels).toHaveBeenLastCalledWith(
+      expect.objectContaining({ proxy: { mode: 'none' } })
+    );
+    await fetchProviderModels(apiProvider());
+    expect(listModels.mock.calls.at(-1)?.[0]).not.toHaveProperty('proxy');
+  });
+
   it('listModels 失败时透传 message，且没有 models', async () => {
     listModels.mockResolvedValue({ ok: false, models: [{ id: 'new' }], error: 'unauthorized' });
 
