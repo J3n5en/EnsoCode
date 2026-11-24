@@ -23,7 +23,14 @@ import { cn } from '@/lib/utils';
 import { type FontWeight, useSettingsStore } from '@/stores/settings';
 import { fontWeightOptions } from './constants';
 import { FileOpeningSettings } from './FileOpeningSettings';
-import { SettingsPage, SettingsRow, SettingsSection, SettingsSelect, TOUCH_TARGET } from './kit';
+import {
+  SettingsPage,
+  SettingsPreview,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  TOUCH_TARGET,
+} from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
 const HIT =
@@ -121,9 +128,8 @@ function TerminalPreview({
     { id: 'output1', text: 'Hello, World!', color: theme.magenta },
   ];
   return (
-    <div
-      data-settings-preview=""
-      className={cn('h-40 max-w-full overflow-auto p-4', 'rounded-lg', 'border')}
+    <SettingsPreview
+      className="h-40 max-w-full overflow-auto p-4"
       style={{
         backgroundColor: theme.background,
         fontSize: `${fontSize}px`,
@@ -149,7 +155,7 @@ function TerminalPreview({
         className="inline-block h-4 w-2 animate-pulse"
         style={{ backgroundColor: theme.cursor }}
       />
-    </div>
+    </SettingsPreview>
   );
 }
 

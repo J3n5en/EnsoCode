@@ -6,7 +6,6 @@ import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
 import { secretaryIdOfProject, useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
-import { SecretaryContactPanel } from './SecretaryContactPanel';
 import { SecretaryDailyBoard } from './SecretaryDailyBoard';
 import { SecretaryMemoryPanel } from './SecretaryMemoryPanel';
 import { SecretaryRunningList } from './SecretaryRunningList';
@@ -146,7 +145,29 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
         {tab === 'workbench' && <SecretaryWorkbench name={view.name} secretaryId={secretaryId} />}
         {tab === 'daily' && <SecretaryDailyBoard secretaryId={secretaryId} />}
         {tab === 'memory' && <SecretaryMemoryPanel secretaryId={secretaryId} />}
-        {tab === 'contact' && <SecretaryContactPanel secretaryId={secretaryId} />}
+        {tab === 'contact' && (
+          <div
+            data-enso="secretary-contact-entry"
+            className="flex flex-col items-start gap-2 px-3 py-3"
+          >
+            <p className="text-[12.5px] text-muted-foreground">
+              {t('Contacts and owner identity are managed in Settings.')}
+            </p>
+            <button
+              type="button"
+              data-enso="secretary-contact-open-settings"
+              onClick={() =>
+                openSecretarySettings(secretaryId, {
+                  category: 'contacts',
+                  rowId: 'contacts.owner',
+                })
+              }
+              className="inline-flex items-center rounded-lg border border-border px-2.5 py-1.5 text-[12.5px] hover:bg-muted"
+            >
+              {t('Manage in Settings')}
+            </button>
+          </div>
+        )}
         {tab === 'skills' && <SecretarySkillsPanel secretaryId={secretaryId} />}
         {tab === 'schedules' && (
           <SecretarySchedulePanel

@@ -7,6 +7,7 @@ import {
   Brain,
   ChevronLeft,
   ChevronRight,
+  ContactRound,
   FileText,
   FlaskConical,
   Gauge,
@@ -43,6 +44,7 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { BotSettings } from './BotSettings';
 import { BotTemplatesSettings } from './BotTemplatesSettings';
 import { BuiltinToolsSettings } from './BuiltinToolsSettings';
+import { ContactsSettings } from './ContactsSettings';
 import { ConversationSettings } from './ConversationSettings';
 import type { SettingsCategory } from './constants';
 import { DevicesSettings } from './DevicesSettings';
@@ -74,16 +76,37 @@ import { TerminalSettings } from './TerminalSettings';
 import { UsageSettings } from './UsageSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
-function flashSettingsRow(rowId: string): void {
-  window.requestAnimationFrame(() => {
+/** 行可能要等父项展开或异步数据才出现：短时间内反复找，找到再滚过去并闪一下 */
+function flashSettingsRow(rowId: string, cancelRestore: () => void): () => void {
+  let attempts = 0;
+  let timer = 0;
+  const tryFlash = () => {
     const el = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
-    if (!(el instanceof HTMLElement)) return;
-    el.scrollIntoView({ block: 'center' });
-    el.dataset.settingsFlash = 'true';
-    window.setTimeout(() => {
-      delete el.dataset.settingsFlash;
-    }, 1600);
-  });
+    if (el instanceof HTMLElement) {
+      // 分区异步加载时会整段重渲染，第一次拿到的元素会被换掉，所以每次重新找
+      let left = 3;
+      const center = () => {
+        const row = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
+        if (row instanceof HTMLElement) {
+          row.scrollIntoView({ block: 'center', behavior: 'instant' });
+          row.dataset.settingsFlash = 'true';
+        }
+        if (--left <= 0) window.clearInterval(follow);
+      };
+      cancelRestore();
+      center();
+      const follow = window.setInterval(center, 400);
+      window.setTimeout(() => {
+        window.clearInterval(follow);
+        const row = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
+        if (row instanceof HTMLElement) delete row.dataset.settingsFlash;
+      }, 1600);
+      return;
+    }
+    if (attempts++ < 12) timer = window.setTimeout(tryFlash, 50);
+  };
+  tryFlash();
+  return () => window.clearTimeout(timer);
 }
 
 const USER_SCROLL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
@@ -205,6 +228,7 @@ export function SettingsContent({
   const scrollPositions = React.useRef(new Map<SettingsCategory, number>());
   const scrollKey = React.useRef<SettingsCategory | null>(null);
   const restoring = React.useRef(false);
+  const scrollRestore = React.useRef<(() => void) | null>(null);
   const flashPending = React.useRef(flashRowId);
   flashPending.current = flashRowId;
   React.useLayoutEffect(() => {
@@ -214,13 +238,18 @@ export function SettingsContent({
     // 深链/搜索命中要定位到行（本 effect 声明在 flash 之前，先执行），交给 flashSettingsRow，不用保存的位置覆盖
     if (flashPending.current) {
       el.scrollTop = 0;
+      restoring.current = false;
       return;
     }
     restoring.current = true;
     const stop = restoreScrollTop(el, scrollPositions.current.get(activeCategory) ?? 0, () => {
       restoring.current = false;
     });
-    return stop;
+    scrollRestore.current = stop;
+    return () => {
+      scrollRestore.current = null;
+      stop();
+    };
   }, [activeCategory, showContent]);
   const rememberScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (restoring.current || !scrollKey.current) return;
@@ -229,9 +258,8 @@ export function SettingsContent({
 
   React.useLayoutEffect(() => {
     if (!flashRowId) return;
-    flashSettingsRow(flashRowId);
-    const timer = window.setTimeout(() => setFlashRowId(null), 1600);
-    return () => window.clearTimeout(timer);
+    // flashRowId 留着：被父开关藏起的行靠它临时展开，清掉会把刚定位到的行又卸掉
+    return flashSettingsRow(flashRowId, () => scrollRestore.current?.());
   }, [flashRowId]);
 
   const allCategories: Array<{
@@ -264,9 +292,10 @@ export function SettingsContent({
     { id: 'resources', icon: Gauge, label: 'Resources' },
     { id: 'logs', icon: ScrollText, label: 'Logs' },
     { id: 'experimental', icon: FlaskConical, label: 'Experimental' },
+    { id: 'secretary', icon: MessagesSquare, label: 'Secretary' },
+    { id: 'contacts', icon: ContactRound, label: 'Contacts & owner' },
     { id: 'bots', icon: BotMessageSquare, label: 'Bot mode', sub: true },
     { id: 'botTemplates', icon: LayoutTemplate, label: 'Bot templates', sub: true },
-    { id: 'secretary', icon: MessagesSquare, label: 'Secretary', sub: true },
   ];
   const categories = visibleCategories(
     allCategories,
@@ -448,7 +477,7 @@ export function SettingsContent({
             {activeCategory === 'appearance' && (
               <AppearanceSettings onOpenPlugins={() => openCategory('plugins')} />
             )}
-            {activeCategory === 'conversation' && <ConversationSettings />}
+            {activeCategory === 'conversation' && <ConversationSettings revealRowId={flashRowId} />}
             {activeCategory === 'terminal' && <TerminalSettings />}
             {activeCategory === 'runtime' && <RuntimeSettings />}
             {activeCategory === 'providers' && <ProvidersSettings />}
@@ -488,6 +517,7 @@ export function SettingsContent({
             {activeCategory === 'bots' && <BotSettings />}
             {activeCategory === 'botTemplates' && <BotTemplatesSettings />}
             {activeCategory === 'secretary' && <SecretarySettings />}
+            {activeCategory === 'contacts' && <ContactsSettings />}
           </div>
         </div>
       )}

@@ -14,9 +14,15 @@ const TOOL_GATED: Partial<Record<SettingsCategory, string>> = {
   workflows: 'workflow',
 };
 const BOT_PAGES: readonly SettingsCategory[] = ['bots', 'botTemplates'];
-const SECRETARY_PAGES: readonly SettingsCategory[] = ['secretary'];
+const SECRETARY_PAGES: readonly SettingsCategory[] = ['secretary', 'contacts'];
 
-export type SettingsGroupId = 'app' | 'agent' | 'extensions' | 'connections' | 'system';
+export type SettingsGroupId =
+  | 'app'
+  | 'agent'
+  | 'extensions'
+  | 'secretary'
+  | 'connections'
+  | 'system';
 
 export const SETTINGS_GROUPS: readonly {
   id: SettingsGroupId;
@@ -39,6 +45,11 @@ export const SETTINGS_GROUPS: readonly {
     categories: ['tools', 'workflows', 'skills', 'mcp', 'plugins'],
   },
   {
+    id: 'secretary',
+    label: 'Secretary & contacts',
+    categories: ['secretary', 'contacts'],
+  },
+  {
     id: 'connections',
     label: 'Connections',
     categories: ['phone', 'ssh'],
@@ -46,7 +57,7 @@ export const SETTINGS_GROUPS: readonly {
   {
     id: 'system',
     label: 'System',
-    categories: ['usage', 'resources', 'logs', 'experimental', 'bots', 'botTemplates', 'secretary'],
+    categories: ['usage', 'resources', 'logs', 'experimental', 'bots', 'botTemplates'],
   },
 ];
 

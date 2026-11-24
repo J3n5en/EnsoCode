@@ -7,7 +7,6 @@ import type {
   SecretaryProfileDraft,
   SecretaryScheduleView,
   SecretarySkillView,
-  SecretarySummary,
   SecretaryTakeoverScope,
   SecretaryTakeoverView,
   SecretaryToolDraft,
@@ -32,15 +31,23 @@ import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
 import { SecretaryDeleteDialog } from '@/components/secretary/SecretaryDeleteDialog';
 import { SecretaryProfileForm } from '@/components/secretary/SecretaryProfileForm';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
-import { SETTINGS_SECRETARY_KEY } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSaved,
+  SettingsSection,
+  TOUCH_TARGET,
+  useSettingsRowControl,
+} from './kit';
 import { PickList } from './PresetsSettings';
+import { SettingsSecretaryChips, useSettingsSecretaries } from './SettingsSecretaryPicker';
 
 const DISPATCH_LIMIT_OPTIONS = Array.from(
   { length: MAX_RUNNING_DISPATCHES - MIN_RUNNING_DISPATCHES + 1 },
@@ -58,6 +65,29 @@ const AVATAR_PROBLEM_TEXT: Record<AvatarUploadProblem, string> = {
   save: 'Could not save the secretary profile. Try again.',
 };
 
+/** 触屏把芯片本身撑到 44px，并用 ring 代替边框，避免再画出一张卡片 */
+function chipClass(active: boolean): string {
+  return cn(
+    'relative rounded-md px-2.5 py-1 text-xs ring-1 transition-colors pointer-coarse:min-h-[44px] pointer-coarse:min-w-[44px]',
+    TOUCH_TARGET,
+    active
+      ? 'bg-primary/10 text-foreground ring-primary/60'
+      : 'text-muted-foreground ring-border hover:bg-muted'
+  );
+}
+
+function useSavedFlash(): { status: React.ReactNode; mark: () => void } {
+  const [on, setOn] = React.useState(false);
+  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  React.useEffect(() => () => clearTimeout(timer.current), []);
+  const mark = React.useCallback(() => {
+    setOn(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setOn(false), 1500);
+  }, []);
+  return { status: on ? <SettingsSaved /> : null, mark };
+}
+
 function Chips<T extends string>({
   value,
   options,
@@ -71,19 +101,14 @@ function Chips<T extends string>({
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex flex-wrap gap-1" data-enso={enso}>
+    <div className="flex max-w-full flex-wrap justify-end gap-1" data-enso={enso}>
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
           aria-pressed={option.value === value}
           onClick={() => onChange(option.value)}
-          className={cn(
-            'rounded-md border px-2.5 py-1 text-xs transition-colors',
-            option.value === value
-              ? 'border-primary/60 bg-primary/10 text-foreground'
-              : 'border-border text-muted-foreground hover:bg-muted'
-          )}
+          className={chipClass(option.value === value)}
         >
           {t(option.label)}
         </button>
@@ -92,28 +117,119 @@ function Chips<T extends string>({
   );
 }
 
-function Section({
-  title,
-  description,
-  rowId,
-  children,
+/** 点选后立即保存；成功时在芯片左侧闪「已保存」 */
+function SaveChips<T extends string>({
+  value,
+  options,
+  enso,
+  onPick,
 }: {
-  title: string;
-  description?: string;
-  rowId: string;
-  children: React.ReactNode;
+  value: T;
+  options: readonly { value: T; label: string }[];
+  enso?: string;
+  onPick: (value: T) => Promise<boolean>;
 }) {
-  const { t } = useI18n();
+  const { status, mark } = useSavedFlash();
   return (
-    <section className="space-y-3" data-settings-row={rowId}>
-      <div>
-        <h4 className="text-sm font-medium">{t(title)}</h4>
-        {description ? <p className="text-xs text-muted-foreground">{t(description)}</p> : null}
-      </div>
-      {children}
-    </section>
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+      {status}
+      <Chips
+        enso={enso}
+        value={value}
+        options={options}
+        onChange={(next) => {
+          if (next === value) return;
+          void onPick(next).then((ok) => {
+            if (ok) mark();
+          });
+        }}
+      />
+    </div>
   );
 }
+
+function BlurControl({
+  value,
+  onCommit,
+  multiline = false,
+  placeholder,
+  type = 'text',
+}: {
+  value: string;
+  onCommit: (value: string) => Promise<boolean>;
+  multiline?: boolean;
+  placeholder?: string;
+  type?: 'text' | 'time';
+}) {
+  const a11y = useSettingsRowControl();
+  const [draft, setDraft] = React.useState(value);
+  React.useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft === value) return;
+    void onCommit(draft);
+  };
+  if (multiline) {
+    return (
+      <Textarea
+        {...a11y}
+        size="sm"
+        rows={4}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        className="w-full min-w-0 max-w-full"
+      />
+    );
+  }
+  return (
+    <Input
+      {...a11y}
+      size="sm"
+      type={type}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      className="w-full min-w-0 max-w-full sm:w-[220px]"
+    />
+  );
+}
+
+/** 文本失焦且和已保存值不同才提交，成功后行内闪「已保存」 */
+function BlurRow({
+  label,
+  value,
+  onCommit,
+  multiline,
+  placeholder,
+  type,
+}: {
+  label: string;
+  value: string;
+  onCommit: (value: string) => Promise<boolean>;
+  multiline?: boolean;
+  placeholder?: string;
+  type?: 'text' | 'time';
+}) {
+  const { status, mark } = useSavedFlash();
+  return (
+    <SettingsRow label={label} status={status}>
+      <BlurControl
+        value={value}
+        multiline={multiline}
+        placeholder={placeholder}
+        type={type}
+        onCommit={async (next) => {
+          const ok = await onCommit(next);
+          if (ok) mark();
+          return ok;
+        }}
+      />
+    </SettingsRow>
+  );
+}
+
+const DIVIDER = 'border-border border-b py-3';
 
 function formatWhen(at: number | undefined, locale: string): string {
   if (!at) return '';
@@ -147,11 +263,11 @@ function PluginPicker({
   if (enabled.length === 0)
     return <p className="text-xs text-muted-foreground">{t('No plugins enabled')}</p>;
   return (
-    <div className="divide-y rounded-md border">
+    <div>
       {enabled.map((plugin) => (
         <label
           key={plugin.id}
-          className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm"
+          className={cn('flex cursor-pointer flex-wrap items-center gap-2 text-sm', DIVIDER)}
           data-enso="secretary-plugin-row"
           data-plugin-id={plugin.id}
         >
@@ -215,24 +331,19 @@ function OwnSkills({ busy }: { busy: boolean }) {
   if (skills.length === 0)
     return <p className="text-xs text-muted-foreground">{t('No skills yet')}</p>;
   return (
-    <div className="divide-y rounded-md border">
+    <div>
       {skills.map((skill) => (
-        <div key={skill.name} className="px-3 py-2" data-enso="secretary-skill-row">
-          <div className="flex items-center gap-2">
+        <div key={skill.name} className={DIVIDER} data-enso="secretary-skill-row">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 flex-1 truncate font-mono text-sm">{skill.name}</span>
             {!skill.enabled && (
               <span className="shrink-0 rounded bg-warning/10 px-1 text-[10px] text-warning">
                 {t('Disabled')}
               </span>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => void remove(skill.name)}
-            >
+            <SettingsButton variant="ghost" disabled={busy} onClick={() => void remove(skill.name)}>
               {t('Remove')}
-            </Button>
+            </SettingsButton>
           </div>
           <p className="text-xs text-muted-foreground">{skill.description}</p>
           <details className="mt-1">
@@ -280,10 +391,10 @@ function OwnTools({ busy }: { busy: boolean }) {
   if (tools.length === 0)
     return <p className="text-xs text-muted-foreground">{t('No tools yet')}</p>;
   return (
-    <div className="divide-y rounded-md border">
+    <div>
       {tools.map((tool) => (
-        <div key={tool.name} className="px-3 py-2" data-enso="secretary-tool-row">
-          <div className="flex items-center gap-2">
+        <div key={tool.name} className={DIVIDER} data-enso="secretary-tool-row">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 flex-1 truncate font-mono text-sm">{tool.name}</span>
             <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
               {tool.runtime === 'python' ? 'Python' : 'Node'}
@@ -291,14 +402,9 @@ function OwnTools({ busy }: { busy: boolean }) {
             <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
               {tool.readOnly ? t('Read-only') : t('Asks every call')}
             </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => void remove(tool.name)}
-            >
+            <SettingsButton variant="ghost" disabled={busy} onClick={() => void remove(tool.name)}>
               {t('Remove')}
-            </Button>
+            </SettingsButton>
           </div>
           <p className="text-xs text-muted-foreground">{tool.description}</p>
           <details className="mt-1">
@@ -323,7 +429,7 @@ function TakeoverScopePicker({
 }: {
   profile: SecretaryProfile;
   busy: boolean;
-  onChange: (scope: SecretaryTakeoverScope) => void;
+  onChange: (scope: SecretaryTakeoverScope) => Promise<boolean>;
 }) {
   const { t } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
@@ -339,7 +445,7 @@ function TakeoverScopePicker({
   const selected = scope.mode === 'projects' ? scope.projectIds : [];
   return (
     <div className="space-y-2">
-      <Chips
+      <SaveChips
         enso="secretary-takeover-scope"
         value={scope.mode}
         options={[
@@ -347,7 +453,7 @@ function TakeoverScopePicker({
           { value: 'projects', label: 'Selected projects' },
           { value: 'all', label: 'All visible projects' },
         ]}
-        onChange={(mode) =>
+        onPick={(mode) =>
           onChange(
             mode === 'all'
               ? { mode: 'all' }
@@ -361,7 +467,10 @@ function TakeoverScopePicker({
         candidates.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('No project in the takeover scope')}</p>
         ) : (
-          <div className="flex flex-wrap gap-1" data-enso="secretary-takeover-projects">
+          <div
+            className="flex max-w-full flex-wrap justify-end gap-1"
+            data-enso="secretary-takeover-projects"
+          >
             {candidates.map((project) => {
               const active = selected.includes(project.id);
               return (
@@ -371,19 +480,14 @@ function TakeoverScopePicker({
                   aria-pressed={active}
                   disabled={busy}
                   onClick={() =>
-                    onChange({
+                    void onChange({
                       mode: 'projects',
                       projectIds: active
                         ? selected.filter((id) => id !== project.id)
                         : [...selected, project.id],
                     })
                   }
-                  className={cn(
-                    'rounded-md border px-2.5 py-1 text-xs transition-colors',
-                    active
-                      ? 'border-primary/60 bg-primary/10 text-foreground'
-                      : 'border-border text-muted-foreground hover:bg-muted'
-                  )}
+                  className={chipClass(active)}
                 >
                   {project.alias || project.name}
                 </button>
@@ -427,11 +531,11 @@ function Takeovers({ locale }: { locale: string }) {
       {takeovers.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t('No sessions handed over')}</p>
       ) : (
-        <div className="divide-y rounded-md border">
+        <div>
           {takeovers.map((entry) => (
             <div
               key={entry.conversationId}
-              className="flex items-center gap-2 px-3 py-2"
+              className={cn('flex flex-wrap items-center gap-2', DIVIDER)}
               data-enso="secretary-takeover-row"
               data-conversation-id={entry.conversationId}
             >
@@ -443,9 +547,9 @@ function Takeovers({ locale }: { locale: string }) {
                     .join(' · ')}
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => void revoke(entry.conversationId)}>
+              <SettingsButton variant="ghost" onClick={() => void revoke(entry.conversationId)}>
                 {t('Take back')}
-              </Button>
+              </SettingsButton>
             </div>
           ))}
         </div>
@@ -491,11 +595,11 @@ function Untracked() {
         )}
       </p>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      <div className="divide-y rounded-md border">
+      <div>
         {entries.map((entry) => (
           <div
             key={entry.conversationId}
-            className="flex items-center gap-2 px-3 py-2"
+            className={cn('flex flex-wrap items-center gap-2', DIVIDER)}
             data-enso="secretary-untracked-row"
             data-conversation-id={entry.conversationId}
           >
@@ -503,9 +607,9 @@ function Untracked() {
               <p className="truncate text-sm">{entry.title || t('Unnamed')}</p>
               <p className="truncate text-xs text-muted-foreground">{entry.projectName}</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => void remove(entry.conversationId)}>
+            <SettingsButton variant="ghost" onClick={() => void remove(entry.conversationId)}>
               {t('Track again')}
-            </Button>
+            </SettingsButton>
           </div>
         ))}
       </div>
@@ -547,99 +651,55 @@ function GlobalSkillPicker({
 /** 设置 → 秘书：多秘书时先选秘书，再编辑它的档案、风格、定时；也能新建与删除 */
 export function SecretarySettings() {
   const { t } = useI18n();
-  const [secretaries, setSecretaries] = React.useState<SecretarySummary[]>([]);
-  const [selected, setSelected] = React.useState<string | undefined>(() => {
-    try {
-      return localStorage.getItem(SETTINGS_SECRETARY_KEY) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  });
+  const { secretaries, setSecretaries, current, multiple, select, reload } =
+    useSettingsSecretaries();
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   // 点删除时的那个秘书：途中列表推送或主窗口切换选中，都不改删除对象
   const [deleteTarget, setDeleteTarget] = React.useState<string>();
 
-  const loadList = React.useCallback(async () => {
-    const list = await window.electronAPI.secretary.list();
-    setSecretaries(list);
-  }, []);
-
-  React.useEffect(() => {
-    void loadList();
-    return window.electronAPI.secretary.onListChanged(setSecretaries);
-  }, [loadList]);
-
-  // 设置窗口已开着时，主窗口点另一个秘书的「设置」：跟着切过去
-  React.useEffect(() => {
-    const follow = (event: StorageEvent) => {
-      if (event.key === SETTINGS_SECRETARY_KEY && event.newValue) setSelected(event.newValue);
-    };
-    window.addEventListener('storage', follow);
-    return () => window.removeEventListener('storage', follow);
-  }, []);
-
-  const current =
-    secretaries.find((entry) => entry.id === selected)?.id ?? secretaries[0]?.id ?? undefined;
-  const multiple = secretaries.length > 1;
-
   const create = async () => {
     const result = await window.electronAPI.secretary.create();
     if (!result.ok) return;
-    await loadList();
-    setSelected(result.secretaryId);
+    await reload();
+    select(result.secretaryId);
   };
 
   return (
     <SecretaryIdContext.Provider value={multiple ? current : undefined}>
-      <div className="space-y-4">
+      <SettingsPage
+        title={t('Secretary')}
+        description={t(
+          'The secretary is not part of any project. It watches your projects, dispatches sessions and reports results back. It never reads or writes code itself.'
+        )}
+      >
         {secretaries.length > 0 && (
           <div
-            className="flex flex-wrap items-center gap-1.5"
+            className="mt-4 flex max-w-full flex-wrap items-center gap-1.5"
             data-enso="secretary-settings-picker"
           >
-            {multiple &&
-              secretaries.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  data-enso="secretary-settings-pick"
-                  data-secretary-id={entry.id}
-                  data-selected={entry.id === current || undefined}
-                  onClick={() => setSelected(entry.id)}
-                  className={cn(
-                    'rounded-full border px-2.5 py-1 text-xs transition-colors',
-                    entry.id === current
-                      ? 'border-foreground/40 bg-foreground/5 text-foreground'
-                      : 'border-border text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {entry.name ?? t('Secretary')}
-                </button>
-              ))}
-            <Button
-              variant="outline"
-              size="sm"
-              data-enso="secretary-settings-create"
-              onClick={() => void create()}
-            >
-              {t('New secretary')}
-            </Button>
-            {current && (
-              <Button
-                variant="ghost"
-                size="sm"
-                data-enso="secretary-settings-delete"
-                onClick={() => {
-                  setDeleteTarget(current);
-                  setDeleteOpen(true);
-                }}
-              >
-                {t('Delete secretary')}
-              </Button>
+            {multiple && (
+              <SettingsSecretaryChips
+                secretaries={secretaries}
+                current={current}
+                onSelect={select}
+              />
             )}
+            <SettingsButton data-enso="secretary-settings-create" onClick={() => void create()}>
+              {t('New secretary')}
+            </SettingsButton>
           </div>
         )}
-        <SecretaryProfileSettings key={current ?? 'single'} />
+        <SecretaryProfileSettings
+          key={current ?? 'single'}
+          onDelete={
+            current
+              ? () => {
+                  setDeleteTarget(current);
+                  setDeleteOpen(true);
+                }
+              : undefined
+          }
+        />
         {deleteTarget && (
           <SecretaryDeleteDialog
             open={deleteOpen}
@@ -647,28 +707,27 @@ export function SecretarySettings() {
             onOpenChange={setDeleteOpen}
             onDeleted={() => {
               setSecretaries((list) => list.filter((entry) => entry.id !== deleteTarget));
-              setSelected(undefined);
-              void loadList();
+              select(undefined);
+              void reload();
             }}
           />
         )}
-      </div>
+      </SettingsPage>
     </SecretaryIdContext.Provider>
   );
 }
 
-function SecretaryProfileSettings() {
+function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
   const { t, locale } = useI18n();
   const secretaryId = React.useContext(SecretaryIdContext);
   const [profile, setProfile] = React.useState<SecretaryProfile | null>(null);
   const [persona, setPersona] = React.useState('');
-  const [styleDraft, setStyleDraft] = React.useState<SecretaryProfileDraft | null>(null);
   const [schedules, setSchedules] = React.useState<SecretaryScheduleView[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<string | null>(null);
   const [resetOpen, setResetOpen] = React.useState(false);
   const [avatar, dispatchAvatar] = React.useReducer(avatarUpload, IDLE_AVATAR_UPLOAD);
+  const { status: profileSaved, mark: markProfileSaved } = useSavedFlash();
   const fileRef = React.useRef<HTMLInputElement>(null);
   const defaultName = t('Secretary');
 
@@ -685,30 +744,28 @@ function SecretaryProfileSettings() {
     }
     setProfile(result.profile);
     setPersona(result.persona);
-    setStyleDraft(result.profile ? draftFromProfile(result.profile, defaultName) : null);
     await loadSchedules();
-  }, [defaultName, loadSchedules, secretaryId]);
+  }, [loadSchedules, secretaryId]);
 
   React.useEffect(() => {
     void reload();
   }, [reload]);
 
-  const save = async (draft: SecretaryProfileDraft) => {
+  const save = async (draft: SecretaryProfileDraft): Promise<boolean> => {
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
       const result = await window.electronAPI.secretary.saveProfile(draft, secretaryId);
       if (!result.ok) {
         setError(result.error);
-        return;
+        return false;
       }
       setProfile(result.profile);
-      setStyleDraft(draftFromProfile(result.profile, defaultName));
-      setNotice(t('Saved'));
       await loadSchedules();
+      return true;
     } catch {
       setError(t('Could not save the secretary profile. Try again.'));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -725,7 +782,6 @@ function SecretaryProfileSettings() {
         return;
       }
       setProfile(result.profile);
-      setStyleDraft(draftFromProfile(result.profile, defaultName));
       dispatchAvatar({ type: 'saved' });
     } catch {
       dispatchAvatar({ type: 'save-failed' });
@@ -744,31 +800,21 @@ function SecretaryProfileSettings() {
   };
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h3 className="text-lg font-medium">{t('Secretary')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            'The secretary is not part of any project. It watches your projects, dispatches sessions and reports results back. It never reads or writes code itself.'
-          )}
-        </p>
-      </div>
-
+    <>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       {avatar.problem ? (
         <p className="text-xs text-destructive" data-enso="secretary-avatar-problem">
           {t(AVATAR_PROBLEM_TEXT[avatar.problem])}
         </p>
       ) : null}
-      {notice ? <p className="text-xs text-muted-foreground">{notice}</p> : null}
 
-      <Section
-        title="Secretary profile"
-        description="Name, avatar, visible projects and patrol."
+      <SettingsSection
+        title={t('Secretary profile')}
+        description={t('Name, avatar, visible projects and patrol.')}
         rowId="secretary.profile"
       >
         {profile ? (
-          <div className="flex items-center gap-2">
+          <div className={cn('flex flex-wrap items-center gap-2', DIVIDER)}>
             <input
               ref={fileRef}
               type="file"
@@ -812,25 +858,22 @@ function SecretaryProfileSettings() {
               running={0}
               enso="secretary-settings-avatar"
             />
-            <Button
-              variant="outline"
-              size="sm"
+            <SettingsButton
               disabled={avatar.busy}
               onClick={() => fileRef.current?.click()}
               data-enso="secretary-avatar-upload"
             >
               {t('Upload image')}
-            </Button>
+            </SettingsButton>
             {profile.avatar.imageVersion ? (
-              <Button
+              <SettingsButton
                 variant="ghost"
-                size="sm"
                 disabled={avatar.busy}
                 onClick={() => void setAvatar(null)}
                 data-enso="secretary-avatar-remove"
               >
                 {t('Remove image')}
-              </Button>
+              </SettingsButton>
             ) : null}
             <AvatarCropDialog
               source={avatar.cropSource}
@@ -857,24 +900,31 @@ function SecretaryProfileSettings() {
           submitLabel={t('Save')}
           busy={busy}
           hideMaxRunning
-          onSubmit={({ maxRunningDispatches: _, ...draft }) => void save(draft)}
+          onSubmit={({ maxRunningDispatches: _, ...draft }) => {
+            void save(draft).then((ok) => {
+              if (ok) markProfileSaved();
+            });
+          }}
         />
-      </Section>
+        {profileSaved}
+      </SettingsSection>
 
-      <Section
-        title="Concurrent dispatch limit"
-        description="The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused."
+      <SettingsSection
+        title={t('Concurrent dispatch limit')}
+        description={t(
+          'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.'
+        )}
         rowId="secretary.dispatchLimit"
       >
         {profile ? (
-          <Chips
+          <SaveChips
             enso="secretary-dispatch-limit"
             value={String(profile.maxRunningDispatches)}
             options={DISPATCH_LIMIT_OPTIONS}
-            onChange={(value) => {
+            onPick={async (value) => {
               const maxRunningDispatches = Number(value);
-              if (busy || maxRunningDispatches === profile.maxRunningDispatches) return;
-              void save({ maxRunningDispatches });
+              if (busy || maxRunningDispatches === profile.maxRunningDispatches) return false;
+              return save({ maxRunningDispatches });
             }}
           />
         ) : (
@@ -882,11 +932,13 @@ function SecretaryProfileSettings() {
             {t('The secretary has not been set up yet.')}
           </p>
         )}
-      </Section>
+      </SettingsSection>
 
-      <Section
-        title="Plugins"
-        description="Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call."
+      <SettingsSection
+        title={t('Plugins')}
+        description={t(
+          'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call.'
+        )}
         rowId="secretary.plugins"
       >
         {profile ? (
@@ -900,11 +952,13 @@ function SecretaryProfileSettings() {
             {t('The secretary has not been set up yet.')}
           </p>
         )}
-      </Section>
+      </SettingsSection>
 
-      <Section
-        title="Skills"
-        description="Skills the secretary may use. It proposes new ones in the chat; you confirm before anything is written."
+      <SettingsSection
+        title={t('Skills')}
+        description={t(
+          'Skills the secretary may use. It proposes new ones in the chat; you confirm before anything is written.'
+        )}
         rowId="secretary.skills"
       >
         {profile ? (
@@ -925,11 +979,13 @@ function SecretaryProfileSettings() {
             {t('The secretary has not been set up yet.')}
           </p>
         )}
-      </Section>
+      </SettingsSection>
 
-      <Section
-        title="Tools"
-        description="Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call."
+      <SettingsSection
+        title={t('Tools')}
+        description={t(
+          'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.'
+        )}
         rowId="secretary.tools"
       >
         {profile ? (
@@ -939,135 +995,116 @@ function SecretaryProfileSettings() {
             {t('The secretary has not been set up yet.')}
           </p>
         )}
-      </Section>
+      </SettingsSection>
 
-      {styleDraft ? (
-        <Section
-          title="Style and interruptions"
-          description="What it calls you, reply language, style and system notifications."
+      {profile ? (
+        <SettingsSection
+          title={t('Style and interruptions')}
+          description={t('What it calls you, reply language, style and system notifications.')}
           rowId="secretary.style"
         >
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <p className="text-sm">{t('What to call you')}</p>
-              <Input
-                value={styleDraft.addressAs ?? ''}
-                placeholder={t('Optional')}
-                onChange={(event) =>
-                  setStyleDraft({
-                    ...styleDraft,
-                    addressAs: event.target.value.trim() ? event.target.value : null,
-                  })
-                }
-                className="max-w-xs"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm">{t('Reply language')}</p>
-              <Chips
-                value={styleDraft.replyLanguage ?? 'ui'}
-                options={(['ui', 'zh', 'en'] as const).map((value) => ({
-                  value,
-                  label: REPLY_LANGUAGE_LABELS[value],
-                }))}
-                onChange={(replyLanguage) => setStyleDraft({ ...styleDraft, replyLanguage })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm">{t('Communication style')}</p>
-              <Chips
-                value={styleDraft.style ?? 'concise'}
-                options={(['concise', 'detailed'] as const).map((value) => ({
-                  value,
-                  label: STYLE_LABELS[value],
-                }))}
-                onChange={(style) => setStyleDraft({ ...styleDraft, style })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm">{t('System notifications')}</p>
-              <Chips
-                value={styleDraft.notify ?? 'needs-user'}
-                options={(['needs-user', 'with-done', 'off'] as const).map((value) => ({
-                  value,
-                  label: NOTIFY_LABELS[value],
-                }))}
-                onChange={(notify) => setStyleDraft({ ...styleDraft, notify })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm">{t('Daily brief time')}</p>
-              <Input
-                type="time"
-                value={styleDraft.dailyBriefAt ?? ''}
-                onChange={(event) =>
-                  setStyleDraft({ ...styleDraft, dailyBriefAt: event.target.value || null })
-                }
-                className="max-w-32"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm">{t('Persona')}</p>
-              <Textarea
-                value={persona}
-                onChange={(event) => setPersona(event.target.value)}
-                rows={4}
-              />
-            </div>
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                void save({
-                  addressAs: styleDraft.addressAs ?? null,
-                  replyLanguage: styleDraft.replyLanguage,
-                  style: styleDraft.style,
-                  notify: styleDraft.notify,
-                  dailyBriefAt: styleDraft.dailyBriefAt ?? null,
-                  persona,
-                })
-              }
-            >
-              {t('Save')}
-            </Button>
-          </div>
-        </Section>
+          <BlurRow
+            label={t('What to call you')}
+            value={profile.addressAs ?? ''}
+            placeholder={t('Optional')}
+            onCommit={(raw) => {
+              const next = raw.trim() ? raw : null;
+              if (next === (profile.addressAs ?? null)) return Promise.resolve(false);
+              return save({ addressAs: next });
+            }}
+          />
+          <SettingsRow label={t('Reply language')}>
+            <SaveChips
+              value={profile.replyLanguage}
+              options={(['ui', 'zh', 'en'] as const).map((value) => ({
+                value,
+                label: REPLY_LANGUAGE_LABELS[value],
+              }))}
+              onPick={(replyLanguage) => (busy ? Promise.resolve(false) : save({ replyLanguage }))}
+            />
+          </SettingsRow>
+          <SettingsRow label={t('Communication style')}>
+            <SaveChips
+              value={profile.style}
+              options={(['concise', 'detailed'] as const).map((value) => ({
+                value,
+                label: STYLE_LABELS[value],
+              }))}
+              onPick={(style) => (busy ? Promise.resolve(false) : save({ style }))}
+            />
+          </SettingsRow>
+          <SettingsRow label={t('System notifications')}>
+            <SaveChips
+              value={profile.notify}
+              options={(['needs-user', 'with-done', 'off'] as const).map((value) => ({
+                value,
+                label: NOTIFY_LABELS[value],
+              }))}
+              onPick={(notify) => (busy ? Promise.resolve(false) : save({ notify }))}
+            />
+          </SettingsRow>
+          <BlurRow
+            label={t('Daily brief time')}
+            type="time"
+            value={profile.dailyBriefAt ?? ''}
+            onCommit={(raw) => {
+              const next = raw || null;
+              if (next === (profile.dailyBriefAt ?? null)) return Promise.resolve(false);
+              return save({ dailyBriefAt: next });
+            }}
+          />
+          <BlurRow
+            label={t('Persona')}
+            multiline
+            value={persona}
+            onCommit={async (raw) => {
+              if (raw === persona) return false;
+              const ok = await save({ persona: raw });
+              if (ok) setPersona(raw);
+              return ok;
+            }}
+          />
+        </SettingsSection>
       ) : null}
 
-      <Section
-        title="Sessions it may take over"
-        description="Which sessions the secretary may message and stop without asking you first. Everything else still needs a confirmation card from the secretary."
+      <SettingsSection
+        title={t('Sessions it may take over')}
+        description={t(
+          'Which sessions the secretary may message and stop without asking you first. Everything else still needs a confirmation card from the secretary.'
+        )}
         rowId="secretary.takeoverScope"
       >
         {profile ? (
           <TakeoverScopePicker
             profile={profile}
             busy={busy}
-            onChange={(takeoverScope) => void save({ takeoverScope })}
+            onChange={(takeoverScope) => save({ takeoverScope })}
           />
         ) : (
           <p className="text-xs text-muted-foreground">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
-      </Section>
+      </SettingsSection>
 
-      <Section
-        title="Sessions handed over"
-        description="Sessions you started and handed to the secretary. It may message and stop them like the ones it dispatched; take one back to remove that right."
+      <SettingsSection
+        title={t('Sessions handed over')}
+        description={t(
+          'Sessions you started and handed to the secretary. It may message and stop them like the ones it dispatched; take one back to remove that right.'
+        )}
         rowId="secretary.takeovers"
       >
         <Takeovers locale={locale} />
         <Untracked />
-      </Section>
+      </SettingsSection>
 
-      <Section title="Scheduled tasks" rowId="secretary.schedules">
+      <SettingsSection title={t('Scheduled tasks')} rowId="secretary.schedules">
         {schedules.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('Nothing scheduled')}</p>
         ) : (
-          <div className="divide-y rounded-md border">
+          <div>
             {schedules.map((schedule) => (
-              <div key={schedule.id} className="flex items-center gap-2 px-3 py-2">
+              <div key={schedule.id} className={cn('flex flex-wrap items-center gap-2', DIVIDER)}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm">{schedule.name}</p>
                   <p className="truncate text-xs text-muted-foreground">
@@ -1080,41 +1117,54 @@ function SecretaryProfileSettings() {
                     {t('Built-in')}
                   </span>
                 ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void removeSchedule(schedule.id)}
-                  >
+                  <SettingsButton variant="ghost" onClick={() => void removeSchedule(schedule.id)}>
                     {t('Remove')}
-                  </Button>
+                  </SettingsButton>
                 )}
               </div>
             ))}
           </div>
         )}
-      </Section>
+      </SettingsSection>
 
-      <Section
-        title="Reset the secretary and start over"
-        description="Sessions and dispatch history are kept either way."
+      <SettingsSection
+        title={t('Reset the secretary and start over')}
+        description={t('Sessions and dispatch history are kept either way.')}
         rowId="secretary.reset"
       >
-        <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>
-          {t('Re-run setup')}
-        </Button>
+        <div className={cn('flex flex-wrap justify-end', DIVIDER)}>
+          <SettingsButton onClick={() => setResetOpen(true)}>{t('Re-run setup')}</SettingsButton>
+        </div>
         <SecretaryResetDialog
           open={resetOpen}
           secretaryId={secretaryId}
           onOpenChange={setResetOpen}
           onReset={() => {
             setProfile(null);
-            setStyleDraft(null);
             setPersona('');
-            setNotice(null);
             void loadSchedules();
           }}
         />
-      </Section>
-    </div>
+      </SettingsSection>
+
+      {onDelete ? (
+        <SettingsSection tone="danger" title={t('Danger zone')}>
+          <SettingsRow
+            label={t('Delete secretary')}
+            description={t(
+              'This cannot be undone. The sessions it manages stay, but nobody manages them afterwards; its contact bindings are released and its private memory is deleted.'
+            )}
+          >
+            <SettingsButton
+              variant="destructive"
+              data-enso="secretary-settings-delete"
+              onClick={onDelete}
+            >
+              {t('Delete secretary')}
+            </SettingsButton>
+          </SettingsRow>
+        </SettingsSection>
+      ) : null}
+    </>
   );
 }

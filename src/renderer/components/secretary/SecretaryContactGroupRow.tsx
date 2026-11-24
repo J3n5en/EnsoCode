@@ -55,8 +55,8 @@ function Choice({
     >
       <span
         className={cn(
-          'flex size-3.5 shrink-0 items-center justify-center rounded border border-border',
-          checked && 'border-foreground bg-foreground text-background'
+          'flex size-3.5 shrink-0 items-center justify-center rounded ring-1 ring-border',
+          checked && 'bg-foreground text-background ring-foreground'
         )}
       >
         {checked && <Check className="size-2.5" />}
@@ -208,7 +208,7 @@ export function SecretaryContactGroupRow({
         <div
           role="radiogroup"
           aria-label={t('What {{name}} hands to this secretary', { name })}
-          className="inline-flex shrink-0 rounded-lg border border-border p-0.5"
+          className="inline-flex shrink-0 rounded-lg bg-muted p-0.5"
         >
           <Segment
             enso="secretary-contact-scope-all"

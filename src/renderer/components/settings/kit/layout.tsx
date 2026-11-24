@@ -51,6 +51,11 @@ export function SettingsSaved() {
   );
 }
 
+/** 内容本身是个对象（图表、预览）：只这一层边框，里面不能再画框 */
+export function SettingsPreview({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div data-settings-preview="" className={cn('rounded-lg border', className)} {...props} />;
+}
+
 export function SettingsPage({
   title,
   description,

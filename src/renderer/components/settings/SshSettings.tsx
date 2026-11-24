@@ -23,6 +23,14 @@ import {
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  TOUCH_TARGET,
+} from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
 const SSH_TIMEOUT_OPTIONS = [10, 15, 30, 60, 120, 300];
@@ -144,69 +152,76 @@ export function SshSettings() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4" data-settings-row="ssh.root">
-        <div>
-          <h2 className="text-lg font-medium">
-            {t('SSH')}
-            <NewSessionBadge
-              note={t(
-                'The file panel and terminal use the change right away. Agents in open sessions keep the previous connection settings.'
-              )}
-            />
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('Saved hosts for remote projects. Passwords stay in the system keychain.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={openCreate}>
+    <SettingsPage
+      rowId="ssh.root"
+      title={
+        <>
+          {t('SSH')}
+          <NewSessionBadge
+            note={t(
+              'The file panel and terminal use the change right away. Agents in open sessions keep the previous connection settings.'
+            )}
+          />
+        </>
+      }
+      description={t('Saved hosts for remote projects. Passwords stay in the system keychain.')}
+      actions={
+        <SettingsButton variant="default" onClick={openCreate}>
           <Plus className="h-4 w-4" />
           {t('Add connection')}
-        </Button>
-      </div>
-      {testHint && <p className="text-sm text-muted-foreground">{testHint}</p>}
-      <ul className="divide-y rounded-lg border">
-        {connections.length === 0 && (
-          <li className="px-3 py-6 text-sm text-muted-foreground">{t('No SSH connections yet')}</li>
-        )}
-        {connections.map((connection) => (
-          <li
-            key={connection.id}
-            className="flex items-center gap-2 px-3 py-2"
-            data-settings-row={`ssh.${connection.id}`}
-          >
-            <button
-              type="button"
-              className="min-w-0 flex-1 text-left"
-              onClick={() => openEdit(connection)}
+        </SettingsButton>
+      }
+    >
+      {testHint && <p className="mt-3 text-[13px] text-muted-foreground">{testHint}</p>}
+      <SettingsSection>
+        <ul>
+          {connections.length === 0 && (
+            <li className="border-border border-b py-6 text-[13px] text-muted-foreground">
+              {t('No SSH connections yet')}
+            </li>
+          )}
+          {connections.map((connection) => (
+            <li
+              key={connection.id}
+              className="flex flex-wrap items-center gap-2 border-border border-b py-2"
+              data-settings-row={`ssh.${connection.id}`}
             >
-              <div className="truncate text-sm font-medium">{connection.name}</div>
-              <div className="truncate text-xs text-muted-foreground">
-                {connection.user ? `${connection.user}@` : ''}
-                {connection.host}
-                {connection.port ? `:${connection.port}` : ''} ·{' '}
-                {connection.auth === 'password' ? t('Password') : t('Key / agent')}
-              </div>
-            </button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={testingId === connection.id}
-              onClick={() => void test(connection.id)}
-            >
-              {testingId === connection.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                t('Test')
-              )}
-            </Button>
-            <Button size="icon-sm" variant="ghost" onClick={() => void remove(connection.id)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </li>
-        ))}
-      </ul>
-      <SshTimeoutRow />
+              <button
+                type="button"
+                className="min-w-0 flex-1 py-1 text-left"
+                onClick={() => openEdit(connection)}
+              >
+                <div className="truncate text-sm font-medium">{connection.name}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {connection.user ? `${connection.user}@` : ''}
+                  {connection.host}
+                  {connection.port ? `:${connection.port}` : ''} ·{' '}
+                  {connection.auth === 'password' ? t('Password') : t('Key / agent')}
+                </div>
+              </button>
+              <SettingsButton
+                disabled={testingId === connection.id}
+                onClick={() => void test(connection.id)}
+              >
+                {testingId === connection.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  t('Test')
+                )}
+              </SettingsButton>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className={TOUCH_TARGET}
+                onClick={() => void remove(connection.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+        <SshTimeoutRow />
+      </SettingsSection>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
@@ -293,7 +308,7 @@ export function SshSettings() {
         onTrust={() => void trustHost()}
         onDismiss={() => !trusting && setHostKey(null)}
       />
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -302,34 +317,21 @@ function SshTimeoutRow() {
   const sshTimeoutSeconds = useSettingsStore((state) => state.sshTimeoutSeconds);
   const setSshTimeoutSeconds = useSettingsStore((state) => state.setSshTimeoutSeconds);
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="ssh.timeout"
+    <SettingsRow
+      rowId="ssh.timeout"
+      label={t('SSH timeout')}
+      description={t(
+        'Time limit for connection tests, loading remote AGENTS.md, remote folder browsing and file panel actions. Agent tool commands are not affected.'
+      )}
     >
-      <div className="min-w-0">
-        <p className="text-sm">{t('SSH timeout')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Time limit for connection tests, loading remote AGENTS.md, remote folder browsing and file panel actions. Agent tool commands are not affected.'
-          )}
-        </p>
-      </div>
-      <Select
-        items={Object.fromEntries(SSH_TIMEOUT_OPTIONS.map((value) => [String(value), `${value}s`]))}
+      <SettingsSelect
         value={String(sshTimeoutSeconds)}
         onValueChange={(value) => setSshTimeoutSeconds(Number(value))}
-      >
-        <SelectTrigger className="w-24">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {SSH_TIMEOUT_OPTIONS.map((value) => (
-            <SelectItem key={value} value={String(value)}>
-              {`${value}s`}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
+        options={SSH_TIMEOUT_OPTIONS.map((value) => ({
+          value: String(value),
+          label: `${value}s`,
+        }))}
+      />
+    </SettingsRow>
   );
 }

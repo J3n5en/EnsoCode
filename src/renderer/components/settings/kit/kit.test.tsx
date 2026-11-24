@@ -7,6 +7,7 @@ import {
   SettingsExpandableRow,
   SettingsInput,
   SettingsPage,
+  SettingsPreview,
   SettingsRow,
   SettingsSection,
   SettingsSegmented,
@@ -14,7 +15,7 @@ import {
   SettingsSubRow,
   SettingsSwitch,
 } from '.';
-import { findNestedBoxes } from './boxes';
+import { countBoxesInSource, findNestedBoxes } from './boxes';
 import { TOUCH_TARGET } from './controls';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -310,5 +311,23 @@ describe('SettingsPage', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Logs');
     expect(container.querySelector('h2')?.textContent).toBe('Recording');
     expect(findNestedBoxes(container)).toEqual([]);
+  });
+});
+
+describe('SettingsPreview', () => {
+  it('预览对象带一层边框并标记放行，里面再画框照算', async () => {
+    await render(
+      <SettingsPreview className="p-4">
+        <div className="rounded border">inner</div>
+      </SettingsPreview>
+    );
+    const preview = container.querySelector('[data-settings-preview]') as HTMLElement;
+    expect(preview.className).toContain('border');
+    expect(preview.className).toContain('p-4');
+    expect(findNestedBoxes(container)).toHaveLength(1);
+  });
+
+  it('页面源码用它画预览框不计入带框容器', () => {
+    expect(countBoxesInSource('<SettingsPreview className="p-4">x</SettingsPreview>')).toBe(0);
   });
 });

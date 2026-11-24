@@ -3,6 +3,7 @@ import type { UsageDailyPoint } from '@shared/usage/types';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SettingsPreview } from '../kit';
 
 type Metric = 'tokens' | 'cost';
 type SeriesId = 'output' | 'input' | 'cache';
@@ -60,7 +61,7 @@ export function DailyTrendChart({ daily }: { daily: UsageDailyPoint[] }) {
   const hovered = hover !== null ? daily[hover] : null;
 
   return (
-    <div className="rounded-lg border bg-card p-4">
+    <SettingsPreview className="p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{t('Daily trend')}</span>
         <div className="flex items-center gap-3">
@@ -164,7 +165,7 @@ export function DailyTrendChart({ daily }: { daily: UsageDailyPoint[] }) {
           })}
         </svg>
       </div>
-    </div>
+    </SettingsPreview>
   );
 }
 

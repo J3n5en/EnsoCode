@@ -6,9 +6,11 @@ import type {
 import { Copy, ExternalLink, KeyRound, Lock, TriangleAlert, Users } from 'lucide-react';
 import { type TFunction, useI18n } from '@/i18n';
 
-const STEP_CLASS = 'rounded-xl border border-border px-3 py-2.5';
+const STEP_CLASS = 'border-border border-b py-3';
 const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12.5px] transition-colors hover:bg-muted disabled:opacity-50';
+const LINK_CLASS =
+  'inline-flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-[12.5px] text-foreground transition-colors hover:bg-muted/80';
 
 /** 同一个 bot 上已经占着私聊的别的秘书：同一个人和同一个 bot 只有一个私聊 */
 export function privateChatOwner(shared: SecretaryContactBotUser[] | undefined): string | null {
@@ -83,7 +85,7 @@ export function SecretaryContactBindPlaces({
             href={bind.groupLink}
             target="_blank"
             rel="noreferrer"
-            className={`${BUTTON_CLASS} self-start text-foreground`}
+            className={`${LINK_CLASS} self-start`}
           >
             <ExternalLink className="size-3.5" />
             {t('Add the bot to a group')}

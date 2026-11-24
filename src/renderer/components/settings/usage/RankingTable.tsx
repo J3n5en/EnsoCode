@@ -1,8 +1,8 @@
 import { formatCost, formatTokens } from '@shared/usage/format';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SettingsButton, SettingsPreview } from '../kit';
 
 export interface RankingRow {
   key: string;
@@ -35,7 +35,7 @@ export function RankingTable({
   const overflow = rows.length > limit;
   const visible = overflow && !expanded ? rows.slice(0, limit) : rows;
   return (
-    <div className="rounded-lg border bg-card p-4">
+    <SettingsPreview className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <span className="text-sm font-medium">{title}</span>
         {overflow && (
@@ -49,60 +49,63 @@ export function RankingTable({
       {visible.length === 0 ? (
         <p className="py-6 text-center text-xs text-muted-foreground">{emptyLabel}</p>
       ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-[11px] text-muted-foreground">
-              <th className="pb-2 text-left font-normal">{t('Name')}</th>
-              <th className="pb-2 text-right font-normal">{t('Cost')}</th>
-              <th className="pb-2 text-right font-normal">{t('Token')}</th>
-              <th className="pb-2 text-right font-normal">{countLabel}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((row) => {
-              const share = total > 0 ? row.tokens / total : 0;
-              return (
-                <tr key={row.key} className="border-t border-border/60">
-                  <td className="py-2 pr-3">
-                    <div className="truncate" title={row.name}>
-                      {row.name || t('(no project)')}
-                    </div>
-                    <div className="mt-1 h-1 w-full rounded-full bg-foreground/[0.06]">
-                      <div
-                        className="h-1 rounded-full bg-foreground/70"
-                        style={{ width: `${Math.max(1, share * 100)}%` }}
-                      />
-                    </div>
-                  </td>
-                  <td
-                    className={cn(
-                      'py-2 text-right font-mono tabular-nums',
-                      row.cost === null && 'text-muted-foreground'
-                    )}
-                  >
-                    {formatCost(row.cost)}
-                  </td>
-                  <td className="py-2 text-right font-mono tabular-nums">
-                    {formatTokens(row.tokens)}
-                    <span className="ml-1 text-muted-foreground">{(share * 100).toFixed(0)}%</span>
-                  </td>
-                  <td className="py-2 text-right font-mono tabular-nums">{row.count}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[32rem] text-xs">
+            <thead>
+              <tr className="text-[11px] text-muted-foreground">
+                <th className="pb-2 text-left font-normal">{t('Name')}</th>
+                <th className="pb-2 text-right font-normal">{t('Cost')}</th>
+                <th className="pb-2 text-right font-normal">{t('Token')}</th>
+                <th className="pb-2 text-right font-normal">{countLabel}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((row) => {
+                const share = total > 0 ? row.tokens / total : 0;
+                return (
+                  <tr key={row.key} className="border-t border-border/60">
+                    <td className="py-2 pr-3">
+                      <div className="truncate" title={row.name}>
+                        {row.name || t('(no project)')}
+                      </div>
+                      <div className="mt-1 h-1 w-full rounded-full bg-foreground/[0.06]">
+                        <div
+                          className="h-1 rounded-full bg-foreground/70"
+                          style={{ width: `${Math.max(1, share * 100)}%` }}
+                        />
+                      </div>
+                    </td>
+                    <td
+                      className={cn(
+                        'py-2 text-right font-mono tabular-nums',
+                        row.cost === null && 'text-muted-foreground'
+                      )}
+                    >
+                      {formatCost(row.cost)}
+                    </td>
+                    <td className="py-2 text-right font-mono tabular-nums">
+                      {formatTokens(row.tokens)}
+                      <span className="ml-1 text-muted-foreground">
+                        {(share * 100).toFixed(0)}%
+                      </span>
+                    </td>
+                    <td className="py-2 text-right font-mono tabular-nums">{row.count}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       {overflow && (
-        <Button
+        <SettingsButton
           variant="ghost"
-          size="xs"
           className="mt-2 w-full text-muted-foreground"
           onClick={() => setExpanded((v) => !v)}
         >
           {expanded ? t('Collapse') : t('Show all')}
-        </Button>
+        </SettingsButton>
       )}
-    </div>
+    </SettingsPreview>
   );
 }

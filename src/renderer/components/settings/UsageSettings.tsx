@@ -8,10 +8,10 @@ import {
 } from '@shared/usage/types';
 import { RefreshCw } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsPage, SettingsSection } from './kit';
 import { DailyTrendChart } from './usage/DailyTrendChart';
 import { HourlyHeatmap } from './usage/HourlyHeatmap';
 import { RankingTable } from './usage/RankingTable';
@@ -64,15 +64,13 @@ export function UsageSettings() {
   }, [days, load]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-medium">{t('Usage')}</h3>
-          <p className="text-sm text-muted-foreground">
-            {t('Token usage across all local sessions; cost is estimated from catalog prices.')}
-          </p>
-        </div>
-        <Button
+    <SettingsPage
+      title={t('Usage')}
+      description={t(
+        'Token usage across all local sessions; cost is estimated from catalog prices.'
+      )}
+      actions={
+        <SettingsButton
           variant="ghost"
           size="icon-sm"
           onClick={() => void load(days)}
@@ -80,73 +78,75 @@ export function UsageSettings() {
           aria-label={t('Refresh')}
         >
           <RefreshCw className={cn(loading && 'animate-spin')} />
-        </Button>
-      </div>
-
-      <RangePills value={days} onChange={setDays} />
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
-
-      {summary && (
-        <>
-          <StatGrid totals={summary.totals} previous={summary.previous} />
-          <DailyTrendChart daily={summary.daily} />
-          <HourlyHeatmap heatmap={summary.heatmap} />
-          <div className="grid gap-4 xl:grid-cols-2">
-            <RankingTable
-              title={t('By model')}
-              countLabel={t('Messages')}
-              emptyLabel={t('No usage in this period')}
-              rows={summary.byModel.map((row) => ({
-                key: row.model,
-                name: row.model,
-                cost: row.cost,
-                tokens: row.tokens,
-                count: row.messages,
-              }))}
-            />
-            <RankingTable
-              title={t('By project')}
-              countLabel={t('Sessions')}
-              emptyLabel={t('No usage in this period')}
-              rows={summary.byProject.map((row) => ({
-                key: row.project || '#',
-                name: row.project,
-                cost: row.cost,
-                tokens: row.tokens,
-                count: row.sessions,
-              }))}
-            />
+        </SettingsButton>
+      }
+    >
+      <SettingsSection>
+        <div className="border-border border-b py-3">
+          <RangePills value={days} onChange={setDays} />
+        </div>
+        {error && <p className="border-border border-b py-3 text-sm text-destructive">{error}</p>}
+        {summary && (
+          <div className="space-y-4 border-border border-b py-4">
+            <StatGrid totals={summary.totals} previous={summary.previous} />
+            <DailyTrendChart daily={summary.daily} />
+            <HourlyHeatmap heatmap={summary.heatmap} />
+            <div className="grid gap-4 xl:grid-cols-2">
+              <RankingTable
+                title={t('By model')}
+                countLabel={t('Messages')}
+                emptyLabel={t('No usage in this period')}
+                rows={summary.byModel.map((row) => ({
+                  key: row.model,
+                  name: row.model,
+                  cost: row.cost,
+                  tokens: row.tokens,
+                  count: row.messages,
+                }))}
+              />
+              <RankingTable
+                title={t('By project')}
+                countLabel={t('Sessions')}
+                emptyLabel={t('No usage in this period')}
+                rows={summary.byProject.map((row) => ({
+                  key: row.project || '#',
+                  name: row.project,
+                  cost: row.cost,
+                  tokens: row.tokens,
+                  count: row.sessions,
+                }))}
+              />
+            </div>
+            {botMode && botRows && (
+              <RankingTable
+                title={t('By member')}
+                countLabel={t('Sessions')}
+                emptyLabel={t('No usage in this period')}
+                rows={botRows.map((row) => ({
+                  key: row.botId,
+                  name: row.name || t('Deleted member'),
+                  cost: row.cost,
+                  tokens: row.tokens,
+                  count: row.sessions,
+                }))}
+              />
+            )}
+            {summary.unpricedModels.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t('No catalog price for: {{models}}. Their cost is not included.', {
+                  models: summary.unpricedModels.join(', '),
+                })}
+              </p>
+            )}
           </div>
-          {botMode && botRows && (
-            <RankingTable
-              title={t('By member')}
-              countLabel={t('Sessions')}
-              emptyLabel={t('No usage in this period')}
-              rows={botRows.map((row) => ({
-                key: row.botId,
-                name: row.name || t('Deleted member'),
-                cost: row.cost,
-                tokens: row.tokens,
-                count: row.sessions,
-              }))}
-            />
-          )}
-          {summary.unpricedModels.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {t('No catalog price for: {{models}}. Their cost is not included.', {
-                models: summary.unpricedModels.join(', '),
-              })}
-            </p>
-          )}
-        </>
-      )}
+        )}
+      </SettingsSection>
       <UsagePricingEditor
         models={summary?.byModel ?? []}
         catalog={summary?.pricing ?? {}}
         onChanged={() => void load(days)}
       />
-    </div>
+    </SettingsPage>
   );
 }
 

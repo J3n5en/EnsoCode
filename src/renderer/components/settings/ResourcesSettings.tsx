@@ -46,6 +46,13 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsPreview,
+  SettingsSection,
+  TOUCH_TARGET,
+} from './kit';
 import { formatBytes } from './MemorySettings';
 
 type Tab = 'cpu' | 'memory' | 'storage';
@@ -131,13 +138,10 @@ export function ResourcesSettings() {
   const [tab, setTab] = React.useState<Tab>('cpu');
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-lg font-medium">{t('Resources')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t('CPU, memory and disk usage of EnsoCode and the processes it started.')}
-        </p>
-      </div>
+    <SettingsPage
+      title={t('Resources')}
+      description={t('CPU, memory and disk usage of EnsoCode and the processes it started.')}
+    >
       <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
         <TabsList>
           <TabsTab value="cpu">CPU</TabsTab>
@@ -154,7 +158,7 @@ export function ResourcesSettings() {
           {tab === 'storage' && <StorageUsage />}
         </TabsPanel>
       </Tabs>
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -208,16 +212,21 @@ function ProcessUsage({ metric }: { metric: Metric }) {
           .sort((a, b) => value(b) - value(a));
         if (rows.length === 0) return null;
         return (
-          <div key={group.id} className="rounded-lg border">
-            <div className="flex items-center justify-between border-b px-3 py-2 text-sm font-medium">
-              <span>{t(group.label)}</span>
+          <SettingsSection
+            key={group.id}
+            title={t(group.label)}
+            actions={
               <span className="font-mono text-xs text-muted-foreground">
                 {format(rows.reduce((sum, p) => sum + value(p), 0))}
               </span>
-            </div>
-            <div className="divide-y">
+            }
+          >
+            <div className="overflow-x-auto">
               {rows.map((p) => (
-                <div key={p.pid} className="flex items-center gap-3 px-3 py-1.5 text-sm">
+                <div
+                  key={p.pid}
+                  className="flex min-w-[28rem] items-center gap-3 border-border border-b py-2 text-sm"
+                >
                   <span className="w-20 shrink-0 truncate text-xs text-muted-foreground">
                     {roleLabel(p.role, t)}
                   </span>
@@ -231,7 +240,7 @@ function ProcessUsage({ metric }: { metric: Metric }) {
                 </div>
               ))}
             </div>
-          </div>
+          </SettingsSection>
         );
       })}
     </div>
@@ -252,7 +261,7 @@ function UsageMeter({
   const { t } = useI18n();
   const pct = (v: number) => `${total > 0 ? Math.min(100, (v / total) * 100) : 0}%`;
   return (
-    <div className="space-y-3 rounded-lg border p-4">
+    <SettingsPreview className="space-y-3 p-4">
       <div className="flex items-baseline justify-between gap-4">
         <div>
           <div className="text-xs text-muted-foreground">EnsoCode</div>
@@ -272,7 +281,7 @@ function UsageMeter({
         />
         <div className="absolute inset-y-0 left-0 bg-foreground" style={{ width: pct(app) }} />
       </div>
-    </div>
+    </SettingsPreview>
   );
 }
 
@@ -374,15 +383,14 @@ function StorageUsage() {
               : null}
         </p>
         {busy === 'scan' ? (
-          <Button
+          <SettingsButton
             variant="ghost"
-            size="sm"
             onClick={() => void window.electronAPI.resources.cancelScan()}
           >
             {t('Cancel')}
-          </Button>
+          </SettingsButton>
         ) : (
-          <Button
+          <SettingsButton
             variant="ghost"
             size="icon-sm"
             onClick={() => void scan()}
@@ -390,7 +398,7 @@ function StorageUsage() {
             aria-label={t('Refresh')}
           >
             <RefreshCw />
-          </Button>
+          </SettingsButton>
         )}
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -420,7 +428,7 @@ function StorageUsage() {
                     format={formatBytes}
                   />
                 ) : (
-                  <div className="rounded-lg border p-4 font-mono text-2xl font-semibold">
+                  <div className="border-border border-b py-3 font-mono text-2xl font-semibold">
                     {formatBytes(used)}
                   </div>
                 )}
@@ -436,7 +444,7 @@ function StorageUsage() {
               </div>
             );
           })}
-          <div className="divide-y rounded-lg border">
+          <div>
             {categories.map((category) => (
               <StorageRow
                 key={category.id}
@@ -525,12 +533,12 @@ function StorageRow({
   const { t } = useI18n();
   const [label, description] = CATEGORY_LABELS[category.id];
   return (
-    <div className="px-3 py-2">
+    <div className="border-border border-b py-2">
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
         >
           <ChevronRight
             className={cn('h-4 w-4 shrink-0 transition-transform', expanded && 'rotate-90')}
@@ -563,9 +571,9 @@ function StorageRow({
           </div>
         </button>
         {STORAGE_CLEANABILITY[category.id] !== 'none' && (
-          <Button variant="outline" size="sm" disabled={disabled} onClick={onClean}>
+          <SettingsButton disabled={disabled} onClick={onClean}>
             {cleaning ? t('Cleaning...') : t('Clean')}
-          </Button>
+          </SettingsButton>
         )}
       </div>
       {expanded && (
@@ -582,7 +590,10 @@ function StorageRow({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="opacity-0 group-hover:opacity-100"
+                className={cn(
+                  'opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100',
+                  TOUCH_TARGET
+                )}
                 aria-label={t('Show in folder')}
                 onClick={() =>
                   void window.electronAPI.resources.revealStorage(entry.root, entry.path)
@@ -657,15 +668,15 @@ function SessionStorage({
         );
 
   return (
-    <div className="rounded-lg border">
-      <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b py-2">
         <div className="shrink-0 text-sm font-medium">
           {t('Conversations')}
           <span className="ml-2 font-mono text-xs text-muted-foreground">
             {scoped.length} · {formatBytes(total)}
           </span>
         </div>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Select
             items={{
               [ALL_PROJECTS]: t('All projects'),
@@ -674,7 +685,7 @@ function SessionStorage({
             value={scope}
             onValueChange={(value) => setProjectId(value ?? ALL_PROJECTS)}
           >
-            <SelectTrigger size="sm" className="w-48 min-w-0">
+            <SelectTrigger size="sm" className="w-full min-w-0 max-w-48">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
@@ -729,9 +740,12 @@ function SessionStorage({
           </Menu>
         </div>
       </div>
-      <div className="max-h-96 divide-y overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto">
         {visible.map((session) => (
-          <div key={session.id} className="group flex items-center gap-3 px-3 py-1.5 text-sm">
+          <div
+            key={session.id}
+            className="group flex items-center gap-3 border-border border-b py-2 text-sm"
+          >
             <div className="min-w-0 flex-1">
               <div className="truncate" title={session.title}>
                 {session.title || t('Untitled')}
@@ -750,7 +764,10 @@ function SessionStorage({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="opacity-0 group-hover:opacity-100"
+              className={cn(
+                'opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100',
+                TOUCH_TARGET
+              )}
               disabled={disabled}
               aria-label={t('Delete')}
               onClick={() =>
