@@ -100,7 +100,7 @@ describe('DeskTunnel', () => {
 
   it('切链后 1.5s 快速补发每缺口仅触发一次，随后退回 8s 常规窗口', () => {
     const { cid } = createOnlineTunnel();
-    mockState.events?.onTransport?.('direct');
+    mockState.events?.onTransport?.('relay');
     mockState.sent = [];
 
     // 切链后立刻出现缺口（收到 seq 2，缺 seq 1）
@@ -122,18 +122,60 @@ describe('DeskTunnel', () => {
 
   it('外部 resync 发完 hello 后推迟既有 gapTimer，不在短时间内叠发两次', () => {
     const { cid } = createOnlineTunnel();
-    mockState.events?.onTransport?.('direct');
+    mockState.events?.onTransport?.('relay');
     mockState.sent = [];
 
     mockState.events?.onRemoteFrame?.({ type: 'rpc-event', cid, ch: 'evt', args: [2], seq: 2 });
     vi.advanceTimersByTime(1_000);
     expect(hellos()).toHaveLength(0);
 
-    // 外部切链触发 resync 立即发一次 hello；原有 1.5s gapTimer（只剩 500ms）应被推迟到 8s
-    mockState.events?.onTransport?.('relay');
+    // 宿主重新上线触发 resync 立即发一次 hello；原有 1.5s gapTimer（只剩 500ms）应被推迟到 8s
+    mockState.events?.onState('online');
     expect(hellos()).toHaveLength(1);
 
     vi.advanceTimersByTime(2_000);
+    expect(hellos()).toHaveLength(1);
+  });
+
+  it('中继升级到直连不重新 hello：中继仍在送，重发只会让宿主把在途大帧再排一遍', () => {
+    const { cid } = createOnlineTunnel();
+    mockState.events?.onTransport?.('direct');
+    expect(hellos()).toHaveLength(0);
+
+    // 大结果走中继分片、小帧走直连先到，属正常乱序：按常规窗口等，不走切链快速补发
+    mockState.events?.onRemoteFrame?.({ type: 'rpc-event', cid, ch: 'evt', args: [2], seq: 2 });
+    vi.advanceTimersByTime(7_999);
+    expect(hellos()).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(hellos()).toHaveLength(1);
+  });
+
+  it('首次上线没有可丢的旧帧：启动期缺口按常规窗口等', () => {
+    const { cid } = createOnlineTunnel();
+    mockState.events?.onRemoteFrame?.({ type: 'rpc-event', cid, ch: 'evt', args: [2], seq: 2 });
+    vi.advanceTimersByTime(1_500);
+    expect(hellos()).toHaveLength(0);
+    vi.advanceTimersByTime(6_500);
+    expect(hellos()).toHaveLength(1);
+  });
+
+  it('断线重连上线后缺口仍快速补发', () => {
+    const { cid } = createOnlineTunnel();
+    mockState.events?.onState('offline');
+    mockState.events?.onState('online');
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-ready',
+      cid,
+      ok: true,
+      resumed: true,
+      version: 'v1',
+      platform: 'darwin',
+      leader: true,
+      replay: true,
+    });
+    mockState.sent = [];
+    mockState.events?.onRemoteFrame?.({ type: 'rpc-event', cid, ch: 'evt', args: [2], seq: 2 });
+    vi.advanceTimersByTime(1_500);
     expect(hellos()).toHaveLength(1);
   });
 
