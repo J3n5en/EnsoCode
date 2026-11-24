@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { encodeRemoteValue, type HostToRemote, type RemoteKind } from '@enso/pair';
-import { RemoteWriteBases, UPSERT_MARK, UpsertEncoder } from '@shared/remoteDelta';
+import { REREAD_MARK, RemoteWriteBases, UPSERT_MARK, UpsertEncoder } from '@shared/remoteDelta';
 import {
   OVERVIEW_BYTE_BUDGET,
   OVERVIEW_TAIL_MESSAGES,
@@ -24,6 +24,12 @@ const AGENT_EVENT_CHANNEL = 'agent:event';
  */
 export const SETTINGS_COALESCE_MS = 400;
 const SETTINGS_CHANGED_CHANNEL = 'settings:changed';
+/**
+ * 秘书整份状态可达数百 KB、对话时每 300ms 一份：主界面只收按秘书合并的重读通知，
+ * 远端自行走缓存重读拿增量，免得整份状态堵在有序流上、后台期间塞满保留窗口。
+ */
+export const SECRETARY_COALESCE_MS = 400;
+const SECRETARY_STATE_CHANNEL = 'secretary:state-changed';
 /** 最近发出的 resume 尾窗（按会话），供紧随其后的 resume 全量快照比对 */
 const MAX_RESUME_TAILS = 8;
 /** 与真实 webContents id（小整数）错开 */
@@ -63,6 +69,8 @@ export class RemoteSender extends EventEmitter {
   private streaming = new Map<string, unknown[]>();
   private streamTimer: NodeJS.Timeout | null = null;
   private settingsTimer: NodeJS.Timeout | null = null;
+  private secretaryTimer: NodeJS.Timeout | null = null;
+  private secretaryIds = new Set<string>();
   private upserts = new UpsertEncoder();
   private resumeTails = new Map<string, string>();
   /** 设置写入增量的宿主基线 */
@@ -88,6 +96,28 @@ export class RemoteSender extends EventEmitter {
         this.settingsTimer = null;
         this.post({ type: 'rpc-event', cid: this.cid, ch: channel, args: encodeRemoteValue([]) });
       }, SETTINGS_COALESCE_MS);
+      return;
+    }
+    const secretaryId =
+      channel === SECRETARY_STATE_CHANNEL && this.kind === 'main'
+        ? (args[0] as { secretaryId?: unknown } | undefined)?.secretaryId
+        : undefined;
+    if (typeof secretaryId === 'string') {
+      if (this.destroyed) return;
+      this.secretaryIds.add(secretaryId);
+      this.secretaryTimer ??= setTimeout(() => {
+        this.secretaryTimer = null;
+        const ids = [...this.secretaryIds];
+        this.secretaryIds.clear();
+        for (const id of ids) {
+          this.post({
+            type: 'rpc-event',
+            cid: this.cid,
+            ch: channel,
+            args: encodeRemoteValue([{ [REREAD_MARK]: id }]),
+          });
+        }
+      }, SECRETARY_COALESCE_MS);
       return;
     }
     if (channel === AGENT_EVENT_CHANNEL && isSnapshotEvent(args[0])) {
@@ -237,6 +267,9 @@ export class RemoteSender extends EventEmitter {
     this.resumeTails.clear();
     if (this.settingsTimer) clearTimeout(this.settingsTimer);
     this.settingsTimer = null;
+    if (this.secretaryTimer) clearTimeout(this.secretaryTimer);
+    this.secretaryTimer = null;
+    this.secretaryIds.clear();
     this.retained = [];
     this.retainedBytes = 0;
     this.emit('destroyed');
