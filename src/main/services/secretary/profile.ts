@@ -131,10 +131,19 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
   /** 运行中改了名字或人设的会话：本轮结束再释放，免得把正在跑的一轮打断 */
   const pendingReleases = new Set<string>();
 
+  /** 回传投递刚发出时 worker 还没报 running：只看状态会把这次投递的模型请求中止 */
+  function delivering(conversationId: string): boolean {
+    return ports.dispatchFile().inflight?.secretaryConversationId === conversationId;
+  }
+
   async function releaseIfIdle(conversationId: string): Promise<void> {
     if (!(await ports.alive(conversationId))) return;
     const status = await ports.status(conversationId);
-    if (status.state === 'idle' && status.pendingAsks + status.pendingApprovals === 0) {
+    if (
+      status.state === 'idle' &&
+      status.pendingAsks + status.pendingApprovals === 0 &&
+      !delivering(conversationId)
+    ) {
       await ports.release(conversationId);
     } else {
       pendingReleases.add(conversationId);
@@ -222,7 +231,9 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     },
 
     async onTurnEnded(conversationId) {
-      if (!pendingReleases.delete(conversationId)) return;
+      // 宿主在这一轮结束时可能已经接着投出下一批：等那一轮结束再释放
+      if (!pendingReleases.has(conversationId) || delivering(conversationId)) return;
+      pendingReleases.delete(conversationId);
       await ports.release(conversationId);
     },
 

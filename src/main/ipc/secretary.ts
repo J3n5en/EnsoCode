@@ -727,7 +727,7 @@ export function registerSecretaryHandlers(): void {
   );
   const queued = createQueuedSessions(queuedSessionPorts());
   setQueuedSessions(queued);
-  // 用户点确认后立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick
+  // 用户点确认或提案执行完立刻投给秘书，不等下一分钟的 tick
   setProposalAcceptedListener(() => {
     for (const instance of hosts.values()) instance.flushNow();
   });
