@@ -161,7 +161,7 @@ function ErrorSummary() {
               <li key={key} className="border-border border-b">
                 <button
                   type="button"
-                  className="-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] hover:bg-accent/50"
+                  className="-mx-2 flex min-h-[44px] w-[calc(100%+1rem)] items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] hover:bg-accent/50"
                   aria-expanded={open}
                   onClick={() => setExpanded(open ? null : key)}
                 >

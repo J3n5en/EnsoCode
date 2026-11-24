@@ -170,7 +170,7 @@ export function SettingsRow({
         data-settings-row={rowId}
         className={cn(
           'flex flex-wrap items-center gap-x-6 gap-y-2 border-border border-b',
-          indent ? 'min-h-11 py-2 pl-10' : 'min-h-(--settings-row-min) py-3'
+          indent ? 'min-h-[44px] py-2 pl-10' : 'min-h-(--settings-row-min) py-3'
         )}
       >
         <div className="flex min-w-[min(100%,12rem)] flex-1 items-center gap-2">
@@ -234,7 +234,7 @@ export function SettingsExpandableRow({
             aria-controls={regionId}
             aria-label={open ? t('Collapse') : t('Expand')}
             onClick={() => setOpen((value) => !value)}
-            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pointer-coarse:after:absolute pointer-coarse:after:size-11"
+            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pointer-coarse:after:absolute pointer-coarse:after:size-[44px]"
           >
             <ChevronRight className={cn('size-4 transition-transform', open && 'rotate-90')} />
           </button>

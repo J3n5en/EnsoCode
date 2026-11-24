@@ -18,9 +18,10 @@ import { type PluginCommandRef, pluginCommandRefs } from '@/plugins/commands';
 import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { useSettingsStore } from '@/stores/settings';
 import { SettingsPage, SettingsRow, SettingsSection } from './kit';
+import { TOUCH_TARGET } from './kit/controls';
 
 const CAPTURE_BUTTON =
-  'relative inline-flex h-(--settings-control-h) min-w-14 items-center justify-center rounded-md px-1.5 transition-colors pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:top-1/2 pointer-coarse:after:h-11 pointer-coarse:after:-translate-y-1/2';
+  'relative inline-flex h-(--settings-control-h) min-w-14 items-center justify-center rounded-md px-1.5 transition-colors pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:top-1/2 pointer-coarse:after:h-[44px] pointer-coarse:after:-translate-y-1/2';
 
 function IconAction({
   title,
@@ -37,7 +38,7 @@ function IconAction({
       variant="ghost"
       title={title}
       onClick={onClick}
-      className="text-muted-foreground hover:text-foreground"
+      className={cn('text-muted-foreground hover:text-foreground', TOUCH_TARGET)}
     >
       {children}
     </Button>
