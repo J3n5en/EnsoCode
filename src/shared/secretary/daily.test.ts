@@ -968,7 +968,7 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
     expect(daily.groups.find((g) => g.key === 'failed')).toBeUndefined();
   });
 
-  it('goal-complete 带 needsUser 时标签为「完成 · 待你决定」、直接暴露 needsUser 且不把正文当主摘要', () => {
+  it('goal-complete 带 needsUser 时标签为「完成 · 需要你」、直接暴露 needsUser，摘要取结构化 summary 而不是正文', () => {
     const daily = buildSecretaryDaily({
       ...base,
       results: [
@@ -1005,10 +1005,40 @@ describe('看板分类规则（防误入「需要你」与「失败或中断」�
     });
     const card = daily.groups.find((g) => g.key === 'needsYou')?.items[0];
     expect(card).toBeDefined();
-    expect(card?.label).toBe('Done · needs your decision');
+    expect(card?.label).toBe('Done · needs you');
     expect(card?.label).not.toBe('Goal complete');
     expect(card?.needsUser).toEqual(['是否合并上架 #62', '确认是否同步发版']);
-    expect(card?.summary).toBeUndefined();
+    expect(card?.summary).toBe('Review 完成');
+  });
+
+  it('已归档会话的 needsUser 结果不再进「需要你」，归入完成且不带 needsUser', () => {
+    const goalResult = {
+      at: at(15, 14),
+      result: { summary: '已部署', needsUser: ['在服务器 ali 删除 /tmp/x'] },
+    };
+    const daily = buildSecretaryDaily({
+      ...base,
+      session: (conversationId) =>
+        conversationId === 'c-archived' ? { title: '部署', archived: true } : {},
+      results: [
+        record({ at: at(15, 14), conversationId: 'c-archived', kind: 'goal-complete', goalResult }),
+      ],
+      dispatched: [
+        dispatch({
+          conversationId: 'c-archived',
+          createdAt: at(15, 10),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 14) },
+          goalResult,
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((g) => g.key === 'needsYou')).toBeUndefined();
+    expect(daily.counts.needsYou).toBe(0);
+    const doneCard = daily.groups.find((g) => g.key === 'done')?.items[0];
+    expect(doneCard).toMatchObject({ conversationId: 'c-archived', label: 'Goal complete' });
+    expect(doneCard).not.toHaveProperty('needsUser');
   });
 
   it('点「知道了」(dismissed) 后，看板卡片移入「完成了什么」不再留在「需要你」，除非产生带新 needsUser 的新结果', () => {

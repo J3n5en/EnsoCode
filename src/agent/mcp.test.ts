@@ -60,11 +60,10 @@ vi.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
   },
 }));
 
-vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
-  StdioClientTransport: class {
-    constructor(options: Record<string, unknown>) {
-      transportState.stdio.push(options);
-    }
+vi.mock('./mcpStdio', () => ({
+  createStdioTransport: (options: Record<string, unknown>) => {
+    transportState.stdio.push(options);
+    return {};
   },
 }));
 

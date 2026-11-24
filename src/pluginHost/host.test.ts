@@ -476,6 +476,36 @@ describe('子进程收敛', () => {
     for (let i = 0; i < 100 && alive(pid); i++) await new Promise((r) => setTimeout(r, 10));
     expect(alive(pid)).toBe(false);
   });
+
+  it.runIf(process.platform !== 'win32')('子进程派生的孙进程在 shutdown 后也退出', async () => {
+    const grandchild = `const g = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); console.log(g.pid); setInterval(() => {}, 1000);`;
+    const h = harness(`import { spawn } from 'node:child_process';
+      export function activate(enso) {
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}]);
+        let out = '';
+        child.stdout.on('data', (chunk) => { out += chunk; });
+        enso.tools.register('pid', () => out.trim());
+      }`);
+    await h.next((m) => m.t === 'ready');
+    let pid = 0;
+    for (let i = 0; i < 100 && !pid; i++) {
+      h.deliver(call(`c${i}`, 'tool.execute', { name: 'pid', args: {} }));
+      const res = await h.next((m) => m.t === 'res' && m.id === `c${i}`);
+      pid = Number((res as { value: { content: string } }).value.content);
+      if (!pid) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(alive(pid)).toBe(true);
+    try {
+      h.deliver({ t: 'shutdown' });
+      await h.next(() => h.exited() !== null);
+      for (let i = 0; i < 100 && alive(pid); i++) await new Promise((r) => setTimeout(r, 10));
+      expect(alive(pid)).toBe(false);
+    } finally {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
+  });
 });
 
 describe('createProcessTransport', () => {

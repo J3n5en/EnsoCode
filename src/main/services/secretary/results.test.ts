@@ -1451,6 +1451,42 @@ describe('排队会话', () => {
     expect(manualCard).not.toHaveProperty('needsUser');
   });
 
+  it('已归档会话的 needsUser / needs-user 结果不计入「需要你处理」，归入「完成」且不带 needsUser', () => {
+    const file = emptyFile({
+      dispatched: {
+        archivedNeed: record({
+          conversationId: 'archivedNeed',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 10 },
+          goalResult: {
+            at: 10,
+            result: { summary: '已部署', needsUser: ['在服务器 ali 删除 /tmp/x'] },
+          },
+        }),
+        archivedAsk: record({
+          conversationId: 'archivedAsk',
+          lastState: 'idle',
+          lastResult: { kind: 'needs-user', turn: 1, at: 11 },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        archivedNeed: { title: '部署', sessionFile: '/s/a.jsonl', archived: true },
+        archivedAsk: { title: '提问', sessionFile: '/s/b.jsonl', archived: true },
+      },
+      statuses: { archivedNeed: idle, archivedAsk: idle },
+      projects,
+      todos: [],
+    });
+    expect(board.needsYou).toEqual([]);
+    expect(board.done.map((c) => (c.kind === 'session' ? c.conversationId : '')).sort()).toEqual([
+      'archivedAsk',
+      'archivedNeed',
+    ]);
+    for (const card of board.done) expect(card).not.toHaveProperty('needsUser');
+  });
+
   it('点「知道了」(dismissed) 后，带 needsUser 的 goal-complete 移出「需要你处理」进入「完成」且不再带 needsUser', () => {
     const file = emptyFile({
       dispatched: {

@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
+import { killProcessTree } from '../agent/killTree';
 
 /** 当前插件宿主要负责收掉的子进程；只在 runPluginHost 期间收集 */
 let bucket: Set<ChildProcess> | null = null;
@@ -119,13 +120,8 @@ export function killTrackedChildren(): void {
   const current = bucket;
   bucket = null;
   if (!current) return;
-  for (const child of current) {
-    try {
-      child.kill();
-    } catch {
-      // 已经退出
-    }
-  }
+  // 连同子进程派生的孙进程一起结束（npx 外壳下面的真实进程），只收直接子进程会留下孤儿
+  for (const child of current) killProcessTree(child, 'SIGTERM');
   current.clear();
 }
 
