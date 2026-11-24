@@ -428,8 +428,8 @@ function hostPortsFor(
     },
     isSecretaryConversation: (conversationId) =>
       secretaryIdOfConversation(conversationId) === ctx.id,
-    answerNeedsUser: (link, answer) => {
-      void answerNeedsUser(dispatchPorts, link, answer).catch((error: unknown) => {
+    answerNeedsUser: (link, answer, askedAt) => {
+      void answerNeedsUser(dispatchPorts, link, answer, askedAt).catch((error: unknown) => {
         console.warn(
           '[secretary] needsUser answer failed:',
           error instanceof Error ? error.message : String(error)

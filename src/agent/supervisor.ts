@@ -3941,6 +3941,7 @@ export class SessionSupervisor {
             ...(resolution?.answer ? { answer: resolution.answer } : {}),
             ...(resolution?.name ? { name: resolution.name } : {}),
             ...(resolution?.relatesTo ? { relatesTo: resolution.relatesTo } : {}),
+            ...(resolution?.askedAt !== undefined ? { askedAt: resolution.askedAt } : {}),
           });
         }
       },

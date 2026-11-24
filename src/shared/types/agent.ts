@@ -341,20 +341,29 @@ export interface AskRelatesTo {
   needsUserIndex?: number;
 }
 
+/** 序号给了但不合法时整段作废：丢掉序号会被当成「覆盖全部条目」 */
 export function parseAskRelatesTo(raw: unknown): AskRelatesTo | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const { conversationId, needsUserIndex } = raw as Record<string, unknown>;
   if (typeof conversationId !== 'string' || !conversationId.trim()) return undefined;
+  if (needsUserIndex === undefined || needsUserIndex === null)
+    return { conversationId: conversationId.trim() };
   const index =
     typeof needsUserIndex === 'string' && needsUserIndex.trim()
       ? Number(needsUserIndex)
       : needsUserIndex;
-  return {
-    conversationId: conversationId.trim(),
-    ...(typeof index === 'number' && Number.isInteger(index) && index >= 0
-      ? { needsUserIndex: index }
-      : {}),
-  };
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) return undefined;
+  return { conversationId: conversationId.trim(), needsUserIndex: index };
+}
+
+/** ask-resolved 的关联字段坏了只剥掉它，提问照常收尾；关联与提问时间必须成对 */
+function withAskLink(value: Record<string, unknown>): Record<string, unknown> {
+  if (value.relatesTo === undefined && value.askedAt === undefined) return value;
+  const { relatesTo, askedAt, ...rest } = value;
+  const link = parseAskRelatesTo(relatesTo);
+  return link && typeof askedAt === 'number' && Number.isFinite(askedAt)
+    ? { ...rest, relatesTo: link, askedAt }
+    : rest;
 }
 
 /** agent 向用户的提问（ask_user 工具,阻塞等答复） */
@@ -2363,6 +2372,8 @@ export type AgentWorkerEvent =
       name?: string;
       /** 提问带的 needsUser 关联，原样带回 */
       relatesTo?: AskRelatesTo;
+      /** 带关联时提问发出的时间：晚于它的新结果不认这次答复 */
+      askedAt?: number;
     }
   | { type: 'subagent-update'; identity: SessionIdentity; seq: number; agent: SubagentInfo }
   | {
@@ -5534,9 +5545,8 @@ const agentWorkerEventParsers = {
       return isNonEmptyString(value.requestId) &&
         (value.by === undefined || (ASK_ANSWER_BY as readonly unknown[]).includes(value.by)) &&
         (value.answer === undefined || typeof value.answer === 'string') &&
-        (value.name === undefined || isNonEmptyString(value.name)) &&
-        (value.relatesTo === undefined || parseAskRelatesTo(value.relatesTo) !== undefined)
-        ? (value as unknown as AgentWorkerEvent)
+        (value.name === undefined || isNonEmptyString(value.name))
+        ? (withAskLink(value) as unknown as AgentWorkerEvent)
         : null;
     }
   ),

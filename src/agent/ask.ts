@@ -17,6 +17,8 @@ export interface AskResolution {
   /** 秘书代答时的名字 */
   name?: string;
   relatesTo?: AskRelatesTo;
+  /** 带关联时提问发出的时间 */
+  askedAt?: number;
 }
 
 interface PendingAsk {
@@ -68,6 +70,7 @@ export class AskManager {
     // 转交的提问一定有超时：秘书不回也不能把会话永久卡住
     const timeoutMs = opts.timeoutMs ?? (relay ? ASK_RELAY_TIMEOUT_MS : undefined);
     const requestId = `ask-${++counter}-${Date.now().toString(36)}`;
+    const askedAt = Date.now();
     const info: AskRequestInfo = {
       requestId,
       question,
@@ -90,7 +93,9 @@ export class AskManager {
         this.pending.delete(requestId);
         this.onResolved(
           requestId,
-          resolution && opts.relatesTo ? { ...resolution, relatesTo: opts.relatesTo } : resolution
+          resolution && opts.relatesTo
+            ? { ...resolution, relatesTo: opts.relatesTo, askedAt }
+            : resolution
         );
         fn();
       };

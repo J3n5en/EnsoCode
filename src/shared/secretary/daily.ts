@@ -261,6 +261,9 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
         ...(last.manual ? { manual: true as const } : {}),
         ...(last.dismissed ? { dismissed: true as const } : {}),
       });
+    } else if (existing && last.at === existing.at && goalResult) {
+      // 同一份结果：派发记录里的才是最新的（带用户对 needsUser 的答复）
+      terminal.set(record.conversationId, { ...existing, goalResult });
     }
   }
 

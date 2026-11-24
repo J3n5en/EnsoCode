@@ -2894,11 +2894,14 @@ const ANSWER_MAX_CHARS = 500;
 /**
  * 秘书带 relatesTo 转问的 needsUser 被用户答复：答复记到那份结果上，卡片标出已答复；
  * 全部条目都答了就按 result_mark_done 收口，不用秘书再手动标。
+ * 只认 goal-complete：goal-blocked 的活没干完，答了也不能记成完成。
+ * 提问之后才到的新结果不认这次答复，免得旧问题的答案落到新条目上。
  */
 export async function answerNeedsUser(
   ports: SecretaryDispatchPorts,
   link: AskRelatesTo,
-  answer: string
+  answer: string,
+  askedAt: number
 ): Promise<AnswerNeedsUserResult> {
   const { conversationId, needsUserIndex } = link;
   const file = ports.dispatchFile();
@@ -2907,12 +2910,13 @@ export async function answerNeedsUser(
   const result = record.lastResult;
   const pending =
     result !== undefined &&
-    (result.kind === 'goal-complete' || result.kind === 'goal-blocked') &&
+    result.kind === 'goal-complete' &&
     !result.manual &&
     !result.dismissed &&
     record.goalResult !== undefined &&
     hasNeedsUser(record.goalResult);
   if (!pending || !record.goalResult) return { ok: false, error: 'nothing-pending' };
+  if (record.goalResult.at > askedAt) return { ok: false, error: 'stale' };
   const count = needsUserItems(record.goalResult).length;
   if (needsUserIndex !== undefined && needsUserIndex >= count)
     return { ok: false, error: 'bad-index' };

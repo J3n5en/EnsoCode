@@ -2324,8 +2324,8 @@ describe('联系方式转发', () => {
     const answered: unknown[] = [];
     const host = createSecretaryHost({
       ...base.ports,
-      answerNeedsUser: (link, answer) => {
-        answered.push({ link, answer });
+      answerNeedsUser: (link, answer, askedAt) => {
+        answered.push({ link, answer, askedAt });
       },
     });
     const resolved = (sessionId: string, extra: Record<string, unknown>) =>
@@ -2339,13 +2339,16 @@ describe('联系方式转发', () => {
     const relatesTo = { conversationId: 'c1', needsUserIndex: 0 };
 
     host.onAgentEvent(resolved('sec-1', { by: 'user', answer: '清理' }), []);
-    host.onAgentEvent(resolved('sec-1', { by: 'timeout', answer: '清理', relatesTo }), []);
-    host.onAgentEvent(resolved('sec-1', { relatesTo }), []);
-    host.onAgentEvent(resolved('c1', { by: 'user', answer: '清理', relatesTo }), []);
+    host.onAgentEvent(
+      resolved('sec-1', { by: 'timeout', answer: '清理', relatesTo, askedAt: 5 }),
+      []
+    );
+    host.onAgentEvent(resolved('sec-1', { relatesTo, askedAt: 5 }), []);
+    host.onAgentEvent(resolved('c1', { by: 'user', answer: '清理', relatesTo, askedAt: 5 }), []);
     expect(answered).toEqual([]);
 
-    host.onAgentEvent(resolved('sec-1', { by: 'user', answer: '清理', relatesTo }), []);
-    expect(answered).toEqual([{ link: relatesTo, answer: '清理' }]);
+    host.onAgentEvent(resolved('sec-1', { by: 'user', answer: '清理', relatesTo, askedAt: 5 }), []);
+    expect(answered).toEqual([{ link: relatesTo, answer: '清理', askedAt: 5 }]);
   });
 
   it('秘书自己会话里的提问、收尾与审批都转发；别的会话不转发', () => {

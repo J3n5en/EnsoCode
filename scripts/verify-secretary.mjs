@@ -85,6 +85,9 @@ const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
 // 只跑「完成 · 需要你」卡片措辞：needsUser 前缀、summary 灰字，已归档与 result_mark_done 的不进「需要你」。
 // 整体 3 分钟硬超时，截图存到 /tmp/needs-user-wording-*.png
 const NEEDS_USER_WORDING_ONLY = process.argv.includes('--needs-user-wording-only');
+// 只跑 needsUser 与秘书提问的关联：秘书 ask_user 带 relatesTo，用户在提问卡上答复后卡片先标已答复、答完移出。
+// 整体 3 分钟硬超时，截图存到 /tmp/needs-user-link-*.png
+const NEEDS_USER_LINK_ONLY = process.argv.includes('--needs-user-link-only');
 // 只跑插件联系渠道连续发送失败：错误原因上卡片、连续失败后暂停推送，截图存到 /tmp/contact-channel-error-*.png
 const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
 // 只跑「确认技能提案后秘书收到更新」：只唤醒一轮，不出现 Request aborted
@@ -769,6 +772,10 @@ async function run(cdp, pluginZipUrl) {
   }
   if (NEEDS_USER_WORDING_ONLY) {
     await verifyNeedsUserWording(cdp, setup);
+    return;
+  }
+  if (NEEDS_USER_LINK_ONLY) {
+    await verifyNeedsUserLink(cdp, setup);
     return;
   }
   if (CONTACT_CHANNEL_ERROR_ONLY) {
@@ -7256,6 +7263,162 @@ async function verifyNeedsUserWording(cdp, setup) {
   log('  shots /tmp/needs-user-wording-{board,card}.png');
 }
 
+async function verifyNeedsUserLink(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== needsUser 关联：秘书带 relatesTo 转问，用户答复后自动标已答复、答完移出「需要你」');
+  const title = '清理部署机';
+  const result = {
+    summary: '部署完成，留下两件事要你定',
+    needsUser: ['是否清理孤儿进程 pid 4242', '是否同步发版 tgclient 0.7.1'],
+  };
+  const created = await directDispatcher(page, setup)('session_create', {
+    projectId: setup.projectId,
+    prompt: '做完就收尾',
+    title,
+    goal: `收尾 [[tool:goal_complete ${JSON.stringify({ summary: '做完了', result })}]]`,
+  });
+  assert(created.ok, 'needsUser 关联: 派出会话建成', created);
+  const target = created.conversationId;
+  const record = () => readJson(dispatchFile).dispatched[target];
+  await waitFor(
+    () => record()?.lastResult?.kind === 'goal-complete' && record()?.goalResult?.result?.needsUser,
+    'goal-complete with needsUser',
+    60_000,
+    300
+  );
+
+  // 打开右侧工作台并关掉动画；返回「需要你」里这张卡的文字与条目
+  const board = (expectCard) =>
+    page(`
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+    document.head.appendChild(style);
+    const onScreen = () => {
+      const box = visiblePanel()?.getBoundingClientRect();
+      return Boolean(box) && box.x + box.width <= innerWidth + 1;
+    };
+    if (!visiblePanel()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+    }
+    if (!onScreen())
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    const panel = await until(() => onScreen() && visiblePanel(), 15000);
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const cardOf = () =>
+      [...(visiblePanel()?.querySelectorAll('[data-enso=secretary-needs-you] [data-enso=secretary-card]') ?? [])]
+        .find((node) => node.innerText.includes(${JSON.stringify(title)})) ?? null;
+    const card = await until(() => (${expectCard} ? cardOf() : cardOf() ? null : true), 20000);
+    await sleep(400);
+    const node = cardOf();
+    node?.scrollIntoView({ block: 'center' });
+    return JSON.stringify({
+      present: Boolean(node),
+      settled: Boolean(card),
+      items: [...(node?.querySelectorAll('[data-enso=secretary-card-needs-user-item]') ?? [])].map(
+        (item) => ({ text: item.innerText, answered: item.dataset.answered === 'true' })
+      ),
+    });
+  `);
+
+  // 新开秘书会话让它带关联提问，用户在提问卡上点选项；ask_user 阻塞到答复，所以不等工具结果
+  const askAndAnswer = (index, question, options, pick, shot) =>
+    page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation({ secretaryId: 'default' });
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      ${JSON.stringify(
+        `替会话问一下 ${toolDirective('ask_user', {
+          question,
+          options,
+          relatesTo: { conversationId: target, needsUserIndex: index },
+        })}`
+      )},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const card = await until(() => visible('[data-enso=ask-options]')[0] ?? null, 40000);
+    await sleep(300);
+    return JSON.stringify({ id, asked: Boolean(card), question: visible('[data-enso=ask-question]')[0]?.innerText ?? null });
+  `).then(async (asked) => {
+      assert(asked.asked, `needsUser 关联: 秘书带 relatesTo 提问第 ${index} 条`, asked);
+      if (shot) await cdp.shot(shot);
+      const clicked = await page(`
+        const button = [...(visible('[data-enso=ask-options]')[0]?.querySelectorAll('button') ?? [])]
+          .find((node) => node.innerText.includes(${JSON.stringify(pick)}));
+        button?.click();
+        return JSON.stringify({ clicked: Boolean(button) });
+      `);
+      assert(clicked.clicked, `needsUser 关联: 用户在提问卡上选「${pick}」`, clicked);
+    });
+
+  const before = await board(true);
+  log(`  before ${JSON.stringify(before)}`);
+  assert(
+    before.present && before.items.length === 2 && before.items.every((item) => !item.answered),
+    'needsUser 关联: 答复前卡片在「需要你」，两条都未答复',
+    before
+  );
+  await cdp.shot('/tmp/needs-user-link-1-before.png');
+
+  await askAndAnswer(
+    0,
+    '部署机上的孤儿进程 pid 4242 要清理吗？',
+    ['清理', '保留'],
+    '清理',
+    '/tmp/needs-user-link-2-ask.png'
+  );
+  await waitFor(
+    () => record()?.goalResult?.answers?.some((item) => item.index === 0),
+    'answer #0 recorded',
+    20_000,
+    200
+  );
+  const partial = await board(true);
+  log(`  partial ${JSON.stringify(partial)}`);
+  assert(
+    partial.present &&
+      partial.items[0]?.answered &&
+      partial.items[0].text.includes('已回答：清理') &&
+      !partial.items[1]?.answered,
+    'needsUser 关联: 只答一条时卡片留着，第 0 条标「已回答：清理」',
+    partial
+  );
+  await cdp.shot('/tmp/needs-user-link-3-partial.png');
+
+  await askAndAnswer(1, '要同步发版 tgclient 0.7.1 吗？', ['发版', '先不发'], '先不发', null);
+  await waitFor(() => record()?.lastResult?.manual === true, 'auto mark done', 20_000, 200);
+  const cleared = await board(false);
+  log(`  cleared ${JSON.stringify(cleared)}`);
+  assert(!cleared.present, 'needsUser 关联: 两条都答完后卡片自动移出「需要你」', cleared);
+  assert(
+    record()?.goalResult?.result?.needsUser === undefined,
+    'needsUser 关联: 等同 result_mark_done，needsUser 已清掉',
+    record()
+  );
+  const ops = auditLines()
+    .filter((entry) => entry.targetId === target)
+    .map((entry) => [entry.op, entry.detail]);
+  assert(
+    JSON.stringify(ops).includes('"needs_user_answered","#0: 清理"') &&
+      JSON.stringify(ops).includes('"result_mark_done","answered"'),
+    'needsUser 关联: 审计记下答复内容与自动收口',
+    ops
+  );
+  await cdp.shot('/tmp/needs-user-link-4-cleared.png');
+  log('  shots /tmp/needs-user-link-{1-before,2-ask,3-partial,4-cleared}.png');
+}
+
 /**
  * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
  * session_send attachments 交过去，目标会话时间线上出现图片引用。
@@ -9268,6 +9431,12 @@ process.on('unhandledRejection', (error) => {
 if (NEEDS_USER_WORDING_ONLY) {
   setTimeout(() => {
     console.error('\nFAIL needs-user-wording: 3 分钟硬超时');
+    void finish(124);
+  }, 180_000).unref();
+}
+if (NEEDS_USER_LINK_ONLY) {
+  setTimeout(() => {
+    console.error('\nFAIL needs-user-link: 3 分钟硬超时');
     void finish(124);
   }, 180_000).unref();
 }

@@ -4835,7 +4835,7 @@ describe('answerNeedsUser：秘书带关联转问的 needsUser 被用户答复',
     const h = withNeeds(['是否清理孤儿进程']);
     expect(needsYou(h.file)).toHaveLength(1);
 
-    expect(await answerNeedsUser(h.ports, { conversationId: 'c1' }, '清理')).toEqual({
+    expect(await answerNeedsUser(h.ports, { conversationId: 'c1' }, '清理', NOW)).toEqual({
       ok: true,
       cleared: true,
     });
@@ -4855,7 +4855,7 @@ describe('answerNeedsUser：秘书带关联转问的 needsUser 被用户答复',
     const h = withNeeds(['是否清理孤儿进程', '是否发版']);
 
     expect(
-      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '先不发')
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 1 }, '先不发', NOW)
     ).toEqual({ ok: true, cleared: false });
     const [card] = needsYou(h.file);
     expect(card).toMatchObject({
@@ -4869,7 +4869,7 @@ describe('answerNeedsUser：秘书带关联转问的 needsUser 被用户答复',
     );
 
     expect(
-      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 0 }, '清理')
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 0 }, '清理', NOW)
     ).toEqual({ ok: true, cleared: true });
     expect(needsYou(h.file)).toEqual([]);
   });
@@ -4877,19 +4877,35 @@ describe('answerNeedsUser：秘书带关联转问的 needsUser 被用户答复',
   it('越界、已点「知道了」或未跟踪的会话不动卡片', async () => {
     const h = withNeeds(['是否清理孤儿进程']);
     expect(
-      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 3 }, '清理')
+      await answerNeedsUser(h.ports, { conversationId: 'c1', needsUserIndex: 3 }, '清理', NOW)
     ).toEqual({ ok: false, error: 'bad-index' });
-    expect(await answerNeedsUser(h.ports, { conversationId: 'zz' }, '清理')).toEqual({
+    expect(await answerNeedsUser(h.ports, { conversationId: 'zz' }, '清理', NOW)).toEqual({
       ok: false,
       error: 'not-found',
     });
     expect(needsYou(h.file)).toHaveLength(1);
 
     expect(dismissResult(h.ports, 'c1')).toEqual({ ok: true });
-    expect(await answerNeedsUser(h.ports, { conversationId: 'c1' }, '清理')).toEqual({
+    expect(await answerNeedsUser(h.ports, { conversationId: 'c1' }, '清理', NOW)).toEqual({
       ok: false,
       error: 'nothing-pending',
     });
     expect(h.file.dispatched.c1.lastResult?.manual).toBeUndefined();
+  });
+
+  it('提问之后才到的新结果、goal-blocked 的 needsUser 都不认这次答复', async () => {
+    const stale = withNeeds(['是否清理孤儿进程']);
+    expect(
+      await answerNeedsUser(stale.ports, { conversationId: 'c1' }, '清理', NOW - 20_000)
+    ).toEqual({ ok: false, error: 'stale' });
+    expect(needsYou(stale.file)).toHaveLength(1);
+
+    const blocked = withNeeds(['确认生产账号']);
+    blocked.file.dispatched.c1.lastResult = { kind: 'goal-blocked', turn: 1, at: NOW - 10_000 };
+    expect(await answerNeedsUser(blocked.ports, { conversationId: 'c1' }, '给了', NOW)).toEqual({
+      ok: false,
+      error: 'nothing-pending',
+    });
+    expect(blocked.file.dispatched.c1.lastResult?.manual).toBeUndefined();
   });
 });

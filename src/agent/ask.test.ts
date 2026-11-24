@@ -150,11 +150,16 @@ describe('秘书转问 needsUser 的关联', () => {
     manager.respond(manager.snapshot()[0].requestId, '清理');
     await pending;
     expect(resolutions).toEqual([
-      { by: 'user', answer: '清理', relatesTo: { conversationId: 'c1', needsUserIndex: 1 } },
+      {
+        by: 'user',
+        answer: '清理',
+        relatesTo: { conversationId: 'c1', needsUserIndex: 1 },
+        askedAt: expect.any(Number),
+      },
     ]);
   });
 
-  it('坏的 relatesTo 丢掉，提问照常；普通会话的 ask_user 不声明这个参数', async () => {
+  it('坏的 relatesTo（含不合法序号）整段丢掉，不会扩大成全部条目；普通会话的 ask_user 不声明这个参数', async () => {
     const { manager, resolutions } = make();
     const tool = createAskTool(manager, { secretary: true });
     expect(tool.prepareArguments?.({ question: 'q', relatesTo: { needsUserIndex: -1 } })).toEqual({
@@ -166,7 +171,7 @@ describe('秘书转问 needsUser 的关联', () => {
     });
     manager.respond(manager.snapshot()[0].requestId, 'a');
     await pending;
-    expect(resolutions).toEqual([{ by: 'user', answer: 'a', relatesTo: { conversationId: 'c1' } }]);
+    expect(resolutions).toEqual([{ by: 'user', answer: 'a' }]);
     expect(JSON.stringify(createAskTool(manager).parameters)).not.toContain('relatesTo');
   });
 });

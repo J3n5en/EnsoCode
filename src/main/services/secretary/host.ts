@@ -144,7 +144,7 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   /** 这个会话是不是秘书自己的会话：决定哪些提问与回复要发到手机 */
   isSecretaryConversation?(conversationId: string): boolean;
   /** 秘书带关联转问的 needsUser 被用户答复：记下答复，全部答完收口卡片；缺省表示不处理 */
-  answerNeedsUser?(link: AskRelatesTo, answer: string): void;
+  answerNeedsUser?(link: AskRelatesTo, answer: string, askedAt: number): void;
   publish(): void;
   now(): number;
   /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
@@ -1238,10 +1238,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         event.type === 'ask-resolved' &&
         event.by === 'user' &&
         event.relatesTo &&
+        event.askedAt !== undefined &&
         event.answer?.trim() &&
         ports.isSecretaryConversation?.(sessionId)
       ) {
-        ports.answerNeedsUser?.(event.relatesTo, event.answer);
+        ports.answerNeedsUser?.(event.relatesTo, event.answer, event.askedAt);
       }
       if (sessionId && changes.length === 0 && STREAM_EVENTS.has(event.type) && ports.peekFile) {
         const view = ports.peekFile();
