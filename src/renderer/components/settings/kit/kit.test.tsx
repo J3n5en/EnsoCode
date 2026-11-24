@@ -10,10 +10,12 @@ import {
   SettingsRow,
   SettingsSection,
   SettingsSegmented,
+  SettingsSelect,
   SettingsSubRow,
   SettingsSwitch,
 } from '.';
 import { findNestedBoxes } from './boxes';
+import { TOUCH_TARGET } from './controls';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/switch', () => ({
@@ -55,6 +57,18 @@ vi.mock('@/components/ui/input', () => ({
     <input {...props} onInput={onChange as ComponentProps<'input'>['onInput']} />
   ),
 }));
+vi.mock('@/components/ui/select', () => {
+  const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  return {
+    Select: Pass,
+    SelectPopup: Pass,
+    SelectValue: () => null,
+    SelectItem: Pass,
+    SelectTrigger: ({ size: _size, ...props }: ComponentProps<'button'> & { size?: string }) => (
+      <button type="button" data-slot="select-trigger" {...props} />
+    ),
+  };
+});
 vi.mock('@/components/ui/alert-dialog', () => {
   const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {
@@ -101,6 +115,23 @@ afterEach(async () => {
 });
 
 describe('SettingsRow', () => {
+  it('触屏下所有控件的点击区都是 44px：下拉框和按钮共用同一个点击区', async () => {
+    await render(
+      <SettingsRow rowId="x.range" label="Range">
+        <SettingsSelect
+          value="a"
+          onValueChange={() => {}}
+          options={[
+            { value: 'a', label: 'A' },
+            { value: 'b', label: 'B' },
+          ]}
+        />
+      </SettingsRow>
+    );
+    const trigger = container.querySelector('[data-slot="select-trigger"]') as HTMLElement;
+    for (const cls of TOUCH_TARGET.split(' ')) expect(trigger.className.split(' ')).toContain(cls);
+  });
+
   it('标签与说明通过 id 关联到控件，深链行号落在行上', async () => {
     const onChange = vi.fn();
     await render(

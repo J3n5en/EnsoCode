@@ -90,7 +90,7 @@ export function SettingsSelect<T extends string>({
         size="sm"
         {...a11y}
         aria-label={ariaLabel}
-        className={cn(WIDTH[width], 'max-w-full', HEIGHT)}
+        className={cn(WIDTH[width], 'max-w-full', HEIGHT, TOUCH_TARGET)}
       >
         <SelectValue />
       </SelectTrigger>
