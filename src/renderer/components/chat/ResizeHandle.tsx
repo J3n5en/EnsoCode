@@ -11,6 +11,8 @@ interface ResizeHandleProps {
   gap?: boolean;
   /** 零宽、不画线，命中区只落在右侧卡片边缘：左侧贴边的是侧栏滚动条，不能被手柄盖住 */
   edge?: boolean;
+  /** 面板收起时仍占位（宽度不变）但隐藏且不可交互：条件挂载会让开合首帧聊天区先跳宽 */
+  inactive?: boolean;
 }
 
 /** 侧边栏缘的拖拽手柄:视觉 1px。edge 命中区只向右扩进卡片，避免盖住侧栏滚动条。 */
@@ -20,6 +22,7 @@ export function ResizeHandle({
   onReset,
   gap = false,
   edge = false,
+  inactive = false,
 }: ResizeHandleProps) {
   const [resizing, setResizing] = useState(false);
   const lastX = useRef(0);
@@ -48,10 +51,12 @@ export function ResizeHandle({
 
   return (
     <div
+      aria-hidden={inactive || undefined}
       className={cn(
         // z-20：命中区伸进相邻卡片，否则后绘制的卡片会把指针吃掉
         'relative z-20 shrink-0',
-        edge ? 'w-0' : gap ? 'w-[8px]' : 'w-px bg-border'
+        edge ? 'w-0' : gap ? 'w-[8px]' : 'w-px bg-border',
+        inactive && 'pointer-events-none invisible'
       )}
     >
       <div
