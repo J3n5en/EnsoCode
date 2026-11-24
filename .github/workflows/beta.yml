@@ -1,7 +1,8 @@
 name: Beta
 
 # 内测渠道：main 每次推送自动构建桌面端，发成 GitHub 预发布（永不标 Latest），只保留最近 5 个。
-# 版本号 <package.json 的下一个 patch>-beta.<run_number> 只在 CI 里算，不提交回仓库。
+# 版本号 <package.json 的下一个 patch>-beta.<N> 只在 CI 里算，不提交回仓库；
+# N 是 HEAD 相对当前正式版 tag 的 first-parent 提交数，每个正式版之后从 1 重新数（见 scripts/beta-release.mjs）。
 # 正式版仍由手动推 vX.Y.Z tag 走 Build；预发布 tag 不触发 Build / Publish Server / Relay Docker。
 on:
   push:
@@ -28,6 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Compute version
         id: version
@@ -178,6 +182,15 @@ jobs:
 
       - name: Publish prerelease
         run: |
+          # 本组串行不取消：同基线已有不小于本次编号的 beta（重跑同一提交、旧提交乱序）就不再发
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | {tag_name, prerelease, draft}' > releases.jsonl
+          newer=$(node scripts/beta-release.mjs superseded "$VERSION" < releases.jsonl)
+          if [ -n "$newer" ]; then
+            echo "::notice::已有 $newer，跳过 $TAG"
+            echo "已有 $newer，跳过 $TAG" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           gh release create "$TAG" assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
