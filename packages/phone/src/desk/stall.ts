@@ -8,6 +8,8 @@ export function stallDelay(now: number, windowMs: number, ...activity: number[])
 }
 
 const HELLO_RETRY_MS = 5_000;
+/** 补发帧一直在应用也不能永远不就绪：rpc-ready 本身可能丢在旧链路上 */
+const HELLO_MAX_MS = 20_000;
 const PENDING_STALL_MS = 20_000;
 /** 未决请求最长等这么久：大帧不断（或别的事件刷屏）时静默永远等不到 */
 const PENDING_MAX_MS = 60_000;
@@ -43,23 +45,31 @@ export function gapResyncDelay(
  * 回前台换链后 rpc-ready 或末尾几帧可能丢在半死的旧通道上：没有后续帧就不会出现 seq 缺口，
  * iframe 会一直等下去。大帧静默足够久仍未就绪/仍有未决请求时重新 hello（宿主按 seq 补发、按 id 去重）。
  * 小帧不算进度：它们可能正是缺口之后、无法应用的帧。
+ * 但按序应用推进（appliedAt）说明宿主在送：慢链路上补发要传很久，此时重新 hello 只会让宿主
+ * 把整段保留窗口再排一遍，越补越慢，最后塞满中继的单连接队列被拆链。
  */
 export function needsRehello(
   now: number,
-  slot: { ready: boolean; helloAt: number; pendingAt?: number },
+  slot: { ready: boolean; helloAt: number; pendingAt?: number; appliedAt?: number },
   lastBulk: number,
   linkAt = Number.NEGATIVE_INFINITY
 ): boolean {
-  if (!slot.ready) return stallDelay(now, HELLO_RETRY_MS, slot.helloAt, lastBulk) === 0;
+  const applied = slot.appliedAt ?? Number.NEGATIVE_INFINITY;
+  if (!slot.ready) {
+    return (
+      stallDelay(now, HELLO_RETRY_MS, slot.helloAt, lastBulk, applied) === 0 ||
+      stallDelay(now, HELLO_MAX_MS, slot.helloAt) === 0
+    );
+  }
   if (slot.pendingAt === undefined) return false;
   if (
     nearLink(slot.pendingAt, linkAt) &&
     now - linkAt <= 2 * LINK_SETTLE_MS &&
-    stallDelay(now, LINK_PENDING_STALL_MS, slot.pendingAt, slot.helloAt, lastBulk) === 0
+    stallDelay(now, LINK_PENDING_STALL_MS, slot.pendingAt, slot.helloAt, lastBulk, applied) === 0
   )
     return true;
   return (
-    stallDelay(now, PENDING_STALL_MS, slot.pendingAt, slot.helloAt, lastBulk) === 0 ||
+    stallDelay(now, PENDING_STALL_MS, slot.pendingAt, slot.helloAt, lastBulk, applied) === 0 ||
     stallDelay(now, PENDING_MAX_MS, slot.pendingAt, slot.helloAt) === 0
   );
 }

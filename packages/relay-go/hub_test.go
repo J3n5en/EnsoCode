@@ -52,6 +52,17 @@ func TestHubJoinRacingLeaveNoOrphanRoom(t *testing.T) {
 	}
 }
 
+// 回前台续上时宿主按 seq 一次补发上千条小帧，手机链路慢时还没写出：只要字节没超限就不能按慢端拆链。
+func TestReplayBurstOfSmallFramesNotAborted(t *testing.T) {
+	p := newPeer(roleGuest, nil)
+	for i := 0; i < 4000; i++ {
+		p.trySend(frame{messageType: websocket.BinaryMessage, data: make([]byte, 300)})
+	}
+	if p.dead.Load() {
+		t.Fatal("4000 条小帧（约 1.2MB）在途就被当成慢端拆链")
+	}
+}
+
 // abort 关掉连接后，writePump 不能干等下一轮 ping 才退出。
 func TestAbortStopsWritePump(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
