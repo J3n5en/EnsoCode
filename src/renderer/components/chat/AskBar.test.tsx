@@ -101,4 +101,30 @@ describe('AskBar', () => {
       expect(kept && body?.contains(kept)).toBe(false);
     }
   });
+
+  it('正文独占卡片整宽：不和「已转给 / 稍后 / 剩余时间」挤在同一横排，长串可断行', () => {
+    const question = `分支 chore/${'a'.repeat(200)} 要删吗？`;
+    const { document } = parseHTML(
+      render([{ ...ask, question, relay: { name: '爱酱' }, expiresAt: Date.now() + 590_000 }])
+    );
+    const card = document.querySelector('[data-enso="ask"]');
+    const body = document.querySelector('[data-enso="ask-question"]');
+    const relay = document.querySelector('[data-enso="ask-relay"]');
+    const later = [...(card?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Later'
+    );
+    const countdown = [...(card?.querySelectorAll('span') ?? [])].find((span) =>
+      span.textContent?.includes('left')
+    );
+    expect(relay && later && countdown).toBeTruthy();
+    // 正文与每个头部元素最近的公共祖先只能是纵向排列的卡片本身
+    for (const head of [relay, later, countdown]) {
+      let common = body?.parentElement ?? null;
+      while (common && !common.contains(head ?? null)) common = common.parentElement;
+      expect(common).toBe(card);
+    }
+    expect(card?.className.split(/\s+/)).toContain('flex-col');
+    expect(body?.parentElement).toBe(card);
+    expect(body?.className).toContain('[overflow-wrap:anywhere]');
+  });
 });
