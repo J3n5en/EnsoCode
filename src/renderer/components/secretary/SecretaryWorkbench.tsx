@@ -5,7 +5,6 @@ import {
   type PendingDispatch,
   type SecretaryBoard,
   type SecretaryBoardTodo,
-  type SecretaryClaimView,
   type SecretaryDemandThreadView,
   type SecretaryTodoMutate,
   type TodoProblemCode,
@@ -23,7 +22,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { QueuedSessionButtons } from '@/components/chat/QueuedSessionCard';
@@ -37,6 +36,7 @@ import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
 import { SecretaryFace } from './SecretaryFace';
 import { SecretaryProposalRow } from './SecretaryProposalRow';
+import { RunningCards } from './SecretaryRunningList';
 import {
   type FeedEvent,
   type FeedTone,
@@ -105,48 +105,35 @@ const PROBLEM_LABEL: Record<TodoProblemCode, string> = {
   deleted: 'The session was deleted',
 };
 
-function Stat({ value, label, warn }: { value: number; label: string; warn?: boolean }) {
+/** 计数卡：点了滚到下面对应的列表 */
+function Stat({
+  value,
+  label,
+  warn,
+  target,
+  section,
+}: {
+  value: number;
+  label: string;
+  warn?: boolean;
+  target: string;
+  section: RefObject<HTMLElement | null>;
+}) {
   return (
-    <div
+    <button
+      type="button"
       data-enso="secretary-stat"
+      data-target={target}
       data-warn={warn || undefined}
+      onClick={() => section.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })}
       className={cn(
-        'rounded-[10px] border px-2.5 py-2',
-        warn ? 'border-warning/40 bg-warning/5' : 'border-border'
+        'rounded-[10px] border px-2.5 py-2 text-left transition-colors',
+        warn ? 'border-warning/40 bg-warning/5 hover:bg-warning/10' : 'border-border hover:bg-muted'
       )}
     >
       <div className="text-[18px] font-semibold tabular-nums">{value}</div>
       <div className="text-[11.5px] text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
-function ClaimList({ claims }: { claims: readonly SecretaryClaimView[] }) {
-  const { t, locale } = useI18n();
-  const now = Date.now();
-  return (
-    <section data-enso="secretary-claims" className="flex flex-col gap-1.5">
-      <p className="text-[12px] font-medium text-muted-foreground">{t('Object claims')}</p>
-      {claims.map((claim) => (
-        <button
-          key={claim.key}
-          type="button"
-          data-enso="secretary-claim"
-          onClick={() => openSessionFromSecretary(claim.sessionId)}
-          className="flex flex-col items-start rounded-lg border border-border px-2.5 py-2 text-left"
-        >
-          <span className="text-[13px] font-medium">{claim.label || claim.key}</span>
-          <span className="text-[11.5px] text-muted-foreground">{claim.key}</span>
-          <span className="text-[11.5px] text-muted-foreground">
-            {t('Claimed by {{session}}', { session: claim.sessionTitle })}
-            {' · '}
-            {claim.pluginId}
-            {' · '}
-            {formatRelativeTime(claim.lastHeartbeatAt, locale, now)}
-          </span>
-        </button>
-      ))}
-    </section>
+    </button>
   );
 }
 
@@ -693,7 +680,7 @@ function EmptyState({ name, onAdd }: { name: string; onAdd: () => void }) {
   );
 }
 
-/** 工作台：问候与今日战报、三个计数、需要你处理、待办、动态时间线 */
+/** 工作台：问候与今日战报、三个计数、需要你处理、进行中、需求线程、待办、动态时间线 */
 export function SecretaryWorkbench({ name, secretaryId }: { name: string; secretaryId?: string }) {
   const { t } = useI18n();
   const ownBoard = useSecretaryStore((s) =>
@@ -733,22 +720,19 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
       running: picked.flatMap((entry) => entry.board.running),
       todos: picked.flatMap((entry) => entry.board.todos),
       done: picked.flatMap((entry) => entry.board.done),
-      ...(ownBoard.claims && ownBoard.claims.length > 0 ? { claims: ownBoard.claims } : {}),
     };
   }, [scope, overviewBoards, filterId, ownBoard]);
   const focusProposal = useSecretaryStore((s) => s.focusProposal);
   const [adding, setAdding] = useState(false);
+  const needsYouRef = useRef<HTMLElement>(null);
+  const runningRef = useRef<HTMLElement>(null);
+  const todosRef = useRef<HTMLElement>(null);
   /** 深链定位过来的那张卡：滚到它并闪一下，2 秒后恢复 */
   const [highlight, setHighlight] = useState<string | null>(null);
   const digest = secretaryDigest(board, Date.now());
   const feed = useSecretaryFeed(secretaryId);
   const empty =
-    board.needsYou.length +
-      board.running.length +
-      board.todos.length +
-      board.done.length +
-      (board.claims?.length ?? 0) ===
-    0;
+    board.needsYou.length + board.running.length + board.todos.length + board.done.length === 0;
 
   useEffect(() => {
     if (!focusProposal) return;
@@ -853,19 +837,28 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
         <p className="text-[15px] font-semibold">{t(digest.greeting)}</p>
         <p className="mt-0.5 text-[12.5px] text-muted-foreground">{todayLine}</p>
       </div>
-      <div className="grid grid-cols-3 gap-1.5">
+      <div data-enso="secretary-stats" className="grid grid-cols-3 gap-1.5">
         <Stat
           value={digest.counts.needsYou}
           label={t('Waiting on you')}
           warn={digest.counts.needsYou > 0}
+          target="needs-you"
+          section={needsYouRef}
         />
-        <Stat value={digest.counts.running} label={t('In progress')} />
-        <Stat value={digest.counts.todos} label={t('To do')} />
+        <Stat
+          value={digest.counts.running}
+          label={t('In progress')}
+          target="running"
+          section={runningRef}
+        />
+        <Stat value={digest.counts.todos} label={t('To do')} target="todos" section={todosRef} />
       </div>
-      {board.claims && board.claims.length > 0 && <ClaimList claims={board.claims} />}
-      {board.threads && board.threads.length > 0 && <ThreadList threads={board.threads} />}
       {board.needsYou.length > 0 && (
-        <section data-enso="secretary-needs-you" className="flex flex-col gap-1.5">
+        <section
+          ref={needsYouRef}
+          data-enso="secretary-needs-you"
+          className="flex scroll-mt-3 flex-col gap-1.5"
+        >
           {board.needsYou.map((card) =>
             card.kind === 'proposal' ? (
               <div
@@ -887,6 +880,20 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
           )}
         </section>
       )}
+      {board.running.length > 0 && (
+        <section
+          ref={runningRef}
+          data-enso="secretary-workbench-running"
+          className="flex scroll-mt-3 flex-col"
+        >
+          <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">
+            {t('In progress')}
+            <span className="ml-1 tabular-nums">{board.running.length}</span>
+          </h3>
+          <RunningCards running={board.running} />
+        </section>
+      )}
+      {board.threads && board.threads.length > 0 && <ThreadList threads={board.threads} />}
       {active.length > 0 && (
         <TodoGroup title={t('In progress')} count={active.length} marker="secretary-active">
           {active.map((todo) => (
@@ -902,8 +909,9 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
         </TodoGroup>
       )}
       <section
+        ref={todosRef}
         data-enso="secretary-todos"
-        className="flex flex-col"
+        className="flex scroll-mt-3 flex-col"
         onDragOver={(event) => {
           if ([...event.dataTransfer.types].includes('text/plain')) event.preventDefault();
         }}

@@ -3264,8 +3264,6 @@ export const zhTranslations: Record<string, string> = {
   Planning: '思考',
   Busy: '执行',
   'Needs you': '等待',
-  'Object claims': '对象认领',
-  'Claimed by {{session}}': '由 {{session}} 认领',
   'Demand threads': '需求线程',
   'Thread owner': '绑定主人',
   'Thread external': '外部',

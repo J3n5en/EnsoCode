@@ -274,6 +274,17 @@ function PendingRow({ pending }: { pending: PendingDispatch }) {
   );
 }
 
+/** 进行中的每一行：会话卡和等依赖的派发 */
+export function RunningCards({ running }: { running: readonly SecretaryCard[] }) {
+  return running.map((card) =>
+    card.kind === 'session' ? (
+      <RunningRow key={card.conversationId} card={card} />
+    ) : card.kind === 'pending' ? (
+      <PendingRow key={card.pending.id} pending={card.pending} />
+    ) : null
+  );
+}
+
 /** 「进行中 N」展开后的明细：和摘要里的数字共用 board.running，条数天然一致 */
 export function SecretaryRunningList({ secretaryId }: { secretaryId?: string } = {}) {
   const { t } = useI18n();
@@ -299,13 +310,7 @@ export function SecretaryRunningList({ secretaryId }: { secretaryId?: string } =
           {t('Nothing running')}
         </p>
       ) : (
-        running.map((card) =>
-          card.kind === 'session' ? (
-            <RunningRow key={card.conversationId} card={card} />
-          ) : card.kind === 'pending' ? (
-            <PendingRow key={card.pending.id} pending={card.pending} />
-          ) : null
-        )
+        <RunningCards running={running} />
       )}
     </section>
   );
