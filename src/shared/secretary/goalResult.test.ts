@@ -150,7 +150,7 @@ describe('goal result 格式化', () => {
         'CI 99 success owner/x',
         '截图 /tmp/a.png home',
         'follow-up: docs',
-        'needs-user: ship?',
+        'needs-user[0]: ship?',
         'deploy needed relay later',
         'worktree feat/x /tmp/wt',
       ].join('\n')

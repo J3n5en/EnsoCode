@@ -34,6 +34,24 @@ describe('secretary worker protocol', () => {
     expect(parseAgentWorkerEvent(toolRun)).toEqual(toolRun);
   });
 
+  it('ask-resolved 的 needsUser 关联：合格的归一放行，坏的或缺提问时间只剥掉关联，事件照常', () => {
+    const base = { type: 'ask-resolved', identity: parent, seq: 4, requestId: 'ask-1', by: 'user' };
+    const link = { conversationId: 'c1', needsUserIndex: 0 };
+    expect(parseAgentWorkerEvent({ ...base, relatesTo: link, askedAt: 9 })).toEqual({
+      ...base,
+      relatesTo: link,
+      askedAt: 9,
+    });
+    expect(
+      parseAgentWorkerEvent({
+        ...base,
+        relatesTo: { conversationId: 'c1', needsUserIndex: -1 },
+        askedAt: 9,
+      })
+    ).toEqual(base);
+    expect(parseAgentWorkerEvent({ ...base, relatesTo: link })).toEqual(base);
+  });
+
   it('spawn-parent 接受秘书自造工具描述符，形状不对整批拒绝', () => {
     const descriptor = {
       name: 'my_upper_text',

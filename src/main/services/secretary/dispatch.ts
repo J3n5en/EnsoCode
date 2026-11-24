@@ -8,7 +8,13 @@ import {
   type UnavailableImage,
 } from '@shared/secretary/attachments';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
-import { hasNeedsUser, stripGoalResultNeedsUser } from '@shared/secretary/goalResult';
+import {
+  answerGoalResultNeedsUser,
+  hasNeedsUser,
+  needsUserItems,
+  stripGoalResultNeedsUser,
+  unansweredNeedsUserCount,
+} from '@shared/secretary/goalResult';
 import { probeImageView, readImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
@@ -38,6 +44,7 @@ import {
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type {
   AgentRunProgress,
+  AskRelatesTo,
   AttachedImage,
   ConversationAuthority,
   ProjectAuthority,
@@ -2776,8 +2783,14 @@ export type MarkResultAction = 'done' | 'undo' | 'dismiss';
 
 export type MarkResultResult = { ok: true } | { ok: false; error: string };
 
-/** 谁点的：用户界面按钮，还是秘书的工具调用。审计里分开记 */
-export type MarkResultSource = 'ui' | 'secretary';
+/** 谁点的：用户界面按钮、秘书的工具调用，还是用户答完了秘书带关联转问的全部 needsUser */
+export type MarkResultSource = 'ui' | 'secretary' | 'answer';
+
+const MARK_SOURCE_DETAIL: Record<MarkResultSource, string> = {
+  ui: 'manual',
+  secretary: 'secretary',
+  answer: 'answered',
+};
 
 /**
  * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
@@ -2868,10 +2881,64 @@ export async function markResult(
     op,
     targetId: conversationId,
     ok: true,
-    detail: [source === 'secretary' ? 'secretary' : 'manual', goalNote].filter(Boolean).join('; '),
+    detail: [MARK_SOURCE_DETAIL[source], goalNote].filter(Boolean).join('; '),
   });
   notifySecretaryChanged();
   return { ok: true };
+}
+
+export type AnswerNeedsUserResult = { ok: true; cleared: boolean } | { ok: false; error: string };
+
+const ANSWER_MAX_CHARS = 500;
+
+/**
+ * 秘书带 relatesTo 转问的 needsUser 被用户答复：答复记到那份结果上，卡片标出已答复；
+ * 全部条目都答了就按 result_mark_done 收口，不用秘书再手动标。
+ * 只认 goal-complete：goal-blocked 的活没干完，答了也不能记成完成。
+ * 提问之后才到的新结果不认这次答复，免得旧问题的答案落到新条目上。
+ */
+export async function answerNeedsUser(
+  ports: SecretaryDispatchPorts,
+  link: AskRelatesTo,
+  answer: string,
+  askedAt: number
+): Promise<AnswerNeedsUserResult> {
+  const { conversationId, needsUserIndex } = link;
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return { ok: false, error: 'not-found' };
+  const result = record.lastResult;
+  const pending =
+    result !== undefined &&
+    result.kind === 'goal-complete' &&
+    !result.manual &&
+    !result.dismissed &&
+    record.goalResult !== undefined &&
+    hasNeedsUser(record.goalResult);
+  if (!pending || !record.goalResult) return { ok: false, error: 'nothing-pending' };
+  if (record.goalResult.at > askedAt) return { ok: false, error: 'stale' };
+  const count = needsUserItems(record.goalResult).length;
+  if (needsUserIndex !== undefined && needsUserIndex >= count)
+    return { ok: false, error: 'bad-index' };
+  const now = ports.now();
+  const text = redactSecrets(answer.trim()).slice(0, ANSWER_MAX_CHARS);
+  record.goalResult = answerGoalResultNeedsUser(record.goalResult, needsUserIndex, text, now);
+  ports.saveDispatch(file);
+  const targets = needsUserIndex === undefined ? [...Array(count).keys()] : [needsUserIndex];
+  ports.audit({
+    at: now,
+    secretaryConversationId: record.secretaryConversationId,
+    op: 'needs_user_answered',
+    targetId: conversationId,
+    ok: true,
+    detail: `#${targets.join(',')}: ${text}`,
+  });
+  if (unansweredNeedsUserCount(record.goalResult) > 0) {
+    notifySecretaryChanged();
+    return { ok: true, cleared: false };
+  }
+  const marked = await markResult(ports, conversationId, 'done', 'answer');
+  return marked.ok ? { ok: true, cleared: true } : marked;
 }
 
 /** 用户点过「知道了」：只标记这条结果，会话本身不动；新结果整体替换 lastResult，标记自然失效 */

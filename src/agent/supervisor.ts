@@ -3690,7 +3690,7 @@ export class SessionSupervisor {
               : withApproval(gate, 'mcp', tool)
           )
         : []),
-      ...builtin('ask_user', [createAskTool(askManager)]),
+      ...builtin('ask_user', [createAskTool(askManager, { secretary: secretaryMode })]),
       ...builtin('subagent', [unifiedSubagentTool]),
       ...builtin('workflow', [
         createWorkflowTool({
@@ -3942,6 +3942,8 @@ export class SessionSupervisor {
             ...(resolution?.by ? { by: resolution.by } : {}),
             ...(resolution?.answer ? { answer: resolution.answer } : {}),
             ...(resolution?.name ? { name: resolution.name } : {}),
+            ...(resolution?.relatesTo ? { relatesTo: resolution.relatesTo } : {}),
+            ...(resolution?.askedAt !== undefined ? { askedAt: resolution.askedAt } : {}),
           });
         }
       },

@@ -654,7 +654,7 @@ const SCHEMAS: Record<
   },
   result_mark_done: {
     description:
-      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. A blocked or paused goal on the session is closed with it, so a later session_send with goal is not refused; result_mark_undo puts that goal back. Only sessions you dispatched or track are accepted; nothing else in the session is touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
+      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. A blocked or paused goal on the session is closed with it, so a later session_send with goal is not refused; result_mark_undo puts that goal back. Only sessions you dispatched or track are accepted; nothing else in the session is touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone. A needsUser card you put to the user through ask_user with relatesTo clears itself once answered, so do not mark it.',
     parameters: object({ conversationId: id('Session id from session_list or the board') }, [
       'conversationId',
     ]),

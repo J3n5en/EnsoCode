@@ -298,16 +298,33 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
             data-enso="secretary-card-needs-user"
             className="flex flex-col gap-0.5 text-foreground/90"
           >
-            {decisionNeeds.map((item) => (
-              <li
-                key={item}
-                data-enso="secretary-card-needs-user-item"
-                title={item}
-                className="line-clamp-2 break-words"
-              >
-                {t('Needs you: {{item}}', { item })}
-              </li>
-            ))}
+            {decisionNeeds.map((item, index) => {
+              const answered = card.needsUserAnswers?.find((entry) => entry.index === index);
+              return (
+                <li
+                  key={item}
+                  data-enso="secretary-card-needs-user-item"
+                  data-answered={answered ? 'true' : undefined}
+                  title={item}
+                  className="break-words"
+                >
+                  <span
+                    className={cn('line-clamp-2', answered && 'text-muted-foreground line-through')}
+                  >
+                    {t('Needs you: {{item}}', { item })}
+                  </span>
+                  {answered && (
+                    <span
+                      data-enso="secretary-card-needs-user-answer"
+                      title={answered.answer}
+                      className="line-clamp-1 text-success"
+                    >
+                      {t('Answered: {{answer}}', { answer: answered.answer })}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : (

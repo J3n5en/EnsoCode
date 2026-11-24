@@ -298,16 +298,36 @@ function DailyCard({
               data-enso="secretary-daily-needs-user"
               className="mt-[4px] flex flex-col gap-0.5 text-[12px] text-foreground/90"
             >
-              {needsUser.map((entry) => (
-                <li
-                  key={entry}
-                  data-enso="secretary-daily-needs-user-item"
-                  title={entry}
-                  className="line-clamp-2 break-words"
-                >
-                  {t('Needs you: {{item}}', { item: entry })}
-                </li>
-              ))}
+              {needsUser.map((entry, index) => {
+                const answered = item.goalResult?.answers?.find((a) => a.index === index);
+                return (
+                  <li
+                    key={entry}
+                    data-enso="secretary-daily-needs-user-item"
+                    data-answered={answered ? 'true' : undefined}
+                    title={entry}
+                    className="break-words"
+                  >
+                    <span
+                      className={cn(
+                        'line-clamp-2',
+                        answered && 'text-muted-foreground line-through'
+                      )}
+                    >
+                      {t('Needs you: {{item}}', { item: entry })}
+                    </span>
+                    {answered && (
+                      <span
+                        data-enso="secretary-daily-needs-user-answer"
+                        title={answered.answer}
+                        className="line-clamp-1 text-success"
+                      >
+                        {t('Answered: {{answer}}', { answer: answered.answer })}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
             {expanded && detail && (
               <span className="mt-1.5 block whitespace-pre-wrap break-words border-t border-border/60 pt-1 text-[11.5px] text-muted-foreground">
