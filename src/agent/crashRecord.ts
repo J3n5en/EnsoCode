@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { inspect } from 'node:util';
 import {
   AGENT_WORKER_ABORT_LOG,
   AGENT_WORKER_CRASH_FILE,
@@ -7,16 +8,17 @@ import {
 } from '@shared/agentWorkerExit';
 import { appendCappedLog } from '@shared/cappedLog';
 
-const ABORT_MESSAGE = /^(The|This) operation was aborted/;
-
-/** AbortSignal 触发的取消 / 超时（fetch、fs 流、DOMException 等形态） */
+/**
+ * 只认 AbortSignal 链路产生的两种形态：Node 内部 AbortError（code=ABORT_ERR）与 DOMException 的
+ * AbortError / TimeoutError。只是 name 或文案相同的自定义错误可能是真缺陷，照旧让 worker 退出。
+ */
 export function isAbortLike(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
+  if (error instanceof DOMException)
+    return error.name === 'AbortError' || error.name === 'TimeoutError';
   return (
-    error.name === 'AbortError' ||
-    error.name === 'TimeoutError' ||
-    (error as { code?: unknown }).code === 'ABORT_ERR' ||
-    ABORT_MESSAGE.test(error.message)
+    error instanceof Error &&
+    error.name === 'AbortError' &&
+    (error as { code?: unknown }).code === 'ABORT_ERR'
   );
 }
 
@@ -33,7 +35,8 @@ interface CrashRecordOptions {
  * 致命异常（含默认模式下升级成异常的未处理 rejection）退出前同步落盘，供 Main 在 exit 时报告。
  * 唯一例外是逃逸的取消类异常：取消是预期内的控制流而非程序缺陷，吞掉只丢那一个已被取消的操作，
  * 不吞则整个 worker 连同所有会话的当前轮次一起退出。其余异常照旧落盘后以 1 退出。
- * 不另挂 unhandledRejection：默认 throw 模式下它会以 origin=unhandledRejection 走到这里，挂了反而改变默认语义。
+ * 不另挂 unhandledRejection：桌面 utilityProcess 的未处理 rejection 只告警不退出，服务器 fork 的 Node 默认
+ * throw 模式会以 origin=unhandledRejection 走到这里；挂了会改掉两边原有的语义。
  */
 export function installCrashRecord(dataDir: string, options: CrashRecordOptions = {}): void {
   const target = options.target ?? process;
@@ -55,8 +58,7 @@ export function installCrashRecord(dataDir: string, options: CrashRecordOptions 
     } catch {}
   });
   target.on('uncaughtException', (error: unknown, origin: string) => {
-    const stack = error instanceof Error ? (error.stack ?? '') : '';
-    const text = `origin=${origin} ${describeError(error)}\n${stack}`;
+    const text = `origin=${origin} ${inspect(error)}`;
     if (isAbortLike(error)) {
       console.warn(`[agent] swallowed escaped abort ${text}`);
       appendCappedLog(path.join(dataDir, AGENT_WORKER_ABORT_LOG), `pid=${process.pid} ${text}`);
