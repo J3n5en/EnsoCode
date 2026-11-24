@@ -84,6 +84,8 @@ const NEW_SECRETARY_CONTACT_ONLY = process.argv.includes('--new-secretary-contac
 const GOAL_RESULT_ONLY = process.argv.includes('--goal-result-only');
 // 只跑插件联系渠道连续发送失败：错误原因上卡片、连续失败后暂停推送，截图存到 /tmp/contact-channel-error-*.png
 const CONTACT_CHANNEL_ERROR_ONLY = process.argv.includes('--contact-channel-error-only');
+// 只跑「确认技能提案后秘书收到更新」：只唤醒一轮，不出现 Request aborted
+const PROPOSAL_ABORTED_ONLY = process.argv.includes('--proposal-aborted-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -761,6 +763,10 @@ async function run(cdp, pluginZipUrl) {
       setup,
       pluginZipUrl.replace('secretary-test-plugin', 'contact-fail-plugin')
     );
+    return;
+  }
+  if (PROPOSAL_ABORTED_ONLY) {
+    await verifyProposalAborted(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -6878,6 +6884,72 @@ async function verifyQueuedSessions(cdp, setup) {
     500
   );
   assert(Boolean(started), '排队: 空出位置后队头自动开始，目标生效', started?.goal);
+}
+
+async function verifyProposalAborted(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 确认技能提案：秘书只唤醒一轮，不出现 Request aborted');
+  const draft = { name: 'abort-check', description: '确认提案验收', body: '# 步骤\n\n- 跑测试' };
+  // [[slow]] 让每轮回复都要流几秒，接近真实模型：投递那一轮还在跑时技能已写盘
+  const ask = `沉淀成 skill [[slow:3000]] [[tool:skill_propose ${JSON.stringify(draft)}]]`;
+  const proposed = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(${JSON.stringify(ask)}, { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path }, undefined, id);
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=skill]'), 30000);
+    const idle = await until(() => S().conversations[id]?.status === 'idle', 30000);
+    const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
+    return JSON.stringify({ ok: Boolean(card && idle && proposal?.status === 'pending'), id, proposalId: proposal?.id });
+  `);
+  assert(proposed.ok, 'proposal-aborted: 出现待确认的技能卡片且秘书空闲', proposed);
+  await sleep(1000);
+  await fetch(`http://127.0.0.1:${FAKE_PORT}/__reset`);
+  const before = await page(
+    `return JSON.stringify((S().conversations[${JSON.stringify(proposed.id)}]?.messages ?? []).length)`
+  );
+  await page(`
+    const secretary = await SEC();
+    await secretary.getState().resolveProposal(${JSON.stringify(proposed.proposalId)}, 'confirm');
+    return 'null';
+  `);
+  await sleep(15_000);
+  const after = await page(`
+    const id = ${JSON.stringify(proposed.id)};
+    await until(() => S().conversations[id]?.status === 'idle', 30000);
+    const textOf = (message) => typeof message.content === 'string' ? message.content :
+      (Array.isArray(message.content) ? message.content : []).filter((part) => part.type === 'text').map((part) => part.text).join('');
+    const messages = (S().conversations[id]?.messages ?? []).slice(${before}).map((message) => ({
+      role: message.role,
+      text: textOf(message).slice(0, 160),
+      stopReason: message.stopReason,
+      errorMessage: message.errorMessage,
+    }));
+    const secretary = await SEC();
+    return JSON.stringify({
+      status: secretary.getState().secretary.proposals[${JSON.stringify(proposed.proposalId)}]?.status,
+      messages,
+      domErrors: [...document.querySelectorAll('[data-enso=timeline-error], .text-red-500')].map((node) => node.innerText).filter((text) => text.includes('abort')),
+    });
+  `);
+  const requests = await (await fetch(`http://127.0.0.1:${FAKE_PORT}/__requests`)).json();
+  const report = {
+    ...after,
+    modelRequests: requests.requests.map((request) => request.lastUserText.slice(0, 80)),
+  };
+  log(JSON.stringify(report, null, 2));
+  await cdp.shot('/tmp/proposal-aborted-confirm.png');
+  assert(report.status === 'succeeded', 'proposal-aborted: 提案执行成功', report);
+  const updates = report.messages.filter(
+    (message) => message.role === 'user' && message.text.includes('<session-updates>')
+  );
+  assert(updates.length === 1, 'proposal-aborted: 秘书只收到一条 session-updates', report);
+  assert(
+    report.messages.every((message) => !message.errorMessage),
+    'proposal-aborted: 秘书会话里没有错误回复（Request aborted）',
+    report
+  );
 }
 
 async function verifyGoalResult(cdp, setup) {
