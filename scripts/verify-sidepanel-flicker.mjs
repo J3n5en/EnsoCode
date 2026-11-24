@@ -12,8 +12,8 @@
 
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { createServer as createHttpServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import path from 'node:path';
@@ -361,7 +361,11 @@ function startFakeProvider() {
       }
       const last = parsed?.messages?.at?.(-1);
       const text = messageText(last);
-      const kind = text.includes('[[long]]') ? 'long' : text.includes('[[short]]') ? 'short' : 'other';
+      const kind = text.includes('[[long]]')
+        ? 'long'
+        : text.includes('[[short]]')
+          ? 'short'
+          : 'other';
       providerHits.push({ at: Date.now(), url, kind, chars: text.length });
       log(`provider ${kind} ${url} chars=${text.length} n=${providerHits.length}`);
       if (kind !== 'long') {
@@ -381,7 +385,11 @@ function startFakeProvider() {
         Connection: 'keep-alive',
       });
       sseWrite(res, textEvents('')[0]);
-      sseWrite(res, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      sseWrite(res, {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' },
+      });
       void (async () => {
         try {
           for (const chunk of chunks) {
@@ -799,19 +807,6 @@ async function scrollerPoint(cdp) {
   })()`);
 }
 
-async function wheelUp(cdp, point) {
-  for (const deltaY of [-220, -220, -220]) {
-    await cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseWheel',
-      x: point.x,
-      y: point.y,
-      deltaX: 0,
-      deltaY,
-      pointerType: 'mouse',
-    });
-  }
-}
-
 async function handlePoint(cdp) {
   return cdp.eval(`(() => {
     const main = document.querySelector('[data-enso="main"]');
@@ -906,7 +901,13 @@ function roundTrips(values, amp) {
   let signFlips = 0;
   for (const value of nums) {
     const s = Math.abs(value) <= 8 ? 0 : Math.sign(value);
-    if (s !== 0 && sign !== 0 && s !== sign && Math.abs(value) > amp && Math.abs(signAnchor) > amp) {
+    if (
+      s !== 0 &&
+      sign !== 0 &&
+      s !== sign &&
+      Math.abs(value) > amp &&
+      Math.abs(signAnchor) > amp
+    ) {
       signFlips += 1;
     }
     if (s !== 0) {
@@ -955,8 +956,7 @@ function firstFrameReport(sample) {
   steps.forEach((step, index) => {
     const residual = round1(step.dm + step.ds);
     const later = steps.slice(index + 1).some((item) => Math.abs(item.dm) > 12);
-    const lone =
-      (near(step.dm, 1, 0.35) || near(step.dm, 8, 0.35)) && Math.abs(step.ds) <= 0.35;
+    const lone = (near(step.dm, 1, 0.35) || near(step.dm, 8, 0.35)) && Math.abs(step.ds) <= 0.35;
     if (lone && (later || travel > 20)) {
       issues.push(`第${index + 1}步主区单独跳 ${step.dm}px（侧栏 ${step.ds}）`);
     }
@@ -978,9 +978,7 @@ function summarizeToggles(frames, marks) {
     .filter((mark) => mark.name !== 'toggle-wheel')
     .map((mark, index) => {
       const next = toggles[index + 1];
-      const segment = frames.filter(
-        (frame) => frame.t >= mark.t && (!next || frame.t < next.t)
-      );
+      const segment = frames.filter((frame) => frame.t >= mark.t && (!next || frame.t < next.t));
       let saw = false;
       const during = [];
       for (const frame of segment) {
@@ -990,9 +988,18 @@ function summarizeToggles(frames, marks) {
         if (saw && !frame.anim) break;
       }
       const used = during.length >= 3 ? during : segment.slice(0, 24);
-      const gap = roundTrips(used.map((frame) => frame.gap), REVERSAL_AMP);
-      const top = roundTrips(used.map((frame) => frame.top), REVERSAL_AMP);
-      const last = roundTrips(used.map((frame) => frame.last).filter((value) => value != null), REVERSAL_AMP);
+      const gap = roundTrips(
+        used.map((frame) => frame.gap),
+        REVERSAL_AMP
+      );
+      const top = roundTrips(
+        used.map((frame) => frame.top),
+        REVERSAL_AMP
+      );
+      const last = roundTrips(
+        used.map((frame) => frame.last).filter((value) => value != null),
+        REVERSAL_AMP
+      );
       return {
         name: mark.name,
         frames: used.length,
@@ -1073,7 +1080,8 @@ async function main() {
         assertIsolatedListener(cdpPort, userData);
         return target;
       } catch (error) {
-        if (String(error.message).includes('不属于') || String(error.message).includes('对不上')) throw error;
+        if (String(error.message).includes('不属于') || String(error.message).includes('对不上'))
+          throw error;
         return null;
       }
     },
@@ -1110,7 +1118,12 @@ async function main() {
         const live = await cdp.eval(liveExpr(session.id));
         if (live.status === 'failed') throw new Error(`长回复失败 ${live.error}`);
         if (!live.virtuoso) return null;
-        if (live.sh > live.ch + 800 && live.gap != null && live.gap <= GAP_FOLLOW_MAX && live.status === 'running') {
+        if (
+          live.sh > live.ch + 800 &&
+          live.gap != null &&
+          live.gap <= GAP_FOLLOW_MAX &&
+          live.status === 'running'
+        ) {
           return live;
         }
         return null;
@@ -1147,7 +1160,9 @@ async function main() {
       );
     }
     const collapsedPng = await shoot(cdp, SHOTS.collapsed);
-    log(`${SHOTS.collapsed} ${collapsedPng.width}x${collapsedPng.height} main=${collapsed.main} side=${collapsed.side} gap=${collapsed.gap} back=${collapsed.back}`);
+    log(
+      `${SHOTS.collapsed} ${collapsedPng.width}x${collapsedPng.height} main=${collapsed.main} side=${collapsed.side} gap=${collapsed.gap} back=${collapsed.back}`
+    );
 
     const wheelAt = await scrollerPoint(cdp);
     if (!wheelAt) throw new Error('没有 Virtuoso scroller，不能上滚');
@@ -1241,7 +1256,8 @@ async function main() {
     const wheelFrames = sliceMarks(probe.frames, probe.marks, 'after-wheel', 'after-wheel-wait');
     const wheelMark = probe.marks.find((item) => item.name === 'toggle-wheel');
     const wheelClick = (probe.clicks ?? []).find((hit) => wheelMark && hit.t >= wheelMark.t);
-    const wheelHit = probe.wheels.find((hit) => wheelMark && hit.t >= wheelMark.t) ?? probe.wheels.at(-1);
+    const wheelHit =
+      probe.wheels.find((hit) => wheelMark && hit.t >= wheelMark.t) ?? probe.wheels.at(-1);
     const dragFrames = sliceMarks(probe.frames, probe.marks, 'drag-start', 'drag-end');
     const opens = probe.opens.map(firstFrameReport);
     const errors = [];
@@ -1252,11 +1268,15 @@ async function main() {
     if (animTotal < 4) errors.push(`动画标记几乎没亮 animFrames=${animTotal}`);
     for (const item of toggles) {
       if (item.top.trips > 1) {
-        errors.push(`${item.name} scrollTop 往返 ${item.top.trips} 次 >1（振幅>${REVERSAL_AMP}）${JSON.stringify(item.top)} ${item.topSeries.join(',')}`);
+        errors.push(
+          `${item.name} scrollTop 往返 ${item.top.trips} 次 >1（振幅>${REVERSAL_AMP}）${JSON.stringify(item.top)} ${item.topSeries.join(',')}`
+        );
       }
       const sustained = sustainedAway(item.gapSeries, GAP_FOLLOW_MAX);
       if (sustained > 1) {
-        errors.push(`${item.name} 距底离开 >${GAP_FOLLOW_MAX} 后再回来 ${sustained} 次（不含单帧流式增量）`);
+        errors.push(
+          `${item.name} 距底离开 >${GAP_FOLLOW_MAX} 后再回来 ${sustained} 次（不含单帧流式增量）`
+        );
       }
     }
     if (!followTail.length) errors.push('开合结束后没有静止采样');
@@ -1285,7 +1305,8 @@ async function main() {
       if (frameDelta > 8) errors.push(`滚轮落在开合后第 ${frameDelta} 帧，已离开动画开头`);
       const tops = wheelFrames.map((frame) => frame.top).filter((value) => value != null);
       const gaps = wheelFrames.map((frame) => frame.gap).filter((value) => value != null);
-      const beforeTop = probe.frames.find((frame) => frame.t >= (wheelMark?.t ?? 0))?.top ?? tops[0];
+      const beforeTop =
+        probe.frames.find((frame) => frame.t >= (wheelMark?.t ?? 0))?.top ?? tops[0];
       const lifted = beforeTop != null && tops.length ? beforeTop - Math.min(...tops) : 0;
       if (lifted < 150) errors.push(`上滚只移动了 ${Math.round(lifted)}px`);
       if (!gaps.length || Math.min(...gaps) <= GAP_FOLLOW_MAX) {
@@ -1312,13 +1333,16 @@ async function main() {
     const dragSides = dragFrames.map((frame) => frame.side).filter((value) => value != null);
     const dragGaps = dragFrames.map((frame) => frame.gap).filter((value) => value != null);
     const dragTravel = dragSides.length ? Math.max(...dragSides) - Math.min(...dragSides) : 0;
-    if (dragTravel < 40) errors.push(`拖拽侧栏只变了 ${Math.round(dragTravel)}px handle=${JSON.stringify(handle)}`);
+    if (dragTravel < 40)
+      errors.push(`拖拽侧栏只变了 ${Math.round(dragTravel)}px handle=${JSON.stringify(handle)}`);
     const dragSorted = [...dragGaps].sort((a, b) => a - b);
     const dragMed = dragSorted.length ? dragSorted[Math.floor(dragSorted.length / 2)] : 999;
     const dragLast = dragFrames.at(-1)?.gap ?? 999;
     const dragHot = dragGaps.filter((gap) => gap > 80).length;
     if (dragMed > GAP_FOLLOW_MAX || (dragGaps.length && dragHot > dragGaps.length * 0.2)) {
-      errors.push(`拖拽距底中位 ${dragMed} last=${dragLast} max=${dragGaps.length ? Math.max(...dragGaps) : null} 尖峰帧 ${dragHot}`);
+      errors.push(
+        `拖拽距底中位 ${dragMed} last=${dragLast} max=${dragGaps.length ? Math.max(...dragGaps) : null} 尖峰帧 ${dragHot}`
+      );
     }
     if (dragFrames.some((frame) => frame.back)) errors.push('拖拽期间出现回到底部');
     if (liveAfter.status !== 'running') errors.push(`结束时会话状态 ${liveAfter.status}，流式已停`);
@@ -1326,10 +1350,12 @@ async function main() {
     const report = {
       threshold: {
         reversalAmp: REVERSAL_AMP,
-        failTrips: 'scrollTop 振幅>40px 的往返 >1 次失败；距底只计持续 ≥2 帧的离开，单帧 ~50px 流式增量不算来回跳',
+        failTrips:
+          'scrollTop 振幅>40px 的往返 >1 次失败；距底只计持续 ≥2 帧的离开，单帧 ~50px 流式增量不算来回跳',
         followGap: `中位 <=${GAP_FOLLOW_MAX}，且不出现回到底部`,
         firstFrame: '首帧主区宽==动作前，或与侧栏同帧对冲；不允许单独 ±1/±8 后再平滑',
-        wheel: '滚轮须在开合后 8 帧内（CDP 同批下发，实测往往落在第 4–6 帧，仍在 220ms 动画内）；之后 2s 距底不回到 ≤40 且出现回到底部',
+        wheel:
+          '滚轮须在开合后 8 帧内（CDP 同批下发，实测往往落在第 4–6 帧，仍在 220ms 动画内）；之后 2s 距底不回到 ≤40 且出现回到底部',
         drag: `拖拽中位距底<=${GAP_FOLLOW_MAX}、无按钮；>80px 的帧不超过 20%`,
       },
       toggles: toggles.map((item) => ({
@@ -1356,7 +1382,12 @@ async function main() {
         sh0: follow[0]?.sh ?? null,
         sh1: followTail.at(-1)?.sh ?? null,
       },
-      collapsed: { main: collapsed.main, side: collapsed.side, gap: collapsed.gap, back: collapsed.back },
+      collapsed: {
+        main: collapsed.main,
+        side: collapsed.side,
+        gap: collapsed.gap,
+        back: collapsed.back,
+      },
       firstFrames: opens.map((item) => ({
         sync: item.sync,
         raf: item.raf,
@@ -1418,7 +1449,7 @@ process.on('unhandledRejection', (error) => {
   void finish(1);
 });
 
-const internalDeadline = setTimeout(() => {
+setTimeout(() => {
   console.error('内部超时 175s');
   if (devLogTail) console.error(devLogTail);
   void finish(124);
