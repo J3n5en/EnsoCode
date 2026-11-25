@@ -26,6 +26,7 @@ vi.mock('@/stores/oauthCredentials', async (importOriginal) => ({
     }),
 }));
 vi.mock('@/components/chat/ModelPicker', () => ({
+  MODEL_PICKER_DIALOG_TRIGGER_CLASS: '',
   MODEL_PICKER_FORM_TRIGGER_CLASS: '',
   ModelPicker: ({ providers }: { providers: ModelProvider[] }) =>
     createElement('div', { 'data-chat-models': providers.map((p) => p.id).join(',') }),

@@ -4,7 +4,7 @@ import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
 import { type BotEngine, type BotProfile, checkBotName } from '@shared/types/bot';
 import { Check } from 'lucide-react';
 import { APPROVAL_MODE_META, APPROVAL_MODE_ORDER } from '@/components/chat/ApprovalModePicker';
-import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
+import { MODEL_PICKER_DIALOG_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import {
   Select,
   SelectItem,
@@ -146,7 +146,7 @@ export function EngineField({
             onChange(enabled ? { ...rest, thinkingLevel: 'medium' } : rest);
           }}
           onThinkingChange={(level: ThinkingLevel) => onChange({ ...engine, thinkingLevel: level })}
-          triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+          triggerClassName={MODEL_PICKER_DIALOG_TRIGGER_CLASS}
           zIndex={zIndex}
           side="bottom"
         />

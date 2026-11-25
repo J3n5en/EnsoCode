@@ -36,3 +36,17 @@ export function secretaryConversationIds(
 ): string[] {
   return projectId ? projectConversationIds(order, conversations, projectId) : [];
 }
+
+/** 折叠侧栏头像上的未读数：只数展开时该秘书分区会列出的会话 */
+export function secretaryUnreadCount(
+  projectId: string | null,
+  order: readonly string[],
+  conversations: Record<
+    string,
+    (Parameters<typeof projectConversationIds>[1][string] & { unread?: boolean }) | undefined
+  >
+): number {
+  return secretaryConversationIds(projectId, order, conversations).filter(
+    (id) => conversations[id]?.unread === true
+  ).length;
+}

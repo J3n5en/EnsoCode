@@ -230,6 +230,26 @@ describe('设置分区各自的滚动位置', () => {
     ).toBe('true');
   });
 
+  it('设置视图卸载后不再追着深链行滚动', async () => {
+    const hits: string[] = [];
+    const proto = Object.getPrototypeOf(container) as { scrollIntoView?: unknown };
+    const original = proto.scrollIntoView;
+    proto.scrollIntoView = function (this: HTMLElement) {
+      hits.push(this.getAttribute('data-settings-row') ?? '');
+    };
+    try {
+      await act(async () =>
+        root.render(<Settings link={{ category: 'logs', rowId: 'logs.row' }} linkSeq={1} />)
+      );
+      expect(hits).toEqual(['logs.row']);
+      await act(async () => root.render(<div data-settings-row="logs.row" />));
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      expect(hits).toEqual(['logs.row']);
+    } finally {
+      proto.scrollIntoView = original;
+    }
+  });
+
   it('导航搜索框用设置 kit，整个设置视图没有带框容器', async () => {
     await act(async () => root.render(<Settings />));
     const nav = container.querySelector('[data-enso="settings-nav"]') as HTMLElement;

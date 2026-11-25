@@ -6,6 +6,7 @@ import {
   ContextMenuPopup,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { SecretaryAvatar } from './SecretaryAvatar';
@@ -257,22 +258,34 @@ export function SecretarySidebarSection({
   );
 }
 
-/** 折叠侧栏时只留头像与状态点，点开最近的秘书会话 */
+/** 折叠侧栏的头像按钮：状态点同展开态头像，右下角数字先报等你，没有再报未读 */
 export function SecretaryCollapsedButton({
   view,
   onClick,
+  unread = 0,
+  active = false,
+  secretaryId,
 }: {
   view: SecretarySectionView;
   onClick: () => void;
+  unread?: number;
+  /** 正在看这个秘书的会话 */
+  active?: boolean;
+  secretaryId?: string;
 }) {
+  const { t } = useI18n();
+  const label = collapsedLabel(view, unread, t);
   return (
     <button
       type="button"
       data-enso="secretary-collapsed"
+      data-secretary-id={secretaryId}
+      data-active={active || undefined}
+      aria-pressed={active}
       onClick={onClick}
-      title={view.name}
-      aria-label={view.name}
-      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+      title={label}
+      aria-label={label}
+      className={cn(COLLAPSED_BUTTON_CLASS, active && COLLAPSED_ACTIVE_CLASS)}
     >
       <SecretaryAvatar
         name={view.name}
@@ -282,6 +295,157 @@ export function SecretaryCollapsedButton({
         running={view.running}
         size="xs"
       />
+      <CollapsedCount needsYou={view.needsYou} unread={unread} />
     </button>
+  );
+}
+
+const COLLAPSED_BUTTON_CLASS =
+  'relative flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
+/** 与侧栏选中会话行同一底色 */
+const COLLAPSED_ACTIVE_CLASS = 'bg-foreground/[0.075] text-foreground dark:bg-foreground/10';
+
+function collapsedLabel(
+  view: SecretarySectionView,
+  unread: number,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  return [
+    view.name,
+    ...(view.needsYou > 0 ? [t('{{n}} waiting', { n: view.needsYou })] : []),
+    ...(view.running > 0 ? [t('{{n}} running', { n: view.running })] : []),
+    ...(unread > 0 ? [t('{{n}} unread', { n: unread })] : []),
+  ].join(' · ');
+}
+
+function CollapsedCount({ needsYou, unread }: { needsYou: number; unread: number }) {
+  const n = needsYou > 0 ? needsYou : unread;
+  if (n === 0) return null;
+  return (
+    <span
+      data-enso="secretary-collapsed-count"
+      data-tone={needsYou > 0 ? 'warn' : 'unread'}
+      className={cn(
+        'pointer-events-none absolute right-0 bottom-0 min-w-3.5 rounded-full px-[3px] text-center font-medium text-[9px] leading-3.5 tabular-nums ring-1 ring-background',
+        needsYou > 0 ? 'bg-warning text-warning-foreground' : 'bg-muted text-muted-foreground'
+      )}
+    >
+      {n > 99 ? '99+' : n}
+    </span>
+  );
+}
+
+export interface CollapsedSecretaryEntry {
+  id: string;
+  view: SecretarySectionView;
+  unread: number;
+  active: boolean;
+}
+
+/** 不超过这个数全部平铺；超过时平铺前 LIMIT-1 个，其余收进「+N」 */
+export const COLLAPSED_SECRETARY_LIMIT = 5;
+
+/**
+ * 折叠侧栏的秘书头像列：顺序同展开态列表。
+ * 列本身可收缩滚动，窗口再矮也不挤掉下面的设置等入口。
+ */
+export function SecretaryCollapsedRail({
+  entries,
+  onOpen,
+  limit = COLLAPSED_SECRETARY_LIMIT,
+}: {
+  entries: readonly CollapsedSecretaryEntry[];
+  onOpen: (secretaryId: string) => void;
+  limit?: number;
+}) {
+  const { t } = useI18n();
+  const overflowing = entries.length > limit;
+  const shown = overflowing ? entries.slice(0, limit - 1) : entries;
+  const hidden = overflowing ? entries.slice(limit - 1) : [];
+  const hiddenNeedsYou = hidden.reduce((sum, entry) => sum + entry.view.needsYou, 0);
+  const hiddenUnread = hidden.reduce((sum, entry) => sum + entry.unread, 0);
+  const hiddenActive = hidden.some((entry) => entry.active);
+  return (
+    <div
+      data-enso="secretary-collapsed-rail"
+      className="flex min-h-0 shrink flex-col items-center gap-1 overflow-y-auto [scrollbar-width:none]"
+    >
+      {shown.map((entry) => (
+        <SecretaryCollapsedButton
+          key={entry.id}
+          secretaryId={entry.id}
+          view={entry.view}
+          unread={entry.unread}
+          active={entry.active}
+          onClick={() => onOpen(entry.id)}
+        />
+      ))}
+      {overflowing && (
+        <Menu>
+          <MenuTrigger
+            render={
+              <button
+                type="button"
+                data-enso="secretary-collapsed-more"
+                data-active={hiddenActive || undefined}
+                aria-pressed={hiddenActive}
+                title={t('All secretaries')}
+                aria-label={t('All secretaries')}
+                className={cn(
+                  COLLAPSED_BUTTON_CLASS,
+                  'text-[11px] font-medium tabular-nums',
+                  hiddenActive && COLLAPSED_ACTIVE_CLASS
+                )}
+              />
+            }
+          >
+            +{hidden.length}
+            {(hiddenNeedsYou > 0 || hiddenUnread > 0) && (
+              <span
+                data-enso="secretary-collapsed-more-dot"
+                data-tone={hiddenNeedsYou > 0 ? 'warn' : 'unread'}
+                className={cn(
+                  'absolute top-1 right-1 size-2 rounded-full ring-2 ring-background',
+                  hiddenNeedsYou > 0 ? 'bg-warning' : 'bg-muted-foreground'
+                )}
+              />
+            )}
+          </MenuTrigger>
+          <MenuPopup side="right" align="start" className="min-w-48">
+            {entries.map((entry) => (
+              <MenuItem
+                key={entry.id}
+                data-secretary-id={entry.id}
+                data-active={entry.active || undefined}
+                onClick={() => onOpen(entry.id)}
+                className={cn(entry.active && 'bg-accent text-accent-foreground')}
+              >
+                <SecretaryAvatar
+                  name={entry.view.name}
+                  color={entry.view.color}
+                  image={entry.view.image}
+                  needsYou={entry.view.needsYou}
+                  running={entry.view.running}
+                  size="sm"
+                />
+                <span className="min-w-0 flex-1 truncate">{entry.view.name}</span>
+                {(entry.view.needsYou > 0 || entry.unread > 0) && (
+                  <span
+                    className={cn(
+                      'shrink-0 text-xs tabular-nums',
+                      entry.view.needsYou > 0 ? 'text-warning' : 'text-muted-foreground'
+                    )}
+                  >
+                    {entry.view.needsYou > 0
+                      ? t('{{n}} waiting', { n: entry.view.needsYou })
+                      : t('{{n}} unread', { n: entry.unread })}
+                  </span>
+                )}
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      )}
+    </div>
   );
 }

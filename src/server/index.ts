@@ -8,7 +8,7 @@ import path from 'node:path';
 import { app } from '@platform';
 import { setAppLoggingEnabled } from '@shared/appLogFile';
 import { registerIpcHandlers } from '../main/ipc';
-import { readSettings, startProviderModelRefresh } from '../main/ipc/settings';
+import { patchSettingsState, readSettings, startProviderModelRefresh } from '../main/ipc/settings';
 import {
   agentWorkerAlive,
   startAgentWorker,
@@ -60,7 +60,12 @@ import { parseWebConfig, type WebConfig } from './web/config';
 const socketPath = (): string => path.join(app.getPath('userData'), 'server.sock');
 
 /** 检查 → 下载 → 应用（应用会让宿主退出，由 systemd 拉起新版本） */
-async function update(updater: ServerUpdater): Promise<unknown> {
+async function update(updater: ServerUpdater, channel?: 'stable' | 'beta'): Promise<unknown> {
+  if (channel) {
+    updater.setChannel(channel);
+    // 命令行切的渠道同样落盘，重启后仍在所选渠道（与设置页一致）
+    patchSettingsState('updateChannel', channel);
+  }
   await updater.checkForUpdates();
   if (updater.state().status?.status === 'available') await updater.downloadUpdate();
   const status = updater.state().status;
@@ -130,7 +135,7 @@ async function handle(
   if (command.cmd === 'plugin') return handlePlugin(command);
   if (command.cmd === 'pair') return startPairing();
   if (command.cmd === 'devices') return { ok: true, status: getPairStatus() };
-  if (command.cmd === 'update') return update(updater);
+  if (command.cmd === 'update') return update(updater, command.channel);
   if (command.cmd === 'status') {
     return {
       ok: true,

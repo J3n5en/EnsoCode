@@ -1,5 +1,5 @@
 import { formatPluginModelChoice, parsePluginModelChoice } from '@shared/extensionPlugins/manifest';
-import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
+import { MODEL_PICKER_DIALOG_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import {
   Select,
   SelectItem,
@@ -61,7 +61,7 @@ export function PluginModelConfigField({
           showReasoningControls={false}
           emptyLabel="选择模型"
           side="bottom"
-          triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+          triggerClassName={MODEL_PICKER_DIALOG_TRIGGER_CLASS}
           onSelect={(providerId, modelId) =>
             onChange(formatPluginModelChoice({ providerId, modelId }))
           }

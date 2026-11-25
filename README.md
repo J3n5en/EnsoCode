@@ -176,6 +176,8 @@ enso-server pair     # in another terminal: scan the QR code or open the link
 
 `enso-server service install` registers a systemd service (Linux only: starts on boot, restarts on crash). Full command list: [scripts/server-package/README.md](scripts/server-package/README.md).
 
+Beta builds: `npm i -g @ensocode/server@beta`; or switch the update channel in the web settings / `enso-server update --channel beta`.
+
 - On a fresh install, projects and the model catalog appear once the full (browser) desk connects and pushes them. After that the phone works on its own; after a restart the host uses the last pushed snapshot.
 - No desktop control, built-in browser, tray, or system notifications on the server.
 - The browser desk needs https or localhost.
@@ -253,3 +255,5 @@ Point **Settings → Devices → Relay URL** at your instance.
 ## License
 
 GNU AGPL-3.0-only, with an additional permission for separately distributed plugins, extensions and skills. See [LICENSE](LICENSE).
+
+
