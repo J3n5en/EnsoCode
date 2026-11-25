@@ -4,6 +4,8 @@ import { Code2, Copy, FolderOpen, GitBranch, SquareTerminal } from 'lucide-react
 import { type ReactNode, useCallback, useState } from 'react';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
 import { ProjectIcon } from '@/components/chat/ProjectIcon';
+import { SecretaryFace } from '@/components/secretary/SecretaryFace';
+import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import {
   Menu,
   MenuGroup,
@@ -43,6 +45,11 @@ export function WorkspaceBadge({
   // 远端客户端：打开 / 用应用打开都发生在宿主机上，只留复制路径
   const local = project.kind !== 'ssh' && !noWorkspace && !window.electronAPI.remote;
   const label = scratch ? t('Temporary chats') : projectDisplayName(project);
+  // 秘书项目：右上角的脸是该秘书本人（爱酱的动漫头像），名字也用秘书名；
+  // 项目 fallback 是「Secretary」首字母 S 的色块，会让用户以为头像串了
+  const secretaryFace = useSecretaryFace(project.kind === 'secretary' ? conversationId : undefined);
+  const face = project.kind === 'secretary' ? secretaryFace : null;
+  const badgeLabel = face?.name.trim() || label;
   const refreshApps = useCallback(() => {
     if (!local) return;
     window.electronAPI.projects
@@ -62,16 +69,26 @@ export function WorkspaceBadge({
     <Menu onOpenChange={(next) => next && refreshApps()}>
       <MenuTrigger
         className="group ml-1.5 flex h-6 min-w-0 shrink-0 items-center rounded-full border border-border/60 px-2 font-mono text-[11.5px] text-muted-foreground outline-none transition-colors duration-(--duration-quick) hover:border-border focus-visible:border-border data-popup-open:border-border"
-        title={noWorkspace ? label : path}
-        aria-label={branch && !noWorkspace ? `${label} / ${branch}` : label}
+        title={noWorkspace ? badgeLabel : path}
+        aria-label={branch && !noWorkspace ? `${badgeLabel} / ${branch}` : badgeLabel}
         onPointerEnter={refreshApps}
       >
-        <ProjectIcon projectId={project.id} displayName={label} size={12} />
+        {face ? (
+          <SecretaryFace
+            name={face.name}
+            color={face.color}
+            image={face.image}
+            enso="workspace-secretary-face"
+            className="size-3 rounded-[3px]"
+          />
+        ) : (
+          <ProjectIcon projectId={project.id} displayName={label} size={12} />
+        )}
         <span
           className={`grid grid-cols-[0fr] opacity-0 transition-[grid-template-columns,opacity] duration-(--duration-fast) ease-(--ease-smooth-out) ${REVEAL}`}
         >
           <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap pl-1.5">
-            <span className="max-w-40 truncate">{label}</span>
+            <span className="max-w-40 truncate">{badgeLabel}</span>
             {branch && !noWorkspace && (
               <>
                 <span className="opacity-40">/</span>
