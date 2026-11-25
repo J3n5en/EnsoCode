@@ -1,4 +1,7 @@
 import type { Transition, Variants } from 'framer-motion';
+import { useSyncExternalStore } from 'react';
+
+export const instantTransition: Transition = { duration: 0 };
 
 export const EASE_SMOOTH_OUT = [0.22, 1, 0.36, 1] as const;
 export const EASE_IN_OUT = [0.4, 0, 0.2, 1] as const;
@@ -13,8 +16,6 @@ export const MOTION_DURATION = {
   slow: 0.4,
   verySlow: 0.5,
 } as const;
-
-export const instantTransition: Transition = { duration: 0 };
 
 /**
  * 标准弹性 —— 布局/重排动画(与 EnsoAI lib/motion.ts 的 springStandard 对齐)。
@@ -62,15 +63,6 @@ export const badgeSlideTransition: Transition = { duration: 0.26, ease: EASE_SMO
 export const badgePopTransition: Transition = { duration: 0.45, ease: EASE_BOUNCE };
 export const badgeCloseTransition: Transition = { duration: 0.16, ease: EASE_IN_OUT };
 
-/** Left sidebar width transition: instant while dragging, smooth non-overshooting glide otherwise */
-export function sidebarWidthTransition(input: {
-  resizing?: boolean;
-  collapsed: boolean;
-}): Transition {
-  if (input.resizing) return instantTransition;
-  return easeOutLayout;
-}
-
 /**
  * 高度展开/收起 —— 用于分组折叠、列表展开。
  * height 不 clamp：欠阻尼 spring 冲到负值会被浏览器丢弃，停在末段再瞬间卸载，故固定用无过冲 tween。
@@ -105,3 +97,49 @@ export const stepSlideVariants: Variants = {
     transition: { duration: 0.15, ease: EASE_SMOOTH_OUT },
   }),
 };
+
+/**
+ * heightVariants 的降级版 —— prefers-reduced-motion 下使用：
+ * 三个状态的视觉值一致，出现/消失即瞬时（AnimatePresence 收 exit 时无值可插值，立即卸载）。
+ * framer-motion 的 reducedMotion="user" 只跳 transform/布局动画，width/height 不归它管，故显式降级。
+ */
+export const heightVariantsReduced: Variants = {
+  initial: { opacity: 1 },
+  animate: { opacity: 1 },
+  exit: { opacity: 1 },
+};
+
+/**
+ * 侧栏宽度动画：拖拽进行中瞬时跟手（否则 tween 追着手抖），
+ * 折叠/展开或双击复位走无过冲缓动。reduced-motion 下瞬时。
+ */
+export function sidebarWidthTransition(input: {
+  resizing?: boolean;
+  collapsed?: boolean;
+  reducedMotion?: boolean;
+}): Transition {
+  if (input.resizing || input.reducedMotion) return instantTransition;
+  return easeOutLayout;
+}
+
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+/**
+ * 订阅 prefers-reduced-motion：framer-motion 的 useReducedMotion 只在模块加载时
+ * 读一次且之后不更新（降级语义不可靠、测试也无法注入），这里直接订阅 media query。
+ */
+export function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      if (typeof window.matchMedia !== 'function') return () => {};
+      const mql = window.matchMedia(REDUCED_MOTION_QUERY);
+      mql.addEventListener('change', notify);
+      return () => mql.removeEventListener('change', notify);
+    },
+    () =>
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia(REDUCED_MOTION_QUERY).matches
+        : false,
+    () => false
+  );
+}
