@@ -10,7 +10,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const userData = mkdtempSync(path.join(tmpdir(), 'enso-model-meta-'));
-const modelsDevOnlyId = 'codex/gpt-6.2-sol';
+const modelsDevOnlyId = 'codex/test-models-dev-reasoning';
 const nonReasoningModelsDevOnlyId = 'test-models-dev-chat';
 
 vi.mock('electron', () => ({

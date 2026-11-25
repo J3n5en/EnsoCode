@@ -1,7 +1,8 @@
-// 用真实 pi AgentSession 核对优雅重启依赖的两处 SDK 行为：
-// 1. prepareNextTurnWithContext 在工具批全部返回（结果已写进会话文件）之后、下一次 turn_start 之前被调用；
-// 2. 另一个进程用同一个会话文件 open 后 continueSessionActivity，直接发下一次模型请求，不重跑工具。
-// 3. prepareRequest 在每次模型请求前被调用（新一轮的首个请求时 user 消息已写进会话文件），停在这里续跑同样成立。
+// 使用真实 Pi AgentSession 验证 prepareRequest 重启断点。首条用户消息或工具结果已写入会话文件，
+// 从文件续跑时直接发送下一次模型请求，避免重复提交消息或执行工具。
+//
+// Use a real Pi AgentSession to verify the prepareRequest restart boundary. The first user message
+// or tool result is already persisted, so resuming sends the next request without repeating either.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -124,13 +125,12 @@ it('真实 pi：工具结束后停在下一次模型请求前；新会话从文�
   const events: string[] = [];
   first.subscribe((event) => events.push(event.type));
   const paused = Promise.withResolvers<void>();
-  const next = first.agent.prepareNextTurnWithContext;
-  expect(typeof next).toBe('function');
-  first.agent.prepareNextTurnWithContext = async () => {
+  const prepareRequest = first.agent.prepareRequest;
+  first.agent.prepareRequest = (request, signal) => {
+    if (requests.length === 0) return prepareRequest?.(request, signal);
     events.push('[restart-boundary]');
     paused.resolve();
-    await new Promise(() => {});
-    return undefined;
+    return new Promise<void>(() => {});
   };
   void first.prompt('run the probe');
   await paused.promise;
@@ -138,7 +138,7 @@ it('真实 pi：工具结束后停在下一次模型请求前；新会话从文�
   const boundary = events.indexOf('[restart-boundary]');
   expect(events.lastIndexOf('tool_execution_end')).toBeLessThan(boundary);
   expect(events.lastIndexOf('turn_end')).toBeLessThan(boundary);
-  expect(events.filter((type) => type === 'turn_start')).toHaveLength(1);
+  expect(events.filter((type) => type === 'turn_start')).toHaveLength(2);
   expect(requests).toHaveLength(1);
   expect(toolRuns).toBe(1);
   const sessionFile = first.sessionFile;

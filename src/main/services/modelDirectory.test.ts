@@ -255,6 +255,27 @@ describe('model directory service', () => {
     };
   }
 
+  it('从 Pi 内置目录把 GPT‑6.2 Sol 和 Astra 加入 Codex 订阅清单', { timeout: 20_000 }, async () => {
+    const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
+    mocks.getRuntime.mockResolvedValue(
+      await ModelRuntime.create({
+        authPath: path.join(userData, 'auth.json'),
+        modelsPath: null,
+        refreshOnCreate: false,
+      })
+    );
+
+    const mod = await import('./modelDirectory');
+    await mod.refreshModelDirectory();
+    const codex = mod
+      .getModelDirectorySnapshot()
+      .providers.find(({ key }) => key === 'openai-codex');
+
+    expect(codex?.models.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(['gpt-6.2-sol', 'gpt-6.2-astra'])
+    );
+  });
+
   it('refresh 合成 oauth + custom，内容不变不 bump，变化才广播并防抖写 oauth 缓存', async () => {
     mocks.settings = settingsWith([
       customProvider([{ id: 'm1', label: '别名' }]),

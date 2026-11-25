@@ -134,10 +134,10 @@ receipt 事件同理：发的是**绑定上下文的 `context.turnId`**（= 派�
 
 ## 对 pi 私有 API 的依赖要登记
 
-目前有三处。第一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
+目前有四处。第一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
 `SessionManager._rewriteFile()`，并在成功重写后同步其私有 `flushed` 标记。
 
-**为什么需要**：Pi 1.5 的 `_persist` 在会话出现第一条 user 或 assistant 消息前一个字节不写
+**为什么需要**：Pi 1.6.0 的 `_persist` 在会话出现第一条 user 或 assistant 消息前一个字节不写
 （避免留空会话文件），而纯派发的父容器按设计永远不跑主 coding 回合、只有 custom
 entry。不干预的后果是父会话文件从未创建，重启后 `resumeConversation`
 报「会话文件已丢失」，**连带该会话下所有 child 的历史都打不开**。
@@ -150,7 +150,7 @@ Pi 0.87.1 的 `_rewriteFile()` 不设置 `flushed`；不显式同步时，首条
 会以 `wx` 创建已有文件并抛出 `EEXIST`。回归还须覆盖物化后追加首条 assistant、
 重开 JSONL 后消息仍存在。只有重写成功后才能设置该标记。
 
-第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.5.1
+第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 Pi 1.6.0
 私有 `_startRun`，通过每次调用独立的代理令 `_prepareRun` 返回空数组。Pi 1.2 起
 移除了旧 `_runAgentPrompt([])`。公开 API 没有不新增消息的 session 级 continue；裸
 `agent.continue()` 绕过自动重试、`agent_before_settle` 与 `agent_settled`，手工补发
@@ -171,7 +171,7 @@ post-run / before-settle / settled 生命周期。
 选号等待时取消与唯一结算）、`sessionAdapter.test.ts` 和 `supervisor.silentTurn.test.ts`。
 
 第三处：`sessionAdapter.steerActiveSession()` 针对 Bot 插话，以每次调用独立的代理拦截
-pi 1.5.1 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
+Pi 1.6.0 的 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
 steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., streamingBehavior:'steer')`
 在 `started` 回调抛错：那时已经可能做过压缩并清空 nextTurn 消息。
 已入队但到 `agent_settled` 仍未消费的消息（如 abort）按对象引用从
@@ -185,7 +185,7 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 `supervisor.agentDispatch.test.ts` 和 Bot 宿主/群联测验证消费回执与重新准入。
 
 第四处：优雅重启在 `supervisor.installRestartBoundary()` 包住
-`session.agent.prepareRequest`。pi 1.5.1 的 loop 在每次模型请求前调它：新一轮的首个请求（prompt 的
+`session.agent.prepareRequest`。Pi 1.6.0 的 loop 在每次模型请求前调它：新一轮的首个请求（prompt 的
 user 消息已经 message_end 写进 jsonl），或工具批全部返回、toolResult 与插话都已写入、`prepareNextTurn`
 （压缩/提示词刷新）跑完之后（Agent 每次起 loop 时现读属性，所以构造后再包仍生效）。有重启请求、没有排队插话时
 会话停在这里，不论别的会话有没有工具在跑——旧实现只在全局没有工具在跑时才停，并在任何工具开跑时放开全部挂起，
@@ -297,8 +297,9 @@ worker 交出任务后又拉起一个 worker，它认回并用掉交接清单，
 `exec` 换掉 shell 时取不到退出码（进程仍能认回、可停止，结束时按退出码不可得说明）。
 子会话/coworker 不随换代恢复：停在边界时 Run 随 worker 退出记 interrupted，父会话就绪后补通知。
 
-**升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult
-已落盘。`gracefulRestart.pi.test.ts` 用真实 SDK 验证时机与「新会话从文件续跑不重跑工具」；
+**升级 pi 必须复检第四处**。工具后的请求在上一轮 `turn_end`、下一轮 `turn_start` 和相关消息落盘后进入
+`prepareRequest`，此时模型请求尚未发出。`gracefulRestart.pi.test.ts` 用真实 SDK 验证首个及工具后请求的
+断点时机，以及从会话文件续跑时工具只执行一次。
 `supervisor.gracefulRestart.test.ts` 验证推迟、落盘与续跑；`node scripts/verify-graceful-restart.mjs`
 跑进程级四条契约。
 
