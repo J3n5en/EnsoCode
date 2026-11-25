@@ -330,7 +330,7 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     category: 'secretary',
     title: 'Concurrent dispatch limit',
     description:
-      'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
+      'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.',
   },
   {
     id: 'secretary.style',

@@ -4107,8 +4107,8 @@ export const zhTranslations: Record<string, string> = {
   'Name, avatar, visible projects and patrol.': '名字、头像、可见项目与巡检。',
   'Up to {{n}} at a time': '最多同时 {{n}} 个',
   'Concurrent dispatch limit': '同时运行的派发会话上限',
-  'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.':
-    '秘书最多同时运行几个派发会话，超过上限时新派发会被拒绝。',
+  'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.':
+    '秘书最多同时运行几个派发会话，超出的派发会排队，有空位时自动开始。',
   Confirm: '确认',
   'Edit here': '就地修改',
   'Profile saved': '配置已保存',

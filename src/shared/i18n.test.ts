@@ -356,7 +356,7 @@ describe('秘书初次设置与设置页文案', () => {
       'Cleanup asks first',
       'Up to {{n}} at a time',
       'Concurrent dispatch limit',
-      'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
+      'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.',
       'Confirm',
       'Edit here',
       'Profile saved',

@@ -25,7 +25,12 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { SettingsRow, useSettingsRowControl } from '@/components/settings/kit';
+import {
+  SettingsRow,
+  SettingsSubRow,
+  SettingsSwitch,
+  useSettingsRowControl,
+} from '@/components/settings/kit';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
@@ -225,20 +230,11 @@ function PrefRow({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex items-start gap-2 pointer-coarse:min-h-[44px]">
-      <input
-        type="checkbox"
-        data-enso={dataEnso}
-        className="mt-0.5"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block text-[12.5px]">{label}</span>
-        <span className="mt-0.5 block text-[11.5px] text-muted-foreground">{hint}</span>
-      </span>
-    </label>
+    <div data-enso={dataEnso}>
+      <SettingsSubRow label={label} description={hint}>
+        <SettingsSwitch checked={checked} disabled={disabled} onCheckedChange={onChange} />
+      </SettingsSubRow>
+    </div>
   );
 }
 
@@ -1118,42 +1114,41 @@ export function SecretaryContactPanel({
 
   const setEnabled = (checked: boolean) =>
     run(() => window.electronAPI.secretary.contactSettings({ enabled: checked }, secretaryId));
-  const ownerBlock = (
-    <>
-      {frames ? (
-        <div data-enso="secretary-contact-master">
-          <SettingsRow label={t('Enable contacts')}>
-            <EnableSwitch
-              checked={state.enabled}
-              disabled={busy}
-              label={t('Enable contacts')}
-              onCheckedChange={setEnabled}
-            />
-          </SettingsRow>
-        </div>
-      ) : (
-        <div
-          data-enso="secretary-contact-master"
-          className="flex items-center justify-between gap-2 border-border border-b py-2"
-        >
-          <span className="text-[13px] font-medium">{t('Enable contacts')}</span>
-          <EnableSwitch
-            checked={state.enabled}
-            disabled={busy}
-            label={t('Enable contacts')}
-            onCheckedChange={setEnabled}
-          />
-        </div>
-      )}
-      <OwnerIdentity
-        owner={state.owner}
-        secretaryId={secretaryId}
-        busy={busy}
-        error={error}
-        run={run}
-        showHeading={!frames}
+  // 总开关管的是各渠道收发：设置页放在「联系渠道」组顶部
+  const masterSwitch = frames ? (
+    <div data-enso="secretary-contact-master">
+      <SettingsRow label={t('Enable contacts')}>
+        <EnableSwitch
+          checked={state.enabled}
+          disabled={busy}
+          label={t('Enable contacts')}
+          onCheckedChange={setEnabled}
+        />
+      </SettingsRow>
+    </div>
+  ) : (
+    <div
+      data-enso="secretary-contact-master"
+      className="flex items-center justify-between gap-2 border-border border-b py-2"
+    >
+      <span className="text-[13px] font-medium">{t('Enable contacts')}</span>
+      <EnableSwitch
+        checked={state.enabled}
+        disabled={busy}
+        label={t('Enable contacts')}
+        onCheckedChange={setEnabled}
       />
-    </>
+    </div>
+  );
+  const ownerBlock = (
+    <OwnerIdentity
+      owner={state.owner}
+      secretaryId={secretaryId}
+      busy={busy}
+      error={error}
+      run={run}
+      showHeading={!frames}
+    />
   );
   const channelsBlock = !state.enabled ? (
     <p
@@ -1298,7 +1293,12 @@ export function SecretaryContactPanel({
     return (
       <div data-enso="secretary-contact">
         {frames.owner(ownerBlock)}
-        {frames.channels(channelsBlock)}
+        {frames.channels(
+          <>
+            {masterSwitch}
+            {channelsBlock}
+          </>
+        )}
       </div>
     );
   }
@@ -1308,6 +1308,7 @@ export function SecretaryContactPanel({
       <p className="px-1 text-[11.5px] text-muted-foreground">
         {t('Reach the secretary from your phone. Milestones go out; your replies come back.')}
       </p>
+      {masterSwitch}
       {ownerBlock}
       {channelsBlock}
     </div>

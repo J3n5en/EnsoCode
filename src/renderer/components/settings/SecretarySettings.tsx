@@ -31,6 +31,7 @@ import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
 import { SecretaryDeleteDialog } from '@/components/secretary/SecretaryDeleteDialog';
 import { SecretaryProfileForm } from '@/components/secretary/SecretaryProfileForm';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -43,9 +44,10 @@ import {
   SettingsRow,
   SettingsSaved,
   SettingsSection,
+  SettingsSwitch,
   useSettingsRowControl,
 } from './kit';
-import { PickList } from './PresetsSettings';
+import { ListFilterBar, matchesFilter } from './ListFilterBar';
 import { SettingsSecretaryChips, useSettingsSecretaries } from './SettingsSecretaryPicker';
 
 const DISPATCH_LIMIT_OPTIONS = Array.from(
@@ -615,7 +617,7 @@ function Untracked() {
   );
 }
 
-/** 勾选全局 Enso skill：未勾选的不进秘书会话 */
+/** 勾选全局 Enso skill：未勾选的不进秘书会话。和秘书自有技能一样平铺行，不套框 */
 function GlobalSkillPicker({
   skillIds,
   onChange,
@@ -625,24 +627,48 @@ function GlobalSkillPicker({
 }) {
   const { t } = useI18n();
   const skills = useSettingsStore((state) => state.skills);
+  const [query, setQuery] = React.useState('');
+  const visible = skills.filter((skill) => matchesFilter(query, [skill.name, skill.source]));
   return (
-    <PickList
-      title={t('Global skills')}
-      emptyText={t('No skills yet')}
-      items={skills}
-      getName={(skill) => skill.name}
-      getSource={(skill) => skill.source}
-      isChecked={(skill) => skillIds.includes(skill.id)}
-      onToggle={(skill) =>
-        onChange(
-          skillIds.includes(skill.id)
-            ? skillIds.filter((id) => id !== skill.id)
-            : [...skillIds, skill.id]
-        )
-      }
-      placeholder={t('Filter skills...')}
-      renderDetail={(skill) => <p className="text-xs">{skill.description || skill.path}</p>}
-    />
+    <div>
+      <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        {t('Global skills')}
+      </p>
+      {skills.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('No skills yet')}</p>
+      ) : (
+        <>
+          <ListFilterBar
+            query={query}
+            onQueryChange={setQuery}
+            placeholder={t('Filter skills...')}
+          />
+          {visible.length === 0 && (
+            <p className="py-3 text-xs text-muted-foreground">{t('No results')}</p>
+          )}
+          {visible.map((skill) => {
+            const checked = skillIds.includes(skill.id);
+            return (
+              <SettingsRow
+                key={skill.id}
+                label={skill.name}
+                description={skill.description || skill.path}
+                status={<Badge variant="secondary">{skill.source}</Badge>}
+              >
+                <SettingsSwitch
+                  checked={checked}
+                  onCheckedChange={() =>
+                    onChange(
+                      checked ? skillIds.filter((id) => id !== skill.id) : [...skillIds, skill.id]
+                    )
+                  }
+                />
+              </SettingsRow>
+            );
+          })}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -910,7 +936,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
       <SettingsSection
         title={t('Concurrent dispatch limit')}
         description={t(
-          'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.'
+          'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.'
         )}
         rowId="secretary.dispatchLimit"
       >

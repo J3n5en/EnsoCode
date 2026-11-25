@@ -4,6 +4,7 @@ import { parseHTML } from 'linkedom';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { findNestedBoxes, isBoxedClassName } from './kit/boxes';
 import { SecretarySettings } from './SecretarySettings';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 'en' }) }));
@@ -67,7 +68,7 @@ vi.mock('@/components/bots/AvatarCropDialog', () => ({
 
 const ROW = '[data-settings-row="secretary.dispatchLimit"]';
 const DESCRIPTION =
-  'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.';
+  'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.';
 
 function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile {
   return {
@@ -151,7 +152,7 @@ function selected() {
 }
 
 describe('设置 → 秘书：同时运行的派发会话上限', () => {
-  it('显示当前值，可选范围是 1 到 10，并说明超限会拒绝新派发', async () => {
+  it('显示当前值，可选范围是 1 到 10，并说明超限的派发排队、有空位自动开始', async () => {
     api.getProfile.mockResolvedValue({ ok: true, profile: profile(7), persona: '' });
     await mount();
     expect(options().map((button) => button.textContent)).toEqual(
@@ -207,7 +208,7 @@ describe('设置 → 秘书：同时运行的派发会话上限', () => {
   it('标题与说明有中文', () => {
     expect(getTranslation('zh', 'Concurrent dispatch limit')).toBe('同时运行的派发会话上限');
     expect(getTranslation('zh', DESCRIPTION)).toBe(
-      '秘书最多同时运行几个派发会话，超过上限时新派发会被拒绝。'
+      '秘书最多同时运行几个派发会话，超出的派发会排队，有空位时自动开始。'
     );
   });
 });
@@ -469,5 +470,28 @@ describe('设置 → 秘书：删除后切换', () => {
     await act(async () => deleteProps.current?.onDeleted?.());
     expect(api.getProfile).toHaveBeenLastCalledWith('s-a');
     expect((formProps.current?.initialDraft as { name: string } | undefined)?.name).toBe('A');
+  });
+});
+
+describe('设置 → 秘书：技能分组', () => {
+  it('全局技能为空时和秘书自有技能一样平铺一行提示，不套带框容器', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: profile(3), persona: '' });
+    await mount();
+    const section = container.querySelector('[data-settings-row="secretary.skills"]') as Element;
+    expect(section.textContent).toContain('Global skills');
+    const empties = [...section.querySelectorAll('p')].filter(
+      (el) => el.textContent === 'No skills yet'
+    );
+    expect(empties).toHaveLength(2);
+    for (const empty of empties) {
+      let el: Element | null = empty;
+      while (el && el !== section) {
+        expect(isBoxedClassName(el.getAttribute('class') ?? ''), el.outerHTML.slice(0, 80)).toBe(
+          false
+        );
+        el = el.parentElement;
+      }
+    }
+    expect(findNestedBoxes(container)).toEqual([]);
   });
 });
