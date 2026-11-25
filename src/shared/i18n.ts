@@ -468,6 +468,9 @@ export const zhTranslations: Record<string, string> = {
   'Conversation display': '对话显示',
   'Also used by command output in conversations': '同时用于对话中的命令输出',
   'Interface font size': '界面字号',
+  'Interface mono font': '界面等宽字体',
+  'Monospace font for the side panel terminal, code blocks and command output in conversations.':
+    '用于侧边栏终端、代码块与对话中的命令输出的等宽字体。',
   'Scales all interface text and command output in conversations; also the side panel terminal size. Conversation body text is set separately in Conversation display.':
     '缩放整个界面文字与对话中的命令输出，也是侧边栏终端的字号；对话正文在「对话显示」里单独设置。',
   'Runtime & sessions': '运行与会话',

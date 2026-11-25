@@ -309,7 +309,7 @@ describe('buildSettingsCatalog', () => {
         translate: (text) => getTranslation('zh', text),
       }).map((e) => `${e.category}:${e.id}`);
     expect(hits('代理')).toContain('general:general.proxy');
-    expect(hits('字体')).toContain('terminal:terminal.font');
+    expect(hits('字体')).toContain('appearance:terminal.font');
     expect(hits('归档闲置')).toContain('runtime:general.autoArchiveIdleDays');
   });
 

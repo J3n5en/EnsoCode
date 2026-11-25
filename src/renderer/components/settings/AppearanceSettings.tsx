@@ -484,16 +484,27 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
   const interfaceFontSize = useSettingsStore((s) => s.terminalFontSize);
   const setInterfaceFontSize = useSettingsStore((s) => s.setTerminalFontSize);
   const [localFontSize, setLocalFontSize] = React.useState(interfaceFontSize);
+  const interfaceFontFamily = useSettingsStore((s) => s.terminalFontFamily);
+  const setInterfaceFontFamily = useSettingsStore((s) => s.setTerminalFontFamily);
+  const [localFontFamily, setLocalFontFamily] = React.useState(interfaceFontFamily);
 
   React.useEffect(() => {
     setLocalFontSize(interfaceFontSize);
   }, [interfaceFontSize]);
+  React.useEffect(() => {
+    setLocalFontFamily(interfaceFontFamily);
+  }, [interfaceFontFamily]);
 
   const applyFontSizeChange = React.useCallback(() => {
     const validFontSize = Math.max(8, Math.min(32, localFontSize || 8));
     if (validFontSize !== localFontSize) setLocalFontSize(validFontSize);
     if (validFontSize !== interfaceFontSize) setInterfaceFontSize(validFontSize);
   }, [localFontSize, interfaceFontSize, setInterfaceFontSize]);
+  const applyFontFamilyChange = React.useCallback(() => {
+    const validFontFamily = localFontFamily.trim() || interfaceFontFamily;
+    if (validFontFamily !== localFontFamily) setLocalFontFamily(validFontFamily);
+    if (validFontFamily !== interfaceFontFamily) setInterfaceFontFamily(validFontFamily);
+  }, [localFontFamily, interfaceFontFamily, setInterfaceFontFamily]);
 
   const themeModeOptions: { value: Theme; icon: React.ElementType; label: string }[] = [
     { value: 'light', icon: Sun, label: t('Light') },
@@ -542,6 +553,28 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
             className="w-20 max-w-full"
           />
           <span className="text-[12px] text-muted-foreground">px</span>
+        </SettingsRow>
+        <SettingsRow
+          rowId="terminal.font"
+          label={t('Interface mono font')}
+          description={t(
+            'Monospace font for the side panel terminal, code blocks and command output in conversations.'
+          )}
+        >
+          <Input
+            value={localFontFamily}
+            onChange={(e) => setLocalFontFamily(e.target.value)}
+            onBlur={applyFontFamilyChange}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === 'Enter') {
+                applyFontFamilyChange();
+                e.currentTarget.blur();
+              }
+            }}
+            placeholder="JetBrains Mono, monospace"
+            className="w-[min(100%,220px)] max-w-full"
+          />
         </SettingsRow>
         <SettingsRow
           rowId="appearance.accent"
