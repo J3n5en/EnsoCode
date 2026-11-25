@@ -245,11 +245,14 @@ export class DeskTunnel {
     this.reportResuming();
   }
 
-  /** 按 seq 重新 hello 让宿主补发，在途资源重新请求；宿主换链时清了 gzip/流控，先重新声明 */
+  /**
+   * 按 seq 重新 hello 让宿主补发，在途资源重新请求；宿主换链时清了 gzip/流控，先重新声明。
+   * 还没 ready 的也要重发：之前的 hello 可能就丢在旧链路上
+   */
   private resync(): void {
     this.linkAt = Date.now();
     this.ack();
-    for (const slot of this.slots.values()) if (slot.ready) this.hello(slot);
+    for (const slot of this.slots.values()) this.hello(slot);
     for (const { message } of this.assets.values()) this.post(message);
   }
 

@@ -747,11 +747,16 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
   // 半开死链的 close 事件可能永不到达：心跳判死后直接走关闭路径，幂等防双跑
   let settled = false;
   let connectTimer: ReturnType<typeof setTimeout> | null = null;
+  let openedAt = 0;
   const closed = (code: number | null): void => {
     if (settled) return;
     settled = true;
     if (connectTimer) clearTimeout(connectTimer);
     if (conn.closed || conn.generation !== generation || conn.ws !== ws) return;
+    // 留痕：半开死链只能靠心跳发现，诊断时要知道桌面到中继断了多久、怎么断的
+    console.log(
+      `[pair] ${conn.device.deviceName}: relay ${code === null ? 'dead' : `closed ${code}`}${openedAt ? ` after ${Math.round((Date.now() - openedAt) / 1000)}s` : ''}`
+    );
     conn.heartbeat?.stop();
     conn.heartbeat = null;
     conn.ws = null;
@@ -790,6 +795,7 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
 
   ws.onopen = () => {
     if (connectTimer) clearTimeout(connectTimer);
+    openedAt = Date.now();
     conn.attempt = 0;
     notifyStatus();
   };
