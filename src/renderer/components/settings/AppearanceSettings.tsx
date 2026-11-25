@@ -479,8 +479,6 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
   const setThemeId = useSettingsStore((s) => s.setThemeId);
   const accentColor = useSettingsStore((s) => s.accentColor);
   const setAccentColor = useSettingsStore((s) => s.setAccentColor);
-  const navRailSide = useSettingsStore((s) => s.navRailSide);
-  const setNavRailSide = useSettingsStore((s) => s.setNavRailSide);
   const pluginThemes = usePluginThemesStore((s) => s.themes);
   const colorScheme = useColorScheme();
 
@@ -498,12 +496,6 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
         ? resolveTheme(themeId, availableThemes(pluginThemes))[colorScheme].accent
         : ACCENT_PRESETS[value][colorScheme],
   }));
-  const railOptions: { value: 'left' | 'right' | 'off'; label: string }[] = [
-    { value: 'left', label: t('Left') },
-    { value: 'right', label: t('Right') },
-    { value: 'off', label: t('Off') },
-  ];
-
   return (
     <SettingsPage rowId="appearance.root" title={t('Appearance')}>
       <SettingsSection
@@ -559,19 +551,6 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
               )
             )}
           </div>
-        </SettingsRow>
-        <SettingsRow
-          rowId="appearance.navRailSide"
-          label={t('Turn marks')}
-          description={t(
-            'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.'
-          )}
-        >
-          <SettingsSegmented
-            value={navRailSide}
-            onValueChange={setNavRailSide}
-            options={railOptions}
-          />
         </SettingsRow>
         <DraftSlider
           label={t('Border opacity')}

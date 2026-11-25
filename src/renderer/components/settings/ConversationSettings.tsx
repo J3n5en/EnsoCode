@@ -20,7 +20,14 @@ import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
 import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
-import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSegmented,
+  SettingsSwitch,
+} from './kit';
 
 const CHAT_ROLE_LABELS = {
   body: 'Body',
@@ -255,13 +262,33 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
   const setHeaderSessionTabs = useSettingsStore((s) => s.setHeaderSessionTabs);
   const headerRecentMinutes = useSettingsStore((s) => s.headerRecentMinutes);
   const setHeaderRecentMinutes = useSettingsStore((s) => s.setHeaderRecentMinutes);
+  const navRailSide = useSettingsStore((s) => s.navRailSide);
+  const setNavRailSide = useSettingsStore((s) => s.setNavRailSide);
   const recentLabel = (value: number) =>
     value === 0 ? t('Off') : t('{{count}} min', { count: value });
+  const railOptions: { value: 'left' | 'right' | 'off'; label: string }[] = [
+    { value: 'left', label: t('Left') },
+    { value: 'right', label: t('Right') },
+    { value: 'off', label: t('Off') },
+  ];
 
   return (
     <SettingsPage rowId="conversation.root" title={t('Conversation display')}>
       <ChatTypographySection />
       <SettingsSection>
+        <SettingsRow
+          rowId="appearance.navRailSide"
+          label={t('Turn marks')}
+          description={t(
+            'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.'
+          )}
+        >
+          <SettingsSegmented
+            value={navRailSide}
+            onValueChange={setNavRailSide}
+            options={railOptions}
+          />
+        </SettingsRow>
         <Toggle
           rowId="appearance.openChangesOnFileEdit"
           label={t('Open Changes when files are edited')}

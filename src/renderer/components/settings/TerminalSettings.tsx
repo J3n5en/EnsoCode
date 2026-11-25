@@ -22,7 +22,6 @@ import {
 import { cn } from '@/lib/utils';
 import { type FontWeight, useSettingsStore } from '@/stores/settings';
 import { fontWeightOptions } from './constants';
-import { FileOpeningSettings } from './FileOpeningSettings';
 import { SettingsPage, SettingsPreview, SettingsRow, SettingsSection, SettingsSelect } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
@@ -400,7 +399,11 @@ function TerminalAppearance() {
         />
       </SettingsSection>
       <SettingsSection>
-        <SettingsRow rowId="terminal.color-scheme" label={t('Color scheme')}>
+        <SettingsRow
+          rowId="terminal.color-scheme"
+          label={t('Color scheme')}
+          description={t('Also used by command output in conversations')}
+        >
           <div className="flex min-w-0 items-center gap-2">
             <Button variant="outline" size="icon" onClick={handlePrevTheme}>
               <ChevronLeft className="h-4 w-4" />
@@ -423,7 +426,11 @@ function TerminalAppearance() {
             </Button>
           </div>
         </SettingsRow>
-        <SettingsRow rowId="terminal.font" label={t('Font')}>
+        <SettingsRow
+          rowId="terminal.font"
+          label={t('Font')}
+          description={t('Also used by command output in conversations')}
+        >
           <Input
             value={localFontFamily}
             onChange={(e) => setLocalFontFamily(e.target.value)}
@@ -439,7 +446,13 @@ function TerminalAppearance() {
             className="w-[min(100%,220px)] max-w-full"
           />
         </SettingsRow>
-        <SettingsRow rowId="terminal.font-size" label={t('Font size')}>
+        <SettingsRow
+          rowId="terminal.font-size"
+          label={t('Font size')}
+          description={t(
+            'Side panel terminals only; conversation output follows the chat font size'
+          )}
+        >
           <Input
             type="number"
             value={localFontSize}
@@ -479,13 +492,12 @@ function TerminalAppearance() {
 export function TerminalSettings() {
   const { t } = useI18n();
   return (
-    <SettingsPage rowId="terminal.root" title={t('Terminal & editor')}>
+    <SettingsPage rowId="terminal.root" title={t('Terminal')}>
       <SettingsSection rowId="terminal.shell" title={t('Shell')}>
         <WindowsLocalShellRow />
         <TerminalShellRow />
       </SettingsSection>
       <TerminalAppearance />
-      <FileOpeningSettings />
     </SettingsPage>
   );
 }
