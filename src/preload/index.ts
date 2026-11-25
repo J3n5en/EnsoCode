@@ -108,6 +108,8 @@ import type {
   FilesWatchEvent,
   FilesWatchResult,
   FilesWriteResult,
+  GitCloneRequest,
+  GitCloneResult,
   GitCommitDiffRequest,
   GitCommitFilesResult,
   GitCommitRequest,
@@ -1101,6 +1103,9 @@ const electronAPI = {
     /** 在本机家目录下按关键词搜索目录；空查询返回空列表，host 是机器名 */
     searchHostDirs: (query: string): Promise<HostDirSearchResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEARCH_HOST_DIRS, query),
+    /** 把远程仓库克隆到 parentDir 下；url 为完整 git 地址或 owner/repo */
+    gitClone: (request: GitCloneRequest): Promise<GitCloneResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GIT_CLONE, request),
     /** 在系统文件管理器（或 appId 指定的应用）里打开项目或会话的实际工作目录；ssh 项目返回 unsupported */
     reveal: (request: {
       projectId: string;
