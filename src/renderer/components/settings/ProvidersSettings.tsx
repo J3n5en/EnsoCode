@@ -49,7 +49,10 @@ import {
   applyFetchedModels,
   fetchAllProviderModels,
   type ProviderFetchOutcome,
+  refreshProvider,
+  useProviderFetchState,
 } from './providerFetch';
+import { ProviderGroupLabel } from './providerGroupLabel';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
 import { TitleSummaryPicker } from './TitleSummaryPicker';
 import { VirtualModelsSettings } from './VirtualModelsSettings';
@@ -59,6 +62,58 @@ function SubscriptionUsage({ accountKey }: { accountKey: string }) {
   const info = useCachedAccountUsage(accountKey);
   if (!info || info.error) return null;
   return <AccountUsageBlock info={info} />;
+}
+
+function ProviderRefreshButton({
+  provider,
+  onStart,
+}: {
+  provider: ModelProvider;
+  onStart: () => void;
+}) {
+  const { t } = useI18n();
+  const updateProvider = useSettingsStore((state) => state.updateProvider);
+  const { refreshing, error } = useProviderFetchState([provider.id]);
+  const title = error ? `${t('Refresh failed')}: ${error}` : t('Refresh provider models');
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className={cn('text-muted-foreground', error && 'text-destructive')}
+      disabled={refreshing}
+      aria-label={t('Refresh provider models')}
+      title={title}
+      data-provider-refresh={provider.id}
+      onClick={() => {
+        onStart();
+        void refreshProvider(provider, updateProvider);
+      }}
+    >
+      {refreshing ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RefreshCw className={cn('h-3.5 w-3.5', error && 'text-destructive')} />
+      )}
+    </Button>
+  );
+}
+
+function ProviderFetchFailure({
+  providerId,
+  fetchOutcome,
+}: {
+  providerId: string;
+  fetchOutcome: ProviderFetchOutcome | undefined;
+}) {
+  const { t } = useI18n();
+  const { error } = useProviderFetchState([providerId]);
+  const message = error ?? (fetchOutcome?.status === 'failed' ? fetchOutcome.message : null);
+  if (!message) return null;
+  return (
+    <p role="status" className="border-border border-b py-2 pl-10 text-destructive-text text-xs">
+      {t('Fetch failed')}: {message}
+    </p>
+  );
 }
 
 export function ProvidersSettings() {
@@ -282,8 +337,7 @@ export function ProvidersSettings() {
               <SettingsExpandableRow
                 key={group.vendorId}
                 defaultOpen
-                label={label}
-                description={String(group.providers.length)}
+                label={<ProviderGroupLabel label={label} count={group.providers.length} />}
               >
                 {group.providers.map((provider) => {
                   const isSubscription = Boolean(provider.oauthAccountKey);
@@ -361,6 +415,17 @@ export function ProvidersSettings() {
                           </>
                         }
                       >
+                        <ProviderRefreshButton
+                          provider={provider}
+                          onStart={() =>
+                            setFetchOutcomes((current) => {
+                              if (!current || !(provider.id in current)) return current;
+                              const next = { ...current };
+                              delete next[provider.id];
+                              return next;
+                            })
+                          }
+                        />
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -409,14 +474,7 @@ export function ProvidersSettings() {
                           </SettingsButton>
                         </SettingsSubRow>
                       )}
-                      {fetchOutcome?.status === 'failed' && (
-                        <p
-                          role="status"
-                          className="border-border border-b py-2 pl-10 text-destructive-text text-xs"
-                        >
-                          {t('Fetch failed')}: {fetchOutcome.message}
-                        </p>
-                      )}
+                      <ProviderFetchFailure providerId={provider.id} fetchOutcome={fetchOutcome} />
                     </React.Fragment>
                   );
                 })}

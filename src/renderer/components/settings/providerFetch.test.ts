@@ -1,9 +1,17 @@
 import type { ModelProvider } from '@shared/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/stores/modelMeta', () => ({
+  invalidateModelMeta: vi.fn(),
+}));
+
 import {
   applyFetchedModels,
   fetchAllProviderModels,
   fetchProviderModels,
+  providerFetchStates,
+  refreshProvider,
+  resetProviderFetchStates,
   summarizeFetchOutcomes,
 } from './providerFetch';
 
@@ -191,5 +199,102 @@ describe('summarizeFetchOutcomes', () => {
       modelCount: 0,
       firstError: null,
     });
+  });
+});
+
+describe('refreshProvider', () => {
+  beforeEach(() => {
+    resetProviderFetchStates();
+  });
+
+  const flush = () => vi.waitFor(() => expect(listModels).toHaveBeenCalled());
+
+  it('刷新单个条目：成功时回写 models，其他条目状态不受影响', async () => {
+    listModels.mockResolvedValue({ ok: true, models: [{ id: 'gpt' }] });
+    const updateProvider = vi.fn();
+
+    await refreshProvider(apiProvider({ id: 'one' }), updateProvider);
+
+    expect(listModels).toHaveBeenCalledTimes(1);
+    expect(updateProvider).toHaveBeenCalledWith('one', {
+      models: [{ id: 'gpt', enabled: true }],
+    });
+    expect(providerFetchStates().one).toMatchObject({ refreshing: false, error: null });
+    expect(providerFetchStates().other).toBeUndefined();
+  });
+
+  it('刷新中只有这一条目转动，结束后回到非转动态', async () => {
+    let release!: () => void;
+    listModels.mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve({ ok: true, models: [] });
+      })
+    );
+
+    const pending = refreshProvider(apiProvider({ id: 'spin' }), vi.fn());
+    await flush();
+    expect(providerFetchStates().spin).toMatchObject({ refreshing: true, error: null });
+    expect(providerFetchStates().other).toBeUndefined();
+
+    release();
+    await pending;
+    expect(providerFetchStates().spin).toMatchObject({ refreshing: false });
+  });
+
+  it('重复触发同一条目去重：拉取只调用一次', async () => {
+    let release!: () => void;
+    listModels.mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve({ ok: true, models: [] });
+      })
+    );
+
+    const provider = apiProvider({ id: 'dup' });
+    const first = refreshProvider(provider, vi.fn());
+    const second = refreshProvider(provider, vi.fn());
+    await flush();
+    release();
+    await Promise.all([first, second]);
+
+    expect(listModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('失败时记录 message 在本条目上，其他条目没有失败状态', async () => {
+    listModels.mockImplementation(({ baseUrl }: { baseUrl: string }) =>
+      baseUrl === 'https://down'
+        ? Promise.resolve({ ok: false, models: [], error: 'unauthorized' })
+        : Promise.resolve({ ok: true, models: [{ id: 'gpt' }] })
+    );
+
+    await refreshProvider(apiProvider({ id: 'bad', baseUrl: 'https://down' }), vi.fn());
+    await refreshProvider(apiProvider({ id: 'good', baseUrl: 'https://ok' }), vi.fn());
+
+    expect(providerFetchStates().bad).toMatchObject({ refreshing: false, error: 'unauthorized' });
+    expect(providerFetchStates().good).toMatchObject({ refreshing: false, error: null });
+  });
+
+  it('再次刷新成功后清除本条目之前的失败状态', async () => {
+    listModels.mockResolvedValueOnce({ ok: false, models: [], error: 'unauthorized' });
+
+    await refreshProvider(apiProvider({ id: 'retry' }), vi.fn());
+    expect(providerFetchStates().retry).toMatchObject({ error: 'unauthorized' });
+
+    listModels.mockResolvedValueOnce({ ok: true, models: [{ id: 'gpt' }] });
+    await refreshProvider(apiProvider({ id: 'retry' }), vi.fn());
+    expect(providerFetchStates().retry).toMatchObject({ refreshing: false, error: null });
+  });
+
+  it('订阅条目刷新走重拉目录路径，不回写 settings', async () => {
+    modelMeta.mockResolvedValue({ ok: true, models: [{ modelId: 'opus', source: 'catalog' }] });
+    const updateProvider = vi.fn();
+
+    await refreshProvider(
+      apiProvider({ id: 'sub', oauthAccountKey: 'anthropic#1' }),
+      updateProvider
+    );
+
+    expect(modelMeta).toHaveBeenCalledWith({ oauthAccountKey: 'anthropic#1', modelIds: [] });
+    expect(updateProvider).not.toHaveBeenCalled();
+    expect(providerFetchStates().sub).toMatchObject({ refreshing: false, error: null });
   });
 });

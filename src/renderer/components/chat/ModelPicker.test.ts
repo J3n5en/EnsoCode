@@ -14,6 +14,7 @@ import { act, createElement, type ReactNode, useLayoutEffect, useState } from 'r
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetProviderFetchStates } from '@/components/settings/providerFetch';
 import { Select, SelectTrigger } from '@/components/ui/select';
 import {
   centeredScrollTop,
@@ -53,6 +54,8 @@ const harness = vi.hoisted(() => ({
   togglePinnedModel: vi.fn(),
   recordRecentModel: vi.fn(),
   removeRecentModel: vi.fn(),
+  providers: [] as ModelProvider[],
+  updateProvider: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({
@@ -67,6 +70,7 @@ vi.mock('@/i18n', () => ({
 
 vi.mock('@/stores/modelMeta', () => ({
   useModelMeta: () => harness.meta,
+  invalidateModelMeta: vi.fn(),
 }));
 
 vi.mock('@/stores/settings', () => ({
@@ -77,6 +81,8 @@ vi.mock('@/stores/settings', () => ({
       recentModels: ModelRef[];
       recordRecentModel: (ref: ModelRef) => void;
       removeRecentModel: (ref: ModelRef) => void;
+      providers: ModelProvider[];
+      updateProvider: (id: string, patch: { models: ModelEntry[] }) => void;
     }) => T
   ) =>
     selector({
@@ -85,6 +91,8 @@ vi.mock('@/stores/settings', () => ({
       recentModels: harness.recentModels,
       recordRecentModel: harness.recordRecentModel,
       removeRecentModel: harness.removeRecentModel,
+      providers: harness.providers,
+      updateProvider: harness.updateProvider,
     }),
 }));
 
@@ -209,6 +217,8 @@ beforeEach(() => {
   harness.togglePinnedModel.mockClear();
   harness.recordRecentModel.mockClear();
   harness.removeRecentModel.mockClear();
+  harness.providers = [];
+  harness.updateProvider.mockClear();
   commonProps.onSelect.mockClear();
   commonProps.onReasoningChange.mockClear();
   commonProps.onThinkingChange.mockClear();
@@ -1813,5 +1823,125 @@ describe('resolveActiveWorkbenchView 最近使用', () => {
   it('未显式选择时不抢默认落点', () => {
     const view = resolveActiveWorkbenchView({ ...base, recentCount: 3, activeNav: null });
     expect(view.activeNav).toEqual({ kind: 'vendor', vendorId: 'custom' });
+  });
+});
+
+describe('ModelPicker 单个服务商刷新', () => {
+  const listModels = vi.fn();
+  const openDetails = { cancel() {}, allowPropagation() {} };
+  const gateway = pickerProvider('gateway', 'Gateway');
+  const relay: ModelProvider = {
+    ...pickerProvider('relay', 'Relay'),
+    baseUrl: 'https://relay.example.test/v1',
+    models: [{ id: 'rl', label: 'Relay model' }],
+  };
+  const auto: VirtualModelEntry = {
+    id: 'auto',
+    name: 'Auto route',
+    enabled: true,
+    primary: { providerId: 'gateway', modelId: 'm' },
+    fallbacks: [],
+  };
+  let doc: Document;
+  let root: Root;
+
+  async function mount(recent = false) {
+    if (recent) harness.recentModels = [{ providerId: 'relay', modelId: 'rl' }];
+    await act(async () => {
+      root.render(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: [gateway, relay],
+          providerId: 'gateway',
+          modelId: 'm',
+          virtualModels: [auto],
+        })
+      );
+    });
+    await act(async () => harness.menuOnOpenChange?.(true, openDetails));
+  }
+
+  const q = (selector: string) => doc.querySelector(selector) as HTMLElement | null;
+  const active = (selector: string) =>
+    (q(selector)?.className.split(/\s+/) ?? []).includes('bg-accent');
+
+  beforeEach(() => {
+    listModels.mockReset();
+    resetProviderFetchStates();
+    const dom = parseHTML('<html><body><div id="root"></div></body></html>');
+    Object.assign(dom.window, {
+      electronAPI: { providers: { listOauth: () => Promise.resolve([]), listModels } },
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    doc = dom.document as unknown as Document;
+    root = createRoot(dom.document.getElementById('root') as unknown as HTMLElement);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    harness.recentModels = [];
+    resetProviderFetchStates();
+    vi.unstubAllGlobals();
+  });
+
+  it('厂商行有刷新控件，星标与最近使用没有', async () => {
+    await mount(true);
+    expect(q('[data-model-picker-nav-refresh="__custom:gateway"]')).not.toBeNull();
+    expect(q('[data-model-picker-nav-refresh="__custom:relay"]')).not.toBeNull();
+    expect(
+      q('[data-model-picker-nav="favorites"]')?.querySelector('[data-model-picker-nav-refresh]')
+    ).toBeNull();
+    expect(
+      q('[data-model-picker-nav="recent"]')?.querySelector('[data-model-picker-nav-refresh]')
+    ).toBeNull();
+    expect(q('[data-model-picker-nav-refresh="__custom:relay"]')?.getAttribute('title')).toBe(
+      'Refresh provider models'
+    );
+  });
+
+  it('点击刷新只拉取该厂商，不改变导航、选中和弹层', async () => {
+    listModels.mockResolvedValue({ ok: true, models: [{ id: 'rl' }] });
+    await mount();
+    await act(async () => q('[data-model-picker-nav-refresh="__custom:relay"]')?.click());
+    expect(listModels).toHaveBeenCalledTimes(1);
+    expect(listModels).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: 'https://relay.example.test/v1' })
+    );
+    expect(commonProps.onSelect).not.toHaveBeenCalled();
+    expect(harness.menuOpen).toBe(true);
+    expect(active('[data-model-picker-vendor="__custom:gateway"]')).toBe(true);
+    expect(active('[data-model-picker-vendor="__custom:relay"]')).toBe(false);
+  });
+
+  it('刷新中按钮呈转动', async () => {
+    let release!: (value: { ok: boolean; models: [] }) => void;
+    listModels.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+    await mount();
+    await act(async () => {
+      q('[data-model-picker-nav-refresh="__custom:gateway"]')?.click();
+    });
+    expect(q('[data-model-picker-nav-refresh="__custom:gateway"]')?.innerHTML ?? '').toContain(
+      'animate-spin'
+    );
+    release({ ok: true, models: [] });
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it('失败时刷新按钮带错误色和原因', async () => {
+    listModels.mockResolvedValue({ ok: false, models: [], error: 'unauthorized' });
+    await mount();
+    await act(async () => q('[data-model-picker-nav-refresh="__custom:gateway"]')?.click());
+    const refresh = q('[data-model-picker-nav-refresh="__custom:gateway"]') as HTMLElement;
+    expect(`${refresh.className} ${refresh.innerHTML}`).toContain('text-destructive');
+    expect(refresh.getAttribute('title')).toContain('unauthorized');
+    expect(refresh.getAttribute('title')).toContain('Refresh failed');
   });
 });
