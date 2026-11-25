@@ -253,3 +253,5 @@ Point **Settings → Devices → Relay URL** at your instance.
 ## License
 
 GNU AGPL-3.0-only, with an additional permission for separately distributed plugins, extensions and skills. See [LICENSE](LICENSE).
+
+
