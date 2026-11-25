@@ -423,6 +423,8 @@ export const IPC_CHANNELS = {
   PROJECTS_LIST_HOST_DIRS: 'projects:list-host-dirs',
   /** 在宿主机目录下新建子文件夹（添加项目的目录浏览里用） */
   PROJECTS_CREATE_HOST_DIR: 'projects:create-host-dir',
+  /** 在本机家目录下按关键词搜索目录（添加项目） */
+  PROJECTS_SEARCH_HOST_DIRS: 'projects:search-host-dirs',
   /** 在系统文件管理器或指定 appId 的应用里打开项目根目录或会话 worktree（仅本地项目） */
   PROJECTS_REVEAL: 'projects:reveal',
   PROJECTS_CODE_SOURCES: 'projects:code-sources',

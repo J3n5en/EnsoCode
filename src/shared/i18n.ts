@@ -1527,6 +1527,10 @@ export const zhTranslations: Record<string, string> = {
     '不挂项目的会话。工具跟随全局设置。',
   'Add a local directory as the conversation working folder.': '把本地目录加为对话的工作目录。',
   'Type a path or select from recent projects...': '输入路径或从最近项目中选择...',
+  'Search for directory': '搜索目录',
+  'Find a directory on {{host}}': '在 {{host}} 上查找目录',
+  'No matching directories': '没有匹配的目录',
+  'Searching...': '搜索中...',
   'Local directory': '本地目录',
   'Remote (SSH)': '远程(SSH)',
   'SSH host': 'SSH 主机',
@@ -4569,6 +4573,7 @@ export const zhTranslations: Record<string, string> = {
   'This removes "{{name}}" from your skills list.': '将从技能列表中移除「{{name}}」。',
   'Delete SSH connection?': '删除 SSH 连接？',
   Metric: '指标',
+  'Add project ({{shortcut}})': '添加项目（{{shortcut}}）',
 };
 
 export function normalizeLocale(input?: string): Locale {

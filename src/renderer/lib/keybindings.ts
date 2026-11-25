@@ -120,6 +120,13 @@ export function isSendMessageKey(e: KeyboardEvent | React.KeyboardEvent, binding
   return !!binding && eventToBinding(e, { allowBare: true }) === binding;
 }
 
+/** 侧栏「添加项目」固定快捷键，不进可配置清单。mac 显示 ⇧⌘A，其它平台 Ctrl+Shift+A。 */
+export const ADD_PROJECT_SHORTCUT = 'mod+shift+a';
+
+export function isAddProjectShortcut(e: KeyboardEvent | React.KeyboardEvent): boolean {
+  return !e.repeat && eventToBinding(e) === ADD_PROJECT_SHORTCUT;
+}
+
 /**
  * macOS View 菜单的「显示/隐藏侧边栏」带同一加速键。菜单加速键会先执行菜单项，
  * 再把 keydown 交给页面且 defaultPrevented 为真；页面再切换一次就把菜单的切换抵消了。

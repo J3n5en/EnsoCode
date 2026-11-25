@@ -1,11 +1,13 @@
 import { DEFAULT_TRAY_TOGGLE_BINDING } from '@shared/keybindingAccelerator';
 import { describe, expect, it } from 'vitest';
 import {
+  ADD_PROJECT_SHORTCUT,
   DEFAULT_KEYBINDINGS,
   effectiveKeybindings,
   eventToBinding,
   formatBinding,
   IS_MAC,
+  isAddProjectShortcut,
   isSendMessageKey,
   KEYBINDING_ACTIONS,
   menuAlreadyHandled,
@@ -18,6 +20,7 @@ function keyEvent(partial: {
   ctrlKey?: boolean;
   altKey?: boolean;
   shiftKey?: boolean;
+  repeat?: boolean;
   defaultPrevented?: boolean;
 }): KeyboardEvent {
   return {
@@ -27,6 +30,7 @@ function keyEvent(partial: {
     ctrlKey: partial.ctrlKey ?? false,
     altKey: partial.altKey ?? false,
     shiftKey: partial.shiftKey ?? false,
+    repeat: partial.repeat ?? false,
     defaultPrevented: partial.defaultPrevented ?? false,
   } as KeyboardEvent;
 }
@@ -141,5 +145,30 @@ describe('menuAlreadyHandled', () => {
   it('普通按键页面照常处理', () => {
     const event = keyEvent({ key: 'b', ...mod });
     expect(menuAlreadyHandled(event, 'mod+b')).toBe(false);
+  });
+});
+
+describe('add project shortcut', () => {
+  const mod = IS_MAC ? { metaKey: true } : { ctrlKey: true };
+
+  it('Cmd/Ctrl+Shift+A 打开添加项目，且不占用现有默认绑定', () => {
+    expect(ADD_PROJECT_SHORTCUT).toBe('mod+shift+a');
+    expect(Object.values(DEFAULT_KEYBINDINGS)).not.toContain(ADD_PROJECT_SHORTCUT);
+    expect(formatBinding(ADD_PROJECT_SHORTCUT)).toBe(IS_MAC ? '⇧⌘A' : 'Ctrl+Shift+A');
+    expect(isAddProjectShortcut(keyEvent({ key: 'A', shiftKey: true, ...mod }))).toBe(true);
+    expect(isAddProjectShortcut(keyEvent({ key: 'a', shiftKey: true, ...mod }))).toBe(true);
+  });
+
+  it('连发、少修饰键或带 Alt 都不算', () => {
+    expect(isAddProjectShortcut(keyEvent({ key: 'A', shiftKey: true, repeat: true, ...mod }))).toBe(
+      false
+    );
+    expect(isAddProjectShortcut(keyEvent({ key: 'a', ...mod }))).toBe(false);
+    expect(isAddProjectShortcut(keyEvent({ key: 'A', shiftKey: true }))).toBe(false);
+    expect(isAddProjectShortcut(keyEvent({ key: 'A', shiftKey: true, altKey: true, ...mod }))).toBe(
+      false
+    );
+    const wrongMod = IS_MAC ? { ctrlKey: true } : { metaKey: true };
+    expect(isAddProjectShortcut(keyEvent({ key: 'A', shiftKey: true, ...wrongMod }))).toBe(false);
   });
 });
