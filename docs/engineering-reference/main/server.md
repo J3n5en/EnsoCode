@@ -66,7 +66,8 @@ app 路径来自 `ENSO_DATA_DIR`（默认 `~/.enso-server`）与 `ENSO_APP_ROOT`
 - 只有装在可写的全局 `node_modules` 下时才走 `npm` 模式；npx 缓存、源码目录下运行是 `manual`，只报告新版本。
 - 下载 = `npm cache add`。应用 = `npm i -g @ensocode/server@<v> --prefer-offline` 然后退出并重启。全局安装改写的是正在运行的文件（懒加载 chunk 的文件名带 hash），所以真正安装放在退出前一刻。
 - 重启方式（`restartMethod`，`canRestart` 等价于它不为 `manual`）：systemd（`INVOCATION_ID`）/ pm2（`pm_id`）/ `ENSO_SUPERVISED=1` 是 `supervisor`，退出交给守护拉起；前台裸跑是 `reexec`——退出前在数据目录放一个 `reexec-restart.sh`，脱离进程等本进程消失后用同一条命令行拉起（日志在数据目录 `restart.log`）；PID 1（容器主进程）是 `manual`，`restart`/`quitAndInstall` 后的重启要外部做。
-- 优雅重启：`quitAndInstall` 先广播 `applying`（`waiting-tasks` 等还在跑回合的工作区收完，上限 5 分钟，超时后由退出收尾的安全中断兜底——worker 被终止前写断点，新进程按恢复清单续跑）→ `installing` → `restarting`。退出本身走 `attachAppQuitDrain`（pty 收尾、worker 安全终止、插件 dispose），与桌面共用。
+- 优雅重启：`quitAndInstall` 与手动 `restart` 都先广播 `applying`（`waiting-tasks` 等还在跑回合的工作区收完，上限 5 分钟，超时后由退出收尾的安全中断兜底——worker 被终止前写断点，新进程按恢复清单续跑）→ 然后退出拉起。退出本身走 `attachAppQuitDrain`（pty 收尾、worker 安全终止、插件 dispose），与桌面共用。`restart(true)` 立即重启，不等待。
+- 服务端没有「自动重启以应用更新」档位：等待逻辑内建在应用流程里（等任务收完/超时安全中断），自动更新下载完成后立即优雅应用，设置页在 server 宿主下不显示该行。`restartMethod=manual`（容器 PID1）时退出没人拉起，自动更新只下载不应用，等用户手动点「重启以更新」。
 - 健康检查与回滚：安装前写 `pending-update.json`（数据目录）。新进程启动时计数，连续 3 次没活到一分钟（`HEALTHY_AFTER_MS`）判定崩溃循环，自动 `npm i -g` 回滚到更新前版本并退出（reexec 场景再放一个拉起脚本）；起来满一分钟 `markUpdateReady` 清标记。安装失败当场清标记，不误判。版本与标记对不上（手动换过版本）按过期清理。
 - 发布：`.github/workflows/publish-server.yml` 随正式版 `vX.Y.Z` tag 自动触发，也可手动触发（可填版本号、dist-tag、dry-run；预发布版本默认发到 `next`）。桌面端内测预发布 tag（`v*-*`，见 `beta.yml`）不触发它；改由 `beta.yml` 的 `server-npm` job 经 workflow_call 复用本工作流，把同一版本号发到 npm 的 `beta` dist-tag（不动 latest；失败不影响桌面内测）。走 npm Trusted Publishing（OIDC），不需要 token。workflow_dispatch 只认默认分支上存在的 workflow 文件。
 - npm Trusted Publishing 的两个坑（都在真实运行中踩过）：

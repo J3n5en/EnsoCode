@@ -2,16 +2,6 @@ import type { UpdateStatus } from '@shared/types/updater';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ServerUpdater, type ServerUpdaterDeps } from './serverUpdater';
 
-const idle = () => ({
-  agentBusy: false,
-  userActive: false,
-  unsentDraft: false,
-  windowFocused: false,
-  queuedCount: 0,
-  pendingAskCount: 0,
-  pendingApprovalCount: 0,
-});
-
 const latest = (version: string) =>
   vi.fn(async (url: string, _init?: RequestInit) =>
     url.endsWith('/@ensocode%2fserver/latest')
@@ -50,7 +40,6 @@ function updater(overrides: Partial<ServerUpdaterDeps> = {}): ServerUpdater {
     npm,
     broadcast: (status) => statuses.push(status),
     quit: vi.fn(),
-    idle,
     ...overrides,
   });
 }
@@ -216,16 +205,67 @@ describe('ServerUpdater 重启能力与优雅应用', () => {
     expect(updater({ env: {}, pid: 1 }).state().canRestart).toBe(false);
   });
 
-  it('裸跑（reexec）restart 拉起替代进程后退出，不抛错', () => {
+  it('裸跑（reexec）restart 默认优雅：空闲时立即拉起替代进程后退出，不抛错', async () => {
     const quit = vi.fn();
     const spawnReexec = vi.fn();
     updater({ quit, env: {}, spawnReexec }).restart();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
     expect(spawnReexec).toHaveBeenCalledOnce();
+  });
+
+  it('restart(true) 立即重启：有任务在跑也不等待', async () => {
+    const quit = vi.fn();
+    const u = updater({ quit, env: {}, spawnReexec: vi.fn(), busyCount: () => 3 });
+    u.restart(true);
     expect(quit).toHaveBeenCalledOnce();
+  });
+
+  it('restart 默认优雅：有任务在跑时先广播 waiting-tasks，空闲后才退出', async () => {
+    const now = { value: 1000 };
+    let busy = 2;
+    const quit = vi.fn();
+    const u = updater({
+      env: {},
+      spawnReexec: vi.fn(),
+      quit,
+      now: () => now.value,
+      busyCount: () => busy,
+      waitForTasksMs: 60_000,
+      waitPollMs: 10,
+    });
+    u.restart();
+    await vi.waitFor(() => {
+      expect(
+        statuses.some((s) => s.status === 'applying' && s.applying?.stage === 'waiting-tasks')
+      ).toBe(true);
+    });
+    expect(quit).not.toHaveBeenCalled();
+    busy = 0;
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
   });
 
   it('manual（容器 PID1）restart 仍然抛错', () => {
     expect(() => updater({ env: {}, pid: 1 }).restart()).toThrow();
+  });
+
+  it('自动更新下载完成后立即优雅应用：不等空闲档位、不依赖 autoRestart 设置', async () => {
+    const quit = vi.fn();
+    const u = updater({ env: { INVOCATION_ID: 'x' }, quit });
+    u.start(true, 'off');
+    await u.checkForUpdates();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce(), { timeout: 5_000 });
+    const stages = statuses.filter((s) => s.status === 'applying').map((s) => s.applying?.stage);
+    expect(stages).toContain('installing');
+  });
+
+  it('manual 重启方式下自动更新只下载不应用：退出没人拉起，不能自杀', async () => {
+    const quit = vi.fn();
+    const u = updater({ env: {}, pid: 1, quit });
+    u.start(true, 'immediate');
+    await u.checkForUpdates();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(quit).not.toHaveBeenCalled();
+    expect(statuses.at(-1)?.status).toBe('downloaded');
   });
 
   it('quitAndInstall 写健康检查标记并广播 installing/restarting 阶段', async () => {

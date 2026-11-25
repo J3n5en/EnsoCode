@@ -5,19 +5,9 @@ import type {
   UpdateStatus,
 } from '@shared/types/updater';
 import type { UpdateChannel } from '@shared/updater/channel';
-import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
-import {
-  IdleRestartGate,
-  type IdleRestartObservation,
-} from '../../main/services/updater/idleRestartGate';
+import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import { detectRestartMethod } from './reexec';
-import {
-  compareVersions,
-  DEFAULT_NPM_REGISTRY,
-  npmDistTagUrl,
-  npmLatestUrl,
-  parseNpmLatest,
-} from './version';
+import { compareVersions, DEFAULT_NPM_REGISTRY, npmDistTagUrl, parseNpmLatest } from './version';
 
 /** 应用更新时等正在跑的 turn 收完的上限；超时后安全中断（断点续跑机制兜底） */
 const WAIT_FOR_TASKS_MS = 5 * 60 * 1000;
@@ -38,7 +28,6 @@ export interface ServerUpdaterDeps {
   npm: NpmInstaller | null;
   broadcast: (status: UpdateStatus) => void;
   quit: () => void;
-  idle: () => IdleRestartObservation;
   now?: () => number;
   /** 测试覆盖：进程 pid（reexec 探测 PID1 用） */
   pid?: number;
@@ -56,7 +45,6 @@ export interface ServerUpdaterDeps {
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const INITIAL_CHECK_MS = 30_000;
-const BUSY_POLL_MS = 5_000;
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -71,13 +59,10 @@ export class ServerUpdater {
   private downloadedVersion: string | null = null;
   private running: Promise<void> | null = null;
   private autoUpdate = false;
-  private autoRestartMode: AutoRestartMode = 'off';
   private applying = false;
   private channel: UpdateChannel = 'stable';
-  private readonly idleGate = new IdleRestartGate();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private interval: ReturnType<typeof setInterval> | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: ServerUpdaterDeps) {}
 
@@ -109,7 +94,7 @@ export class ServerUpdater {
   }
 
   start(autoUpdate: boolean, autoRestartMode: AutoRestartMode): void {
-    this.autoRestartMode = autoRestartMode;
+    this.setAutoRestartMode(autoRestartMode);
     this.setAutoUpdateEnabled(autoUpdate);
   }
 
@@ -118,7 +103,6 @@ export class ServerUpdater {
     this.timers.clear();
     if (this.interval) clearInterval(this.interval);
     this.interval = null;
-    this.clearIdleTimer();
   }
 
   private later(ms: number, fn: () => void): void {
@@ -242,7 +226,6 @@ export class ServerUpdater {
       return;
     }
     this.markDownloaded(version);
-    this.idleGate.reset();
     this.notifyIdleStateChanged();
   }
 
@@ -259,11 +242,13 @@ export class ServerUpdater {
       if (!this.deps.npm) throw new Error('this install cannot update itself; run npm i -g');
       // 等正在跑的 turn 收完；超时后按推荐方案安全中断（退出收尾会写断点，重启后续跑）
       const busyCount = this.deps.busyCount?.() ?? 0;
-      if (busyCount > 0) await this.waitForTasks(version);
+      if (busyCount > 0) await this.waitForTasks();
       this.setApplying('installing');
       this.deps.writePending?.({ from: this.deps.version, to: version });
       await this.deps.npm.install(this.spec(version));
       this.setApplying('restarting');
+      // 应用成功后不再有「已下载待装」状态；重启倒计时结束状态由新进程自己报
+      this.downloadedVersion = null;
       this.restartProcess();
     } catch (error) {
       this.applying = false;
@@ -291,7 +276,7 @@ export class ServerUpdater {
     );
   }
 
-  private async waitForTasks(version: string): Promise<void> {
+  private async waitForTasks(): Promise<void> {
     const now = this.now();
     const limit = this.deps.waitForTasksMs ?? WAIT_FOR_TASKS_MS;
     const poll = this.deps.waitPollMs ?? WAIT_POLL_MS;
@@ -311,9 +296,32 @@ export class ServerUpdater {
     this.deps.quit();
   }
 
-  restart(): void {
+  /**
+   * 手动重启。默认优雅：等正在跑的回合收完（同应用更新的等待上限），再退出拉起；
+   * force=true 立即退出（收尾仍会安全中断写断点，任务重启后续跑）。
+   */
+  restart(force = false): void {
     if (!this.canRestart()) throw new Error('enso-server is not running under a supervisor');
-    this.restartProcess();
+    if (force) {
+      this.restartProcess();
+      return;
+    }
+    void this.gracefulRestart();
+  }
+
+  private async gracefulRestart(): Promise<void> {
+    await this.exclusive(async () => {
+      const busyCount = this.deps.busyCount?.() ?? 0;
+      if (busyCount > 0) {
+        this.applying = true;
+        try {
+          await this.waitForTasks();
+        } finally {
+          this.applying = false;
+        }
+      }
+      this.restartProcess();
+    });
   }
 
   setAutoUpdateEnabled(enabled: boolean): void {
@@ -328,43 +336,15 @@ export class ServerUpdater {
     this.notifyIdleStateChanged();
   }
 
-  setAutoRestartMode(mode: AutoRestartMode): void {
-    this.autoRestartMode = mode;
-    if (mode === 'off') this.idleGate.reset();
-    this.notifyIdleStateChanged();
-  }
+  // 服务端没有自动重启档位：应用本身等待任务收完，设置保留通道只为不报错
+  setAutoRestartMode(_mode: AutoRestartMode): void {}
 
   private notifyIdleStateChanged(): void {
-    this.clearIdleTimer();
-    if (
-      this.applying ||
-      this.idleGate.isFailed() ||
-      !this.downloadedVersion ||
-      !this.autoUpdate ||
-      this.autoRestartMode === 'off' ||
-      !this.canRestart()
-    ) {
+    if (!this.downloadedVersion || !this.autoUpdate || this.applying || !this.canRestart()) {
       return;
     }
-    const now = this.now();
-    if (this.idleGate.evaluate(this.deps.idle(), this.autoRestartMode, now)) {
-      void this.quitAndInstall();
-      return;
-    }
-    const remaining = this.idleGate.delayUntilReadyMs(now);
-    const delay = Math.min(
-      remaining === null ? BUSY_POLL_MS : Math.max(remaining, 250),
-      AUTO_RESTART_IDLE_MS
-    );
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
-      this.notifyIdleStateChanged();
-    }, delay);
-    this.idleTimer.unref?.();
-  }
-
-  private clearIdleTimer(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
+    // 服务端应用的等待逻辑（等任务收完/超时安全中断）都在 quitAndInstall 内，
+    // 下载完成立即优雅应用，不再需要桌面那套空闲判定与「只提示不重启」档位。
+    void this.quitAndInstall();
   }
 }
