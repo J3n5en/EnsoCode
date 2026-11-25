@@ -4,6 +4,7 @@ import type { BrowserSearchTab, SettingsSearchEntry } from '@shared/searchAnythi
 import {
   recentBrowserTabs,
   searchBrowserTabs,
+  searchProjectEntries,
   searchSettingsEntries,
 } from '@shared/searchAnything';
 import type { WorkspaceSearchHit, WorkspaceSearchScope } from '@shared/workspaceSearch';
@@ -15,6 +16,7 @@ import {
 } from '@shared/workspaceSearch';
 import {
   Bot,
+  Folder,
   Globe,
   type LucideIcon,
   MessageCircle,
@@ -201,6 +203,21 @@ export function WorkspaceSearchDialog({
     [browserTabs, query]
   );
 
+  const projectHits = useMemo(() => {
+    if (!trimmed) return [];
+    return searchProjectEntries(
+      projects
+        .filter((project) => project.kind !== 'secretary' && project.kind !== 'scratch')
+        .map((project) => ({
+          id: project.id,
+          name: project.name,
+          path: project.path,
+          ...(project.alias ? { alias: project.alias } : {}),
+        })),
+      query
+    );
+  }, [projects, query, trimmed]);
+
   const recentBrowsers = useMemo(() => recentBrowserTabs(browserTabs), [browserTabs]);
 
   useEffect(() => {
@@ -310,9 +327,29 @@ export function WorkspaceSearchDialog({
     onOpenChange(false);
   };
 
+  const openProject = (projectId: string) => {
+    const sessions = useSessionsStore.getState();
+    const latest = Object.values(sessions.conversations)
+      .filter((conversation) => conversation.projectId === projectId && !conversation.archived)
+      .sort((left, right) => conversationActivityAt(right) - conversationActivityAt(left))[0];
+    if (!latest) {
+      void sessions.newConversation(projectId);
+    } else {
+      const parent = latest.parentId ? sessions.conversations[latest.parentId] : undefined;
+      if (parent && !parent.archived) {
+        sessions.selectConversation(parent.id);
+        sessions.selectTab(parent.id, latest.id);
+      } else {
+        sessions.selectConversation(latest.id);
+      }
+    }
+    onOpenChange(false);
+  };
+
   const empty =
     trimmed.length > 0 &&
     hits.length === 0 &&
+    projectHits.length === 0 &&
     browserHits.length === 0 &&
     settingsHits.length === 0;
 
@@ -430,7 +467,7 @@ export function WorkspaceSearchDialog({
       >
         <Command>
           <CommandInput
-            placeholder={t('Search conversations, browser tabs, settings…')}
+            placeholder={t('Search conversations, projects, browser tabs, settings…')}
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={onInputKeyDown}
@@ -545,6 +582,34 @@ export function WorkspaceSearchDialog({
                       {hitRow(hit)}
                     </CommandItem>
                   ))}
+                </CommandGroup>
+              )}
+              {trimmed.length > 0 && projectHits.length > 0 && (
+                <CommandGroup>
+                  <CommandGroupLabel>{t('Projects')}</CommandGroupLabel>
+                  {projectHits.map((project) => {
+                    const title = projectDisplayName(project);
+                    const alias = project.alias?.trim();
+                    const detail =
+                      alias && title !== project.name && project.name !== project.path
+                        ? project.name
+                        : undefined;
+                    return (
+                      <CommandItem
+                        key={project.id}
+                        value={`project-${project.id}`}
+                        className="gap-2.5"
+                        onClick={() => openProject(project.id)}
+                      >
+                        <ResultRow
+                          icon={Folder}
+                          title={<Highlighted text={title} query={query} />}
+                          detail={detail && <Highlighted text={detail} query={query} />}
+                          meta={<Highlighted text={project.path} query={query} />}
+                        />
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               )}
               {trimmed.length > 0 && browserHits.length > 0 && (

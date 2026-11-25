@@ -3,6 +3,7 @@ import { GENERATED_SETTINGS_CATALOG } from './settingsCatalog.generated';
 
 export const SEARCH_ANYTHING_BROWSER_LIMIT = 20;
 export const SEARCH_ANYTHING_SETTINGS_LIMIT = 20;
+export const SEARCH_ANYTHING_PROJECTS_LIMIT = 20;
 export const SEARCH_ANYTHING_RECENT_BROWSER = 5;
 
 export interface BrowserSearchTab {
@@ -19,6 +20,13 @@ export interface SettingsSearchEntry {
   category: string;
   title: string;
   description?: string;
+}
+
+export interface ProjectSearchEntry {
+  id: string;
+  name: string;
+  path: string;
+  alias?: string;
 }
 
 export interface SettingsCatalogSnapshot {
@@ -152,6 +160,26 @@ export function searchBrowserTabs(
   }
   hits.sort((a, b) => a.rank - b.rank || b.at - a.at);
   return hits.slice(0, limit).map(({ rank: _rank, ...tab }) => tab);
+}
+
+export function searchProjectEntries(
+  entries: readonly ProjectSearchEntry[],
+  query: string,
+  options: { limit?: number } = {}
+): ProjectSearchEntry[] {
+  const tokens = tokenize(query);
+  if (tokens.length === 0) return [];
+  const hits: Array<ProjectSearchEntry & { rank: number }> = [];
+  for (const entry of entries) {
+    const nameHit = fieldMatches(entry.name, tokens) || fieldMatches(entry.alias ?? '', tokens);
+    const pathHit = fieldMatches(entry.path, tokens);
+    if (!nameHit && !pathHit) continue;
+    hits.push({ ...entry, rank: nameHit ? 0 : 1 });
+  }
+  hits.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+  return hits
+    .slice(0, options.limit ?? SEARCH_ANYTHING_PROJECTS_LIMIT)
+    .map(({ rank: _rank, ...entry }) => entry);
 }
 
 export function searchSettingsEntries(
