@@ -354,6 +354,7 @@ export function ChatSessionTimeline({
           quotable={quotable}
           activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
           secretarySession={secretarySession}
+          conversationId={conversationId}
           {...(secretaryFace ? { secretaryFace } : {})}
         />
       )}
