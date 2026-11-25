@@ -859,3 +859,34 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     }
   });
 });
+
+describe('AgentSessionIndex busyWorkspaceCount', () => {
+  it('数的是还在跑的工作区数，不是会话数', () => {
+    const sessions = index();
+    expect(sessions.busyWorkspaceCount()).toBe(0);
+    sessions.prepareParent(parent);
+    expect(sessions.busyWorkspaceCount()).toBe(1);
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+    });
+    expect(sessions.busyWorkspaceCount()).toBe(0);
+    const reserved = sessions.reserveChild(parent, 'builtin:scout', 'Scout', 'request-1');
+    if (!reserved.ok) throw new Error('reservation failed');
+    expect(sessions.busyWorkspaceCount()).toBe(1);
+  });
+
+  it('两个独立工作区各算一个', () => {
+    const sessions = index();
+    const other: SessionIdentity = {
+      sessionId: 'other',
+      generation: '22222222-2222-4222-8222-222222222222',
+    };
+    sessions.prepareParent(parent);
+    sessions.prepareParent(other);
+    expect(sessions.busyWorkspaceCount()).toBe(2);
+  });
+});
