@@ -190,6 +190,44 @@ describe('searchSettingsEntries', () => {
     const hits = searchSettingsEntries(local, 'term');
     expect(hits.map((e) => e.id)).toEqual(['a.title-hit', 'b.desc-only']);
   });
+
+  it('精确命中排在前缀、子串和仅说明命中之前', () => {
+    const local = [
+      { id: 'd.desc', category: 'general', title: '其他', description: '这里提到代理' },
+      { id: 'c.mid', category: 'general', title: '网络代理项' },
+      { id: 'b.prefix', category: 'general', title: '代理服务器' },
+      { id: 'a.exact', category: 'general', title: '代理' },
+    ];
+    expect(searchSettingsEntries(local, '代理').map((e) => e.id)).toEqual([
+      'a.exact',
+      'b.prefix',
+      'c.mid',
+      'd.desc',
+    ]);
+  });
+
+  it('多词查询按最差的一词排，整句前缀高于标题中段，说明垫底', () => {
+    const local = [
+      { id: 'd.desc', category: 'general', title: '其他', description: '代理 服务器在说明里' },
+      { id: 'c.mid', category: 'general', title: '说明里的代理 服务器' },
+      { id: 'b.prefix', category: 'general', title: '代理 服务器更多' },
+      { id: 'a.exact', category: 'general', title: '代理 服务器' },
+    ];
+    expect(searchSettingsEntries(local, '代理 服务器').map((e) => e.id)).toEqual([
+      'a.exact',
+      'b.prefix',
+      'c.mid',
+      'd.desc',
+    ]);
+  });
+
+  it('不传译文函数时，中文仍能命中英文标题的中文译文', () => {
+    const local = [{ id: 'general.proxy', category: 'general', title: 'Network proxy' }];
+    expect(searchSettingsEntries(local, '网络代理').map((e) => e.id)).toEqual(['general.proxy']);
+    expect(searchSettingsEntries(local, 'Network proxy').map((e) => e.id)).toEqual([
+      'general.proxy',
+    ]);
+  });
 });
 
 describe('buildSettingsCatalog', () => {

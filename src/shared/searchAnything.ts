@@ -1,3 +1,5 @@
+import { getTranslation } from './i18n';
+
 export const SEARCH_ANYTHING_BROWSER_LIMIT = 20;
 export const SEARCH_ANYTHING_SETTINGS_LIMIT = 20;
 export const SEARCH_ANYTHING_RECENT_BROWSER = 5;
@@ -35,6 +37,59 @@ function tokenize(text: string): string[] {
 
 function isCjkToken(token: string): boolean {
   return CJK_RE.test(token);
+}
+
+function normalize(text: string): string {
+  return text.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/** 原文、中文译文、当前界面译文。英文界面也能用中文命中。 */
+function textVariants(text: string, translate?: (text: string) => string): string[] {
+  const values = [text];
+  const zh = getTranslation('zh', text);
+  if (zh !== text) values.push(zh);
+  if (translate) {
+    const translated = translate(text);
+    if (!values.includes(translated)) values.push(translated);
+  }
+  return values;
+}
+
+function matchesAny(texts: string[], tokens: string[]): boolean {
+  return texts.some((text) => fieldMatches(text, tokens));
+}
+
+function wordPrefix(title: string, token: string): boolean {
+  if (isCjkToken(token)) return false;
+  return tokenize(title).some((part) => part.startsWith(token));
+}
+
+/** 0 整句相等，1 开头或词前缀，2 子串，3 标题里没有这个词 */
+function tokenTitleRank(token: string, titles: string[]): number {
+  let best = 3;
+  const needle = normalize(token);
+  for (const title of titles) {
+    const norm = normalize(title);
+    if (norm === needle) best = Math.min(best, 0);
+    else if (norm.startsWith(needle) || wordPrefix(title, needle)) best = Math.min(best, 1);
+    else if (norm.includes(needle)) best = Math.min(best, 2);
+  }
+  return best;
+}
+
+function settingsHitRank(
+  entry: SettingsSearchEntry,
+  query: string,
+  translate?: (text: string) => string
+): number {
+  const titles = textVariants(entry.title, translate);
+  if (titles.some((title) => normalize(title) === normalize(query))) return 0;
+  const tokens = tokenize(query);
+  let worst = 0;
+  for (const token of tokens) worst = Math.max(worst, tokenTitleRank(token, titles));
+  const queryNorm = normalize(query);
+  if (titles.some((title) => normalize(title).startsWith(queryNorm))) return Math.min(worst, 1);
+  return worst;
 }
 
 function fieldMatches(text: string, tokens: string[]): boolean {
@@ -105,16 +160,14 @@ export function searchSettingsEntries(
 ): SettingsSearchEntry[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
-  // 界面显示的是译文，原文与译文都参与匹配
-  const matches = (text = '') =>
-    fieldMatches(text, tokens) ||
-    (!!options.translate && fieldMatches(options.translate(text), tokens));
   const hits: Array<SettingsSearchEntry & { rank: number }> = [];
   for (const entry of entries) {
-    const titleHit = matches(entry.title);
-    const otherHit = fieldMatches(entry.id, tokens) || matches(entry.description);
+    const titles = textVariants(entry.title, options.translate);
+    const descriptions = textVariants(entry.description ?? '', options.translate);
+    const titleHit = matchesAny(titles, tokens);
+    const otherHit = fieldMatches(entry.id, tokens) || matchesAny(descriptions, tokens);
     if (!titleHit && !otherHit) continue;
-    hits.push({ ...entry, rank: titleHit ? 0 : 1 });
+    hits.push({ ...entry, rank: settingsHitRank(entry, query, options.translate) });
   }
   hits.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
   return hits
