@@ -14,8 +14,8 @@ import {
   isStringLiteral,
 } from 'typescript/unstable/ast/is';
 import { API } from 'typescript/unstable/sync';
-import type { SettingsSearchEntry } from '../../src/shared/searchAnything.ts';
-import { categoryForSettingsRow } from '../../src/shared/settingsDeepLink.ts';
+import type { SettingsSearchEntry } from '../../src/shared/searchAnything';
+import { categoryForSettingsRow } from '../../src/shared/settingsDeepLink';
 
 const SETTINGS_TAGS = new Set([
   'SettingsRow',
@@ -159,10 +159,14 @@ function staticText(expr: Node | undefined): string | undefined {
   }
   if (isCallExpression(expr)) {
     const callee = expr.expression;
+    const accessed =
+      callee.kind === SyntaxKind.PropertyAccessExpression
+        ? (callee as { name?: Node }).name
+        : undefined;
     const name = isIdentifier(callee)
       ? callee.text
-      : callee.kind === SyntaxKind.PropertyAccessExpression && isIdentifier(callee.name)
-        ? callee.name.text
+      : accessed && isIdentifier(accessed)
+        ? accessed.text
         : '';
     if (name !== 't') return undefined;
     const arg = expr.arguments[0];
@@ -793,10 +797,20 @@ function writeCatalog(root: string): SettingsCatalogExtraction {
     path.join(root, 'src/shared/settingsCatalog.generated.ts'),
     renderSettingsCatalog(extracted.entries)
   );
-  execFileSync('pnpm', ['exec', 'biome', 'check', '--write', path.join(root, 'src/shared/settingsCatalog.generated.ts')], {
-    cwd: root,
-    stdio: 'ignore',
-  });
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'biome',
+      'check',
+      '--write',
+      path.join(root, 'src/shared/settingsCatalog.generated.ts'),
+    ],
+    {
+      cwd: root,
+      stdio: 'ignore',
+    }
+  );
   return extracted;
 }
 
