@@ -48,6 +48,17 @@ vi.mock('node:child_process', async (importOriginal) => {
       kill: () => true,
     });
     h.children.push(child);
+    // taskkill /T /F 在真实 Windows 上必杀死目标进程；mock 的 child 自己不会退出，
+    // 不补这一刀，stop() 的强制收口链（killGraceMs 级定时器）会跨测试窗口迟到
+    // 额外的 taskkill spawn，污染后续用例的 fakes 断言——机器忙时偶发 6 vs 1。
+    if (/taskkill\.exe$/i.test(file)) {
+      // 所有 mock child 共享 pid 4242，taskkill 的目标就是它们；对已存在的 bash child
+      // 补 close，任务当场收口，升级/强制 settle 定时器自动失效。
+      const targets = h.children.slice(0, -1);
+      queueMicrotask(() => {
+        for (const target of targets) (target as EventEmitter).emit('close', 0, null);
+      });
+    }
     return child;
   };
   return { ...actual, default: { ...actual, spawn }, spawn };
@@ -71,6 +82,11 @@ const tempDir = (prefix: string) => {
 
 beforeEach(() => {
   Object.defineProperty(process, 'platform', { value: 'win32' });
+  // 上个用例留下的 child 永远不退出的话，其 manager 的 watchdog（500ms 一轮）
+  // 会把它们当成「进程消失」反复 taskkill——mock 的 pid 4242 在高负载下还可能
+  // 撞上本机真实存活进程，spawn 漏进当前用例的 fakes 窗口（偶发 6 vs 1 失败）。
+  // 测试边界即这些模拟进程的寿命终点：close 后任务当场收口，watchdog 不再碰。
+  for (const child of h.children) (child as EventEmitter).emit('close', 0, null);
   h.shell = undefined;
   h.fakes.length = 0;
   h.children.length = 0;

@@ -40,7 +40,10 @@ function RowTextInput({ className, ...props }: React.ComponentProps<typeof Input
 }
 
 export function GeneralSettings() {
-  const { language, setLanguage } = useSettingsStore();
+  // 只订阅用到的两个键：整店订阅会让这个最重页面的子树在每次设置写入时
+  // 全量重渲，是 pin 快照测试渲染广度的主要来源
+  const language = useSettingsStore((state) => state.language);
+  const setLanguage = useSettingsStore((state) => state.setLanguage);
   const { t } = useI18n();
 
   return (

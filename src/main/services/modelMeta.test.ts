@@ -18,6 +18,16 @@ vi.mock('electron', () => ({
   shell: { openExternal: () => {} },
 }));
 
+// catalog 联网刷新走真实 fetch：测试用的是假 token，线上本来就秒回 401，
+// 单测不该为网络时延付 1-17s（本机慢链路下会贴到 20s 超时上限）。
+// 用确定性 401 复刻同一行为路径——刷新失败后回退到内置兜底清单，
+// 正是这些用例一直在断言的 catalog 内容。
+vi.stubGlobal(
+  'fetch',
+  async () =>
+    new Response(JSON.stringify({ error: { type: 'authentication_error' } }), { status: 401 })
+);
+
 beforeAll(() => {
   const dir = path.join(userData, 'agent', 'pi-agent');
   mkdirSync(dir, { recursive: true });
