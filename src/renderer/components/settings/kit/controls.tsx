@@ -289,11 +289,14 @@ export function SettingsSearch({
   onValueChange,
   placeholder,
   inputRef,
+  onArrowDown,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   placeholder: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  /** 有命中时，向下把焦点交给第一条结果 */
+  onArrowDown?: () => void;
 }) {
   const { t } = useI18n();
   const localRef = React.useRef<HTMLInputElement>(null);
@@ -317,6 +320,11 @@ export function SettingsSearch({
         aria-label={placeholder}
         onChange={(event) => onValueChange(event.currentTarget.value)}
         onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' && onArrowDown) {
+            event.preventDefault();
+            onArrowDown();
+            return;
+          }
           if (event.key !== 'Escape' || value.length === 0) return;
           event.preventDefault();
           event.stopPropagation();

@@ -23,6 +23,7 @@ export function TitleSummaryPicker() {
   return (
     <>
       <SettingsRow
+        rowId="providers.conversation-title-summary"
         label={t('Conversation title summary')}
         description={t('Generate a short AI title from the first message of a new conversation.')}
       >
@@ -30,6 +31,7 @@ export function TitleSummaryPicker() {
       </SettingsRow>
       {enabled && (
         <SettingsSubRow
+          rowId="providers.titleSummaryModel"
           label={t('Model')}
           description={
             model && (!selectedProvider || !selectedModel)

@@ -117,7 +117,7 @@ function PluginKeybindingsSection() {
   };
 
   return (
-    <SettingsSection title={t('Plugin commands')}>
+    <SettingsSection rowId="shortcuts.pluginCommands" title={t('Plugin commands')}>
       {rows.map(({ action, command, binding, custom, conflict }) => {
         const isCapturing = capturing === action;
         return (

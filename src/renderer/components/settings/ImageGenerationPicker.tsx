@@ -19,6 +19,7 @@ export function ImageGenerationPicker() {
   const setSelection = useSettingsStore((state) => state.setImageGenerationModel);
   return (
     <SettingsRow
+      rowId="providers.default-image-generation-model"
       label={t('Default image generation model')}
       description={
         providers.length === 0 ? (

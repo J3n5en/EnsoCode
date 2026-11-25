@@ -6,7 +6,6 @@ import {
   searchBrowserTabs,
   searchSettingsEntries,
 } from '@shared/searchAnything';
-import type { SettingsCategory } from '@shared/settingsDeepLink';
 import type { WorkspaceSearchHit, WorkspaceSearchScope } from '@shared/workspaceSearch';
 import {
   cycleWorkspaceSearchScope,
@@ -31,6 +30,7 @@ import {
   useState,
 } from 'react';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
+import { settingsEntryPath } from '@/components/settings/settingsCategories';
 import { Badge } from '@/components/ui/badge';
 import {
   Command,
@@ -68,36 +68,6 @@ const SCOPE_LABELS: Record<WorkspaceSearchScope, string> = {
   project: 'This project',
   all: 'All projects',
   'all-including-archived': 'Include archived',
-};
-
-const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
-  general: 'General',
-  shortcuts: 'Shortcuts',
-  appearance: 'Appearance',
-  conversation: 'Conversation display',
-  terminal: 'Terminal & editor',
-  runtime: 'Runtime & sessions',
-  providers: 'Model Providers',
-  skills: 'Skills',
-  plugins: 'Enso plugins',
-  mcp: 'MCP Servers',
-  instructions: 'Instruction Files',
-  presets: 'Presets',
-  agents: 'Agent types',
-  workflows: 'Workflows',
-  tools: 'Built-in tools',
-  memory: 'Memory',
-  privacy: 'Privacy',
-  phone: 'Devices',
-  ssh: 'SSH',
-  usage: 'Usage',
-  resources: 'Resources',
-  logs: 'Logs',
-  experimental: 'Experimental',
-  bots: 'Bot mode',
-  botTemplates: 'Bot templates',
-  secretary: 'Secretary',
-  contacts: 'Contacts & owner',
 };
 
 function Highlighted({ text, query }: { text: string; query: string }) {
@@ -601,10 +571,7 @@ export function WorkspaceSearchDialog({
                             <Highlighted text={t(entry.description)} query={query} />
                           )
                         }
-                        meta={t(
-                          SETTINGS_CATEGORY_LABELS[entry.category as SettingsCategory] ??
-                            entry.category
-                        )}
+                        meta={settingsEntryPath(entry, t)}
                       />
                     </CommandItem>
                   ))}

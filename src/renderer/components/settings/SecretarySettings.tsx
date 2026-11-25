@@ -701,6 +701,7 @@ export function SecretarySettings() {
   return (
     <SecretaryIdContext.Provider value={multiple ? current : undefined}>
       <SettingsPage
+        rowId="secretary.root"
         title={t('Secretary')}
         description={t(
           'The secretary is not part of any project. It watches your projects, dispatches sessions and reports results back. It never reads or writes code itself.'
@@ -1051,7 +1052,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
               return save({ addressAs: next });
             }}
           />
-          <SettingsRow label={t('Reply language')}>
+          <SettingsRow rowId="secretary.reply-language" label={t('Reply language')}>
             <SaveChips
               value={profile.replyLanguage}
               options={(['ui', 'zh', 'en'] as const).map((value) => ({
@@ -1061,7 +1062,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
               onPick={(replyLanguage) => (busy ? Promise.resolve(false) : save({ replyLanguage }))}
             />
           </SettingsRow>
-          <SettingsRow label={t('Communication style')}>
+          <SettingsRow rowId="secretary.communication-style" label={t('Communication style')}>
             <SaveChips
               value={profile.style}
               options={(['concise', 'detailed'] as const).map((value) => ({
@@ -1071,7 +1072,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
               onPick={(style) => (busy ? Promise.resolve(false) : save({ style }))}
             />
           </SettingsRow>
-          <SettingsRow label={t('System notifications')}>
+          <SettingsRow rowId="secretary.system-notifications" label={t('System notifications')}>
             <SaveChips
               value={profile.notify}
               options={(['needs-user', 'with-done', 'off'] as const).map((value) => ({
@@ -1188,8 +1189,9 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
       </SettingsSection>
 
       {onDelete ? (
-        <SettingsSection tone="danger" title={t('Danger zone')}>
+        <SettingsSection rowId="secretary.danger-zone" tone="danger" title={t('Danger zone')}>
           <SettingsRow
+            rowId="secretary.delete-secretary"
             label={t('Delete secretary')}
             description={t(
               'This cannot be undone. The sessions it manages stay, but nobody manages them afterwards; its contact bindings are released and its private memory is deleted.'

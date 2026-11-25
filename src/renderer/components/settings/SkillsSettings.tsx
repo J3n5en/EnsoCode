@@ -88,12 +88,14 @@ export function SkillsSettings() {
     >
       <SettingsSection>
         <SettingsRow
+          rowId="skills.load-local-skills"
           label={t('Load local skills')}
           description={t('Let the agent auto-discover skills under .agents/skills and .pi/skills')}
         >
           <SettingsSwitch checked={loadLocalSkills} onCheckedChange={setLoadLocalSkills} />
         </SettingsRow>
         <SettingsRow
+          rowId="skills.load-project-harness-assets"
           label={t('Load project harness assets')}
           description={t(
             'Also load skills from .claude/.codex/.cursor and rule files (.cursorrules, .cursor/rules, .claude/rules) in the project'

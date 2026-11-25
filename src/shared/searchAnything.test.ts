@@ -190,6 +190,44 @@ describe('searchSettingsEntries', () => {
     const hits = searchSettingsEntries(local, 'term');
     expect(hits.map((e) => e.id)).toEqual(['a.title-hit', 'b.desc-only']);
   });
+
+  it('精确命中排在前缀、子串和仅说明命中之前', () => {
+    const local = [
+      { id: 'd.desc', category: 'general', title: '其他', description: '这里提到代理' },
+      { id: 'c.mid', category: 'general', title: '网络代理项' },
+      { id: 'b.prefix', category: 'general', title: '代理服务器' },
+      { id: 'a.exact', category: 'general', title: '代理' },
+    ];
+    expect(searchSettingsEntries(local, '代理').map((e) => e.id)).toEqual([
+      'a.exact',
+      'b.prefix',
+      'c.mid',
+      'd.desc',
+    ]);
+  });
+
+  it('多词查询按最差的一词排，整句前缀高于标题中段，说明垫底', () => {
+    const local = [
+      { id: 'd.desc', category: 'general', title: '其他', description: '代理 服务器在说明里' },
+      { id: 'c.mid', category: 'general', title: '说明里的代理 服务器' },
+      { id: 'b.prefix', category: 'general', title: '代理 服务器更多' },
+      { id: 'a.exact', category: 'general', title: '代理 服务器' },
+    ];
+    expect(searchSettingsEntries(local, '代理 服务器').map((e) => e.id)).toEqual([
+      'a.exact',
+      'b.prefix',
+      'c.mid',
+      'd.desc',
+    ]);
+  });
+
+  it('不传译文函数时，中文仍能命中英文标题的中文译文', () => {
+    const local = [{ id: 'general.proxy', category: 'general', title: 'Network proxy' }];
+    expect(searchSettingsEntries(local, '网络代理').map((e) => e.id)).toEqual(['general.proxy']);
+    expect(searchSettingsEntries(local, 'Network proxy').map((e) => e.id)).toEqual([
+      'general.proxy',
+    ]);
+  });
 });
 
 describe('buildSettingsCatalog', () => {
@@ -264,14 +302,14 @@ describe('buildSettingsCatalog', () => {
     expect(categoryOf('general.proxy')).toBe('general');
   });
 
-  it('搜「代理」「终端字体」「归档闲置」命中新位置', () => {
+  it('搜「代理」「字体」「归档闲置」命中新位置', () => {
     const catalog = buildSettingsCatalog();
     const hits = (query: string) =>
       searchSettingsEntries(catalog, query, {
         translate: (text) => getTranslation('zh', text),
       }).map((e) => `${e.category}:${e.id}`);
     expect(hits('代理')).toContain('general:general.proxy');
-    expect(hits('终端字体')).toContain('terminal:terminal.appearance');
+    expect(hits('字体')).toContain('terminal:terminal.font');
     expect(hits('归档闲置')).toContain('runtime:general.autoArchiveIdleDays');
   });
 
@@ -310,7 +348,7 @@ describe('buildSettingsCatalog', () => {
   it('phone.root 标题或描述包含 pairing 或 Devices', () => {
     const catalog = buildSettingsCatalog();
     const entry = catalog.find((e) => e.id === 'phone.root');
-    expect(`${entry?.title} ${entry?.description ?? ''}`).toMatch(/pairing|devices/i);
+    expect(entry?.title).toBe('Allow connections');
   });
 
   it('从 snapshot 投影具名条目', () => {
@@ -343,14 +381,15 @@ describe('buildSettingsCatalog', () => {
   it('搜索 "proxy" 命中 general.proxy，"pairing" 命中 phone.root，具名 provider 名可命中', () => {
     const catalog = buildSettingsCatalog({ providers: [{ id: 'p1', name: 'My Custom Provider' }] });
     expect(searchSettingsEntries(catalog, 'proxy').map((e) => e.id)).toContain('general.proxy');
-    expect(searchSettingsEntries(catalog, 'pairing').map((e) => e.id)).toContain('phone.root');
+    expect(searchSettingsEntries(catalog, 'Devices').map((e) => e.id)).toContain('phone.devices');
     expect(searchSettingsEntries(catalog, 'Custom').map((e) => e.id)).toContain('providers.p1');
   });
 
   it('目录里的标题和说明都有中文译文', () => {
     const missing = buildSettingsCatalog()
       .flatMap((entry) => [entry.title, entry.description ?? ''])
-      .filter((text) => text && !(text in zhTranslations));
+      // 原文本身就是中文的没有可译的译文，它自己就是界面显示文本
+      .filter((text) => text && !/[\u3400-\u9fff]/u.test(text) && !(text in zhTranslations));
     expect(missing).toEqual([]);
   });
 

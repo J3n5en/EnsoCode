@@ -116,6 +116,7 @@ function TryIt({ settings }: { settings: PrivacyMaskSettings }) {
   const result = React.useMemo(() => previewMask(input, settings), [input, settings]);
   return (
     <SettingsSection
+      rowId="privacy.try-it"
       title={t('Try it')}
       description={t('Runs locally. Nothing is remembered or sent anywhere.')}
     >
@@ -199,6 +200,7 @@ function Records() {
 
   return (
     <SettingsSection
+      rowId="privacy.records"
       title={t('Records')}
       actions={
         <>
@@ -286,6 +288,7 @@ export function PrivacySettings() {
 
   return (
     <SettingsPage
+      rowId="privacy.root"
       title={t('Privacy')}
       description={t(
         'Replace API keys and personal data with placeholders before requests leave this device, and restore them in replies. Original values stay in memory on this device only.'
@@ -306,6 +309,7 @@ export function PrivacySettings() {
       {settings.enabled && (
         <>
           <SettingsSection
+            rowId="privacy.secretsSection"
             title={t('Secrets')}
             description={t('API keys, tokens, private keys, passwords in URLs and config files.')}
             actions={
@@ -345,6 +349,7 @@ export function PrivacySettings() {
           </SettingsSection>
 
           <SettingsSection
+            rowId="privacy.personal-data"
             title={t('Personal data')}
             description={t('Emails, phone numbers, ID and bank card numbers, IP addresses.')}
             actions={
@@ -394,6 +399,7 @@ export function PrivacySettings() {
           </SettingsSection>
 
           <SettingsSection
+            rowId="privacy.custom-rules"
             title={t('Custom rules')}
             description={t('Words and patterns specific to your work.')}
             actions={
@@ -420,7 +426,7 @@ export function PrivacySettings() {
             />
           </SettingsSection>
 
-          <SettingsSection title={t('Allow list')}>
+          <SettingsSection rowId="privacy.allow-list" title={t('Allow list')}>
             <ListField
               rowId="privacy.allow"
               label={t('Never mask')}

@@ -403,7 +403,7 @@ export function WorkflowsSettings() {
         </SettingsButton>
       }
     >
-      <SettingsSection title={t('Custom presets')}>
+      <SettingsSection rowId="workflows.custom-presets" title={t('Custom presets')}>
         {presets.length === 0 ? (
           <SettingsEmptyState
             icon={Workflow}
@@ -454,7 +454,7 @@ export function WorkflowsSettings() {
       </SettingsSection>
 
       {builtins.length > 0 && (
-        <SettingsSection title={t('Built-in presets')}>
+        <SettingsSection rowId="workflows.built-in-presets" title={t('Built-in presets')}>
           {builtins.map((preset) => (
             <SettingsRow
               key={preset.id}

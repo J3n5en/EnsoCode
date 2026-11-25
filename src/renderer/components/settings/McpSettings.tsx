@@ -260,6 +260,7 @@ export function McpSettings() {
                     }
                   >
                     <SettingsSubRow
+                      rowId="mcp.load-mode"
                       label={t('Load mode')}
                       description={t(
                         'On demand: tool descriptions are not preloaded into context; the model connects through the mcp tool when needed. Suits servers with many or rarely used tools. Takes effect in new conversations.'
@@ -280,7 +281,7 @@ export function McpSettings() {
                       />
                     </SettingsSubRow>
                     {(canAuthorize || status?.state === 'unauthorized') && (
-                      <SettingsSubRow label={t('Authorize')}>
+                      <SettingsSubRow rowId="mcp.authorize" label={t('Authorize')}>
                         <SettingsButton
                           disabled={authorizing}
                           onClick={() => void runAuthorize(server.id)}
@@ -295,7 +296,10 @@ export function McpSettings() {
                       </SettingsSubRow>
                     )}
                     {authorizedMap[server.id] === true && (
-                      <SettingsSubRow label={t('Revoke authorization')}>
+                      <SettingsSubRow
+                        rowId="mcp.revoke-authorization"
+                        label={t('Revoke authorization')}
+                      >
                         <SettingsButton onClick={() => void revoke(server.id)}>
                           <ShieldOff className="h-3.5 w-3.5" />
                           {t('Revoke authorization')}
@@ -312,13 +316,13 @@ export function McpSettings() {
                         </SettingsButton>
                       </SettingsSubRow>
                     )}
-                    <SettingsSubRow label={t('Edit')}>
+                    <SettingsSubRow rowId="mcp.edit" label={t('Edit')}>
                       <SettingsButton onClick={() => setEditing(server)}>
                         <Pencil className="h-3.5 w-3.5" />
                         {t('Edit')}
                       </SettingsButton>
                     </SettingsSubRow>
-                    <SettingsSubRow label={t('Delete')}>
+                    <SettingsSubRow rowId="mcp.delete" label={t('Delete')}>
                       <SettingsButton
                         variant="destructive-outline"
                         className="border-destructive-text/45 text-destructive-text"

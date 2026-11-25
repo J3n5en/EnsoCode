@@ -1,6 +1,58 @@
 import { type SettingsSearchEntry, searchSettingsEntries } from '@shared/searchAnything';
 import type { SettingsCategory } from './constants';
 
+export const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
+  general: 'General',
+  shortcuts: 'Shortcuts',
+  appearance: 'Appearance',
+  conversation: 'Conversation display',
+  terminal: 'Terminal & editor',
+  runtime: 'Runtime & sessions',
+  providers: 'Model Providers',
+  skills: 'Skills',
+  plugins: 'Enso plugins',
+  mcp: 'MCP Servers',
+  instructions: 'Instruction Files',
+  presets: 'Presets',
+  agents: 'Agent types',
+  workflows: 'Workflows',
+  tools: 'Built-in tools',
+  memory: 'Memory',
+  privacy: 'Privacy',
+  phone: 'Devices',
+  ssh: 'SSH',
+  usage: 'Usage',
+  resources: 'Resources',
+  logs: 'Logs',
+  experimental: 'Experimental',
+  bots: 'Bot mode',
+  botTemplates: 'Bot templates',
+  secretary: 'Secretary',
+  contacts: 'Contacts & owner',
+};
+
+export function categoryGroup(
+  category: string
+): { id: SettingsGroupId; label: string } | undefined {
+  return SETTINGS_GROUPS.find((group) =>
+    (group.categories as readonly string[]).includes(category)
+  );
+}
+
+/** 组名 › 分类名 › 标题。includeTitle 为 false 时停在分类名，给侧栏副行用。 */
+export function settingsEntryPath(
+  entry: { category: string; title: string },
+  translate: (text: string) => string,
+  includeTitle = true
+): string {
+  const group = categoryGroup(entry.category);
+  const categoryLabel =
+    SETTINGS_CATEGORY_LABELS[entry.category as SettingsCategory] ?? entry.category;
+  const parts = [group ? translate(group.label) : '', translate(categoryLabel)];
+  if (includeTitle) parts.push(translate(entry.title));
+  return parts.filter((part) => part.length > 0).join(' › ');
+}
+
 /**
  * 记忆、工作流分页跟随内置工具开关显隐：功能没开就不该占一个入口。
  *

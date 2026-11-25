@@ -391,7 +391,7 @@ function TerminalAppearance() {
 
   return (
     <div data-settings-row="terminal.appearance" className="space-y-4">
-      <SettingsSection bare title={t('Terminal appearance')}>
+      <SettingsSection bare rowId="terminal.appearance" title={t('Terminal appearance')}>
         <TerminalPreview
           theme={previewTheme}
           fontSize={localFontSize}
@@ -400,7 +400,7 @@ function TerminalAppearance() {
         />
       </SettingsSection>
       <SettingsSection>
-        <SettingsRow label={t('Color scheme')}>
+        <SettingsRow rowId="terminal.color-scheme" label={t('Color scheme')}>
           <div className="flex min-w-0 items-center gap-2">
             <Button variant="outline" size="icon" onClick={handlePrevTheme}>
               <ChevronLeft className="h-4 w-4" />
@@ -423,7 +423,7 @@ function TerminalAppearance() {
             </Button>
           </div>
         </SettingsRow>
-        <SettingsRow label={t('Font')}>
+        <SettingsRow rowId="terminal.font" label={t('Font')}>
           <Input
             value={localFontFamily}
             onChange={(e) => setLocalFontFamily(e.target.value)}
@@ -439,7 +439,7 @@ function TerminalAppearance() {
             className="w-[min(100%,220px)] max-w-full"
           />
         </SettingsRow>
-        <SettingsRow label={t('Font size')}>
+        <SettingsRow rowId="terminal.font-size" label={t('Font size')}>
           <Input
             type="number"
             value={localFontSize}
@@ -457,14 +457,14 @@ function TerminalAppearance() {
           />
           <span className="text-[12px] text-muted-foreground">px</span>
         </SettingsRow>
-        <SettingsRow label={t('Font weight')}>
+        <SettingsRow rowId="terminal.font-weight" label={t('Font weight')}>
           <SettingsSelect
             value={terminalFontWeight}
             options={fontWeightOptions}
             onValueChange={(value) => setTerminalFontWeight(value as FontWeight)}
           />
         </SettingsRow>
-        <SettingsRow label={t('Bold font weight')}>
+        <SettingsRow rowId="terminal.bold-font-weight" label={t('Bold font weight')}>
           <SettingsSelect
             value={terminalFontWeightBold}
             options={fontWeightOptions}
@@ -479,8 +479,8 @@ function TerminalAppearance() {
 export function TerminalSettings() {
   const { t } = useI18n();
   return (
-    <SettingsPage title={t('Terminal & editor')}>
-      <SettingsSection title={t('Shell')}>
+    <SettingsPage rowId="terminal.root" title={t('Terminal & editor')}>
+      <SettingsSection rowId="terminal.shell" title={t('Shell')}>
         <WindowsLocalShellRow />
         <TerminalShellRow />
       </SettingsSection>

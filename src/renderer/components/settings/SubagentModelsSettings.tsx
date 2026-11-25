@@ -71,6 +71,7 @@ export function SubagentModelsSettings() {
   return (
     <SettingsSection>
       <SettingsRow
+        rowId="providers.let-the-agent-pick-subagent-models"
         label={t('Let the agent pick subagent models')}
         description={
           <>

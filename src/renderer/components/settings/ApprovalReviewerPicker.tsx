@@ -45,6 +45,7 @@ export function ApprovalReviewerPicker() {
   return (
     <>
       <SettingsRow
+        rowId="providers.assistant-approval-model"
         label={t('Assistant approval model')}
         description={
           <>
@@ -84,6 +85,7 @@ export function ApprovalReviewerPicker() {
       {classifierOnly && (
         <>
           <SettingsSubRow
+            rowId="providers.auto-manage-approvals"
             label={t('Auto-manage approvals')}
             description={
               autoManage
@@ -98,6 +100,7 @@ export function ApprovalReviewerPicker() {
             <SettingsSwitch checked={autoManage} onCheckedChange={setAutoManage} />
           </SettingsSubRow>
           <SettingsSubRow
+            rowId="providers.auto-allow-threshold"
             label={t('Auto-allow threshold')}
             description={t(
               'Only runs automatically when the allow probability reaches this value. Operations near the threshold may be allowed one time and not the next.'

@@ -7,6 +7,7 @@ import {
   resolveActiveCategory,
   SETTINGS_GROUPS,
   searchCategories,
+  settingsEntryPath,
   visibleCategories,
 } from './settingsCategories';
 
@@ -146,6 +147,18 @@ describe('groupCategories', () => {
       'app',
       'system',
     ]);
+  });
+});
+
+describe('settingsEntryPath', () => {
+  it('拼出组、分类和标题，侧栏可以不带标题', () => {
+    const entry = { category: 'providers', title: 'Conversation title summary' };
+    const translate = (text: string) =>
+      text === 'Conversation title summary' ? '会话标题总结' : text;
+    expect(settingsEntryPath(entry, translate)).toBe(
+      'Models & agents › Model Providers › 会话标题总结'
+    );
+    expect(settingsEntryPath(entry, translate, false)).toBe('Models & agents › Model Providers');
   });
 });
 

@@ -69,7 +69,9 @@ import { SshSettings } from './SshSettings';
 import {
   groupCategories,
   resolveActiveCategory,
+  SETTINGS_CATEGORY_LABELS,
   searchCategories,
+  settingsEntryPath,
   visibleCategories,
 } from './settingsCategories';
 import { TerminalSettings } from './TerminalSettings';
@@ -301,33 +303,38 @@ export function SettingsContent({
     /** 子菜单：缩进挂在父分类下 */
     sub?: boolean;
   }> = [
-    { id: 'general', icon: Settings, label: 'General' },
-    { id: 'shortcuts', icon: Keyboard, label: 'Shortcuts' },
-    { id: 'appearance', icon: Palette, label: 'Appearance' },
-    { id: 'conversation', icon: MessageSquareText, label: 'Conversation display' },
-    { id: 'terminal', icon: SquareTerminal, label: 'Terminal & editor' },
-    { id: 'runtime', icon: Timer, label: 'Runtime & sessions' },
-    { id: 'providers', icon: Server, label: 'Model Providers' },
-    { id: 'presets', icon: Layers, label: 'Presets' },
-    { id: 'agents', icon: Bot, label: 'Agent types' },
-    { id: 'tools', icon: Wrench, label: 'Built-in tools' },
-    { id: 'workflows', icon: Workflow, label: 'Workflows' },
-    { id: 'memory', icon: Brain, label: 'Memory' },
-    { id: 'privacy', icon: Shield, label: 'Privacy' },
-    { id: 'skills', icon: Sparkles, label: 'Skills' },
-    { id: 'plugins', icon: Puzzle, label: 'Enso plugins' },
-    { id: 'mcp', icon: Plug, label: 'MCP Servers' },
-    { id: 'instructions', icon: FileText, label: 'Instruction Files' },
-    { id: 'phone', icon: Smartphone, label: 'Devices' },
-    { id: 'ssh', icon: Terminal, label: 'SSH' },
-    { id: 'usage', icon: BarChart3, label: 'Usage' },
-    { id: 'resources', icon: Gauge, label: 'Resources' },
-    { id: 'logs', icon: ScrollText, label: 'Logs' },
-    { id: 'experimental', icon: FlaskConical, label: 'Experimental' },
-    { id: 'secretary', icon: MessagesSquare, label: 'Secretary' },
-    { id: 'contacts', icon: ContactRound, label: 'Contacts & owner' },
-    { id: 'bots', icon: BotMessageSquare, label: 'Bot mode', sub: true },
-    { id: 'botTemplates', icon: LayoutTemplate, label: 'Bot templates', sub: true },
+    { id: 'general', icon: Settings, label: SETTINGS_CATEGORY_LABELS.general },
+    { id: 'shortcuts', icon: Keyboard, label: SETTINGS_CATEGORY_LABELS.shortcuts },
+    { id: 'appearance', icon: Palette, label: SETTINGS_CATEGORY_LABELS.appearance },
+    { id: 'conversation', icon: MessageSquareText, label: SETTINGS_CATEGORY_LABELS.conversation },
+    { id: 'terminal', icon: SquareTerminal, label: SETTINGS_CATEGORY_LABELS.terminal },
+    { id: 'runtime', icon: Timer, label: SETTINGS_CATEGORY_LABELS.runtime },
+    { id: 'providers', icon: Server, label: SETTINGS_CATEGORY_LABELS.providers },
+    { id: 'presets', icon: Layers, label: SETTINGS_CATEGORY_LABELS.presets },
+    { id: 'agents', icon: Bot, label: SETTINGS_CATEGORY_LABELS.agents },
+    { id: 'tools', icon: Wrench, label: SETTINGS_CATEGORY_LABELS.tools },
+    { id: 'workflows', icon: Workflow, label: SETTINGS_CATEGORY_LABELS.workflows },
+    { id: 'memory', icon: Brain, label: SETTINGS_CATEGORY_LABELS.memory },
+    { id: 'privacy', icon: Shield, label: SETTINGS_CATEGORY_LABELS.privacy },
+    { id: 'skills', icon: Sparkles, label: SETTINGS_CATEGORY_LABELS.skills },
+    { id: 'plugins', icon: Puzzle, label: SETTINGS_CATEGORY_LABELS.plugins },
+    { id: 'mcp', icon: Plug, label: SETTINGS_CATEGORY_LABELS.mcp },
+    { id: 'instructions', icon: FileText, label: SETTINGS_CATEGORY_LABELS.instructions },
+    { id: 'phone', icon: Smartphone, label: SETTINGS_CATEGORY_LABELS.phone },
+    { id: 'ssh', icon: Terminal, label: SETTINGS_CATEGORY_LABELS.ssh },
+    { id: 'usage', icon: BarChart3, label: SETTINGS_CATEGORY_LABELS.usage },
+    { id: 'resources', icon: Gauge, label: SETTINGS_CATEGORY_LABELS.resources },
+    { id: 'logs', icon: ScrollText, label: SETTINGS_CATEGORY_LABELS.logs },
+    { id: 'experimental', icon: FlaskConical, label: SETTINGS_CATEGORY_LABELS.experimental },
+    { id: 'secretary', icon: MessagesSquare, label: SETTINGS_CATEGORY_LABELS.secretary },
+    { id: 'contacts', icon: ContactRound, label: SETTINGS_CATEGORY_LABELS.contacts },
+    { id: 'bots', icon: BotMessageSquare, label: SETTINGS_CATEGORY_LABELS.bots, sub: true },
+    {
+      id: 'botTemplates',
+      icon: LayoutTemplate,
+      label: SETTINGS_CATEGORY_LABELS.botTemplates,
+      sub: true,
+    },
   ];
   const categories = visibleCategories(
     allCategories,
@@ -351,6 +358,14 @@ export function SettingsContent({
   }, [resolvedCategory, activeCategory]);
 
   const activeLabel = categories.find((c) => c.id === activeCategory)?.label;
+  const hitButtonRefs = React.useRef(new Map<string, HTMLButtonElement>());
+  const flatHits = groupedCategories.flatMap((group) =>
+    group.items.flatMap((category) => category.hits)
+  );
+  const focusHit = (index: number) => {
+    const hit = flatHits[index];
+    if (hit) hitButtonRefs.current.get(hit.id)?.focus();
+  };
 
   return (
     <div className="flex h-full w-full">
@@ -386,6 +401,7 @@ export function SettingsContent({
               value={settingsQuery}
               onValueChange={setSettingsQuery}
               placeholder={t('Search settings')}
+              onArrowDown={() => focusHit(0)}
             />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -425,17 +441,41 @@ export function SettingsContent({
                           <button
                             type="button"
                             key={hit.id}
+                            ref={(node) => {
+                              if (node) hitButtonRefs.current.set(hit.id, node);
+                              else hitButtonRefs.current.delete(hit.id);
+                            }}
+                            onKeyDown={(event) => {
+                              const index = flatHits.findIndex((item) => item.id === hit.id);
+                              if (event.key === 'ArrowDown') {
+                                event.preventDefault();
+                                if (index >= 0 && index < flatHits.length - 1) focusHit(index + 1);
+                              } else if (event.key === 'ArrowUp') {
+                                event.preventDefault();
+                                if (index <= 0) searchInputRef.current?.focus();
+                                else focusHit(index - 1);
+                              } else if (event.key === 'Escape') {
+                                // 与搜索框一致：有字时 Esc 只清空并回到搜索框，不冒泡成「退出设置」
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setSettingsQuery('');
+                                searchInputRef.current?.focus();
+                              }
+                            }}
                             onClick={() => {
                               openCategory(category.id);
                               setFlashRowId(hit.id);
                             }}
                             className={cn(
-                              'block w-full truncate rounded-md pr-3 text-left text-xs text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                              'block w-full rounded-md pr-3 text-left text-xs text-muted-foreground hover:bg-background/60 hover:text-foreground',
                               category.sub ? 'pl-14' : 'pl-9',
                               isMobile ? 'py-2' : 'py-1'
                             )}
                           >
-                            {t(hit.title)}
+                            <span className="block truncate">{t(hit.title)}</span>
+                            <span className="block truncate text-[10px] text-muted-foreground/70">
+                              {settingsEntryPath(hit, t, false)}
+                            </span>
                           </button>
                         ))}
                       </div>

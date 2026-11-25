@@ -17,6 +17,7 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
   const isMac = window.electronAPI.env.platform === 'darwin' && !window.electronAPI.remote;
   return (
     <SettingsPage
+      rowId="experimental.root"
       title={t('Experimental')}
       description={t('Features still being tested. They may change or be removed.')}
     >

@@ -573,6 +573,7 @@ function OwnerIdentity({
   return (
     <div data-enso="secretary-contact-owner">
       <SettingsRow
+        rowId="contacts.github-accounts"
         label={t('GitHub accounts')}
         description={
           suggestion || error === 'invalid-github-login' ? (
@@ -631,6 +632,7 @@ function OwnerIdentity({
         </SettingsButton>
       </SettingsRow>
       <SettingsRow
+        rowId="contacts.external-messages"
         label={t('Messages that are not from you')}
         description={t(
           'Events from anyone else are left to the agent unless you require confirmation.'
@@ -1226,7 +1228,7 @@ export function SecretaryContactPanel({
   // 总开关管的是各渠道收发：设置页放在「联系渠道」组顶部
   const masterSwitch = (
     <div data-enso="secretary-contact-master">
-      <SettingsRow label={t('Enable contacts')}>
+      <SettingsRow rowId="contacts.enable-contacts" label={t('Enable contacts')}>
         <EnableSwitch
           checked={state.enabled}
           disabled={busy}
@@ -1359,6 +1361,7 @@ export function SecretaryContactPanel({
 
       <SettingsRow
         interactive
+        rowId="contacts.plugin-market"
         label={
           <button
             type="button"

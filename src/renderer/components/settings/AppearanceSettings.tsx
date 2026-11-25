@@ -307,7 +307,7 @@ function BackgroundImageSettings() {
 
   const controls = (
     <>
-      <SettingsRow label={t('Source type')}>
+      <SettingsRow rowId="appearance.source-type" label={t('Source type')}>
         <SettingsSelect
           value={sourceType}
           options={sourceTypeOptions}
@@ -325,7 +325,7 @@ function BackgroundImageSettings() {
         />
       </SettingsRow>
       {sourceType !== 'file' && (
-        <SettingsRow label={t('Auto switch')}>
+        <SettingsRow rowId="appearance.auto-switch" label={t('Auto switch')}>
           <SettingsSwitch
             checked={randomEnabled}
             onCheckedChange={(checked) => setRandomEnabled(checked === true)}
@@ -389,7 +389,7 @@ function BackgroundImageSettings() {
         defaultValue={65}
         onCommit={(v) => setCodeOpacity(v / 100)}
       />
-      <SettingsRow label={t('Size mode')}>
+      <SettingsRow rowId="appearance.size-mode" label={t('Size mode')}>
         <SettingsSelect value={sizeMode} options={sizeModeOptions} onValueChange={setSizeMode} />
       </SettingsRow>
     </>
@@ -397,10 +397,12 @@ function BackgroundImageSettings() {
 
   return (
     <SettingsSection
+      rowId="appearance.background-image"
       title={t('Background image')}
       description={t('Show a custom image behind the interface')}
     >
       <SettingsRow
+        rowId="appearance.enable-custom-background"
         label={t('Enable custom background image')}
         description={
           themeBackground
@@ -503,8 +505,12 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
   ];
 
   return (
-    <SettingsPage title={t('Appearance')}>
-      <SettingsSection title={t('Personalization')} description={t('Applied on top of any theme')}>
+    <SettingsPage rowId="appearance.root" title={t('Appearance')}>
+      <SettingsSection
+        rowId="appearance.personalization"
+        title={t('Personalization')}
+        description={t('Applied on top of any theme')}
+      >
         <SettingsRow rowId="appearance.theme" label={t('Theme mode')}>
           <SettingsSegmented value={theme} onValueChange={setTheme} options={themeModeOptions} />
         </SettingsRow>

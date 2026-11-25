@@ -110,6 +110,7 @@ export function ContextMenuOpeningSettings() {
   return (
     <>
       <SettingsRow
+        rowId="terminal.context-menu-opening"
         label={t('Context menu opening')}
         description={
           <>

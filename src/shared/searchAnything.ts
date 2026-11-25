@@ -1,3 +1,6 @@
+import { getTranslation } from './i18n';
+import { GENERATED_SETTINGS_CATALOG } from './settingsCatalog.generated';
+
 export const SEARCH_ANYTHING_BROWSER_LIMIT = 20;
 export const SEARCH_ANYTHING_SETTINGS_LIMIT = 20;
 export const SEARCH_ANYTHING_RECENT_BROWSER = 5;
@@ -35,6 +38,59 @@ function tokenize(text: string): string[] {
 
 function isCjkToken(token: string): boolean {
   return CJK_RE.test(token);
+}
+
+function normalize(text: string): string {
+  return text.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/** 原文、中文译文、当前界面译文。英文界面也能用中文命中。 */
+function textVariants(text: string, translate?: (text: string) => string): string[] {
+  const values = [text];
+  const zh = getTranslation('zh', text);
+  if (zh !== text) values.push(zh);
+  if (translate) {
+    const translated = translate(text);
+    if (!values.includes(translated)) values.push(translated);
+  }
+  return values;
+}
+
+function matchesAny(texts: string[], tokens: string[]): boolean {
+  return texts.some((text) => fieldMatches(text, tokens));
+}
+
+function wordPrefix(title: string, token: string): boolean {
+  if (isCjkToken(token)) return false;
+  return tokenize(title).some((part) => part.startsWith(token));
+}
+
+/** 0 整句相等，1 开头或词前缀，2 子串，3 标题里没有这个词 */
+function tokenTitleRank(token: string, titles: string[]): number {
+  let best = 3;
+  const needle = normalize(token);
+  for (const title of titles) {
+    const norm = normalize(title);
+    if (norm === needle) best = Math.min(best, 0);
+    else if (norm.startsWith(needle) || wordPrefix(title, needle)) best = Math.min(best, 1);
+    else if (norm.includes(needle)) best = Math.min(best, 2);
+  }
+  return best;
+}
+
+function settingsHitRank(
+  entry: SettingsSearchEntry,
+  query: string,
+  translate?: (text: string) => string
+): number {
+  const titles = textVariants(entry.title, translate);
+  if (titles.some((title) => normalize(title) === normalize(query))) return 0;
+  const tokens = tokenize(query);
+  let worst = 0;
+  for (const token of tokens) worst = Math.max(worst, tokenTitleRank(token, titles));
+  const queryNorm = normalize(query);
+  if (titles.some((title) => normalize(title).startsWith(queryNorm))) return Math.min(worst, 1);
+  return worst;
 }
 
 function fieldMatches(text: string, tokens: string[]): boolean {
@@ -105,333 +161,20 @@ export function searchSettingsEntries(
 ): SettingsSearchEntry[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
-  // 界面显示的是译文，原文与译文都参与匹配
-  const matches = (text = '') =>
-    fieldMatches(text, tokens) ||
-    (!!options.translate && fieldMatches(options.translate(text), tokens));
   const hits: Array<SettingsSearchEntry & { rank: number }> = [];
   for (const entry of entries) {
-    const titleHit = matches(entry.title);
-    const otherHit = fieldMatches(entry.id, tokens) || matches(entry.description);
+    const titles = textVariants(entry.title, options.translate);
+    const descriptions = textVariants(entry.description ?? '', options.translate);
+    const titleHit = matchesAny(titles, tokens);
+    const otherHit = fieldMatches(entry.id, tokens) || matchesAny(descriptions, tokens);
     if (!titleHit && !otherHit) continue;
-    hits.push({ ...entry, rank: titleHit ? 0 : 1 });
+    hits.push({ ...entry, rank: settingsHitRank(entry, query, options.translate) });
   }
   hits.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
   return hits
     .slice(0, options.limit ?? SEARCH_ANYTHING_SETTINGS_LIMIT)
     .map(({ rank: _rank, ...entry }) => entry);
 }
-
-const STATIC_CATALOG: SettingsSearchEntry[] = [
-  { id: 'general.language', category: 'general', title: 'Language' },
-  {
-    id: 'terminal.appearance',
-    category: 'terminal',
-    title: 'Terminal appearance',
-    description: 'Color scheme, font, size and weight of side panel terminals',
-  },
-  {
-    id: 'general.autoArchiveIdleDays',
-    category: 'runtime',
-    title: 'Archive idle conversations',
-    description:
-      'Move conversations that have been idle this long into Archived. Does not delete them.',
-  },
-  {
-    id: 'general.autoArchiveMergedWorktrees',
-    category: 'runtime',
-    title: 'Clean up merged worktrees',
-  },
-  {
-    id: 'general.autoDeleteArchivedDays',
-    category: 'runtime',
-    title: 'Delete archived conversations after',
-  },
-  {
-    id: 'general.windowsLocalShell',
-    category: 'terminal',
-    title: 'Windows local command shell',
-    description:
-      'Only the Windows local agent command tool. SSH and other platforms stay on bash. Takes effect on the next session.',
-  },
-  {
-    id: 'general.terminalShell',
-    category: 'terminal',
-    title: 'Terminal shell',
-    description: 'Applies to new side panel terminals. SSH projects keep the remote login shell.',
-  },
-  {
-    id: 'appearance.openChangesOnFileEdit',
-    category: 'conversation',
-    title: 'Open Changes when files are edited',
-  },
-  {
-    id: 'appearance.compactReadOnlyTools',
-    category: 'conversation',
-    title: 'Compact read-only tool calls',
-  },
-  {
-    id: 'appearance.expandLiveEdits',
-    category: 'conversation',
-    title: 'Expand file edits while running',
-  },
-  {
-    id: 'appearance.expandLiveReasoning',
-    category: 'conversation',
-    title: 'Expand reasoning while streaming',
-  },
-  {
-    id: 'appearance.autoCollapseTurns',
-    category: 'conversation',
-    title: 'Auto-collapse previous turns',
-  },
-  {
-    id: 'appearance.quoteSelectionButton',
-    category: 'conversation',
-    title: 'Quote button on text selection',
-  },
-  {
-    id: 'appearance.collapseCompletedActivity',
-    category: 'conversation',
-    title: 'Collapse activity after reply',
-  },
-  {
-    id: 'appearance.collapseLiveActivity',
-    category: 'conversation',
-    title: 'Collapse finished activity while replying',
-  },
-  {
-    id: 'appearance.liveActivityFoldDelaySec',
-    category: 'conversation',
-    title: 'Wait before folding',
-  },
-  {
-    id: 'appearance.pinUnfinishedTodos',
-    category: 'conversation',
-    title: 'Pin unfinished todos',
-  },
-  {
-    id: 'appearance.headerSessionTabs',
-    category: 'conversation',
-    title: 'Show active sessions in the title bar',
-  },
-  {
-    id: 'appearance.navRailSide',
-    category: 'appearance',
-    title: 'Turn marks',
-  },
-  {
-    id: 'appearance.chatTypography',
-    category: 'conversation',
-    title: 'Conversation typography',
-    description: 'Headings, tables and inline code scale with the body text',
-  },
-  {
-    id: 'general.notifyMainAgentOnly',
-    category: 'general',
-    title: 'Notify only for the main agent',
-    description:
-      'Skip coworker completion and failure notifications on this computer and the paired phone. Questions and approvals still notify.',
-  },
-  {
-    id: 'general.smartCompactEnabled',
-    category: 'runtime',
-    title: 'Context compaction strategy',
-    description:
-      'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model and compaction mode apply to open conversations on the next compaction.',
-  },
-  {
-    id: 'general.compactReserveTokens',
-    category: 'runtime',
-    title: 'Compaction reserve tokens',
-    description:
-      'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.',
-  },
-  {
-    id: 'general.generationStallTimeout',
-    category: 'runtime',
-    title: 'Stop if no output',
-  },
-  {
-    id: 'general.autoRetryLimit',
-    category: 'runtime',
-    title: 'Auto-retry on transient errors',
-    description: 'Retry count after 429, 5xx or network errors; off, fixed count or unlimited',
-  },
-  {
-    id: 'general.longCacheRetention',
-    category: 'runtime',
-    title: 'Long prompt cache (1 hour)',
-    description:
-      'Keep the prompt cache for 1 hour instead of 5 minutes. Saves a lot when turns are more than 5 minutes apart, since the cache no longer expires and gets rewritten every turn, but cache writes cost 2× instead of 1.25×, so rapid follow-ups tens of seconds apart cost more. Anthropic models only. Applies from the next request.',
-  },
-  {
-    id: 'general.proxy',
-    category: 'general',
-    title: 'Network proxy',
-    description: 'Used by model requests, the built-in browser, and agent tools',
-  },
-  {
-    id: 'general.caCert',
-    category: 'general',
-    title: 'Custom CA certificate',
-    description:
-      'Trust an extra CA (PEM file) for model endpoints signed by a private CA. TLS verification stays on.',
-  },
-  { id: 'general.updates', category: 'general', title: 'Updates' },
-  {
-    id: 'general.ensoCommand',
-    category: 'general',
-    title: "'enso' terminal command",
-    description: 'Run `enso .` in a terminal to open the current folder in EnsoCode.',
-  },
-  {
-    id: 'general.finderQuickAction',
-    category: 'general',
-    title: 'Finder Quick Action',
-    description: 'Right-click a folder in Finder and choose Services > Open with EnsoCode.',
-  },
-  {
-    id: 'experimental.botMode',
-    category: 'experimental',
-    title: 'Bot mode',
-    description:
-      'Adds a Code | Bot switch to the sidebar. Create members with their own persona, model and tools, and chat with them alone or in groups.',
-  },
-  {
-    id: 'experimental.secretary',
-    category: 'experimental',
-    title: 'Secretary',
-    description:
-      'A global agent that watches your projects and sessions, creates sessions to do the work, and reports results back to you.',
-  },
-  {
-    id: 'bots.routeClassifier',
-    category: 'bots',
-    title: 'Group reply picker model',
-    description:
-      'When nobody is @-mentioned in a smart-routing group, this model picks which member replies.',
-  },
-  {
-    id: 'bots.assistantModel',
-    category: 'bots',
-    title: 'Bot assistant model',
-    description: 'Used for helper tasks such as auto-configuring member abilities.',
-  },
-  { id: 'secretary.root', category: 'secretary', title: 'Secretary' },
-  {
-    id: 'secretary.profile',
-    category: 'secretary',
-    title: 'Secretary profile',
-    description: 'Name, avatar, visible projects and patrol.',
-  },
-  {
-    id: 'secretary.dispatchLimit',
-    category: 'secretary',
-    title: 'Concurrent dispatch limit',
-    description:
-      'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.',
-  },
-  {
-    id: 'secretary.style',
-    category: 'secretary',
-    title: 'Style and interruptions',
-    description: 'What it calls you, reply language, style and system notifications.',
-  },
-  {
-    id: 'secretary.schedules',
-    category: 'secretary',
-    title: 'Scheduled tasks',
-    description: 'Daily brief, to-do reminders and one-off or recurring prompts.',
-  },
-  {
-    id: 'contacts.owner',
-    category: 'contacts',
-    title: 'Owner identity',
-    description:
-      'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.',
-  },
-  {
-    id: 'contacts.channels',
-    category: 'contacts',
-    title: 'Contact channels',
-    description: 'Where the secretary can be reached and where it pushes updates.',
-  },
-  {
-    id: 'secretary.reset',
-    category: 'secretary',
-    title: 'Reset the secretary and start over',
-  },
-  { id: 'shortcuts.root', category: 'shortcuts', title: 'Shortcuts' },
-  { id: 'appearance.theme', category: 'appearance', title: 'Theme mode' },
-  {
-    id: 'appearance.themeGallery',
-    category: 'appearance',
-    title: 'Theme',
-    description: 'Built-in and plugin themes; each one is a set of color tokens',
-  },
-  {
-    id: 'appearance.accent',
-    category: 'appearance',
-    title: 'Accent color',
-    description: 'Used for running state, checkmarks and plan mode',
-  },
-  {
-    id: 'appearance.userCss',
-    category: 'appearance',
-    title: 'Custom CSS',
-    description: 'Inject user.css into every window; saved changes apply immediately',
-  },
-  { id: 'providers.root', category: 'providers', title: 'Model Providers' },
-  { id: 'presets.root', category: 'presets', title: 'Presets' },
-  { id: 'agents.root', category: 'agents', title: 'Agent types' },
-  {
-    id: 'agents.maxActiveCoworkers',
-    category: 'agents',
-    title: 'Max active coworkers',
-    description:
-      'How many coworkers one conversation can keep at once. Existing ones stay if you lower the limit; hire more only after dismissing. Subagents are not counted.',
-  },
-  { id: 'tools.root', category: 'tools', title: 'Built-in tools' },
-  {
-    id: 'tools.rtkEnabled',
-    category: 'tools',
-    title: 'RTK command compression',
-    description:
-      'Compress supported command output before it enters the model context. Takes effect on new conversations.',
-  },
-  {
-    id: 'tools.dcgEnabled',
-    category: 'tools',
-    title: 'Destructive command guard (dcg)',
-    description:
-      'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.',
-  },
-  {
-    id: 'tools.editMode',
-    category: 'tools',
-    title: 'File edit mode',
-    description:
-      'Choose how files are modified. Apply patch is the default. New and cold-restored sessions use this mode; already warm sessions keep their current mode.',
-  },
-  { id: 'skills.root', category: 'skills', title: 'Skills' },
-  { id: 'mcp.root', category: 'mcp', title: 'MCP Servers' },
-  { id: 'instructions.root', category: 'instructions', title: 'Instruction Files' },
-  {
-    id: 'phone.root',
-    category: 'phone',
-    title: 'Devices',
-    description: 'Generate a pairing code to let a phone or another desktop connect.',
-  },
-  { id: 'ssh.root', category: 'ssh', title: 'SSH' },
-  {
-    id: 'ssh.timeout',
-    category: 'ssh',
-    title: 'SSH timeout',
-    description:
-      'Time limit for connection tests, loading remote AGENTS.md, remote folder browsing and file panel actions. Agent tool commands are not affected.',
-  },
-];
 
 function named(
   prefix: string,
@@ -447,7 +190,7 @@ function named(
 
 export function buildSettingsCatalog(snapshot?: SettingsCatalogSnapshot): SettingsSearchEntry[] {
   return [
-    ...STATIC_CATALOG,
+    ...GENERATED_SETTINGS_CATALOG,
     ...named('providers', 'providers', snapshot?.providers),
     ...named('skills', 'skills', snapshot?.skills),
     ...named('mcp', 'mcp', snapshot?.mcpServers),

@@ -44,8 +44,12 @@ export function GeneralSettings() {
   const { t } = useI18n();
 
   return (
-    <SettingsPage title={t('General')} description={t('General application settings')}>
-      <SettingsSection title={t('Application')}>
+    <SettingsPage
+      rowId="general.root"
+      title={t('General')}
+      description={t('General application settings')}
+    >
+      <SettingsSection rowId="general.application" title={t('Application')}>
         <SettingsRow rowId="general.language" label={t('Language')}>
           <SettingsSelect
             value={language}
@@ -59,7 +63,7 @@ export function GeneralSettings() {
         <NotificationSection />
       </SettingsSection>
 
-      <SettingsSection title={t('Network')}>
+      <SettingsSection rowId="general.network" title={t('Network')}>
         <ProxySection />
         <CaCertSection />
       </SettingsSection>
@@ -68,7 +72,7 @@ export function GeneralSettings() {
       <UpdateSection />
 
       {window.electronAPI.env.platform === 'darwin' && !isRemoteClient() && (
-        <SettingsSection title={t('Integrations')}>
+        <SettingsSection rowId="general.integrations" title={t('Integrations')}>
           <ShellIntegrationRow
             kind="ensoCommand"
             title={t("'enso' terminal command")}
@@ -227,7 +231,7 @@ function ProxySection() {
   };
 
   const urlRow = (
-    <SettingsSubRow label={t('Proxy URL')}>
+    <SettingsSubRow rowId="general.proxy-url" label={t('Proxy URL')}>
       <ProxyUrlField
         value={draft}
         error={error}
@@ -243,6 +247,7 @@ function ProxySection() {
   return (
     <div data-settings-row="general.proxy">
       <SettingsRow
+        rowId="general.proxy"
         label={t('Network proxy')}
         description={t('Used by model requests, the built-in browser, and agent tools')}
       >
@@ -512,6 +517,7 @@ function UpdateSection() {
 
   const autoRestartRow = (
     <SettingsSubRow
+      rowId="general.restart-automatically-to-apply-updates"
       label={t('Restart automatically to apply updates')}
       description={
         autoRestartForUpdate === 'immediate'
@@ -551,6 +557,7 @@ function UpdateSection() {
       }
     >
       <SettingsRow
+        rowId="general.current-version"
         label={
           <>
             {t('Current version')} · {APP_VERSION}
@@ -601,6 +608,7 @@ function UpdateSection() {
       </SettingsRow>
       {server?.canRestart && (
         <SettingsRow
+          rowId="general.restart-server"
           label={t('Restart server')}
           description={t(
             'Waits for running tasks to finish before restarting; this page reconnects after the server is back. Force restart does not wait.'
@@ -629,6 +637,7 @@ function UpdateSection() {
         </SettingsRow>
       )}
       <SettingsRow
+        rowId="general.automatic-updates"
         label={t('Automatic updates')}
         description={
           server?.mode === 'manual'

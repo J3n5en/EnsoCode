@@ -65,6 +65,7 @@ export function UsageSettings() {
 
   return (
     <SettingsPage
+      rowId="usage.root"
       title={t('Usage')}
       description={t(
         'Token usage across all local sessions; cost is estimated from catalog prices.'

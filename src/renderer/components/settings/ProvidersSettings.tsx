@@ -296,7 +296,10 @@ export function ProvidersSettings() {
         </>
       }
     >
-      <SettingsSection title={t('Models used by features')}>
+      <SettingsSection
+        rowId="providers.models-used-by-features"
+        title={t('Models used by features')}
+      >
         <DefaultModelPicker />
         <ImageGenerationPicker />
         <TitleSummaryPicker />
@@ -306,9 +309,10 @@ export function ProvidersSettings() {
       <VirtualModelsSettings />
       <SubagentModelsSettings />
 
-      <SettingsSection title={t('Providers')}>
+      <SettingsSection rowId="providers.providers" title={t('Providers')}>
         {poolSources.length > 0 && !providers.some((p) => p.oauthAccountPool) && (
           <SettingsRow
+            rowId="providers.create-chatgpt-account-pool"
             label={t('Create ChatGPT account pool')}
             description={t(
               'Pool entries do not show a single account quota. Fixed-account entries remain unchanged.'
@@ -472,6 +476,7 @@ export function ProvidersSettings() {
                       </SettingsSubRow>
                       {removeError?.providerId === provider.id && (
                         <SettingsSubRow
+                          rowId="providers.sign-out-failed-message"
                           label={
                             <span className="text-destructive-text">
                               {t('Sign-out failed: {{message}}', { message: removeError.message })}
