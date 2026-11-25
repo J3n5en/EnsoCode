@@ -834,12 +834,28 @@ describe('session_send', () => {
     expect(h.prompts).toEqual([]);
   });
 
-  it('运行中把消息追加到排队', async () => {
+  it('不传 mode 时默认 steer：运行中插话，不排到回合后面', async () => {
     const h = harness({
       file: dispatchedFile(),
       statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
     });
     const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(result).toEqual({ ok: true, result: { status: 'steered' } });
+    expect(h.steers).toEqual([{ conversationId: 'c1', text: '继续', deliveryId: 'id-1' }]);
+    expect(h.queued).toEqual([]);
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('显式 mode=queue 时运行中把消息追加到排队', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '继续',
+      mode: 'queue',
+    });
     expect(result).toEqual({ ok: true, result: { status: 'queued' } });
     expect(h.queued).toEqual([
       {

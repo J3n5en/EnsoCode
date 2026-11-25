@@ -468,7 +468,7 @@ function sessionFields(
     value: {
       conversationId: conversationId.value,
       message: message.value,
-      mode: (mode as SecretarySendMode | undefined) ?? 'queue',
+      mode: (mode as SecretarySendMode | undefined) ?? 'steer',
       clearQueue: clearQueue === true,
       taskId: taskId.value,
       attachments: attachments.value,
