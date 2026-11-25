@@ -11,6 +11,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionWorktree, WorktreeStatus } from '../../../shared/types/worktree';
+import { seedWorktreeDependencies } from './seed';
 import { worktreeTrash } from './trash';
 
 function git(cwd: string, ...args: string[]): Promise<string> {
@@ -93,6 +94,7 @@ export async function createSessionWorktree(
   const path = join(root, projectId, `${base}${suffix}`);
   await mkdir(join(root, projectId), { recursive: true });
   await git(repoPath, 'worktree', 'add', '-b', branch, path, baseCommit);
+  await seedDependencies(repoPath, path);
 
   return {
     conversationId,
@@ -301,5 +303,25 @@ export async function rebuildSessionWorktree(
   } else {
     await git(record.repoPath, 'worktree', 'add', '-b', record.branch, path, record.baseCommit);
   }
+  await seedDependencies(record.repoPath, path);
   return { ...record, path, createdAt: Date.now() };
+}
+
+/**
+ * 播种依赖到新建 worktree：零拷贝复制 node_modules，agent 首次 install 退化为校验快路径。
+ * best-effort 内联等待：并行 clonefile 通常秒级完成，同步等它能避免与 agent 的 install 竞争；
+ * 失败只留日志，绝不阻断 worktree 创建。
+ */
+async function seedDependencies(repoPath: string, worktreePath: string): Promise<void> {
+  try {
+    const result = await seedWorktreeDependencies({ repoPath, worktreePath });
+    if (result.seeded.length > 0 || result.errors > 0) {
+      console.log(
+        `[worktree] seeded ${result.seeded.length} dependency dirs into ${worktreePath} ` +
+          `(${result.files} files, ${result.errors} errors, ${result.durationMs}ms)`
+      );
+    }
+  } catch (error) {
+    console.warn('[worktree] dependency seeding failed (non-fatal):', error);
+  }
 }
