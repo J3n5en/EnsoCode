@@ -14,7 +14,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { findNestedBoxes } from './kit/boxes';
 import { setupPin } from './pin.testUtils';
 
-/** 迁移时只改这里：分区 → 页面组件 */
+/** 迁移时只改这里：分区 → 页面组件。逐个点控件较慢，机器忙时 5s 默认超时不够 */
 async function MEMORY_GROUP_PAGES() {
   const { MemorySettings } = await import('./MemorySettings');
   const { MemoryKnowledge } = await import('./MemoryKnowledge');
@@ -216,7 +216,7 @@ describe('记忆与指令组设置迁移前后行为一致', () => {
 
   it('每个控件的当前值（默认值）与读写的 store key / electronAPI 调用不变', async () => {
     expect(await pin.probe()).toMatchSnapshot();
-  });
+  }, 30_000);
 });
 
 describe('启用记忆、有指令文件、打开提炼与遗忘、换成本地提炼模型后同样不变', () => {
@@ -248,5 +248,5 @@ describe('启用记忆、有指令文件、打开提炼与遗忘、换成本地�
 
   it('每个控件的当前值与读写的 store key / electronAPI 调用不变', async () => {
     expect(await pin.probe()).toMatchSnapshot();
-  });
+  }, 30_000);
 });
