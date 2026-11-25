@@ -686,7 +686,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
           'Everything the agent has saved. Archiving hides a memory from search but keeps it.'
         )}
       >
-        <div className="flex flex-wrap items-center gap-2 border-border border-b py-2">
+        <div className="flex flex-wrap items-center gap-2 border-border border-b py-2 pointer-coarse:gap-y-[16px]">
           {/* 检索方式属于「怎么搜」，和搜索框合成一个控件，不当作并列的筛选项 */}
           <InputGroup className="w-full sm:w-96" data-size="sm">
             <InputGroupInput

@@ -33,7 +33,8 @@ const pin = setupPin({
   props: { 'electronAPI.env.platform': 'darwin' },
 });
 
-describe('应用组设置迁移前后行为一致', () => {
+// 逐页渲染并点遍控件较慢，机器忙时 5s 默认超时会偶发失败
+describe('应用组设置迁移前后行为一致', { timeout: 30_000 }, () => {
   it('深链行 id 一个不少', () => {
     expect(pin.rows()).toMatchSnapshot();
   });
