@@ -182,7 +182,7 @@ export function LocalAssetImportDialog({ kind, open, onOpenChange }: LocalAssetI
           <>
             <DialogPanel className="max-h-[50vh] space-y-4">
               {foundSources.length === 0 && (
-                <div className="rounded-md border border-dashed px-3 py-6 text-center">
+                <div className="px-3 py-6 text-center">
                   <p className="font-medium text-sm">{t('No local apps detected')}</p>
                 </div>
               )}

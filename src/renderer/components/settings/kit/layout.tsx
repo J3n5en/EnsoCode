@@ -219,6 +219,7 @@ export function SettingsExpandableRow({
   defaultOpen = false,
   control,
   children,
+  label,
   ...row
 }: Omit<SettingsRowProps, 'leading' | 'indent' | 'children'> & {
   defaultOpen?: boolean;
@@ -228,10 +229,21 @@ export function SettingsExpandableRow({
   const { t } = useI18n();
   const [open, setOpen] = React.useState(defaultOpen);
   const regionId = React.useId();
+  // 列表行点名字是展开；拦掉 label 的默认激活，免得顺手切了右侧的启用开关
+  const toggle = (event: React.MouseEvent) => {
+    event.preventDefault();
+    setOpen((value) => !value);
+  };
   return (
     <>
       <SettingsRow
         {...row}
+        label={
+          // biome-ignore lint/a11y/useKeyWithClickEvents: 键盘走左侧的展开按钮
+          <span className="cursor-pointer" onClick={toggle}>
+            {label}
+          </span>
+        }
         leading={
           <button
             type="button"
@@ -239,7 +251,7 @@ export function SettingsExpandableRow({
             aria-controls={regionId}
             aria-label={open ? t('Collapse') : t('Expand')}
             onClick={() => setOpen((value) => !value)}
-            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pointer-coarse:after:absolute pointer-coarse:after:size-[44px]"
+            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ChevronRight className={cn('size-4 transition-transform', open && 'rotate-90')} />
           </button>

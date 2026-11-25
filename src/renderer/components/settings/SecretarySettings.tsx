@@ -43,7 +43,6 @@ import {
   SettingsRow,
   SettingsSaved,
   SettingsSection,
-  TOUCH_TARGET,
   useSettingsRowControl,
 } from './kit';
 import { PickList } from './PresetsSettings';
@@ -69,7 +68,6 @@ const AVATAR_PROBLEM_TEXT: Record<AvatarUploadProblem, string> = {
 function chipClass(active: boolean): string {
   return cn(
     'relative rounded-md px-2.5 py-1 text-xs ring-1 transition-colors pointer-coarse:min-h-[44px] pointer-coarse:min-w-[44px]',
-    TOUCH_TARGET,
     active
       ? 'bg-primary/10 text-foreground ring-primary/60'
       : 'text-muted-foreground ring-border hover:bg-muted'

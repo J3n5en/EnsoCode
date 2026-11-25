@@ -11,12 +11,10 @@ import {
   SettingsRow,
   SettingsSection,
   SettingsSegmented,
-  SettingsSelect,
   SettingsSubRow,
   SettingsSwitch,
 } from '.';
 import { countBoxesInSource, findNestedBoxes } from './boxes';
-import { TOUCH_TARGET } from './controls';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/switch', () => ({
@@ -116,10 +114,10 @@ afterEach(async () => {
 });
 
 describe('SettingsRow', () => {
-  it('触屏下所有控件的点击区都是 44px：下拉框和按钮共用同一个点击区', async () => {
+  it('分段控件的选项在触屏下至少 44px 宽，滚动框上下放出 44px 热区不被裁掉', async () => {
     await render(
-      <SettingsRow rowId="x.range" label="Range">
-        <SettingsSelect
+      <SettingsRow rowId="x.level" label="Level">
+        <SettingsSegmented
           value="a"
           onValueChange={() => {}}
           options={[
@@ -129,8 +127,13 @@ describe('SettingsRow', () => {
         />
       </SettingsRow>
     );
-    const trigger = container.querySelector('[data-slot="select-trigger"]') as HTMLElement;
-    for (const cls of TOUCH_TARGET.split(' ')) expect(trigger.className.split(' ')).toContain(cls);
+    const option = container.querySelector('[role="radio"]') as HTMLElement;
+    expect(option.className.split(' ')).toContain('pointer-coarse:min-w-[44px]');
+    const scroller = option.parentElement as HTMLElement;
+    expect(scroller.className).toContain('overflow-x-auto');
+    expect(scroller.className.split(' ')).toEqual(
+      expect.arrayContaining(['pointer-coarse:py-[12px]', 'pointer-coarse:-my-[12px]'])
+    );
   });
 
   it('标签与说明通过 id 关联到控件，深链行号落在行上', async () => {
@@ -221,6 +224,30 @@ describe('SettingsRow', () => {
 });
 
 describe('SettingsExpandableRow', () => {
+  it('点名字是展开，不经 label 去切右侧开关', async () => {
+    const onChange = vi.fn();
+    await render(
+      <SettingsExpandableRow
+        label="Plugin A"
+        control={<SettingsSwitch checked={false} onCheckedChange={onChange} />}
+      >
+        <SettingsSubRow label="detail" />
+      </SettingsExpandableRow>
+    );
+    const name = byText('label span', 'Plugin A');
+    const click = new (window as unknown as { Event: typeof Event }).Event('click', {
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => name.dispatchEvent(click));
+    expect(click.defaultPrevented).toBe(true);
+    expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+    expect(container.textContent).toContain('detail');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('默认收起，展开后子行缩进显示在同一列表里而不是内嵌卡片', async () => {
     await render(
       <SettingsSection title="Providers">

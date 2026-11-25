@@ -12,7 +12,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsButton, SettingsSection, TOUCH_TARGET } from '../kit';
+import { SettingsButton, SettingsSection } from '../kit';
 
 const EMPTY: ModelPricing = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
@@ -200,10 +200,7 @@ export function UsagePricingEditor({
         description={t('Rates used for cost estimates ($/M tokens).')}
         actions={
           <CollapsibleTrigger
-            className={cn(
-              'relative flex size-7 items-center justify-center text-muted-foreground pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:-translate-1/2',
-              TOUCH_TARGET
-            )}
+            className={cn('relative flex size-7 items-center justify-center text-muted-foreground')}
             aria-label={open ? t('Collapse') : t('Expand')}
           >
             <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />

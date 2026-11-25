@@ -40,9 +40,6 @@ import {
 } from './kit';
 import { ThemeGallery } from './ThemeGallery';
 
-const HIT =
-  'relative pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-[44px] pointer-coarse:after:-translate-1/2';
-
 const ACCENT_LABELS = {
   theme: 'Follow theme',
   violet: 'Violet',
@@ -390,7 +387,6 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
                 onClick={() => setTheme(option.value)}
                 aria-pressed={theme === option.value}
                 className={cn(
-                  HIT,
                   'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors',
                   theme === option.value
                     ? 'bg-background text-foreground shadow-xs'
@@ -408,46 +404,46 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
           label={t('Accent color')}
           description={t('Used for running state, checkmarks and plan mode')}
         >
-          {accentOptions.map((option) =>
-            option.value === 'theme' ? (
-              <button
-                type="button"
-                key={option.value}
-                onClick={() => setAccentColor(option.value)}
-                aria-pressed={accentColor === option.value}
-                className={cn(
-                  HIT,
-                  'flex h-6 items-center gap-1.5 px-2 text-xs transition-shadow',
-                  'rounded-full',
-                  'border',
-                  accentColor === option.value && 'border-transparent ring-2 ring-foreground/60'
-                )}
-              >
-                <span
-                  data-theme-accent
-                  className="size-2.5 rounded-full"
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-2 pointer-coarse:gap-[26px]">
+            {accentOptions.map((option) =>
+              option.value === 'theme' ? (
+                <button
+                  type="button"
+                  key={option.value}
+                  onClick={() => setAccentColor(option.value)}
+                  aria-pressed={accentColor === option.value}
+                  className={cn(
+                    'flex h-6 items-center gap-1.5 px-2 text-xs transition-shadow',
+                    'rounded-full',
+                    'border',
+                    accentColor === option.value && 'border-transparent ring-2 ring-foreground/60'
+                  )}
+                >
+                  <span
+                    data-theme-accent
+                    className="size-2.5 rounded-full"
+                    style={{ backgroundColor: option.swatch }}
+                  />
+                  {option.label}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  key={option.value}
+                  onClick={() => setAccentColor(option.value)}
+                  title={option.label}
+                  aria-label={option.label}
+                  aria-pressed={accentColor === option.value}
                   style={{ backgroundColor: option.swatch }}
+                  className={cn(
+                    'size-5 rounded-full transition-shadow',
+                    accentColor === option.value &&
+                      'ring-2 ring-offset-2 ring-offset-background ring-foreground/60'
+                  )}
                 />
-                {option.label}
-              </button>
-            ) : (
-              <button
-                type="button"
-                key={option.value}
-                onClick={() => setAccentColor(option.value)}
-                title={option.label}
-                aria-label={option.label}
-                aria-pressed={accentColor === option.value}
-                style={{ backgroundColor: option.swatch }}
-                className={cn(
-                  HIT,
-                  'size-5 rounded-full transition-shadow',
-                  accentColor === option.value &&
-                    'ring-2 ring-offset-2 ring-offset-background ring-foreground/60'
-                )}
-              />
-            )
-          )}
+              )
+            )}
+          </div>
         </SettingsRow>
         <SettingsRow
           rowId="appearance.navRailSide"
@@ -456,7 +452,7 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
             'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.'
           )}
         >
-          <div className="flex w-full max-w-36 rounded-lg bg-muted p-0.5 text-xs">
+          <div className="flex w-full max-w-36 rounded-lg bg-muted p-0.5 text-xs pointer-coarse:max-w-none">
             {railOptions.map((option) => (
               <button
                 key={option.value}
@@ -464,8 +460,7 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
                 onClick={() => setNavRailSide(option.value)}
                 aria-pressed={navRailSide === option.value}
                 className={cn(
-                  HIT,
-                  'flex-1 rounded-md px-2 py-1 transition-colors',
+                  'flex-1 rounded-md px-2 py-1 transition-colors pointer-coarse:min-w-[44px]',
                   navRailSide === option.value
                     ? 'bg-background font-medium text-foreground shadow-xs'
                     : 'text-muted-foreground hover:text-foreground'

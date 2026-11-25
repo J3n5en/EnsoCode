@@ -18,6 +18,7 @@ const harness = vi.hoisted(() => ({
   addToast: vi.fn(),
   pluginLoggingEnabled: true,
   setPluginLoggingEnabled: vi.fn(),
+  openSettings: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -30,6 +31,9 @@ vi.mock('@/stores/settings', () => ({
       pluginLoggingEnabled: harness.pluginLoggingEnabled,
       setPluginLoggingEnabled: harness.setPluginLoggingEnabled,
     }),
+}));
+vi.mock('@/stores/appView', () => ({
+  openSettings: (...args: unknown[]) => harness.openSettings(...args),
 }));
 vi.mock('@/components/ui/button', () => ({
   Button: ({
@@ -175,8 +179,13 @@ const byLabel = (label: string) => {
   const found = [...container.querySelectorAll('button')].find(
     (element) => element.getAttribute('aria-label') === label
   );
-  expect(found).not.toBeUndefined();
-  return found as HTMLElement;
+  if (found) return found as HTMLElement;
+  const row = [...container.querySelectorAll('[data-slot="settings-row"]')].find((element) =>
+    [...element.querySelectorAll('label')].some((node) => node.textContent === label)
+  );
+  const button = row?.querySelector('button');
+  expect(button).not.toBeUndefined();
+  return button as HTMLElement;
 };
 
 const byText = (text: string) => {
@@ -184,6 +193,12 @@ const byText = (text: string) => {
     element.textContent?.startsWith(text)
   );
   expect(found).not.toBeUndefined();
+  return found as HTMLElement;
+};
+
+const detailsToggle = () => {
+  const found = container.querySelector('button[aria-expanded]') as HTMLElement | null;
+  expect(found).not.toBeNull();
   return found as HTMLElement;
 };
 
@@ -233,12 +248,12 @@ describe('ExtensionPluginsSection', () => {
     expect(container.textContent).not.toContain('agent.tool');
     expect(container.textContent).toContain('2 项权限');
 
-    await act(async () => byText('详情').click());
+    await act(async () => detailsToggle().click());
     expect(container.textContent).toContain('agent.tool');
     expect(container.textContent).toContain('事件 tool_call · 拦截');
     expect(container.textContent).toContain('允许向任意运行中的会话发送消息');
 
-    await act(async () => byText('收起详情').click());
+    await act(async () => detailsToggle().click());
     expect(container.textContent).not.toContain('agent.tool');
   });
 
@@ -250,7 +265,7 @@ describe('ExtensionPluginsSection', () => {
     root = createRoot(container);
     await render();
 
-    await act(async () => byText('详情').click());
+    await act(async () => detailsToggle().click());
     expect(container.textContent).toContain('修改界面样式');
     expect(container.textContent).not.toContain('无特殊权限');
   });
@@ -263,7 +278,7 @@ describe('ExtensionPluginsSection', () => {
 
     expect(container.textContent).toContain('受信任界面');
     expect(container.textContent).toContain('界面代码');
-    await act(async () => byText('详情').click());
+    await act(async () => detailsToggle().click());
     expect(container.textContent).toContain('界面代码：运行在主界面里');
     expect(container.textContent).not.toContain('无特殊权限');
   });
@@ -276,7 +291,7 @@ describe('ExtensionPluginsSection', () => {
     root = createRoot(container);
     await render();
 
-    await act(async () => byText('详情').click());
+    await act(async () => detailsToggle().click());
     expect(container.textContent).toContain('待同意');
     expect(container.textContent).toContain('新增界面代码');
   });
@@ -288,7 +303,7 @@ describe('ExtensionPluginsSection', () => {
     await render();
 
     expect(container.textContent).toContain('开发模式');
-    await act(async () => byText('详情').click());
+    await act(async () => detailsToggle().click());
     await act(async () => byLabel('开发模式：目录改动后自动重装').click());
     expect(harness.setDevWatch).toHaveBeenCalledWith('local.missionops', false);
   });
@@ -409,6 +424,7 @@ describe('ExtensionPluginLogs', () => {
 
   it('开关关闭时日志面板显示未开启提示并提供开启入口', async () => {
     harness.pluginLoggingEnabled = false;
+    harness.openSettings.mockClear();
     harness.setPluginLoggingEnabled.mockClear();
     await openLogs('');
     expect(container.textContent).toContain('Plugin logging is off');
@@ -417,7 +433,8 @@ describe('ExtensionPluginLogs', () => {
     );
     expect(enableBtn).toBeDefined();
     await act(async () => (enableBtn as HTMLButtonElement).click());
-    expect(harness.setPluginLoggingEnabled).toHaveBeenCalledWith(true);
+    expect(harness.openSettings).toHaveBeenCalledWith({ category: 'logs', rowId: 'logs.root' });
+    expect(harness.setPluginLoggingEnabled).not.toHaveBeenCalled();
     harness.pluginLoggingEnabled = true;
   });
 

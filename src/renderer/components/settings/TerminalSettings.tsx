@@ -23,18 +23,8 @@ import { cn } from '@/lib/utils';
 import { type FontWeight, useSettingsStore } from '@/stores/settings';
 import { fontWeightOptions } from './constants';
 import { FileOpeningSettings } from './FileOpeningSettings';
-import {
-  SettingsPage,
-  SettingsPreview,
-  SettingsRow,
-  SettingsSection,
-  SettingsSelect,
-  TOUCH_TARGET,
-} from './kit';
+import { SettingsPage, SettingsPreview, SettingsRow, SettingsSection, SettingsSelect } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
-
-const HIT =
-  'relative pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-[44px] pointer-coarse:after:-translate-1/2';
 
 const TERMINAL_SHELL_LABELS: Record<Exclude<TerminalShell, 'auto'>, string> = {
   cmd: 'Command Prompt',
@@ -178,7 +168,7 @@ function FavoriteButton({
         e.preventDefault();
         onClick(e);
       }}
-      className={cn(HIT, 'p-1 text-muted-foreground transition-colors hover:text-destructive')}
+      className="p-1 text-muted-foreground transition-colors hover:text-destructive"
     >
       <Heart className={cn('h-4 w-4', isFavorite && 'fill-destructive text-destructive')} />
     </button>
@@ -282,17 +272,15 @@ function ThemeCombobox({
       open={isOpen}
       onOpenChange={handleOpenChange}
     >
-      <div className="relative w-[min(100%,280px)] min-w-0 pointer-coarse:[&_[data-slot=combobox-trigger]]:after:min-h-[44px] pointer-coarse:[&_[data-slot=combobox-trigger]]:after:min-w-[44px]">
+      <div className="relative w-[min(100%,280px)] min-w-0">
         <ComboboxInput placeholder={t('Search themes...')} />
         <div className="absolute top-1/2 right-8 flex -translate-y-1/2 items-center gap-1.5">
-          <span className={HIT}>
-            <Checkbox
-              id="show-favorites-only-inner"
-              checked={showFavoritesOnly}
-              onCheckedChange={(checked) => onShowFavoritesOnlyChange(checked === true)}
-              onClick={(e) => e.stopPropagation()}
-            />
-          </span>
+          <Checkbox
+            id="show-favorites-only-inner"
+            checked={showFavoritesOnly}
+            onCheckedChange={(checked) => onShowFavoritesOnlyChange(checked === true)}
+            onClick={(e) => e.stopPropagation()}
+          />
           <label
             htmlFor="show-favorites-only-inner"
             className="max-w-[7.5rem] cursor-pointer truncate text-xs text-muted-foreground"
@@ -413,7 +401,7 @@ function TerminalAppearance() {
       </div>
       <SettingsRow label={t('Color scheme')}>
         <div className="flex min-w-0 items-center gap-2">
-          <Button variant="outline" size="icon" className={TOUCH_TARGET} onClick={handlePrevTheme}>
+          <Button variant="outline" size="icon" onClick={handlePrevTheme}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <ThemeCombobox
@@ -429,7 +417,7 @@ function TerminalAppearance() {
             onShowFavoritesOnlyChange={setShowFavoritesOnly}
             showEmptyFavoritesHint={showEmptyFavoritesHint}
           />
-          <Button variant="outline" size="icon" className={TOUCH_TARGET} onClick={handleNextTheme}>
+          <Button variant="outline" size="icon" onClick={handleNextTheme}>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>

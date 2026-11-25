@@ -22,7 +22,10 @@ export function AvatarColorField({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5" data-enso="secretary-form-avatar">
+    <div
+      className="flex flex-wrap items-center gap-1.5 pointer-coarse:gap-[23px]"
+      data-enso="secretary-form-avatar"
+    >
       {AVATAR_PRESET_COLORS.map((preset) => (
         <button
           key={preset}
@@ -43,7 +46,7 @@ export function AvatarColorField({
         title={t('Custom color')}
         style={selection.customSelected ? { backgroundColor: color } : undefined}
         className={cn(
-          'relative grid size-6 cursor-pointer place-items-center overflow-hidden rounded-full border-2 text-[10px]',
+          'relative grid size-6 cursor-pointer place-items-center overflow-hidden rounded-full border-2 text-[10px] pointer-coarse:overflow-visible',
           selection.customSelected
             ? 'border-foreground text-white'
             : 'border-border text-muted-foreground'
@@ -57,7 +60,7 @@ export function AvatarColorField({
           aria-label={t('Custom color')}
           value={normalizeAvatarColor(color) ?? '#7c5cff'}
           onChange={(event) => commit(event.target.value)}
-          className="absolute inset-0 cursor-pointer opacity-0"
+          className="absolute inset-0 cursor-pointer opacity-0 pointer-coarse:-inset-[12px]"
         />
       </label>
       <Input

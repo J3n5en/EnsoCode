@@ -22,9 +22,9 @@ import { useI18n } from '@/i18n';
 import { isRemoteClient } from '@/lib/remoteClient';
 import { cn } from '@/lib/utils';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
-import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, TOUCH_TARGET } from './kit';
+import { SettingsButton, SettingsPage, SettingsRow, SettingsSection } from './kit';
 
-const ICON_BUTTON = cn('text-muted-foreground', TOUCH_TARGET);
+const ICON_BUTTON = 'text-muted-foreground';
 
 /**
  * 设备：两个方向。
@@ -310,7 +310,7 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
                 )
               }
               className={cn(
-                'relative shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-[44px] pointer-coarse:after:-translate-1/2',
+                'relative shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none transition-colors',
                 device.scope === 'read'
                   ? 'bg-warning/15 text-warning hover:bg-warning/25'
                   : 'bg-muted text-muted-foreground hover:bg-accent'

@@ -9,13 +9,12 @@ import type {
 import { ArrowLeft, ExternalLink, Puzzle } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
+import { SettingsButton, SettingsSwitch } from './kit';
 import { nextMarketLoadRequest, openMarketLoadRequest } from './marketLoad';
 import { httpHomepage, PluginReadmeBody } from './PluginReadmeDialog';
 import {
@@ -131,16 +130,16 @@ export function PluginMarket({
             }}
           />
           <label className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs">
-            <Switch
+            <SettingsSwitch
               checked={list?.chinaMirror ?? false}
               disabled={loading}
               onCheckedChange={(on) => void setMirror(on)}
             />
             {t('China mirror')}
           </label>
-          <Button size="sm" variant="ghost" disabled={loading} onClick={() => void load(true)}>
+          <SettingsButton variant="ghost" disabled={loading} onClick={() => void load(true)}>
             {loading ? <Spinner /> : t('Refresh')}
-          </Button>
+          </SettingsButton>
         </div>
         {list?.ok === false && <p className="text-destructive text-sm">{list.error}</p>}
         {list?.ok === true && list.stale && (
@@ -197,7 +196,7 @@ function InstallAction({
       </span>
     );
   return (
-    <Button
+    <SettingsButton
       size="xs"
       variant={action === 'update' ? 'default' : 'outline'}
       disabled={disabled}
@@ -207,7 +206,7 @@ function InstallAction({
       }}
     >
       {action === 'update' ? t('Update') : t('Install')}
-    </Button>
+    </SettingsButton>
   );
 }
 
@@ -244,7 +243,7 @@ function MarketCard({
           onOpen();
         }
       }}
-      className="flex cursor-pointer flex-col gap-2 rounded-lg border p-3 text-left transition-colors hover:bg-accent/50"
+      className="flex cursor-pointer flex-col gap-2 rounded-lg bg-muted/30 p-3 text-left transition-colors hover:bg-accent/50"
     >
       <div className="flex items-start gap-3">
         <MarketIcon src={plugin.icon} />
@@ -282,10 +281,10 @@ function MarketDetail({
   const homepage = httpHomepage(plugin.homepage);
   return (
     <div className="space-y-4">
-      <Button size="xs" variant="ghost" onClick={onBack}>
+      <SettingsButton size="xs" variant="ghost" onClick={onBack}>
         <ArrowLeft className="size-3.5" />
         返回
-      </Button>
+      </SettingsButton>
       <div className="flex items-start gap-3">
         <MarketIcon src={plugin.icon} large />
         <div className="min-w-0 flex-1 space-y-1">
@@ -326,7 +325,7 @@ function MarketDetail({
               alt={shot.alt}
               title={shot.alt}
               loading="lazy"
-              className="h-44 shrink-0 rounded-md border object-cover"
+              className="h-44 shrink-0 rounded-md object-cover"
             />
           ))}
         </div>
