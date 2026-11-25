@@ -158,7 +158,8 @@ function ErrorSummary() {
           {t('No errors recorded.')}
         </p>
       ) : (
-        <div className="divide-y divide-border/60">
+        // biome-ignore lint/complexity/noUselessFragments: 包一层会让行间发丝线失效，行必须是 settings-group 的直接子节点
+        <>
           {(rows ?? []).map(({ key, entry }) => {
             const open = expanded === key;
             return (
@@ -198,7 +199,7 @@ function ErrorSummary() {
               </div>
             );
           })}
-        </div>
+        </>
       )}
     </SettingsSection>
   );

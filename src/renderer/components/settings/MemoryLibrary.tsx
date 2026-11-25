@@ -138,7 +138,7 @@ export function MemoryRows({
   emptyLabel?: string;
 }) {
   return (
-    <ul className="divide-y divide-border/60">
+    <ul>
       {items.length === 0 && (
         <li className="px-4 py-6 text-[13px] text-muted-foreground max-sm:px-3">{emptyLabel}</li>
       )}
@@ -355,7 +355,7 @@ export function PendingReviewSection({
         </p>
       )}
       {selected.size > 0 && (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md bg-accent/40 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-accent/40 px-4 py-2 max-sm:px-3">
           <span className="text-sm">
             {t('{{count}} selected', { count: String(selected.size) })}
           </span>
@@ -373,7 +373,7 @@ export function PendingReviewSection({
         </div>
       )}
       {groupPendingReviews(items).map((group) => (
-        <div key={group.key}>
+        <React.Fragment key={group.key}>
           {group.label && (
             <h4 className="px-4 pt-3 pb-1 text-muted-foreground text-xs max-sm:px-3">
               {group.label} · {t('{{count}} pending', { count: String(group.items.length) })}
@@ -413,7 +413,7 @@ export function PendingReviewSection({
               </div>
             </div>
           ))}
-        </div>
+        </React.Fragment>
       ))}
     </SettingsSection>
   );
@@ -819,7 +819,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         )}
 
         {selected.size > 0 && (
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md bg-accent/40 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-accent/40 px-4 py-2 max-sm:px-3">
             <span className="text-sm">
               {t('{{count}} selected', { count: String(selected.size) })}
             </span>

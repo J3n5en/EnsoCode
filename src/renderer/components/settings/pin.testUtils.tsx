@@ -384,7 +384,9 @@ async function probe(container: HTMLElement, { pressGroups = false } = {}): Prom
       current: Object.fromEntries(keys.map((k) => [k, base[k]])),
       ...(pressGroups && {
         selected: options
-          .filter((o) => o.getAttribute('aria-pressed') === 'true')
+          .filter(
+            (o) => (o.getAttribute('aria-pressed') ?? o.getAttribute('aria-checked')) === 'true'
+          )
           .map((o) => o.textContent?.trim()),
       }),
       effects: effects

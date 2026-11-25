@@ -6,7 +6,8 @@ import type {
 import { Copy, ExternalLink, KeyRound, Lock, TriangleAlert, Users } from 'lucide-react';
 import { type TFunction, useI18n } from '@/i18n';
 
-const STEP_CLASS = 'border-border border-b py-3';
+/** 渠道展开区里的信息块：与子行文本同一左缩进，发丝线由分组 CSS 画 */
+const STEP_CLASS = 'py-2.5 pl-10 pr-4 max-sm:pl-7 max-sm:pr-3';
 const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12.5px] transition-colors hover:bg-muted disabled:opacity-50';
 const LINK_CLASS =

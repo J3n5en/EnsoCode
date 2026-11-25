@@ -72,7 +72,15 @@ const addButton = () =>
 
 async function render(secretaryId?: string): Promise<void> {
   await act(async () => {
-    root.render(<SecretaryContactPanel secretaryId={secretaryId} />);
+    root.render(
+      <SecretaryContactPanel
+        secretaryId={secretaryId}
+        frames={{
+          owner: (node) => <div data-frame="owner">{node}</div>,
+          channels: (node) => <div data-frame="channels">{node}</div>,
+        }}
+      />
+    );
   });
 }
 
@@ -194,10 +202,21 @@ describe('主人身份', () => {
     const input = container.querySelector(selector) as HTMLInputElement;
     const key = Object.keys(input).find((name) => name.startsWith('__reactProps'));
     const props = (key ? (input as unknown as Record<string, unknown>)[key] : null) as {
-      onChange?: (event: { target: { value: string } }) => void;
+      onChange?: (event: {
+        target: { value: string };
+        currentTarget: { value: string };
+        defaultPrevented: boolean;
+        nativeEvent: { defaultPrevented: boolean };
+      }) => void;
     } | null;
     await act(async () => {
-      props?.onChange?.({ target: { value } });
+      // base-ui 的 FieldControl 内部读 currentTarget/nativeEvent/defaultPrevented
+      props?.onChange?.({
+        target: { value },
+        currentTarget: { value },
+        defaultPrevented: false,
+        nativeEvent: { defaultPrevented: false },
+      });
     });
   };
 

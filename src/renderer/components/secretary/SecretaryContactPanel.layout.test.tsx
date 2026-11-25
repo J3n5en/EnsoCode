@@ -144,4 +144,58 @@ describe('设置 → 联系方式与主人的分组与控件', () => {
       undefined
     );
   });
+
+  it('主人身份是分组行结构：输入框与保存按钮同行、外部消息用分段控件', async () => {
+    await renderFramed();
+    const owner = container.querySelector('[data-enso="secretary-contact-owner"]') as HTMLElement;
+    expect(owner).toBeTruthy();
+    const rows = owner.querySelectorAll('[data-slot="settings-row"]');
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const input = owner.querySelector(
+      '[data-enso="secretary-contact-github-logins"]'
+    ) as HTMLInputElement;
+    const save = owner.querySelector(
+      '[data-enso="secretary-contact-github-save"]'
+    ) as HTMLButtonElement;
+    // 输入框和保存按钮在同一行容器里，不再各自独占一行
+    const inputRow = input.closest('[data-slot="settings-row"]');
+    expect(inputRow).toBeTruthy();
+    expect(inputRow?.contains(save)).toBe(true);
+    // 外部渠道的非主人消息：分段控件（radiogroup），不是两个裸按钮
+    const segmented = owner.querySelector('[role="radiogroup"]');
+    expect(segmented).toBeTruthy();
+    expect(segmented?.querySelector('[data-enso="secretary-contact-external-agent"]')).toBeTruthy();
+    expect(
+      segmented?.querySelector('[data-enso="secretary-contact-external-confirm"]')
+    ).toBeTruthy();
+    // 两个选项同一时刻只有一个被选中
+    expect(segmented?.querySelectorAll('[role="radio"][aria-checked="true"]').length).toBe(1);
+  });
+
+  it('渠道展开区是 settings-sub-group 结构，开关行在其中', async () => {
+    await renderFramed();
+    const channel = container.querySelector(
+      '[data-enso="secretary-contact-channel"][data-channel="telegram"]'
+    ) as HTMLElement;
+    expect(channel).toBeTruthy();
+    const subgroup = channel.querySelector('[data-slot="settings-sub-group"]');
+    expect(subgroup).toBeTruthy();
+    for (const id of ['secretary-contact-push', 'secretary-contact-mirror']) {
+      expect(subgroup?.querySelector(`[data-enso="${id}"]`), `${id} in sub-group`).toBeTruthy();
+    }
+    // 展开区里的绑定/群/命令信息块带统一缩进 padding，不裸贴卡片边缘
+    const groups = subgroup?.querySelector('[data-enso="secretary-contact-groups"]') as HTMLElement;
+    expect(groups).toBeTruthy();
+    expect(groups?.className).toContain('pl-10');
+    expect(groups?.className).toContain('pr-4');
+  });
+
+  it('渠道卡片头与体之间不再各画一遍 border 线', async () => {
+    await renderFramed();
+    const channel = container.querySelector(
+      '[data-enso="secretary-contact-channel"][data-channel="telegram"]'
+    ) as HTMLElement;
+    // 卡片头是 settings-row，卡片间分隔交给分组发丝线；不再自画 border-b
+    expect(channel.className).not.toContain('border-b');
+  });
 });

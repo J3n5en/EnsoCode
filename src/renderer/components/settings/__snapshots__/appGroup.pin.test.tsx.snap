@@ -897,17 +897,6 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "privacy.words",
   },
   {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "checkbox",
-    "row": "terminal.appearance",
-  },
-  {
     "current": {
       "terminalFontWeight": "normal",
     },
@@ -2062,17 +2051,6 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     ],
     "kind": "switch",
     "row": "privacy.enabled",
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "checkbox",
-    "row": "terminal.appearance",
   },
   {
     "current": {
