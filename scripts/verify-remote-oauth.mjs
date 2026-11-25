@@ -422,46 +422,6 @@ async function typeInput(cdp, value) {
   if (!readback.includes(value.slice(0, 20))) throw new Error('typeInput: value did not stick');
 }
 
-async function openProvidersWizard(cdp) {
-  const r1 = await inDoc(
-    cdp,
-    `
-    const main = document.querySelector('iframe.main')?.contentDocument;
-    const btn = main?.querySelector('[data-enso="settings-button"]') ?? doc.querySelector('[data-enso="settings-button"]');
-    if (btn) btn.click();
-    return !!btn;
-  `
-  );
-  log('openWizard settings click: ' + r1);
-  await sleep(1100);
-  // 分类项可能包了一层：找叶子文本再爬到最近的 button/a/[role]
-  const navHit = await inDoc(
-    cdp,
-    `
-    const leafs = [...doc.querySelectorAll('button, a, [role="button"], span, div, li')].filter(
-      (n) => n.children.length === 0 && /^(Model Providers|模型中心|服务商|模型服务)$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null
-    );
-    const leaf = leafs[0];
-    if (!leaf) return { hit: false };
-    const target = leaf.closest('button, a, [role="button"]') ?? leaf;
-    target.click();
-    return { hit: true, tag: target.tagName };
-  `
-  );
-  log('providers nav hit: ' + JSON.stringify(navHit));
-  await sleep(900);
-  const r3 = await inDoc(
-    cdp,
-    `
-    const btn = [...doc.querySelectorAll('button')].find((b) => /Add model or provider|添加模型/.test(b.textContent ?? '') && b.offsetParent !== null);
-    if (btn) btn.click();
-    return !!btn;
-  `
-  );
-  log('openWizard add click: ' + r3);
-  await sleep(700);
-}
-
 function check(name, condition, detail = '') {
   results.push({ name, ok: !!condition });
   log(`${condition ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
@@ -684,7 +644,7 @@ async function main() {
   const navOk = await cdp.eval(`(() => {
     const doc = (document.querySelector('iframe.settings')?.contentDocument) ?? (document.querySelector('iframe.main')?.contentDocument) ?? document;
     const nodes = [...doc.querySelectorAll('button, a, [role="button"]')];
-    const target = nodes.find((n) => /^(Model Providers|模型中心|服务商|模型服务)\s*$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null);
+    const target = nodes.find((n) => /^(Model Providers|模型中心|服务商|模型服务)s*$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null);
     if (target) { target.click(); return 'nav'; }
     return null;
   })()`);
@@ -891,7 +851,6 @@ async function main() {
     const badUrl = `${redirect}?code=verify-code-1&state=wrong-state`;
     await fillInput(cdp, badUrl);
 
-
     // 提交（回车或按钮）
     await cdp.eval(`(() => {
       const doc = (document.querySelector('iframe.settings')?.contentDocument) ?? (document.querySelector('iframe.main')?.contentDocument) ?? document;
@@ -918,6 +877,16 @@ async function main() {
       return false;
     });
     check('red rejection error shown', !!redErr);
+    // 被拒后状态行必须复位回「正在等待浏览器完成授权」，不能停在「正在验证」
+    const statusReset = await hasText(cdp, '正在等待浏览器完成授权');
+    const stuckVerifying = await inDoc(
+      cdp,
+      `
+      const d = doc.querySelector('[role="dialog"]');
+      return d ? (d.textContent ?? '').includes('正在验证') : false;
+    `
+    );
+    check('status reset to waiting after rejection', !!statusReset && !stuckVerifying);
     await sleep(400);
     await cdp.shot('/tmp/remote-oauth-zh-2-state-error.png');
     check('shot 2 state error', existsSync('/tmp/remote-oauth-zh-2-state-error.png'));

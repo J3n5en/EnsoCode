@@ -42,6 +42,7 @@ const mount = (prompt: OauthLoginPrompt) => {
       binding: locator,
       locator,
       progress: null,
+      lastProgress: null,
       authUrl: null,
       fullAuthUrl: null,
       userCode: null,

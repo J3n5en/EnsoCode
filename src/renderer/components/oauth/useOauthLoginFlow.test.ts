@@ -123,6 +123,32 @@ describe('OAuth exact locator state machine', () => {
     expect(replaced.prompt?.error).toBeUndefined();
   });
 
+  it('粘贴被拒重提示时状态行从「Verifying...」复位回上一条 progress', () => {
+    // 等待浏览器授权 → 用户提交（乐观置 Verifying...）→ 被拒重提示：状态行要回去
+    const waiting = reduceOauthLoginFlowState(
+      running,
+      event(wizardA, { type: 'progress', message: 'Waiting for browser authentication...' })
+    );
+    const optimistic = {
+      ...waiting,
+      prompt: null,
+      progress: 'Verifying...',
+    } as typeof waiting;
+    const rejected = reduceOauthLoginFlowState(
+      optimistic,
+      event(wizardA, {
+        type: 'prompt',
+        prompt: {
+          requestId: 'prompt-2',
+          type: 'manual_code',
+          message: 'Paste the address',
+          error: 'That is not an authorization callback address.',
+        },
+      })
+    );
+    expect(rejected).toMatchObject({ progress: 'Waiting for browser authentication...' });
+  });
+
   it('auth_url 把完整链接放进 fullAuthUrl，剥参链接仍留给展示', () => {
     const full =
       'https://accounts.example.test/authorize?state=secret&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb';
