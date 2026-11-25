@@ -7,12 +7,7 @@ import type {
 import type { UpdateChannel } from '@shared/updater/channel';
 import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import { detectRestartMethod } from './reexec';
-import {
-  compareVersions,
-  DEFAULT_NPM_REGISTRY,
-  npmDistTagUrl,
-  parseNpmLatest,
-} from './version';
+import { compareVersions, DEFAULT_NPM_REGISTRY, npmDistTagUrl, parseNpmLatest } from './version';
 
 /** 应用更新时等正在跑的 turn 收完的上限；超时后安全中断（断点续跑机制兜底） */
 const WAIT_FOR_TASKS_MS = 5 * 60 * 1000;
@@ -343,7 +338,6 @@ export class ServerUpdater {
 
   // 服务端没有自动重启档位：应用本身等待任务收完，设置保留通道只为不报错
   setAutoRestartMode(_mode: AutoRestartMode): void {}
-
 
   private notifyIdleStateChanged(): void {
     if (!this.downloadedVersion || !this.autoUpdate || this.applying || !this.canRestart()) {

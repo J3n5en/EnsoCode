@@ -62,24 +62,27 @@ export function GeneralSettings() {
       <ConfigSyncSettings />
       <UpdateSection />
 
-      {window.electronAPI.env.platform === 'darwin' && (
-        <SettingsSection title={t('Integrations')}>
-          <ShellIntegrationRow
-            kind="ensoCommand"
-            title={t("'enso' terminal command")}
-            description={t(
-              'Run `enso .` in a terminal to open the current folder in EnsoCode. Links the command into /usr/local/bin and may ask for your password.'
-            )}
-          />
-          <ShellIntegrationRow
-            kind="finderQuickAction"
-            title={t('Finder Quick Action')}
-            description={t(
-              'Right-click a folder in Finder and choose Services > Open with EnsoCode.'
-            )}
-          />
-        </SettingsSection>
-      )}
+      {
+        // 终端命令/访达快速操作是桌面 Mac 的本机集成，远程（server 宿主）不适用
+        window.electronAPI.env.platform === 'darwin' && !isRemoteClient() && (
+          <SettingsSection title={t('Integrations')}>
+            <ShellIntegrationRow
+              kind="ensoCommand"
+              title={t("'enso' terminal command")}
+              description={t(
+                'Run `enso .` in a terminal to open the current folder in EnsoCode. Links the command into /usr/local/bin and may ask for your password.'
+              )}
+            />
+            <ShellIntegrationRow
+              kind="finderQuickAction"
+              title={t('Finder Quick Action')}
+              description={t(
+                'Right-click a folder in Finder and choose Services > Open with EnsoCode.'
+              )}
+            />
+          </SettingsSection>
+        )
+      }
     </SettingsPage>
   );
 }

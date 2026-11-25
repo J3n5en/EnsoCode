@@ -25,5 +25,8 @@ describe('server 更新能力显示（npm 安装）', { timeout: 30_000 }, () =>
     expect(text.includes('Restart now')).toBe(true);
     expect(text.includes('Restart automatically to apply updates')).toBe(false);
     expect(pin.rows()).toContain('general.updateChannel');
+    // 终端命令/访达快速操作是桌面 Mac 本机集成，服务端宿主下不出现
+    expect(pin.rows()).not.toContain('general.ensoCommand');
+    expect(pin.rows()).not.toContain('general.finderQuickAction');
   });
 });
