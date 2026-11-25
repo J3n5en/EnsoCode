@@ -8,6 +8,7 @@ export function ContactsSettings() {
   const { secretaries, current, multiple, select } = useSettingsSecretaries();
   return (
     <SettingsPage
+      rowId="contacts.root"
       title={t('Contacts & owner')}
       description={t(
         'Reach the secretary from your phone. Milestones go out; your replies come back.'

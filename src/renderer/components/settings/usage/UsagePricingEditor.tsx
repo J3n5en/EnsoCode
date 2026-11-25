@@ -196,6 +196,7 @@ export function UsagePricingEditor({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <SettingsSection
+        rowId="usage.unit-prices"
         title={t('Unit prices')}
         description={t('Rates used for cost estimates ($/M tokens).')}
         actions={

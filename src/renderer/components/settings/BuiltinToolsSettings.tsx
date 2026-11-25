@@ -342,6 +342,7 @@ export function BuiltinToolsSettings() {
     context: (
       <>
         <ToolRow
+          rowId="tools.explore-fold"
           icon={FoldVertical}
           newSession
           title={t('Explore fold')}
@@ -367,6 +368,7 @@ export function BuiltinToolsSettings() {
     safety: (
       <>
         <ToolRow
+          rowId="tools.protected-action-confirmation"
           icon={ShieldAlert}
           newSession
           title={t('Protected action confirmation')}
@@ -515,6 +517,7 @@ export function BuiltinToolsSettings() {
                       {capabilities?.platform === 'darwin' && (
                         <>
                           <SettingsSubRow
+                            rowId="tools.show-the-app-being-operated"
                             label={t('Show the app being operated')}
                             description={t(
                               'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.'
@@ -535,6 +538,7 @@ export function BuiltinToolsSettings() {
               {tool.id === 'browser' ? (
                 <div>
                   <SettingsSubRow
+                    rowId="tools.open-chat-links-in-the-built-in-browser"
                     label={t('Open chat links in the built-in browser')}
                     description={t(
                       'Clicking a web link in chat opens it in the side panel browser. {{key}}+Click opens it in the external browser.',

@@ -402,7 +402,7 @@ export function WorkflowsSettings() {
         </SettingsButton>
       }
     >
-      <SettingsSection title={t('Custom presets')}>
+      <SettingsSection rowId="workflows.custom-presets" title={t('Custom presets')}>
         {presets.length === 0 ? (
           <div className="border-border border-b py-8 text-center">
             <Workflow className="mx-auto h-5 w-5 text-muted-foreground" />
@@ -447,7 +447,7 @@ export function WorkflowsSettings() {
       </SettingsSection>
 
       {builtins.length > 0 && (
-        <SettingsSection title={t('Built-in presets')}>
+        <SettingsSection rowId="workflows.built-in-presets" title={t('Built-in presets')}>
           {builtins.map((preset) => (
             <SettingsRow
               key={preset.id}

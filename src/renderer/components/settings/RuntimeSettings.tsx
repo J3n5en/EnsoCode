@@ -62,15 +62,15 @@ function dayLabel(
 export function RuntimeSettings() {
   const { t } = useI18n();
   return (
-    <SettingsPage title={t('Runtime & sessions')}>
-      <SettingsSection title={t('Agent runtime')}>
+    <SettingsPage rowId="runtime.root" title={t('Runtime & sessions')}>
+      <SettingsSection rowId="runtime.agent-runtime" title={t('Agent runtime')}>
         <GenerationStallTimeoutRow />
         <AutoRetryLimitRow />
         <LongCacheRetentionRow />
         <SmartCompactPicker />
         <CompactReserveTokensSection />
       </SettingsSection>
-      <SettingsSection title={t('Sessions & worktrees')}>
+      <SettingsSection rowId="runtime.sessions-worktrees" title={t('Sessions & worktrees')}>
         <AutoArchiveSection />
         <ActiveRetentionMinutesRow />
         <WorktreeRootSection />

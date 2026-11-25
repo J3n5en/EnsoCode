@@ -66,6 +66,7 @@ export function DefaultModelPicker() {
   return (
     <>
       <SettingsRow
+        rowId="providers.default-model"
         label={t('Default model')}
         description={
           <>
@@ -102,6 +103,7 @@ export function DefaultModelPicker() {
       </SettingsRow>
       {candidates.length > 0 && (
         <SettingsRow
+          rowId="providers.follow-last-selection"
           label={t('Follow last selection')}
           description={t('New conversations use the last model you picked.')}
         >

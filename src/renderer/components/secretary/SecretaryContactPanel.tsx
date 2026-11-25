@@ -1117,7 +1117,7 @@ export function SecretaryContactPanel({
   // 总开关管的是各渠道收发：设置页放在「联系渠道」组顶部
   const masterSwitch = frames ? (
     <div data-enso="secretary-contact-master">
-      <SettingsRow label={t('Enable contacts')}>
+      <SettingsRow rowId="contacts.enable-contacts" label={t('Enable contacts')}>
         <EnableSwitch
           checked={state.enabled}
           disabled={busy}

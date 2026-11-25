@@ -41,6 +41,7 @@ export function ComputerAllowedApps() {
         </p>
       </div>
       <SettingsSubRow
+        rowId="tools.allow-all-apps"
         label={t('Allow all apps')}
         description={t(
           'The AI can click, type and read in any app without asking. It can see everything in their windows, including chats and passwords.'

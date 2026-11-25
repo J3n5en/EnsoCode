@@ -82,6 +82,14 @@ const ROW_RELOCATIONS: Readonly<Record<string, SettingsCategory>> = {
   'appearance.headerSessionTabs': 'conversation',
 };
 
+/** 行号前缀即分区；拆页后挪走的行以 ROW_RELOCATIONS 为准。 */
+export function categoryForSettingsRow(rowId: string): string {
+  const relocated = ROW_RELOCATIONS[rowId];
+  if (relocated) return relocated;
+  const dot = rowId.indexOf('.');
+  return dot === -1 ? rowId : rowId.slice(0, dot);
+}
+
 export function relocateSettingsLink<T extends SettingsDeepLink>(link: T): T {
   const category = ROW_RELOCATIONS[link.rowId];
   return category ? { ...link, category } : link;

@@ -34,7 +34,7 @@ const ICON_BUTTON = 'text-muted-foreground';
 export function DevicesSettings() {
   const { t } = useI18n();
   return (
-    <SettingsPage title={t('Devices')}>
+    <SettingsPage rowId="phone.devices" title={t('Devices')}>
       <AllowConnectionsSection />
       {!window.electronAPI.remote && <ConnectToNodesSection />}
       <RelaySection />
@@ -213,6 +213,7 @@ function ConnectToNodesSection() {
 
   return (
     <SettingsSection
+      rowId="phone.connect-to-a-node"
       title={t('Connect to a node')}
       description={t(
         'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.'
@@ -450,6 +451,7 @@ function RelaySection() {
   return (
     <SettingsSection>
       <SettingsRow
+        rowId="phone.relay-server"
         label={t('Relay server')}
         description={t('The relay only forwards encrypted frames and cannot read your messages.')}
       >

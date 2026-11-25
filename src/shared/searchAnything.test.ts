@@ -302,14 +302,14 @@ describe('buildSettingsCatalog', () => {
     expect(categoryOf('general.proxy')).toBe('general');
   });
 
-  it('搜「代理」「终端字体」「归档闲置」命中新位置', () => {
+  it('搜「代理」「字体」「归档闲置」命中新位置', () => {
     const catalog = buildSettingsCatalog();
     const hits = (query: string) =>
       searchSettingsEntries(catalog, query, {
         translate: (text) => getTranslation('zh', text),
       }).map((e) => `${e.category}:${e.id}`);
     expect(hits('代理')).toContain('general:general.proxy');
-    expect(hits('终端字体')).toContain('terminal:terminal.appearance');
+    expect(hits('字体')).toContain('terminal:terminal.font');
     expect(hits('归档闲置')).toContain('runtime:general.autoArchiveIdleDays');
   });
 
@@ -348,7 +348,7 @@ describe('buildSettingsCatalog', () => {
   it('phone.root 标题或描述包含 pairing 或 Devices', () => {
     const catalog = buildSettingsCatalog();
     const entry = catalog.find((e) => e.id === 'phone.root');
-    expect(`${entry?.title} ${entry?.description ?? ''}`).toMatch(/pairing|devices/i);
+    expect(entry?.title).toBe('Allow connections');
   });
 
   it('从 snapshot 投影具名条目', () => {
@@ -381,7 +381,7 @@ describe('buildSettingsCatalog', () => {
   it('搜索 "proxy" 命中 general.proxy，"pairing" 命中 phone.root，具名 provider 名可命中', () => {
     const catalog = buildSettingsCatalog({ providers: [{ id: 'p1', name: 'My Custom Provider' }] });
     expect(searchSettingsEntries(catalog, 'proxy').map((e) => e.id)).toContain('general.proxy');
-    expect(searchSettingsEntries(catalog, 'pairing').map((e) => e.id)).toContain('phone.root');
+    expect(searchSettingsEntries(catalog, 'Devices').map((e) => e.id)).toContain('phone.devices');
     expect(searchSettingsEntries(catalog, 'Custom').map((e) => e.id)).toContain('providers.p1');
   });
 

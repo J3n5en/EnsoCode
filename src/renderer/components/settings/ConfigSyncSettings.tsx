@@ -99,6 +99,7 @@ export function ConfigSyncSettings() {
       )}
     >
       <SettingsRow
+        rowId="general.portable-enso-configuration"
         label={t('Portable Enso configuration')}
         description={
           <>

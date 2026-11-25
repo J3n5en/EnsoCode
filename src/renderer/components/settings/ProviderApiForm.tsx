@@ -496,12 +496,14 @@ export function ProviderApiForm({
 
             <div className="border-border border-t">
               <SettingsExpandableRow
+                rowId="providers.advanced"
                 label={t('Advanced')}
                 open={advancedOpen}
                 onOpenChange={setAdvancedOpen}
               >
                 <div data-field="provider-proxy">
                   <SettingsSubRow
+                    rowId="providers.proxy"
                     label={t('Proxy')}
                     description={
                       <span data-slot="provider-proxy-hint">{t(PROXY_MODE_HINTS[proxyMode])}</span>
@@ -520,6 +522,7 @@ export function ProviderApiForm({
                   </SettingsSubRow>
                   {proxyMode === 'custom' && (
                     <SettingsSubRow
+                      rowId="providers.proxy-url"
                       label={t('Proxy URL')}
                       description={
                         proxyInvalid ? (
@@ -559,7 +562,7 @@ export function ProviderApiForm({
                     </SettingsSubRow>
                   )}
                 </div>
-                <SettingsSubRow label={t('Request headers')}>
+                <SettingsSubRow rowId="providers.request-headers" label={t('Request headers')}>
                   <SettingsButton
                     variant="ghost"
                     onClick={() =>

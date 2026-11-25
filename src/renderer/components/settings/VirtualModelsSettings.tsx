@@ -367,7 +367,7 @@ function VirtualModelCard({
           </>
         }
       >
-        <SettingsSubRow label={t('Name')}>
+        <SettingsSubRow rowId="providers.name" label={t('Name')}>
           <Input
             value={entry.name}
             maxLength={60}
@@ -377,7 +377,11 @@ function VirtualModelCard({
             onChange={(event) => update({ name: event.target.value })}
           />
         </SettingsSubRow>
-        <SettingsSubRow label={t('Primary model')} description={t('Default for each new turn')}>
+        <SettingsSubRow
+          rowId="providers.primary-model"
+          label={t('Primary model')}
+          description={t('Default for each new turn')}
+        >
           <div className={memberColumn}>
             <MemberPicker
               providers={providers}
@@ -394,7 +398,11 @@ function VirtualModelCard({
             />
           </div>
         </SettingsSubRow>
-        <SettingsSubRow label={t('Fast model')} description={t('Summaries and simple turns')}>
+        <SettingsSubRow
+          rowId="providers.fast-model"
+          label={t('Fast model')}
+          description={t('Summaries and simple turns')}
+        >
           <div className={memberColumn}>
             <MemberPicker
               providers={providers}
@@ -417,6 +425,7 @@ function VirtualModelCard({
           </div>
         </SettingsSubRow>
         <SettingsSubRow
+          rowId="providers.fallback-models"
           label={t('Fallback models')}
           description={t('Used in order when a model is rate limited or down')}
         >
@@ -458,7 +467,7 @@ function VirtualModelCard({
             </SettingsButton>
           </div>
         </SettingsSubRow>
-        <SettingsSubRow label={t('Difficulty routing')}>
+        <SettingsSubRow rowId="providers.difficulty-routing" label={t('Difficulty routing')}>
           <div className="w-[280px] max-w-full">
             <ClassifierField
               entry={entry}
@@ -501,6 +510,7 @@ export function VirtualModelsSettings() {
 
   return (
     <SettingsSection
+      rowId="providers.virtual-models"
       title={t('Virtual models')}
       description={
         <>

@@ -25,6 +25,7 @@ export function BotSettings() {
   const { t } = useI18n();
   return (
     <SettingsPage
+      rowId="bots.root"
       title={t('Bot mode')}
       description={t('Settings shared by all members and group chats.')}
     >

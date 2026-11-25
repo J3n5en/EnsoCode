@@ -638,6 +638,7 @@ export function MemorySettings({
       </SettingsSection>
 
       <SettingsSection
+        rowId="memory.embedding-model"
         title={t('Embedding model')}
         description={t(
           'Used for semantic search and near-duplicate detection. Without it search still works using full-text only.'
@@ -764,6 +765,7 @@ export function MemorySettings({
 
       <SettingsSection rowId="memory.distillModel" title={t('Distillation')}>
         <SettingsRow
+          rowId="memory.completion-backend"
           label={t('Completion backend')}
           description={t('Local GGUF runs on this machine. Remote uses the model below.')}
         >
@@ -815,6 +817,7 @@ export function MemorySettings({
         )}
         {chatModel === 'remote' && (
           <SettingsSubRow
+            rowId="memory.distillation-model"
             label={t('Distillation model')}
             description={t('Reads finished sessions and writes the memories.')}
           >
@@ -859,7 +862,7 @@ export function MemorySettings({
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title={t('Background processing')}>
+      <SettingsSection rowId="memory.background-processing" title={t('Background processing')}>
         <SwitchRow
           rowId="memory.distill"
           title={t('Distill sessions automatically')}

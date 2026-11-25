@@ -225,6 +225,7 @@ export function BotTemplatesSettings() {
 
   return (
     <SettingsPage
+      rowId="botTemplates.root"
       title={t('Bot templates')}
       description={t(
         'Templates used when creating members and teams. Built-in templates can be edited, hidden or restored.'

@@ -86,6 +86,7 @@ export function GitCommitSettings() {
       description={t('Model and prompt used by the AI button in the Git commit panel.')}
     >
       <SettingsRow
+        rowId="providers.provider"
         label={t('Provider')}
         status={
           model && (!provider || !selectedModel) ? (
@@ -106,7 +107,7 @@ export function GitCommitSettings() {
           }}
         />
       </SettingsRow>
-      <SettingsRow label={t('Model')}>
+      <SettingsRow rowId="providers.model" label={t('Model')}>
         <SettingsSelect
           value={selectedModel?.id ?? ''}
           options={modelOptions}

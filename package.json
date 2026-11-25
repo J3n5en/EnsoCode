@@ -27,6 +27,7 @@
     "pack:server": "node scripts/pack-server.mjs",
     "harbor:eval": "node scripts/harbor-eval.mjs",
     "generate:themes": "npx tsx scripts/generate-themes.ts",
+    "settings:catalog": "npx tsx scripts/settings-catalog/extract.ts",
     "rtk:prepare": "node scripts/prepare-rtk.mjs",
     "knowledge:check": "npx tsx scripts/knowledge.ts check",
     "knowledge:clean": "npx tsx scripts/knowledge.ts clean",

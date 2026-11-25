@@ -133,6 +133,7 @@ export function ResourcesSettings() {
 
   return (
     <SettingsPage
+      rowId="resources.root"
       title={t('Resources')}
       description={t('CPU, memory and disk usage of EnsoCode and the processes it started.')}
     >

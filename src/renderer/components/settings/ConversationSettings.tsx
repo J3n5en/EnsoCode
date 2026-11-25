@@ -254,7 +254,7 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
     value === 0 ? t('Off') : t('{{count}} min', { count: value });
 
   return (
-    <SettingsPage title={t('Conversation display')}>
+    <SettingsPage rowId="conversation.root" title={t('Conversation display')}>
       <ChatTypographySection />
       <SettingsSection>
         <Toggle

@@ -47,13 +47,14 @@ export function LogsSettings() {
   const { t } = useI18n();
   return (
     <SettingsPage
+      rowId="logs.root"
       title={t('Logs')}
       description={t('Recent errors and log export. API keys, tokens and passwords are masked.')}
     >
       <LoggingSwitches />
       <ErrorSummary />
       <LogExport />
-      <SettingsSection title={t('Troubleshooting')}>
+      <SettingsSection rowId="logs.troubleshooting" title={t('Troubleshooting')}>
         <DevToolsSection />
       </SettingsSection>
     </SettingsPage>
@@ -69,6 +70,7 @@ function LoggingSwitches() {
   return (
     <SettingsSection>
       <SettingsRow
+        rowId="logs.record-app-logs"
         label={t('Record app logs')}
         description={t(
           'Off by default. Write main process and agent logs to disk. Files needed for restart recovery are always kept.'
@@ -77,6 +79,7 @@ function LoggingSwitches() {
         <SettingsSwitch checked={appLogging} onCheckedChange={setAppLogging} />
       </SettingsRow>
       <SettingsRow
+        rowId="logs.record-plugin-logs"
         label={t('Record plugin logs')}
         description={t(
           'Off by default. Record plugin console output and runtime logs to disk. Startup failures and crashes are still shown.'
@@ -121,6 +124,7 @@ function ErrorSummary() {
 
   return (
     <SettingsSection
+      rowId="logs.recent-errors"
       title={t('Recent errors')}
       actions={
         <>
@@ -145,6 +149,7 @@ function ErrorSummary() {
     >
       {!appLogging && (
         <SettingsRow
+          rowId="logs.app-logging-is-off"
           label={t('App logging is off')}
           description={t('New app logs are not recorded while off. Existing logs are kept below.')}
         >
@@ -236,10 +241,12 @@ function LogExport() {
 
   return (
     <SettingsSection
+      rowId="logs.export-logs"
       title={t('Export logs')}
       description={t('Pack logs from the selected period into a zip file for troubleshooting.')}
     >
       <SettingsRow
+        rowId="logs.time-range"
         label={t('Time range')}
         description={
           appLogging

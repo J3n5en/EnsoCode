@@ -46,6 +46,7 @@ export function SmartCompactPicker() {
   return (
     <div data-settings-row="general.smartCompactEnabled">
       <SettingsRow
+        rowId="general.smartCompactEnabled"
         label={
           <>
             {t('Context compaction strategy')}
@@ -70,6 +71,7 @@ export function SmartCompactPicker() {
       {(strategy === 'smart' || strategy === 'codex-native') && (
         <div data-smart-compact-mode={mode}>
           <SettingsRow
+            rowId="runtime.compaction-mode"
             label={t('Compaction mode')}
             description={t(
               'Mode changes summary budget and how much recent tail to keep. It does not decide whether compact runs.'
