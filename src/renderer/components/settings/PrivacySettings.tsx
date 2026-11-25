@@ -310,7 +310,7 @@ export function PrivacySettings() {
       {settings.enabled && (
         <>
           <SettingsSection
-            rowId="privacy.secrets-2"
+            rowId="privacy.secretsSection"
             title={t('Secrets')}
             description={t('API keys, tokens, private keys, passwords in URLs and config files.')}
             actions={

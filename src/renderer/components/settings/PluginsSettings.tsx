@@ -883,7 +883,7 @@ function ExtensionPluginRow({
         </div>
         {plugin.crossSessionInject !== undefined && (
           <SettingsSubRow
-            rowId="plugins.text-3284f0b6"
+            rowId={`plugins.crossSessionInject-${plugin.id}`}
             label="允许向任意运行中的会话发送消息"
             description="关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行"
           >
@@ -897,7 +897,7 @@ function ExtensionPluginRow({
         )}
         {plugin.devWatch !== undefined && (
           <SettingsSubRow
-            rowId="plugins.text-02fea954"
+            rowId={`plugins.devWatch-${plugin.id}`}
             label="开发模式：目录改动后自动重装"
             description="授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭"
           >

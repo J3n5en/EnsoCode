@@ -39,6 +39,8 @@ export interface MissingSettingsRow {
   tag: string;
   label: string;
   category: string | null;
+  /** dynamic：rowId 已有但标题是运行期计算，不进目录也不算缺失 */
+  kind?: 'dynamic';
 }
 
 export interface SettingsCatalogExtraction {
@@ -622,7 +624,13 @@ function kebab(label: string): string {
 }
 
 function quote(value: string): string {
-  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')}'`;
+  return `'${value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')}'`;
 }
 
 export function renderSettingsCatalog(entries: readonly SettingsSearchEntry[]): string {
@@ -734,7 +742,19 @@ function analyze(root: string): Analysis {
       }
       const id = row.rowId;
       const title = row.label;
-      if (!title) continue;
+      if (!title) {
+        // rowId 已有、标题却是运行期动态的（如嵌入模型状态）：
+        // 不进目录，但要登记，免得防漂移测试误以为它们已被收录
+        missing.push({
+          file: path.relative(root, row.file),
+          line: row.line,
+          tag: row.tag,
+          label: '',
+          category: categoryForSettingsRow(id),
+          kind: 'dynamic',
+        });
+        continue;
+      }
       const entry: SettingsSearchEntry = {
         id,
         category: categoryForSettingsRow(id),

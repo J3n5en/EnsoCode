@@ -31,7 +31,7 @@ export function TitleSummaryPicker() {
       </SettingsRow>
       {enabled && (
         <SettingsSubRow
-          rowId="providers.model-2"
+          rowId="providers.titleSummaryModel"
           label={t('Model')}
           description={
             model && (!selectedProvider || !selectedModel)

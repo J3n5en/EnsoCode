@@ -637,19 +637,6 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
       'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.',
   },
   {
-    id: 'plugins.text-02fea954',
-    category: 'plugins',
-    title: '开发模式：目录改动后自动重装',
-    description: '授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭',
-  },
-  {
-    id: 'plugins.text-3284f0b6',
-    category: 'plugins',
-    title: '允许向任意运行中的会话发送消息',
-    description:
-      '关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行',
-  },
-  {
     id: 'plugins.update-plugins-automatically',
     category: 'plugins',
     title: 'Update plugins automatically',
@@ -702,7 +689,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description: 'Recommended. Covers common vendor key formats.',
   },
   {
-    id: 'privacy.secrets-2',
+    id: 'privacy.secretsSection',
     category: 'privacy',
     title: 'Secrets',
     description: 'API keys, tokens, private keys, passwords in URLs and config files.',
@@ -785,6 +772,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     title: 'Git commit generation',
     description: 'Model and prompt used by the AI button in the Git commit panel.',
   },
+  { id: 'providers.gitCommitModel', category: 'providers', title: 'Model' },
   {
     id: 'providers.let-the-agent-pick-subagent-models',
     category: 'providers',
@@ -792,8 +780,6 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description:
       'The main agent can pick one of these models when dispatching subagents or coworkers. The description tells it when to use each model.',
   },
-  { id: 'providers.model', category: 'providers', title: 'Model' },
-  { id: 'providers.model-2', category: 'providers', title: 'Model' },
   {
     id: 'providers.models-used-by-features',
     category: 'providers',
@@ -822,6 +808,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     category: 'providers',
     title: 'Sign-out failed: {{message}}',
   },
+  { id: 'providers.titleSummaryModel', category: 'providers', title: 'Model' },
   {
     id: 'providers.virtual-models',
     category: 'providers',
@@ -924,13 +911,13 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description:
       'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.',
   },
+  { id: 'shortcuts.pluginCommands', category: 'shortcuts', title: '插件命令' },
   {
     id: 'shortcuts.root',
     category: 'shortcuts',
     title: 'Shortcuts',
     description: 'Click a shortcut to rebind it. Backspace removes it; Esc cancels.',
   },
-  { id: 'shortcuts.text-ec42bcc9', category: 'shortcuts', title: '插件命令' },
   {
     id: 'skills.load-local-skills',
     category: 'skills',

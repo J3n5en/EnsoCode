@@ -116,7 +116,7 @@ function PluginKeybindingsSection() {
   };
 
   return (
-    <SettingsSection rowId="shortcuts.text-ec42bcc9" title="插件命令">
+    <SettingsSection rowId="shortcuts.pluginCommands" title="插件命令">
       {rows.map(({ action, command, binding, custom, conflict }) => {
         const isCapturing = capturing === action;
         return (

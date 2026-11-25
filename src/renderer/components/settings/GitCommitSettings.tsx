@@ -107,7 +107,7 @@ export function GitCommitSettings() {
           }}
         />
       </SettingsRow>
-      <SettingsRow rowId="providers.model" label={t('Model')}>
+      <SettingsRow rowId="providers.gitCommitModel" label={t('Model')}>
         <SettingsSelect
           value={selectedModel?.id ?? ''}
           options={modelOptions}

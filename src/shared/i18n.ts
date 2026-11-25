@@ -4520,13 +4520,6 @@ export const zhTranslations: Record<string, string> = {
   Plugins: '插件',
   'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.':
     '秘书为自己编写的 Python 或 Node 工具。它会在对话里提出，你确认后才会写入。只读工具直接运行，其他工具每次调用都要你批准。',
-  插件命令: '插件命令',
-  允许向任意运行中的会话发送消息: '允许向任意运行中的会话发送消息',
-  '关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行':
-    '关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行',
-  '开发模式：目录改动后自动重装': '开发模式：目录改动后自动重装',
-  '授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭':
-    '授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭',
 };
 
 export function normalizeLocale(input?: string): Locale {

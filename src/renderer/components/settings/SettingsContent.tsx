@@ -424,6 +424,12 @@ export function SettingsContent({
                                 event.preventDefault();
                                 if (index <= 0) searchInputRef.current?.focus();
                                 else focusHit(index - 1);
+                              } else if (event.key === 'Escape') {
+                                // 与搜索框一致：有字时 Esc 只清空并回到搜索框，不冒泡成「退出设置」
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setSettingsQuery('');
+                                searchInputRef.current?.focus();
                               }
                             }}
                             onClick={() => {

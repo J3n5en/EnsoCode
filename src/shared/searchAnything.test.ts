@@ -388,7 +388,8 @@ describe('buildSettingsCatalog', () => {
   it('目录里的标题和说明都有中文译文', () => {
     const missing = buildSettingsCatalog()
       .flatMap((entry) => [entry.title, entry.description ?? ''])
-      .filter((text) => text && !(text in zhTranslations));
+      // 原文本身就是中文的没有可译的译文，它自己就是界面显示文本
+      .filter((text) => text && !/[\u3400-\u9fff]/u.test(text) && !(text in zhTranslations));
     expect(missing).toEqual([]);
   });
 
