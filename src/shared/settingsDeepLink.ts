@@ -69,6 +69,7 @@ const ROW_RELOCATIONS: Readonly<Record<string, SettingsCategory>> = {
   'general.windowsLocalShell': 'terminal',
   'appearance.fileOpening': 'general',
   'terminal.context-menu-opening': 'general',
+  'terminal.font-size': 'appearance',
   'appearance.chatTypography': 'conversation',
   'appearance.navRailSide': 'conversation',
   'appearance.openChangesOnFileEdit': 'conversation',

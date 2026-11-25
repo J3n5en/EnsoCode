@@ -330,7 +330,6 @@ function TerminalAppearance() {
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const setTerminalTheme = useSettingsStore((s) => s.setTerminalTheme);
   const globalFontSize = useSettingsStore((s) => s.terminalFontSize);
-  const setTerminalFontSize = useSettingsStore((s) => s.setTerminalFontSize);
   const globalFontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const setTerminalFontFamily = useSettingsStore((s) => s.setTerminalFontFamily);
   const terminalFontWeight = useSettingsStore((s) => s.terminalFontWeight);
@@ -339,22 +338,12 @@ function TerminalAppearance() {
   const setTerminalFontWeightBold = useSettingsStore((s) => s.setTerminalFontWeightBold);
   const favoriteTerminalThemes = useSettingsStore((s) => s.favoriteTerminalThemes);
   const toggleFavoriteTerminalTheme = useSettingsStore((s) => s.toggleFavoriteTerminalTheme);
-  const [localFontSize, setLocalFontSize] = React.useState(globalFontSize);
   const [localFontFamily, setLocalFontFamily] = React.useState(globalFontFamily);
   const [showFavoritesOnly, setShowFavoritesOnly] = React.useState(false);
 
   React.useEffect(() => {
-    setLocalFontSize(globalFontSize);
-  }, [globalFontSize]);
-  React.useEffect(() => {
     setLocalFontFamily(globalFontFamily);
   }, [globalFontFamily]);
-
-  const applyFontSizeChange = React.useCallback(() => {
-    const validFontSize = Math.max(8, Math.min(32, localFontSize || 8));
-    if (validFontSize !== localFontSize) setLocalFontSize(validFontSize);
-    if (validFontSize !== globalFontSize) setTerminalFontSize(validFontSize);
-  }, [localFontSize, globalFontSize, setTerminalFontSize]);
 
   const applyFontFamilyChange = React.useCallback(() => {
     const validFontFamily = localFontFamily.trim() || globalFontFamily;
@@ -393,7 +382,7 @@ function TerminalAppearance() {
       <SettingsSection bare rowId="terminal.appearance" title={t('Terminal appearance')}>
         <TerminalPreview
           theme={previewTheme}
-          fontSize={localFontSize}
+          fontSize={globalFontSize}
           fontFamily={localFontFamily}
           fontWeight={terminalFontWeight}
         />
@@ -445,30 +434,6 @@ function TerminalAppearance() {
             placeholder="JetBrains Mono, monospace"
             className="w-[min(100%,220px)] max-w-full"
           />
-        </SettingsRow>
-        <SettingsRow
-          rowId="terminal.font-size"
-          label={t('Font size')}
-          description={t(
-            'Side panel terminals only; conversation output follows the chat font size'
-          )}
-        >
-          <Input
-            type="number"
-            value={localFontSize}
-            onChange={(e) => setLocalFontSize(Number(e.target.value))}
-            onBlur={applyFontSizeChange}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                applyFontSizeChange();
-                e.currentTarget.blur();
-              }
-            }}
-            min={8}
-            max={32}
-            className="w-20 max-w-full"
-          />
-          <span className="text-[12px] text-muted-foreground">px</span>
         </SettingsRow>
         <SettingsRow rowId="terminal.font-weight" label={t('Font weight')}>
           <SettingsSelect

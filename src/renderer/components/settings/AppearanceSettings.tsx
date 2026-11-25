@@ -481,6 +481,19 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
   const setAccentColor = useSettingsStore((s) => s.setAccentColor);
   const pluginThemes = usePluginThemesStore((s) => s.themes);
   const colorScheme = useColorScheme();
+  const interfaceFontSize = useSettingsStore((s) => s.terminalFontSize);
+  const setInterfaceFontSize = useSettingsStore((s) => s.setTerminalFontSize);
+  const [localFontSize, setLocalFontSize] = React.useState(interfaceFontSize);
+
+  React.useEffect(() => {
+    setLocalFontSize(interfaceFontSize);
+  }, [interfaceFontSize]);
+
+  const applyFontSizeChange = React.useCallback(() => {
+    const validFontSize = Math.max(8, Math.min(32, localFontSize || 8));
+    if (validFontSize !== localFontSize) setLocalFontSize(validFontSize);
+    if (validFontSize !== interfaceFontSize) setInterfaceFontSize(validFontSize);
+  }, [localFontSize, interfaceFontSize, setInterfaceFontSize]);
 
   const themeModeOptions: { value: Theme; icon: React.ElementType; label: string }[] = [
     { value: 'light', icon: Sun, label: t('Light') },
@@ -505,6 +518,30 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
       >
         <SettingsRow rowId="appearance.theme" label={t('Theme mode')}>
           <SettingsSegmented value={theme} onValueChange={setTheme} options={themeModeOptions} />
+        </SettingsRow>
+        <SettingsRow
+          rowId="terminal.font-size"
+          label={t('Interface font size')}
+          description={t(
+            'Scales all interface text and command output in conversations; also the side panel terminal size. Conversation body text is set separately in Conversation display.'
+          )}
+        >
+          <Input
+            type="number"
+            value={localFontSize}
+            onChange={(e) => setLocalFontSize(Number(e.target.value))}
+            onBlur={applyFontSizeChange}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                applyFontSizeChange();
+                e.currentTarget.blur();
+              }
+            }}
+            min={8}
+            max={32}
+            className="w-20 max-w-full"
+          />
+          <span className="text-[12px] text-muted-foreground">px</span>
         </SettingsRow>
         <SettingsRow
           rowId="appearance.accent"

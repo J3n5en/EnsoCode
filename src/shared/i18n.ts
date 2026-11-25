@@ -467,8 +467,9 @@ export const zhTranslations: Record<string, string> = {
   Terminal: '终端',
   'Conversation display': '对话显示',
   'Also used by command output in conversations': '同时用于对话中的命令输出',
-  'Side panel terminals only; conversation output follows the chat font size':
-    '仅侧边栏终端；对话中的命令输出跟随聊天字号',
+  'Interface font size': '界面字号',
+  'Scales all interface text and command output in conversations; also the side panel terminal size. Conversation body text is set separately in Conversation display.':
+    '缩放整个界面文字与对话中的命令输出，也是侧边栏终端的字号；对话正文在「对话显示」里单独设置。',
   'Runtime & sessions': '运行与会话',
   'Contacts & owner': '联系方式与主人',
   'Secretary & contacts': '秘书与联系',

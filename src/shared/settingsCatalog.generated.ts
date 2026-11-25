@@ -1001,9 +1001,10 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: 'terminal.font-size',
-    category: 'terminal',
-    title: 'Font size',
-    description: 'Side panel terminals only; conversation output follows the chat font size',
+    category: 'appearance',
+    title: 'Interface font size',
+    description:
+      'Scales all interface text and command output in conversations; also the side panel terminal size. Conversation body text is set separately in Conversation display.',
   },
   { id: 'terminal.font-weight', category: 'terminal', title: 'Font weight' },
   { id: 'terminal.root', category: 'terminal', title: 'Terminal' },
