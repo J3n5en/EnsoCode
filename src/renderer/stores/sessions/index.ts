@@ -91,7 +91,6 @@ import { create } from 'zustand';
 import { persist, type StorageValue } from 'zustand/middleware';
 import { startQueuedSession } from '@/lib/queuedSessionApi';
 import { isLeaderRenderer } from '@/lib/rendererRole';
-import { noteDispatchFlight } from '@/stores/dispatchFlight';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
@@ -1964,9 +1963,6 @@ export const useSessionsStore = create<SessionsState>()(
           return;
         }
 
-        let dispatchLanded:
-          | { messages: TimelineMessage[]; historyBaseIndex?: number; projectId: string }
-          | undefined;
         set((state) => {
           const conversation = state.conversations[id];
           if (!conversation) return state;
@@ -1997,18 +1993,6 @@ export const useSessionsStore = create<SessionsState>()(
           const next = applyAgentEvent(conversation, id, event);
           // dev：首个 worker 事件即 spawn 完成信号，即使投影未变也要清 spawning（resume loading 依赖它）
           if (next === conversation && !conversation.spawning) return state;
-          if (
-            event.type === 'message-upsert' &&
-            event.message.role === 'toolResult' &&
-            event.message.toolCallId &&
-            next !== conversation
-          ) {
-            dispatchLanded = {
-              messages: next.messages,
-              historyBaseIndex: next.historyBaseIndex,
-              projectId: conversation.projectId,
-            };
-          }
           // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上，
           // 用它的首条用户消息补一个，否则侧边栏永远显示「新对话」
           const title = conversation.title || extractedTitle || firstUserText(next) || '';
@@ -2098,20 +2082,6 @@ export const useSessionsStore = create<SessionsState>()(
               : {}),
           });
         });
-        if (
-          dispatchLanded &&
-          event.type === 'message-upsert' &&
-          event.message.role === 'toolResult' &&
-          event.message.toolCallId
-        ) {
-          noteDispatchFlight({
-            messages: dispatchLanded.messages,
-            historyBaseIndex: dispatchLanded.historyBaseIndex ?? 0,
-            projectId: dispatchLanded.projectId,
-            toolCallId: event.message.toolCallId,
-            projects: useSettingsStore.getState().projects,
-          });
-        }
         if (event.type === 'parent-rejected' && event.reason.startsWith(STALE_SESSION_ERROR)) {
           void recoverStaleSession(id, event.reason, event.identity.generation);
         }
