@@ -27,7 +27,7 @@ export function pluginInstallUrlsFromArgv(argv: readonly string[]): string[] {
 }
 
 export function pluginInstallSettingsLink(url: string): SettingsDeepLink {
-  return { category: 'plugins', rowId: 'plugins.enso', pluginInstallUrl: url };
+  return { category: 'plugins', rowId: 'plugins.installUrl', pluginInstallUrl: url };
 }
 
 export function pluginFocusSettingsLink(pluginId: string): SettingsDeepLink {

@@ -1,3 +1,4 @@
+import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
 import { parseHTML } from 'linkedom';
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -617,5 +618,32 @@ describe('插件市场安装', () => {
     expect(harness.restage).toHaveBeenCalledWith('local.missionops');
     expect(marketDialog()).toBeUndefined();
     expect(container.querySelector('[data-dialog="open"]')?.textContent).toContain('Market A');
+  });
+});
+
+describe('enso://install-plugin 深链', () => {
+  it('高亮落在「从链接安装」那一行：链接已填入输入框并聚焦，不是页头', async () => {
+    const source = 'https://github.com/owner/repo';
+    const link = pluginInstallSettingsLink(source);
+    const stageFromUrl = vi.fn(async () => ({ ok: false as const, error: 'offline' }));
+    Object.assign(window.electronAPI.extensionPlugins, { stageFromUrl });
+    const focused: Element[] = [];
+    const focus = vi.spyOn(window.HTMLElement.prototype, 'focus').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      focused.push(this);
+    });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<PluginsSettings requestedInstallUrl={source} />));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)));
+
+    const row = container.querySelector(`[data-settings-row="${link.rowId}"]`);
+    expect(row?.tagName).not.toBe('HEADER');
+    const input = row?.querySelector('input');
+    expect((input as HTMLInputElement | null | undefined)?.value).toBe(source);
+    expect(focused).toContain(input);
+    expect(stageFromUrl).toHaveBeenCalledWith(source);
+    focus.mockRestore();
   });
 });

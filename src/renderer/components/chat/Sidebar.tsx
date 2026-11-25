@@ -122,7 +122,8 @@ import {
   SecretaryDispatchBadge,
 } from '@/components/secretary/SecretaryRunningOrigins';
 import {
-  SecretaryCollapsedButton,
+  type CollapsedSecretaryEntry,
+  SecretaryCollapsedRail,
   SecretaryGroupHeader,
   SecretarySidebarSection,
   sidebarProjects,
@@ -168,7 +169,7 @@ import {
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
-import { secretaryConversationIds } from '@/lib/secretaryEntry';
+import { secretaryConversationIds, secretaryUnreadCount } from '@/lib/secretaryEntry';
 import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -372,6 +373,38 @@ export function Sidebar({
       return view ? [{ id: entry.id, projectId: entry.projectId, view }] : [];
     });
   }, [multiSecretary, secretaryList, secretaryStates, t]);
+  // 折叠图标栏：与展开态同一份秘书清单与顺序，每个秘书各自的角标
+  const collapsedSecretaries = useMemo<CollapsedSecretaryEntry[]>(() => {
+    if (!collapsed) return [];
+    const base = multiSecretary
+      ? secretaryEntries
+      : secretaryView
+        ? [
+            {
+              id: secretaryList[0]?.id ?? '',
+              projectId: secretaryState.projectId,
+              view: secretaryView,
+            },
+          ]
+        : [];
+    const activeProjectId = activeId ? conversations[activeId]?.projectId : undefined;
+    return base.map((entry) => ({
+      id: entry.id,
+      view: entry.view,
+      unread: secretaryUnreadCount(entry.projectId, order, conversations),
+      active: activeProjectId !== undefined && activeProjectId === entry.projectId,
+    }));
+  }, [
+    collapsed,
+    multiSecretary,
+    secretaryEntries,
+    secretaryView,
+    secretaryList,
+    secretaryState.projectId,
+    activeId,
+    order,
+    conversations,
+  ]);
   // 每个秘书只按自己的看板分组，计数和悬停列表都不跨分区
   const secretaryRunning = useMemo(() => {
     const known = (id: string) => conversations[id] !== undefined;
@@ -1075,24 +1108,10 @@ export function Sidebar({
       className="flex shrink-0 flex-col overflow-hidden"
     >
       {collapsed && (
-        <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 py-2">
           {/* 展开/折叠与搜索常驻窗口顶栏（App），折叠栏只留其余入口 */}
-          {(multiSecretary ? secretaryEntries.length > 0 : secretaryView) && (
-            <SecretaryCollapsedButton
-              view={
-                multiSecretary && secretaryEntries[0]
-                  ? {
-                      ...secretaryEntries[0].view,
-                      needsYou: secretaryEntries.reduce(
-                        (sum, entry) => sum + entry.view.needsYou,
-                        0
-                      ),
-                      running: secretaryEntries.reduce((sum, entry) => sum + entry.view.running, 0),
-                    }
-                  : (secretaryView as NonNullable<typeof secretaryView>)
-              }
-              onClick={() => openSecretary()}
-            />
+          {collapsedSecretaries.length > 0 && (
+            <SecretaryCollapsedRail entries={collapsedSecretaries} onOpen={openSecretary} />
           )}
           <button
             type="button"
