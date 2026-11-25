@@ -70,4 +70,5 @@ app 路径来自 `ENSO_DATA_DIR`（默认 `~/.enso-server`）与 `ENSO_APP_ROOT`
 - npm Trusted Publishing 的两个坑（都在真实运行中踩过）：
   - 可复用工作流的 `id-token` 权限按**调用方**裁决：调用方 workflow 没声明 `id-token: write` 时 GitHub 在启动期直接判 startup_failure，整个 workflow 一个 job 都起不来；actionlint 查不出来。所以 `beta.yml` 也声明了 `id-token: write`。
   - npm 对 token exchange 校验的是**调用方**（顶层）workflow 文件名，而不是真正执行 publish 的被调用文件。所以 npm 包后台需要登记**两个** trusted publisher：`publish-server.yml`（正式版直推 tag 触发）和 `beta.yml`（内测 workflow_call 链）；每个包最多 10 个。直连 tag 推送时两者是同一个文件，登记 `publish-server.yml` 就够了。
+- 打包发布前校验（`scripts/server-package/validate.mjs`，`pack-server.mjs` 末尾强制执行）：tarball 必须带齐 `out/server/index.js`、`out/renderer/index.html` + `web-preload.js`（`rendererBuildId` 缺它就 null，浏览器完整版的 meta 直接 503，用户看到「桌面端缺少浏览器版资源」）、`index.html` 直接引用的 assets、`out/phone` 产物；缺任何一样打包直接失败、不产出 tgz。完整版桌面的资源链：手机壳 `fetchAsset('meta')` → 隧道 IPC → 宿主 `rendererBuildId`（`out/renderer/index.html` + `web-preload.js` 内容指纹）→ 逐资产经隧道或 `/desk-bundle/<id>/<path>` 下发（清单 sha256 按磁盘原始内容算，`index.html` 不在清单里——它由宿主注入 web-preload 后下发）。
 - npm 11 起会对依赖的安装脚本给出警告（npm 12 默认阻止）。真正依赖安装脚本的只有 `@vscode/ripgrep`（下载 rg），缺失时只影响工作区文件搜索。
