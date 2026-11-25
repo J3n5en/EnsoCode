@@ -1182,6 +1182,7 @@ export function EnsoPluginsSettings({
               <Link2 className="size-4 text-muted-foreground" />
             </InputGroupAddon>
             <InputGroupInput
+              size="sm"
               value={url}
               placeholder={t('https://github.com/owner/repo')}
               onChange={(event) => setUrl(event.target.value)}

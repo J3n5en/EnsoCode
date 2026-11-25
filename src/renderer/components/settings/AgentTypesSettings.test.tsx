@@ -21,6 +21,7 @@ vi.mock('@/stores/modelDirectory/useProviders', () => ({
   useUsableProviders: () => harness.state.providers,
 }));
 vi.mock('@/components/chat/ModelPicker', () => ({
+  MODEL_PICKER_DIALOG_TRIGGER_CLASS: 'form-trigger',
   MODEL_PICKER_FORM_TRIGGER_CLASS: 'form-trigger',
   ModelPicker: (props: Record<string, unknown>) => {
     harness.pickerProps.push(props);

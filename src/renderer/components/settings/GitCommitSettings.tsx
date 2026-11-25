@@ -98,6 +98,7 @@ export function GitCommitSettings() {
         <SettingsSelect
           value={provider?.id ?? ''}
           options={providerOptions}
+          width="wide"
           onValueChange={(next) => {
             const entry = providers.find((item) => item.id === next);
             const first = entry?.models.find((item) => item.enabled !== false);
@@ -109,6 +110,7 @@ export function GitCommitSettings() {
         <SettingsSelect
           value={selectedModel?.id ?? ''}
           options={modelOptions}
+          width="wide"
           disabled={!provider}
           onValueChange={(next) => {
             if (provider && next) setModel({ providerId: provider.id, modelId: next });
