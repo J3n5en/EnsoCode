@@ -1,5 +1,6 @@
 import { PopDigits } from '@/components/ui/pop-digits';
 import { cn } from '@/lib/utils';
+import { SettingsPreview } from '../kit';
 
 interface StatCardProps {
   label: string;
@@ -11,15 +12,15 @@ interface StatCardProps {
 
 const TONE_CLASS: Record<NonNullable<StatCardProps['tone']>, string> = {
   default: 'text-foreground',
-  success: 'text-emerald-600 dark:text-emerald-400',
-  info: 'text-sky-600 dark:text-sky-400',
+  success: 'text-success',
+  info: 'text-info',
   muted: 'text-muted-foreground',
 };
 
 /** 统计卡：标签 + 大号等宽数值 + 右上角 delta。delta 不着色——涨费用是坏事、涨 token 是中性，颜色反而误导。 */
 export function StatCard({ label, value, delta, tone = 'default' }: StatCardProps) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-lg border bg-card px-4 py-3">
+    <SettingsPreview className="min-w-0 overflow-hidden px-4 py-3">
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 text-xs text-muted-foreground">{label}</span>
         {delta && (
@@ -37,6 +38,6 @@ export function StatCard({ label, value, delta, tone = 'default' }: StatCardProp
       >
         <PopDigits value={value} />
       </div>
-    </div>
+    </SettingsPreview>
   );
 }

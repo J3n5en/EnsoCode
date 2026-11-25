@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { SettingsRow, useSettingsRowControl } from '@/components/settings/kit';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
@@ -60,9 +61,11 @@ const ERROR_TEXT: Record<string, string> = {
   'invalid-github-login': 'That is not a GitHub login',
 };
 
-const STEP_CLASS = 'rounded-xl border border-border px-3 py-2.5';
+const STEP_CLASS = 'border-border border-b py-3';
 const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12.5px] transition-colors hover:bg-muted disabled:opacity-50';
+const LINK_CLASS =
+  'inline-flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-[12.5px] text-foreground transition-colors hover:bg-muted/80';
 const PRIMARY_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg bg-foreground px-2.5 py-1.5 text-[12.5px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50';
 
@@ -133,8 +136,8 @@ function OutboundNotice({
       data-enso="secretary-contact-outbound"
       data-state={outbound.state}
       className={cn(
-        'rounded-lg border px-2.5 py-2 text-[12px]',
-        paused ? 'border-warning/50 bg-warning/5' : 'border-destructive/40 bg-destructive/5'
+        'border-l-2 px-2.5 py-2 text-[12px]',
+        paused ? 'border-warning bg-warning/5' : 'border-destructive bg-destructive/5'
       )}
     >
       <div
@@ -269,9 +272,9 @@ function ChannelCard({
     <div
       data-enso="secretary-contact-channel"
       data-channel={channel.id}
-      className="rounded-xl border border-border"
+      className="border-border border-b"
     >
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex items-center gap-2 py-2">
         <button
           type="button"
           data-enso="secretary-contact-channel-toggle"
@@ -322,7 +325,7 @@ function ChannelCard({
         />
       </div>
       {!collapsed && (
-        <div className="flex flex-col gap-2 border-t border-border px-3 py-2.5">
+        <div className="flex flex-col gap-2 border-border border-t py-2.5">
           {channel.detail && channel.status === 'error' && (
             <p className="text-[11.5px] text-destructive">{channel.detail}</p>
           )}
@@ -408,12 +411,14 @@ function OwnerIdentity({
   busy,
   error,
   run,
+  showHeading = true,
 }: {
   owner: SecretaryContactState['owner'];
   secretaryId?: string;
   busy: boolean;
   error: string | null;
   run: (action: () => Promise<{ ok: boolean; error?: string }>) => void;
+  showHeading?: boolean;
 }) {
   const { t } = useI18n();
   const saved = owner.githubLogins.join(', ');
@@ -453,8 +458,8 @@ function OwnerIdentity({
 
   return (
     <div data-enso="secretary-contact-owner" className={STEP_CLASS}>
-      <div className="text-[12.5px] font-medium">{t('Owner identity')}</div>
-      <p className="mt-1 text-[11.5px] text-muted-foreground">
+      {showHeading && <div className="text-[12.5px] font-medium">{t('Owner identity')}</div>}
+      <p className={cn('text-[11.5px] text-muted-foreground', showHeading && 'mt-1')}>
         {t(
           'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.'
         )}
@@ -558,10 +563,45 @@ function OwnerIdentity({
 }
 
 /**
- * 联系方式：顶部总开关，下面是渠道卡片（Telegram 内置固定第一位，插件渠道跟在后面），
- * 可以同时启用多个。Telegram 的绑定向导尽量少步骤，不让用户手抄 chat_id。
+ * 联系方式：总开关、主人身份、渠道（Telegram 内置固定第一位，插件渠道跟在后面）。
+ * 设置页传入 frames，把总开关和主人身份、渠道内容分到两个分组；不传时仍是一整块。
  */
-export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } = {}) {
+export type SecretaryContactFrames = {
+  owner: (node: ReactNode) => ReactNode;
+  channels: (node: ReactNode) => ReactNode;
+};
+
+function EnableSwitch({
+  checked,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  const row = useSettingsRowControl();
+  return (
+    <Switch
+      {...row}
+      data-enso="secretary-contact-enabled"
+      checked={checked}
+      disabled={disabled}
+      aria-label={row['aria-labelledby'] ? undefined : label}
+      onCheckedChange={onCheckedChange}
+    />
+  );
+}
+
+export function SecretaryContactPanel({
+  secretaryId,
+  frames,
+}: {
+  secretaryId?: string;
+  frames?: SecretaryContactFrames;
+} = {}) {
   const { t } = useI18n();
   const [state, setState] = useState<SecretaryContactState | null>(null);
   const [token, setToken] = useState('');
@@ -1021,7 +1061,7 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
               href={BOTFATHER_URL}
               target="_blank"
               rel="noreferrer"
-              className={cn(BUTTON_CLASS, 'mt-2')}
+              className={cn(LINK_CLASS, 'mt-2')}
             >
               <ExternalLink className="size-3.5" />
               {t('Open @BotFather')}
@@ -1076,173 +1116,200 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
     </>
   );
 
-  return (
-    <div data-enso="secretary-contact" className="flex flex-col gap-2 px-3 py-3">
-      <p className="px-1 text-[11.5px] text-muted-foreground">
-        {t('Reach the secretary from your phone. Milestones go out; your replies come back.')}
-      </p>
-
-      <div
-        data-enso="secretary-contact-master"
-        className="flex items-center justify-between gap-2 rounded-xl border border-border px-3 py-2"
-      >
-        <span className="text-[13px] font-medium">{t('Enable contacts')}</span>
-        <Switch
-          data-enso="secretary-contact-enabled"
-          checked={state.enabled}
-          disabled={busy}
-          aria-label={t('Enable contacts')}
-          onCheckedChange={(checked) =>
-            run(() =>
-              window.electronAPI.secretary.contactSettings({ enabled: checked }, secretaryId)
-            )
-          }
-        />
-      </div>
-
+  const setEnabled = (checked: boolean) =>
+    run(() => window.electronAPI.secretary.contactSettings({ enabled: checked }, secretaryId));
+  const ownerBlock = (
+    <>
+      {frames ? (
+        <div data-enso="secretary-contact-master">
+          <SettingsRow label={t('Enable contacts')}>
+            <EnableSwitch
+              checked={state.enabled}
+              disabled={busy}
+              label={t('Enable contacts')}
+              onCheckedChange={setEnabled}
+            />
+          </SettingsRow>
+        </div>
+      ) : (
+        <div
+          data-enso="secretary-contact-master"
+          className="flex items-center justify-between gap-2 border-border border-b py-2"
+        >
+          <span className="text-[13px] font-medium">{t('Enable contacts')}</span>
+          <EnableSwitch
+            checked={state.enabled}
+            disabled={busy}
+            label={t('Enable contacts')}
+            onCheckedChange={setEnabled}
+          />
+        </div>
+      )}
       <OwnerIdentity
         owner={state.owner}
         secretaryId={secretaryId}
         busy={busy}
         error={error}
         run={run}
+        showHeading={!frames}
       />
+    </>
+  );
+  const channelsBlock = !state.enabled ? (
+    <p
+      className={
+        frames
+          ? 'border-border border-b py-3 text-[13px] text-muted-foreground'
+          : 'px-1 text-[11.5px] text-subtle-foreground'
+      }
+    >
+      {t('Contacts are off: nothing is sent or received on any channel.')}
+    </p>
+  ) : (
+    <>
+      {(shownError || pollFailed) && (
+        <div
+          data-enso="secretary-contact-error"
+          className="flex items-start gap-1.5 border-destructive border-l-2 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive"
+        >
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">
+            {shownError
+              ? t(ERROR_TEXT[shownError] ?? 'Telegram returned an error')
+              : t('Cannot reach api.telegram.org. Check the proxy.')}
+          </span>
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-center gap-1.5 border-success border-l-2 bg-success/5 px-2.5 py-2 text-[12px] text-success">
+          <Check className="size-3.5 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
 
-      {!state.enabled ? (
-        <p className="px-1 text-[11.5px] text-subtle-foreground">
-          {t('Contacts are off: nothing is sent or received on any channel.')}
-        </p>
-      ) : (
-        <>
-          {(shownError || pollFailed) && (
+      {channels.map((channel) => (
+        <ChannelCard
+          key={channel.id}
+          channel={channel}
+          collapsed={collapsed[channel.id] === true}
+          busy={busy}
+          onToggle={() => toggleCollapsed(channel.id)}
+          onPrefs={(prefs) => setPrefs(channel.id, prefs)}
+          onRetry={() => retryChannel(channel.id)}
+        >
+          {channel.id === 'telegram' ? (
+            telegramBody
+          ) : channel.pluginId && channel.settingsView ? (
             <div
-              data-enso="secretary-contact-error"
-              className="flex items-start gap-1.5 rounded-lg border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive"
+              data-enso="secretary-contact-plugin-view"
+              className="h-72 overflow-hidden border-border border-y"
             >
-              <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">
-                {shownError
-                  ? t(ERROR_TEXT[shownError] ?? 'Telegram returned an error')
-                  : t('Cannot reach api.telegram.org. Check the proxy.')}
-              </span>
+              <PluginFrame
+                pluginId={channel.pluginId}
+                entry={channel.settingsView}
+                title={channel.title}
+                sessionId={null}
+              />
             </div>
-          )}
-          {notice && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-success/40 bg-success/5 px-2.5 py-2 text-[12px] text-success">
-              <Check className="size-3.5 shrink-0" />
-              <span>{notice}</span>
-            </div>
-          )}
+          ) : null}
+        </ChannelCard>
+      ))}
 
-          {channels.map((channel) => (
-            <ChannelCard
-              key={channel.id}
-              channel={channel}
-              collapsed={collapsed[channel.id] === true}
-              busy={busy}
-              onToggle={() => toggleCollapsed(channel.id)}
-              onPrefs={(prefs) => setPrefs(channel.id, prefs)}
-              onRetry={() => retryChannel(channel.id)}
+      <div data-enso="secretary-contact-following" className={STEP_CLASS}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[12.5px] font-medium">
+            {t('Followed from the phone: {{count}}', { count: telegram.following.length })}
+          </div>
+          {telegram.following.length > 0 && (
+            <button
+              type="button"
+              data-enso="secretary-contact-following-clear"
+              disabled={busy}
+              className={BUTTON_CLASS}
+              onClick={() =>
+                run(() =>
+                  window.electronAPI.secretary.contactFollowing({ action: 'clear' }, secretaryId)
+                )
+              }
             >
-              {channel.id === 'telegram' ? (
-                telegramBody
-              ) : channel.pluginId && channel.settingsView ? (
-                <div
-                  data-enso="secretary-contact-plugin-view"
-                  className="h-72 overflow-hidden rounded-lg border border-border"
-                >
-                  <PluginFrame
-                    pluginId={channel.pluginId}
-                    entry={channel.settingsView}
-                    title={channel.title}
-                    sessionId={null}
-                  />
-                </div>
-              ) : null}
-            </ChannelCard>
-          ))}
-
-          <div data-enso="secretary-contact-following" className={STEP_CLASS}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[12.5px] font-medium">
-                {t('Followed from the phone: {{count}}', { count: telegram.following.length })}
-              </div>
-              {telegram.following.length > 0 && (
+              {t('Clear all')}
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-[11.5px] text-muted-foreground">
+          {t(
+            'What you dispatch or schedule from the phone keeps reporting here until it finishes or fails once, even with /sync off.'
+          )}
+        </p>
+        {telegram.following.length > 0 && (
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {telegram.following.map((item) => (
+              <li key={item.id} className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 text-[12px]">
+                  <span className="text-muted-foreground">
+                    {item.kind === 'schedule' ? t('Scheduled') : t('Session')} ·{' '}
+                  </span>
+                  {item.summary}
+                </span>
                 <button
                   type="button"
-                  data-enso="secretary-contact-following-clear"
+                  data-enso="secretary-contact-following-cancel"
                   disabled={busy}
                   className={BUTTON_CLASS}
                   onClick={() =>
                     run(() =>
                       window.electronAPI.secretary.contactFollowing(
-                        { action: 'clear' },
+                        {
+                          action: 'cancel',
+                          id: item.id,
+                        },
                         secretaryId
                       )
                     )
                   }
                 >
-                  {t('Clear all')}
+                  {t('Drop')}
                 </button>
-              )}
-            </div>
-            <p className="mt-1 text-[11.5px] text-muted-foreground">
-              {t(
-                'What you dispatch or schedule from the phone keeps reporting here until it finishes or fails once, even with /sync off.'
-              )}
-            </p>
-            {telegram.following.length > 0 && (
-              <ul className="mt-1.5 flex flex-col gap-1">
-                {telegram.following.map((item) => (
-                  <li key={item.id} className="flex items-start justify-between gap-2">
-                    <span className="min-w-0 flex-1 text-[12px]">
-                      <span className="text-muted-foreground">
-                        {item.kind === 'schedule' ? t('Scheduled') : t('Session')} ·{' '}
-                      </span>
-                      {item.summary}
-                    </span>
-                    <button
-                      type="button"
-                      data-enso="secretary-contact-following-cancel"
-                      disabled={busy}
-                      className={BUTTON_CLASS}
-                      onClick={() =>
-                        run(() =>
-                          window.electronAPI.secretary.contactFollowing(
-                            {
-                              action: 'cancel',
-                              id: item.id,
-                            },
-                            secretaryId
-                          )
-                        )
-                      }
-                    >
-                      {t('Drop')}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
-          <button
-            type="button"
-            data-enso="secretary-contact-market"
-            className={cn(BUTTON_CLASS, 'self-start')}
-            onClick={() =>
-              openSettings({
-                category: 'plugins',
-                rowId: 'plugins.enso',
-                marketQuery: 'contact',
-              })
-            }
-          >
-            <Search className="size-3.5" />
-            {t('Find more contact channels in the plugin market')}
-          </button>
-        </>
-      )}
+      <button
+        type="button"
+        data-enso="secretary-contact-market"
+        className={cn(BUTTON_CLASS, frames ? 'mt-3' : 'self-start')}
+        onClick={() =>
+          openSettings({
+            category: 'plugins',
+            rowId: 'plugins.enso',
+            marketQuery: 'contact',
+          })
+        }
+      >
+        <Search className="size-3.5" />
+        {t('Find more contact channels in the plugin market')}
+      </button>
+    </>
+  );
+
+  if (frames) {
+    return (
+      <div data-enso="secretary-contact">
+        {frames.owner(ownerBlock)}
+        {frames.channels(channelsBlock)}
+      </div>
+    );
+  }
+
+  return (
+    <div data-enso="secretary-contact" className="flex flex-col gap-2 px-3 py-3">
+      <p className="px-1 text-[11.5px] text-muted-foreground">
+        {t('Reach the secretary from your phone. Milestones go out; your replies come back.')}
+      </p>
+      {ownerBlock}
+      {channelsBlock}
     </div>
   );
 }

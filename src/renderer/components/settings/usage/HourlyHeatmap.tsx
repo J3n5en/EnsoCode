@@ -1,6 +1,7 @@
 import { formatTokens } from '@shared/usage/format';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SettingsPreview } from '../kit';
 
 const WEEKDAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'));
@@ -23,7 +24,7 @@ export function HourlyHeatmap({ heatmap }: { heatmap: number[][] }) {
   const { t } = useI18n();
   const max = Math.max(0, ...heatmap.flat());
   return (
-    <div className="rounded-lg border bg-card p-4">
+    <SettingsPreview className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <span className="text-sm font-medium">{t('Activity by hour')}</span>
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -34,35 +35,37 @@ export function HourlyHeatmap({ heatmap }: { heatmap: number[][] }) {
           <span>{t('More')}</span>
         </div>
       </div>
-      <div className="grid grid-cols-[28px_1fr] gap-x-2 gap-y-1">
-        {heatmap.map((row, weekday) => (
-          <div key={WEEKDAY_KEYS[weekday]} className="contents">
-            <span className="self-center text-[10px] text-muted-foreground">
-              {t(WEEKDAY_KEYS[weekday])}
-            </span>
-            <div className="grid grid-cols-24 gap-[3px]">
-              {HOURS.map((label, hour) => (
-                <span
-                  key={label}
-                  title={`${t(WEEKDAY_KEYS[weekday])} ${label}:00 · ${formatTokens(row[hour] ?? 0)}`}
-                  className={cn(
-                    'aspect-square rounded-[2px]',
-                    LEVELS[levelOf(row[hour] ?? 0, max)]
-                  )}
-                />
-              ))}
+      <div className="overflow-x-auto">
+        <div className="grid grid-cols-[28px_1fr] gap-x-2 gap-y-1">
+          {heatmap.map((row, weekday) => (
+            <div key={WEEKDAY_KEYS[weekday]} className="contents">
+              <span className="self-center text-[10px] text-muted-foreground">
+                {t(WEEKDAY_KEYS[weekday])}
+              </span>
+              <div className="grid grid-cols-24 gap-[3px]">
+                {HOURS.map((label, hour) => (
+                  <span
+                    key={label}
+                    title={`${t(WEEKDAY_KEYS[weekday])} ${label}:00 · ${formatTokens(row[hour] ?? 0)}`}
+                    className={cn(
+                      'aspect-square rounded-[2px]',
+                      LEVELS[levelOf(row[hour] ?? 0, max)]
+                    )}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
-        <span />
-        <div className="grid grid-cols-24 font-mono text-[10px] text-muted-foreground">
-          {HOURS.map((label, hour) => (
-            <span key={label} className={cn(hour % 3 !== 0 && 'invisible')}>
-              {label}
-            </span>
           ))}
+          <span />
+          <div className="grid grid-cols-24 font-mono text-[10px] text-muted-foreground">
+            {HOURS.map((label, hour) => (
+              <span key={label} className={cn(hour % 3 !== 0 && 'invisible')}>
+                {label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </SettingsPreview>
   );
 }

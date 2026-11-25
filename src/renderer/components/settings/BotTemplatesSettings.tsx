@@ -79,6 +79,7 @@ import {
   useMemberTemplates,
   useTeamTemplates,
 } from '@/stores/bots/templateLibrary';
+import { SettingsButton, SettingsPage, TOUCH_TARGET } from './kit';
 
 type Kind = 'members' | 'teams';
 type Editing<T> = { id?: string; data: T } | null;
@@ -223,29 +224,22 @@ export function BotTemplatesSettings() {
   );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium">{t('Bot templates')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            'Templates used when creating members and teams. Built-in templates can be edited, hidden or restored.'
-          )}
-        </p>
-      </div>
+    <SettingsPage
+      title={t('Bot templates')}
+      description={t(
+        'Templates used when creating members and teams. Built-in templates can be edited, hidden or restored.'
+      )}
+    >
       <Tabs defaultValue="members">
         <TabsList variant="underline">
           <TabsTab value="members">{t('Member templates')}</TabsTab>
           <TabsTab value="teams">{t('Team templates')}</TabsTab>
         </TabsList>
         <TabsPanel value="members" className="space-y-2 pt-3">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setEditingMember({ data: blankMember() })}
-          >
+          <SettingsButton onClick={() => setEditingMember({ data: blankMember() })}>
             <Plus />
             {t('New member template')}
-          </Button>
+          </SettingsButton>
           {members.map((item) => (
             <TemplateRow
               key={item.id}
@@ -262,18 +256,14 @@ export function BotTemplatesSettings() {
         </TabsPanel>
         <TabsPanel value="teams" className="space-y-2 pt-3">
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setEditingTeam({ data: blankTeam() })}
-            >
+            <SettingsButton onClick={() => setEditingTeam({ data: blankTeam() })}>
               <Plus />
               {t('New team template')}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+            </SettingsButton>
+            <SettingsButton onClick={() => fileRef.current?.click()}>
               <FileJson />
               {t('Import team (JSON)')}
-            </Button>
+            </SettingsButton>
             <input
               ref={fileRef}
               type="file"
@@ -344,7 +334,7 @@ export function BotTemplatesSettings() {
           }}
         />
       )}
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -367,6 +357,7 @@ function IconAction({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
+      className={TOUCH_TARGET}
     >
       {children}
     </Button>
@@ -391,7 +382,7 @@ function TemplateRow<T>({
   const { t } = useI18n();
   return (
     <div
-      className="flex items-center gap-3 rounded-md border px-3 py-2.5"
+      className="flex flex-wrap items-center gap-3 border-border border-b py-3"
       data-template-id={item.id}
     >
       <div className={cn('flex min-w-0 flex-1 items-center gap-3', item.hidden && 'opacity-50')}>
@@ -469,7 +460,7 @@ function MemberFields({
   const { t } = useI18n();
   const issue = value.name ? nameError(value.name, [], t) : null;
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div>
         <FieldLabel>{t('Name')}</FieldLabel>
         <Input value={value.name} onChange={(event) => onChange({ name: event.target.value })} />
@@ -494,7 +485,7 @@ function MemberFields({
           onChange={(tools) => onChange({ tools })}
         />
       </div>
-      <div className="col-span-2">
+      <div className="sm:col-span-2">
         <FieldLabel>{t('Approval mode')}</FieldLabel>
         <ApprovalSelect
           value={value.approvalMode}
@@ -503,7 +494,7 @@ function MemberFields({
         />
       </div>
       {value.summary !== undefined && (
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <FieldLabel hint={t('Shown on the template card')}>{t('Summary')}</FieldLabel>
           <Input
             value={value.summary}
@@ -511,11 +502,11 @@ function MemberFields({
           />
         </div>
       )}
-      <div className="col-span-2">
+      <div className="sm:col-span-2">
         <FieldLabel>{t('Responsibilities')}</FieldLabel>
         <Input value={value.scope} onChange={(event) => onChange({ scope: event.target.value })} />
       </div>
-      <div className="col-span-2">
+      <div className="sm:col-span-2">
         <FieldLabel>{t('Persona')}</FieldLabel>
         <Textarea
           rows={6}
@@ -618,7 +609,7 @@ function TeamTemplateDialog({
       onClose={onClose}
       onSave={() => (parsed ? onSave(parsed) : Promise.resolve())}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <FieldLabel>{t('Group name')}</FieldLabel>
           <Input value={draft.title} onChange={(event) => patch({ title: event.target.value })} />
@@ -645,14 +636,14 @@ function TeamTemplateDialog({
             </SelectPopup>
           </Select>
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <FieldLabel hint={t('Shown on the template card')}>{t('Summary')}</FieldLabel>
           <Input
             value={draft.summary}
             onChange={(event) => patch({ summary: event.target.value })}
           />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <FieldLabel>{t('Shared workspace')}</FieldLabel>
           <Segmented
             value={draft.workspace}
@@ -683,11 +674,11 @@ function TeamTemplateDialog({
             const boss = member.key === draft.bossKey;
             const others = draft.members.filter((m) => m.key !== member.key).map((m) => m.key);
             return (
-              <div key={member.key} className="rounded-lg border" data-member-key={member.key}>
+              <div key={member.key} className="border-border border-b" data-member-key={member.key}>
                 <div className="flex items-center gap-2 px-2.5 py-2">
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
                     onClick={() => setExpanded(open ? null : member.key)}
                   >
                     {open ? (

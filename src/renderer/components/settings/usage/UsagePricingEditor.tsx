@@ -6,13 +6,13 @@ import {
 import type { UsageModelRow } from '@shared/usage/types';
 import { ChevronDown } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsSection, TOUCH_TARGET } from '../kit';
 
 const EMPTY: ModelPricing = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
@@ -58,79 +58,80 @@ function PriceTable({
 }) {
   const { t } = useI18n();
   return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-[11px] text-muted-foreground">
-          <th className="pb-2 text-left font-normal">{t('Name')}</th>
-          {FIELDS.map((field) => (
-            <th key={field} className="pb-2 text-right font-normal">
-              {field}
-            </th>
-          ))}
-          <th className="w-14 pb-2" />
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => {
-          const isEditing = editing === row.model;
-          const custom = row.model in overrides;
-          return (
-            <tr key={row.model} className="border-t border-border/60">
-              <td className="py-1.5 pr-3 align-middle">
-                <span className="font-mono text-xs" title={row.model}>
-                  {row.model}
-                </span>
-                {custom && (
-                  <span className="ml-1.5 text-[10px] text-muted-foreground">{t('Custom')}</span>
-                )}
-              </td>
-              {FIELDS.map((field) => (
-                <td key={field} className="py-1.5 text-right align-middle">
-                  {isEditing ? (
-                    <Input
-                      size="sm"
-                      inputMode="decimal"
-                      className="ml-auto w-16 [&_input]:text-right"
-                      value={draft[field]}
-                      onChange={(e) => onDraft({ ...draft, [field]: e.target.value })}
-                    />
-                  ) : (
-                    <span
-                      className={cn(
-                        'font-mono tabular-nums',
-                        row.pricing == null && 'text-muted-foreground'
-                      )}
-                    >
-                      {formatRate(row.pricing?.[field])}
-                    </span>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[36rem] text-xs">
+        <thead>
+          <tr className="text-[11px] text-muted-foreground">
+            <th className="pb-2 text-left font-normal">{t('Name')}</th>
+            {FIELDS.map((field) => (
+              <th key={field} className="pb-2 text-right font-normal">
+                {field}
+              </th>
+            ))}
+            <th className="w-14 pb-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const isEditing = editing === row.model;
+            const custom = row.model in overrides;
+            return (
+              <tr key={row.model} className="border-t border-border/60">
+                <td className="py-1.5 pr-3 align-middle">
+                  <span className="font-mono text-xs" title={row.model}>
+                    {row.model}
+                  </span>
+                  {custom && (
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">{t('Custom')}</span>
                   )}
                 </td>
-              ))}
-              <td className="py-1.5 text-right align-middle">
-                {isEditing ? (
-                  <Button
-                    size="sm"
-                    className="h-6 px-1.5 text-[11px]"
-                    onClick={() => onSave(row.model)}
-                  >
-                    {t('Save')}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-1.5 text-[11px]"
-                    onClick={() => onEdit(row.model, row.pricing)}
-                  >
-                    {t('Edit')}
-                  </Button>
-                )}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+                {FIELDS.map((field) => (
+                  <td key={field} className="py-1.5 text-right align-middle">
+                    {isEditing ? (
+                      <Input
+                        size="sm"
+                        inputMode="decimal"
+                        className="ml-auto w-16 [&_input]:text-right"
+                        value={draft[field]}
+                        onChange={(e) => onDraft({ ...draft, [field]: e.target.value })}
+                      />
+                    ) : (
+                      <span
+                        className={cn(
+                          'font-mono tabular-nums',
+                          row.pricing == null && 'text-muted-foreground'
+                        )}
+                      >
+                        {formatRate(row.pricing?.[field])}
+                      </span>
+                    )}
+                  </td>
+                ))}
+                <td className="py-1.5 text-right align-middle">
+                  {isEditing ? (
+                    <SettingsButton
+                      variant="default"
+                      className="px-1.5 text-[11px]"
+                      onClick={() => onSave(row.model)}
+                    >
+                      {t('Save')}
+                    </SettingsButton>
+                  ) : (
+                    <SettingsButton
+                      variant="ghost"
+                      className="px-1.5 text-[11px]"
+                      onClick={() => onEdit(row.model, row.pricing)}
+                    >
+                      {t('Edit')}
+                    </SettingsButton>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -193,134 +194,134 @@ export function UsagePricingEditor({
   };
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border bg-card">
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
-        <div className="min-w-0">
-          <div className="text-sm font-medium">{t('Unit prices')}</div>
-          <p className="text-xs text-muted-foreground">
-            {t('Rates used for cost estimates ($/M tokens).')}
-          </p>
-        </div>
-        <ChevronDown
-          className={cn(
-            'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
-            open && 'rotate-180'
-          )}
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="space-y-3 border-t px-4 py-3">
-          <Input
-            size="sm"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('Search models')}
-          />
-          {usedRows.length === 0 && !adding ? (
-            <p className="text-xs text-muted-foreground">
-              {q ? t('No matching models') : t('No usage in this period')}
-            </p>
-          ) : (
-            <PriceTable
-              rows={usedRows}
-              editing={editing}
-              draft={draft}
-              overrides={overrides}
-              onDraft={setDraft}
-              onEdit={startEdit}
-              onSave={save}
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <SettingsSection
+        title={t('Unit prices')}
+        description={t('Rates used for cost estimates ($/M tokens).')}
+        actions={
+          <CollapsibleTrigger
+            className={cn(
+              'relative flex size-7 items-center justify-center text-muted-foreground pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:-translate-1/2',
+              TOUCH_TARGET
+            )}
+            aria-label={open ? t('Collapse') : t('Expand')}
+          >
+            <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />
+          </CollapsibleTrigger>
+        }
+      >
+        <CollapsibleContent>
+          <div className="space-y-3 border-border border-b py-3">
+            <Input
+              size="sm"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('Search models')}
             />
-          )}
+            {usedRows.length === 0 && !adding ? (
+              <p className="text-xs text-muted-foreground">
+                {q ? t('No matching models') : t('No usage in this period')}
+              </p>
+            ) : (
+              <PriceTable
+                rows={usedRows}
+                editing={editing}
+                draft={draft}
+                overrides={overrides}
+                onDraft={setDraft}
+                onEdit={startEdit}
+                onSave={save}
+              />
+            )}
 
-          {unusedRows.length > 0 && (showAll || Boolean(q)) && (
-            <PriceTable
-              rows={unusedRows}
-              editing={editing}
-              draft={draft}
-              overrides={overrides}
-              onDraft={setDraft}
-              onEdit={startEdit}
-              onSave={save}
-            />
-          )}
+            {unusedRows.length > 0 && (showAll || Boolean(q)) && (
+              <PriceTable
+                rows={unusedRows}
+                editing={editing}
+                draft={draft}
+                overrides={overrides}
+                onDraft={setDraft}
+                onEdit={startEdit}
+                onSave={save}
+              />
+            )}
 
-          {adding ? (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="grid min-w-36 gap-1 text-[11px] text-muted-foreground">
-                  {t('Model id')}
-                  <Input
-                    size="sm"
-                    value={newId}
-                    onChange={(e) => setNewId(e.target.value)}
-                    placeholder="qwen-3.8-27b"
-                  />
-                </label>
-                {FIELDS.map((field) => (
-                  <label
-                    key={field}
-                    className="grid min-w-16 gap-1 text-[11px] text-muted-foreground"
-                  >
-                    {field}
+            {adding ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="grid min-w-36 gap-1 text-[11px] text-muted-foreground">
+                    {t('Model id')}
                     <Input
                       size="sm"
-                      inputMode="decimal"
-                      value={draft[field]}
-                      onChange={(e) => setDraft((cur) => ({ ...cur, [field]: e.target.value }))}
+                      value={newId}
+                      onChange={(e) => setNewId(e.target.value)}
+                      placeholder="qwen-3.8-27b"
                     />
                   </label>
-                ))}
+                  {FIELDS.map((field) => (
+                    <label
+                      key={field}
+                      className="grid min-w-16 gap-1 text-[11px] text-muted-foreground"
+                    >
+                      {field}
+                      <Input
+                        size="sm"
+                        inputMode="decimal"
+                        value={draft[field]}
+                        onChange={(e) => setDraft((cur) => ({ ...cur, [field]: e.target.value }))}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <SettingsButton variant="default" onClick={() => save(newId)}>
+                    {t('Save')}
+                  </SettingsButton>
+                  <SettingsButton
+                    variant="ghost"
+                    onClick={() => {
+                      setAdding(false);
+                      setNewId('');
+                      setError(null);
+                    }}
+                  >
+                    {t('Cancel')}
+                  </SettingsButton>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" className="h-7" onClick={() => save(newId)}>
-                  {t('Save')}
-                </Button>
-                <Button
+            ) : (
+              <div className="flex justify-end gap-2">
+                {unusedRows.length > 0 && (
+                  <SettingsButton
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    onClick={() => setShowAll((v) => !v)}
+                  >
+                    {t('Show all')}
+                    <ChevronDown
+                      className={cn(
+                        'ml-1 h-3.5 w-3.5 transition-transform',
+                        showAll && 'rotate-180'
+                      )}
+                    />
+                  </SettingsButton>
+                )}
+                <SettingsButton
                   variant="ghost"
-                  size="sm"
-                  className="h-7"
                   onClick={() => {
-                    setAdding(false);
-                    setNewId('');
+                    setAdding(true);
+                    setDraft(toDraft(EMPTY));
                     setError(null);
                   }}
                 >
-                  {t('Cancel')}
-                </Button>
+                  {t('Add')}
+                </SettingsButton>
               </div>
-            </div>
-          ) : (
-            <div className="flex justify-end gap-2">
-              {unusedRows.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-muted-foreground"
-                  onClick={() => setShowAll((v) => !v)}
-                >
-                  {t('Show all')}
-                  <ChevronDown
-                    className={cn('ml-1 h-3.5 w-3.5 transition-transform', showAll && 'rotate-180')}
-                  />
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7"
-                onClick={() => {
-                  setAdding(true);
-                  setDraft(toDraft(EMPTY));
-                  setError(null);
-                }}
-              >
-                {t('Add')}
-              </Button>
-            </div>
-          )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
-      </CollapsibleContent>
+            )}
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+        </CollapsibleContent>
+      </SettingsSection>
     </Collapsible>
   );
 }

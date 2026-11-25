@@ -22,6 +22,9 @@ import { useI18n } from '@/i18n';
 import { isRemoteClient } from '@/lib/remoteClient';
 import { cn } from '@/lib/utils';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
+import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, TOUCH_TARGET } from './kit';
+
+const ICON_BUTTON = cn('text-muted-foreground', TOUCH_TARGET);
 
 /**
  * 设备：两个方向。
@@ -29,12 +32,13 @@ import { useRemoteNodesStore } from '@/stores/remoteNodes';
  * 「连接到节点」= 本机作 guest：粘别的桌面的配对链接，管理已连节点（在线/重命名/解绑）。
  */
 export function DevicesSettings() {
+  const { t } = useI18n();
   return (
-    <div className="space-y-10">
+    <SettingsPage title={t('Devices')}>
       <AllowConnectionsSection />
       {!window.electronAPI.remote && <ConnectToNodesSection />}
       <RelaySection />
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -102,121 +106,97 @@ function AllowConnectionsSection() {
   const devices = status?.devices ?? [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4" data-settings-row="phone.root">
-        <div>
-          <h3 className="font-medium text-lg">{t('Allow connections')}</h3>
-          <p className="text-muted-foreground text-sm">
+    <SettingsSection
+      rowId="phone.root"
+      title={t('Allow connections')}
+      description={t(
+        'Let your phone or another EnsoCode desktop connect to this computer. Keep this app running.'
+      )}
+      actions={
+        status?.pairing ? (
+          <SettingsButton onClick={() => void window.electronAPI.pair.cancel()}>
+            {t('Cancel pairing')}
+          </SettingsButton>
+        ) : (
+          <SettingsButton disabled={busy} onClick={() => void startPairing()}>
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Smartphone className="h-4 w-4" />
+            )}
+            {t('Generate pairing code')}
+          </SettingsButton>
+        )
+      }
+    >
+      {status && !status.secureStorage && <SecureStorageNote />}
+      {error && <p className="border-border border-b py-3 text-xs text-destructive">{error}</p>}
+      {status?.pairing && (
+        <div className="border-border border-b py-4 text-center">
+          {qrDataUrl ? (
+            <img src={qrDataUrl} alt={t('Pairing QR code')} className="mx-auto h-52 w-52" />
+          ) : (
+            <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+          )}
+          <p className="mt-3 font-medium text-sm">{t('Scan with your phone camera')}</p>
+          <p className="mt-1 text-muted-foreground text-xs">
             {t(
-              'Let your phone or another EnsoCode desktop connect to this computer. Keep this app running.'
+              'Scanning opens the app and pairs it. To keep it handy, add it to your home screen.'
             )}
           </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {status?.pairing ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void window.electronAPI.pair.cancel()}
-            >
-              {t('Cancel pairing')}
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void startPairing()}>
-              {busy ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              ) : (
-                <Smartphone className="mr-1.5 h-4 w-4" />
-              )}
-              {t('Generate pairing code')}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {status && !status.secureStorage && (
-        <div className="flex items-start gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <span className="text-muted-foreground">
+          <p className="mt-1 text-muted-foreground text-xs">
             {t(
-              'Secure storage is unavailable on this system, so pairing keys are stored unencrypted.'
+              'On another EnsoCode desktop, paste the link below into Settings → Devices → Connect to a node.'
             )}
-          </span>
-        </div>
-      )}
-
-      {error && <p className="text-destructive text-xs">{error}</p>}
-
-      {status?.pairing && (
-        <div className="space-y-3 rounded-md border border-dashed px-3 py-6">
-          <div className="text-center">
-            {qrDataUrl ? (
-              <img src={qrDataUrl} alt={t('Pairing QR code')} className="mx-auto h-52 w-52" />
-            ) : (
-              <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
-            )}
-            <p className="mt-3 font-medium text-sm">{t('Scan with your phone camera')}</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t(
-                'Scanning opens the app and pairs it. To keep it handy, add it to your home screen.'
-              )}
-            </p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t(
-                'On another EnsoCode desktop, paste the link below into Settings → Devices → Connect to a node.'
-              )}
-            </p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {remaining === null
-                ? t('The code expires in 60 seconds and can only be used once.')
-                : remaining > 0
-                  ? t('Expires in {{seconds}}s · single use', { seconds: remaining })
-                  : t('Code expired')}
-            </p>
-          </div>
-
+          </p>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {remaining === null
+              ? t('The code expires in 60 seconds and can only be used once.')
+              : remaining > 0
+                ? t('Expires in {{seconds}}s · single use', { seconds: remaining })
+                : t('Code expired')}
+          </p>
           {status.inviteUri && (
-            <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+            <div className="mt-3 flex items-center gap-2 text-left">
+              <code className="min-w-0 flex-1 truncate bg-muted px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
                 {status.inviteUri}
               </code>
-              <Button
-                variant="outline"
-                size="sm"
+              <SettingsButton
                 className="shrink-0"
                 onClick={() => copyInvite(status.inviteUri as string)}
               >
-                {copied ? (
-                  <Check className="mr-1.5 h-3.5 w-3.5" />
-                ) : (
-                  <Copy className="mr-1.5 h-3.5 w-3.5" />
-                )}
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? t('Copied') : t('Copy')}
-              </Button>
+              </SettingsButton>
             </div>
           )}
         </div>
       )}
+      <p className="border-border border-b py-3 font-medium text-[13px]">{t('Paired devices')}</p>
+      {devices.length === 0 ? (
+        <div className="border-border border-b py-8 text-center">
+          <Smartphone className="mx-auto h-5 w-5 text-muted-foreground" />
+          <p className="mt-3 font-medium text-sm">{t('No paired devices')}</p>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {t('Generate a pairing code to let a phone or another desktop connect.')}
+          </p>
+        </div>
+      ) : (
+        devices.map((device) => <PairedDeviceRow key={device.pairId} device={device} />)
+      )}
+    </SettingsSection>
+  );
+}
 
-      <div className="space-y-2">
-        <p className="font-medium text-sm">{t('Paired devices')}</p>
-        {devices.length === 0 ? (
-          <div className="rounded-md border border-dashed px-3 py-8 text-center">
-            <Smartphone className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 font-medium text-sm">{t('No paired devices')}</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t('Generate a pairing code to let a phone or another desktop connect.')}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {devices.map((device) => (
-              <PairedDeviceRow key={device.pairId} device={device} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+function SecureStorageNote() {
+  const { t } = useI18n();
+  return (
+    <p className="flex items-start gap-2 border-border border-b py-3 text-xs text-muted-foreground">
+      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+      <span>
+        {t('Secure storage is unavailable on this system, so pairing keys are stored unencrypted.')}
+      </span>
+    </p>
   );
 }
 
@@ -232,54 +212,35 @@ function ConnectToNodesSection() {
   React.useEffect(() => useRemoteNodesStore.getState().bind(), []);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h3 className="font-medium text-lg">{t('Connect to a node')}</h3>
-          <p className="text-muted-foreground text-sm">
-            {t(
-              'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.'
-            )}
+    <SettingsSection
+      title={t('Connect to a node')}
+      description={t(
+        'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.'
+      )}
+      actions={
+        <SettingsButton onClick={() => setPairOpen(true)}>
+          <Plus className="h-4 w-4" />
+          {t('Connect to a node')}
+        </SettingsButton>
+      }
+    >
+      {!secureStorage && <SecureStorageNote />}
+      <p className="border-border border-b py-3 font-medium text-[13px]">{t('Connected nodes')}</p>
+      {nodes.length === 0 ? (
+        <div className="border-border border-b py-8 text-center">
+          <Monitor className="mx-auto h-5 w-5 text-muted-foreground" />
+          <p className="mt-3 font-medium text-sm">{t('No connected nodes')}</p>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {t('Each connecting computer needs its own pairing code from the other desktop.')}
           </p>
         </div>
-        <Button variant="outline" size="sm" className="shrink-0" onClick={() => setPairOpen(true)}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          {t('Connect to a node')}
-        </Button>
-      </div>
-
-      {!secureStorage && (
-        <div className="flex items-start gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <span className="text-muted-foreground">
-            {t(
-              'Secure storage is unavailable on this system, so pairing keys are stored unencrypted.'
-            )}
-          </span>
-        </div>
+      ) : (
+        nodes.map((node) => (
+          <NodeRow key={node.nodeId} node={node} onChanged={() => void refresh()} />
+        ))
       )}
-
-      <div className="space-y-2">
-        <p className="font-medium text-sm">{t('Connected nodes')}</p>
-        {nodes.length === 0 ? (
-          <div className="rounded-md border border-dashed px-3 py-8 text-center">
-            <Monitor className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 font-medium text-sm">{t('No connected nodes')}</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t('Each connecting computer needs its own pairing code from the other desktop.')}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {nodes.map((node) => (
-              <NodeRow key={node.nodeId} node={node} onChanged={() => void refresh()} />
-            ))}
-          </div>
-        )}
-      </div>
-
       <PairNodeDialog open={pairOpen} onOpenChange={setPairOpen} switchOnSuccess={false} />
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -292,7 +253,7 @@ function TransportBadge({ transport, rttMs }: { transport?: 'relay' | 'direct'; 
     <span
       className={cn(
         'shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none',
-        direct ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground'
+        direct ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'
       )}
     >
       {direct ? t('Direct link') : t('Via relay')}
@@ -314,15 +275,15 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
   };
 
   return (
-    <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
+    <div className="group flex flex-wrap items-center justify-between gap-3 border-border border-b py-2">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span
           className={cn(
             'h-2 w-2 shrink-0 rounded-full',
             device.phoneOnline
-              ? 'bg-emerald-500'
+              ? 'bg-success'
               : device.connected
-                ? 'bg-amber-500'
+                ? 'bg-warning'
                 : 'bg-muted-foreground/40'
           )}
         />
@@ -349,9 +310,9 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
                 )
               }
               className={cn(
-                'shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none transition-colors',
+                'relative shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-[44px] pointer-coarse:after:-translate-1/2',
                 device.scope === 'read'
-                  ? 'bg-amber-500/15 text-amber-600 hover:bg-amber-500/25'
+                  ? 'bg-warning/15 text-warning hover:bg-warning/25'
                   : 'bg-muted text-muted-foreground hover:bg-accent'
               )}
             >
@@ -368,15 +329,15 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
               if (e.key === 'Enter') void commit();
               if (e.key === 'Escape') setDraft(null);
             }}
-            className="h-7 text-sm"
+            className="h-7 w-full max-w-full text-sm sm:w-[220px]"
           />
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity pointer-coarse:opacity-100 group-hover:opacity-100">
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 text-muted-foreground"
+          className={ICON_BUTTON}
           title={t('Rename')}
           onClick={() => setDraft(device.deviceName)}
         >
@@ -385,7 +346,7 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+          className={cn(ICON_BUTTON, 'hover:text-destructive')}
           onClick={() => void window.electronAPI.pair.revoke(device.pairId)}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -409,7 +370,7 @@ function NodeRow({ node, onChanged }: { node: RemoteNodeStatus; onChanged: () =>
   };
 
   return (
-    <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
+    <div className="group flex flex-wrap items-center justify-between gap-3 border-border border-b py-2">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <NodeDot node={node} />
         {draft === null ? (
@@ -439,15 +400,15 @@ function NodeRow({ node, onChanged }: { node: RemoteNodeStatus; onChanged: () =>
               if (e.key === 'Enter') void commit();
               if (e.key === 'Escape') setDraft(null);
             }}
-            className="h-7 text-sm"
+            className="h-7 w-full max-w-full text-sm sm:w-[220px]"
           />
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity pointer-coarse:opacity-100 group-hover:opacity-100">
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 text-muted-foreground"
+          className={ICON_BUTTON}
           title={t('Rename')}
           onClick={() => setDraft(node.label)}
         >
@@ -456,7 +417,7 @@ function NodeRow({ node, onChanged }: { node: RemoteNodeStatus; onChanged: () =>
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+          className={cn(ICON_BUTTON, 'hover:text-destructive')}
           title={t('Disconnect')}
           onClick={() => {
             void window.electronAPI.nodes.remove(node.nodeId).then(onChanged);
@@ -487,36 +448,33 @@ function RelaySection() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <p className="font-medium text-sm">{t('Relay server')}</p>
-        <p className="text-muted-foreground text-xs">
-          {t('The relay only forwards encrypted frames and cannot read your messages.')}
-        </p>
-        <div className="flex items-center gap-2">
-          <Input
-            value={relayDraft ?? status?.relayUrl ?? ''}
-            onChange={(e) => setRelayDraft(e.target.value)}
-            placeholder="https://relay.example.com"
-            className="font-mono text-xs"
-          />
-          {relayDraft === null ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0 text-muted-foreground"
-              onClick={() => setRelayDraft(status?.relayUrl ?? '')}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-          ) : (
-            <Button size="sm" className="shrink-0" onClick={() => void saveRelay()}>
-              <Check className="mr-1.5 h-3.5 w-3.5" />
-              {t('Save')}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
+    <SettingsSection>
+      <SettingsRow
+        label={t('Relay server')}
+        description={t('The relay only forwards encrypted frames and cannot read your messages.')}
+      >
+        <Input
+          value={relayDraft ?? status?.relayUrl ?? ''}
+          onChange={(e) => setRelayDraft(e.target.value)}
+          placeholder="https://relay.example.com"
+          className="w-full font-mono text-xs sm:w-[220px]"
+        />
+        {relayDraft === null ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={ICON_BUTTON}
+            onClick={() => setRelayDraft(status?.relayUrl ?? '')}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          <SettingsButton variant="default" onClick={() => void saveRelay()}>
+            <Check className="h-3.5 w-3.5" />
+            {t('Save')}
+          </SettingsButton>
+        )}
+      </SettingsRow>
+    </SettingsSection>
   );
 }
