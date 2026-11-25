@@ -42,7 +42,9 @@ import { providerDisplayName } from '@/components/settings/chatgptPool';
 import {
   applyFetchedModels,
   fetchAllProviderModels,
+  refreshProviders,
   summarizeFetchOutcomes,
+  useProviderFetchState,
 } from '@/components/settings/providerFetch';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -553,6 +555,49 @@ function RecentRemoveButton({ refKey, onRemove }: { refKey: string; onRemove: ()
     >
       <X className="h-3 w-3" />
     </span>
+  );
+}
+
+/**
+ * 左栏厂商行尾的刷新。和行按钮并列，避免 button 嵌套；拦住冒泡，以免切导航或关掉弹层。
+ */
+function VendorNavRefresh({
+  vendorId,
+  providers,
+  emphasized,
+  updateProvider,
+}: {
+  vendorId: string;
+  providers: readonly ModelProvider[];
+  emphasized: boolean;
+  updateProvider: (id: string, patch: { models: ModelEntry[] }) => void;
+}) {
+  const { t } = useI18n();
+  const { refreshing, error } = useProviderFetchState(providers.map((provider) => provider.id));
+  const label = error ? `${t('Refresh failed')}: ${error}` : t('Refresh provider models');
+  return (
+    <button
+      type="button"
+      data-model-picker-nav-refresh={vendorId}
+      aria-label={label}
+      title={label}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        void refreshProviders(providers, updateProvider);
+      }}
+      className={cn(
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 hover:bg-accent hover:text-foreground focus-visible:text-foreground group-hover:text-foreground',
+        emphasized && 'text-foreground',
+        error && 'text-destructive'
+      )}
+    >
+      {refreshing ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RefreshCw className={cn('h-3.5 w-3.5', error && 'text-destructive')} />
+      )}
+    </button>
   );
 }
 
@@ -1513,45 +1558,55 @@ export function ModelPicker({
                       view.activeNav.kind === 'vendor' &&
                       view.activeNav.vendorId === group.vendorId;
                     return (
-                      <button
+                      <div
                         key={group.vendorId}
-                        type="button"
                         data-model-picker-nav={`vendor:${group.vendorId}`}
                         data-model-picker-vendor={group.vendorId}
                         data-model-picker-nav-selected={selectedHere ? '' : undefined}
                         onMouseEnter={() =>
                           setActiveNav({ kind: 'vendor', vendorId: group.vendorId })
                         }
-                        onClick={() => setActiveNav({ kind: 'vendor', vendorId: group.vendorId })}
                         className={cn(
-                          'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
+                          'group flex w-full items-center rounded-md text-left text-xs hover:bg-accent',
                           navActive && 'bg-accent'
                         )}
                       >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{vendorLabel}</span>
-                          <span className="block truncate text-[10px] text-muted-foreground/70">
-                            {sole
-                              ? soleSubtitle
-                              : t('{{count}} accounts', { count: group.providers.length })}
+                        <button
+                          type="button"
+                          onClick={() => setActiveNav({ kind: 'vendor', vendorId: group.vendorId })}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{vendorLabel}</span>
+                            <span className="block truncate text-[10px] text-muted-foreground/70">
+                              {sole
+                                ? soleSubtitle
+                                : t('{{count}} accounts', { count: group.providers.length })}
+                            </span>
                           </span>
-                        </span>
-                        {sole && soleInfo?.plan && (
-                          <Badge
-                            variant="outline"
-                            size="sm"
-                            className="max-w-16 shrink-0 truncate text-[9px] uppercase"
-                          >
-                            {soleInfo.plan}
-                          </Badge>
-                        )}
-                        {!sole && (
-                          <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
-                            {group.providers.length}
-                          </Badge>
-                        )}
-                        {selectedHere && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                      </button>
+                          {sole && soleInfo?.plan && (
+                            <Badge
+                              variant="outline"
+                              size="sm"
+                              className="max-w-16 shrink-0 truncate text-[9px] uppercase"
+                            >
+                              {soleInfo.plan}
+                            </Badge>
+                          )}
+                          {!sole && (
+                            <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
+                              {group.providers.length}
+                            </Badge>
+                          )}
+                          {selectedHere && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                        </button>
+                        <VendorNavRefresh
+                          vendorId={group.vendorId}
+                          providers={group.providers}
+                          emphasized={navActive}
+                          updateProvider={updateProvider}
+                        />
+                      </div>
                     );
                   })}
                 </div>

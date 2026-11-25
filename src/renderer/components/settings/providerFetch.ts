@@ -1,5 +1,7 @@
 import { mergeFetchedModels } from '@shared/modelEntry';
 import type { ModelEntry, ModelProvider } from '@shared/types';
+import { create } from 'zustand';
+import { invalidateModelMeta } from '@/stores/modelMeta';
 
 export type ProviderFetchOutcome =
   | { status: 'ok'; count: number; models?: ModelEntry[] }
@@ -90,4 +92,73 @@ export function summarizeFetchOutcomes(
     }
   }
   return summary;
+}
+
+interface ProviderFetchEntry {
+  refreshing: boolean;
+  error: string | null;
+}
+
+const useProviderFetchStore = create<{ entries: Record<string, ProviderFetchEntry> }>(() => ({
+  entries: {},
+}));
+
+export function providerFetchStates(): Record<string, ProviderFetchEntry> {
+  return useProviderFetchStore.getState().entries;
+}
+
+export function resetProviderFetchStates(): void {
+  useProviderFetchStore.setState({ entries: {} });
+}
+
+function writeProviderFetchEntry(id: string, entry: ProviderFetchEntry): void {
+  useProviderFetchStore.setState((state) => ({
+    entries: { ...state.entries, [id]: entry },
+  }));
+}
+
+export async function refreshProvider(
+  provider: ModelProvider,
+  updateProvider: (id: string, patch: { models: ModelEntry[] }) => void
+): Promise<void> {
+  if (useProviderFetchStore.getState().entries[provider.id]?.refreshing) return;
+  writeProviderFetchEntry(provider.id, { refreshing: true, error: null });
+  let error: string | null = null;
+  try {
+    const outcome = await fetchProviderModels(provider);
+    if (outcome.status === 'failed') {
+      error = outcome.message;
+    } else {
+      applyFetchedModels({ [provider.id]: outcome }, updateProvider);
+      invalidateModelMeta();
+    }
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : String(caught);
+  } finally {
+    writeProviderFetchEntry(provider.id, { refreshing: false, error });
+  }
+}
+
+export async function refreshProviders(
+  providers: readonly ModelProvider[],
+  updateProvider: (id: string, patch: { models: ModelEntry[] }) => void
+): Promise<void> {
+  await Promise.all(providers.map((provider) => refreshProvider(provider, updateProvider)));
+}
+
+/** 多个 id 聚合成一行：任一在刷新即转动，错误取第一个非空。没有记录视为从未刷过。 */
+export function useProviderFetchState(providerIds: readonly string[]): {
+  refreshing: boolean;
+  error: string | null;
+} {
+  const entries = useProviderFetchStore((state) => state.entries);
+  let refreshing = false;
+  let error: string | null = null;
+  for (const id of providerIds) {
+    const entry = entries[id];
+    if (!entry) continue;
+    if (entry.refreshing) refreshing = true;
+    if (error === null && entry.error) error = entry.error;
+  }
+  return { refreshing, error };
 }
