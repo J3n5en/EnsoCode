@@ -158,7 +158,12 @@ export async function gitClone(request: unknown): Promise<GitCloneResult> {
   if (!parsed) return { ok: false, error: 'Invalid request.' };
   // 与 hostDirs 一致：`~` 与 `~/...` 展开到家目录
   const input = parsed.parentDir.trim();
-  const expanded = input === '~' ? homedir() : input.startsWith('~/') ? path.join(homedir(), input.slice(2)) : input;
+  const expanded =
+    input === '~'
+      ? homedir()
+      : input.startsWith('~/')
+        ? path.join(homedir(), input.slice(2))
+        : input;
   if (!path.isAbsolute(expanded)) return { ok: false, error: 'Invalid request.' };
   const parentDir = expanded;
 
