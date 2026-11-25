@@ -398,3 +398,19 @@ describe('秘书初次设置与设置页文案', () => {
     }
   });
 });
+
+describe('模型服务商的中文叫法统一为「服务商」', () => {
+  it('中文文案里不再出现「提供商」「供应商」', () => {
+    const mixed = Object.entries(zhTranslations).filter(([, zh]) => /提供商|供应商/.test(zh));
+    expect(mixed).toEqual([]);
+  });
+
+  it('模型中心的按钮、标签、占位与空状态都说「服务商」', () => {
+    expect(getTranslation('zh', 'Add model or provider')).toBe('添加模型 / 服务商');
+    expect(getTranslation('zh', 'Provider')).toBe('服务商');
+    expect(getTranslation('zh', 'Select provider')).toBe('选择服务商');
+    expect(getTranslation('zh', 'Add Provider')).toBe('添加服务商');
+    expect(getTranslation('zh', 'No providers yet')).toBe('暂无服务商');
+    expect(getTranslation('zh', 'Provider (optional)')).toBe('服务商（可选）');
+  });
+});

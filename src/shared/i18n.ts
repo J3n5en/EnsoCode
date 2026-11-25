@@ -905,7 +905,7 @@ export const zhTranslations: Record<string, string> = {
   // 首次运行引导
   'Welcome to EnsoCode': '欢迎使用 EnsoCode',
   'Import your providers and assets from local AI apps to get started. You can skip any step.':
-    '从本地 AI 应用导入模型服务与资源即可开始，每一步都可跳过。',
+    '从本地 AI 应用导入服务商与资源即可开始，每一步都可跳过。',
   'Sign in with a provider subscription, or import API providers from local AI apps':
     '使用订阅账号登录，或从本地 AI 应用导入 API 服务',
   'Import skills from Claude Code, Codex or Cursor': '从 Claude Code、Codex 或 Cursor 导入技能',
@@ -921,9 +921,9 @@ export const zhTranslations: Record<string, string> = {
   Minimize: '最小化',
   Maximize: '最大化',
   Restore: '还原',
-  'No new providers imported': '没有新导入的模型服务',
+  'No new providers imported': '没有新导入的服务商',
   'Fetch models for each provider, then enable the ones you want.':
-    '为每个模型服务拉取模型，再启用你需要的。',
+    '为每个服务商拉取模型，再启用你需要的。',
   'Fetch failed': '拉取失败',
   'No models yet': '暂无模型，点击拉取',
   'Bundle skills, MCP servers and an instruction file into a preset (optional)':
@@ -937,7 +937,7 @@ export const zhTranslations: Record<string, string> = {
   'Automatically fetch models': '自动拉取模型',
   'Model fetch interval': '拉取间隔',
   'This interval applies when automatic fetching is enabled for this provider.':
-    '开启此供应商的自动拉取后，按此间隔拉取模型。',
+    '开启此服务商的自动拉取后，按此间隔拉取模型。',
   'Enter a whole number from {{min}} to {{max}} hours.': '请输入 {{min}}–{{max}} 小时之间的整数。',
   hours: '小时',
   'Last fetched {{time}}': '上次拉取成功：{{time}}',
@@ -945,24 +945,24 @@ export const zhTranslations: Record<string, string> = {
   'Manage model API providers for this app': '管理应用的模型 API 服务',
   'Import from local apps': '从本地应用导入',
   'Scan providers configured in local AI apps and import them.':
-    '扫描本机 AI 应用中已配置的模型服务并导入。',
+    '扫描本机 AI 应用中已配置的服务商并导入。',
   'Scanning local apps...': '正在扫描本地应用...',
   'Scan failed': '扫描失败',
   Rescan: '重新扫描',
   'No local apps detected': '未检测到本地应用',
   'Supported: Claude Code, Codex, CC Switch, Alma, Cherry Studio, Hermes, OpenClaw, Grok CLI, Cursor':
     '支持:Claude Code、Codex、CC Switch、Alma、Cherry Studio、Hermes、OpenClaw、Grok CLI、Cursor',
-  'No importable providers found': '未发现可导入的模型服务',
+  'No importable providers found': '未发现可导入的服务商',
   'Already exists': '已存在',
   '{{count}} models': '{{count}} 个模型',
   '{{count}} selected': '已选 {{count}} 项',
   'Import selected': '导入所选',
   Done: '完成',
-  'No providers yet': '暂无模型服务',
+  'No providers yet': '暂无服务商',
   'Import providers from local apps or add one manually to get started':
-    '从本地应用导入或手动添加模型服务以开始使用',
+    '从本地应用导入或手动添加服务商以开始使用',
   'Add provider': '添加服务',
-  'Add Provider': '添加模型服务',
+  'Add Provider': '添加服务商',
   'Subscription login': '订阅登录',
   'Sign in with provider subscriptions (SuperGrok, Claude Pro, ChatGPT, etc.)':
     '使用订阅账号登录（SuperGrok、Claude Pro、ChatGPT 等）',
@@ -976,7 +976,7 @@ export const zhTranslations: Record<string, string> = {
   'Verifying...': '正在验证…',
   'resets {{time}}': '{{time}} 重置',
   Submit: '提交',
-  'Edit Provider': '编辑模型服务',
+  'Edit Provider': '编辑服务商',
   Name: '名称',
   'API Type': 'API 类型',
   'Base URL': 'Base URL',
@@ -1002,11 +1002,11 @@ export const zhTranslations: Record<string, string> = {
   'Model info updated': '模型信息已更新',
   'Model info refresh failed, using cache': '模型信息刷新失败，仍使用缓存',
   'Model info refresh failed': '模型信息刷新失败',
-  'Fetched {{count}} providers': '已拉取 {{count}} 个模型服务',
+  'Fetched {{count}} providers': '已拉取 {{count}} 个服务商',
   '{{ok}} succeeded, {{failed}} failed': '{{ok}} 个成功，{{failed}} 个失败',
   'Sync failed ({{failed}})': '同步失败（{{failed}} 个）',
-  'Skipped {{count}} disabled providers': '已跳过 {{count}} 个未启用的模型服务',
-  'No enabled providers to sync': '没有已启用的模型服务可同步',
+  'Skipped {{count}} disabled providers': '已跳过 {{count}} 个未启用的服务商',
+  'No enabled providers to sync': '没有已启用的服务商可同步',
   'Test connection': '测试连接',
   Authorize: '授权',
   Authorizing: '授权中...',
@@ -1047,15 +1047,15 @@ export const zhTranslations: Record<string, string> = {
   Exit: '退出',
   // 统一的供应商设置、默认模型与 Enso
   'Add a provider subscription or API Key, or import providers from local AI apps':
-    '添加提供商订阅或 API Key，也可从本地 AI 应用导入模型服务',
-  'Add model or provider': '添加模型 / 提供商',
+    '添加服务商订阅或 API Key，也可从本地 AI 应用导入服务商',
+  'Add model or provider': '添加模型 / 服务商',
   'Import providers from local apps or use the unified setup to get started':
-    '从本地应用导入模型服务，或使用统一向导开始配置',
+    '从本地应用导入服务商，或使用统一向导开始配置',
   'Choose a provider first. You will select subscription or API Key next.':
-    '请先选择提供商，下一步再选择订阅或 API Key。',
+    '请先选择服务商，下一步再选择订阅或 API Key。',
   'Choose how to connect': '选择连接方式',
   Subscription: '订阅',
-  'Provider subscription': '提供商订阅',
+  'Provider subscription': '服务商订阅',
   'ChatGPT (PI login)': 'ChatGPT（PI 登录）',
   'Sign in in your browser and use your subscription account.': '在浏览器中登录并使用订阅账号。',
   'Configure an endpoint and key, then fetch or test its models.':
@@ -1068,7 +1068,7 @@ export const zhTranslations: Record<string, string> = {
   'Cancel authorization': '取消授权',
   'Subscription authorization': '订阅授权',
   'No subscription account connected': '尚未连接订阅账号',
-  'Authorize this provider to add its available models.': '授权此提供商，以添加其可用模型。',
+  'Authorize this provider to add its available models.': '授权此服务商，以添加其可用模型。',
   'Connect subscription': '连接订阅',
   'Add another account': '添加其他账号',
   'Import from Codex': '从 Codex 导入',
@@ -1096,12 +1096,12 @@ export const zhTranslations: Record<string, string> = {
   'Git commit generation': 'Git Commit 生成',
   'Model and prompt used by the AI button in the Git commit panel.':
     'Git 提交面板「AI 生成」按钮使用的模型与提示词。',
-  'Select provider': '选择供应商',
+  'Select provider': '选择服务商',
   'The selected model is unavailable. Choose another one.': '所选模型不可用，请重新选择。',
   'Could not save the prompt': '提示词保存失败',
   'Git commit generation is not configured': '尚未配置 Git Commit 生成',
   'Choose a provider and model for Git commit generation in Model Providers.':
-    '请先在模型中心为「Git Commit 生成」选择供应商和模型。',
+    '请先在模型中心为「Git Commit 生成」选择服务商和模型。',
   'The selected model is unavailable. Choose another one in Model Providers.':
     '所选模型不可用，请在模型中心重新选择。',
   'Could not generate a commit message': '提交信息生成失败',
@@ -1132,7 +1132,7 @@ export const zhTranslations: Record<string, string> = {
     '使用默认生图模型生成图片，并保存到会话专属目录。',
   'No image generation models available': '没有可用的图像生成模型',
   'Enable a model and configure valid provider credentials first.':
-    '请先启用模型并配置有效的提供商凭证。',
+    '请先启用模型并配置有效的服务商凭证。',
   'Default model changed: {{previous}} → {{next}}': '默认模型已更改：{{previous}} → {{next}}',
   'Subscription credentials are loading. API-key models remain available.':
     '正在加载订阅凭证，API Key 模型仍可使用。',
@@ -1146,7 +1146,7 @@ export const zhTranslations: Record<string, string> = {
   'Choose a model for this conversation or set a project, group, or global default before sending.':
     '发送前请为此对话选择模型，或设置项目、分组或全局默认模型。',
   'No usable model is available. Configure provider credentials and enable a model first.':
-    '没有可用模型。请先配置提供商凭证并启用模型。',
+    '没有可用模型。请先配置服务商凭证并启用模型。',
   Agent: 'Agent',
   Agents: 'Agent',
   File: '文件',
@@ -1253,10 +1253,10 @@ export const zhTranslations: Record<string, string> = {
   'Failed to prompt child Agent.': '无法向子 Agent 发送任务。',
   'Failed to record dispatch.': '无法记录派发结果。',
   Target: '目标',
-  Provider: '提供商',
+  Provider: '服务商',
   Account: '账号',
   Coworker: '队员',
-  'Could not load subscription providers': '无法加载订阅提供商',
+  'Could not load subscription providers': '无法加载订阅服务商',
   Save: '保存',
   // 技能与 MCP
   Skills: '技能',
@@ -2370,7 +2370,7 @@ export const zhTranslations: Record<string, string> = {
   'Fast read-only recon, returns compressed findings': '快速只读调研,返回压缩结论',
   'System prompt': '系统提示',
   'You are a fast recon agent. Explore, never modify…': '你是快速调研代理,只探索不修改…',
-  'Provider (optional)': '模型服务(可选)',
+  'Provider (optional)': '服务商（可选）',
   'Follow conversation': '跟随会话',
   'Enable subagent model': '启用子代理模型',
   'Make this model available to subagents': '允许子代理选择此模型',
@@ -2936,7 +2936,7 @@ export const zhTranslations: Record<string, string> = {
   'Encrypt the entire package with a password. OAuth login sessions are still excluded.':
     '使用密码加密整个配置包。OAuth 登录态仍不会包含在内。',
   'API keys, provider account links, MCP arguments and environment values, plus credentials and private URL parts in MCP endpoints, will be omitted. Configurations containing skill or instruction files require encryption.':
-    'API Key、模型服务账号关联、MCP 参数和环境变量，以及 MCP 地址中的凭据和私密 URL 部分都会被省略。包含技能或指令文件的配置需要加密导出。',
+    'API Key、服务商账号关联、MCP 参数和环境变量，以及 MCP 地址中的凭据和私密 URL 部分都会被省略。包含技能或指令文件的配置需要加密导出。',
   'Encryption password': '加密密码',
   'Confirm password': '确认密码',
   'Use at least 8 characters. This password cannot be recovered.':
@@ -2984,7 +2984,7 @@ export const zhTranslations: Record<string, string> = {
   'Do you want to continue with this import?': '要继续导入吗？',
   'Confirm import': '确认导入',
   'Sensitive provider or MCP values were omitted; existing local values were preserved when available.':
-    '敏感的模型服务或 MCP 配置值已省略；如本机已有对应值，则会保留。',
+    '敏感的服务商或 MCP 配置值已省略；如本机已有对应值，则会保留。',
   'OAuth login state is not included; sign in again after import.':
     '配置包不包含 OAuth 登录态；导入后请重新登录。',
   'Imported MCP servers may require external commands, packages, or paths.':
