@@ -339,6 +339,22 @@ describe('config CLI socket', () => {
     });
   });
 
+  it('Git Commit 生成：模型引用可写，自定义提示词标记只能在设置页改', async () => {
+    const model = { providerId: 'p1', modelId: 'm1' };
+    expect(await config({ action: 'set', key: 'gitCommitModel', value: model })).toMatchObject({
+      ok: true,
+    });
+    expect((await state()).gitCommitModel).toEqual(model);
+    expect(
+      await config({ action: 'set', key: 'gitCommitPromptCustomized', value: true })
+    ).toMatchObject({ ok: false });
+    const schema = await config({ action: 'schema' });
+    const keys = new Map(
+      (schema.keys as { path: string; writable: boolean }[]).map((entry) => [entry.path, entry])
+    );
+    expect(keys.get('gitCommitPromptCustomized')).toMatchObject({ writable: false });
+  });
+
   it('list 输出全部设置键，密钥显示为 ***', async () => {
     const reply = await config({ action: 'list' });
     const text = JSON.stringify(reply);

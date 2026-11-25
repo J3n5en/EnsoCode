@@ -1091,6 +1091,25 @@ export const zhTranslations: Record<string, string> = {
     '关闭后可为本项目单独配置内置工具，优先级高于全局，下次会话生效。',
   'Session choice overrides the project default.': '会话里手动选的模型优先于项目默认。',
   'Conversation title summary': '会话标题总结',
+  'Git commit generation': 'Git Commit 生成',
+  'Model and prompt used by the AI button in the Git commit panel.':
+    'Git 提交面板「AI 生成」按钮使用的模型与提示词。',
+  'Select provider': '选择供应商',
+  'The selected model is unavailable. Choose another one.': '所选模型不可用，请重新选择。',
+  'Could not save the prompt': '提示词保存失败',
+  'Git commit generation is not configured': '尚未配置 Git Commit 生成',
+  'Choose a provider and model for Git commit generation in Model Providers.':
+    '请先在模型中心为「Git Commit 生成」选择供应商和模型。',
+  'The selected model is unavailable. Choose another one in Model Providers.':
+    '所选模型不可用，请在模型中心重新选择。',
+  'Could not generate a commit message': '提交信息生成失败',
+  'No changes to commit.': '没有可提交的改动。',
+  'Cancel generation': '取消生成',
+  'Generate commit message with AI': 'AI 生成提交信息',
+  'Replace the current commit message?': '覆盖当前提交信息？',
+  'The AI-generated message will overwrite what you have typed.':
+    'AI 生成的内容会覆盖你已输入的提交信息。',
+  'Model returned an empty commit message.': '模型返回了空的提交信息。',
   'Generate a short AI title from the first message of a new conversation.':
     '新会话发出首条消息后，用 AI 自动生成简短标题。',
   'Follows the default model': '跟随默认模型',

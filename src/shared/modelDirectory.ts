@@ -109,6 +109,7 @@ export function referencedModelIds(settings: unknown, providerId: unknown): Set<
     'defaultModel',
     'imageGenerationModel',
     'titleSummaryModel',
+    'gitCommitModel',
     'approvalReviewer',
     'smartCompactModel',
     'memoryDistillModel',

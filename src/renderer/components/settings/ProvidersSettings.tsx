@@ -30,6 +30,7 @@ import { ApprovalReviewerPicker } from './ApprovalReviewerPicker';
 import { chatgptPoolSources, createChatgptPoolProvider, providerDisplayName } from './chatgptPool';
 import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
+import { GitCommitSettings } from './GitCommitSettings';
 import { ImageGenerationPicker } from './ImageGenerationPicker';
 import { LocalImportDialog } from './LocalImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
@@ -240,6 +241,7 @@ export function ProvidersSettings() {
       <ImageGenerationPicker />
       <VirtualModelsSettings />
       <TitleSummaryPicker />
+      <GitCommitSettings />
       <ApprovalReviewerPicker />
       <SubagentModelsSettings />
       {chatgptPoolSources(providers).length > 0 && !providers.some((p) => p.oauthAccountPool) && (
