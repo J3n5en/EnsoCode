@@ -73,9 +73,10 @@ export function SettingsPage({
 }) {
   return (
     <div data-slot="settings-page" className="mx-auto w-full max-w-(--settings-content-max) pb-10">
-      <header data-settings-row={rowId} className="flex flex-wrap items-start gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 font-semibold text-[18px] leading-[26px]">
+      {/* 标题区按 280px 参与换行：操作按钮放不下时整组换到标题下面，标题不被挤成竖排 */}
+      <header data-settings-row={rowId} className="flex flex-wrap items-start gap-x-6 gap-y-3">
+        <div className="min-w-[min(100%,280px)] grow basis-[280px]">
+          <h1 className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-semibold text-[18px] leading-[26px]">
             {title}
             {badge}
           </h1>
@@ -84,7 +85,9 @@ export function SettingsPage({
           )}
         </div>
         {actions && (
-          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2 pointer-coarse:gap-y-4">
+            {actions}
+          </div>
         )}
       </header>
       {children}

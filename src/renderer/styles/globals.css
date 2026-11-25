@@ -355,10 +355,11 @@ html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
 }
 
 :root {
-  --settings-content-max: 720px;
+  --settings-content-max: 920px;
   --settings-row-min: 56px;
   --settings-section-gap: 40px;
-  --settings-control-h: 28px;
+  /* 与 ui 控件 sm 尺寸（h-7）一致，分段控件、快捷键键帽用它对齐 */
+  --settings-control-h: 1.75rem;
 }
 
 @keyframes settings-row-flash {
