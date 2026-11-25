@@ -156,6 +156,8 @@ export const SETTINGS_STATE_FIELDS = [
   'defaultModelFollowLast',
   'titleSummaryEnabled',
   'titleSummaryModel',
+  'gitCommitModel',
+  'gitCommitPromptCustomized',
   'imageGenerationModel',
   'memoryDistillModel',
   'memoryChatModel',
@@ -216,6 +218,8 @@ export type SettingsStateField = (typeof SETTINGS_STATE_FIELDS)[number];
 /** 仅限本机的字段：config-sync 绝不计入指纹，也绝不回写。 */
 const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'hashlineEditEnabled',
+  // 自定义提示词正文是本机 userData 下的独立文件，标记跨机同步会悬空
+  'gitCommitPromptCustomized',
   'pinnedModels',
   'recentModels',
   'approvalAutoManage',

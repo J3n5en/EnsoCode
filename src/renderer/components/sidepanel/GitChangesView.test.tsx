@@ -105,7 +105,29 @@ vi.mock('@/components/ui/input-group', () => ({
     <input {...props} />
   ),
 }));
-vi.mock('@/components/ui/textarea', () => ({ Textarea: () => <textarea /> }));
+vi.mock('@/components/ui/textarea', () => ({
+  Textarea: ({ size: _size, ...props }: ComponentProps<'textarea'> & { size?: string }) => (
+    <textarea {...props} />
+  ),
+}));
+vi.mock('./GitCommitAiButton', () => ({
+  GitCommitAiButton: (props: {
+    onGenerated: (message: string) => void;
+    onRunningChange?: (running: boolean) => void;
+  }) => (
+    <>
+      <button type="button" data-ai-start="" onClick={() => props.onRunningChange?.(true)} />
+      <button
+        type="button"
+        data-ai-done=""
+        onClick={() => {
+          props.onGenerated('feat: generated');
+          props.onRunningChange?.(false);
+        }}
+      />
+    </>
+  ),
+}));
 vi.mock('./GitDiffPreview', () => ({ GitDiffPreview: () => null }));
 vi.mock('./GitHistoryView', () => ({ GitHistoryView: () => null }));
 vi.mock('./GitPanelLayout', () => ({
@@ -633,5 +655,18 @@ describe('GitChangesView 文件夹右键菜单', () => {
       paths: ['src/a/deep/two.ts'],
       confirmUntracked: false,
     });
+  });
+});
+
+describe('GitChangesView AI 生成提交信息', () => {
+  it('生成中锁定输入框，完成后回填', async () => {
+    harness.git.status.mockResolvedValue(statusWith([], [{ path: 'a.ts', status: 'modified' }]));
+    await render();
+    const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => (container.querySelector('[data-ai-start]') as HTMLElement).click());
+    expect(textarea().disabled).toBe(true);
+    await act(async () => (container.querySelector('[data-ai-done]') as HTMLElement).click());
+    expect(textarea().disabled).toBe(false);
+    expect(textarea().value).toBe('feat: generated');
   });
 });

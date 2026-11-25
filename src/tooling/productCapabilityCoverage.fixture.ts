@@ -166,6 +166,10 @@ export const SETTINGS_DATA_COVERAGE = {
   defaultThinkingLevel: surfaces('providers.default-model'),
   titleSummaryEnabled: excluded('Conversation title summary preference; not an Enso capability.'),
   titleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
+  gitCommitModel: excluded('Changes panel AI commit message model; not an Enso capability.'),
+  gitCommitPromptCustomized: excluded(
+    'Changes panel AI commit message prompt flag; not an Enso capability.'
+  ),
   imageGenerationModel: excluded(
     'Independent image generation model preference; not an Enso capability.'
   ),
@@ -389,6 +393,10 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Conversation title summary preference; not an Enso capability.'
   ),
   setTitleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
+  setGitCommitModel: excluded('Changes panel AI commit message model; not an Enso capability.'),
+  setGitCommitPromptCustomized: excluded(
+    'Changes panel AI commit message prompt flag; not an Enso capability.'
+  ),
   setImageGenerationModel: excluded('Default image generation model; desktop settings only.'),
   setMemoryDistillModel: excluded('Memory distillation model preference; not an Enso capability.'),
   setMemoryLanguage: excluded('Memory output language preference; not an Enso capability.'),
@@ -853,6 +861,15 @@ export const IPC_PRODUCT_COVERAGE = {
   GIT_FETCH: excluded('Desktop Changes panel remote fetch; no Enso capability.'),
   GIT_PULL: excluded('Desktop Changes panel fast-forward-only pull; no Enso capability.'),
   GIT_PUSH: excluded('Desktop Changes panel non-forced upstream push; no Enso capability.'),
+  GIT_GENERATE_COMMIT_MESSAGE: excluded(
+    'Desktop Changes panel AI commit message draft; the user still commits manually.'
+  ),
+  GIT_GENERATE_COMMIT_MESSAGE_ABORT: excluded(
+    'Desktop Changes panel AI commit message draft cancel; no Enso capability.'
+  ),
+  GIT_COMMIT_PROMPT_READ: excluded('Model center Git commit prompt editor; no Enso capability.'),
+  GIT_COMMIT_PROMPT_WRITE: excluded('Model center Git commit prompt editor; no Enso capability.'),
+  GIT_COMMIT_PROMPT_RESET: excluded('Model center Git commit prompt editor; no Enso capability.'),
   CHANGES_SNAPSHOTS_READ: excluded(
     'Internal per-conversation snapshot store for the Changes panel.'
   ),

@@ -295,6 +295,8 @@ const initialState = {
   defaultModelFollowLast: false,
   titleSummaryEnabled: false,
   titleSummaryModel: null as import('@shared/defaultModel').DefaultModelRef | null,
+  gitCommitModel: null as import('@shared/defaultModel').DefaultModelRef | null,
+  gitCommitPromptCustomized: false,
   imageGenerationModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   memoryDistillModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   memoryChatModel: 'remote',
@@ -624,6 +626,9 @@ export const useSettingsStore = create<SettingsState>()(
 
       setTitleSummaryEnabled: (titleSummaryEnabled) => set({ titleSummaryEnabled }),
       setTitleSummaryModel: (titleSummaryModel) => set({ titleSummaryModel }),
+      setGitCommitModel: (gitCommitModel) => set({ gitCommitModel }),
+      setGitCommitPromptCustomized: (gitCommitPromptCustomized) =>
+        set({ gitCommitPromptCustomized }),
       setImageGenerationModel: (imageGenerationModel) => set({ imageGenerationModel }),
       setMemoryDistillModel: (memoryDistillModel) => set({ memoryDistillModel }),
       setMemoryChatModel: (memoryChatModel) => set({ memoryChatModel }),
