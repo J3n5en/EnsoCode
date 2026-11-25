@@ -1,11 +1,13 @@
 import type { SecretaryScheduleView } from '@shared/types/secretary';
 import { Settings } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { SettingsSection } from '@/components/settings/kit';
 import { useI18n } from '@/i18n';
 import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
 import { secretaryIdOfProject, useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
+import { SecretaryContactPanel } from './SecretaryContactPanel';
 import { SecretaryDailyBoard } from './SecretaryDailyBoard';
 import { SecretaryMemoryPanel } from './SecretaryMemoryPanel';
 import { SecretaryRunningList } from './SecretaryRunningList';
@@ -146,26 +148,24 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
         {tab === 'daily' && <SecretaryDailyBoard secretaryId={secretaryId} />}
         {tab === 'memory' && <SecretaryMemoryPanel secretaryId={secretaryId} />}
         {tab === 'contact' && (
-          <div
-            data-enso="secretary-contact-entry"
-            className="flex flex-col items-start gap-2 px-3 py-3"
-          >
-            <p className="text-[12.5px] text-muted-foreground">
-              {t('Contacts and owner identity are managed in Settings.')}
-            </p>
-            <button
-              type="button"
-              data-enso="secretary-contact-open-settings"
-              onClick={() =>
-                openSecretarySettings(secretaryId, {
-                  category: 'contacts',
-                  rowId: 'contacts.owner',
-                })
-              }
-              className="inline-flex items-center rounded-lg border border-border px-2.5 py-1.5 text-[12.5px] hover:bg-muted"
-            >
-              {t('Manage in Settings')}
-            </button>
+          // 手机上打不开桌面设置页，联系方式与主人身份必须在面板里直接管理；
+          // 与设置页同一实现，分组卡片排版走同一套 frames
+          <div className="px-3 pb-4">
+            <SecretaryContactPanel
+              secretaryId={secretaryId}
+              frames={{
+                owner: (node) => (
+                  <SettingsSection title={t('Owner identity')} rowId="contacts.owner">
+                    {node}
+                  </SettingsSection>
+                ),
+                channels: (node) => (
+                  <SettingsSection title={t('Contact channels')} rowId="contacts.channels">
+                    {node}
+                  </SettingsSection>
+                ),
+              }}
+            />
           </div>
         )}
         {tab === 'skills' && <SecretarySkillsPanel secretaryId={secretaryId} />}
