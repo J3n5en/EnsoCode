@@ -407,7 +407,7 @@ import { ACTIVE_WORKFLOW_RUN_IDS, createWorkflowTool, WORKFLOW_STOPPED_BY_USER }
 import { claimInterruptedWorkflowRuns } from './workflowJournal';
 import { listWorkflowPresets, loadWorkflowPreset, workflowPresetRoots } from './workflowPresets';
 import { WorkspaceClaims, withExclusiveCommand, withFileClaims } from './workspaceClaims';
-import { WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
+import { VIZ_GUIDANCE_PROMPT, WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
 import { WorkspaceSwitchGate, workspaceBranchContextExtension } from './workspaceSwitch';
 import { extractEditTargetPath, withWritePreflight, withWriteScope } from './writeScope';
 
@@ -824,6 +824,7 @@ function createSessionResourceLoader(options: {
       skillChainExtension(() => loader.getSkills().skills),
       options.silentTurnRecovery,
       appendSystemPromptExtension('workspace-policy', WORKSPACE_POLICY_PROMPT),
+      appendSystemPromptExtension('viz-guidance', VIZ_GUIDANCE_PROMPT),
       ...(options.childContract
         ? [appendSystemPromptExtension('subagent-contract', SUBAGENT_CONTRACT_PROMPT)]
         : []),
