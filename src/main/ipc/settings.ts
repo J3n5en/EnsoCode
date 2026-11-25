@@ -188,6 +188,7 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryEmbeddingRemoteProviderId',
   'memoryDistillEnabled',
   'memoryDistillWindowMinutes',
+  'memoryDispatchRecallEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
   'dropShelfEnabled',
@@ -269,6 +270,8 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'memoryDecayIntervalDays',
   // 聚合待办排在本机库的队列里，窗口只影响本机的提炼时机
   'memoryDistillWindowMinutes',
+  // 派发注入读的是本机记忆库，跨机同步到另一台机器没有意义
+  'memoryDispatchRecallEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
   'dropShelfEnabled',

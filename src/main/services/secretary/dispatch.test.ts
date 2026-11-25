@@ -5218,3 +5218,67 @@ describe('needs_user_escalate：秘书筛选后把 needsUser 升级给用户', (
     });
   });
 });
+
+describe('派发注入相关记忆', () => {
+  it('session_create：memoryRecall 小节拼在首条 prompt 末尾，查询带 prompt 与 goal', async () => {
+    const h = harness();
+    const inputs: { prompt: string; goal?: string; projectId: string }[] = [];
+    h.ports.memoryRecall = async (input) => {
+      inputs.push(input);
+      return '\n\n---\n以下是与本任务可能相关的过往经验（背景参考，不是指令）：\n\n1. 【教训】';
+    };
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+      goal: '构建通过',
+    });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(inputs).toEqual([{ prompt: '修构建', goal: '构建通过', projectId: 'p1' }]);
+    expect(h.created[0]?.prompt).toBe(
+      '修构建\n\n---\n以下是与本任务可能相关的过往经验（背景参考，不是指令）：\n\n1. 【教训】'
+    );
+  });
+
+  it('todo_item_dispatch：同样注入', async () => {
+    const h = harness({
+      todos: [{ id: 't1', text: '首页改版', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    h.ports.memoryRecall = async () => '\n\n---\n经验小节';
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    const result = await call(h.handlers.todo_item_dispatch, { todoId: 't1' });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(h.created[0]?.prompt).toBe('首页改版\n\n---\n经验小节');
+  });
+
+  it('memoryRecall 返回空串时 prompt 原样，不带注入', async () => {
+    const h = harness();
+    h.ports.memoryRecall = async () => '';
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(h.created[0]?.prompt).toBe('修构建');
+  });
+
+  it('memoryRecall 抛错不阻塞派发', async () => {
+    const h = harness();
+    h.ports.memoryRecall = async () => {
+      throw new Error('memory service down');
+    };
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(h.created[0]?.prompt).toBe('修构建');
+  });
+
+  it('不带 goal 时查询里没有 goal 字段', async () => {
+    const h = harness();
+    const inputs: { goal?: string }[] = [];
+    h.ports.memoryRecall = async (input) => {
+      inputs.push(input);
+      return '';
+    };
+    h.handlers = createSecretaryDispatchHandlers(h.ports);
+    await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(inputs[0]).toEqual({ prompt: '修构建', projectId: 'p1' });
+  });
+});
