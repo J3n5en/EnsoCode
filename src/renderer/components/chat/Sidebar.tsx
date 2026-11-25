@@ -76,10 +76,16 @@ import { BackgroundTaskMarker } from '@/components/backgroundTasks/BackgroundTas
 import { BackgroundTasksButton } from '@/components/backgroundTasks/BackgroundTasksButton';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ArchiveEntryButton, ArchiveScopeChip } from '@/components/chat/ArchiveEntryButton';
+import { CollapsedActiveProjectRail } from '@/components/chat/CollapsedActiveProjectRail';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
 import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { matchesQuery } from '@/components/chat/chatSearch';
+import {
+  type CollapsedActiveProject,
+  collapsedActiveProjects,
+  openCollapsedActiveProject,
+} from '@/components/chat/collapsedActiveProjects';
 import { insertComposerMention } from '@/components/chat/composerMentionBridge';
 import {
   activeChatDragId,
@@ -102,7 +108,7 @@ import {
   moveConversationTargets,
 } from '@/components/chat/moveConversationAction';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
-import { ProjectIcon } from '@/components/chat/ProjectIcon';
+import { ProjectRowMark } from '@/components/chat/ProjectRowMark';
 import { ProjectSettingsDialog } from '@/components/chat/ProjectSettingsDialog';
 import { ReminderMarker } from '@/components/chat/ReminderMarker';
 import {
@@ -187,7 +193,6 @@ import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { openSettings } from '@/stores/appView';
 import { closeBackgroundTasks } from '@/stores/backgroundTasksView';
-import { useProjectIconsStore } from '@/stores/projectIcons';
 import { useSecretaryStore } from '@/stores/secretary';
 import { usePendingReminder, useSessionRemindersStore } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
@@ -317,6 +322,17 @@ export function Sidebar({
       selectConversationInStore(id);
     },
     [selectConversationInStore]
+  );
+  const selectTab = useSessionsStore((state) => state.selectTab);
+  const openCollapsedProject = useCallback(
+    (entry: CollapsedActiveProject) => {
+      openCollapsedActiveProject(entry, {
+        conversations,
+        selectConversation,
+        selectTab,
+      });
+    },
+    [conversations, selectConversation, selectTab]
   );
   const removeConversation = useSessionsStore((state) => state.removeConversation);
   const togglePinConversation = useSessionsStore((state) => state.togglePinConversation);
@@ -518,6 +534,11 @@ export function Sidebar({
   // 不会把之前单独归档的会话一并“还原”回项目组
   const [archivedProjectIds, setArchivedProjectIds] = useState<string[]>(() =>
     readSidebarOrder(ARCHIVED_PROJECTS_KEY)
+  );
+  const collapsedRunningProjects = useMemo(
+    () =>
+      collapsed ? collapsedActiveProjects(projects, conversations, { archivedProjectIds }) : [],
+    [archivedProjectIds, collapsed, conversations, projects]
   );
   useEffect(
     () => subscribeCollapsedProjects(() => setCollapsedProjects(readCollapsedProjects())),
@@ -1127,6 +1148,11 @@ export function Sidebar({
           >
             <FolderPlus className="h-4 w-4" />
           </button>
+          <CollapsedActiveProjectRail
+            entries={collapsedRunningProjects}
+            projects={projects}
+            onOpen={openCollapsedProject}
+          />
           <div className="flex-1" />
           {phoneEntry === 'devices' && <PhoneDeviceChip compact />}
           {phoneEntry === 'info' && <PhoneLinkStatus />}
@@ -1731,11 +1757,10 @@ export function Sidebar({
                                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                                     title={project.path}
                                   >
-                                    <ProjectRowChevron projectId={project.id} folded={folded} />
-                                    <ProjectIcon
+                                    <ProjectRowMark
                                       projectId={project.id}
                                       displayName={projectDisplayName(project)}
-                                      size={16}
+                                      folded={folded}
                                     />
                                     <span
                                       className="min-w-0 flex-1 truncate text-[0.9286rem] font-medium text-foreground"
@@ -2579,8 +2604,7 @@ function ProjectDragPreview({
       style={{ width: width ?? 224 }}
     >
       <div className="flex h-8 items-center gap-2 px-2 text-[0.9286rem] font-medium">
-        <ProjectRowChevron projectId={projectId} folded={folded} />
-        <ProjectIcon projectId={projectId} displayName={name} size={16} />
+        <ProjectRowMark projectId={projectId} displayName={name} folded={folded} />
         <span className="min-w-0 flex-1 truncate">{name}</span>
       </div>
       {!folded && (
@@ -3457,28 +3481,6 @@ function SidebarSectionLabel({
       {actions}
     </div>
   );
-}
-
-/** 项目行首的折叠箭头:与会话行状态点同占 16px 列 */
-function FoldChevron({ folded }: { folded: boolean }) {
-  return (
-    <span
-      data-enso="tree-chevron"
-      data-expanded={!folded || undefined}
-      className="flex size-4 shrink-0 items-center justify-center text-subtle-foreground"
-    >
-      <ChevronRight
-        className={cn('size-3.5 transition-transform duration-150', !folded && 'rotate-90')}
-      />
-    </span>
-  );
-}
-
-function ProjectRowChevron({ projectId, folded }: { projectId: string; folded: boolean }) {
-  const kind = useProjectIconsStore((state) => state.icons[projectId]?.kind);
-  const hasImage = kind === 'scanned' || kind === 'custom';
-  if (hasImage) return <span className="size-4 shrink-0" />;
-  return <FoldChevron folded={folded} />;
 }
 
 function ConversationDot({
