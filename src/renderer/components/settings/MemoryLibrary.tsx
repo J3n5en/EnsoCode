@@ -45,7 +45,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { usePendingMemoryWrites, usePendingMemoryWritesStore } from '@/stores/memoryReview';
-import { SettingsSection, TOUCH_TARGET } from './kit';
+import { SettingsSection } from './kit';
 
 /**
  * 记忆库浏览与维护。归档是默认动作；永久删除要二次确认（禁止静默删除）。
@@ -708,10 +708,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               >
                 <SelectTrigger
                   size="sm"
-                  className={cn(
-                    'w-auto min-w-0 gap-1 border-0 bg-transparent px-2 shadow-none before:hidden',
-                    TOUCH_TARGET
-                  )}
+                  className="w-auto min-w-0 gap-1 border-0 bg-transparent px-2 shadow-none before:hidden"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -735,11 +732,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               setSpaceId(ALL);
             }}
           >
-            <SelectTrigger
-              size="sm"
-              className={cn('w-36', TOUCH_TARGET)}
-              data-memory-filter="space-kind"
-            >
+            <SelectTrigger size="sm" className="w-36" data-memory-filter="space-kind">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
@@ -758,11 +751,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               setSpaceId(String(value));
             }}
           >
-            <SelectTrigger
-              size="sm"
-              className={cn('w-36', TOUCH_TARGET)}
-              data-memory-filter="space"
-            >
+            <SelectTrigger size="sm" className="w-36" data-memory-filter="space">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
@@ -781,7 +770,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               setUnitType(String(value));
             }}
           >
-            <SelectTrigger size="sm" className={cn('w-36', TOUCH_TARGET)}>
+            <SelectTrigger size="sm" className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>

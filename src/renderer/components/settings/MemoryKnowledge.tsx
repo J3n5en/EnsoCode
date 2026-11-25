@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/select';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { SettingsSection, TOUCH_TARGET } from './kit';
+import { SettingsSection } from './kit';
 import { MemoryGraphView } from './MemoryGraphView';
 import { MemoryTreeView } from './MemoryTreeView';
 
@@ -140,7 +140,7 @@ export function MemoryKnowledge({ revision = 0 }: { revision?: number } = {}) {
           items={modeItems}
           onValueChange={(value) => setMode(value === 'tree' ? 'tree' : 'graph')}
         >
-          <SelectTrigger size="sm" className={cn('w-32', TOUCH_TARGET)}>
+          <SelectTrigger size="sm" className="w-32">
             <SelectValue />
           </SelectTrigger>
           <SelectPopup>
@@ -157,7 +157,7 @@ export function MemoryKnowledge({ revision = 0 }: { revision?: number } = {}) {
             items={groupItems}
             onValueChange={(value) => setGroupBy(value as TreeGrouping)}
           >
-            <SelectTrigger size="sm" className={cn('w-36', TOUCH_TARGET)}>
+            <SelectTrigger size="sm" className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>

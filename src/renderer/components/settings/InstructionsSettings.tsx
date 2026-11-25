@@ -7,14 +7,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { InstructionEditDialog } from './InstructionEditDialog';
-import {
-  SettingsButton,
-  SettingsPage,
-  SettingsRow,
-  SettingsSection,
-  SettingsSwitch,
-  TOUCH_TARGET,
-} from './kit';
+import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
 import {
@@ -125,7 +118,7 @@ export function InstructionsSettings() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t('Edit')}
-                className={cn('text-muted-foreground', TOUCH_TARGET)}
+                className="text-muted-foreground"
                 onClick={() => setEditing(instruction)}
               >
                 <Pencil className="h-3.5 w-3.5" />
@@ -134,7 +127,7 @@ export function InstructionsSettings() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t('Delete')}
-                className={cn('text-muted-foreground hover:text-destructive-text', TOUCH_TARGET)}
+                className="text-muted-foreground hover:text-destructive-text"
                 onClick={() => removeInstruction(instruction.id)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
