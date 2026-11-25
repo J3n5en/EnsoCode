@@ -2962,7 +2962,6 @@ function ConversationRow({
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
       data-enso="session-row"
-      data-conversation={id}
       data-active={active || undefined}
       data-status={conversationThemeState(conversation)}
       data-unread={conversation.unread || undefined}
