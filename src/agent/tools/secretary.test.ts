@@ -234,6 +234,13 @@ describe('secretary tools', () => {
       path: '/repo/alpha',
     });
     expect(
+      normalizeSecretaryParams('repo_diff', {
+        project_id: 'p1',
+        branch: ' feat/x ',
+        merge_base: 'false',
+      })
+    ).toEqual({ projectId: 'p1', ref: 'feat/x', mergeBase: false });
+    expect(
       normalizeSecretaryParams('session_read', {
         conversation_id: 'c1',
         message_index: '7',
