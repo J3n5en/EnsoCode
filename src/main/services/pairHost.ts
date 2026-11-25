@@ -69,7 +69,11 @@ import type {
   PairSessionConfig,
   PairStatus,
 } from '@shared/types/pair';
-import { readTrayPreventDisplaySleep, readTraySleepPolicy } from '../ipc/settings';
+import {
+  readPersistedConversation,
+  readTrayPreventDisplaySleep,
+  readTraySleepPolicy,
+} from '../ipc/settings';
 // 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
 import { requestSnapshot, setPinnedSessions } from './agentHost';
 import { ApprovalNotificationGate } from './approvalNotificationGate';
@@ -1535,12 +1539,16 @@ function forwardSnapshot(event: RendererAgentEvent): void {
 
     // 未 spawn：supervisor 回 partial + 空 sessions。这不是读失败，要回空 session-sync
     // 并放行后续 live 事件。无 partial、id 不符、或桌面完整模式保持不应答。
+    // 例外：持久化里有 sessionFile 的冷历史会话——subscribe 已同步发了 resume，
+    // 真快照马上到，此时回空应答只会让手机先闪一遍空视图再 invalidate 重订阅一轮。
+    // 全新会话没有 sessionFile，不受此限。
     if (
       !conn.deskGuest &&
       !narrowed &&
       full.partial === true &&
       full.sessionId === subscribedId &&
       (full.sessions?.length ?? 0) === 0 &&
+      typeof readPersistedConversation(subscribedId)?.sessionFile !== 'string' &&
       sync?.sessionId === subscribedId &&
       !sync.answered
     ) {
