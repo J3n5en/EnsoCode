@@ -1498,6 +1498,12 @@ export const zhTranslations: Record<string, string> = {
   Alias: '别名',
   'Shown in the sidebar instead of the folder name. Leave blank to reset.':
     '在侧边栏代替目录名显示，留空则恢复默认。',
+  'Custom icon': '自定义图标',
+  'Upload icon': '上传图标',
+  'Remove custom icon': '移除自定义图标',
+  'The icon must be a PNG, JPEG, WebP or SVG image.': '图标必须是 PNG、JPEG、WebP 或 SVG 图片。',
+  'Upload a square image. It overrides the icon found in the project folder.':
+    '上传方形图片，会覆盖从项目文件夹扫描到的图标。',
   'Groups organize projects in the sidebar.': '用分组整理侧栏里的项目。',
   'Move projects into this group': '选择要移入的项目',
   'Move to group': '移动到分组',

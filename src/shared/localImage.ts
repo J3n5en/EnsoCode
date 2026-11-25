@@ -9,6 +9,7 @@
  * - POSIX 绝对路径    `/a/b.png`              → `local-image://posix/a/b.png`（固定 host）
  * - 远程图片代理      `local-image://remote-fetch/?url=<encoded>`（主进程 net.fetch 代理，绕过 CSP/CORS）
  * - 插件图片和字体    `local-image://plugin-asset/<pluginId>/<rel>?v=<build>`
+ * - 项目图标          `local-image://project-icon/<projectId>?v=<revision>`
  */
 
 export const LOCAL_IMAGE_SCHEME = 'local-image';
@@ -31,6 +32,13 @@ export const REMOTE_FETCH_HOST = 'remote-fetch';
 export const BOT_AVATAR_HOST = 'bot-avatar';
 export const botAvatarUrl = (botId: string, version: number): string =>
   routed(`${LOCAL_IMAGE_SCHEME}://${BOT_AVATAR_HOST}/${encodeURIComponent(botId)}?v=${version}`);
+
+/** 项目图标的保留 host：只按 projectId 寻址，路径由 Main 推导；v 是内容修订号 */
+export const PROJECT_ICON_HOST = 'project-icon';
+export const projectIconUrl = (projectId: string, revision: string): string =>
+  routed(
+    `${LOCAL_IMAGE_SCHEME}://${PROJECT_ICON_HOST}/${encodeURIComponent(projectId)}?v=${encodeURIComponent(revision)}`
+  );
 
 /**
  * 秘书头像的保留 host：只有一个秘书，路径由 Main 推导。
@@ -135,7 +143,8 @@ export function localImageUrlToPath(url: URL): string | null {
     host === BOT_AVATAR_HOST ||
     host === SECRETARY_AVATAR_HOST ||
     host === SECRETARY_REPORT_HOST ||
-    host === PLUGIN_ASSET_HOST
+    host === PLUGIN_ASSET_HOST ||
+    host === PROJECT_ICON_HOST
   )
     return null;
   const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);

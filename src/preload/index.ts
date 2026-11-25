@@ -66,6 +66,7 @@ import type { PastedTextFileResult } from '@shared/pastedText';
 import type { PlanRespondAction } from '@shared/planMode';
 import type { PresetImportDraft } from '@shared/presetImport';
 import type { PrivacyMaskRecord } from '@shared/privacyMask/report';
+import type { ProjectIconInfo } from '@shared/projectIcon';
 import type { SessionReminderSummary } from '@shared/reminders';
 import type { RemoteApi } from '@shared/remoteBridge';
 import type {
@@ -1117,6 +1118,14 @@ const electronAPI = {
     /** 项目（或会话 worktree）里会被当作代码加载的 pi 扩展/包来源 */
     codeSources: (request: { projectId: string; conversationId?: string }): Promise<string[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_CODE_SOURCES, request),
+    getIcon: (projectId: string): Promise<ProjectIconInfo> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GET_ICON, { projectId }),
+    /** 上传自定义图标，或传 null 移除。scratch / 秘书 / bot-home 会被拒绝 */
+    setIcon: (
+      projectId: string,
+      image: Uint8Array | null
+    ): Promise<{ ok: boolean; error?: string; info?: ProjectIconInfo }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SET_ICON, { projectId, image }),
   },
 
   git: {

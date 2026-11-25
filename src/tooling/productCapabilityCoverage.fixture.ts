@@ -850,6 +850,8 @@ export const IPC_PRODUCT_COVERAGE = {
   PROJECTS_GIT_CLONE: surfaces('projects.add'),
   PROJECTS_REVEAL: surfaces('projects.list'),
   PROJECTS_OPEN_IN_APPS: surfaces('projects.list'),
+  PROJECTS_GET_ICON: surfaces('projects.list'),
+  PROJECTS_SET_ICON: surfaces('projects.list'),
   PROJECTS_CODE_SOURCES: excluded(
     'Desktop-only review of project pi extensions before trusting them.'
   ),

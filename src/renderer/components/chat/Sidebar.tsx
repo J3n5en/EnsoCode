@@ -102,6 +102,7 @@ import {
   moveConversationTargets,
 } from '@/components/chat/moveConversationAction';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
+import { ProjectIcon } from '@/components/chat/ProjectIcon';
 import { ProjectSettingsDialog } from '@/components/chat/ProjectSettingsDialog';
 import { ReminderMarker } from '@/components/chat/ReminderMarker';
 import {
@@ -186,6 +187,7 @@ import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { openSettings } from '@/stores/appView';
 import { closeBackgroundTasks } from '@/stores/backgroundTasksView';
+import { useProjectIconsStore } from '@/stores/projectIcons';
 import { useSecretaryStore } from '@/stores/secretary';
 import { usePendingReminder, useSessionRemindersStore } from '@/stores/sessionReminders';
 import { useSessionsStore } from '@/stores/sessions';
@@ -1717,7 +1719,6 @@ export function Sidebar({
                           render={
                             (
                               <div ref={drag.setNodeRef} style={drag.style}>
-                                {/* 项目行：折叠箭头 + 名称 + 悬停操作；整行可拖拽排序 */}
                                 <div
                                   data-enso="project-row"
                                   data-expanded={!folded || undefined}
@@ -1730,7 +1731,12 @@ export function Sidebar({
                                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                                     title={project.path}
                                   >
-                                    <FoldChevron folded={folded} />
+                                    <ProjectRowChevron projectId={project.id} folded={folded} />
+                                    <ProjectIcon
+                                      projectId={project.id}
+                                      displayName={projectDisplayName(project)}
+                                      size={16}
+                                    />
                                     <span
                                       className="min-w-0 flex-1 truncate text-[0.9286rem] font-medium text-foreground"
                                       title={
@@ -2573,7 +2579,8 @@ function ProjectDragPreview({
       style={{ width: width ?? 224 }}
     >
       <div className="flex h-8 items-center gap-2 px-2 text-[0.9286rem] font-medium">
-        <FoldChevron folded={folded} />
+        <ProjectRowChevron projectId={projectId} folded={folded} />
+        <ProjectIcon projectId={projectId} displayName={name} size={16} />
         <span className="min-w-0 flex-1 truncate">{name}</span>
       </div>
       {!folded && (
@@ -3465,6 +3472,13 @@ function FoldChevron({ folded }: { folded: boolean }) {
       />
     </span>
   );
+}
+
+function ProjectRowChevron({ projectId, folded }: { projectId: string; folded: boolean }) {
+  const kind = useProjectIconsStore((state) => state.icons[projectId]?.kind);
+  const hasImage = kind === 'scanned' || kind === 'custom';
+  if (hasImage) return <span className="size-4 shrink-0" />;
+  return <FoldChevron folded={folded} />;
 }
 
 function ConversationDot({
