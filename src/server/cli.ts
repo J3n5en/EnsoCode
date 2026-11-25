@@ -33,7 +33,8 @@ export const USAGE = `EnsoCode Server — 无界面宿主，手机 / 浏览器�
   revoke <pairId>            撤销设备
   plugin <action>            管理 Enso 插件（list / install / enable / disable / approve / reject / uninstall / config）
   status                     运行状态、版本与更新
-  update                     检查并安装新版本后重启（npm 全局安装时）
+  update [--channel stable|beta]  检查并安装新版本后重启（npm 全局安装时）；
+                             带 --channel 会把更新渠道切过去并保存，之后自动更新也走该渠道
   service install [web 参数]  注册 systemd 服务（开机自启、崩溃拉起）；web 参数写入配置文件
   service uninstall          移除 systemd 服务
   logs                       跟随 systemd 服务日志
@@ -139,6 +140,7 @@ async function status(socketPath: string): Promise<void> {
         : s?.status === 'error'
           ? `检查失败: ${s.error}`
           : '自动';
+  const channelText = updater.channel === 'beta' ? '内测 (beta)' : '正式 (stable)';
   console.log(`状态: 运行中 (pid ${reply.pid})`);
   console.log(`版本: ${reply.version}`);
   console.log(`数据: ${reply.dataDir}`);
@@ -148,13 +150,24 @@ async function status(socketPath: string): Promise<void> {
   console.log(`中继: ${pairStatus.relayUrl}${web ? '（内置）' : ''}`);
   if (web) console.log(`Web: 监听 ${web.listen} → ${web.publicUrl}`);
   console.log(`更新: ${updateText}`);
+  console.log(`渠道: ${channelText}`);
   console.log('设备:');
   printDevices(pairStatus);
 }
 
-async function update(socketPath: string): Promise<void> {
+async function update(socketPath: string, flags: string[]): Promise<void> {
+  let channel: 'stable' | 'beta' | undefined;
+  const rest: string[] = [];
+  for (let i = 0; i < flags.length; i++) {
+    if (flags[i] === '--channel') {
+      const value = flags[++i];
+      if (value === 'stable' || value === 'beta') channel = value;
+      else fail('--channel 只能是 stable 或 beta');
+    } else rest.push(flags[i]);
+  }
+  if (rest.length > 0) fail(`未知参数 ${rest.join(' ')}\n\n${USAGE}`);
   console.log('检查更新…');
-  const reply = await call(socketPath, { cmd: 'update' });
+  const reply = await call(socketPath, channel ? { cmd: 'update', channel } : { cmd: 'update' });
   const s = reply.status as UpdaterState['status'];
   if (reply.applying) console.log(`正在安装 ${s?.info?.version}，完成后服务自动重启`);
   else if (s?.status === 'not-available') console.log(`已是最新 (${s.info?.version})`);
@@ -370,7 +383,7 @@ export async function runCommand(
       await status(ctx.socketPath);
       return true;
     case 'update':
-      await update(ctx.socketPath);
+      await update(ctx.socketPath, rest);
       return true;
     case 'service':
       await service(arg, rest, ctx.dataDir, ctx.socketPath);

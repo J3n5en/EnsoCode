@@ -13,6 +13,23 @@ describe('parseControlCommand', () => {
     expect(parseControlCommand('{"cmd":"status"}')).toEqual({ cmd: 'status' });
   });
 
+  it('update 可带更新渠道，非法渠道报错', () => {
+    expect(parseControlCommand('{"cmd":"update","channel":"beta"}')).toEqual({
+      cmd: 'update',
+      channel: 'beta',
+    });
+    expect(parseControlCommand('{"cmd":"update","channel":"stable"}')).toEqual({
+      cmd: 'update',
+      channel: 'stable',
+    });
+    expect(parseControlCommand('{"cmd":"update","channel":"nightly"}')).toEqual({
+      error: 'update channel must be stable or beta',
+    });
+    expect(parseControlCommand('{"cmd":"update","channel":1}')).toEqual({
+      error: 'update channel must be stable or beta',
+    });
+  });
+
   it('requires an id to revoke', () => {
     expect(parseControlCommand('{"cmd":"revoke","id":" dev "}')).toEqual({
       cmd: 'revoke',

@@ -523,8 +523,9 @@ function UpdateSection() {
           />
         </SettingsRow>
       </div>
-      {host?.host === 'desktop' && (
+      {(host?.host === 'desktop' || host?.host === 'server') && (
         <SettingsRow
+          rowId="general.updateChannel"
           label={t('Update channel')}
           description={
             <>
