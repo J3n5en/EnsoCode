@@ -89,6 +89,27 @@ function needsAuth(value: string): boolean {
   return text.includes('not logged in') || text.includes('authentication');
 }
 
+// 当前账号 login 进程内缓存：每次搜索都查一次 gh api user 会翻倍请求
+let cachedLogin: string | null | undefined;
+
+/** 当前 gh 登录账号的 login；未登录/失败时为 null。结果进程内缓存。 */
+async function currentUserLogin(): Promise<string | null> {
+  if (cachedLogin !== undefined) return cachedLogin;
+  const result = await runGh(['api', 'user', '--jq', '.login']);
+  if (!result.ok) {
+    // 登录态可能变化，失败不缓存
+    return null;
+  }
+  const login = result.stdout.trim();
+  cachedLogin = login || null;
+  return cachedLogin;
+}
+
+/** 仅供测试：清空 login 缓存，避免用例间串扰。 */
+export function resetGithubRepoSearchCacheForTest(): void {
+  cachedLogin = undefined;
+}
+
 function failure(error: unknown, stderr = ''): GhFailure {
   const code =
     error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
@@ -182,9 +203,15 @@ export async function searchGithubRepos(
   }
 
   const searchArgs = ['search', 'repos', '--json', SEARCH_JSON, '--limit', String(capped)];
+  // 只搜自己账号下的仓库：不加 owner 限定会搜遍全 GitHub，与「搜自己的仓库」语义不符
+  const login = await currentUserLogin();
+  const ownerArgs = login ? ['--owner', login] : [];
   const [general, priv] = await Promise.all([
-    reposFrom([...searchArgs, '--sort', 'updated', '--order', 'desc', '--', trimmed], capped),
-    reposFrom([...searchArgs, '--visibility=private', '--', trimmed], capped),
+    reposFrom(
+      [...searchArgs, ...ownerArgs, '--sort', 'updated', '--order', 'desc', '--', trimmed],
+      capped
+    ),
+    reposFrom([...searchArgs, ...ownerArgs, '--visibility=private', '--', trimmed], capped),
   ]);
   if (!general.ok) return general;
   if (!priv.ok) return priv;

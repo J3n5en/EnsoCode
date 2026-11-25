@@ -5,7 +5,7 @@ const spawn = vi.hoisted(() => vi.fn());
 
 vi.mock('node:child_process', () => ({ spawn }));
 
-import { searchGithubRepos } from './githubRepoSearch';
+import { resetGithubRepoSearchCacheForTest, searchGithubRepos } from './githubRepoSearch';
 
 const TIMEOUT_MS = 15_000;
 const LIST_JSON = 'name,nameWithOwner,description,isPrivate,updatedAt,url,sshUrl';
@@ -21,6 +21,7 @@ describe('searchGithubRepos', () => {
   afterEach(() => {
     vi.useRealTimers();
     spawn.mockReset();
+    resetGithubRepoSearchCacheForTest();
   });
 
   function arm(): FakeGh[] {
@@ -28,6 +29,14 @@ describe('searchGithubRepos', () => {
     spawn.mockImplementation(() => {
       const child = new FakeGh();
       children.push(child);
+      // gh api user 用来自动应答当前账号 login：搜索类用例都依赖它，逐个 emit 太啰嗦
+      const args = spawn.mock.calls[children.length - 1]?.[1] as string[] | undefined;
+      if (args?.[0] === 'api' && args?.[1] === 'user') {
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'me\n');
+          child.emit('close', 0);
+        });
+      }
       return child;
     });
     return children;
@@ -48,6 +57,18 @@ describe('searchGithubRepos', () => {
   function emitJson(child: FakeGh, value: unknown, code = 0) {
     child.stdout.emit('data', JSON.stringify(value));
     child.emit('close', code);
+  }
+
+  // 等待搜索用的两个 gh search spawn 出现（api user 先跑、resolve 后才发起搜索）。
+  // 返回过滤掉 api user 后的搜索调用与对应 children（children[0] 恒为 api user）。
+  async function searchCalls(children: FakeGh[]) {
+    await vi.waitFor(() => {
+      if (calls().length < 3) throw new Error('waiting for search spawns');
+    });
+    return {
+      seen: calls().filter((call) => call.args[0] === 'search'),
+      searchChildren: children.slice(1),
+    };
   }
 
   it('lists the signed-in user repos when the query is empty and sorts by updatedAt', async () => {
@@ -107,7 +128,7 @@ describe('searchGithubRepos', () => {
   it('searches by keyword and merges a private search without duplicates', async () => {
     const children = arm();
     const pending = searchGithubRepos('enso code', 5);
-    const seen = calls();
+    const { seen, searchChildren } = await searchCalls(children);
     expect(seen).toHaveLength(2);
     expect(seen[0]).toEqual({
       command: 'gh',
@@ -118,6 +139,8 @@ describe('searchGithubRepos', () => {
         SEARCH_JSON,
         '--limit',
         '5',
+        '--owner',
+        'me',
         '--sort',
         'updated',
         '--order',
@@ -137,6 +160,8 @@ describe('searchGithubRepos', () => {
         SEARCH_JSON,
         '--limit',
         '5',
+        '--owner',
+        'me',
         '--visibility=private',
         '--',
         'enso code',
@@ -144,7 +169,7 @@ describe('searchGithubRepos', () => {
       shell: undefined,
       windowsHide: true,
     });
-    emitJson(children[0], [
+    emitJson(searchChildren[0], [
       {
         name: 'enso',
         fullName: 'me/enso',
@@ -162,7 +187,7 @@ describe('searchGithubRepos', () => {
         url: 'https://github.com/me/demo',
       },
     ]);
-    emitJson(children[1], [
+    emitJson(searchChildren[1], [
       {
         name: 'enso',
         fullName: 'me/enso',
@@ -211,9 +236,10 @@ describe('searchGithubRepos', () => {
   it('keeps a hyphenated query behind -- so gh does not treat it as a flag', async () => {
     const children = arm();
     const pending = searchGithubRepos('-label:bug');
-    expect(calls()[0]?.args.slice(-2)).toEqual(['--', '-label:bug']);
-    expect(calls()[1]?.args.slice(-2)).toEqual(['--', '-label:bug']);
-    for (const child of children) emitJson(child, []);
+    const { seen, searchChildren } = await searchCalls(children);
+    expect(seen[0]?.args.slice(-2)).toEqual(['--', '-label:bug']);
+    expect(seen[1]?.args.slice(-2)).toEqual(['--', '-label:bug']);
+    for (const child of searchChildren) emitJson(child, []);
     await expect(pending).resolves.toEqual({ ok: true, repos: [] });
   });
 
@@ -240,12 +266,18 @@ describe('searchGithubRepos', () => {
   });
 
   it('reports when gh is not logged in', async () => {
-    const children = arm();
+    // 未登录时 gh api user 也会失败：不能用 arm 的自动 login，全部 child 都报认证错误
+    const children: FakeGh[] = [];
+    spawn.mockImplementation(() => {
+      const child = new FakeGh();
+      children.push(child);
+      queueMicrotask(() => {
+        child.stderr.emit('data', 'error: not logged into any GitHub hosts. authentication failed');
+        child.emit('close', 4);
+      });
+      return child;
+    });
     const pending = searchGithubRepos('enso');
-    for (const child of children) {
-      child.stderr.emit('data', 'error: not logged into any GitHub hosts. authentication failed');
-      child.emit('close', 4);
-    }
     await expect(pending).resolves.toEqual({
       ok: false,
       error: 'Sign in to GitHub with gh CLI.',
@@ -256,10 +288,19 @@ describe('searchGithubRepos', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const children = arm();
     const pending = searchGithubRepos('enso');
+    // children[0] 是 gh api user（queueMicrotask 应答 login），多轮 microtask 让 login resolve、搜索 spawn 出现
+    for (let i = 0; i < 20 && children.length < 3; i += 1) {
+      await Promise.resolve();
+    }
+    expect(children.length).toBeGreaterThanOrEqual(3);
+    const searchChildren = children.slice(1);
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1);
-    expect(children[0]?.kill).not.toHaveBeenCalled();
+    expect(searchChildren[0]?.kill).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(children.map((child) => child.kill.mock.calls)).toEqual([[['SIGKILL']], [['SIGKILL']]]);
+    expect(searchChildren.map((child) => child.kill.mock.calls)).toEqual([
+      [['SIGKILL']],
+      [['SIGKILL']],
+    ]);
     await expect(pending).resolves.toEqual({ ok: false, error: 'GitHub search timed out.' });
   });
 
