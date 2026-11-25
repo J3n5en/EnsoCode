@@ -63,6 +63,18 @@ async function mount(): Promise<void> {
   vi.stubGlobal('document', window.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   Object.assign(window, {
+    // 高度展开动画在 linkedom 里跑不完：全程按 prefers-reduced-motion 走瞬时路径，
+    // 出现/消失断言仍校验行为开关，不依赖插值时长
+    matchMedia: (query: string) => ({
+      matches: query.includes('prefers-reduced-motion'),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      onchange: null,
+      dispatchEvent: () => false,
+    }),
     electronAPI: {
       remote,
       app: {

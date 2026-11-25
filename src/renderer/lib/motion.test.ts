@@ -9,6 +9,7 @@ import {
   easeOutLayout,
   floatingPillVariants,
   heightVariants,
+  heightVariantsReduced,
   instantTransition,
   MOTION_DURATION,
   modalFadeScaleVariants,
@@ -84,5 +85,31 @@ describe('motion tokens and presets', () => {
       stepSlideVariants.exit as (dir: number) => { transition: { duration: number } }
     )(1);
     expect(stepExit.transition.duration).toBeLessThan(stepCenter.transition.duration);
+  });
+});
+
+describe('sidebarWidthTransition (workbench resizing/reduced-motion)', () => {
+  it('拖拽进行中瞬时跟手，宽度不经过缓动追赶', () => {
+    expect(sidebarWidthTransition({ resizing: true })).toEqual({ duration: 0 });
+  });
+
+  it('prefers-reduced-motion 下瞬时不做宽度动画', () => {
+    expect(sidebarWidthTransition({ reducedMotion: true })).toEqual({ duration: 0 });
+  });
+});
+
+describe('heightVariantsReduced', () => {
+  it('三个状态视觉值一致，出现/消失无高度插值', () => {
+    const read = (v: unknown) => (typeof v === 'object' && v !== null ? v : {});
+    for (const key of ['initial', 'animate', 'exit'] as const) {
+      const state = read(heightVariantsReduced[key]) as Record<string, unknown>;
+      expect(state.height).toBeUndefined();
+      expect(state.opacity).toBe(1);
+    }
+  });
+
+  it('常规版本保留高度展开动画', () => {
+    expect(heightVariants.initial).toMatchObject({ height: 0, opacity: 0 });
+    expect(heightVariants.exit).toMatchObject({ height: 0 });
   });
 });

@@ -28,6 +28,9 @@ export function ResizeHandle({
   inactive = false,
 }: ResizeHandleProps) {
   const [resizing, setResizing] = useState(false);
+  // 只在实际拖动后才铺 iframe 遮罩：mousedown 立即铺设会把手柄盖住，
+  // 快速点击(无拖动)的 mouseup 落在遮罩上,click/dblclick 序列断裂,双击复位间歇失效
+  const [dragging, setDragging] = useState(false);
   const lastX = useRef(0);
 
   const handleMouseDown = useCallback(
@@ -37,11 +40,13 @@ export function ResizeHandle({
       onResizingChange?.(true);
       lastX.current = e.clientX;
       const handleMove = (ev: MouseEvent) => {
+        setDragging(true);
         onResize(ev.clientX - lastX.current);
         lastX.current = ev.clientX;
       };
       const handleUp = () => {
         setResizing(false);
+        setDragging(false);
         onResizingChange?.(false);
         document.removeEventListener('mousemove', handleMove);
         document.removeEventListener('mouseup', handleUp);
@@ -77,7 +82,7 @@ export function ResizeHandle({
         )}
       />
       {/* 拖拽期间遮住 iframe（插件页等），否则鼠标进入 iframe 后父文档收不到 mousemove/mouseup */}
-      {resizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+      {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
     </div>
   );
 }
