@@ -1,10 +1,17 @@
 import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
+import type { UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import {
   IdleRestartGate,
   type IdleRestartObservation,
 } from '../../main/services/updater/idleRestartGate';
-import { compareVersions, DEFAULT_NPM_REGISTRY, npmLatestUrl, parseNpmLatest } from './version';
+import {
+  compareVersions,
+  DEFAULT_NPM_REGISTRY,
+  npmDistTagUrl,
+  npmLatestUrl,
+  parseNpmLatest,
+} from './version';
 
 /** 全局 npm 安装能力；装在 npx 缓存或不可写前缀时为 null */
 export interface NpmInstaller {
@@ -44,6 +51,7 @@ export class ServerUpdater {
   private autoUpdate = false;
   private autoRestartMode: AutoRestartMode = 'off';
   private applying = false;
+  private channel: UpdateChannel = 'stable';
   private readonly idleGate = new IdleRestartGate();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -69,6 +77,7 @@ export class ServerUpdater {
       status: this.status,
       mode: this.mode(),
       canRestart: this.canRestart(),
+      channel: this.channel,
     };
   }
 
@@ -113,13 +122,49 @@ export class ServerUpdater {
     return this.running;
   }
 
-  private async fetchLatest(): Promise<string | null> {
+  private async fetchTag(tag: string): Promise<string | null> {
     const registry = this.deps.env.ENSO_NPM_REGISTRY?.trim() || DEFAULT_NPM_REGISTRY;
-    const response = await this.deps.fetch(npmLatestUrl(registry, this.deps.packageName), {
+    const response = await this.deps.fetch(npmDistTagUrl(registry, this.deps.packageName, tag), {
       headers: { Accept: 'application/json', 'User-Agent': `enso-server/${this.deps.version}` },
     });
     if (!response.ok) throw new Error(`update check failed: HTTP ${response.status}`);
     return parseNpmLatest(await response.json());
+  }
+
+  /**
+   * stable 只看 latest；beta 取 beta 与 latest 中较新的（与桌面「取两者较新」口径一致）。
+   * beta dist-tag 还没发过（404/网络错误）时回退 latest，不算检查失败。
+   */
+  private async fetchLatest(): Promise<string | null> {
+    const stable = await this.fetchTag('latest');
+    if (this.channel !== 'beta') return stable;
+    let beta: string | null = null;
+    try {
+      beta = await this.fetchTag('beta');
+    } catch {
+      beta = null;
+    }
+    if (beta && (!stable || compareVersions(beta, stable) > 0)) return beta;
+    return stable;
+  }
+
+  /**
+   * 切渠道只影响之后的检查；切回 stable 不降级（正式版更旧就报已是最新，等下一个正式版）。
+   * 已下载的版本若不属于新渠道作废重查，避免 beta 下载被 stable 渠道装进去。
+   */
+  setChannel(channel: UpdateChannel): void {
+    if (channel === this.channel) return;
+    this.channel = channel;
+    if (this.downloadedVersion) {
+      const invalid = channel === 'stable' ? this.downloadedVersion.includes('-') : false;
+      if (invalid || !this.downloadedVersion) this.clearDownloaded();
+    }
+    void this.checkForUpdates();
+  }
+
+  private clearDownloaded(): void {
+    this.downloadedVersion = null;
+    this.latest = null;
   }
 
   checkForUpdates(): Promise<void> {

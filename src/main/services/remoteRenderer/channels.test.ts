@@ -88,6 +88,7 @@ describe('isRemoteChannelAllowed', () => {
       IPC_CHANNELS.UPDATER_CHECK,
       IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL,
       IPC_CHANNELS.UPDATER_RESTART,
+      IPC_CHANNELS.UPDATER_SET_CHANNEL,
     ]) {
       expect(isRemoteChannelAllowed(ch, true)).toBe(false);
       expect(isRemoteChannelAllowed(ch, false, true)).toBe(true);

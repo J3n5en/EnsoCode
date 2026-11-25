@@ -24,10 +24,20 @@ enso-server logs
 | `pair` | 生成配对二维码与链接，等待设备配对 |
 | `devices` / `revoke <pairId>` | 查看 / 撤销已配对设备 |
 | `status` | 运行状态、版本、更新与设备 |
-| `update` | 检查并安装新版本后重启 |
+| `update` | 检查并安装新版本后重启；`--channel stable\|beta` 切更新渠道（会保存） |
 | `service install\|uninstall` | 注册 / 移除 systemd 服务 |
 | `logs` | 跟随服务日志 |
 | `run` | 不启动宿主，对一个目录跑一轮真实会话。`enso-server run --help` |
+
+## 更新渠道
+
+默认只更新到正式版（npm 的 `latest` dist-tag）。想跑内测版：
+
+```bash
+npm i -g @ensocode/server@beta     # 直接装内测版
+```
+
+已安装的实例在网页版「设置 → 通用 → 更新」里把更新渠道切成「内测」，或执行 `enso-server update --channel beta`（会记住，之后自动更新也走内测）。内测渠道取 beta 与正式版中较新的那个，正式版发布后会自然跟上。切回正式（`enso-server update --channel stable` 或网页里改回）不会降级：等下一个正式版发布后再更新过去。
 
 设置保存在 `$ENSO_DATA_DIR/config.toml`（`enso-server config` 生成，可手改，改完重启服务生效）：
 
