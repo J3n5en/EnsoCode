@@ -11,7 +11,6 @@ import {
   SettingsRow,
   SettingsSection,
   SettingsSegmented,
-  SettingsSelect,
   SettingsSubRow,
   SettingsSwitch,
 } from '.';
@@ -225,6 +224,30 @@ describe('SettingsRow', () => {
 });
 
 describe('SettingsExpandableRow', () => {
+  it('点名字是展开，不经 label 去切右侧开关', async () => {
+    const onChange = vi.fn();
+    await render(
+      <SettingsExpandableRow
+        label="Plugin A"
+        control={<SettingsSwitch checked={false} onCheckedChange={onChange} />}
+      >
+        <SettingsSubRow label="detail" />
+      </SettingsExpandableRow>
+    );
+    const name = byText('label span', 'Plugin A');
+    const click = new (window as unknown as { Event: typeof Event }).Event('click', {
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => name.dispatchEvent(click));
+    expect(click.defaultPrevented).toBe(true);
+    expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+    expect(container.textContent).toContain('detail');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('默认收起，展开后子行缩进显示在同一列表里而不是内嵌卡片', async () => {
     await render(
       <SettingsSection title="Providers">

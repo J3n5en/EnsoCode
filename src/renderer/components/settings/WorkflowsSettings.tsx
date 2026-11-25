@@ -30,12 +30,19 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTab } from '@/components/ui/tabs';
 import { useI18n } from '@/i18n';
 import { formatScript } from '@/lib/formatScript';
 import { useSettingsStore } from '@/stores/settings';
 import { CodeEditor } from './CodeEditor';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsPreview,
+  SettingsRow,
+  SettingsSection,
+  SettingsSwitch,
+} from './kit';
 import { WorkflowDesigner } from './WorkflowDesigner';
 
 const NEW_DESIGN: WorkflowDesign = {
@@ -293,9 +300,9 @@ function WorkflowPresetDialog({
               </Tabs>
             </div>
             {loading ? (
-              <div className="flex w-full items-center justify-center rounded-md border py-12">
+              <SettingsPreview className="flex w-full items-center justify-center py-12">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
+              </SettingsPreview>
             ) : tab === 'design' ? (
               draft.design ? (
                 <WorkflowDesigner
@@ -305,7 +312,7 @@ function WorkflowPresetDialog({
                   onChange={setDesign}
                 />
               ) : (
-                <div className="flex w-full flex-col items-center gap-2 rounded-md border border-dashed py-8 text-center">
+                <SettingsPreview className="flex w-full flex-col items-center gap-2 py-8 text-center">
                   <p className="max-w-md text-muted-foreground text-xs">
                     {t(
                       'This preset is plain code and cannot be shown in the designer. Using the designer replaces the current script.'
@@ -318,7 +325,7 @@ function WorkflowPresetDialog({
                   >
                     {t('Use the designer')}
                   </Button>
-                </div>
+                </SettingsPreview>
               )
             ) : (
               <CodeEditor
@@ -375,116 +382,106 @@ export function WorkflowsSettings() {
   const builtins = all.filter((preset) => preset.source === 'builtin');
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4" data-settings-row="workflows.root">
-        <div>
-          <h3 className="font-medium text-lg">{t('Workflows')}</h3>
-          <p className="text-muted-foreground text-sm">
-            {t('Preset workflows you can run from the Workflow side panel')}
-          </p>
-          <p className="text-muted-foreground text-xs">
+    <SettingsPage
+      rowId="workflows.root"
+      title={t('Workflows')}
+      description={
+        <>
+          {t('Preset workflows you can run from the Workflow side panel')}
+          <span className="mt-0.5 block text-xs">
             {t(
               'Project .agents/workflows files take precedence over these; ~/.agents/workflows and built-in presets come after.'
             )}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
+          </span>
+        </>
+      }
+      actions={
+        <SettingsButton onClick={() => setEditing('new')}>
           <Plus className="mr-1.5 h-4 w-4" />
           {t('Add workflow preset')}
-        </Button>
-      </div>
-
-      <div className="space-y-2">
-        <h4 className="font-medium text-muted-foreground text-xs">{t('Custom presets')}</h4>
+        </SettingsButton>
+      }
+    >
+      <SettingsSection title={t('Custom presets')}>
         {presets.length === 0 ? (
-          <div className="rounded-md border border-dashed px-3 py-8 text-center">
+          <div className="border-border border-b py-8 text-center">
             <Workflow className="mx-auto h-5 w-5 text-muted-foreground" />
             <p className="mt-3 font-medium text-sm">{t('No custom workflow presets yet')}</p>
           </div>
         ) : (
-          <div className="space-y-1">
-            {presets.map((preset) => (
-              <div
-                key={preset.id}
-                className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-                data-settings-row={`workflows.${preset.id}`}
+          presets.map((preset) => (
+            <SettingsRow
+              key={preset.id}
+              rowId={`workflows.${preset.id}`}
+              label={preset.name}
+              description={<span className="block truncate">{preset.description}</span>}
+              status={
+                <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
+                  {preset.id}
+                </Badge>
+              }
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-muted-foreground"
+                aria-label={t('Edit')}
+                onClick={() => setEditing(preset.id)}
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{preset.name}</span>
-                    <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
-                      {preset.id}
-                    </Badge>
-                  </div>
-                  <p className="truncate text-muted-foreground text-xs">{preset.description}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                    aria-label={t('Edit')}
-                    onClick={() => setEditing(preset.id)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                    aria-label={t('Delete')}
-                    onClick={() =>
-                      void window.electronAPI.workflowPresets.delete(preset.id).then(reload)
-                    }
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-muted-foreground hover:text-destructive"
+                aria-label={t('Delete')}
+                onClick={() =>
+                  void window.electronAPI.workflowPresets.delete(preset.id).then(reload)
+                }
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </SettingsRow>
+          ))
         )}
-      </div>
+      </SettingsSection>
 
       {builtins.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="font-medium text-muted-foreground text-xs">{t('Built-in presets')}</h4>
-          <div className="space-y-1">
-            {builtins.map((preset) => (
-              <div
-                key={preset.id}
-                className="flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-                data-settings-row={`workflows.builtin.${preset.id}`}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{t(preset.name)}</span>
-                    <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
-                      {preset.id}
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground text-xs">{t(preset.description)}</p>
+        <SettingsSection title={t('Built-in presets')}>
+          {builtins.map((preset) => (
+            <SettingsRow
+              key={preset.id}
+              rowId={`workflows.builtin.${preset.id}`}
+              label={t(preset.name)}
+              description={
+                <>
+                  {t(preset.description)}
                   {preset.args.length > 0 && (
-                    <p className="mt-0.5 text-muted-foreground text-xs">
+                    <span className="mt-0.5 block">
                       {t('Arguments')}:{' '}
                       {preset.args
                         .map((arg) => `${t(arg.label)}${arg.required ? ' *' : ''}`)
                         .join(' · ')}
-                    </p>
+                    </span>
                   )}
-                </div>
-                <Switch
-                  aria-label={t(preset.name)}
-                  checked={!disabled.includes(preset.id)}
-                  onCheckedChange={(checked) => toggleWorkflowPreset(preset.id, checked)}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
+                </>
+              }
+              status={
+                <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
+                  {preset.id}
+                </Badge>
+              }
+            >
+              <SettingsSwitch
+                checked={!disabled.includes(preset.id)}
+                onCheckedChange={(checked) => toggleWorkflowPreset(preset.id, checked)}
+              />
+            </SettingsRow>
+          ))}
+        </SettingsSection>
       )}
 
       <WorkflowPresetDialog target={editing} onClose={() => setEditing(null)} onSaved={reload} />
-    </div>
+    </SettingsPage>
   );
 }

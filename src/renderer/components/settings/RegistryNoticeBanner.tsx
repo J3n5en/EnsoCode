@@ -9,7 +9,7 @@ export function RegistryNoticeBanner(props: {
 }) {
   const { notice, remote, onDismiss } = props;
   return (
-    <div className="space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-amber-700 text-sm dark:text-amber-400">
+    <div className="space-y-1 border-amber-500/30 border-b bg-amber-500/5 px-1 py-2 text-amber-700 text-sm dark:text-amber-400">
       {notice.unreadable && (
         <p>
           插件登记表曾读取失败，下面的列表可能不全。插件文件没有删除，原文保存在数据目录的

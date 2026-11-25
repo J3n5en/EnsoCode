@@ -5,6 +5,7 @@ import { CODE_THEME, ensureHighlighter } from '@/components/chat/codeHighlighter
 import { useCodeHighlightOptions } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SettingsPreview } from './kit';
 
 const FILE_OPTIONS = {
   theme: CODE_THEME,
@@ -57,19 +58,19 @@ export function CodeEditor({
 
   if (!ready) {
     return (
-      <div
+      <SettingsPreview
         className={cn(
-          'flex w-full items-center justify-center rounded-lg border border-input text-muted-foreground text-xs',
+          'flex w-full items-center justify-center text-muted-foreground text-xs',
           className
         )}
       >
         {t('Loading...')}
-      </div>
+      </SettingsPreview>
     );
   }
 
   return (
-    <div className={cn('w-full overflow-hidden rounded-lg border border-input', className)}>
+    <SettingsPreview className={cn('w-full overflow-hidden', className)}>
       <EditProvider createEditor={createEditor}>
         <Virtualizer style={{ height: '100%', overflow: 'auto' }}>
           <File
@@ -82,6 +83,6 @@ export function CodeEditor({
           />
         </Virtualizer>
       </EditProvider>
-    </div>
+    </SettingsPreview>
   );
 }

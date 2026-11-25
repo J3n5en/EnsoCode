@@ -11,14 +11,20 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTab } from '@/components/ui/tabs';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { type McpServerStatus, useMcpStatusStore } from '@/stores/mcpStatus';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsExpandableRow,
+  SettingsPage,
+  SettingsSection,
+  SettingsSegmented,
+  SettingsSubRow,
+  SettingsSwitch,
+} from './kit';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 import { McpEditDialog } from './McpEditDialog';
@@ -111,65 +117,66 @@ export function McpSettings() {
   const enabledTokens = enabledOccupancyTotal(directIds, occupancy.rows);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4" data-settings-row="mcp.root">
-        <div>
-          <h3 className="font-medium text-lg">
-            {t('MCP Servers')}
-            <NewSessionBadge />
-            {mcpServers.length > 0 && (
-              <span className="ml-2 font-normal text-muted-foreground text-xs">
-                {t('{{enabled}}/{{total}} enabled', {
-                  enabled: enabledCount,
-                  total: mcpServers.length,
-                })}
-                <OccupancyEnabledTotal tokens={enabledTokens} />
-              </span>
-            )}
-          </h3>
-          <p className="text-muted-foreground text-sm">
-            {t('Model Context Protocol servers available to this app')}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+    <SettingsPage
+      rowId="mcp.root"
+      title={
+        <>
+          {t('MCP Servers')}
+          {mcpServers.length > 0 && (
+            <span className="font-normal text-muted-foreground text-xs">
+              {t('{{enabled}}/{{total}} enabled', {
+                enabled: enabledCount,
+                total: mcpServers.length,
+              })}
+              <OccupancyEnabledTotal tokens={enabledTokens} />
+            </span>
+          )}
+        </>
+      }
+      badge={<NewSessionBadge />}
+      description={t('Model Context Protocol servers available to this app')}
+      actions={
+        <>
+          <SettingsButton onClick={() => setImportOpen(true)}>
             <HardDriveDownload className="mr-1.5 h-4 w-4" />
             {t('Import from local apps')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
+          </SettingsButton>
+          <SettingsButton onClick={() => setEditing('new')}>
             <Plus className="mr-1.5 h-4 w-4" />
             {t('Add MCP server')}
-          </Button>
-        </div>
-      </div>
-
-      {mcpServers.length === 0 ? (
-        <div className="rounded-md border border-dashed px-3 py-8 text-center">
-          <Plug className="mx-auto h-5 w-5 text-muted-foreground" />
-          <p className="mt-3 font-medium text-sm">{t('No MCP servers yet')}</p>
-          <p className="mt-1 text-muted-foreground text-xs">
-            {t('Import MCP servers from local apps or add one manually to get started')}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <ListFilterBar
-            query={query}
-            onQueryChange={setQuery}
-            placeholder={t('Filter MCP servers...')}
-            allSelected={selection.allSelected}
-            someSelected={selection.someSelected}
-            onToggleSelectAll={selection.toggleAll}
-            onEnable={() => setMcpServersEnabled(selection.selectedIds, true)}
-            onDisable={() => setMcpServersEnabled(selection.selectedIds, false)}
-            selectDisabled={visible.length === 0}
-            actionDisabled={selection.selectedIds.length === 0}
-          />
-          {visible.length === 0 ? (
-            <p className="px-3 py-6 text-center text-muted-foreground text-xs">{t('No results')}</p>
-          ) : (
-            <div className="space-y-1">
-              {visible.map((server) => {
+          </SettingsButton>
+        </>
+      }
+    >
+      <SettingsSection>
+        {mcpServers.length === 0 ? (
+          <div className="border-border border-b py-8 text-center">
+            <Plug className="mx-auto h-5 w-5 text-muted-foreground" />
+            <p className="mt-3 font-medium text-sm">{t('No MCP servers yet')}</p>
+            <p className="mt-1 text-muted-foreground text-xs">
+              {t('Import MCP servers from local apps or add one manually to get started')}
+            </p>
+          </div>
+        ) : (
+          <>
+            <ListFilterBar
+              query={query}
+              onQueryChange={setQuery}
+              placeholder={t('Filter MCP servers...')}
+              allSelected={selection.allSelected}
+              someSelected={selection.someSelected}
+              onToggleSelectAll={selection.toggleAll}
+              onEnable={() => setMcpServersEnabled(selection.selectedIds, true)}
+              onDisable={() => setMcpServersEnabled(selection.selectedIds, false)}
+              selectDisabled={visible.length === 0}
+              actionDisabled={selection.selectedIds.length === 0}
+            />
+            {visible.length === 0 ? (
+              <p className="border-border border-b py-6 text-center text-muted-foreground text-xs">
+                {t('No results')}
+              </p>
+            ) : (
+              visible.map((server) => {
                 // 事件可能缺 serverId（旧配置），按名字兜底
                 const status = statuses[server.id] ?? statuses[server.name];
                 const authorizing = pending[server.id] === true;
@@ -178,24 +185,39 @@ export function McpSettings() {
                   server.transport !== 'stdio' && authorizedMap[server.id] !== true;
                 const deferred = server.loadMode === 'deferred';
                 return (
-                  <div key={server.id} className="space-y-1">
-                    <div
-                      className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-                      data-settings-row={`mcp.${server.id}`}
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Checkbox
-                          checked={selection.isSelected(server.id)}
-                          onCheckedChange={(checked) => selection.toggleOne(server.id, checked)}
-                        />
+                  <SettingsExpandableRow
+                    key={server.id}
+                    rowId={`mcp.${server.id}`}
+                    label={
+                      <span className="flex min-w-0 items-center gap-2">
+                        {/* 勾选框在行标签里：拦住点击，避免顺带拨动右侧开关 */}
+                        <span
+                          className="inline-flex"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selection.isSelected(server.id)}
+                            onCheckedChange={(checked) => selection.toggleOne(server.id, checked)}
+                          />
+                        </span>
                         <span
                           className={cn(
-                            'shrink-0 font-medium text-sm',
+                            'truncate',
                             !server.enabled && 'text-muted-foreground line-through'
                           )}
                         >
                           {server.name}
                         </span>
+                      </span>
+                    }
+                    description={
+                      <span className="block truncate font-mono">
+                        {server.url ?? [server.command, ...(server.args ?? [])].join(' ')}
+                      </span>
+                    }
+                    status={
+                      <>
                         <Badge variant="outline" className="shrink-0 text-[11px]">
                           {server.transport}
                         </Badge>
@@ -203,106 +225,93 @@ export function McpSettings() {
                           {server.source}
                         </Badge>
                         {status && <McpStatusBadge status={status} />}
-                        <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
-                          {server.url ?? [server.command, ...(server.args ?? [])].join(' ')}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        {(canAuthorize || status?.state === 'unauthorized') && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7"
-                            disabled={authorizing}
-                            onClick={() => void runAuthorize(server.id)}
-                          >
-                            {authorizing ? (
-                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
-                            )}
-                            {authorizing ? t('Authorizing') : t('Authorize')}
-                          </Button>
-                        )}
-                        {authorizedMap[server.id] === true && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title={t('Revoke authorization')}
-                            className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                            onClick={() => void revoke(server.id)}
-                          >
-                            <ShieldOff className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
                         <OccupancyMark
                           row={occupancy.rows[server.id]}
                           pending={
                             server.enabled && occupancy.pending && !occupancy.rows[server.id]
                           }
                         />
-                        <Tabs
-                          value={deferred ? 'deferred' : 'direct'}
-                          onValueChange={(value) =>
-                            updateMcpServer(server.id, {
-                              loadMode: value === 'deferred' ? 'deferred' : 'direct',
-                            })
-                          }
-                          title={t(
-                            'On demand: tool descriptions are not preloaded into context; the model connects through the mcp tool when needed. Suits servers with many or rarely used tools. Takes effect in new conversations.'
+                      </>
+                    }
+                    control={
+                      <SettingsSwitch
+                        checked={server.enabled}
+                        onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}
+                      />
+                    }
+                  >
+                    <SettingsSubRow
+                      label={t('Load mode')}
+                      description={t(
+                        'On demand: tool descriptions are not preloaded into context; the model connects through the mcp tool when needed. Suits servers with many or rarely used tools. Takes effect in new conversations.'
+                      )}
+                    >
+                      <SettingsSegmented
+                        aria-label={t('Load mode')}
+                        value={deferred ? 'deferred' : 'direct'}
+                        options={[
+                          { value: 'direct', label: t('Always loaded') },
+                          { value: 'deferred', label: t('On demand') },
+                        ]}
+                        onValueChange={(value) =>
+                          updateMcpServer(server.id, {
+                            loadMode: value === 'deferred' ? 'deferred' : 'direct',
+                          })
+                        }
+                      />
+                    </SettingsSubRow>
+                    {(canAuthorize || status?.state === 'unauthorized') && (
+                      <SettingsSubRow label={t('Authorize')}>
+                        <SettingsButton
+                          disabled={authorizing}
+                          onClick={() => void runAuthorize(server.id)}
+                        >
+                          {authorizing ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
                           )}
-                        >
-                          <TabsList aria-label={t('Load mode')}>
-                            <TabsTab value="direct" className="h-6 px-2 text-xs sm:h-6 sm:text-xs">
-                              {t('Always loaded')}
-                            </TabsTab>
-                            <TabsTab
-                              value="deferred"
-                              className="h-6 px-2 text-xs sm:h-6 sm:text-xs"
-                            >
-                              {t('On demand')}
-                            </TabsTab>
-                          </TabsList>
-                        </Tabs>
-                        <Switch
-                          checked={server.enabled}
-                          onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                          onClick={() => setEditing(server)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                          onClick={() => removeMcpServer(server.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
+                          {authorizing ? t('Authorizing') : t('Authorize')}
+                        </SettingsButton>
+                      </SettingsSubRow>
+                    )}
+                    {authorizedMap[server.id] === true && (
+                      <SettingsSubRow label={t('Revoke authorization')}>
+                        <SettingsButton onClick={() => void revoke(server.id)}>
+                          <ShieldOff className="mr-1.5 h-3.5 w-3.5" />
+                          {t('Revoke authorization')}
+                        </SettingsButton>
+                      </SettingsSubRow>
+                    )}
+                    <SettingsSubRow label={t('Edit')}>
+                      <SettingsButton onClick={() => setEditing(server)}>
+                        <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                        {t('Edit')}
+                      </SettingsButton>
+                    </SettingsSubRow>
+                    <SettingsSubRow label={t('Delete')}>
+                      <SettingsButton onClick={() => removeMcpServer(server.id)}>
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        {t('Delete')}
+                      </SettingsButton>
+                    </SettingsSubRow>
                     {authorizedHint === server.id && (
-                      <p className="px-3 text-muted-foreground text-xs">
+                      <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
                         {t(
                           'Authorized. Conversations that already include this server can use it on the next message.'
                         )}
                       </p>
                     )}
-                  </div>
+                  </SettingsExpandableRow>
                 );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+              })
+            )}
+          </>
+        )}
+      </SettingsSection>
 
       <LocalAssetImportDialog kind="mcp" open={importOpen} onOpenChange={setImportOpen} />
       <McpEditDialog server={editing} onClose={() => setEditing(null)} />
-    </div>
+    </SettingsPage>
   );
 }

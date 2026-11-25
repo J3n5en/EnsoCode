@@ -26,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import { SettingsPreview } from './kit';
 import {
   addStep,
   canAddStep,
@@ -185,7 +186,7 @@ function Terminal({
   return (
     <div
       data-node={node}
-      className="flex w-24 shrink-0 flex-col items-center gap-0.5 rounded-full border bg-background px-3 py-1.5 text-center shadow-xs"
+      className="flex w-24 shrink-0 flex-col items-center gap-0.5 rounded-full bg-background px-3 py-1.5 text-center shadow-xs ring-1 ring-border"
     >
       <span className="flex items-center gap-1 font-medium text-xs">
         {icon}
@@ -287,7 +288,7 @@ export function WorkflowDesigner({
         onClick={() =>
           apply(insertPhase(design, index, { title: '', steps: [newDesignStep(defaultType)] }))
         }
-        className="relative z-30 flex h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:pointer-events-none disabled:opacity-50"
+        className="relative z-30 flex h-5 w-5 items-center justify-center rounded-full bg-background text-muted-foreground ring-1 ring-border transition-colors hover:text-primary hover:ring-primary disabled:pointer-events-none disabled:opacity-50"
       >
         <Plus className="h-3 w-3" />
       </button>
@@ -296,7 +297,7 @@ export function WorkflowDesigner({
 
   return (
     <div className="w-full space-y-2">
-      <div className="overflow-x-auto rounded-lg border bg-muted/30">
+      <SettingsPreview className="overflow-x-auto bg-muted/30">
         <div
           ref={canvasRef}
           className="relative flex w-max min-w-full items-center justify-center px-3 py-5"
@@ -341,10 +342,8 @@ export function WorkflowDesigner({
               {gap(pi)}
               <div
                 className={cn(
-                  'flex w-44 shrink-0 flex-col gap-1.5 rounded-xl border border-dashed bg-background/60 p-2',
-                  selected.kind === 'phase' &&
-                    selected.phase === pi &&
-                    'border-primary border-solid'
+                  'flex w-44 shrink-0 flex-col gap-1.5 rounded-xl bg-background/60 p-2 ring-1 ring-border',
+                  selected.kind === 'phase' && selected.phase === pi && 'ring-2 ring-primary'
                 )}
               >
                 <button
@@ -372,9 +371,9 @@ export function WorkflowDesigner({
                       data-node={`s-${pi}-${si}`}
                       onClick={() => setSelection({ kind: 'step', phase: pi, step: si })}
                       className={cn(
-                        'block w-full rounded-lg border bg-background px-2.5 py-1.5 text-left shadow-xs transition-colors hover:border-primary/60',
-                        active && 'border-primary ring-2 ring-primary/20',
-                        invalid && !active && 'border-destructive/50'
+                        'block w-full rounded-lg bg-background px-2.5 py-1.5 text-left shadow-xs ring-1 ring-border transition-colors hover:ring-primary/60',
+                        active && 'ring-2 ring-primary',
+                        invalid && !active && 'ring-destructive/50'
                       )}
                     >
                       <span className="flex items-center gap-1.5">
@@ -395,7 +394,7 @@ export function WorkflowDesigner({
                   type="button"
                   disabled={!canAdd}
                   onClick={() => apply(addStep(design, pi, newDesignStep(defaultType)))}
-                  className="flex items-center justify-center gap-1 rounded-lg border border-dashed py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:pointer-events-none disabled:opacity-50"
+                  className="flex items-center justify-center gap-1 rounded-lg py-1 text-[11px] text-muted-foreground ring-1 ring-border transition-colors hover:text-primary hover:ring-primary disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Plus className="h-3 w-3" />
                   {t('Parallel step')}
@@ -411,9 +410,9 @@ export function WorkflowDesigner({
             detail={t('Last phase output')}
           />
         </div>
-      </div>
+      </SettingsPreview>
 
-      <div className="space-y-2 rounded-lg border p-3">
+      <div className="space-y-2 border-border border-t pt-3">
         <div className="flex items-center gap-1">
           <span className="font-medium text-xs">
             {selected.kind === 'phase'

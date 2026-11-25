@@ -32,18 +32,6 @@ const LEGACY = new Set([
   'TitleSummaryPicker.tsx',
   'VirtualModelsSettings.tsx',
   // PR3c 工具与扩展组
-  'BuiltinToolsSettings.tsx',
-  'CodeEditor.tsx',
-  'ComputerAllowedApps.tsx',
-  'LocalAssetImportDialog.tsx',
-  'LocalImportDialog.tsx',
-  'McpSettings.tsx',
-  'PluginMarket.tsx',
-  'PluginsSettings.tsx',
-  'RegistryNoticeBanner.tsx',
-  'SkillsSettings.tsx',
-  'WorkflowDesigner.tsx',
-  'WorkflowsSettings.tsx',
   // PR4 去掉独立窗口时（导航搜索框）
   'SettingsContent.tsx',
 ]);
