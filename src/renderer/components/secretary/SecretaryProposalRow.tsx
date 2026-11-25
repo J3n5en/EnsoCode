@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSettingsStore } from '@/stores/settings';
 import { draftFromProfile } from './profileFormState';
+import { DependencyNote } from './SecretaryDependencyLinks';
 import { SecretaryProfileForm } from './SecretaryProfileForm';
 
 /** 会产出待确认提案的工具：派活两个，加上秘书提交的配置草案 */
@@ -142,10 +143,7 @@ export function SecretaryProposalRow({
           {card.draft.worktree ? t('Isolated worktree') : t('Project checkout')}
         </span>
       </div>
-      {(card.draft.branch ||
-        card.draft.baseRef ||
-        model ||
-        (card.draft.after?.length ?? 0) > 0) && (
+      {(card.draft.branch || card.draft.baseRef || model) && (
         <div
           data-enso="secretary-proposal-base"
           className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"
@@ -155,10 +153,14 @@ export function SecretaryProposalRow({
           {model && (
             <span data-enso="secretary-proposal-model">{t('Model: {{model}}', { model })}</span>
           )}
-          {card.draft.after && card.draft.after.length > 0 && (
-            <span>{t('After {{ids}}', { ids: card.draft.after.join(', ') })}</span>
-          )}
         </div>
+      )}
+      {card.draft.after && card.draft.after.length > 0 && (
+        <DependencyNote
+          template="After {{ids}}"
+          ids={card.draft.after}
+          className="mt-1 block text-[11px] text-muted-foreground"
+        />
       )}
       <div className="mt-1.5 flex items-center gap-1.5">
         <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>

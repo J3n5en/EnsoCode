@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSettingsStore } from '@/stores/settings';
+import { DependencyNote } from './SecretaryDependencyLinks';
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
@@ -263,12 +264,12 @@ function PendingRow({ pending }: { pending: PendingDispatch }) {
             {formatRelativeTime(pending.updatedAt, locale)}
           </span>
         </span>
-        <span
-          data-enso="secretary-running-after"
-          className="mt-0.5 block truncate text-[11.5px] text-subtle-foreground"
-        >
-          {t('After {{ids}}', { ids: pending.after.join(', ') })}
-        </span>
+        <DependencyNote
+          template="After {{ids}}"
+          ids={pending.after}
+          dataEnso="secretary-running-after"
+          className="mt-0.5 block text-[11.5px] text-subtle-foreground"
+        />
       </div>
     </div>
   );
