@@ -649,11 +649,7 @@ function UpdateSection() {
           }}
         />
       </SettingsRow>
-      {!server && (
-        <div className={autoUpdate ? undefined : 'opacity-60'}>
-          {autoRestartRow}
-        </div>
-      )}
+      {!server && <div className={autoUpdate ? undefined : 'opacity-60'}>{autoRestartRow}</div>}
       {(host?.host === 'desktop' || host?.host === 'server') && (
         <SettingsRow
           rowId="general.updateChannel"

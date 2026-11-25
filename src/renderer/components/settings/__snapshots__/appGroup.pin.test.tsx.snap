@@ -2185,6 +2185,8 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "general.caCert",
   "general.compactReserveTokens",
   "general.configSync",
+  "general.ensoCommand",
+  "general.finderQuickAction",
   "general.generationStallTimeout",
   "general.language",
   "general.longCacheRetention",
