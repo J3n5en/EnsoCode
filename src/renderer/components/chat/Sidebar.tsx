@@ -2073,6 +2073,16 @@ export function Sidebar({
           ) : (
             <NodeSwitcher />
           )}
+          <button
+            type="button"
+            data-enso="add-project-footer"
+            onClick={() => setAddOpen(true)}
+            className={ICON_BUTTON_CLASS}
+            title={addProjectTitle}
+            aria-label={addProjectTitle}
+          >
+            <FolderPlus className="h-4 w-4" />
+          </button>
           <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
           <ArchiveEntryButton
             count={archivedCount}
