@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createUpstreamRecoveryService,
+  reseatUpstreamWaiters,
   UpstreamHealthGate,
   type UpstreamWakeEvent,
 } from './upstreamRecovery';
@@ -206,6 +207,132 @@ describe('UpstreamHealthGate', () => {
     expect(gate.snapshot('p1')?.state).toBe('probing');
     expect(gate.snapshot('p1')?.probingWaiterId).toBe('s1');
   });
+
+  it('requeue 把无人接住的 probe 按原退避进度放回队列并释放 probe 槽位', () => {
+    const gate = new UpstreamHealthGate({ random: () => 0 });
+    const t0 = 1_700_000_000_000;
+
+    gate.reportFailure(
+      { id: 's1', kind: 'session', provider: 'p1', errorKind: 'transient', lastError: '503' },
+      t0
+    );
+    gate.reportFailure(
+      { id: 's2', kind: 'session', provider: 'p1', errorKind: 'transient', lastError: '503' },
+      t0
+    );
+
+    const [probe] = gate.takeDue(t0 + MIN);
+    expect(probe?.waiter.id).toBe('s1');
+    // probe 期间同 provider 其他 waiter 顶不上来
+    expect(gate.takeDue(t0 + MIN + 100)).toHaveLength(0);
+
+    // 探测从未真正发生（worker 死了）：重排后槽位释放、退避进度沿用（attempt=1 -> 下次 2 分钟）
+    expect(gate.requeue(probe!.waiter, t0 + MIN + 100)).toBe(true);
+    expect(gate.snapshot('p1')?.probingWaiterId).toBeUndefined();
+    const waiter = gate.getWaiter('s1');
+    expect(waiter?.since).toBe(t0);
+    expect(waiter?.attempt).toBe(1);
+    expect(waiter?.nextAt).toBe(t0 + MIN + 100 + MIN);
+
+    // 已到点的 s2 现在可以顶上探测
+    const [probe2] = gate.takeDue(t0 + MIN + 200);
+    expect(probe2?.waiter.id).toBe('s2');
+  });
+
+  it('requeue 拒绝重复登记仍在闸门里的 waiter，provider 已恢复（无降级桶）时不收留', () => {
+    const gate = new UpstreamHealthGate({ random: () => 0 });
+    const t0 = 1_700_000_000_000;
+
+    gate.reportFailure(
+      { id: 's1', kind: 'session', provider: 'p1', errorKind: 'transient', lastError: '503' },
+      t0
+    );
+    expect(
+      gate.requeue(
+        {
+          id: 's1',
+          kind: 'session',
+          provider: 'p1',
+          errorKind: 'transient',
+          attempt: 1,
+          since: t0,
+          nextAt: t0,
+          lastError: '503',
+        },
+        t0
+      )
+    ).toBe(false);
+
+    // provider 恢复后桶没了：recovered 队列掉出的 waiter 不放回
+    const [probe] = gate.takeDue(t0 + MIN);
+    gate.reportSuccess('p1', 's1', t0 + MIN);
+    expect(gate.requeue({ ...probe!.waiter, id: 's9' }, t0 + MIN + 1)).toBe(false);
+  });
+});
+
+describe('reseatUpstreamWaiters 重启重注册', () => {
+  const retryOf = (over: Record<string, unknown> = {}) => ({
+    reason: 'upstream',
+    kind: 'transient',
+    provider: 'anthropic',
+    attempt: 2,
+    since: 1_700_000_000_000,
+    at: 1_700_000_060_000,
+    lastError: '503 No available accounts',
+    ...over,
+  });
+
+  it('磁盘上 waiting(upstream) 的会话重进闸门，沿用 since/attempt；超窗与非 waiting 不登记', () => {
+    vi.useFakeTimers();
+    try {
+      const start = 1_700_000_000_000 + 30_000;
+      vi.setSystemTime(start);
+      const wakes: UpstreamWakeEvent[] = [];
+      const service = createUpstreamRecoveryService({
+        now: () => Date.now(),
+        random: () => 0,
+        onWake: (event) => {
+          wakes.push(event);
+        },
+      });
+
+      const rows = {
+        s1: { driver: 'main', goal: { text: 'g', status: 'waiting', retry: retryOf() } },
+        // active 目标不登记
+        s2: { driver: 'main', goal: { text: 'g', status: 'active' } },
+        // 已超 6h 窗口的不登记
+        s3: {
+          driver: 'main',
+          goal: {
+            text: 'g',
+            status: 'waiting',
+            retry: retryOf({ since: start - 7 * 60 * 60_000 }),
+          },
+        },
+        // 没有 goal 的行不登记
+        s4: { driver: 'main' },
+      };
+
+      const count = reseatUpstreamWaiters(service, rows, start);
+      expect(count).toBe(1);
+
+      const waiter = service.getWaiter('s1');
+      expect(waiter).toBeDefined();
+      expect(waiter?.since).toBe(1_700_000_000_000);
+      expect(waiter?.attempt).toBe(2);
+      expect(service.getWaiter('s2')).toBeUndefined();
+      expect(service.getWaiter('s3')).toBeUndefined();
+
+      // attempt=2 -> 退避 2 分钟，到点真正唤醒
+      vi.advanceTimersByTime(2 * MIN);
+      expect(wakes).toHaveLength(1);
+      expect(wakes[0]!.waiter.id).toBe('s1');
+
+      service.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('createUpstreamRecoveryService', () => {
@@ -223,7 +350,9 @@ describe('createUpstreamRecoveryService', () => {
         wakeConcurrency: 2,
         wakeBaseJitterMs: 500,
         wakeStaggerMs: 2000,
-        onWake: (event) => wakes.push(event),
+        onWake: (event) => {
+          wakes.push(event);
+        },
         onHealthChange: (snaps) => changes.push(snaps.length),
       });
 
@@ -257,6 +386,82 @@ describe('createUpstreamRecoveryService', () => {
       expect(wakes).toHaveLength(2);
       expect(wakes[1]!.waiter.id).toBe('s2');
       expect(wakes[1]!.reason).toBe('recovered');
+
+      service.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('onWake 返回 false 时按原退避进度重排 waiter，倒计时到点再次唤醒而不是消失', () => {
+    vi.useFakeTimers();
+    try {
+      const start = 1_700_000_000_000;
+      vi.setSystemTime(start);
+      const wakes: UpstreamWakeEvent[] = [];
+      // 第一次唤醒无人接住（返回 false），第二次接住
+      let catchCount = 0;
+      const service = createUpstreamRecoveryService({
+        now: () => Date.now(),
+        random: () => 0,
+        onWake: (event) => {
+          wakes.push(event);
+          catchCount += 1;
+          return catchCount >= 2;
+        },
+      });
+
+      service.reportFailure({
+        id: 's1',
+        kind: 'session',
+        provider: 'p1',
+        errorKind: 'transient',
+        lastError: '503 No available accounts',
+      });
+
+      // 到点唤醒：无人接住 -> 重排，waiter 仍在闸门里
+      vi.advanceTimersByTime(MIN);
+      expect(wakes).toHaveLength(1);
+      expect(service.getWaiter('s1')).toBeDefined();
+      expect(service.snapshots()).toHaveLength(1);
+
+      // 下一个退避点到：再次唤醒（attempt=2 -> 2 分钟）
+      vi.advanceTimersByTime(2 * MIN);
+      expect(wakes).toHaveLength(2);
+      expect(wakes[1]!.waiter.id).toBe('s1');
+
+      service.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('onWake 返回 true/void 时不重排：已接管的 waiter 就此离开闸门', () => {
+    vi.useFakeTimers();
+    try {
+      const start = 1_700_000_000_000;
+      vi.setSystemTime(start);
+      const wakes: UpstreamWakeEvent[] = [];
+      const service = createUpstreamRecoveryService({
+        now: () => Date.now(),
+        random: () => 0,
+        onWake: (event) => {
+          wakes.push(event);
+          return true;
+        },
+      });
+
+      service.reportFailure({
+        id: 's1',
+        kind: 'session',
+        provider: 'p1',
+        errorKind: 'transient',
+        lastError: '503',
+      });
+      vi.advanceTimersByTime(MIN);
+      expect(wakes).toHaveLength(1);
+      vi.advanceTimersByTime(10 * MIN);
+      expect(wakes).toHaveLength(1);
 
       service.dispose();
     } finally {

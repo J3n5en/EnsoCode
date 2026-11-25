@@ -819,7 +819,7 @@ export function SecretaryWorkbench({ name, secretaryId }: { name: string; secret
             <div key={item.provider} className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate">
                 {t('Upstream unavailable ({{provider}}), retrying automatically', {
-                  provider: item.provider,
+                  provider: item.providerName ?? item.provider,
                 })}
               </span>
               {item.nextProbeAt && (

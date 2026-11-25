@@ -99,8 +99,16 @@ export interface DispatchDriver {
   watch(now: number): BackgroundStall[];
   /** 会话被停止：撤掉续跑与看门狗，之后不许再唤醒它 */
   forget(conversationId: string): void;
-  /** 上游健康闸门唤醒（探测、provider 恢复或手动立即重试） */
-  wakeUpstream(conversationId: string, reason: 'probe' | 'recovered' | 'manual'): boolean;
+  /**
+   * 上游健康闸门唤醒（探测、provider 恢复或手动立即重试）。
+   * delivered = 已接管投递（或投递被拒后已自行收敛为 paused，闸门别再管）；
+   * retry = 会话还在 waiting 但此刻无法接管（压缩中/审批挂起等），闸门应重排倒计时；
+   * dropped = 会话已停止/目标已非 waiting，闸门直接放弃该 waiter。
+   */
+  wakeUpstream(
+    conversationId: string,
+    reason: 'probe' | 'recovered' | 'manual'
+  ): 'delivered' | 'retry' | 'dropped';
 }
 
 interface TrackedTask extends WatchedBackgroundTask {
@@ -354,15 +362,15 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
     }
   }
 
-  /** 落盘后投递；投递失败把这一条放回队首或暂停目标，不能让消息蒸发 */
+  /** 落盘后投递；投递失败把这一条放回队首或暂停目标，不能让消息蒸发。返回投递是否被 worker 接住 */
   function commit(
     conversationId: string,
     previous: HeadlessSessionRuntime,
     applied: Applied
-  ): void {
+  ): boolean {
     save(conversationId, applied.runtime);
     const delivery = applied.deliver;
-    if (!delivery) return;
+    if (!delivery) return true;
     const deliveryId = ports.newId();
     // 从队列里取出的那一条：被拒时原样放回队首，来源标记跟着回来
     const flushed = previous.queued.find(
@@ -374,12 +382,15 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       ...(flushed ? { item: flushed } : {}),
     });
     const result = ports.prompt(conversationId, delivery, deliveryId);
-    if (result.ok) return;
+    if (result.ok) return true;
     inflight.delete(deliveryId);
     const error = result.error ?? 'prompt failed';
-    // 投递失败的那一条放回队首：来源标记跟着回来，秘书还能撤回它
+    // 投递失败的那一条放回队首：来源标记跟着回来，秘书还能撤回它。
+    // 会话状态回退到投递前：wake/续跑的乐观 running 不能留在行上，
+    // 否则下一轮唤醒看到 running 永远按「腾不出手」重排，倒计时假走
     save(conversationId, {
       ...applied.runtime,
+      status: previous.status,
       ...(flushed
         ? {
             queued: [
@@ -405,6 +416,7 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
           }
         : {}),
     });
+    return false;
   }
 
   /** worker 回执拒收：消息放回队首（或暂停目标），审计记一条，绝不悄悄丢 */
@@ -845,11 +857,11 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       if (reason === 'manual') {
         userStopped.delete(conversationId);
       } else if (userStopped.has(conversationId)) {
-        return false;
+        return 'dropped';
       }
       const runtime = runtimeOf(conversationId);
       if (runtime?.goal?.status !== 'waiting' || runtime.goal.retry?.reason !== 'upstream') {
-        return false;
+        return 'dropped';
       }
       if (
         runtime.status === 'running' ||
@@ -857,7 +869,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         runtime.pendingApprovals > 0 ||
         runtime.pendingAsks > 0
       ) {
-        return false;
+        // 会话还在 waiting 只是此刻腾不出手：闸门重排倒计时，稍后真正重试
+        return 'retry';
       }
       const delivery: HeadlessDelivery = {
         kind: 'prompt',
@@ -868,8 +881,14 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         started: true,
         status: 'running',
       };
-      commit(conversationId, runtime, { runtime: nextRuntime, deliver: delivery });
-      return true;
+      const delivered = commit(conversationId, runtime, {
+        runtime: nextRuntime,
+        deliver: delivery,
+      });
+      if (delivered) return 'delivered';
+      // worker 接不住（已死/已拒）：waiting 目标还在，闸门重排倒计时之后真正再试，
+      // 否则 waiter 已离闸、探测永远不发生——状态条倒计时空转的根因
+      return 'retry';
     },
   };
 }

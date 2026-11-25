@@ -1,6 +1,9 @@
 import {
   nextUpstreamRetryAt,
   type ProviderHealthSnapshot,
+  parseGoalUpstreamRetry,
+  QUOTA_MAX_WINDOW_MS,
+  TRANSIENT_MAX_WINDOW_MS,
   type UpstreamErrorKind,
 } from '@shared/upstreamRecovery';
 
@@ -223,6 +226,41 @@ export class UpstreamHealthGate {
     return true;
   }
 
+  /**
+   * 唤醒无人接住（探测从未真正发起）时把 waiter 按原退避进度放回等待队列：
+   * 不重置 since/attempt，下一次到点再试。probe 槽位一并释放，避免 provider 卡在 probing。
+   *
+   * probe 的 waiter 在 takeDue 后仍留在闸门里（probing 标记）：若探测从未真正发生，
+   * 它会永远卡在 probing——nextDeadline 跳过它，倒计时就此空转。requeue 清掉标记重新排期；
+   * recovered 队列的 waiter 已被摘除，重新登记。
+   */
+  requeue(waiter: RecoveryWaiter, now: number): boolean {
+    const existing = this.waiters.get(waiter.id);
+    if (existing && !existing.probing) return false;
+    const bucket = this.providers.get(waiter.provider);
+    if (bucket?.probingWaiterId === waiter.id) {
+      bucket.probingWaiterId = undefined;
+      bucket.state = 'degraded';
+    }
+    // 恢复队列里掉出来的：provider 已不在降级表，放回也永远不会到点——直接放弃
+    if (!bucket) return false;
+    const nextAt = nextUpstreamRetryAt({
+      kind: waiter.errorKind,
+      attempt: waiter.attempt,
+      since: waiter.since,
+      now,
+      ...(waiter.resetAt !== undefined ? { resetAt: waiter.resetAt } : {}),
+    });
+    if (nextAt === null) return false;
+    this.waiters.set(waiter.id, {
+      ...waiter,
+      probing: false,
+      recovering: false,
+      nextAt,
+    });
+    return true;
+  }
+
   nextDeadline(): number | null {
     let earliest: number | null = null;
     for (const waiter of this.waiters.values()) {
@@ -292,7 +330,12 @@ export class UpstreamHealthGate {
 
 export interface UpstreamRecoveryServiceOptions extends UpstreamHealthGateOptions {
   now?: () => number;
-  onWake: (event: UpstreamWakeEvent) => void;
+  /**
+   * 唤醒投递。返回 false 表示无人接住（会话已不在/运行状态拒绝接管），
+   * service 会把 waiter 按原退避进度重排，倒计时继续走而不是空转消失；
+   * 返回 true/undefined 表示已接管（或调用方已自行取消，不该再重排）。
+   */
+  onWake: (event: UpstreamWakeEvent) => boolean | undefined;
   onHealthChange?: (snapshots: ProviderHealthSnapshot[]) => void;
 }
 
@@ -333,11 +376,14 @@ export function createUpstreamRecoveryService(
     timer = setTimeout(() => {
       timer = undefined;
       const due = gate.takeDue(now());
+      for (const event of due) {
+        const handled = options.onWake(event);
+        if (handled === false) {
+          gate.requeue(event.waiter, now());
+        }
+      }
       emitHealthIfChanged();
       schedule();
-      for (const event of due) {
-        options.onWake(event);
-      }
     }, delay);
     if (typeof timer === 'object' && 'unref' in timer) {
       timer.unref();
@@ -358,9 +404,14 @@ export function createUpstreamRecoveryService(
     },
     retryNow(waiterId) {
       const event = gate.retryNow(waiterId, now());
+      if (event) {
+        const handled = options.onWake(event);
+        if (handled === false) {
+          gate.requeue(event.waiter, now());
+        }
+      }
       emitHealthIfChanged();
       schedule();
-      if (event) options.onWake(event);
       return event;
     },
     cancel(waiterId) {
@@ -384,4 +435,41 @@ export function createUpstreamRecoveryService(
       }
     },
   };
+}
+
+/**
+ * 重启后闸门内存是空的：把磁盘上还挂着 waiting(upstream) 目标的会话重新登记，
+ * 沿用 since/attempt 退避进度，倒计时到点真正发起重试。
+ * 已超出退避总窗口的会话不再登记（它们的 goal 会在下一次失败时按 exhausted 收敛）。
+ * 返回重新登记的会话数。
+ */
+export function reseatUpstreamWaiters(
+  recovery: UpstreamRecoveryService,
+  rows: Record<string, unknown>,
+  now: number
+): number {
+  let count = 0;
+  for (const [conversationId, row] of Object.entries(rows)) {
+    if (!row || typeof row !== 'object') continue;
+    const goal = (row as Record<string, unknown>).goal;
+    if (!goal || typeof goal !== 'object') continue;
+    const record = goal as Record<string, unknown>;
+    if (record.status !== 'waiting') continue;
+    const retry = parseGoalUpstreamRetry(record.retry);
+    if (!retry) continue;
+    const maxWindow = retry.kind === 'quota' ? QUOTA_MAX_WINDOW_MS : TRANSIENT_MAX_WINDOW_MS;
+    if (now >= retry.since + maxWindow) continue;
+    const result = recovery.reportFailure({
+      id: conversationId,
+      kind: 'session',
+      provider: retry.provider,
+      errorKind: retry.kind,
+      lastError: retry.lastError,
+      ...(retry.resetAt !== undefined ? { resetAt: retry.resetAt } : {}),
+      since: retry.since,
+      previousAttempt: retry.attempt - 1,
+    });
+    if (result.action === 'wait') count += 1;
+  }
+  return count;
 }

@@ -9,6 +9,16 @@ const h = vi.hoisted(() => ({
   board: null as unknown as SecretaryBoard,
   feed: [] as FeedEvent[],
   calls: [] as { name: string; args: unknown }[],
+  upstreamHealth: [] as {
+    provider: string;
+    providerName?: string;
+    state: 'degraded' | 'probing';
+    since: number;
+    errorKind: 'transient' | 'quota';
+    lastError: string;
+    waitingCount: number;
+    nextProbeAt?: number;
+  }[],
 }));
 
 vi.mock('@/i18n', () => ({
@@ -45,6 +55,9 @@ vi.mock('@/stores/sessions', () => {
     activeId: 'sec',
     conversations: { sec: { projectId: 'p-sec' }, c1: { projectId: 'p1' } },
     selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
+    get upstreamHealth() {
+      return h.upstreamHealth;
+    },
   };
   const useSessionsStore = (selector: (s: Record<string, unknown>) => unknown) => selector(state);
   useSessionsStore.getState = () => state;
@@ -115,6 +128,7 @@ beforeEach(() => {
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
+  h.upstreamHealth = [];
   useSecretaryReturn.setState({ back: null });
   h.board = board([]);
   h.feed = [];
@@ -650,5 +664,45 @@ describe('SecretaryWorkbench 待办状态与会话状态一致', () => {
     const sessionLine = problemGroup?.querySelector('[data-enso="secretary-todo-session"]');
     expect(sessionLine?.textContent).toContain('[Idle]');
     expect(sessionLine?.textContent).not.toContain('[Running]');
+  });
+});
+
+describe('SecretaryWorkbench 上游健康横幅', () => {
+  it('有可读 providerName 时显示名字而不是运行时哈希 id，倒计时照显', async () => {
+    h.upstreamHealth = [
+      {
+        provider: 'enso-d8cd1cfb1018-28077c58',
+        providerName: 'xAI (Grok)',
+        state: 'degraded',
+        since: NOW - 60_000,
+        errorKind: 'transient',
+        lastError: '503 No available accounts',
+        waitingCount: 2,
+        nextProbeAt: NOW + 161_000,
+      },
+    ];
+    h.board = { needsYou: [], running: [sessionCard()], todos: [], done: [] };
+    await render(<SecretaryWorkbench name="小安" />);
+    const banner = container.querySelector('[data-enso="secretary-upstream-health"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('xAI (Grok)');
+    expect(banner?.textContent).not.toContain('enso-d8cd1cfb1018-28077c58');
+  });
+
+  it('条目找不到名字（供应商已删/换 key）时退回原 id', async () => {
+    h.upstreamHealth = [
+      {
+        provider: 'enso-d8cd1cfb1018-28077c58',
+        state: 'degraded',
+        since: NOW - 60_000,
+        errorKind: 'transient',
+        lastError: '503',
+        waitingCount: 1,
+      },
+    ];
+    h.board = { needsYou: [], running: [sessionCard()], todos: [], done: [] };
+    await render(<SecretaryWorkbench name="小安" />);
+    const banner = container.querySelector('[data-enso="secretary-upstream-health"]');
+    expect(banner?.textContent).toContain('enso-d8cd1cfb1018-28077c58');
   });
 });

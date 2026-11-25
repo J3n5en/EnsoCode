@@ -67,10 +67,13 @@ function createHarness(initialRows: Record<string, Record<string, unknown>>) {
     wakeStaggerMs: 2_000,
     onWake(event) {
       if (event.waiter.kind === 'session') {
-        driver.wakeUpstream(event.waiter.id, event.reason);
+        // 与 Main IPC 层同一条接线：驱动者明说 retry（还在 waiting 但此刻接不住）才重排
+        return driver.wakeUpstream(event.waiter.id, event.reason) !== 'retry';
       }
     },
   });
+
+  let promptResult: { ok: boolean; error?: string } = { ok: true };
 
   const ports: DispatchDriverPorts = {
     row: (id) => rows.get(id),
@@ -91,7 +94,7 @@ function createHarness(initialRows: Record<string, Record<string, unknown>>) {
     alive: () => true,
     prompt(id, delivery) {
       prompts.push({ id, text: delivery.text });
-      return { ok: true };
+      return promptResult;
     },
     newId: () => `d-${++seq}`,
     now: () => clock,
@@ -119,6 +122,9 @@ function createHarness(initialRows: Record<string, Record<string, unknown>>) {
     advance(ms: number) {
       clock += ms;
       vi.advanceTimersByTime(ms);
+    },
+    setPromptResult(result: { ok: boolean; error?: string }) {
+      promptResult = result;
     },
     goalOf(id: string) {
       return rows.get(id)?.goal as Record<string, unknown> | undefined;
@@ -395,6 +401,97 @@ describe('DispatchDriver 上游错误自动恢复', () => {
       expect(h.goalOf('s1')?.status).toBe('waiting');
       expect(retry?.attempt).toBe(2);
       expect(retry?.since).toBe(since);
+      h.recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('唤醒投递被 worker 拒绝（worker 已死）时 waiter 重排：倒计时到点再次真正重试，绝不空转', () => {
+    vi.useFakeTimers();
+    try {
+      const h = createHarness({
+        s1: {
+          driver: 'main',
+          status: 'running',
+          goal: { text: '发布验证', status: 'active', autoTurns: 1, noProgressRuns: 0 },
+        },
+      });
+
+      h.driver.observe(turnFailed('s1', '503 No available accounts', { provider: 'anthropic' }));
+      expect(h.goalOf('s1')?.status).toBe('waiting');
+
+      // 到点唤醒，但 worker 接不住投递（STALE / 已死）：探测从未发生
+      h.setPromptResult({ ok: false, error: 'stale session generation' });
+      h.advance(TRANSIENT_BACKOFF_MS[0]);
+      expect(h.prompts).toHaveLength(1);
+      // waiter 不能丢：闸门里还在，倒计时继续走
+      expect(h.recovery.getWaiter('s1')).toBeDefined();
+      expect(h.recovery.snapshots()).toHaveLength(1);
+
+      // worker 恢复可用：下一个退避点到时真正再投一次
+      h.setPromptResult({ ok: true });
+      h.advance(TRANSIENT_BACKOFF_MS[1] + 500);
+      expect(h.prompts).toHaveLength(2);
+      expect(h.prompts[1]!.text).toContain('<goal-continuation>');
+      h.recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forget（会话停止/删除）后 waiter 即刻撤出：倒计时收敛、同 provider 恢复也绝不唤醒它', () => {
+    vi.useFakeTimers();
+    try {
+      const h = createHarness({
+        s1: {
+          driver: 'main',
+          status: 'running',
+          goal: { text: '目标一', status: 'active', autoTurns: 0, noProgressRuns: 0 },
+        },
+        s2: {
+          driver: 'main',
+          status: 'running',
+          goal: { text: '目标二', status: 'active', autoTurns: 0, noProgressRuns: 0 },
+        },
+      });
+
+      h.driver.observe(turnFailed('s1', '503 No available accounts', { provider: 'anthropic' }));
+      h.driver.observe(turnFailed('s2', '503 No available accounts', { provider: 'anthropic' }));
+      expect(h.recovery.snapshots()[0]?.waitingCount).toBe(2);
+
+      // 用户停止/删除 s1：waiter 撤出，健康快照只剩 1 个等待者
+      h.driver.forget('s1');
+      expect(h.recovery.getWaiter('s1')).toBeUndefined();
+      expect(h.recovery.snapshots()[0]?.waitingCount).toBe(1);
+
+      // 到点只有 s2 被探测；s2 成功后错峰队列里也绝没有 s1
+      h.advance(1 * MIN);
+      expect(h.prompts.map((p) => p.id)).toEqual(['s2']);
+      h.driver.observe(turnCompleted('s2', { provider: 'anthropic' }));
+      h.advance(10_000);
+      expect(h.prompts.filter((p) => p.id === 's1')).toHaveLength(0);
+      h.recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('wakeUpstream 三态：waiting 但压缩中/审批挂起返回 retry，用户已停返回 dropped，正常投递返回 delivered', () => {
+    vi.useFakeTimers();
+    try {
+      const h = createHarness({
+        s1: {
+          driver: 'main',
+          status: 'idle',
+          goal: { text: '目标一', status: 'active', autoTurns: 0, noProgressRuns: 0 },
+        },
+      });
+      h.driver.observe(turnFailed('s1', '503 No available accounts', { provider: 'anthropic' }));
+      expect(h.goalOf('s1')?.status).toBe('waiting');
+
+      // 正常路径：delivered
+      expect(h.driver.wakeUpstream('s1', 'probe')).toBe('delivered');
       h.recovery.dispose();
     } finally {
       vi.useRealTimers();
