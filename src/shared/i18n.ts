@@ -2886,6 +2886,9 @@ export const zhTranslations: Record<string, string> = {
   'Turn off notifications': '关闭推送通知',
   'Push notifications': '推送通知',
   'Computers and notifications': '电脑与通知',
+  'Things that need your attention are pushed to this phone.': '有需要你处理的事时推送到这台手机。',
+  'Things that need your attention are pushed to this device.':
+    '有需要你处理的事时推送到这台设备。',
   'Turning on notifications…': '正在开启推送…',
   'Notifications need a newer desktop app.': '需先升级桌面端才能开启推送。',
   'Add this app to the Home Screen before notifications can be turned on.':
