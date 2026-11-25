@@ -12,6 +12,10 @@ on:
 
 permissions:
   contents: read
+  # server-npm 经 workflow_call 复用 publish-server.yml（声明了 id-token: write）。
+  # 可复用工作流的 id-token 权限按调用方授权裁决：调用方没声明时 GitHub 在启动期直接
+  # 判 startup_failure，整个 workflow 一个 job 都起不来（actionlint 查不出，已在临时仓库复现验证）。
+  id-token: write
 
 jobs:
   prepare:
