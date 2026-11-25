@@ -1,8 +1,9 @@
 import { projectDisplayName } from '@shared/projectName';
 import type { OpenInApp } from '@shared/types';
-import { Code2, Copy, Folder, FolderOpen, GitBranch, SquareTerminal } from 'lucide-react';
+import { Code2, Copy, FolderOpen, GitBranch, SquareTerminal } from 'lucide-react';
 import { type ReactNode, useCallback, useState } from 'react';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
+import { ProjectIcon } from '@/components/chat/ProjectIcon';
 import {
   Menu,
   MenuGroup,
@@ -65,7 +66,7 @@ export function WorkspaceBadge({
         aria-label={branch && !noWorkspace ? `${label} / ${branch}` : label}
         onPointerEnter={refreshApps}
       >
-        <Folder className="h-3 w-3 shrink-0" />
+        <ProjectIcon projectId={project.id} displayName={label} size={12} />
         <span
           className={`grid grid-cols-[0fr] opacity-0 transition-[grid-template-columns,opacity] duration-(--duration-fast) ease-(--ease-smooth-out) ${REVEAL}`}
         >
