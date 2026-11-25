@@ -390,7 +390,7 @@ export function Sidebar({
       : secretaryView
         ? [
             {
-              id: secretaryList[0]?.id ?? '',
+              id: secretaryList[0]?.id ?? 'default',
               projectId: secretaryState.projectId,
               view: secretaryView,
             },
@@ -1279,6 +1279,7 @@ export function Sidebar({
                   })
                 }
                 onReset={() => setSecretaryResetId('default')}
+                secretaryId={secretaryList[0]?.id ?? 'default'}
                 runningOrigins={runningLink(secretaryRunning.single)}
               >
                 {shownSecretaryIds.map((id) => (
@@ -2961,6 +2962,7 @@ function ConversationRow({
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
       data-enso="session-row"
+      data-conversation={id}
       data-active={active || undefined}
       data-status={conversationThemeState(conversation)}
       data-unread={conversation.unread || undefined}

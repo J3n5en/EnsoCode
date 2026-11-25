@@ -53,6 +53,7 @@ import { PairNodeDialog } from '@/components/nodes/PairNodeDialog';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
+import { DispatchFlightLayer } from '@/components/secretary/DispatchFlightLayer';
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
 import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
 import { SettingsView } from '@/components/settings/SettingsView';
@@ -814,23 +815,26 @@ export default function App() {
                   </motion.div>
                 </>
               ) : (
-                <div ref={workbenchSidebarRef} className="flex min-h-0 shrink-0">
-                  <Sidebar
-                    width={collapsed ? undefined : width}
-                    resizing={sidebarResizing}
-                    collapsed={collapsed}
-                    onToggleCollapse={toggleSidebar}
-                    onOpenSearch={() => setSearchOpen(true)}
-                  />
-                  {!collapsed && (
-                    <ResizeHandle
-                      edge={desktopShell}
-                      onResize={handleResize}
-                      onResizingChange={setSidebarResizing}
-                      onReset={resetSidebarWidth}
+                <>
+                  <div ref={workbenchSidebarRef} className="flex min-h-0 shrink-0">
+                    <Sidebar
+                      width={collapsed ? undefined : width}
+                      resizing={sidebarResizing}
+                      collapsed={collapsed}
+                      onToggleCollapse={toggleSidebar}
+                      onOpenSearch={() => setSearchOpen(true)}
                     />
-                  )}
-                </div>
+                    {!collapsed && (
+                      <ResizeHandle
+                        edge={desktopShell}
+                        onResize={handleResize}
+                        onResizingChange={setSidebarResizing}
+                        onReset={resetSidebarWidth}
+                      />
+                    )}
+                  </div>
+                  <DispatchFlightLayer />
+                </>
               )}
               <div
                 ref={workspaceRef}
