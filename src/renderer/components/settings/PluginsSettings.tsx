@@ -1041,6 +1041,7 @@ export function EnsoPluginsSettings({
   };
   const stageUrlRef = React.useRef(stageUrl);
   stageUrlRef.current = stageUrl;
+  const urlInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (!requestedInstallUrl) return;
@@ -1051,6 +1052,7 @@ export function EnsoPluginsSettings({
       if (cancelled || stagingInstallUrls.has(installUrl)) return;
       stagingInstallUrls.add(installUrl);
       setUrl(installUrl);
+      urlInputRef.current?.focus();
       onRequestedInstallUrlConsumed?.();
       void stageUrlRef.current(installUrl).finally(() => {
         stagingInstallUrls.delete(installUrl);
@@ -1176,12 +1178,16 @@ export function EnsoPluginsSettings({
         >
           <SettingsSwitch checked={pluginAutoUpdate} onCheckedChange={setPluginAutoUpdate} />
         </SettingsRow>
-        <div className="flex flex-wrap items-center gap-2 border-border border-b py-3">
+        <div
+          data-settings-row="plugins.installUrl"
+          className="flex flex-wrap items-center gap-2 border-border border-b py-3"
+        >
           <InputGroup className="min-w-40 flex-1">
             <InputGroupAddon>
               <Link2 className="size-4 text-muted-foreground" />
             </InputGroupAddon>
             <InputGroupInput
+              ref={urlInputRef}
               size="sm"
               value={url}
               placeholder={t('https://github.com/owner/repo')}

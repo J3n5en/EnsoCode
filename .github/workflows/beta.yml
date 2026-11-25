@@ -4,6 +4,7 @@ name: Beta
 # 版本号 <package.json 的下一个 patch>-beta.<N> 只在 CI 里算，不提交回仓库；
 # N 是 HEAD 相对当前正式版 tag 的 first-parent 提交数，每个正式版之后从 1 重新数（见 scripts/beta-release.mjs）。
 # 正式版仍由手动推 vX.Y.Z tag 走 Build；预发布 tag 不触发 Build / Publish Server / Relay Docker。
+# 服务端 npm 预发布版本随桌面内测同一版本号发到 @ensocode/server 的 beta dist-tag（不动 latest），版本号规则与桌面内测一致；发布失败不影响桌面内测。
 on:
   push:
     branches: [main]
@@ -11,6 +12,10 @@ on:
 
 permissions:
   contents: read
+  # server-npm 经 workflow_call 复用 publish-server.yml（声明了 id-token: write）。
+  # 可复用工作流的 id-token 权限按调用方授权裁决：调用方没声明时 GitHub 在启动期直接
+  # 判 startup_failure，整个 workflow 一个 job 都起不来（actionlint 查不出，已在临时仓库复现验证）。
+  id-token: write
 
 jobs:
   prepare:
@@ -89,6 +94,16 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+  server-npm:
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.skip != 'true'
+    uses: ./.github/workflows/publish-server.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      dist-tag: beta
+      dry-run: false
+    secrets: inherit
 
   desktop:
     needs: [prepare, verify]

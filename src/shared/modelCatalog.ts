@@ -116,19 +116,59 @@ type CatalogKeyed = { id: string; provider?: string };
 
 /** 同档多条时：原厂 provider > 无命名空间 id > 目录顺序第一条 */
 function pickPreferred<T extends CatalogKeyed>(
-  catalog: readonly T[],
-  matches: (entry: T) => boolean,
+  candidates: readonly T[],
   owner: string | undefined
 ): T | undefined {
   let bare: T | undefined;
   let first: T | undefined;
-  for (const entry of catalog) {
-    if (!matches(entry)) continue;
+  for (const entry of candidates) {
     if (owner && entry.provider === owner) return entry;
     if (!bare && canonicalModelId(entry.id) === leafModelKey(entry.id)) bare = entry;
     first ??= entry;
   }
   return bare ?? first;
+}
+
+const TIER_KEYS = [(id: string) => id, canonicalModelId, leafModelKey] as const;
+
+/**
+ * 同一份 catalog 反查多个 id 时先拿这个：每档索引第一次用到时建一次，之后每个 id 都是 Map 查找。
+ * 逐个 id 全表归一化扫描在几百个 id × 几千条目录时会把 Main 卡住数秒。
+ */
+export function catalogModelLookup<T extends CatalogKeyed>(
+  catalog: readonly T[]
+): (modelId: string) => T | undefined {
+  const indexes: Map<string, T[]>[] = [];
+  const candidates = (tier: 0 | 1 | 2, key: string): readonly T[] => {
+    let index = indexes[tier];
+    if (!index) {
+      index = new Map();
+      for (const entry of catalog) {
+        const entryKey = TIER_KEYS[tier](entry.id);
+        const bucket = index.get(entryKey);
+        if (bucket) bucket.push(entry);
+        else index.set(entryKey, [entry]);
+      }
+      indexes[tier] = index;
+    }
+    return index.get(key) ?? [];
+  };
+  return (modelId) => {
+    const leaf = leafModelKey(modelId);
+    const stripped = stripDeploymentMarker(leaf);
+    const owner = MODEL_OWNERS.find(([pattern]) => pattern.test(leaf))?.[1];
+    const probes: [0 | 1 | 2, string][] = [
+      [0, modelId],
+      [1, canonicalModelId(modelId)],
+      [2, leaf],
+    ];
+    if (stripped) probes.push([2, stripped]);
+    for (const [tier, key] of probes) {
+      const hit = pickPreferred(candidates(tier, key), owner);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
 }
 
 /**
@@ -140,21 +180,7 @@ export function findCatalogModelById<T extends CatalogKeyed>(
   catalog: readonly T[],
   modelId: string
 ): T | undefined {
-  const canonical = canonicalModelId(modelId);
-  const leaf = leafModelKey(modelId);
-  const stripped = stripDeploymentMarker(leaf);
-  const owner = MODEL_OWNERS.find(([pattern]) => pattern.test(leaf))?.[1];
-  const tiers: ((entry: T) => boolean)[] = [
-    (entry) => entry.id === modelId,
-    (entry) => canonicalModelId(entry.id) === canonical,
-    (entry) => leafModelKey(entry.id) === leaf,
-  ];
-  if (stripped) tiers.push((entry) => leafModelKey(entry.id) === stripped);
-  for (const matches of tiers) {
-    const hit = pickPreferred(catalog, matches, owner);
-    if (hit) return hit;
-  }
-  return undefined;
+  return catalogModelLookup(catalog)(modelId);
 }
 
 /** 非正 / 非有限视为缺失。未知不得用 128K 凑数。 */

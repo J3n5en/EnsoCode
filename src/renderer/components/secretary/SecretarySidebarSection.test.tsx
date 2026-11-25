@@ -62,12 +62,50 @@ vi.mock('@/components/ui/preview-card', () => ({
     <div data-enso="popup">{children}</div>
   ),
 }));
+vi.mock('@/components/ui/menu', async () => {
+  const { cloneElement, createContext, useContext, useState } = await import('react');
+  const State = createContext({ open: false, toggle: () => {} });
+  return {
+    Menu: ({ children }: { children: ReactNode }) => {
+      const [open, setOpen] = useState(false);
+      return (
+        <State.Provider value={{ open, toggle: () => setOpen((prev) => !prev) }}>
+          {children}
+        </State.Provider>
+      );
+    },
+    MenuTrigger: ({ render, children }: { render: ReactElement; children?: ReactNode }) => {
+      const { toggle } = useContext(State);
+      return cloneElement(
+        render as ReactElement<{ onClick: () => void }>,
+        { onClick: toggle },
+        children
+      );
+    },
+    MenuPopup: ({ children }: { children: ReactNode }) =>
+      useContext(State).open ? <div role="menu">{children}</div> : null,
+    MenuItem: ({
+      children,
+      onClick,
+      ...rest
+    }: {
+      children: ReactNode;
+      onClick: () => void;
+      [key: string]: unknown;
+    }) => (
+      <button type="button" role="menuitem" onClick={onClick} {...rest}>
+        {children}
+      </button>
+    ),
+  };
+});
 
 import { openSecretary } from '@/lib/openSecretary';
 import { EMPTY_SECRETARY_STATE, useSecretaryStore } from '@/stores/secretary';
 import { runningBySecretary, SecretaryDispatchBadge } from './SecretaryRunningOrigins';
 import {
   SecretaryCollapsedButton,
+  SecretaryCollapsedRail,
   SecretaryGroupHeader,
   SecretarySidebarSection,
   sidebarProjects,
@@ -673,5 +711,92 @@ describe('SecretaryCollapsedButton', () => {
     );
     act(() => (button as unknown as HTMLElement).click());
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SecretaryCollapsedRail', () => {
+  const COLORS = ['#ff6b9d', '#8b7bff', '#3fb950', '#f0883e', '#58a6ff', '#d2a8ff'];
+  const entries = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `s-${index}`,
+      view: { ...view(), name: `秘书${index}`, color: COLORS[index] },
+      unread: 0,
+      active: false,
+    }));
+  const buttons = () => [...container.querySelectorAll('[data-enso="secretary-collapsed"]')];
+  const overflow = () => container.querySelector('[data-enso="secretary-collapsed-more"]');
+
+  it.each([
+    { count: 1, shown: 1, more: null },
+    { count: 3, shown: 3, more: null },
+    { count: 5, shown: 5, more: null },
+    { count: 6, shown: 4, more: '+2' },
+  ])('$count 个秘书时按展开态顺序显示 $shown 个头像', async ({ count, shown, more }) => {
+    await render(<SecretaryCollapsedRail entries={entries(count)} onOpen={vi.fn()} />);
+    expect(buttons().map((node) => node.getAttribute('data-secretary-id'))).toEqual(
+      entries(count)
+        .slice(0, shown)
+        .map((entry) => entry.id)
+    );
+    expect(buttons().map((node) => node.getAttribute('title')?.split(' · ')[0])).toEqual(
+      entries(count)
+        .slice(0, shown)
+        .map((entry) => entry.view.name)
+    );
+    expect(overflow()?.textContent ?? null).toBe(more);
+  });
+
+  it('每个头像带各自的等你数、在跑状态与未读数', async () => {
+    const list = entries(3);
+    list[0] = { ...list[0], view: { ...list[0].view, needsYou: 2, running: 1 }, unread: 4 };
+    list[1] = { ...list[1], view: { ...list[1].view, running: 3 } };
+    list[2] = { ...list[2], unread: 5 };
+    await render(<SecretaryCollapsedRail entries={list} onOpen={vi.fn()} />);
+    const badge = (node: Element) => ({
+      pip: node.querySelector('[data-enso="secretary-pip"]')?.getAttribute('data-tone') ?? null,
+      count: node.querySelector('[data-enso="secretary-collapsed-count"]')?.textContent ?? null,
+      tone:
+        node.querySelector('[data-enso="secretary-collapsed-count"]')?.getAttribute('data-tone') ??
+        null,
+    });
+    expect(buttons().map(badge)).toEqual([
+      { pip: 'warn', count: '2', tone: 'warn' },
+      { pip: 'run', count: null, tone: null },
+      { pip: null, count: '5', tone: 'unread' },
+    ]);
+  });
+
+  it('点头像进入对应秘书，正在看的那个标为选中', async () => {
+    const onOpen = vi.fn();
+    const list = entries(3);
+    list[1] = { ...list[1], active: true };
+    await render(<SecretaryCollapsedRail entries={list} onOpen={onOpen} />);
+    expect(buttons().map((node) => node.getAttribute('aria-pressed'))).toEqual([
+      'false',
+      'true',
+      'false',
+    ]);
+    act(() => (buttons()[2] as unknown as HTMLElement).click());
+    expect(onOpen.mock.calls).toEqual([['s-2']]);
+  });
+
+  it('超过上限时「+N」列出全部秘书，点条目进入对应秘书', async () => {
+    const onOpen = vi.fn();
+    const list = entries(6);
+    list[5] = { ...list[5], active: true, view: { ...list[5].view, needsYou: 1 } };
+    await render(<SecretaryCollapsedRail entries={list} onOpen={onOpen} />);
+    expect(overflow()?.getAttribute('aria-pressed')).toBe('true');
+    expect(
+      overflow()
+        ?.querySelector('[data-enso="secretary-collapsed-more-dot"]')
+        ?.getAttribute('data-tone')
+    ).toBe('warn');
+    act(() => (overflow() as unknown as HTMLElement).click());
+    const items = [...container.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((node) => node.getAttribute('data-secretary-id'))).toEqual(
+      list.map((entry) => entry.id)
+    );
+    act(() => (items[4] as unknown as HTMLElement).click());
+    expect(onOpen.mock.calls).toEqual([['s-4']]);
   });
 });

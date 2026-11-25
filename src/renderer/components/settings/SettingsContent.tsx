@@ -80,6 +80,8 @@ import { WorkflowsSettings } from './WorkflowsSettings';
 function flashSettingsRow(rowId: string, cancelRestore: () => void): () => void {
   let attempts = 0;
   let timer = 0;
+  let follow = 0;
+  let finish = 0;
   const tryFlash = () => {
     const el = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
     if (el instanceof HTMLElement) {
@@ -95,18 +97,23 @@ function flashSettingsRow(rowId: string, cancelRestore: () => void): () => void 
       };
       cancelRestore();
       center();
-      const follow = window.setInterval(center, 400);
-      window.setTimeout(() => {
-        window.clearInterval(follow);
-        const row = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
-        if (row instanceof HTMLElement) delete row.dataset.settingsFlash;
-      }, 1600);
+      follow = window.setInterval(center, 400);
+      finish = window.setTimeout(stop, 1600);
       return;
     }
     if (attempts++ < 12) timer = window.setTimeout(tryFlash, 50);
   };
+  const stop = () => {
+    window.clearInterval(follow);
+    const row = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
+    if (row instanceof HTMLElement) delete row.dataset.settingsFlash;
+  };
   tryFlash();
-  return () => window.clearTimeout(timer);
+  return () => {
+    window.clearTimeout(timer);
+    window.clearTimeout(finish);
+    stop();
+  };
 }
 
 const USER_SCROLL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;

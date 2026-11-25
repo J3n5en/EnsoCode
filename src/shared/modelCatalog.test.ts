@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  catalogModelLookup,
   findCatalogModelById,
   pickModelCapabilityOverrides,
   positiveFiniteNumber,
@@ -80,6 +81,52 @@ describe('findCatalogModelById', () => {
     expect(findCatalogModelById(catalog, 'gpt-5.4')).toBe(openai);
     expect(findCatalogModelById(catalog, 'gpt-5.4-high')).toBe(openai);
     expect(findCatalogModelById([azure], 'gpt-5.4-fast')).toBe(azure);
+  });
+});
+
+describe('catalogModelLookup', () => {
+  it('批量反查与逐个 findCatalogModelById 结果一致', () => {
+    const catalog = [
+      { id: 'anthropic/claude-sonnet-4.5', contextWindow: 1_000_000 },
+      { id: 'claude-sonnet-4-5', contextWindow: 200_000 },
+      { id: 'claude-opus-4-8' },
+      { id: 'grok-4' },
+      { id: 'grok-4-fast' },
+      { id: 'gpt-5.4', provider: 'azure' },
+      { id: 'gpt-5.4', provider: 'openai' },
+      { id: 'gpt-5' },
+    ];
+    const ids = [
+      'Anthropic/Claude-Sonnet-4.5',
+      'relay/claude-sonnet-4.5-fast',
+      'us.anthropic.claude-opus-4-8',
+      'models/claude_opus_4.8-fast',
+      'xai/grok-4-fast',
+      'gpt-5.4-high',
+      'gpt-5:free',
+      'gpt-5-mini',
+      'not-a-model',
+    ];
+    const lookup = catalogModelLookup(catalog);
+    for (const id of ids) expect(lookup(id)).toBe(findCatalogModelById(catalog, id));
+    expect(lookup('relay/claude-sonnet-4.5-fast')).toBe(catalog[1]);
+    expect(lookup('gpt-5.4-high')).toBe(catalog[6]);
+  });
+
+  it('一份目录查几百个 id 时每个目录条目只读常数次，不随 id 数量放大', () => {
+    let reads = 0;
+    const catalog = Array.from({ length: 2000 }, (_, i) => {
+      const id = `vendor-${i % 7}/model-${i}`;
+      return {
+        get id() {
+          reads++;
+          return id;
+        },
+      };
+    });
+    const lookup = catalogModelLookup(catalog);
+    for (let i = 0; i < 256; i++) lookup(`relay/unknown-model-${i}-chat`);
+    expect(reads).toBeLessThanOrEqual(catalog.length * 3);
   });
 });
 

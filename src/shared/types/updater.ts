@@ -41,4 +41,6 @@ export interface UpdaterState {
   mode?: ServerUpdateMode;
   /** 有进程守护（systemd）时才允许远程重启 */
   canRestart?: boolean;
+  /** 服务端按渠道查 npm dist-tag；桌面端无此字段（渠道由 electron-updater 侧维护） */
+  channel?: 'stable' | 'beta';
 }

@@ -1,3 +1,4 @@
+import { translate } from '@shared/i18n';
 import { linkTone } from '@shared/pair/linkLabel';
 import type { RemoteLinkStatus } from '@shared/remoteBridge';
 import { CONN_STATE_LABEL, formatOnlineConnectionLabel } from '../connectionLabel';
@@ -7,9 +8,24 @@ import type { DeskDevices } from './devices';
 import type { DeskTheme } from './drawerTheme';
 
 /**
- * 完整版「电脑与通知」底部抽屉：画在壳页面里（纯 DOM，不进 React），
+ * 完整版「电脑与通知」面板：画在壳页面里（纯 DOM，不进 React），
  * 推送订阅与配对凭据都只在手机本地，renderer 只能打开它。
+ * 窄屏/触屏是底部抽屉，宽屏桌面浏览器是居中对话框（同视口宽度会跟随 resize 切换）。
  */
+
+/** 与 renderer useViewport 同口径：窄屏、或触屏横屏（≤1024）走手机抽屉 */
+export function resolveDrawerLayout(width: number, coarsePointer: boolean): 'phone' | 'desktop' {
+  return width <= (coarsePointer ? 1024 : 767) ? 'phone' : 'desktop';
+}
+
+/** 触屏 ≤1024、鼠标 ≤767 走抽屉，其余居中对话框 */
+export const DESKTOP_DRAWER_QUERY = '(min-width: 1025px), (min-width: 768px) and (pointer: fine)';
+
+/** 壳没有 i18n 接线，跟 stubs/i18n 一样跟随系统语言 */
+export function drawerText(key: string): string {
+  const zh = typeof navigator !== 'undefined' && navigator.language?.startsWith('zh');
+  return translate(zh ? 'zh' : 'en', key);
+}
 
 export interface DeviceDrawerHost {
   doc: Document;
@@ -22,6 +38,8 @@ export interface DeviceDrawerHost {
   watchTheme(listener: () => void): () => void;
   /** 复制给开发者排查卡顿的诊断文本 */
   diagnostics(): string;
+  /** 宽屏桌面浏览器：面板排成居中对话框而不是底部抽屉 */
+  wide(): boolean;
 }
 
 const ICONS = {
@@ -89,6 +107,24 @@ html.kb-open .dd-sheet{padding-bottom:12px}
 .dd-btn{height:32px;padding:0 12px;border-radius:var(--dd-radius);font-size:13px;border:1px solid var(--dd-border)}
 .dd-btn.dd-danger{background:var(--dd-destructive);color:#fff;border-color:transparent}
 .dd-sep{border-top:1px solid var(--dd-border);margin:8px 0 4px}
+/* 宽屏桌面浏览器：居中对话框，密度对齐桌面端设置（行 13px、控件 sm），不要抽屉的把手与贴底大圆角 */
+.dd-desktop{justify-content:center;align-items:center;padding:16px}
+.dd-desktop .dd-sheet{margin:0;width:min(400px,100%);max-height:calc(100% - 32px);
+border-bottom:1px solid var(--dd-border);border-radius:12px;padding:4px 10px 10px;
+box-shadow:0 16px 48px rgba(0,0,0,.22);transform:scale(.97);opacity:0;
+transition:transform .18s ease-out,opacity .18s ease-out}
+.dd-desktop.dd-open .dd-sheet{transform:none;opacity:1}
+.dd-desktop .dd-sheet{font-size:13px}
+.dd-desktop .dd-head{padding:4px 2px 4px 6px}
+.dd-desktop .dd-title{font-size:14px}
+.dd-desktop .dd-icon{width:28px;height:28px}
+.dd-desktop .dd-line{padding:6px 6px;gap:6px}
+.dd-desktop .dd-hint{padding:0 6px 2px 28px;font-size:11px}
+.dd-desktop .dd-label{padding:8px 6px 3px}
+.dd-desktop .dd-input{height:28px;font-size:13px;padding:0 8px}
+.dd-desktop .dd-btn{height:26px;padding:0 10px;font-size:12px}
+.dd-desktop .dd-box{padding:8px}
+.dd-desktop .dd-sep{margin:6px 0 2px}
 `;
 
 type Child = Node | string | null | false | undefined;
@@ -175,7 +211,14 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
       configReady: link.pushReady,
     });
     if (hints.length === 0)
-      hints.push({ text: '有需要你处理的事时推送到这台手机。', error: false });
+      hints.push({
+        text: drawerText(
+          host.wide()
+            ? 'Things that need your attention are pushed to this device.'
+            : 'Things that need your attention are pushed to this phone.'
+        ),
+        error: false,
+      });
     pushBox.replaceChildren(
       el(
         'div',
@@ -381,16 +424,16 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     if (!doc.getElementById('dd-style')) doc.head.append(el('style', { id: 'dd-style' }, STYLE));
     pushBox = el('div');
     list = el('div');
+    const head = el(
+      'div',
+      { class: 'dd-head' },
+      el('span', { class: 'dd-title' }, '电脑与通知'),
+      button({ class: 'dd-icon', 'aria-label': '关闭' }, close, icon('x', 20))
+    );
     const sheet = el(
       'div',
       { class: 'dd-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': '电脑与通知' },
-      el('div', { class: 'dd-grab' }),
-      el(
-        'div',
-        { class: 'dd-head' },
-        el('span', { class: 'dd-title' }, '电脑与通知'),
-        button({ class: 'dd-icon', 'aria-label': '关闭' }, close, icon('x', 20))
-      ),
+      head,
       pushBox,
       el('div', { class: 'dd-label' }, '已配对的电脑'),
       list,
@@ -412,6 +455,15 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     const scrim = el('div', { class: 'dd-scrim' });
     scrim.addEventListener('click', close);
     root = el('div', { class: 'dd-root' }, scrim, sheet);
+    const applyLayout = () => {
+      if (!root) return;
+      const wide = host.wide();
+      root.classList.toggle('dd-desktop', wide);
+      const grab = sheet.querySelector('.dd-grab');
+      if (wide) grab?.remove();
+      else if (!grab) sheet.prepend(el('div', { class: 'dd-grab' }));
+    };
+    applyLayout();
     applyTheme();
     renderPush();
     renderList();
@@ -419,9 +471,15 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') close();
     };
+    const onResize = () => {
+      applyLayout();
+      renderPush();
+    };
+    host.doc.defaultView?.addEventListener('resize', onResize);
     doc.addEventListener('keydown', onKey);
     cleanups = [
       () => doc.removeEventListener('keydown', onKey),
+      () => host.doc.defaultView?.removeEventListener('resize', onResize),
       host.onLink(() => {
         renderPush();
         renderStatus();
