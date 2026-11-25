@@ -4,8 +4,10 @@ import type { Project, ThinkingLevel } from '@shared/types';
 import type { AgentMode } from '@shared/types/agent';
 import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { FolderOpen, ShieldAlert, Wrench } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { coverSquare, dataUrlBytes } from '@/components/bots/avatarRaster';
 import { CopyButton } from '@/components/chat/CopyButton';
+import { ProjectIcon } from '@/components/chat/ProjectIcon';
 import { ScopedDefaultModelField } from '@/components/chat/ScopedDefaultModelField';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,6 +31,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
+import { type ProjectIconSetResult, useProjectIconsStore } from '@/stores/projectIcons';
 import { useSettingsStore } from '@/stores/settings';
 
 export function ProjectSettingsDialog({
@@ -164,6 +167,7 @@ export function ProjectSettingsDialog({
                 {t('Shown in the sidebar instead of the folder name. Leave blank to reset.')}
               </FieldDescription>
             </Field>
+            {project && <ProjectIconField key={project.id} project={project} />}
             <Field className="w-full items-stretch">
               <FieldLabel>{t('Path')}</FieldLabel>
               <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -363,5 +367,115 @@ export function ProjectSettingsDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const ICON_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']);
+const ICON_EXT = /\.(png|jpe?g|webp|svg)$/i;
+const ICON_TYPE_ERROR = 'The icon must be a PNG, JPEG, WebP or SVG image.';
+
+function isSvgFile(file: File): boolean {
+  return file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+}
+
+function isIconFile(file: File): boolean {
+  return ICON_TYPES.has(file.type) || ICON_EXT.test(file.name);
+}
+
+async function iconBytes(file: File): Promise<Uint8Array> {
+  if (isSvgFile(file)) return new Uint8Array(await file.arrayBuffer());
+  return dataUrlBytes(await coverSquare(file));
+}
+
+function ProjectIconField({ project }: { project: Project }) {
+  const { t } = useI18n();
+  const info = useProjectIconsStore((state) => state.icons[project.id]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (task: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await task();
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : t(ICON_TYPE_ERROR));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const applyResult = (result: ProjectIconSetResult) => {
+    if (!result.ok || !result.info) {
+      setError(t(result.error ?? ICON_TYPE_ERROR));
+      return;
+    }
+    useProjectIconsStore.getState().set(project.id, result.info);
+  };
+
+  return (
+    <Field className="w-full items-stretch">
+      <FieldLabel>{t('Custom icon')}</FieldLabel>
+      <div className="flex items-center gap-3">
+        <ProjectIcon projectId={project.id} displayName={projectDisplayName(project)} size={40} />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => inputRef.current?.click()}
+            >
+              {t('Upload icon')}
+            </Button>
+            {info?.kind === 'custom' && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    applyResult(await window.electronAPI.projects.setIcon(project.id, null));
+                  })
+                }
+              >
+                {t('Remove custom icon')}
+              </Button>
+            )}
+          </div>
+          <FieldDescription>
+            {t('Upload a square image. It overrides the icon found in the project folder.')}
+          </FieldDescription>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (!file || busyRef.current) return;
+          if (!isIconFile(file)) {
+            setError(t(ICON_TYPE_ERROR));
+            return;
+          }
+          void run(async () => {
+            applyResult(
+              await window.electronAPI.projects.setIcon(project.id, await iconBytes(file))
+            );
+          });
+        }}
+      />
+    </Field>
   );
 }
