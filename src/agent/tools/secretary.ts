@@ -85,6 +85,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     numbers: ['limit'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
+  session_stats: {
+    keys: ['conversationId'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
   session_create: {
     keys: [
       'projectId',
@@ -605,6 +609,11 @@ const SCHEMAS: Record<
       },
       ['conversationId']
     ),
+  },
+  session_stats: {
+    description:
+      'One-call health snapshot of one session: state, age since creation, goal status, turn count, assistant step count, total tool calls and the top tools by count, cumulative input/output tokens, compaction count, context occupancy in tokens (used, window and percent when the session is running), and recent activity — how many assistant steps and tool results landed in the last minute and how long the session has been idle. Use it to tell a session that is making progress from one that is spinning in circles: a running session with zero recent events for a long idle period is stuck; many compactions or repeated calls of the same tool in session_activity hint at a loop. Fields that cannot be known (for example context occupancy of a session that is not running) are listed in missing with the reason.',
+    parameters: object({ conversationId: id('Session id from session_list') }, ['conversationId']),
   },
   session_create: {
     description:

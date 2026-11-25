@@ -1159,6 +1159,62 @@ register('session_activity', (call, ctx) => {
   );
 });
 
+register('session_stats', (call, ctx) => {
+  const output = rec(parseJson(call.output));
+  const id = str(output?.conversationId) ?? str(rec(call.args)?.conversationId);
+  const title = sessionLabel(id, ctx);
+  const error = errorText(call, ctx);
+  const blocks: ToolCardBlock[] = [];
+  if (error) blocks.push({ kind: 'error', text: error });
+  const rows: Array<{ label: string; value: string }> = [];
+  const count = (value: number) => (value >= 1000 ? `${Math.round(value / 1000)}k` : String(value));
+  const state = str(output?.state);
+  if (state) rows.push({ label: ctx.t('State'), value: state });
+  const usage = rec(output?.usage);
+  if (typeof usage?.inputTokens === 'number')
+    rows.push({
+      label: ctx.t('Tokens'),
+      value: `in ${count(usage.inputTokens)} · out ${count(typeof usage.outputTokens === 'number' ? usage.outputTokens : 0)}`,
+    });
+  const context = rec(output?.context);
+  if (typeof context?.percent === 'number')
+    rows.push({ label: ctx.t('Context'), value: `${Math.round(context.percent)}%` });
+  else if (typeof context?.used === 'number')
+    rows.push({ label: ctx.t('Context'), value: count(context.used) });
+  if (typeof output?.compactions === 'number' && output.compactions > 0)
+    rows.push({ label: ctx.t('Compactions'), value: String(output.compactions) });
+  const activity = rec(output?.activity);
+  if (typeof activity?.idleForMs === 'number')
+    rows.push({ label: ctx.t('Idle for'), value: durationText(activity.idleForMs) });
+  const missing = Array.isArray(output?.missing) ? output.missing : [];
+  for (const item of missing) {
+    const text = str(item);
+    if (text) rows.push({ label: ctx.t('Missing'), value: text });
+  }
+  if (rows.length > 0) blocks.push({ kind: 'kv', rows });
+  const tools = Array.isArray(output?.topTools) ? output.topTools : [];
+  const toolRows = tools.flatMap((entry) => {
+    const row = rec(entry);
+    const name = str(row?.name);
+    const count = typeof row?.count === 'number' ? row.count : undefined;
+    if (!name || count === undefined) return [];
+    return [
+      { title: friendlyName(name, ctx), badge: String(count), badgeTone: 'neutral' as const },
+    ];
+  });
+  if (toolRows.length > 0) blocks.push({ kind: 'list', items: toolRows });
+  return view(
+    call,
+    ctx.t('Session stats of {{title}}', { title }),
+    blocks,
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : typeof output?.turns === 'number'
+        ? { tone: 'ok', label: ctx.t('{{count}} turns', { count: output.turns }) }
+        : { tone: 'neutral', label: ctx.t('Stats') }
+  );
+});
+
 const PROFILE_FIELDS: Record<string, string> = {
   name: 'Name',
   avatarColor: 'Avatar color',

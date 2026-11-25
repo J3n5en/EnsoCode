@@ -39,6 +39,58 @@ function readyChild(child: ChildSessionIdentity) {
 }
 
 describe('AgentSessionIndex generation and reservation authority', () => {
+  it('session-meta 的占用与用量按事件覆盖缓存，worker 退出后清空', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+    });
+    expect(sessions.sessionMeta(parent.sessionId)).toBeUndefined();
+    sessions.observe({
+      type: 'session-meta',
+      identity: parent,
+      seq: 2,
+      contextWindow: 1_000_000,
+      occupancy: {
+        buckets: {
+          system: 1,
+          instructions: 0,
+          skills: 0,
+          tools: 0,
+          conversation: 100,
+          compaction: 0,
+          projectMemory: 0,
+          reminders: 0,
+        },
+        used: 101,
+        estimated: false,
+        compactedMessageCount: 0,
+        compactionModelMismatch: false,
+      },
+      usageTotals: { inputTokens: 1000, outputTokens: 200 },
+    });
+    const meta = sessions.sessionMeta(parent.sessionId);
+    expect(meta?.contextWindow).toBe(1_000_000);
+    expect(meta?.occupancy?.used).toBe(101);
+    expect(meta?.usageTotals?.inputTokens).toBe(1000);
+    // 下一条 session-meta 字段更少时整体覆盖，不残留旧字段
+    sessions.observe({
+      type: 'session-meta',
+      identity: parent,
+      seq: 3,
+      contextWindow: 500_000,
+    });
+    const next = sessions.sessionMeta(parent.sessionId);
+    expect(next?.contextWindow).toBe(500_000);
+    expect(next?.occupancy).toBeUndefined();
+    sessions.observe({ type: 'worker-exited' });
+    expect(sessions.sessionMeta(parent.sessionId)).toBeUndefined();
+  });
+
   it('blocks starting, reserved and running workspace trees but allows idle children', () => {
     const sessions = index();
     expect(sessions.workspaceTreeRunning(parent.sessionId)).toBe(false);

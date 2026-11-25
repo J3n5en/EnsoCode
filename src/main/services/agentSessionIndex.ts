@@ -15,6 +15,7 @@ import {
 import type {
   AgentWorkerEvent,
   ChildConversationMetadata,
+  ContextOccupancy,
   CoworkerInfo,
   McpWorkerEvent,
   ModelRef,
@@ -22,6 +23,7 @@ import type {
   PluginAgentWorkerEvent,
   PluginMcpResultEvent,
   ResolvedChildProfileProof,
+  SessionUsageTotals,
   WorkspaceLockEvent,
 } from '@shared/types/agent';
 import { type AgentTypeEntry, BUILTIN_AGENT_TYPES } from '@shared/types/assets';
@@ -50,6 +52,8 @@ interface IndexedSession {
   turnStartedAt?: number;
   /** 已见过的最大消息下标：退出记录里的「最后一条消息」 */
   lastMessageIndex?: number;
+  /** 最近一次 session-meta 的运行时读数（上下文占用、窗口、累计用量）；秘书 session_stats 读它，不落盘 */
+  meta?: { contextWindow?: number; occupancy?: ContextOccupancy; usageTotals?: SessionUsageTotals };
 }
 
 export interface ChildReservation {
@@ -403,6 +407,15 @@ export class AgentSessionIndex {
       : undefined;
   }
 
+  /** 最近一次 session-meta 的运行时读数；会话释放、换 generation 或从没观察到 session-meta 时为 undefined */
+  sessionMeta(
+    sessionId: string
+  ):
+    | { contextWindow?: number; occupancy?: ContextOccupancy; usageTotals?: SessionUsageTotals }
+    | undefined {
+    return this.sessions.get(sessionId)?.meta;
+  }
+
   model(identity: SessionIdentity): ModelRef | undefined {
     const current = this.sessions.get(identity.sessionId);
     return current && isSameGeneration(current.identity, identity) ? current.model : undefined;
@@ -541,6 +554,8 @@ export class AgentSessionIndex {
         session.alive = false;
         session.ready = false;
         session.detached = true;
+        // 运行时读数随 worker 一起失效：复活是新的 generation，不能拿旧读数冒充
+        session.meta = undefined;
         // worker 重建后会话 seq 从 0 重计；不重置则 parent-ready 被当重复丢弃，索引永远不 ready
         session.lastSeq = -1;
       }
@@ -729,6 +744,12 @@ export class AgentSessionIndex {
       current.started = true;
       current.alive = true;
       if (event.sessionFile) current.sessionFile = event.sessionFile;
+      // 运行时读数按事件覆盖式缓存：worker 每次发都是完整快照，不逐字段合并
+      const meta: IndexedSession['meta'] = {};
+      if (event.contextWindow !== undefined) meta.contextWindow = event.contextWindow;
+      if (event.occupancy) meta.occupancy = event.occupancy;
+      if (event.usageTotals) meta.usageTotals = event.usageTotals;
+      if (Object.keys(meta).length > 0) current.meta = meta;
       return true;
     }
     if (event.type === 'coworker-update') {

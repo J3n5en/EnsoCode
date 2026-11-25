@@ -10,10 +10,12 @@ import {
 } from '@shared/secretary/transcript';
 import type {
   AgentRunProgress,
+  ContextOccupancy,
   ConversationAuthority,
   ParentHistoryTailResult,
   ProjectAuthority,
   ProjectedMessage,
+  SessionUsageTotals,
 } from '@shared/types/agent';
 import { parseDemandStatus } from '@shared/types/demandThreads';
 import type {
@@ -30,6 +32,7 @@ import {
   ACTIVITY_LIMIT_MAX,
   type SessionToolActivity,
 } from '../sessionActivity';
+import type { SessionHistoryStats } from '../sessionHistoryStats';
 import { currentBranch, repoIsClean } from '../worktree/service';
 import { autoArchived } from './autoArchive';
 import { leftoverReason, taskIsPersistent } from './leftover';
@@ -93,6 +96,15 @@ export interface SecretaryReadPorts {
   ): MaybePromise<{ index: number; message: ProjectedMessage } | null>;
   /** 最近工具调用，不含任何工具输出 */
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
+  /** 权威 jsonl 的一次性统计（轮次、工具分布、token、压缩、最近活跃度）；读不到文件或空历史为 null */
+  historyStats?(sessionFile: string | undefined): MaybePromise<SessionHistoryStats | null>;
+  /** 运行中会话最近一次 session-meta 的读数（上下文占用、窗口）；没观察到为 undefined */
+  meta?(
+    conversationId: string
+  ): MaybePromise<
+    | { contextWindow?: number; occupancy?: ContextOccupancy; usageTotals?: SessionUsageTotals }
+    | undefined
+  >;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
   tasks(conversationId: string): MaybePromise<ObservedTask[]>;
   /** 该会话名下正在运行的子代理进度；缺省表示没有 */
@@ -122,6 +134,7 @@ export interface SecretaryReadHandlers {
   session_read: SecretaryOpHandler;
   session_tasks: SecretaryOpHandler;
   session_activity: SecretaryOpHandler;
+  session_stats: SecretaryOpHandler;
 }
 
 interface ListedSession {
@@ -129,6 +142,7 @@ interface ListedSession {
   projectId: string;
   title: string;
   lastActiveAt: number;
+  createdAt: number;
   sessionFile?: string;
   /** 会话行上的目标：与 session_create 挂的是同一种，巡检按它判定 */
   goal?: { text: string; status: string };
@@ -244,6 +258,7 @@ async function collect(ports: SecretaryReadPorts): Promise<{
       projectId,
       title: redactSecrets(typeof row.title === 'string' ? row.title : ''),
       lastActiveAt: timestamp(row.lastActiveAt) ?? timestamp(row.createdAt) ?? 0,
+      createdAt: timestamp(row.createdAt) ?? 0,
       ...(sessionFile ? { sessionFile } : {}),
       ...(goal ? { goal } : {}),
       ...(queued?.failed
@@ -681,6 +696,96 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       };
     },
 
+    async session_stats(params) {
+      const conversationId = stringParam(params, 'conversationId');
+      if (!conversationId) return invalidArguments;
+      const { sessions } = await collect(ports);
+      const session = sessions.find((candidate) => candidate.conversationId === conversationId);
+      if (!session) return notFound;
+      const status = await ports.status(conversationId);
+      const stats = (await ports.historyStats?.(session.sessionFile)) ?? null;
+      const meta = (await ports.meta?.(conversationId)) ?? undefined;
+      const now = Date.now();
+      const missing: string[] = [];
+      if (!stats) missing.push('usage: 会话历史不可读或为空，token 用量与轮次不可得');
+
+      // 上下文水位只有活会话的 session-meta 是真值；history 里的 usage.input 口径各家不一，不做猜测
+      let context: Record<string, unknown>;
+      const occupancy = meta?.occupancy;
+      const contextWindow = meta?.contextWindow ?? occupancy?.contextWindow;
+      if (occupancy) {
+        context = {
+          source: 'live',
+          used: occupancy.used,
+          ...(contextWindow !== undefined ? { window: contextWindow } : {}),
+          ...(occupancy.percent !== undefined ? { percent: occupancy.percent } : {}),
+          estimated: occupancy.estimated,
+          ...(occupancy.compactionTokensAfter !== undefined
+            ? { tokensAfterLastCompaction: occupancy.compactionTokensAfter }
+            : {}),
+        };
+        if (contextWindow === undefined)
+          missing.push(
+            'context.window: worker 未报上下文窗口大小，只有占用 token 数，没有水位百分比'
+          );
+      } else {
+        context = { source: 'unavailable' };
+        missing.push(
+          'context: 会话不在运行中或 Main 未观察到 session-meta（占用只活在 worker 事件里、不落盘）；活会话重发事件后自动出现'
+        );
+      }
+
+      return {
+        ok: true,
+        result: {
+          conversationId,
+          projectId: session.projectId,
+          state: sessionState(session, status),
+          ...queueFields(session),
+          pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
+          ...(session.createdAt > 0
+            ? {
+                createdAt: session.createdAt,
+                ageMs: Math.max(0, now - session.createdAt),
+              }
+            : {}),
+          lastActiveAt: session.lastActiveAt,
+          ...(session.goal ? { goal: session.goal } : {}),
+          ...(stats
+            ? {
+                turns: stats.turns,
+                steps: stats.steps,
+                toolCalls: stats.toolCalls,
+                topTools: stats.topTools,
+                compactions: stats.compactions,
+                usage: {
+                  inputTokens: stats.inputTokens,
+                  outputTokens: stats.outputTokens,
+                  ...(stats.cacheHitPercent !== null
+                    ? { cacheHitPercent: stats.cacheHitPercent }
+                    : {}),
+                },
+                activity: {
+                  recentEventsLastMinute: stats.recentEvents,
+                  windowMs: 60_000,
+                  ...(stats.lastActivityAt !== null
+                    ? {
+                        lastActivityAt: stats.lastActivityAt,
+                        idleForMs: Math.max(0, now - stats.lastActivityAt),
+                      }
+                    : {}),
+                },
+                ...(stats.lastCompactionTokensBefore !== null
+                  ? { lastCompactionTokensBefore: stats.lastCompactionTokensBefore }
+                  : {}),
+              }
+            : {}),
+          context,
+          ...(missing.length > 0 ? { missing } : {}),
+        },
+      };
+    },
+
     async repo_status(params) {
       const limit = countParam(params.limit, REPO_STATUS_COMMIT_DEFAULT, REPO_STATUS_COMMIT_MAX);
       const base = stringParam(params, 'base');
@@ -814,6 +919,12 @@ export function readPortsFor(
     },
     async activity(sessionFile, limit) {
       return (await import('../../ipc/agent')).readSessionActivity(sessionFile, limit);
+    },
+    async historyStats(sessionFile) {
+      return (await import('../../ipc/agent')).readSessionHistoryStats(sessionFile);
+    },
+    async meta(conversationId) {
+      return (await import('../../ipc/agent')).observedSessionMeta(conversationId);
     },
     async tasks(conversationId) {
       return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);

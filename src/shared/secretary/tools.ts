@@ -13,6 +13,7 @@ export const SECRETARY_OPS = [
   'session_read',
   'session_tasks',
   'session_activity',
+  'session_stats',
   'session_create',
   'session_send',
   'session_queue_list',

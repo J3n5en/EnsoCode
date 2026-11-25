@@ -115,6 +115,15 @@ const zh: Record<string, string> = {
   '{{count}} running': '{{count}} 个在跑',
   '{{count}} tasks': '{{count}} 个任务',
   '{{count}} calls': '{{count}} 次调用',
+  'Session stats of {{title}}': '{{title}} 的运行统计',
+  '{{count}} turns': '{{count}} 轮',
+  Stats: '统计',
+  State: '状态',
+  Tokens: 'Token',
+  Context: '上下文',
+  Compactions: '压缩',
+  'Idle for': '已静默',
+  Missing: '缺失',
   '{{count}} failed': '{{count}} 次失败',
   'Recent tool calls in {{title}}': '{{title}} 最近的工具调用',
   Exited: '已退出',
@@ -818,6 +827,37 @@ describe('只读核实卡片', () => {
     expect(text).toContain('pnpm typecheck');
     expect(text).toContain('2s');
     expect(text).not.toContain('untrusted-content');
+  });
+
+  it('session_stats 显示状态、token、水位与工具分布', () => {
+    const card = renderToolCall(
+      call(
+        'session_stats',
+        { conversationId: 'c1' },
+        {
+          conversationId: 'c1',
+          state: 'running',
+          turns: 5,
+          compactions: 2,
+          usage: { inputTokens: 120_000, outputTokens: 4_000, cacheHitPercent: 80 },
+          context: { source: 'live', used: 500_000, window: 1_000_000, percent: 50 },
+          activity: { recentEventsLastMinute: 4, windowMs: 60_000, idleForMs: 5_000 },
+          topTools: [
+            { name: 'bash', count: 7 },
+            { name: 'read', count: 5 },
+          ],
+          missing: ['context.window: 测试缺失说明'],
+        }
+      ),
+      ctx('zh', { sessionTitle: () => '写发布说明' })
+    );
+    expect(card.status).toEqual({ tone: 'ok', label: '5 轮' });
+    const text = cardPlainText(card);
+    expect(text).toContain('running');
+    expect(text).toContain('120k');
+    expect(text).toContain('50%');
+    expect(text).toContain('测试缺失说明');
+    expect(text).toContain('bash');
   });
 
   it('session_read 的 index 模式显示全文与续读位置，列表模式标出被截断的消息', () => {
