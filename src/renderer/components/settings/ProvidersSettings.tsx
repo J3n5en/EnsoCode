@@ -111,7 +111,10 @@ function ProviderFetchFailure({
   const message = error ?? (fetchOutcome?.status === 'failed' ? fetchOutcome.message : null);
   if (!message) return null;
   return (
-    <p role="status" className="border-border border-b py-2 pl-10 text-destructive-text text-xs">
+    <p
+      role="status"
+      className="py-2.5 pl-10 pr-4 text-destructive-text text-xs max-sm:pl-7 max-sm:pr-3"
+    >
       {t('Fetch failed')}: {message}
     </p>
   );

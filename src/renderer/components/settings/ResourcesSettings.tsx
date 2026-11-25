@@ -773,7 +773,7 @@ function SessionStorage({
         <button
           type="button"
           onClick={() => setShowAll(!showAll)}
-          className="w-full border-t border-border/60 px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
+          className="w-full px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
         >
           {showAll ? t('Show less') : t('Show all')}
         </button>

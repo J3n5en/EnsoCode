@@ -41,6 +41,9 @@ export const zhTranslations: Record<string, string> = {
   'Owner identity': '主人身份',
   'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.':
     '这些 GitHub 账号算你本人。其他人的事件默认交给 agent 判断，除非你要求必须确认。',
+  'GitHub accounts that count as you.': '这些 GitHub 账号算你本人。',
+  'Events from anyone else are left to the agent unless you require confirmation.':
+    '其他人的事件默认交给 agent 判断，除非你要求必须确认。',
   'GitHub accounts': 'GitHub 账号',
   'Comma or space separated': '用逗号或空格分隔',
   'Detected the gh login {{login}} on this machine': '检测到本机 gh 登录账号 {{login}}',

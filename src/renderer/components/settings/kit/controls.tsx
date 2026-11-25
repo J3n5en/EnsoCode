@@ -26,6 +26,8 @@ export interface SettingsOption<T extends string> {
   value: T;
   label: string;
   icon?: React.ElementType;
+  /** 行为测试与验收钩子 */
+  dataEnso?: string;
 }
 
 const WIDTH = { default: 'w-[220px]', wide: 'w-[280px]' } as const;
@@ -201,6 +203,7 @@ export function SettingsSegmented<T extends string>({
               }}
               type="button"
               role="radio"
+              data-enso={option.dataEnso}
               aria-checked={on}
               tabIndex={on ? 0 : -1}
               onClick={() => onValueChange(option.value)}
