@@ -1,9 +1,8 @@
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
-import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsRow, SettingsSubRow, SettingsSwitch } from './kit';
 
 /**
  * 会话标题总结设置：开关 + 独立模型（null = 跟随全局默认）。
@@ -22,21 +21,29 @@ export function TitleSummaryPicker() {
   const selectedModel = selectedProvider?.models.find((entry) => entry.id === model?.modelId);
 
   return (
-    <section className="space-y-2 rounded-lg border bg-card p-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h4 className="font-medium text-sm">{t('Conversation title summary')}</h4>
-          <p className="mt-0.5 text-muted-foreground text-xs">
-            {t('Generate a short AI title from the first message of a new conversation.')}
-          </p>
-        </div>
-        <Switch checked={enabled} onCheckedChange={setEnabled} />
-      </div>
-
+    <>
+      <SettingsRow
+        label={t('Conversation title summary')}
+        description={t('Generate a short AI title from the first message of a new conversation.')}
+      >
+        <SettingsSwitch checked={enabled} onCheckedChange={setEnabled} />
+      </SettingsRow>
       {enabled && (
-        <div className="space-y-2">
+        <SettingsSubRow
+          label={t('Model')}
+          description={
+            model && (!selectedProvider || !selectedModel)
+              ? t('Selected model is unavailable — falls back to the default model.')
+              : undefined
+          }
+        >
+          {model && (
+            <SettingsButton variant="ghost" onClick={() => setModel(null)}>
+              {t('Follow default model')}
+            </SettingsButton>
+          )}
           {candidates.length > 0 && (
-            <div className="w-full min-w-0">
+            <div className="w-[280px] max-w-full">
               <ModelPicker
                 providers={candidates}
                 providerId={selectedProvider?.id ?? ''}
@@ -53,18 +60,8 @@ export function TitleSummaryPicker() {
               />
             </div>
           )}
-          {model && (!selectedProvider || !selectedModel) && (
-            <p className="text-muted-foreground text-xs">
-              {t('Selected model is unavailable — falls back to the default model.')}
-            </p>
-          )}
-          {model && (
-            <Button variant="ghost" size="sm" className="self-start" onClick={() => setModel(null)}>
-              {t('Follow default model')}
-            </Button>
-          )}
-        </div>
+        </SettingsSubRow>
       )}
-    </section>
+    </>
   );
 }

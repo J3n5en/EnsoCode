@@ -20,21 +20,9 @@ import {
 import { isValidProxyUrl } from '@shared/proxy';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types/llm';
-import {
-  ChevronDown,
-  CircleCheck,
-  CircleX,
-  Eye,
-  EyeOff,
-  ListPlus,
-  Loader2,
-  Plus,
-  X,
-  Zap,
-} from 'lucide-react';
+import { CircleCheck, CircleX, Eye, EyeOff, ListPlus, Loader2, Plus, X, Zap } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
   DialogFooter,
@@ -59,6 +47,14 @@ import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { API_KIND_LABELS } from './constants';
+import {
+  SettingsButton,
+  SettingsExpandableRow,
+  SettingsSegmented,
+  SettingsSubRow,
+  TOUCH_TARGET,
+  useSettingsRowControl,
+} from './kit';
 import { ListFilterBar, useVisibleSelection } from './ListFilterBar';
 import { ProviderModelRow } from './ProviderModelRow';
 
@@ -102,6 +98,7 @@ const refreshIntervalRange = {
 
 type HeaderDraft = { key: string; name: string; value: string };
 
+const PROXY_MODES = ['global', 'none', 'custom'] as const satisfies readonly ProviderProxyMode[];
 const PROXY_MODE_LABELS: Record<ProviderProxyMode, string> = {
   global: 'Follow global proxy',
   none: 'No proxy (direct)',
@@ -112,6 +109,12 @@ const PROXY_MODE_HINTS: Record<ProviderProxyMode, string> = {
   none: 'All requests to this provider connect directly, ignoring the global and system proxy.',
   custom: 'All requests to this provider go through this proxy.',
 };
+
+/** 子行里的输入框：id 与行标签关联 */
+function RowInput(props: React.ComponentProps<typeof Input>) {
+  const { id } = useSettingsRowControl();
+  return <Input id={id} render={<input id={id} />} {...props} />;
+}
 
 function headerDrafts(headers: Record<string, string> | undefined): HeaderDraft[] {
   return Object.entries(headers ?? {}).map(([name, value]) => ({
@@ -162,7 +165,6 @@ export function ProviderApiForm({
   const [proxyUrl, setProxyUrl] = React.useState(
     initialProxy?.mode === 'custom' ? initialProxy.url : ''
   );
-  const proxyUrlId = React.useId();
   const proxyErrorId = React.useId();
   const [showProxyUrl, setShowProxyUrl] = React.useState(false);
   // 生效中的独立代理与请求头一样默认展开，避免用户看不到
@@ -493,53 +495,43 @@ export function ProviderApiForm({
               </div>
             )}
 
-            <Collapsible
-              open={advancedOpen}
-              onOpenChange={setAdvancedOpen}
-              className="rounded-md border"
-            >
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left">
-                <span className="text-sm font-medium">{t('Advanced')}</span>
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
-                    advancedOpen && 'rotate-180'
-                  )}
-                />
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <Field className="items-stretch border-t px-3 py-3" data-field="provider-proxy">
-                  <FieldLabel>{t('Proxy')}</FieldLabel>
-                  <Select
-                    items={{
-                      global: t(PROXY_MODE_LABELS.global),
-                      none: t(PROXY_MODE_LABELS.none),
-                      custom: t(PROXY_MODE_LABELS.custom),
-                    }}
-                    value={proxyMode}
-                    onValueChange={(value) => setProxyMode(value as ProviderProxyMode)}
+            <div className="border-border border-t">
+              <SettingsExpandableRow
+                label={t('Advanced')}
+                open={advancedOpen}
+                onOpenChange={setAdvancedOpen}
+              >
+                <div data-field="provider-proxy">
+                  <SettingsSubRow
+                    label={t('Proxy')}
+                    description={
+                      <span data-slot="provider-proxy-hint">{t(PROXY_MODE_HINTS[proxyMode])}</span>
+                    }
                   >
-                    <SelectTrigger className="w-full" data-slot="provider-proxy-mode">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                      {(['global', 'none', 'custom'] as const).map((mode) => (
-                        <SelectItem key={mode} value={mode}>
-                          {t(PROXY_MODE_LABELS[mode])}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
-                  <p className="text-xs text-muted-foreground" data-slot="provider-proxy-hint">
-                    {t(PROXY_MODE_HINTS[proxyMode])}
-                  </p>
+                    <div data-slot="provider-proxy-mode" className="max-w-full">
+                      <SettingsSegmented
+                        value={proxyMode}
+                        onValueChange={setProxyMode}
+                        options={PROXY_MODES.map((mode) => ({
+                          value: mode,
+                          label: t(PROXY_MODE_LABELS[mode]),
+                        }))}
+                      />
+                    </div>
+                  </SettingsSubRow>
                   {proxyMode === 'custom' && (
-                    <>
-                      <FieldLabel htmlFor={proxyUrlId}>{t('Proxy URL')}</FieldLabel>
-                      <div className="relative w-full">
-                        <Input
-                          id={proxyUrlId}
-                          render={<input id={proxyUrlId} />}
+                    <SettingsSubRow
+                      label={t('Proxy URL')}
+                      description={
+                        proxyInvalid ? (
+                          <span id={proxyErrorId} role="alert" className="text-destructive-text">
+                            {t('Enter an http(s) proxy URL')}
+                          </span>
+                        ) : undefined
+                      }
+                    >
+                      <div className="relative w-[280px] max-w-full">
+                        <RowInput
                           data-slot="provider-proxy-url"
                           type={proxyHasCredentials && !showProxyUrl ? 'password' : 'text'}
                           value={proxyUrl}
@@ -565,74 +557,12 @@ export function ProviderApiForm({
                           </button>
                         )}
                       </div>
-                      {proxyInvalid ? (
-                        <p id={proxyErrorId} role="alert" className="text-destructive text-xs">
-                          {t('Enter an http(s) proxy URL')}
-                        </p>
-                      ) : null}
-                    </>
+                    </SettingsSubRow>
                   )}
-                </Field>
-                <Field className="items-stretch border-t px-3 py-3">
-                  <FieldLabel>{t('Request headers')}</FieldLabel>
-                  {headerRows.map((row) => {
-                    const nameInvalid =
-                      row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim());
-                    const valueInvalid =
-                      row.value.trim() !== '' && !isSendableHeaderValue(row.value.trim());
-                    return (
-                      <div key={row.key} className="flex items-center gap-2">
-                        <Input
-                          value={row.name}
-                          placeholder="Header-Name"
-                          aria-invalid={nameInvalid || undefined}
-                          spellCheck={false}
-                          onChange={(event) =>
-                            setHeaderRows((current) =>
-                              current.map((entry) =>
-                                entry.key === row.key
-                                  ? { ...entry, name: event.target.value }
-                                  : entry
-                              )
-                            )
-                          }
-                        />
-                        <Input
-                          value={row.value}
-                          aria-invalid={valueInvalid || undefined}
-                          spellCheck={false}
-                          onChange={(event) =>
-                            setHeaderRows((current) =>
-                              current.map((entry) =>
-                                entry.key === row.key
-                                  ? { ...entry, value: event.target.value }
-                                  : entry
-                              )
-                            )
-                          }
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="shrink-0"
-                          aria-label={t('Remove header')}
-                          onClick={() =>
-                            setHeaderRows((current) =>
-                              current.filter((entry) => entry.key !== row.key)
-                            )
-                          }
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                  <Button
-                    type="button"
+                </div>
+                <SettingsSubRow label={t('Request headers')}>
+                  <SettingsButton
                     variant="ghost"
-                    size="sm"
-                    className="h-7 self-start px-2 text-xs"
                     onClick={() =>
                       setHeaderRows((current) => [
                         ...current,
@@ -641,17 +571,76 @@ export function ProviderApiForm({
                     }
                   >
                     + {t('Add header')}
-                  </Button>
-                  {headerValueInvalid ? (
-                    <p role="alert" className="text-destructive text-xs">
-                      {t(
-                        'Header values can only contain tab and single-byte characters (no Chinese, newlines, or NUL).'
-                      )}
-                    </p>
-                  ) : null}
-                </Field>
-              </CollapsibleContent>
-            </Collapsible>
+                  </SettingsButton>
+                </SettingsSubRow>
+                {(headerRows.length > 0 || headerValueInvalid) && (
+                  <div className="space-y-2 border-border border-b py-2 pl-10">
+                    {headerRows.map((row) => {
+                      const nameInvalid =
+                        row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim());
+                      const valueInvalid =
+                        row.value.trim() !== '' && !isSendableHeaderValue(row.value.trim());
+                      return (
+                        <div key={row.key} className="flex min-w-0 items-center gap-2">
+                          <Input
+                            value={row.name}
+                            placeholder="Header-Name"
+                            aria-invalid={nameInvalid || undefined}
+                            spellCheck={false}
+                            className="min-w-0 flex-1"
+                            onChange={(event) =>
+                              setHeaderRows((current) =>
+                                current.map((entry) =>
+                                  entry.key === row.key
+                                    ? { ...entry, name: event.target.value }
+                                    : entry
+                                )
+                              )
+                            }
+                          />
+                          <Input
+                            value={row.value}
+                            aria-invalid={valueInvalid || undefined}
+                            spellCheck={false}
+                            className="min-w-0 flex-1"
+                            onChange={(event) =>
+                              setHeaderRows((current) =>
+                                current.map((entry) =>
+                                  entry.key === row.key
+                                    ? { ...entry, value: event.target.value }
+                                    : entry
+                                )
+                              )
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={cn('shrink-0', TOUCH_TARGET)}
+                            aria-label={t('Remove header')}
+                            onClick={() =>
+                              setHeaderRows((current) =>
+                                current.filter((entry) => entry.key !== row.key)
+                              )
+                            }
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                    {headerValueInvalid ? (
+                      <p role="alert" className="text-destructive-text text-xs">
+                        {t(
+                          'Header values can only contain tab and single-byte characters (no Chinese, newlines, or NUL).'
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </SettingsExpandableRow>
+            </div>
           </>
         )}
 
@@ -705,7 +694,7 @@ export function ProviderApiForm({
               {/* 列表自己限高滚动，到边界后由 useScrollChain 把滚轮交给对话框 */}
               <div
                 ref={modelListRef}
-                className="max-h-72 w-full space-y-0.5 overflow-y-auto rounded-md border p-1"
+                className="max-h-72 w-full space-y-0.5 overflow-y-auto border-border border-y py-1"
               >
                 {visibleModels.map((model) => (
                   <ProviderModelRow

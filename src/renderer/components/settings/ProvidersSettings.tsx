@@ -17,7 +17,6 @@ import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { refreshOauthCredentialState } from '@/components/oauth/OauthCredentialBootstrap';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { addToast } from '@/components/ui/toast';
 import { useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
@@ -32,6 +31,16 @@ import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
 import { GitCommitSettings } from './GitCommitSettings';
 import { ImageGenerationPicker } from './ImageGenerationPicker';
+import {
+  SettingsButton,
+  SettingsExpandableRow,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSubRow,
+  SettingsSwitch,
+  TOUCH_TARGET,
+} from './kit';
 import { LocalImportDialog } from './LocalImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
 import { AccountUsageBlock } from './OauthProvidersDialog';
@@ -181,268 +190,245 @@ export function ProvidersSettings() {
     }
   };
 
+  const poolSources = chatgptPoolSources(providers);
+
   return (
-    <div className="space-y-6">
-      <div
-        className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3"
-        data-settings-row="providers.root"
-      >
-        <div className="min-w-0 flex-1 basis-56">
-          <h3 className="text-lg font-medium">
-            {t('Model Providers')}
-            <NewSessionBadge
-              note={t(
-                'Newly enabled models can be picked right away. After changing a key or address, an open session uses it once you switch its model or start a new session.'
-              )}
-            />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            {t('Manage model API providers for this app')}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={catalogRefreshing}
-            onClick={() => void refreshCatalog()}
-          >
+    <SettingsPage
+      rowId="providers.root"
+      title={
+        <>
+          {t('Model Providers')}
+          <NewSessionBadge
+            note={t(
+              'Newly enabled models can be picked right away. After changing a key or address, an open session uses it once you switch its model or start a new session.'
+            )}
+          />
+        </>
+      }
+      description={t('Manage model API providers for this app')}
+      actions={
+        <>
+          <SettingsButton disabled={catalogRefreshing} onClick={() => void refreshCatalog()}>
             {catalogRefreshing ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="mr-1.5 h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
             {t('Refresh model info')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
+          </SettingsButton>
+          <SettingsButton
             disabled={fetching || providers.length === 0}
             onClick={() => void fetchAllModels()}
           >
             {fetching ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="mr-1.5 h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
             {t('Fetch all models')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-            <HardDriveDownload className="h-4 w-4 mr-1.5" />
+          </SettingsButton>
+          <SettingsButton onClick={() => setImportOpen(true)}>
+            <HardDriveDownload className="h-4 w-4" />
             {t('Import from local apps')}
-          </Button>
-          <Button size="sm" onClick={() => setSetupOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
+          </SettingsButton>
+          <SettingsButton variant="default" onClick={() => setSetupOpen(true)}>
+            <Plus className="h-4 w-4" />
             {t('Add model or provider')}
-          </Button>
-        </div>
-      </div>
-      <DefaultModelPicker />
-      <ImageGenerationPicker />
-      <VirtualModelsSettings />
-      <TitleSummaryPicker />
+          </SettingsButton>
+        </>
+      }
+    >
+      <SettingsSection title={t('Models used by features')}>
+        <DefaultModelPicker />
+        <ImageGenerationPicker />
+        <TitleSummaryPicker />
+        <ApprovalReviewerPicker />
+      </SettingsSection>
       <GitCommitSettings />
-      <ApprovalReviewerPicker />
+      <VirtualModelsSettings />
       <SubagentModelsSettings />
-      {chatgptPoolSources(providers).length > 0 && !providers.some((p) => p.oauthAccountPool) && (
-        <div className="space-y-1.5 rounded-md border p-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const pool = createChatgptPoolProvider(providers, crypto.randomUUID());
-              if (pool && addProviders([pool]) > 0) setEditing(pool);
-            }}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('Create ChatGPT account pool')}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            {t(
+
+      <SettingsSection title={t('Providers')}>
+        {poolSources.length > 0 && !providers.some((p) => p.oauthAccountPool) && (
+          <SettingsRow
+            label={t('Create ChatGPT account pool')}
+            description={t(
               'Pool entries do not show a single account quota. Fixed-account entries remain unchanged.'
             )}
-          </p>
-        </div>
-      )}
-
-      {providers.length === 0 ? (
-        <div className="rounded-md border border-dashed px-3 py-8 text-center">
-          <Server className="mx-auto h-5 w-5 text-muted-foreground" />
-          <p className="mt-3 text-sm font-medium">{t('No providers yet')}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t('Import providers from local apps or use the unified setup to get started')}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-1">
-          {groups.map((group) => {
+          >
+            <SettingsButton
+              onClick={() => {
+                const pool = createChatgptPoolProvider(providers, crypto.randomUUID());
+                if (pool && addProviders([pool]) > 0) setEditing(pool);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t('Create')}
+            </SettingsButton>
+          </SettingsRow>
+        )}
+        {providers.length === 0 ? (
+          <div className="border-border border-b px-3 py-8 text-center">
+            <Server className="mx-auto h-5 w-5 text-muted-foreground" />
+            <p className="mt-3 text-sm font-medium">{t('No providers yet')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('Import providers from local apps or use the unified setup to get started')}
+            </p>
+          </div>
+        ) : (
+          groups.map((group) => {
             const oauthInfo = oauthInfos.find((info) => info.id === group.vendorId);
             const label = group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
             return (
-              <div key={group.vendorId} className="rounded-md px-3 py-2">
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-                    {label}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground/60">
-                    {group.providers.length}
-                  </span>
-                </div>
-                <div className="mt-1.5 space-y-1 border-l pl-3">
-                  {group.providers.map((provider) => {
-                    const isSubscription = Boolean(provider.oauthAccountKey);
-                    const modelCount = modelCountById.get(provider.id) ?? provider.models.length;
-                    const account =
-                      provider.oauthAccountKey && !provider.oauthAccountPool
-                        ? oauthInfo?.accounts.find((a) => a.key === provider.oauthAccountKey)
-                        : undefined;
-                    // 订阅行主位放账号身份（邮箱/账号 key），不是厂商名——厂商名已经是分组标题
-                    const primaryLabel = provider.oauthAccountPool
-                      ? providerDisplayName(provider, t)
-                      : isSubscription
-                        ? (account?.email ?? provider.oauthAccountKey ?? provider.name)
-                        : provider.name;
-                    const fetchOutcome = fetchOutcomes?.[provider.id];
-                    return (
-                      <React.Fragment key={provider.id}>
-                        <div
-                          className="group flex items-start justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-                          data-settings-row={`providers.${provider.id}`}
-                        >
-                          <div className="min-w-0 flex-1 overflow-hidden">
-                            <div className="flex min-w-0 items-center gap-2">
-                              {isSubscription ? (
-                                <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                              ) : (
-                                <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <SettingsExpandableRow
+                key={group.vendorId}
+                defaultOpen
+                label={label}
+                description={String(group.providers.length)}
+              >
+                {group.providers.map((provider) => {
+                  const isSubscription = Boolean(provider.oauthAccountKey);
+                  const modelCount = modelCountById.get(provider.id) ?? provider.models.length;
+                  const account =
+                    provider.oauthAccountKey && !provider.oauthAccountPool
+                      ? oauthInfo?.accounts.find((a) => a.key === provider.oauthAccountKey)
+                      : undefined;
+                  // 订阅行主位放账号身份（邮箱/账号 key），不是厂商名——厂商名已经是分组标题
+                  const primaryLabel = provider.oauthAccountPool
+                    ? providerDisplayName(provider, t)
+                    : isSubscription
+                      ? (account?.email ?? provider.oauthAccountKey ?? provider.name)
+                      : provider.name;
+                  const fetchOutcome = fetchOutcomes?.[provider.id];
+                  const meta = [
+                    isSubscription ? undefined : provider.baseUrl,
+                    provider.oauthAccountPool
+                      ? t('{{count}} accounts', {
+                          count: provider.oauthAccountPool.accountKeys.length,
+                        })
+                      : undefined,
+                    modelCount > 0 ? t('{{count}} models', { count: modelCount }) : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <React.Fragment key={provider.id}>
+                      <SettingsSubRow
+                        rowId={`providers.${provider.id}`}
+                        label={
+                          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                            {isSubscription ? (
+                              <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            )}
+                            <span
+                              className={cn(
+                                'min-w-0 truncate font-medium',
+                                !provider.enabled && 'text-muted-foreground line-through'
                               )}
-                              <span
-                                className={cn(
-                                  'truncate text-sm font-medium',
-                                  !provider.enabled && 'text-muted-foreground line-through'
-                                )}
-                              >
-                                {primaryLabel}
-                              </span>
-                              {isSubscription ? (
-                                account?.plan && (
-                                  <Badge
-                                    variant="outline"
-                                    className="shrink-0 text-[10px] uppercase"
-                                  >
-                                    {account.plan}
-                                  </Badge>
-                                )
-                              ) : (
-                                <Badge variant="outline" className="shrink-0 text-[11px]">
-                                  {API_KIND_LABELS[provider.api] ?? provider.api}
+                            >
+                              {primaryLabel}
+                            </span>
+                            {isSubscription ? (
+                              account?.plan && (
+                                <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                                  {account.plan}
                                 </Badge>
-                              )}
-                              {provider.importedFrom && (
-                                <Badge variant="secondary" className="shrink-0 text-[11px]">
-                                  {provider.importedFrom}
-                                </Badge>
-                              )}
-                              <span className="min-w-0 truncate text-xs text-muted-foreground">
-                                {[
-                                  isSubscription ? undefined : provider.baseUrl,
-                                  provider.oauthAccountPool
-                                    ? t('{{count}} accounts', {
-                                        count: provider.oauthAccountPool.accountKeys.length,
-                                      })
-                                    : undefined,
-                                  modelCount > 0
-                                    ? t('{{count}} models', { count: modelCount })
-                                    : undefined,
-                                ]
-                                  .filter(Boolean)
-                                  .join(' · ')}
-                              </span>
-                            </div>
+                              )
+                            ) : (
+                              <Badge variant="outline" className="shrink-0 text-[11px]">
+                                {API_KIND_LABELS[provider.api] ?? provider.api}
+                              </Badge>
+                            )}
+                            {provider.importedFrom && (
+                              <Badge variant="secondary" className="shrink-0 text-[11px]">
+                                {provider.importedFrom}
+                              </Badge>
+                            )}
+                          </span>
+                        }
+                        description={
+                          <>
+                            {meta && <span className="block break-all">{meta}</span>}
                             {isClassifierOnlyProvider(provider) && (
-                              <p className="mt-1 text-xs text-muted-foreground">
+                              <span className="block">
                                 {t('Classification only, not for chat')}
-                              </p>
+                              </span>
                             )}
                             {provider.oauthAccountKey && !provider.oauthAccountPool && (
                               <SubscriptionUsage accountKey={provider.oauthAccountKey} />
                             )}
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1 pt-0.5">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                              aria-label={t('Edit Provider')}
-                              onClick={() => setEditing(provider)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={removingId === provider.id}
-                              className={cn(
-                                'h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100',
-                                removingId === provider.id && 'opacity-100'
-                              )}
-                              onClick={() => setPendingRemove(provider)}
-                            >
-                              {removingId === provider.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                            <Switch
-                              checked={provider.enabled}
-                              onCheckedChange={(enabled) =>
-                                updateProvider(provider.id, { enabled })
-                              }
-                            />
-                          </div>
-                        </div>
-                        {removeError?.providerId === provider.id && (
-                          <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
-                            <span className="min-w-0 truncate">
+                          </>
+                        }
+                      >
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className={cn('text-muted-foreground', TOUCH_TARGET)}
+                          aria-label={t('Edit Provider')}
+                          onClick={() => setEditing(provider)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={removingId === provider.id}
+                          aria-label={t('Remove')}
+                          className={cn(
+                            'text-muted-foreground hover:text-destructive',
+                            TOUCH_TARGET
+                          )}
+                          onClick={() => setPendingRemove(provider)}
+                        >
+                          {removingId === provider.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        <SettingsSwitch
+                          checked={provider.enabled}
+                          onCheckedChange={(enabled) => updateProvider(provider.id, { enabled })}
+                        />
+                      </SettingsSubRow>
+                      {removeError?.providerId === provider.id && (
+                        <SettingsSubRow
+                          label={
+                            <span className="text-destructive-text">
                               {t('Sign-out failed: {{message}}', { message: removeError.message })}
                             </span>
-                            <div className="flex shrink-0 items-center gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 px-2 text-[11px]"
-                                onClick={() => void performRemove(provider)}
-                              >
-                                {t('Retry')}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-[11px] text-destructive hover:text-destructive"
-                                onClick={() => void performRemove(provider, { skipLogout: true })}
-                              >
-                                {t('Delete anyway')}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                        {fetchOutcome?.status === 'failed' && (
-                          <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
-                            <span className="min-w-0 truncate">
-                              {t('Fetch failed')}: {fetchOutcome.message}
-                            </span>
-                          </div>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-              </div>
+                          }
+                        >
+                          <SettingsButton onClick={() => void performRemove(provider)}>
+                            {t('Retry')}
+                          </SettingsButton>
+                          <SettingsButton
+                            variant="ghost"
+                            className="text-destructive-text"
+                            onClick={() => void performRemove(provider, { skipLogout: true })}
+                          >
+                            {t('Delete anyway')}
+                          </SettingsButton>
+                        </SettingsSubRow>
+                      )}
+                      {fetchOutcome?.status === 'failed' && (
+                        <p
+                          role="status"
+                          className="border-border border-b py-2 pl-10 text-destructive-text text-xs"
+                        >
+                          {t('Fetch failed')}: {fetchOutcome.message}
+                        </p>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </SettingsExpandableRow>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </SettingsSection>
 
       <LocalImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <ProviderSetupWizard open={setupOpen} onOpenChange={setSetupOpen} />
@@ -468,6 +454,6 @@ export function ProvidersSettings() {
         confirmLabel={t('Remove')}
         onConfirm={confirmRemove}
       />
-    </div>
+    </SettingsPage>
   );
 }

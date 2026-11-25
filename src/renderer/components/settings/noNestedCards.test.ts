@@ -10,10 +10,6 @@ import { countBoxesInSource } from './kit/boxes';
  */
 const LEGACY = new Set([
   // PR3b 模型与智能体组
-  'AgentTypesSettings.tsx',
-  'ApprovalReviewerPicker.tsx',
-  'DefaultModelPicker.tsx',
-  'ImageGenerationPicker.tsx',
   'InstructionEditDialog.tsx',
   'InstructionsSettings.tsx',
   'MemoryGraphView.tsx',
@@ -21,16 +17,6 @@ const LEGACY = new Set([
   'MemoryLibrary.tsx',
   'MemorySettings.tsx',
   'MemoryTreeView.tsx',
-  'OauthProvidersDialog.tsx',
-  'PresetsSettings.tsx',
-  'ProviderApiForm.tsx',
-  'ProviderEditDialog.tsx',
-  'ProviderModelRow.tsx',
-  'ProviderSetupWizard.tsx',
-  'ProvidersSettings.tsx',
-  'SubagentModelsSettings.tsx',
-  'TitleSummaryPicker.tsx',
-  'VirtualModelsSettings.tsx',
   // PR3c 工具与扩展组
   'BuiltinToolsSettings.tsx',
   'CodeEditor.tsx',

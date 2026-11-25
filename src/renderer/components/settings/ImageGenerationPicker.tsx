@@ -1,9 +1,9 @@
 import { imageGenerationCandidateProviders } from '@shared/imageGeneration';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsRow } from './kit';
 
 export function ImageGenerationPicker() {
   const { t } = useI18n();
@@ -18,36 +18,41 @@ export function ImageGenerationPicker() {
     );
   const setSelection = useSettingsStore((state) => state.setImageGenerationModel);
   return (
-    <section className="space-y-2 rounded-lg border bg-card p-3">
-      <h4 className="font-medium text-sm">{t('Default image generation model')}</h4>
-      {providers.length > 0 ? (
-        <ModelPicker
-          providers={providers}
-          providerId={selection?.providerId ?? ''}
-          modelId={selection?.modelId ?? ''}
-          reasoningEnabled={false}
-          thinkingLevel="medium"
-          emptyLabel={t('Select model')}
-          side="bottom"
-          triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
-          onSelect={(providerId, modelId) => setSelection({ providerId, modelId })}
-          onReasoningChange={() => {}}
-          onThinkingChange={() => {}}
-          showReasoningControls={false}
-        />
-      ) : (
-        <p className="text-muted-foreground text-xs">{t('No image generation models available')}</p>
-      )}
-      {!selectedAvailable && (
-        <p className="text-destructive text-xs">
-          {t('Selected image generation model is unavailable')}
-        </p>
-      )}
+    <SettingsRow
+      label={t('Default image generation model')}
+      description={
+        providers.length === 0 ? (
+          t('No image generation models available')
+        ) : !selectedAvailable ? (
+          <span className="text-destructive-text">
+            {t('Selected image generation model is unavailable')}
+          </span>
+        ) : undefined
+      }
+    >
       {selection && (
-        <Button type="button" variant="ghost" size="sm" onClick={() => setSelection(null)}>
+        <SettingsButton variant="ghost" onClick={() => setSelection(null)}>
           {t('Clear selection')}
-        </Button>
+        </SettingsButton>
       )}
-    </section>
+      {providers.length > 0 && (
+        <div className="w-[280px] max-w-full">
+          <ModelPicker
+            providers={providers}
+            providerId={selection?.providerId ?? ''}
+            modelId={selection?.modelId ?? ''}
+            reasoningEnabled={false}
+            thinkingLevel="medium"
+            emptyLabel={t('Select model')}
+            side="bottom"
+            triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+            onSelect={(providerId, modelId) => setSelection({ providerId, modelId })}
+            onReasoningChange={() => {}}
+            onThinkingChange={() => {}}
+            showReasoningControls={false}
+          />
+        </div>
+      )}
+    </SettingsRow>
   );
 }

@@ -28,11 +28,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSwitch,
+  TOUCH_TARGET,
+} from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
 
@@ -43,29 +52,33 @@ export function AgentTypesSettings() {
   const hasSubagentModels = subagentModelsEnabled && subagentModels.length > 0;
 
   return (
-    <div className="space-y-6">
-      <div data-settings-row="agents.root">
-        <h3 className="font-medium text-lg">
+    <SettingsPage
+      rowId="agents.root"
+      title={
+        <>
           {t('Agent types')}
           <NewSessionBadge />
-        </h3>
-        <p className="text-muted-foreground text-sm">
-          {t(
-            'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.'
-          )}
-        </p>
-      </div>
-      <MaxActiveCoworkersRow />
+        </>
+      }
+      description={t(
+        'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.'
+      )}
+    >
+      <SettingsSection>
+        <MaxActiveCoworkersRow />
+      </SettingsSection>
       {!hasSubagentModels && (
-        <Alert variant="warning" className="text-xs">
+        <Alert variant="warning" className="mt-4 text-xs">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="text-xs text-foreground/90">
             {t('Subagent models not configured warning')}
           </AlertDescription>
         </Alert>
       )}
-      <AgentTypeList hasSubagentModels={hasSubagentModels} />
-    </div>
+      <SettingsSection>
+        <AgentTypeList hasSubagentModels={hasSubagentModels} />
+      </SettingsSection>
+    </SettingsPage>
   );
 }
 
@@ -79,37 +92,22 @@ function MaxActiveCoworkersRow() {
   const maxActiveCoworkers = useSettingsStore((state) => state.maxActiveCoworkers);
   const setMaxActiveCoworkers = useSettingsStore((state) => state.setMaxActiveCoworkers);
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row="agents.maxActiveCoworkers"
+    <SettingsRow
+      rowId="agents.maxActiveCoworkers"
+      label={t('Max active coworkers')}
+      description={t(
+        'How many coworkers one conversation can keep at once. Existing ones stay if you lower the limit; hire more only after dismissing. Subagents are not counted.'
+      )}
     >
-      <div className="min-w-0">
-        <p className="text-sm">{t('Max active coworkers')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'How many coworkers one conversation can keep at once. Existing ones stay if you lower the limit; hire more only after dismissing. Subagents are not counted.'
-          )}
-        </p>
-      </div>
-      <Select
-        items={Object.fromEntries(
-          MAX_ACTIVE_COWORKER_OPTIONS.map((value) => [String(value), String(value)])
-        )}
+      <SettingsSelect
         value={String(maxActiveCoworkers)}
+        options={MAX_ACTIVE_COWORKER_OPTIONS.map((value) => ({
+          value: String(value),
+          label: String(value),
+        }))}
         onValueChange={(value) => setMaxActiveCoworkers(Number(value))}
-      >
-        <SelectTrigger className="w-20">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {MAX_ACTIVE_COWORKER_OPTIONS.map((value) => (
-            <SelectItem key={value} value={String(value)}>
-              {value}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
+      />
+    </SettingsRow>
   );
 }
 
@@ -133,100 +131,120 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
   );
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
-        <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            general
-            <Badge variant="secondary">{t('Built-in')}</Badge>
-          </p>
-          <p className="text-muted-foreground text-xs">
-            {t('Follows the conversation model, full toolset')}
-          </p>
-        </div>
-      </div>
-
-      {BUILTIN_AGENT_TYPES.filter((type) => !overriddenNames.has(type.name)).map((type) => (
-        <div key={type.name} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+    <>
+      <ul>
+        <li className="flex flex-wrap items-center gap-2 border-border border-b py-2">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              {type.name}
+            <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+              general
               <Badge variant="secondary">{t('Built-in')}</Badge>
-              {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
             </p>
-            <p className="truncate text-muted-foreground text-xs">{type.description}</p>
-            <p className="text-muted-foreground/80 text-[11px] mt-0.5">
-              {hasSubagentModels
-                ? t('Picked by main agent')
-                : `${t('Picked by main agent')} (${t('Follows the conversation model')})`}
+            <p className="text-muted-foreground text-xs">
+              {t('Follows the conversation model, full toolset')}
             </p>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setEditing({ defaults: type })}>
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Switch
-            checked={!disabledBuiltins.includes(type.name)}
-            onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
-          />
-        </div>
-      ))}
+        </li>
 
-      {agentTypes.map((entry) => {
-        const provider = providers.find((p) => p.id === entry.providerId);
-        const virtual = findVirtualModel(virtualModels, entry);
-        const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
-        const modeLabel =
-          mode === 'agent_pick'
-            ? hasSubagentModels
-              ? t('Picked by main agent')
-              : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
-            : mode === 'fixed'
-              ? virtual
-                ? virtual.name
-                : `${provider?.name ?? '?'} / ${entry.modelId}`
-              : t('Follows the conversation model');
-        const thinkingChoice = mode !== 'agent_pick' ? thinkingChoiceOf(entry) : '';
-
-        return (
-          <div key={entry.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+        {BUILTIN_AGENT_TYPES.filter((type) => !overriddenNames.has(type.name)).map((type) => (
+          <li
+            key={type.name}
+            className="flex flex-wrap items-center gap-2 border-border border-b py-2"
+          >
             <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 truncate text-sm font-medium">
-                {entry.name}
-                {BUILTIN_AGENT_TYPES.some(
-                  (type) => type.name === entry.name.trim().toLowerCase()
-                ) && <Badge variant="secondary">{t('Overrides built-in')}</Badge>}
-                {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
+              <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                {type.name}
+                <Badge variant="secondary">{t('Built-in')}</Badge>
+                {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
               </p>
-              <p className="truncate text-muted-foreground text-xs">
-                {modeLabel}
-                {thinkingChoice
-                  ? ` · ${t('Thinking level')}: ${thinkingChoice === 'off' ? t('Off') : thinkingChoice}`
-                  : ''}
-                {entry.description ? ` · ${entry.description}` : ''}
+              <p className="truncate text-xs text-muted-foreground">{type.description}</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground/80">
+                {hasSubagentModels
+                  ? t('Picked by main agent')
+                  : `${t('Picked by main agent')} (${t('Follows the conversation model')})`}
               </p>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => setEditing(entry)}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={TOUCH_TARGET}
+              onClick={() => setEditing({ defaults: type })}
+            >
               <Pencil className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => removeAgentType(entry.id)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        );
-      })}
+            <SettingsSwitch
+              checked={!disabledBuiltins.includes(type.name)}
+              onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
+            />
+          </li>
+        ))}
 
-      <button
-        type="button"
-        onClick={() => setEditing('new')}
-        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
-      >
-        <Plus className="h-4 w-4" />
-        {t('New agent type')}
-      </button>
+        {agentTypes.map((entry) => {
+          const provider = providers.find((p) => p.id === entry.providerId);
+          const virtual = findVirtualModel(virtualModels, entry);
+          const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
+          const modeLabel =
+            mode === 'agent_pick'
+              ? hasSubagentModels
+                ? t('Picked by main agent')
+                : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
+              : mode === 'fixed'
+                ? virtual
+                  ? virtual.name
+                  : `${provider?.name ?? '?'} / ${entry.modelId}`
+                : t('Follows the conversation model');
+          const thinkingChoice = mode !== 'agent_pick' ? thinkingChoiceOf(entry) : '';
 
+          return (
+            <li
+              key={entry.id}
+              className="flex flex-wrap items-center gap-2 border-border border-b py-2"
+            >
+              <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                  <span className="max-w-full truncate">{entry.name}</span>
+                  {BUILTIN_AGENT_TYPES.some(
+                    (type) => type.name === entry.name.trim().toLowerCase()
+                  ) && <Badge variant="secondary">{t('Overrides built-in')}</Badge>}
+                  {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {modeLabel}
+                  {thinkingChoice
+                    ? ` · ${t('Thinking level')}: ${thinkingChoice === 'off' ? t('Off') : thinkingChoice}`
+                    : ''}
+                  {entry.description ? ` · ${entry.description}` : ''}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={TOUCH_TARGET}
+                onClick={() => setEditing(entry)}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={TOUCH_TARGET}
+                onClick={() => removeAgentType(entry.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </li>
+          );
+        })}
+
+        <li className="border-border border-b py-2">
+          <SettingsButton onClick={() => setEditing('new')}>
+            <Plus className="h-4 w-4" />
+            {t('New agent type')}
+          </SettingsButton>
+        </li>
+      </ul>
       {editing && (
         <AgentTypeEditDialog
           entry={editing !== 'new' && 'id' in editing ? editing : null}
@@ -235,7 +253,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
           onClose={() => setEditing(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -367,11 +385,11 @@ export function AgentTypeEditDialog({
           </Field>
           <Field>
             <FieldLabel>{t('System prompt')}</FieldLabel>
-            <textarea
+            <Textarea
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={5}
-              className="w-full rounded-md border bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+              className="font-mono text-xs"
               placeholder={t('You are a fast recon agent. Explore, never modify…')}
             />
           </Field>

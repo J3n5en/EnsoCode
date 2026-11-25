@@ -61,6 +61,7 @@ vi.mock('@/components/ui/button', () => ({
 }));
 
 vi.mock('@/components/chat/ModelPicker', () => ({
+  MODEL_PICKER_FORM_TRIGGER_CLASS: 'form-trigger',
   ModelPicker: (props: Record<string, unknown>) => {
     harness.pickerProps.push(props);
     return createElement('i', { 'data-model-picker': 'true' });

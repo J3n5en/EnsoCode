@@ -83,7 +83,9 @@ export function SettingsPage({
             <p className="mt-0.5 text-[13px] text-muted-foreground leading-5">{description}</p>
           )}
         </div>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {actions && (
+          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+        )}
       </header>
       {children}
     </div>
@@ -189,12 +191,13 @@ export function SettingsRow({
               {label}
             </label>
             {description && (
-              <p
+              // div：说明里可能放额度条这类块级内容
+              <div
                 id={context.descriptionId}
                 className="mt-px text-[12px] text-muted-foreground leading-[18px]"
               >
                 {description}
-              </p>
+              </div>
             )}
           </div>
         </div>
@@ -217,16 +220,22 @@ export function SettingsSubRow(props: Omit<SettingsRowProps, 'indent'>) {
 /** 服务商 / 插件 / MCP 这类列表：展开后是缩进子行，不是内嵌卡片 */
 export function SettingsExpandableRow({
   defaultOpen = false,
+  open: openProp,
+  onOpenChange,
   control,
   children,
   ...row
 }: Omit<SettingsRowProps, 'leading' | 'indent' | 'children'> & {
   defaultOpen?: boolean;
+  /** 受控展开：外部需要主动展开（例如校验失败要露出错误）时传 */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   control?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = React.useState(defaultOpen);
+  const [ownOpen, setOwnOpen] = React.useState(defaultOpen);
+  const open = openProp ?? ownOpen;
   const regionId = React.useId();
   return (
     <>
@@ -238,7 +247,10 @@ export function SettingsExpandableRow({
             aria-expanded={open}
             aria-controls={regionId}
             aria-label={open ? t('Collapse') : t('Expand')}
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => {
+              setOwnOpen(!open);
+              onOpenChange?.(!open);
+            }}
             className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pointer-coarse:after:absolute pointer-coarse:after:size-[44px]"
           >
             <ChevronRight className={cn('size-4 transition-transform', open && 'rotate-90')} />
