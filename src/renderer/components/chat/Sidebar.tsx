@@ -3037,11 +3037,7 @@ function ConversationRow({
         <SecretaryDispatchBadge count={dispatchRunning} />
         <ReminderMarker
           conversationId={id}
-          running={
-            conversation.status === 'running' ||
-            Boolean(conversation.spawning) ||
-            Boolean(conversation.hasRunningChild)
-          }
+          running={conversation.status === 'running' || Boolean(conversation.spawning)}
           hidden={renaming || isUpstreamWaitingGoal(conversation.goal)}
         />
         {!renaming && isUpstreamWaitingGoal(conversation.goal) && (
