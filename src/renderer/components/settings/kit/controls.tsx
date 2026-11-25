@@ -126,7 +126,7 @@ export function SettingsSegmented<T extends string>({
       className="flex h-(--settings-control-h) max-w-full items-center rounded-md bg-muted p-0.5"
     >
       {/* 触屏热区高 44px：滚动框会把它上下裁掉，用 padding 放出、负 margin 抵消，布局不变 */}
-      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto pointer-coarse:-my-[11px] pointer-coarse:py-[11px]">
+      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto pointer-coarse:-my-[12px] pointer-coarse:py-[12px]">
         {options.map((option, index) => {
           const on = option.value === value;
           return (

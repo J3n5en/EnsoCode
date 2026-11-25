@@ -133,7 +133,7 @@ describe('SettingsRow', () => {
     const scroller = option.parentElement as HTMLElement;
     expect(scroller.className).toContain('overflow-x-auto');
     expect(scroller.className.split(' ')).toEqual(
-      expect.arrayContaining(['pointer-coarse:py-[11px]', 'pointer-coarse:-my-[11px]'])
+      expect.arrayContaining(['pointer-coarse:py-[12px]', 'pointer-coarse:-my-[12px]'])
     );
   });
 
