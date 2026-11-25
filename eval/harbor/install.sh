@@ -27,11 +27,32 @@ step() {
 
 export DEBIAN_FRONTEND=noninteractive
 
+# 最低可用版本：undici 8.x（pi-mcp/pi-tui 的依赖）engines 要求 node >=22.19，
+# 且 node 的 zstd 支持（createZstdDecompress，undici decompress 拦截器运行时要用到）
+# 在 22.15+ 才进 LTS；22.6 之类更老的 22.x 会在 require('undici') 时直接崩。
+node_min_major=22
+node_min_minor=19
+
+# 版本检测片段只在 node_ok 一处使用；最低版本经 env 传入避免引号插值。
+# 三点判定：能执行、bun shim 排除（oven/bun 镜像用 node→bun 的 symlink 冒充 node，
+# process.versions.node 会谎报宿主模拟的版本号）、semver >= 最低版本。
+node_check_js='const v = process.versions.node;
+const parts = typeof v === "string" ? v.split(".").map(Number) : [];
+const major = Number(process.env.ENSO_NODE_MIN_MAJOR);
+const minor = Number(process.env.ENSO_NODE_MIN_MINOR);
+const ok = process.versions.bun === undefined
+  && parts.length >= 2
+  && (parts[0] > major || (parts[0] === major && parts[1] >= minor));
+process.exit(ok ? 0 : 1);'
+
+node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  ENSO_NODE_MIN_MAJOR=$node_min_major ENSO_NODE_MIN_MINOR=$node_min_minor \
+    node -e "$node_check_js" >/dev/null 2>&1
+}
+
 need_node() {
-  if ! command -v node >/dev/null 2>&1; then
-    return 0
-  fi
-  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 1 : 0)'
+  ! node_ok
 }
 
 arch="$(uname -m)"
@@ -101,7 +122,11 @@ finish_node_install() {
       step "node: background track failed (rc=$rc), retrying serially"
     fi
   fi
-  if ! have_node22; then
+  hash -r || true
+  # 后台轨道可能已成功解压到 /usr/local 但 PATH 里仍被旧 node/bun shim 遮蔽：
+  # 先解除遮蔽再判定，避免把合格的安装当成失败而整包重下
+  unshadow_node
+  if ! node_ok; then
     if [[ -f "$node_tarball_tmp/$node_tarball" ]]; then
       step "node: extracting downloaded tarball"
       tar -xJf "$node_tarball_tmp/$node_tarball" -C /usr/local --strip-components=1
@@ -111,13 +136,34 @@ finish_node_install() {
     fi
   fi
   hash -r || true
+  unshadow_node
 }
 
-have_node22() {
-  if ! command -v node >/dev/null 2>&1; then
-    return 1
-  fi
-  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'
+# 新 node 装在 /usr/local/bin，但镜像可能把旧 node/bun shim 放在 PATH 更靠前的目录
+# （freecad 镜像 /opt/conda/bin 在 /usr/local/bin 前；bun 镜像 shim 在末尾、不遮蔽）。
+# 若解析结果不是刚装的 /usr/local/bin/node，把遮蔽点替换成指向新二进制的 symlink。
+# 对 npm/npx 同样处理——它们的脚本靠 node 解释，绑在旧 node 上一样崩。
+unshadow_node() {
+  [[ -x /usr/local/bin/node ]] || return 0
+  local name resolved
+  for name in node npm npx; do
+    [[ -x "/usr/local/bin/$name" ]] || continue
+    resolved="$(command -v "$name" 2>/dev/null)" || continue
+    [[ -n "$resolved" ]] || continue
+    if [[ "$resolved" != "/usr/local/bin/$name" ]]; then
+      # 遮蔽点已是解开过的 symlink（指向新二进制）时跳过，保持幂等且日志不重复
+      if [[ "$(readlink -f "$resolved" 2>/dev/null)" = "$(readlink -f "/usr/local/bin/$name" 2>/dev/null)" ]]; then
+        continue
+      fi
+      # 只动 symlink 或普通文件所在路径本身，不动目录；替换失败不阻断主流程
+      if ln -sf "/usr/local/bin/$name" "$resolved" 2>/dev/null; then
+        step "node: $resolved shadowed /usr/local/bin/$name, replaced with symlink"
+      else
+        step "node: warning: cannot replace shadowing $resolved"
+      fi
+    fi
+  done
+  hash -r || true
 }
 
 install_rg_fallback() {
@@ -147,7 +193,7 @@ if need_node; then
   node_tarball_tmp="$(mktemp -d)"
   start_node_track
 else
-  step "node >= 22 already present, skipping node install"
+  step "node >= ${node_min_major}.${node_min_minor} already present, skipping node install"
 fi
 
 # 前台轨道：缺工具补工具，顺手把 ripgrep 排进同一个 apt 事务
@@ -203,6 +249,10 @@ fi
 step "finalizing node install"
 finish_node_install
 
+if ! node_ok; then
+  echo "node >= ${node_min_major}.${node_min_minor} (real node, not a bun shim) is required but could not be installed" >&2
+  exit 1
+fi
 node -v
 
 if [[ -n "$server_package" ]]; then
