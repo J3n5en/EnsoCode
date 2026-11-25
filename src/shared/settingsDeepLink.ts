@@ -44,6 +44,11 @@ export interface SettingsDeepLink {
   marketQuery?: string;
 }
 
+/** 主进程转给主窗口的「打开设置」：link 为空时回到上次的分区 */
+export interface SettingsOpenRequest {
+  link: SettingsDeepLink | null;
+}
+
 const MARKET_QUERY = /^[a-z0-9-]{1,32}$/u;
 
 const CATEGORY_SET = new Set<string>(SETTINGS_CATEGORIES);

@@ -49,7 +49,6 @@ import { createServer as createHttpServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import path from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { deflateSync } from 'node:zlib';
 import { uiElementElectron } from './verify-electron.mjs';
 import {
@@ -378,20 +377,9 @@ const visiblePanel = () =>
   }) ?? null;
 `;
 
+/** 设置在主窗口里原地打开：这条连接也是主窗口，退出设置回到工作区再断开 */
 async function closeSettingsWindow(page) {
-  // 页面里的 window.close() 会把 evaluate 一起挂死，不能一直等它回包。
-  // 用这条连接自己的 target 走 CDP /json/close，最多 2 秒，然后断开。
-  const closed = page.evaluate('window.close()').catch(() => undefined);
-  if (page.targetId) {
-    try {
-      await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${page.targetId}`, {
-        signal: AbortSignal.timeout(2000),
-      });
-    } catch {
-      // 窗口已经没了，或者关闭请求没有在时限内返回
-    }
-  }
-  await Promise.race([closed, delay(2_000)]);
+  await page.evaluate('window.__stores.settingsView.close()').catch(() => undefined);
   page.close();
 }
 
@@ -1257,7 +1245,7 @@ async function run(cdp, pluginZipUrl) {
   const seededState = readJson(dispatchFile).dispatched[dispatchedId].lastState;
 
   await page(`
-    await window.electronAPI.window.openSettings({
+    window.__stores.settingsView.open({
       category: 'secretary',
       rowId: 'secretary.dispatchLimit',
     });
@@ -1266,12 +1254,12 @@ async function run(cdp, pluginZipUrl) {
   const settingsPage = await waitFor(
     async () => {
       try {
-        return await connect('settings.html');
+        return await connect('index.html');
       } catch {
         return null;
       }
     },
-    'settings window',
+    'settings view',
     30_000,
     500
   );
@@ -5305,7 +5293,7 @@ async function verifyAvatar(cdp, setup) {
 
   log('== 头像：自定义颜色');
   await page(`
-    await window.electronAPI.window.openSettings({
+    window.__stores.settingsView.open({
       category: 'secretary',
       rowId: 'secretary.profile',
     });
@@ -5314,12 +5302,12 @@ async function verifyAvatar(cdp, setup) {
   const settingsPage = await waitFor(
     async () => {
       try {
-        return await connect('settings.html');
+        return await connect('index.html');
       } catch {
         return null;
       }
     },
-    'settings window',
+    'settings view',
     30_000,
     500
   );
@@ -5739,12 +5727,12 @@ async function verifyMemoryManualEdit(cdp, setup) {
 
   log('== 记忆：设置页筛选秘书空间');
   await page(`
-    await window.electronAPI.window.openSettings({ category: 'memory', rowId: 'memory.library' });
+    window.__stores.settingsView.open({ category: 'memory', rowId: 'memory.library' });
     return JSON.stringify(true);
   `);
   const settingsCdp = await waitFor(
-    () => connect('settings.html').catch(() => null),
-    'settings window',
+    () => connect('index.html').catch(() => null),
+    'settings view',
     30_000,
     500
   );
@@ -5940,7 +5928,7 @@ async function verifyMemoryManualEdit(cdp, setup) {
     );
     await settingsCdp.shot(path.join(ART, '42-settings-deleted.png'));
   } finally {
-    settingsCdp.close();
+    await closeSettingsWindow(settingsCdp);
   }
 
   const memoryAudit = readFileSync(memoryAuditFile, 'utf8')
@@ -9654,12 +9642,12 @@ async function verifyDeleteSecretary(cdp, setup) {
 
   log('== 删除秘书：设置页选中间那个，走两步确认');
   await page(`
-    await window.electronAPI.window.openSettings({ category: 'secretary', rowId: 'secretary.profile' });
+    window.__stores.settingsView.open({ category: 'secretary', rowId: 'secretary.profile' });
     return 'null';
   `);
   const settings = await waitFor(
-    () => connect('settings.html').catch(() => null),
-    'settings window',
+    () => connect('index.html').catch(() => null),
+    'settings view',
     30_000,
     500
   );
@@ -9852,7 +9840,7 @@ async function verifyDeleteSecretary(cdp, setup) {
     );
   };
   checkKept('删除秘书');
-  settings.close();
+  await closeSettingsWindow(settings);
 
   log('== 删除秘书：退出再打开（关着时给被删秘书自己的会话塞一条已到点的提醒）');
   cdp = await restartDev(cdp, () => {

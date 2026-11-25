@@ -36,7 +36,7 @@ const UPDATE_FLUSH_TIMEOUT_MS = 3_000;
 
 /**
  * 自动更新单例(移植自 EnsoAI,剥离 proxy 耦合)。
- * 事件 → 广播全部窗口(设置为独立窗口,主窗口与设置窗口都要收到);
+ * 事件 → 广播全部窗口;
  * 周期 + focus 去抖检查;下载完成后停后续检查并提示重启。
  */
 class AutoUpdaterService {

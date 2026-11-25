@@ -1,12 +1,12 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { ipcMain } from 'electron';
 import { computerHost } from '../services/computerHost';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 
 const MAX_APP_KEY_CHARS = 1024;
 
 function trusted(senderId: number): boolean {
-  return isMainRenderer(senderId) || isSettingsRenderer(senderId);
+  return isMainRenderer(senderId);
 }
 
 export function registerComputerHandlers(): void {

@@ -79,7 +79,7 @@ import type {
 } from '@shared/resources';
 import type { BrowserSearchTab } from '@shared/searchAnything';
 import type { FeedEvent } from '@shared/secretary/feed';
-import type { SettingsDeepLink } from '@shared/settingsDeepLink';
+import type { SettingsOpenRequest } from '@shared/settingsDeepLink';
 import type { ShellIntegration } from '@shared/shellIntegration';
 import type {
   AssetOccupancyRow,
@@ -1841,9 +1841,6 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.NODES_REMOVE, nodeId),
     rename: (nodeId: string, label: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_RENAME, nodeId, label),
-    /** 在本机新窗口打开该节点的设置（宿主设置页经隧道运行） */
-    openSettings: (nodeId: string): Promise<NodeActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.NODES_OPEN_SETTINGS, nodeId),
     /** 主窗口可见层切到本机（'local'）或某节点的完整界面 */
     switch: (target: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_SWITCH, target),
@@ -1874,8 +1871,6 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
     refreshDragRegions: (): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_REFRESH_DRAG_REGIONS),
-    openSettings: (link?: SettingsDeepLink): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, link),
     openDevTools: (): Promise<OpenDevToolsResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_DEV_TOOLS),
     onToggleSidebar: (callback: () => void): (() => void) => {
@@ -1883,12 +1878,12 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);
     },
-    onSettingsDeepLink: (callback: (link: SettingsDeepLink) => void): (() => void) => {
-      const listener = (_: unknown, link: SettingsDeepLink) => callback(link);
+    onSettingsDeepLink: (callback: () => void): (() => void) => {
+      const listener = () => callback();
       ipcRenderer.on(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
     },
-    consumeSettingsDeepLink: (): Promise<SettingsDeepLink | null> =>
+    consumeSettingsDeepLink: (): Promise<SettingsOpenRequest | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME),
     popupMenu: (
       items: { id: string; label: string }[],

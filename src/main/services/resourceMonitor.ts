@@ -100,7 +100,6 @@ function chromiumKinds(): { kinds: ChromiumPidKinds; titles: Map<number, string>
   return {
     kinds: {
       main: new Set(info?.mainPids ?? []),
-      settings: new Set(info?.settingsPids ?? []),
       browser: new Set(info?.browserPids ?? []),
     },
     titles: new Map(info?.titles ?? []),
@@ -125,9 +124,7 @@ export async function sampleResources(): Promise<ResourceSnapshot> {
             ? 'GPU'
             : kinds.main.has(m.pid)
               ? 'Main window'
-              : kinds.settings.has(m.pid)
-                ? 'Settings'
-                : (titles.get(m.pid) ?? m.name ?? m.serviceName ?? m.type);
+              : (titles.get(m.pid) ?? m.name ?? m.serviceName ?? m.type);
     return {
       pid: m.pid,
       name,

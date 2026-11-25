@@ -443,7 +443,6 @@ export const PRODUCT_SURFACE_INVENTORY = {
   'updates.download': { domain: 'updates', kind: 'action', label: 'Download update' },
   'updates.install': { domain: 'updates', kind: 'action', label: 'Quit and install update' },
 
-  'window.open-settings': { domain: 'window', kind: 'action', label: 'Open settings window' },
   'window.focus-conversation-notification': {
     domain: 'window',
     kind: 'action',

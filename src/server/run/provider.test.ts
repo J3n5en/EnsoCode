@@ -2,6 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { RUN_USAGE } from './args';
 import { resolveRunProvider, writeProviderSettings } from './provider';
 
 const dirs: string[] = [];
@@ -69,6 +70,19 @@ describe('resolveRunProvider', () => {
       api: 'anthropic-messages',
       baseUrl: 'https://api.anthropic.com',
     });
+  });
+
+  it('CLI 报错与帮助都叫「服务商」', () => {
+    const errors = [
+      resolveRunProvider({ apiKey: 'k', baseUrl: 'https://x.example/v1' }, []),
+      resolveRunProvider({ modelId: 'm', baseUrl: 'https://x.example/v1' }, []),
+      resolveRunProvider({}, []),
+      resolveRunProvider({ providerId: 'missing' }, [saved]),
+      resolveRunProvider({ providerId: 'saved' }, [{ ...saved, enabled: false }]),
+      resolveRunProvider({ providerId: 'saved' }, [{ ...saved, models: [] }]),
+    ].map((resolved) => (resolved.ok ? '' : resolved.error));
+    for (const error of errors) expect(error).toContain('服务商');
+    expect(RUN_USAGE).not.toContain('供应商');
   });
 
   it('writes settings as owner-only and keeps unrelated state', () => {

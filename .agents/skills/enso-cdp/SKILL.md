@@ -18,7 +18,6 @@ Dev (`!app.isPackaged`) already opens **9222** in `src/main/index.ts`. Do not in
 ```bash
 node scripts/cdp.mjs pages                          # 列出 page 目标
 node scripts/cdp.mjs eval '(async()=>{...})()'      # 主窗口执行 JS（支持 await）
-node scripts/cdp.mjs eval '...' --page settings.html # 设置窗口
 node scripts/cdp.mjs shot /tmp/x.png                # 截图
 node scripts/cdp.mjs keys ArrowDown Enter           # 受信任按键（真实输入管线）
 node scripts/cdp.mjs type '@rev'                    # 受信任文本输入

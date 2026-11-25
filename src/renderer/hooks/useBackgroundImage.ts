@@ -41,7 +41,7 @@ export function useEffectiveBackground(): EffectiveBackground | null {
  * light / dark / sync-terminal（ghostty 主题写入的任意颜色）。
  *
  * 本 hook 只负责：切换 <html> 的 bg-image-enabled 类 + 写入 alpha 变量。
- * 仅在主窗口 App 挂载（设置窗口保持不透明）。
+ * 仅在主窗口 App 挂载。
  */
 export function useBackgroundImage(): void {
   const background = useEffectiveBackground();

@@ -6,7 +6,7 @@ const anchorLines = THEME_ANCHORS.map((anchor) => ` *   [data-enso="${anchor}"]`
 export const USER_CSS_TEMPLATE = `/*
  * EnsoCode user.css
  *
- * 在「设置 → 外观 → 自定义 CSS」打开开关后，本文件注入主窗口与设置窗口，保存即生效。
+ * 在「设置 → 外观 → 自定义 CSS」打开开关后，本文件注入主窗口，保存即生效。
  * Enable "Settings → Appearance → Custom CSS" to inject this file; changes apply on save.
  *
  * 它排在主题 token 与主题 CSS 之后，普通的 :root / .dark 规则就能覆盖颜色变量：

@@ -64,7 +64,7 @@ import {
   setEmbeddingProgressSink,
   startEmbeddingModelDownload,
 } from '../services/memoryModels';
-import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { readSettings, readSettingsState } from './settings';
 
 const EMPTY_LIST: MemoryListResult = { items: [], total: 0 };
@@ -84,7 +84,7 @@ const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null, kgF
 const EMPTY_GRAPH: MemoryGraphDto = { nodes: [], edges: [], totalEntities: 0 };
 
 function isTrustedWindow(webContentsId: number): boolean {
-  return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
+  return isMainRenderer(webContentsId);
 }
 
 /** 服务侧库不存在（未建库）时按旧 withExistingDb 语义回落 fallback */

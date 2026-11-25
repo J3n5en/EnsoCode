@@ -208,7 +208,7 @@ function ConnectToNodesSection() {
   const refresh = useRemoteNodesStore((s) => s.refresh);
   const [pairOpen, setPairOpen] = React.useState(false);
 
-  // 设置窗口独立于主窗口：自行绑定一次状态推送
+  // 设置页可能先于节点列表挂载：自行绑定一次状态推送
   React.useEffect(() => useRemoteNodesStore.getState().bind(), []);
 
   return (

@@ -9,11 +9,11 @@ import {
 } from '../services/mcpOAuth';
 import { getMcpOAuthStore } from '../services/mcpOAuthStore';
 import { mcpStatusSnapshot, recordMcpStatus } from '../services/mcpStatusCache';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 import { pushMcpStatus } from './agent';
 
 function isTrustedWindow(webContentsId: number): boolean {
-  return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
+  return isMainRenderer(webContentsId);
 }
 
 function emitStatus(event: McpStatusEvent): void {

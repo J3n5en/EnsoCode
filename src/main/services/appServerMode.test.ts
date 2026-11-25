@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   dock: { hide: vi.fn(), show: vi.fn(async () => undefined), isVisible: vi.fn(() => true) },
   hibernate: { release: () => {} },
   win: null as null | Record<string, ReturnType<typeof vi.fn>>,
-  closeNodeSettingsWindows: vi.fn(),
+  openSettings: vi.fn(),
   trays: [] as Array<{ on: ReturnType<typeof vi.fn> }>,
   settings: {} as Record<string, unknown>,
 }));
@@ -60,7 +60,6 @@ vi.mock('../windows/MainWindow', () => ({
   getMainWindow: () => mocks.win,
   isMainWindowAlive: () => mocks.win !== null,
 }));
-vi.mock('../windows/SettingsWindow', () => ({ getSettingsWindow: () => null }));
 // 关窗确认用真实模块：放行标志在两个模块之间流转，单独 mock 掉就测不到泄漏
 vi.mock('./updater/AutoUpdater', () => ({
   autoUpdaterService: { isQuittingForUpdate: () => false },
@@ -75,7 +74,7 @@ vi.mock('./browserHost', () => ({
 }));
 vi.mock('./pairHost', () => ({ refreshPowerKeepAlive: vi.fn() }));
 vi.mock('./pairSessionHost', () => ({ setPairHeadless: vi.fn() }));
-vi.mock('./nodeRemote', () => ({ closeNodeSettingsWindows: mocks.closeNodeSettingsWindows }));
+vi.mock('../windows/mainSettings', () => ({ openSettingsInMainWindow: mocks.openSettings }));
 
 import { app, Menu } from 'electron';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../ipc/settings';
@@ -132,16 +131,6 @@ describe('app server mode dock visibility', () => {
     leaveServerMode();
     expect(mocks.dock.show).toHaveBeenCalledTimes(1);
     expect(isServerMode()).toBe(false);
-  });
-
-  it('进托盘时一并关掉远程节点的设置窗口', async () => {
-    mocks.closeNodeSettingsWindows.mockClear();
-    const entering = enterServerMode();
-    await vi.waitFor(() => expect(isServerMode()).toBe(true));
-    mocks.hibernate.release();
-    await entering;
-    expect(mocks.closeNodeSettingsWindows).toHaveBeenCalledOnce();
-    leaveServerMode();
   });
 });
 
@@ -330,6 +319,30 @@ function trayItems() {
     click?: () => void;
   }>;
 }
+
+describe('tray settings', () => {
+  beforeEach(() => {
+    mocks.settings = {};
+    mocks.openSettings.mockClear();
+    vi.mocked(Menu.buildFromTemplate).mockClear();
+    mocks.win = eventedWindow().win;
+  });
+
+  it('切换项下面就是「设置…」，点了在主窗口里打开设置（不带深链 = 回到上次的分区）', () => {
+    ensureTray();
+    const items = trayItems();
+    expect(items[1]?.label).toBe('Settings…');
+    items[1]?.click?.();
+    expect(mocks.openSettings).toHaveBeenCalledTimes(1);
+    expect(mocks.openSettings).toHaveBeenCalledWith();
+  });
+
+  it('中文界面显示「设置…」', () => {
+    mocks.settings = { 'enso-settings': { state: { language: 'zh' } } };
+    ensureTray();
+    expect(trayItems()[1]?.label).toBe('设置…');
+  });
+});
 
 describe('tray restart', () => {
   let state: AppRestartState;

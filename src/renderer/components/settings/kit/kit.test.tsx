@@ -1,4 +1,5 @@
 import { parseHTML } from 'linkedom';
+import * as React from 'react';
 import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import {
   SettingsPage,
   SettingsPreview,
   SettingsRow,
+  SettingsSearch,
   SettingsSection,
   SettingsSegmented,
   SettingsSubRow,
@@ -220,6 +222,55 @@ describe('SettingsRow', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain('Saved');
     await act(async () => vi.advanceTimersByTime(1500));
     expect(container.textContent).not.toContain('Saved');
+  });
+});
+
+describe('SettingsSearch', () => {
+  const type = async (input: HTMLInputElement, value: string) =>
+    act(async () => {
+      let proto = Object.getPrototypeOf(input);
+      while (proto && !Object.getOwnPropertyDescriptor(proto, 'value')) {
+        proto = Object.getPrototypeOf(proto);
+      }
+      Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(input, value);
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+  const pressEscape = async (input: HTMLInputElement) =>
+    act(async () => {
+      input.dispatchEvent(
+        Object.assign(new window.Event('keydown', { bubbles: true, cancelable: true }), {
+          key: 'Escape',
+        })
+      );
+    });
+
+  function Harness({ onOuterEscape }: { onOuterEscape: () => void }) {
+    const [value, setValue] = React.useState('');
+    return (
+      <div onKeyDown={(event) => event.key === 'Escape' && onOuterEscape()}>
+        <SettingsSearch value={value} onValueChange={setValue} placeholder="Search settings" />
+      </div>
+    );
+  }
+
+  it('边输边筛；有字时 Esc 只清空不往外冒（不会顺带退出设置），空了再 Esc 才往外传', async () => {
+    const outer = vi.fn();
+    await render(<Harness onOuterEscape={outer} />);
+    const input = container.querySelector('input') as HTMLInputElement;
+    expect(input.getAttribute('placeholder')).toBe('Search settings');
+    expect(input.getAttribute('aria-label')).toBe('Search settings');
+    await type(input, 'proxy');
+    expect(input.value).toBe('proxy');
+    await pressEscape(input);
+    expect(input.value).toBe('');
+    expect(outer).not.toHaveBeenCalled();
+    await pressEscape(input);
+    expect(outer).toHaveBeenCalledTimes(1);
+  });
+
+  it('不画带框容器', async () => {
+    await render(<SettingsSearch value="" onValueChange={() => {}} placeholder="Search" />);
+    expect(findNestedBoxes(container)).toEqual([]);
   });
 });
 

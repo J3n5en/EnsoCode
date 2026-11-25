@@ -143,12 +143,11 @@ export const IPC_CHANNELS = {
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: 'window:set-traffic-lights-visible',
   /** renderer → main：macOS 布局变化后重算窗口形状与拖拽命中区 */
   WINDOW_REFRESH_DRAG_REGIONS: 'window:refresh-drag-regions',
-  WINDOW_OPEN_SETTINGS: 'window:open-settings',
   /** renderer → main：给本机主窗口打开独立 DevTools（window: 前缀，远程一律不可调） */
   WINDOW_OPEN_DEV_TOOLS: 'window:open-dev-tools',
   /** main → 主界面 renderer：macOS View 菜单要求切换侧栏（与渲染层快捷键同一条逻辑） */
   WINDOW_TOGGLE_SIDEBAR: 'window:toggle-sidebar',
-  /** main → settings renderer：打开后切分类并闪行 */
+  /** main → 主窗口 renderer：有「打开设置」请求，来 CONSUME 取走（托盘、应用菜单、enso:// 深链） */
   SETTINGS_DEEP_LINK: 'settings:deep-link',
   SETTINGS_DEEP_LINK_CONSUME: 'settings:deep-link-consume',
   WINDOW_POPUP_MENU: 'window:popup-menu',
@@ -613,14 +612,12 @@ export const IPC_CHANNELS = {
   NODES_RENAME: 'nodes:rename',
   /** main → renderer：节点列表/连接状态变化 */
   NODES_STATUS_CHANGED: 'nodes:status-changed',
-  /** 主窗口打开某节点的设置窗口（宿主 renderer 经 rpc 隧道） */
-  NODES_OPEN_SETTINGS: 'nodes:open-settings',
   /** 主窗口可见层切到本机或某节点（节点界面层由 main 叠在本机 workbench 之上） */
   NODES_SWITCH: 'nodes:switch',
   NODES_ACTIVE: 'nodes:active',
   /** main → renderer：主窗口可见层变化 */
   NODES_ACTIVE_CHANGED: 'nodes:active-changed',
-  /** 节点设置窗口专用 preload ↔ main（只认该窗口的 sender） */
+  /** 节点层专用 preload ↔ main（只认节点层的 sender） */
   NODE_REMOTE_INIT: 'node-remote:init',
   NODE_REMOTE_ATTACH: 'node-remote:attach',
   NODE_REMOTE_INVOKE: 'node-remote:invoke',
