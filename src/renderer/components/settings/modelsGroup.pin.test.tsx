@@ -6,6 +6,7 @@ import { setupPin } from './pin.testUtils';
 
 // 模型菜单是弹层，钉子里换成按「供应商/模型」列出的选项，记录选中项与点选写入
 vi.mock('@/components/chat/ModelPicker', () => ({
+  MODEL_PICKER_DIALOG_TRIGGER_CLASS: 'form-trigger',
   MODEL_PICKER_FORM_TRIGGER_CLASS: 'form-trigger',
   ModelPicker: ({
     providers,

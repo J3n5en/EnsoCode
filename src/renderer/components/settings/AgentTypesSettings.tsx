@@ -7,7 +7,7 @@ import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types/llm';
 import { findVirtualModel } from '@shared/virtualModels';
 import { AlertCircle, Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
-import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
+import { MODEL_PICKER_DIALOG_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -428,7 +428,7 @@ export function AgentTypeEditDialog({
                 onReasoningChange={(enabled) => setThinking(enabled ? pickerThinkingLevel : 'off')}
                 onThinkingChange={(level) => setThinking(level)}
                 side="bottom"
-                triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+                triggerClassName={MODEL_PICKER_DIALOG_TRIGGER_CLASS}
                 zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
               />
             </Field>

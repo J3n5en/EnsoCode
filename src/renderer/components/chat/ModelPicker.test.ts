@@ -14,10 +14,13 @@ import { act, createElement, type ReactNode, useLayoutEffect, useState } from 'r
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Select, SelectTrigger } from '@/components/ui/select';
 import {
   centeredScrollTop,
   duplicateModelLabels,
   expandWorkbenchGroups,
+  MODEL_PICKER_DIALOG_TRIGGER_CLASS,
+  MODEL_PICKER_FORM_TRIGGER_CLASS,
   ModelPicker,
   persistClampedThinkingLevel,
   pinnedModelKey,
@@ -212,6 +215,39 @@ beforeEach(() => {
 });
 
 describe('ModelPicker reasoning controls mode', () => {
+  const triggerTokens = (html: string, marker: string) =>
+    (html.match(new RegExp(`<button[^>]*${marker}[^>]*>`))?.[0].match(/class="([^"]*)"/)?.[1] ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .sort();
+  const selectTokens = (size: 'sm' | 'default') =>
+    triggerTokens(
+      renderToStaticMarkup(
+        createElement(Select, { value: 'a' }, createElement(SelectTrigger, { size }, 'A'))
+      ),
+      'data-slot="select-trigger"'
+    );
+
+  it('表单触发器与同尺寸 ui 下拉同一套外观：类名一致，右侧是 ⇕ 图标', () => {
+    for (const [triggerClassName, size] of [
+      [MODEL_PICKER_FORM_TRIGGER_CLASS, 'sm'],
+      [MODEL_PICKER_DIALOG_TRIGGER_CLASS, 'default'],
+    ] as const) {
+      const html = renderToStaticMarkup(
+        createElement(ModelPicker, { ...commonProps, triggerClassName })
+      );
+      expect(triggerTokens(html, 'title=')).toEqual(selectTokens(size));
+      expect(html).toContain('lucide-chevrons-up-down');
+      expect(html).not.toContain('lucide-chevron-down');
+    }
+  });
+
+  it('会话工具行的模型芯片仍是 ∨ 图标', () => {
+    const html = renderToStaticMarkup(createElement(ModelPicker, commonProps));
+    expect(html).toContain('lucide-chevron-down');
+    expect(html).not.toContain('lucide-chevrons-up-down');
+  });
+
   it('账号池复用普通账号额度区域并跟随当前会话实际接替账号', () => {
     const pool = {
       ...providers[0],
