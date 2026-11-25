@@ -92,7 +92,7 @@ export function SubagentModelsSettings() {
                 key={entry.id}
                 data-slot="subagent-model-row"
                 className={cn(
-                  'flex flex-wrap items-center gap-2 border-border border-b py-2 pl-10',
+                  'flex flex-wrap items-center gap-2 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7',
                   entry.enabled === false && 'text-muted-foreground'
                 )}
               >
@@ -175,7 +175,7 @@ export function SubagentModelsSettings() {
               </div>
             ))}
 
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-border border-b py-2 pl-10">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7">
               <SettingsButton
                 disabled={!seedSelection}
                 onClick={() => {

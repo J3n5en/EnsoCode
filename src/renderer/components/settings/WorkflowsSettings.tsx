@@ -37,6 +37,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { CodeEditor } from './CodeEditor';
 import {
   SettingsButton,
+  SettingsEmptyState,
   SettingsPage,
   SettingsPreview,
   SettingsRow,
@@ -396,7 +397,7 @@ export function WorkflowsSettings() {
         </>
       }
       actions={
-        <SettingsButton onClick={() => setEditing('new')}>
+        <SettingsButton variant="default" onClick={() => setEditing('new')}>
           <Plus className="h-4 w-4" />
           {t('Add workflow preset')}
         </SettingsButton>
@@ -404,10 +405,16 @@ export function WorkflowsSettings() {
     >
       <SettingsSection title={t('Custom presets')}>
         {presets.length === 0 ? (
-          <div className="border-border border-b py-8 text-center">
-            <Workflow className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 font-medium text-sm">{t('No custom workflow presets yet')}</p>
-          </div>
+          <SettingsEmptyState
+            icon={Workflow}
+            title={t('No custom workflow presets yet')}
+            actions={
+              <SettingsButton variant="default" onClick={() => setEditing('new')}>
+                <Plus className="h-4 w-4" />
+                {t('Add workflow preset')}
+              </SettingsButton>
+            }
+          />
         ) : (
           presets.map((preset) => (
             <SettingsRow

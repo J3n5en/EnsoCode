@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { MotionGlobalConfig } from 'framer-motion';
 import { parseHTML } from 'linkedom';
 import * as React from 'react';
 import { act } from 'react';
@@ -267,7 +268,11 @@ export function setupPin(config: PinConfig) {
   const container = dom.document.createElement('div') as unknown as HTMLElement;
   dom.document.body.appendChild(container);
   let root: Root;
+  // 分组折叠用了 framer-motion 的 heightVariants，pin 快照只认结构不认动效进度，
+  // 收集阶段跳过动画，快照不随 rAF 时序漂。
+  const prevSkipAnimations = MotionGlobalConfig.skipAnimations;
   beforeAll(async () => {
+    MotionGlobalConfig.skipAnimations = true;
     const pages = await config.pages();
     root = createRoot(container);
     await act(async () =>
@@ -285,6 +290,7 @@ export function setupPin(config: PinConfig) {
   afterAll(async () => {
     await act(async () => root?.unmount());
     container.remove();
+    MotionGlobalConfig.skipAnimations = prevSkipAnimations;
   });
   return {
     get container() {

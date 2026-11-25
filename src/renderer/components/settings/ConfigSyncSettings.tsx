@@ -126,8 +126,8 @@ export function ConfigSyncSettings() {
         <p
           className={
             openImportMessage.kind === 'error'
-              ? 'border-border border-b py-2 text-[12px] text-destructive'
-              : 'border-border border-b py-2 text-[12px] text-muted-foreground'
+              ? 'px-4 py-2.5 text-[12px] text-destructive max-sm:px-3'
+              : 'px-4 py-2.5 text-[12px] text-muted-foreground max-sm:px-3'
           }
           role={openImportMessage.kind === 'error' ? 'alert' : 'status'}
         >

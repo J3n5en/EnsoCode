@@ -18,7 +18,6 @@ import {
 } from '@/components/ui/select';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextMenuOpeningSettings } from './ContextMenuOpeningSettings';
 import { SettingsButton, SettingsRow, SettingsSection } from './kit';
@@ -237,7 +236,7 @@ export function FileOpeningSettings() {
           </Button>
         </SettingsRow>
       ))}
-      <div className="flex flex-wrap items-center gap-2 py-3">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3">
         <Input
           className="w-24 max-w-full"
           value={extension}
@@ -267,7 +266,7 @@ export function FileOpeningSettings() {
       </div>
       {target === 'application' &&
         !isExternalFileOpenBlocked(`file${normalizedExtension ?? '.md'}`) && (
-          <div className="flex min-w-0 flex-wrap items-center gap-2 pb-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 px-4 pb-3 max-sm:px-3">
             <SettingsButton
               disabled={busy}
               onClick={() =>
@@ -288,7 +287,7 @@ export function FileOpeningSettings() {
           </div>
         )}
       {error && (
-        <p role="alert" className="pb-3 text-xs text-destructive">
+        <p role="alert" className="px-4 pb-3 text-xs text-destructive max-sm:px-3">
           {error}
         </p>
       )}

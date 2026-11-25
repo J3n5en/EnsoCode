@@ -4520,6 +4520,37 @@ export const zhTranslations: Record<string, string> = {
   Plugins: '插件',
   'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.':
     '秘书为自己编写的 Python 或 Node 工具。它会在对话里提出，你确认后才会写入。只读工具直接运行，其他工具每次调用都要你批准。',
+  'Delete agent type?': '删除智能体类型？',
+  'This permanently deletes the "{{name}}" agent type.': '将永久删除智能体类型「{{name}}」。',
+  'Enable custom background image': '启用自定义背景图',
+  'Theme mode is set to Sync terminal theme, so interface colors follow your terminal theme instead of this gallery.':
+    '当前主题模式为「跟随终端主题」，界面配色将跟随终端主题，而非下方主题库。',
+  'Switch to System mode': '切换为跟随系统',
+  'Restore default template?': '恢复默认模板？',
+  'Delete template?': '删除模板？',
+  'This discards customizations to "{{name}}".': '将放弃对「{{name}}」的自定义修改。',
+  'This permanently deletes "{{name}}".': '将永久删除「{{name}}」。',
+  'Remove member?': '移除成员？',
+  'Remove "{{name}}" from this team template?': '要从团队模板中移除「{{name}}」吗？',
+  'Clear cookies?': '清除 Cookie？',
+  'Clear cache?': '清除缓存？',
+  'Clear all browsing data?': '清除所有浏览数据？',
+  'Clear rule exemptions?': '清除规则豁免？',
+  'All exempted dcg rules will require confirmation again.':
+    '所有已豁免的 dcg 规则将重新需要确认。',
+  'From environment': '来自环境变量',
+  'Delete instruction file?': '删除指令文件？',
+  'This removes "{{name}}" from your instruction files.': '将从指令文件列表中移除「{{name}}」。',
+  'Plugin commands': '插件命令',
+  'Clear filter': '清空筛选',
+  'Delete MCP server?': '删除 MCP 服务器？',
+  'This permanently deletes the "{{name}}" MCP server configuration.':
+    '将永久删除 MCP 服务器配置「{{name}}」。',
+  'Clear search': '清空搜索',
+  'Delete skill?': '删除技能？',
+  'This removes "{{name}}" from your skills list.': '将从技能列表中移除「{{name}}」。',
+  'Delete SSH connection?': '删除 SSH 连接？',
+  Metric: '指标',
 };
 
 export function normalizeLocale(input?: string): Locale {

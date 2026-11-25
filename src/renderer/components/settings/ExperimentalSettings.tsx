@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsRow, SettingsSwitch } from './kit';
+import { SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
 
 /** 实验功能开关集中在这里；功能自己的设置放各自的分页 */
 export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void }) {
@@ -16,14 +16,11 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
   const setSecretaryEnabled = useSettingsStore((s) => s.setSecretaryEnabled);
   const isMac = window.electronAPI.env.platform === 'darwin' && !window.electronAPI.remote;
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium">{t('Experimental')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t('Features still being tested. They may change or be removed.')}
-        </p>
-      </div>
-      <div className="space-y-2">
+    <SettingsPage
+      title={t('Experimental')}
+      description={t('Features still being tested. They may change or be removed.')}
+    >
+      <SettingsSection>
         <SettingsRow
           rowId="experimental.botMode"
           label={t('Bot mode')}
@@ -34,9 +31,11 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
           <SettingsSwitch checked={botModeEnabled} onCheckedChange={setBotModeEnabled} />
         </SettingsRow>
         {botModeEnabled && (
-          <Button variant="outline" size="sm" onClick={onOpenBots}>
-            {t('Bot mode settings')}
-          </Button>
+          <div className="px-4 py-2.5 max-sm:px-3">
+            <Button variant="outline" size="sm" onClick={onOpenBots}>
+              {t('Bot mode settings')}
+            </Button>
+          </div>
         )}
         <SettingsRow
           rowId="experimental.scratchSessions"
@@ -70,7 +69,7 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
         >
           <SettingsSwitch checked={secretaryEnabled} onCheckedChange={setSecretaryEnabled} />
         </SettingsRow>
-      </div>
-    </div>
+      </SettingsSection>
+    </SettingsPage>
   );
 }

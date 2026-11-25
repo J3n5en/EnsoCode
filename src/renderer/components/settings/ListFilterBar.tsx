@@ -1,9 +1,10 @@
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 
 export function matchesFilter(query: string, parts: Array<string | undefined>): boolean {
   const q = query.trim().toLowerCase();
@@ -71,17 +72,40 @@ export function ListFilterBar({
   actionDisabled?: boolean;
 }) {
   const { t } = useI18n();
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   return (
-    <div className="flex w-full items-center gap-2">
+    <div className="flex w-full items-center gap-2 px-4 py-2.5 max-sm:px-3">
       <div className="relative min-w-0 flex-1">
         <Search className="pointer-events-none absolute top-1/2 left-2.5 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
+          ref={inputRef}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape' || query.length === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onQueryChange('');
+          }}
           placeholder={placeholder}
-          className="h-8 text-xs [&_input]:pl-8"
+          className={cn('h-8 text-xs [&_input]:pl-8', query.length > 0 && '[&_input]:pr-7')}
         />
+        {query.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('Clear filter')}
+            onClick={() => {
+              onQueryChange('');
+              inputRef.current?.focus();
+            }}
+            className="absolute top-1/2 right-1 z-10 -translate-y-1/2"
+          >
+            <X className="size-3.5" />
+          </Button>
+        )}
       </div>
       {onToggleSelectAll != null && (
         <Checkbox

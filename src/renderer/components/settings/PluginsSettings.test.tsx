@@ -1,4 +1,5 @@
 import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
+import { MotionGlobalConfig } from 'framer-motion';
 import { parseHTML } from 'linkedom';
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -233,12 +234,14 @@ beforeEach(async () => {
   harness.configGet.mockResolvedValue({ ok: true, fields: [] });
   container = dom.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
+  MotionGlobalConfig.skipAnimations = true;
   vi.clearAllMocks();
   harness.list.mockResolvedValue([plugin]);
   await render();
 });
 
 afterEach(async () => {
+  MotionGlobalConfig.skipAnimations = false;
   await act(async () => root.unmount());
   vi.unstubAllGlobals();
 });

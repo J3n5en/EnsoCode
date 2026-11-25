@@ -390,87 +390,89 @@ function TerminalAppearance() {
   };
 
   return (
-    <SettingsSection rowId="terminal.appearance" title={t('Terminal appearance')}>
-      <div className="py-3">
+    <div data-settings-row="terminal.appearance" className="space-y-4">
+      <SettingsSection bare title={t('Terminal appearance')}>
         <TerminalPreview
           theme={previewTheme}
           fontSize={localFontSize}
           fontFamily={localFontFamily}
           fontWeight={terminalFontWeight}
         />
-      </div>
-      <SettingsRow label={t('Color scheme')}>
-        <div className="flex min-w-0 items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handlePrevTheme}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <ThemeCombobox
-            value={terminalTheme}
-            onValueChange={(value) => {
-              if (value) setTerminalTheme(value);
+      </SettingsSection>
+      <SettingsSection>
+        <SettingsRow label={t('Color scheme')}>
+          <div className="flex min-w-0 items-center gap-2">
+            <Button variant="outline" size="icon" onClick={handlePrevTheme}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <ThemeCombobox
+              value={terminalTheme}
+              onValueChange={(value) => {
+                if (value) setTerminalTheme(value);
+              }}
+              themes={displayThemes}
+              favoriteThemes={favoriteTerminalThemes}
+              onToggleFavorite={toggleFavoriteTerminalTheme}
+              onThemeHover={setTerminalTheme}
+              showFavoritesOnly={showFavoritesOnly}
+              onShowFavoritesOnlyChange={setShowFavoritesOnly}
+              showEmptyFavoritesHint={showEmptyFavoritesHint}
+            />
+            <Button variant="outline" size="icon" onClick={handleNextTheme}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </SettingsRow>
+        <SettingsRow label={t('Font')}>
+          <Input
+            value={localFontFamily}
+            onChange={(e) => setLocalFontFamily(e.target.value)}
+            onBlur={applyFontFamilyChange}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === 'Enter') {
+                applyFontFamilyChange();
+                e.currentTarget.blur();
+              }
             }}
-            themes={displayThemes}
-            favoriteThemes={favoriteTerminalThemes}
-            onToggleFavorite={toggleFavoriteTerminalTheme}
-            onThemeHover={setTerminalTheme}
-            showFavoritesOnly={showFavoritesOnly}
-            onShowFavoritesOnlyChange={setShowFavoritesOnly}
-            showEmptyFavoritesHint={showEmptyFavoritesHint}
+            placeholder="JetBrains Mono, monospace"
+            className="w-[min(100%,220px)] max-w-full"
           />
-          <Button variant="outline" size="icon" onClick={handleNextTheme}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </SettingsRow>
-      <SettingsRow label={t('Font')}>
-        <Input
-          value={localFontFamily}
-          onChange={(e) => setLocalFontFamily(e.target.value)}
-          onBlur={applyFontFamilyChange}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
-            if (e.key === 'Enter') {
-              applyFontFamilyChange();
-              e.currentTarget.blur();
-            }
-          }}
-          placeholder="JetBrains Mono, monospace"
-          className="w-[min(100%,220px)] max-w-full"
-        />
-      </SettingsRow>
-      <SettingsRow label={t('Font size')}>
-        <Input
-          type="number"
-          value={localFontSize}
-          onChange={(e) => setLocalFontSize(Number(e.target.value))}
-          onBlur={applyFontSizeChange}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              applyFontSizeChange();
-              e.currentTarget.blur();
-            }
-          }}
-          min={8}
-          max={32}
-          className="w-20 max-w-full"
-        />
-        <span className="text-[12px] text-muted-foreground">px</span>
-      </SettingsRow>
-      <SettingsRow label={t('Font weight')}>
-        <SettingsSelect
-          value={terminalFontWeight}
-          options={fontWeightOptions}
-          onValueChange={(value) => setTerminalFontWeight(value as FontWeight)}
-        />
-      </SettingsRow>
-      <SettingsRow label={t('Bold font weight')}>
-        <SettingsSelect
-          value={terminalFontWeightBold}
-          options={fontWeightOptions}
-          onValueChange={(value) => setTerminalFontWeightBold(value as FontWeight)}
-        />
-      </SettingsRow>
-    </SettingsSection>
+        </SettingsRow>
+        <SettingsRow label={t('Font size')}>
+          <Input
+            type="number"
+            value={localFontSize}
+            onChange={(e) => setLocalFontSize(Number(e.target.value))}
+            onBlur={applyFontSizeChange}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                applyFontSizeChange();
+                e.currentTarget.blur();
+              }
+            }}
+            min={8}
+            max={32}
+            className="w-20 max-w-full"
+          />
+          <span className="text-[12px] text-muted-foreground">px</span>
+        </SettingsRow>
+        <SettingsRow label={t('Font weight')}>
+          <SettingsSelect
+            value={terminalFontWeight}
+            options={fontWeightOptions}
+            onValueChange={(value) => setTerminalFontWeight(value as FontWeight)}
+          />
+        </SettingsRow>
+        <SettingsRow label={t('Bold font weight')}>
+          <SettingsSelect
+            value={terminalFontWeightBold}
+            options={fontWeightOptions}
+            onValueChange={(value) => setTerminalFontWeightBold(value as FontWeight)}
+          />
+        </SettingsRow>
+      </SettingsSection>
+    </div>
   );
 }
 

@@ -33,6 +33,7 @@ import { GitCommitSettings } from './GitCommitSettings';
 import { ImageGenerationPicker } from './ImageGenerationPicker';
 import {
   SettingsButton,
+  SettingsEmptyState,
   SettingsExpandableRow,
   SettingsPage,
   SettingsRow,
@@ -322,13 +323,25 @@ export function ProvidersSettings() {
           </SettingsRow>
         )}
         {providers.length === 0 ? (
-          <div className="border-border border-b px-3 py-8 text-center">
-            <Server className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 text-sm font-medium">{t('No providers yet')}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t('Import providers from local apps or use the unified setup to get started')}
-            </p>
-          </div>
+          <SettingsEmptyState
+            icon={Server}
+            title={t('No providers yet')}
+            description={t(
+              'Import providers from local apps or use the unified setup to get started'
+            )}
+            actions={
+              <>
+                <SettingsButton variant="default" onClick={() => setSetupOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  {t('Add model or provider')}
+                </SettingsButton>
+                <SettingsButton onClick={() => setImportOpen(true)}>
+                  <HardDriveDownload className="h-4 w-4" />
+                  {t('Import from local apps')}
+                </SettingsButton>
+              </>
+            }
+          />
         ) : (
           groups.map((group) => {
             const oauthInfo = oauthInfos.find((info) => info.id === group.vendorId);

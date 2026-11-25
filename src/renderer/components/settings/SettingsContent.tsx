@@ -51,7 +51,7 @@ import { ExperimentalSettings } from './ExperimentalSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
-import { SettingsSearch } from './kit';
+import { SettingsButton, SettingsSearch } from './kit';
 import { LogsSettings } from './LogsSettings';
 import { McpSettings } from './McpSettings';
 import { MemoryKnowledge } from './MemoryKnowledge';
@@ -177,6 +177,32 @@ export function SettingsContent({
   const mobileList = !embedded.mobileDetail;
   const setMobileList = (list: boolean) => embedded.onMobileDetailChange(!list);
   const [settingsQuery, setSettingsQuery] = React.useState('');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'f'
+      ) {
+        const target = event.target;
+        if (
+          target instanceof Element &&
+          target.closest('.cm-editor, .monaco-editor, [data-code-editor], [contenteditable="true"]')
+        ) {
+          return;
+        }
+        const input = searchInputRef.current;
+        if (!input) return;
+        event.preventDefault();
+        input.focus();
+        input.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
   const [sshConnections, setSshConnections] = React.useState<Array<{ id: string; name: string }>>(
     []
   );
@@ -356,6 +382,7 @@ export function SettingsContent({
           </div>
           <div className="sticky top-0 z-10 px-2 pt-2">
             <SettingsSearch
+              inputRef={searchInputRef}
               value={settingsQuery}
               onValueChange={setSettingsQuery}
               placeholder={t('Search settings')}
@@ -363,7 +390,12 @@ export function SettingsContent({
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {settingsQuery.trim() && groupedCategories.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">{t('No results')}</div>
+              <div className="flex flex-col items-start gap-2 px-3 py-2">
+                <span className="text-xs text-muted-foreground">{t('No results')}</span>
+                <SettingsButton variant="ghost" size="xs" onClick={() => setSettingsQuery('')}>
+                  {t('Clear search')}
+                </SettingsButton>
+              </div>
             ) : (
               groupedCategories.map((group, index) => (
                 <div key={group.id} className={cn(index > 0 && 'mt-4')}>
@@ -444,7 +476,7 @@ export function SettingsContent({
                 type="button"
                 data-enso="settings-detail-back"
                 onClick={() => setMobileList(true)}
-                className="sticky top-0 z-10 -mx-4 mb-3 flex min-h-11 w-[calc(100%+2rem)] items-center gap-1 border-b bg-background px-2 py-2.5 text-sm font-medium"
+                className="sticky top-0 z-10 -mx-4 mb-3 flex min-h-11 w-[calc(100%+2rem)] items-center gap-1 border-b border-border/70 bg-background/95 px-2 py-2.5 text-sm font-medium backdrop-blur-md"
               >
                 <ChevronLeft className="h-5 w-5 text-muted-foreground" />
                 {activeLabel ? t(activeLabel) : null}

@@ -138,14 +138,14 @@ export function MemoryRows({
   emptyLabel?: string;
 }) {
   return (
-    <ul className="divide-y border-border border-b">
+    <ul className="divide-y divide-border/60">
       {items.length === 0 && (
-        <li className="py-6 text-[13px] text-muted-foreground">{emptyLabel}</li>
+        <li className="px-4 py-6 text-[13px] text-muted-foreground max-sm:px-3">{emptyLabel}</li>
       )}
       {items.map((item) => (
         <li
           key={item.id}
-          className={cn(HOVER_ROW_CLASS, 'flex items-center gap-2 px-1 py-2')}
+          className={cn(HOVER_ROW_CLASS, 'flex items-center gap-2 px-4 py-2.5 max-sm:px-3')}
           data-memory-id={item.id}
         >
           {onToggle && (
@@ -329,7 +329,7 @@ export function PendingReviewSection({
         </label>
       }
     >
-      <div className="space-y-0.5 border-border border-b py-2 text-muted-foreground text-xs">
+      <div className="space-y-0.5 px-4 py-2.5 text-muted-foreground text-xs max-sm:px-3">
         <p>
           {t(
             'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.'
@@ -347,7 +347,7 @@ export function PendingReviewSection({
         </p>
       </div>
       {items.length > PENDING_REVIEW_ALERT && (
-        <p className="border-border border-b py-2 text-warning text-xs" data-memory-review-alert>
+        <p className="px-4 py-2.5 text-warning text-xs max-sm:px-3" data-memory-review-alert>
           {t(
             '{{count}} contradictions are waiting for review. Clear them in bulk so real conflicts do not get buried.',
             { count: String(items.length) }
@@ -375,14 +375,14 @@ export function PendingReviewSection({
       {groupPendingReviews(items).map((group) => (
         <div key={group.key}>
           {group.label && (
-            <h4 className="pt-3 pb-1 text-muted-foreground text-xs">
+            <h4 className="px-4 pt-3 pb-1 text-muted-foreground text-xs max-sm:px-3">
               {group.label} · {t('{{count}} pending', { count: String(group.items.length) })}
             </h4>
           )}
           {group.items.map(({ edge, older, newer }) => (
             <div
               key={edge.id}
-              className="space-y-1.5 border-border border-b py-3"
+              className="space-y-1.5 px-4 py-3 max-sm:px-3"
               data-memory-review={edge.id}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -437,7 +437,7 @@ export function PendingWritesSection({
       description={t('Bot members need your approval before writing to project or global memory.')}
     >
       {writes.map((write) => (
-        <div key={write.id} className="space-y-1 border-border border-b py-3">
+        <div key={write.id} className="space-y-1 px-4 py-3 max-sm:px-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {write.originLabel && <span className="text-foreground">{write.originLabel}</span>}
             <span>→ {write.spaceLabel}</span>
@@ -686,7 +686,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
           'Everything the agent has saved. Archiving hides a memory from search but keeps it.'
         )}
       >
-        <div className="flex flex-wrap items-center gap-2 border-border border-b py-2 pointer-coarse:gap-y-[16px]">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 pointer-coarse:gap-y-[16px] max-sm:px-3">
           {/* 检索方式属于「怎么搜」，和搜索框合成一个控件，不当作并列的筛选项 */}
           <InputGroup className="w-full sm:w-96" data-size="sm">
             <InputGroupInput
@@ -808,7 +808,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         </div>
 
         {isMemoryRetrievalMode(mode) && (
-          <p className="border-border border-b py-2 text-xs text-muted-foreground">
+          <p className="px-4 py-2.5 text-xs text-muted-foreground max-sm:px-3">
             {t(
               mode === 'deep'
                 ? 'Same recall as Fast, plus intent-weighted fusion and an optional short-timeout LLM rerank. Failures fall back; archived memories are excluded.'
@@ -871,7 +871,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         />
 
         {!approximate && total > MEMORY_PAGE_SIZE && (
-          <div className="flex items-center justify-between py-2 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between px-4 py-2.5 text-xs text-muted-foreground max-sm:px-3">
             <Button
               variant="outline"
               size="sm"

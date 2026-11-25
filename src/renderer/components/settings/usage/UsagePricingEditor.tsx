@@ -208,7 +208,7 @@ export function UsagePricingEditor({
         }
       >
         <CollapsibleContent>
-          <div className="space-y-3 border-border border-b py-3">
+          <div className="space-y-3 px-4 py-3 max-sm:px-3">
             <Input
               size="sm"
               value={query}
