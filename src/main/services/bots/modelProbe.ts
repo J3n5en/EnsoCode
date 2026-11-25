@@ -89,9 +89,9 @@ function usabilityReasonText(reason: ModelUsability): string {
     case 'missing-selection':
       return '未配置模型';
     case 'provider-missing':
-      return '找不到供应商';
+      return '找不到服务商';
     case 'provider-disabled':
-      return '供应商已停用';
+      return '服务商已停用';
     case 'classifier-only':
       return '仅用于分类，不能聊天';
     case 'model-missing':

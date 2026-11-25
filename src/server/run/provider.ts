@@ -88,8 +88,8 @@ export function resolveRunProvider(
   const known = rawList.map((item) => coerceProvider(item));
   const endpoint = Boolean(request.apiKey || request.baseUrl || request.api);
   if (endpoint) {
-    if (!request.modelId) return { ok: false, error: '新建供应商时需要 --model 或 ENSO_MODEL' };
-    if (!request.apiKey) return { ok: false, error: '新建供应商时需要 --api-key 或 ENSO_API_KEY' };
+    if (!request.modelId) return { ok: false, error: '新建服务商时需要 --model 或 ENSO_MODEL' };
+    if (!request.apiKey) return { ok: false, error: '新建服务商时需要 --api-key 或 ENSO_API_KEY' };
     const id = request.providerId || 'enso-run';
     const api = inferApi(request.baseUrl, request.api);
     const baseUrl = request.baseUrl || DEFAULT_BASE_URLS[api];
@@ -137,18 +137,18 @@ export function resolveRunProvider(
     return {
       ok: false,
       error: request.providerId
-        ? `设置里没有供应商 ${request.providerId}`
-        : '没有可用供应商。用 --api-key、--base-url 和 --model 指定，或先写入 settings.json',
+        ? `设置里没有服务商 ${request.providerId}`
+        : '没有可用服务商。用 --api-key、--base-url 和 --model 指定，或先写入 settings.json',
     };
   }
-  if (!provider.enabled) return { ok: false, error: `供应商 ${provider.id} 已停用` };
+  if (!provider.enabled) return { ok: false, error: `服务商 ${provider.id} 已停用` };
   let modelId = enabledModelId(provider, request.modelId);
   let next = provider;
   if (!modelId && request.modelId) {
     next = withModel(provider, request.modelId);
     modelId = request.modelId;
   }
-  if (!modelId) return { ok: false, error: `供应商 ${provider.id} 没有可用模型` };
+  if (!modelId) return { ok: false, error: `服务商 ${provider.id} 没有可用模型` };
   const reason = modelUsability({ providerId: provider.id, modelId }, [next], {
     oauthCredentials: { status: 'ready', authenticatedAccountKeys: new Set() },
   });

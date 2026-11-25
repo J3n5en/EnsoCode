@@ -314,15 +314,15 @@ describe('describeModelIssue', () => {
   it('缺 key / 停用 / 不存在各有可读原因', () => {
     expect(describeModelIssue(state, ENGINE)).toBe('模型 gpt-5 (OpenAI) 不可用：缺少 API Key');
     const disabled = { providers: [{ ...providers[0], enabled: false }] };
-    expect(describeModelIssue(disabled, ENGINE)).toContain('供应商已停用');
+    expect(describeModelIssue(disabled, ENGINE)).toContain('服务商已停用');
     const missing = { providers: [{ ...providers[0], models: [] }] };
     expect(describeModelIssue(missing, ENGINE)).toContain('模型不存在');
   });
 
-  it('供应商找不到时仍带模型 id', () => {
+  it('服务商找不到时仍带模型 id', () => {
     expect(describeModelIssue(state, { providerId: 'ghost', modelId: 'm1' })).toContain('m1');
     expect(describeModelIssue(state, { providerId: 'ghost', modelId: 'm1' })).toContain(
-      '找不到供应商'
+      '找不到服务商'
     );
   });
 });

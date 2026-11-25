@@ -77,10 +77,10 @@ export const RUN_USAGE = `enso-server run — 无界面跑一轮真实 agent 会
   --target <text> | --goal <text>
                               以 /goal 自动续跑；可与 --prompt 同时给出
   --auto-turns <n>            goal 自动轮数上限，默认 25
-  --provider <id>             供应商 id；新建时默认 enso-run
+  --provider <id>             服务商 id；新建时默认 enso-run
   --model <id>                模型 id
   --api <kind>                openai-completions | openai-responses | anthropic-messages
-                              以及供应商层支持的其它协议
+                              以及服务商层支持的其它协议
   --api-key <key>             API key（也可用环境变量，见下）
   --base-url <url>            模型端点，例如 https://host/v1
   --reasoning-effort <level>  off | minimal | low | medium | high | xhigh | max
@@ -96,7 +96,7 @@ export const RUN_USAGE = `enso-server run — 无界面跑一轮真实 agent 会
 环境变量（命令行优先）:
   ENSO_DATA_DIR ENSO_PROVIDER_ID ENSO_MODEL ENSO_API_KEY ENSO_BASE_URL ENSO_API
   ENSO_REASONING_EFFORT ENSO_TIMEOUT_MS
-  ENSO_API_KEY 和 ENSO_BASE_URL 都没设置、也没指定供应商但给了模型时，整组回退
+  ENSO_API_KEY 和 ENSO_BASE_URL 都没设置、也没指定服务商但给了模型时，整组回退
   OPENAI_API_KEY + OPENAI_BASE_URL，其次 ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL
   未设置 ENSO_MODEL 时回退 OPENAI_MODEL；没给地址时用协议默认端点
 
