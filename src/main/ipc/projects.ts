@@ -12,6 +12,7 @@ import {
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { listProjectCodeSources } from '../../agent/projectCodeSources';
 import { gitClone } from '../services/gitClone';
+import { searchGithubRepos } from '../services/githubRepoSearch';
 import { searchHostDirs } from '../services/hostDirSearch';
 import { createHostDir, listHostDirs } from '../services/hostDirs';
 import { setProjectIconResolver } from '../services/localImageProtocol';
@@ -183,6 +184,14 @@ export function registerProjectHandlers(): void {
     if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'Invalid request.' };
     return gitClone(request);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECTS_SEARCH_GITHUB_REPOS,
+    async (event, query: unknown, limit: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'Invalid request.' };
+      return searchGithubRepos(query, limit);
+    }
+  );
 
   // 渲染层只传标识符，磁盘路径由 Main 从权威记录推导，不接受任意路径
   ipcMain.handle(

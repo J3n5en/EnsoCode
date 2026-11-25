@@ -121,6 +121,7 @@ import type {
   GitFileDiffResult,
   GitHistoryRequest,
   GitHistoryResult,
+  GithubRepoSearchResult,
   GitOperationResult,
   GitPathsRequest,
   GitRequest,
@@ -1107,6 +1108,9 @@ const electronAPI = {
     /** 把远程仓库克隆到 parentDir 下；url 为完整 git 地址或 owner/repo */
     gitClone: (request: GitCloneRequest): Promise<GitCloneResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GIT_CLONE, request),
+    /** 用 gh 搜索当前账号的仓库。空 query 列出自己的仓库，url 为 https 克隆地址 */
+    searchGithubRepos: (query: string, limit?: number): Promise<GithubRepoSearchResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEARCH_GITHUB_REPOS, query, limit),
     /** 在系统文件管理器（或 appId 指定的应用）里打开项目或会话的实际工作目录；ssh 项目返回 unsupported */
     reveal: (request: {
       projectId: string;

@@ -93,3 +93,17 @@ export interface GitCloneRequest {
 
 /** path 是克隆出的目录绝对路径 */
 export type GitCloneResult = { ok: true; path: string } | { ok: false; error: string };
+
+/** gh 搜到的仓库。url 是 https 地址，可直接交给 git clone */
+export interface GithubRepo {
+  name: string;
+  nameWithOwner: string;
+  description: string | null;
+  isPrivate: boolean;
+  url: string;
+  sshUrl?: string;
+}
+
+export type GithubRepoSearchResult =
+  | { ok: true; repos: GithubRepo[] }
+  | { ok: false; error: string };
