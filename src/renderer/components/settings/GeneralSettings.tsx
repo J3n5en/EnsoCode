@@ -2,7 +2,11 @@ import { CA_CERT_EXTENSIONS, type CaCertError, type CaCertStatus } from '@shared
 import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { ShellIntegration } from '@shared/shellIntegration';
 import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
-import { isPrereleaseVersion, type UpdateChannel } from '@shared/updater/channel';
+import {
+  isPrereleaseVersion,
+  manualInstallSpec,
+  type UpdateChannel,
+} from '@shared/updater/channel';
 import { isAutoRestartMode } from '@shared/updater/idleRestart';
 import * as React from 'react';
 import { ManualInstallActions } from '@/components/app/ManualInstallActions';
@@ -319,10 +323,19 @@ function CaCertSection() {
 
 function serverModeText(
   mode: ServerUpdateMode | undefined,
+  channel: UpdateChannel,
   t: ReturnType<typeof useI18n>['t']
-): string {
+): React.ReactNode {
   if (mode === 'npm') return t('Server updates install the new version with npm and restart.');
-  return t('This server must be updated on the machine itself.');
+  return (
+    <>
+      {t('This server must be updated on the machine itself.')}
+      {/* 命令与渠道联动（内测装 @beta dist-tag），命令本身不翻译，所以拆出来直接渲染 */}
+      <code data-server-manual-command className="mt-0.5 block">
+        npm i -g {manualInstallSpec(channel)}
+      </code>
+    </>
+  );
 }
 
 /** 打包时由 vite 注入的 app 版本(见 electron.vite.config.ts define);dev 下取 package.json */
@@ -410,7 +423,7 @@ function UpdateSection() {
     <SettingsSection
       rowId="general.updates"
       title={t('Updates')}
-      description={server ? serverModeText(server.mode, t) : t('Application update settings')}
+      description={server ? serverModeText(server.mode, updateChannel, t) : t('Application update settings')}
     >
       <SettingsRow
         label={

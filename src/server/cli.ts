@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { createInterface as createPromptInterface } from 'node:readline/promises';
 import type { PairStatus } from '@shared/types/pair';
 import type { UpdaterState } from '@shared/types/updater';
+import { manualInstallSpec, manualInstallSpecForVersion } from '@shared/updater/channel';
 import QRCode from 'qrcode';
 import {
   CONFIG_ENV_KEYS,
@@ -134,7 +135,7 @@ async function status(socketPath: string): Promise<void> {
   const s = updater.status;
   const updateText =
     updater.mode !== 'npm'
-      ? '手动（npm i -g @ensocode/server@latest）'
+      ? `手动（npm i -g ${manualInstallSpec(updater.channel === 'beta' ? 'beta' : 'stable')}）`
       : s?.status === 'available' || s?.status === 'downloaded'
         ? `有新版本 ${s.info?.version}，运行 \`enso-server update\``
         : s?.status === 'error'
@@ -172,7 +173,9 @@ async function update(socketPath: string, flags: string[]): Promise<void> {
   if (reply.applying) console.log(`正在安装 ${s?.info?.version}，完成后服务自动重启`);
   else if (s?.status === 'not-available') console.log(`已是最新 (${s.info?.version})`);
   else if (s?.status === 'available')
-    console.log(`有新版本 ${s.info?.version}：执行 npm i -g @ensocode/server@latest 后重启`);
+    console.log(
+      `有新版本 ${s.info?.version}：执行 npm i -g ${manualInstallSpecForVersion(String(s.info?.version ?? ''))} 后重启`
+    );
   else console.log(JSON.stringify(s));
 }
 
