@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { act } from 'react';
+import { describe, expect, it } from 'vitest';
 import { setupPin } from './pin.testUtils';
 
 /** 手动更新提示里的 npm 命令要随更新渠道走 dist-tag：内测 @beta、正式 @latest */

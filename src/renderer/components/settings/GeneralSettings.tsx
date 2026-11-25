@@ -423,7 +423,9 @@ function UpdateSection() {
     <SettingsSection
       rowId="general.updates"
       title={t('Updates')}
-      description={server ? serverModeText(server.mode, updateChannel, t) : t('Application update settings')}
+      description={
+        server ? serverModeText(server.mode, updateChannel, t) : t('Application update settings')
+      }
     >
       <SettingsRow
         label={
