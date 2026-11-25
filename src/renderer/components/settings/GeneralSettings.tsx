@@ -499,16 +499,22 @@ function UpdateSection() {
         <SettingsRow
           label={t('Restart server')}
           description={t(
-            'Running tasks are interrupted; this page reconnects after the server is back.'
+            'Waits for running tasks to finish before restarting; this page reconnects after the server is back. Force restart does not wait.'
           )}
         >
+          <SettingsButton
+            variant="ghost"
+            onClick={() => void window.electronAPI.updater.restart(true)}
+          >
+            {t('Restart now')}
+          </SettingsButton>
           <SettingsButton onClick={() => setConfirmRestart(true)}>{t('Restart')}</SettingsButton>
           <ConfirmDialog
             open={confirmRestart}
             onOpenChange={setConfirmRestart}
             title={t('Restart server?')}
             description={t(
-              'Running tasks are interrupted; this page reconnects after the server is back.'
+              'Running tasks finish first, then the server restarts; this page reconnects when it is back.'
             )}
             confirmLabel={t('Restart')}
             onConfirm={() => {
@@ -523,11 +529,15 @@ function UpdateSection() {
         description={
           server?.mode === 'manual'
             ? t('Not available for this install: it cannot update itself. Update manually instead.')
-            : t('Download and install updates automatically')
+            : server
+              ? t(
+                  'Download and install updates automatically: running tasks finish first, then the server restarts and they resume.'
+                )
+              : t('Download and install updates automatically')
         }
       >
         <SettingsSwitch
-          checked={autoUpdate}
+          checked={server?.mode === 'manual' ? false : autoUpdate}
           disabled={server?.mode === 'manual'}
           onCheckedChange={(checked) => {
             setAutoUpdate(checked);
@@ -535,37 +545,39 @@ function UpdateSection() {
           }}
         />
       </SettingsRow>
-      <div className={autoUpdate ? undefined : 'opacity-60'}>
-        <SettingsRow
-          label={t('Restart automatically to apply updates')}
-          description={
-            autoRestartForUpdate === 'immediate'
-              ? t(
-                  "Restart as soon as the update is downloaded, even while agents are running or messages are queued. The restart happens after the current tool finishes, and running sessions keep going afterwards. It still waits while you're using the window (input in the last 2 minutes), while an input box has an unsent draft, or while a question or approval is pending."
-                )
-              : autoRestartForUpdate === 'idle'
+      {!server && (
+        <div className={autoUpdate ? undefined : 'opacity-60'}>
+          <SettingsRow
+            label={t('Restart automatically to apply updates')}
+            description={
+              autoRestartForUpdate === 'immediate'
                 ? t(
-                    'After the update is downloaded, restart automatically if no agent is running, nothing is queued, and there are no pending questions or approvals. The idle state must last 5 minutes, and a focused window also blocks it.'
+                    "Restart as soon as the update is downloaded, even while agents are running or messages are queued. The restart happens after the current tool finishes, and running sessions keep going afterwards. It still waits while you're using the window (input in the last 2 minutes), while an input box has an unsent draft, or while a question or approval is pending."
                   )
-                : t('Only notify when an update is ready; never restart automatically.')
-          }
-        >
-          <SettingsSelect
-            value={autoRestartForUpdate}
-            disabled={!autoUpdate}
-            onValueChange={(value) => {
-              if (!isAutoRestartMode(value)) return;
-              setAutoRestartForUpdate(value);
-              void window.electronAPI.updater.setAutoRestartMode(value);
-            }}
-            options={[
-              { value: 'off', label: t('Off') },
-              { value: 'idle', label: t('When idle') },
-              { value: 'immediate', label: t("Don't wait for idle") },
-            ]}
-          />
-        </SettingsRow>
-      </div>
+                : autoRestartForUpdate === 'idle'
+                  ? t(
+                      'After the update is downloaded, restart automatically if no agent is running, nothing is queued, and there are no pending questions or approvals. The idle state must last 5 minutes, and a focused window also blocks it.'
+                    )
+                  : t('Only notify when an update is ready; never restart automatically.')
+            }
+          >
+            <SettingsSelect
+              value={autoRestartForUpdate}
+              disabled={!autoUpdate}
+              onValueChange={(value) => {
+                if (!isAutoRestartMode(value)) return;
+                setAutoRestartForUpdate(value);
+                void window.electronAPI.updater.setAutoRestartMode(value);
+              }}
+              options={[
+                { value: 'off', label: t('Off') },
+                { value: 'idle', label: t('When idle') },
+                { value: 'immediate', label: t("Don't wait for idle") },
+              ]}
+            />
+          </SettingsRow>
+        </div>
+      )}
       {(host?.host === 'desktop' || host?.host === 'server') && (
         <SettingsRow
           rowId="general.updateChannel"

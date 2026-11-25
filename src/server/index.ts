@@ -7,6 +7,8 @@ import { createServer, type Socket } from 'node:net';
 import path from 'node:path';
 import { app } from '@platform';
 import { setAppLoggingEnabled } from '@shared/appLogFile';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import type { UpdateStatus } from '@shared/types/updater';
 import { registerIpcHandlers } from '../main/ipc';
 import { patchSettingsState, readSettings, startProviderModelRefresh } from '../main/ipc/settings';
 import {
@@ -42,6 +44,7 @@ import {
 } from '../main/services/pairHost';
 import { getProxyConfig } from '../main/services/proxyConfig';
 import { refreshRemoteLeadership, setupRemoteRenderer } from '../main/services/remoteRenderer';
+import { broadcastToRenderers } from '../main/services/renderers';
 import { readySecureStores } from '../main/services/secureStores';
 import {
   disposeAllTerminals,
@@ -173,6 +176,22 @@ async function handle(
   if (command.cmd === 'pair') return startPairing();
   if (command.cmd === 'devices') return { ok: true, status: getPairStatus() };
   if (command.cmd === 'update') return update(updater, command.channel);
+  // 仅调试：ENSO_SERVER_DEBUG=1 时可伪造 applying 状态广播，截图/联调 UI 用
+  if (command.cmd === 'debug-applying') {
+    if (process.env.ENSO_SERVER_DEBUG !== '1') return { ok: false, error: 'debug disabled' };
+    const status: UpdateStatus = {
+      status: 'applying',
+      info: { version: command.version ?? '0.4.0-beta.1' },
+      applying: {
+        stage: command.stage,
+        ...(command.stage === 'waiting-tasks'
+          ? { busyCount: command.busyCount ?? 2, deadlineMs: Date.now() + 5 * 60 * 1000 }
+          : {}),
+      },
+    };
+    broadcastToRenderers(IPC_CHANNELS.UPDATER_STATUS, status);
+    return { ok: true };
+  }
   if (command.cmd === 'status') {
     return {
       ok: true,

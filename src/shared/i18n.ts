@@ -346,6 +346,13 @@ export const zhTranslations: Record<string, string> = {
   'Updating…': '正在更新…',
   'New version {{version}} is downloaded. Applying it installs and then stops the server — you will need to restart it externally (container or process manager).':
     '新版本 {{version}} 已下载。应用更新会安装后停止服务端——它需要你在容器或进程管理器里外部重启。',
+  'Waits for running tasks to finish before restarting; this page reconnects after the server is back. Force restart does not wait.':
+    '重启前先等正在跑的任务收完；服务端起来后本页自动重连。「立即重启」不等待。',
+  'Restart now': '立即重启',
+  'Running tasks finish first, then the server restarts; this page reconnects when it is back.':
+    '正在跑的任务先收完，然后服务端重启；起来后本页自动重连。',
+  'Download and install updates automatically: running tasks finish first, then the server restarts and they resume.':
+    '自动下载并安装更新：正在跑的任务先收完，然后服务端重启，任务重启后续跑。',
   'Automatic updates': '自动更新',
   'Download and install updates automatically': '自动下载并安装更新',
   'Restart automatically to apply updates': '自动重启以应用更新',

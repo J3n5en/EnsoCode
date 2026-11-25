@@ -1766,7 +1766,9 @@ const electronAPI = {
     setChannel: (channel: UpdateChannel): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_CHANNEL, channel),
     getState: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_GET_STATE),
-    restart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_RESTART),
+    /** force=true 立即重启（不等任务收完）；默认优雅：先等运行中的回合结束 */
+    restart: (force?: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_RESTART, force === true),
     onStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
       const listener = (_: unknown, status: UpdateStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);

@@ -6,7 +6,6 @@ import { agentSessionIndex } from '../../main/ipc/sessionIndex';
 import { patchSettingsState, readSettings } from '../../main/ipc/settings';
 import { allowRemoteHostControl } from '../../main/services/remoteRenderer';
 import { broadcastToRenderers } from '../../main/services/renderers';
-import { currentIdleRestartObservation } from '../../main/services/updater/idleRestartSnapshot';
 import { globalNpmInstaller } from './npm';
 import { clearPendingUpdate, writePendingUpdate } from './pendingUpdate';
 import { spawnReexec } from './reexec';
@@ -24,7 +23,6 @@ export function registerServerUpdater(): ServerUpdater {
     npm: globalNpmInstaller(app.getAppPath()),
     broadcast: (status) => broadcastToRenderers(IPC_CHANNELS.UPDATER_STATUS, status),
     quit: () => app.quit(),
-    idle: () => currentIdleRestartObservation(),
     busyCount: () => agentSessionIndex.busyWorkspaceCount(),
     spawnReexec: () => spawnReexec(dataDir),
     writePending: (update) => writePendingUpdate(dataDir, { ...update, at: Date.now() }),
@@ -34,7 +32,9 @@ export function registerServerUpdater(): ServerUpdater {
   ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, () => updater.checkForUpdates());
   ipcMain.handle(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE, () => updater.downloadUpdate());
   ipcMain.handle(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, () => updater.quitAndInstall());
-  ipcMain.handle(IPC_CHANNELS.UPDATER_RESTART, () => updater.restart());
+  ipcMain.handle(IPC_CHANNELS.UPDATER_RESTART, (_event, force: unknown) =>
+    updater.restart(force === true)
+  );
   ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, (_event, enabled: unknown) => {
     if (typeof enabled === 'boolean') updater.setAutoUpdateEnabled(enabled);
   });
