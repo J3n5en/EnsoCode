@@ -83,6 +83,11 @@ export interface OauthLoginPrompt {
    * 只供界面决定是否允许提交空值；Main 以自己登记的提示为准裁决，不采信回传。
    */
   allowEmpty?: boolean;
+  /**
+   * 上一轮输入被拒的原因。缺省表示还没失败。
+   * 界面在用户改输入后清掉，不回写这条事件。
+   */
+  error?: string;
 }
 
 /** 登录流程事件（Main → Renderer 单向推送） */

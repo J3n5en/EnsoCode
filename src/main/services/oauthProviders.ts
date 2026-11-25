@@ -678,6 +678,10 @@ async function runOauthLogin(
         // pi 的 AuthPrompt 类型没有 allowEmpty，但扩展的旧版提示（如 Qoder）会被整体展开进来；
         // 用 in 收窄、只认严格的 true，登记在 Main 侧供 respond 裁决空值。
         const allowEmpty = 'allowEmpty' in prompt && prompt.allowEmpty === true;
+        const pasteError =
+          'error' in prompt && typeof prompt.error === 'string' && prompt.error
+            ? prompt.error
+            : undefined;
         login.pendingPrompts.set(requestId, { resolve, reject, allowEmpty });
         prompt.signal?.addEventListener('abort', () => {
           if (login.pendingPrompts.delete(requestId)) {
@@ -697,6 +701,7 @@ async function runOauthLogin(
                 ? prompt.options.map((option) => ({ ...option }))
                 : undefined,
             allowEmpty,
+            ...(pasteError ? { error: pasteError } : {}),
           },
         });
         return promise;

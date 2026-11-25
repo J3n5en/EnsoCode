@@ -6,6 +6,7 @@ import {
   oauthManualPasteRejection,
   parseManualOauthInput,
   startOauthCallbackServer,
+  waitForOauthCallbackCode,
 } from './callbackServer';
 
 const start = (timeoutMs: number) =>
@@ -82,6 +83,14 @@ describe('parseManualOauthInput', () => {
       expect(zhTranslations[message]).toBeTruthy();
       expect(message).not.toContain(secret);
     }
+    expect(zhTranslations[oauthManualPasteRejection('state')]).toBe(
+      '链接与本次授权不匹配，请重新复制最新的地址'
+    );
+    for (const reason of ['host', 'port', 'path', 'not-a-url']) {
+      expect(zhTranslations[oauthManualPasteRejection(reason)]).toBe('这不是授权回调地址');
+    }
+    // 已用过的码走 settled 成功消费，没有单独的「已使用」拒绝
+    expect(zhTranslations[oauthManualPasteRejection('code')]).not.toContain('已使用');
   });
 });
 
@@ -131,6 +140,36 @@ describe('startOauthCallbackServer', () => {
       await expect(pending).resolves.toBe(secret);
       expect(server.submitManualInput(pasted)).toEqual({ accepted: false, reason: 'settled' });
       await expect(server.waitForCode()).resolves.toBe(secret);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('拒绝后重提示带上原因，粘贴指引不变；接受后不再提示', async () => {
+    const server = await start(5_000);
+    const port = Number(new URL(server.redirectUri).port);
+    const wrongState = `http://127.0.0.1:${port}/oauth-callback?code=${secret}&state=wrong`;
+    const accepted = `http://127.0.0.1:${port}/oauth-callback?code=${secret}&state=expected-state`;
+    const answers = ['not a url', wrongState, accepted];
+    const seen: Array<{ message: string; error?: string }> = [];
+    try {
+      const code = await waitForOauthCallbackCode(server, async (request) => {
+        seen.push({ message: request.message, error: request.error });
+        const next = answers.shift();
+        if (next === undefined) throw new Error('unexpected extra prompt');
+        return next;
+      });
+      expect(code).toBe(secret);
+      expect(seen.map((item) => item.message)).toEqual([
+        OAUTH_MANUAL_PASTE_MESSAGE,
+        OAUTH_MANUAL_PASTE_MESSAGE,
+        OAUTH_MANUAL_PASTE_MESSAGE,
+      ]);
+      expect(seen.map((item) => item.error)).toEqual([
+        undefined,
+        oauthManualPasteRejection('not-a-url'),
+        oauthManualPasteRejection('state'),
+      ]);
     } finally {
       server.close();
     }

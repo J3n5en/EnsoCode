@@ -1480,6 +1480,21 @@ describe('登录提示的留空提交', () => {
       }
     );
   });
+
+  it('手动粘贴的拒绝原因随提示事件透传，指引原文不动', async () => {
+    const message = 'Paste the full address from the address bar.';
+    const error = 'That is not an authorization callback address.';
+    await withPromptingLogin(
+      { type: 'manual_code', message, error },
+      async ({ prompt, respond, answered, completion }) => {
+        expect(prompt.message).toBe(message);
+        expect(prompt.error).toBe(error);
+        expect(respond('http://127.0.0.1/cb')).toBe(true);
+        await expect(answered).resolves.toBe('http://127.0.0.1/cb');
+        await completion;
+      }
+    );
+  });
 });
 
 describe('登录成功凭证失效通知', () => {

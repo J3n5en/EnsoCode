@@ -16,7 +16,8 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
 const KEEP = argv.includes('--keep');
 const outFlag = argv.indexOf('--out');
-const OUT = outFlag !== -1 ? argv[outFlag + 1] : mkdtempSync(path.join(os.tmpdir(), 'enso-roauth-'));
+const OUT =
+  outFlag !== -1 ? argv[outFlag + 1] : mkdtempSync(path.join(os.tmpdir(), 'enso-roauth-'));
 mkdirSync(OUT, { recursive: true });
 
 const HARD_TIMEOUT_MS = 180_000;
@@ -221,7 +222,10 @@ async function launchBrowser() {
     try {
       const message = JSON.parse(event.data);
       if (message.method === 'Runtime.consoleAPICalled') {
-        const line = message.params.args.map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 300);
+        const line = message.params.args
+          .map((a) => a.value ?? a.description ?? '')
+          .join(' ')
+          .slice(0, 300);
         if (cdp.consoleLines.length < 200) cdp.consoleLines.push(line);
       }
     } catch {}
@@ -281,7 +285,9 @@ async function remoteDoc(cdp) {
 }
 
 async function clickText(cdp, selector, text) {
-  const ok = await inDoc(cdp, `
+  const ok = await inDoc(
+    cdp,
+    `
     const nodes = [...doc.querySelectorAll(${JSON.stringify(selector)})];
     const visible = (n) => {
       const r = n.getBoundingClientRect();
@@ -307,7 +313,8 @@ async function clickText(cdp, selector, text) {
     }
     target.click();
     return { ok: true };
-  `);
+  `
+  );
   if (!ok?.ok) {
     await dumpDiag(cdp, `clickText ${text}`);
     if (ok?.miss) console.log('candidates:', JSON.stringify(ok.miss));
@@ -316,13 +323,18 @@ async function clickText(cdp, selector, text) {
 }
 
 async function hasText(cdp, text) {
-  return inDoc(cdp, `
+  return inDoc(
+    cdp,
+    `
     return doc.body ? (doc.body.textContent ?? '').includes(${JSON.stringify(text)}) : false;
-  `);
+  `
+  );
 }
 
 async function fillInput(cdp, value) {
-  const ok = await inDoc(cdp, `
+  const ok = await inDoc(
+    cdp,
+    `
     const scope = doc.querySelector('[role="dialog"]') ?? doc;
     const input = scope.querySelector('input[type="text"], input:not([type])');
     if (!input) return { err: 'no input', inputs: scope.querySelectorAll('input').length };
@@ -332,7 +344,8 @@ async function fillInput(cdp, value) {
     input.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
     input.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
     return { err: null, now: input.value.slice(0, 80) };
-  `);
+  `
+  );
   if (ok?.err) {
     await dumpDiag(cdp, 'fillInput');
     throw new Error(`fillInput: ${ok.err}`);
@@ -340,16 +353,21 @@ async function fillInput(cdp, value) {
   // React 受控输入：commit 可能比读回晚，轮询等落盘
   let readback = '';
   for (let i = 0; i < 8 && !readback; i++) {
-    readback = await inDoc(cdp, `
+    readback = await inDoc(
+      cdp,
+      `
       const scope = doc.querySelector('[role="dialog"]') ?? doc;
       const input = scope.querySelector('input[type="text"], input:not([type])');
       return input ? input.value : '';
-    `);
+    `
+    );
     if (!readback) await sleep(100);
   }
   log('fillInput now: ' + (ok?.now ?? '').slice(0, 70) + ' | readback: ' + readback.slice(0, 60));
   if (!readback) {
-    const probe = await inDoc(cdp, `
+    const probe = await inDoc(
+      cdp,
+      `
       const scope = doc.querySelector('[role="dialog"]') ?? doc;
       const input = scope.querySelector('input[type="text"], input:not([type])');
       if (!input) return { err: 'no input' };
@@ -362,11 +380,11 @@ async function fillInput(cdp, value) {
       const v1 = input.value;
       // React 重渲染是否清掉
       return new Promise((resolve) => setTimeout(() => resolve({ seen, v1, v2: input.value, proto: Object.getPrototypeOf(input).constructor.name }), 300));
-    `);
+    `
+    );
     console.log('INPUT PROBE:', JSON.stringify(probe));
   }
 }
-
 
 async function dumpDiag(cdp, label) {
   const diag = await cdp.eval(`(() => {
@@ -379,54 +397,67 @@ async function dumpDiag(cdp, label) {
   console.log(`DIAG[${label}]:`, JSON.stringify(diag, null, 1));
 }
 
-
 async function typeInput(cdp, value) {
-  const focused = await inDoc(cdp, `
+  const focused = await inDoc(
+    cdp,
+    `
     const scope = doc.querySelector('[role="dialog"]') ?? doc;
     const input = scope.querySelector('input[type="text"], input:not([type])');
     if (!input) return false;
     input.focus();
     return scope.activeElement === input || doc.activeElement === input || true;
-  `);
+  `
+  );
   if (!focused) throw new Error('typeInput: input not focused');
   await cdp.send('Input.insertText', { text: value });
-  const readback = await inDoc(cdp, `
+  const readback = await inDoc(
+    cdp,
+    `
     const scope = doc.querySelector('[role="dialog"]') ?? doc;
     const input = scope.querySelector('input[type="text"], input:not([type])');
     return input ? input.value : '';
-  `);
+  `
+  );
   log('typeInput readback: ' + readback.slice(0, 70));
   if (!readback.includes(value.slice(0, 20))) throw new Error('typeInput: value did not stick');
 }
 
-
 async function openProvidersWizard(cdp) {
-  const r1 = await inDoc(cdp, `
+  const r1 = await inDoc(
+    cdp,
+    `
     const main = document.querySelector('iframe.main')?.contentDocument;
     const btn = main?.querySelector('[data-enso="settings-button"]') ?? doc.querySelector('[data-enso="settings-button"]');
     if (btn) btn.click();
     return !!btn;
-  `);
+  `
+  );
   log('openWizard settings click: ' + r1);
   await sleep(1100);
   // 分类项可能包了一层：找叶子文本再爬到最近的 button/a/[role]
-  const navHit = await inDoc(cdp, `
+  const navHit = await inDoc(
+    cdp,
+    `
     const leafs = [...doc.querySelectorAll('button, a, [role="button"], span, div, li')].filter(
-      (n) => n.children.length === 0 && /^(Model Providers|服务商|模型服务)$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null
+      (n) => n.children.length === 0 && /^(Model Providers|模型中心|服务商|模型服务)$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null
     );
     const leaf = leafs[0];
     if (!leaf) return { hit: false };
     const target = leaf.closest('button, a, [role="button"]') ?? leaf;
     target.click();
     return { hit: true, tag: target.tagName };
-  `);
+  `
+  );
   log('providers nav hit: ' + JSON.stringify(navHit));
   await sleep(900);
-  const r3 = await inDoc(cdp, `
+  const r3 = await inDoc(
+    cdp,
+    `
     const btn = [...doc.querySelectorAll('button')].find((b) => /Add model or provider|添加模型/.test(b.textContent ?? '') && b.offsetParent !== null);
     if (btn) btn.click();
     return !!btn;
-  `);
+  `
+  );
   log('openWizard add click: ' + r3);
   await sleep(700);
 }
@@ -451,7 +482,8 @@ async function main() {
   mkdirSync(userData, { recursive: true });
   writeFileSync(
     path.join(userData, 'settings.json'),
-    JSON.stringify({ language: 'zh' })
+    // zustand persist 结构（enso-settings/state + 当前版本号），扁平写法不会生效
+    JSON.stringify({ 'enso-settings': { state: { language: 'zh' }, version: 18 } })
   );
   const serverLog = openSync(path.join(OUT, 'server.log'), 'a');
   const serverEnv = {
@@ -464,7 +496,14 @@ async function main() {
   delete serverEnv.ELECTRON_RUN_AS_NODE;
   const server = spawn(
     process.execPath,
-    [path.join(ROOT, 'out/server/index.js'), 'start', '--web-host', '127.0.0.1', '--web-port', String(webPort)],
+    [
+      path.join(ROOT, 'out/server/index.js'),
+      'start',
+      '--web-host',
+      '127.0.0.1',
+      '--web-port',
+      String(webPort),
+    ],
     { env: serverEnv, stdio: ['ignore', serverLog, serverLog], cwd: ROOT }
   );
   children.push(server);
@@ -497,11 +536,10 @@ async function main() {
   /* 配对：拿邀请链接 */
   const invite = await new Promise((resolve, reject) => {
     const pairEnv = { ...serverEnv };
-    const pair = spawn(
-      process.execPath,
-      [path.join(ROOT, 'out/server/index.js'), 'pair'],
-      { env: pairEnv, cwd: ROOT }
-    );
+    const pair = spawn(process.execPath, [path.join(ROOT, 'out/server/index.js'), 'pair'], {
+      env: pairEnv,
+      cwd: ROOT,
+    });
     children.push(pair);
     let buf = '';
     const timer = setTimeout(() => reject(new Error('pair invite timeout')), 20_000);
@@ -536,7 +574,9 @@ async function main() {
   // 先种 uiMode=desk：配对后回到 / 时启动逻辑会跳 /desk
   const webOrigin = `http://127.0.0.1:${webPort}`;
   await nav(cdp, `${webOrigin}/?mode=phone`);
-  await waitFor(async () => cdp.eval('document.readyState === "complete"'), { label: 'index loaded' });
+  await waitFor(async () => cdp.eval('document.readyState === "complete"'), {
+    label: 'index loaded',
+  });
   await cdp.eval(`localStorage.setItem('enso-phone-ui-mode', 'desk'); true`);
   // 手动走配对 UI：地址栏不带 hash，粘贴邀请链接进输入框点「配对」
   await nav(cdp, `${webOrigin}/?mode=phone`);
@@ -558,10 +598,10 @@ async function main() {
     btn?.click();
     return !!btn;
   })()`);
-  await waitFor(
-    async () => !!(await cdp.eval('localStorage.getItem("enso-phone-devices")')),
-    { timeout: 30_000, label: 'pairing done (device stored)' }
-  ).catch(async (error) => {
+  await waitFor(async () => !!(await cdp.eval('localStorage.getItem("enso-phone-devices")')), {
+    timeout: 30_000,
+    label: 'pairing done (device stored)',
+  }).catch(async (error) => {
     const diag = await cdp.eval(`({
       url: location.href,
       text: (document.body?.innerText ?? '').slice(0, 300),
@@ -576,10 +616,10 @@ async function main() {
   await cdp.eval(`localStorage.setItem('enso-phone-ui-mode', 'desk'); true`);
   await nav(cdp, `${webOrigin}/`);
   await nav(cdp, `${webOrigin}/`);
-  await waitFor(
-    async () => (await cdp.eval('location.pathname')).startsWith('/desk'),
-    { timeout: 15_000, label: 'redirect to /desk' }
-  ).catch(async (error) => {
+  await waitFor(async () => (await cdp.eval('location.pathname')).startsWith('/desk'), {
+    timeout: 15_000,
+    label: 'redirect to /desk',
+  }).catch(async (error) => {
     const diag = await cdp.eval(`({
       url: location.href,
       uiMode: localStorage.getItem('enso-phone-ui-mode'),
@@ -644,7 +684,7 @@ async function main() {
   const navOk = await cdp.eval(`(() => {
     const doc = (document.querySelector('iframe.settings')?.contentDocument) ?? (document.querySelector('iframe.main')?.contentDocument) ?? document;
     const nodes = [...doc.querySelectorAll('button, a, [role="button"]')];
-    const target = nodes.find((n) => /^(Model Providers|服务商|模型服务)\s*$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null);
+    const target = nodes.find((n) => /^(Model Providers|模型中心|服务商|模型服务)\s*$/.test((n.textContent ?? '').trim()) && n.offsetParent !== null);
     if (target) { target.click(); return 'nav'; }
     return null;
   })()`);
@@ -656,31 +696,42 @@ async function main() {
     timeout: 10_000,
     label: 'providers page',
   }).catch(() => {});
-  await clickText(cdp, 'button', 'Add model or provider').catch(async () =>
-    clickText(cdp, 'button', '添加模型 / 服务商')
+  await clickText(cdp, 'button', '添加模型或服务商').catch(async () =>
+    clickText(cdp, 'button', 'Add model or provider')
   );
   await sleep(1200);
-  const dlg = await inDoc(cdp, `
+  const dlg = await inDoc(
+    cdp,
+    `
     return {
       dialogs: [...doc.querySelectorAll('[role="dialog"], [data-state="open"]')].length,
       wizardText: doc.body.innerText.slice(0, 400),
     };
-  `);
-  const dlgText = await inDoc(cdp, `
+  `
+  );
+  const dlgText = await inDoc(
+    cdp,
+    `
     const d = doc.querySelector('[role="dialog"]');
     return d ? (d.textContent ?? '').slice(0, 800) : 'no-dialog';
-  `);
+  `
+  );
   log('dialog text: ' + JSON.stringify(dlgText));
   log('after add click: ' + JSON.stringify(dlg).slice(0, 300));
   console.log('PAGE CONSOLE:', (cdp.consoleLines ?? []).slice(-15).join('\n'));
-  await waitFor(() => hasText(cdp, 'Verify OAuth') || hasText(cdp, '验证用 OAuth'), { label: 'wizard provider list', timeout: 12_000 }).catch(async (error) => {
+  await waitFor(() => hasText(cdp, '验证用 OAuth'), {
+    label: 'wizard provider list',
+    timeout: 12_000,
+  }).catch(async (error) => {
     await dumpDiag(cdp, 'wizard');
     throw error;
   });
   /* 场景 4（先做，免得重开向导）：设备码显示 */
-  await clickText(cdp, 'button', 'Verify Device').catch(async () => clickText(cdp, 'button', '验证用设备码'));
-  await clickText(cdp, 'button', 'Provider subscription').catch(async () =>
-    clickText(cdp, 'button', '服务商订阅')
+  await clickText(cdp, 'button', '验证用设备码').catch(async () =>
+    clickText(cdp, 'button', 'Verify Device')
+  );
+  await clickText(cdp, 'button', '服务商订阅').catch(async () =>
+    clickText(cdp, 'button', 'Provider subscription')
   );
   await sleep(600);
   await cdp.eval(`(() => {
@@ -689,51 +740,74 @@ async function main() {
     btn?.click();
     return !!btn;
   })()`);
-  await waitFor(() => hasText(cdp, 'WXYZ-1234'), { timeout: 12_000, label: 'device user code' }).catch(async () => {
-    const dlgDev = await inDoc(cdp, `
+  await waitFor(() => hasText(cdp, 'WXYZ-1234'), {
+    timeout: 12_000,
+    label: 'device user code',
+  }).catch(async () => {
+    const dlgDev = await inDoc(
+      cdp,
+      `
       const d = doc.querySelector('[role="dialog"]');
       return d ? (d.textContent ?? '').slice(0, 400) : 'no-dialog';
-    `);
+    `
+    );
     console.log('device step dialog:', JSON.stringify(dlgDev));
   });
   await sleep(500);
-  await cdp.shot('/tmp/remote-oauth-4-device-code.png');
-  check('shot 4 device code', existsSync('/tmp/remote-oauth-4-device-code.png'));
+  await cdp.shot('/tmp/remote-oauth-zh-4-device-code.png');
+  check('shot 4 device code', existsSync('/tmp/remote-oauth-zh-4-device-code.png'));
   check('device code displayed', await hasText(cdp, 'WXYZ-1234'));
   // 取消设备登录，Back 回服务商列表
-  await inDoc(cdp, `
+  await inDoc(
+    cdp,
+    `
     const btn = [...doc.querySelectorAll('button')].find((b) => /Cancel authorization|取消授权/.test(b.textContent ?? '') && b.offsetParent !== null);
     btn?.click();
     return !!btn;
-  `);
+  `
+  );
   await sleep(700);
-  await inDoc(cdp, `
-    const btn = [...doc.querySelectorAll('button')].find((b) => /^(Back|返回)$/.test((b.textContent ?? '').trim()) && b.offsetParent !== null);
+  await inDoc(
+    cdp,
+    `
+    const btn = [...doc.querySelectorAll('button')].find((b) => /^(Back|返回|上一步)$/.test((b.textContent ?? '').trim()) && b.offsetParent !== null);
     btn?.click();
     return !!btn;
-  `);
+  `
+  );
   await sleep(500);
-  await inDoc(cdp, `
-    const btn = [...doc.querySelectorAll('button')].find((b) => /^(Back|返回)$/.test((b.textContent ?? '').trim()) && b.offsetParent !== null);
+  await inDoc(
+    cdp,
+    `
+    const btn = [...doc.querySelectorAll('button')].find((b) => /^(Back|返回|上一步)$/.test((b.textContent ?? '').trim()) && b.offsetParent !== null);
     btn?.click();
     return !!btn;
-  `);
+  `
+  );
   await sleep(700);
-  await waitFor(() => hasText(cdp, 'Verify OAuth'), { timeout: 8_000, label: 'back at provider list' }).catch(() => {});
+  await waitFor(() => hasText(cdp, '验证用 OAuth'), {
+    timeout: 8_000,
+    label: 'back at provider list',
+  }).catch(() => {});
 
-  await clickText(cdp, 'button', 'Verify OAuth').catch(async () => clickText(cdp, 'button', '验证用 OAuth'));
-  await waitFor(() => hasText(cdp, 'Provider subscription') || hasText(cdp, '服务商订阅'), {
+  await clickText(cdp, 'button', '验证用 OAuth').catch(async () =>
+    clickText(cdp, 'button', 'Verify OAuth')
+  );
+  await waitFor(() => hasText(cdp, '服务商订阅'), {
     label: 'method step',
   }).catch(async (error) => {
-    const dlg2 = await inDoc(cdp, `
+    const dlg2 = await inDoc(
+      cdp,
+      `
       const d = doc.querySelector('[role="dialog"]');
       return d ? (d.textContent ?? '').slice(0, 500) : 'no-dialog';
-    `);
+    `
+    );
     console.log('method step dialog:', JSON.stringify(dlg2));
     throw error;
   });
-  await clickText(cdp, 'button', 'Provider subscription').catch(async () =>
-    clickText(cdp, 'button', '服务商订阅')
+  await clickText(cdp, 'button', '服务商订阅').catch(async () =>
+    clickText(cdp, 'button', 'Provider subscription')
   );
 
   /* 开始登录：OauthProviderAccounts 里的登录按钮 */
@@ -750,7 +824,7 @@ async function main() {
     const doc = (document.querySelector('iframe.settings')?.contentDocument) ?? (document.querySelector('iframe.main')?.contentDocument) ?? document;
     const exact = (t) => (b) => (b.textContent ?? '').trim().includes(t);
     const all = [...doc.querySelectorAll('button')];
-    const btns = all.filter(exact('Connect subscription')).concat(all.filter(exact('连接订阅')), all.filter(exact('Add another account')));
+    const btns = all.filter(exact('连接订阅')).concat(all.filter(exact('Connect subscription')), all.filter(exact('添加其他账号')), all.filter(exact('Add another account')));
     const btn = btns.find((b) => b.offsetParent !== null) ?? btns[0];
     if (!btn) return { found: false };
     btn.click();
@@ -759,14 +833,17 @@ async function main() {
   log('login click: ' + JSON.stringify(loginClick));
 
   /* 场景 1：等待 + 粘贴输入框 */
-  await waitFor(async () => hasText(cdp, 'Waiting for browser authentication') || hasText(cdp, '等待浏览器完成授权'), {
+  await waitFor(async () => hasText(cdp, '正在等待浏览器完成授权'), {
     label: 'waiting progress',
     timeout: 12_000,
   }).catch(async (error) => {
-    const dlg3 = await inDoc(cdp, `
+    const dlg3 = await inDoc(
+      cdp,
+      `
       const d = doc.querySelector('[role="dialog"]');
       return d ? (d.textContent ?? '').slice(0, 600) : 'no-dialog';
-    `);
+    `
+    );
     console.log('waiting diag dialog:', JSON.stringify(dlg3));
     throw error;
   });
@@ -780,20 +857,31 @@ async function main() {
     { label: 'manual paste input' }
   );
   await sleep(400);
-  await cdp.shot('/tmp/remote-oauth-1-waiting-input.png');
-  check('shot 1 waiting+input', existsSync('/tmp/remote-oauth-1-waiting-input.png'));
+  await cdp.shot('/tmp/remote-oauth-zh-1-waiting-input.png');
+  check('shot 1 waiting+input', existsSync('/tmp/remote-oauth-zh-1-waiting-input.png'));
+  check('zh paste guidance visible', await hasText(cdp, '把地址栏里的完整链接粘贴到这里'));
 
   // 远程应已自动 window.open 完整授权链接（含 query）
   const opened = await waitFor(
     async () => {
-      const urls = await inDoc(cdp, 'return doc.defaultView?.__openedUrls ?? window.__openedUrls ?? []');
+      const urls = await inDoc(
+        cdp,
+        'return doc.defaultView?.__openedUrls ?? window.__openedUrls ?? []'
+      );
       return urls.length ? urls : null;
     },
     { timeout: 10_000, label: 'remote window.open auth url' }
   ).catch(() => []);
   const authUrl = opened[0] ?? '';
-  check('remote auto-opened full auth url', /\/authorize\?/.test(authUrl) && /state=/.test(authUrl), authUrl.slice(0, 90));
-  check('auth url keeps query (state/redirect_uri)', /redirect_uri=/.test(authUrl) && /client_id=/.test(authUrl));
+  check(
+    'remote auto-opened full auth url',
+    /\/authorize\?/.test(authUrl) && /state=/.test(authUrl),
+    authUrl.slice(0, 90)
+  );
+  check(
+    'auth url keeps query (state/redirect_uri)',
+    /redirect_uri=/.test(authUrl) && /client_id=/.test(authUrl)
+  );
 
   /* 场景 2：state 错误被拒 */
   if (authUrl) {
@@ -803,23 +891,6 @@ async function main() {
     const badUrl = `${redirect}?code=verify-code-1&state=wrong-state`;
     await fillInput(cdp, badUrl);
 
-    const probe2 = await inDoc(cdp, `
-      const scope = doc.querySelector('[role="dialog"]') ?? doc;
-      const input = scope.querySelector('input[type="text"], input:not([type])');
-      if (!input) return { err: 'no input' };
-      // React 受控输入检查：元素的 value 是否被 own-property 包了一层（React inputValueTracking 的标志）
-      const own = Object.getOwnPropertyDescriptor(input, 'value');
-      const proto = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
-      const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, 'value').set;
-      setter.call(input, 'PROBEVAL');
-      input.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
-      return new Promise((resolve) => setTimeout(() => resolve({
-        ownValue: !!own, protoHas: !!proto,
-        ownGet: own?.get?.toString().slice(0, 80),
-        v: input.value,
-      }), 250));
-    `);
-    console.log('REACT PROBE:', JSON.stringify(probe2));
 
     // 提交（回车或按钮）
     await cdp.eval(`(() => {
@@ -831,9 +902,25 @@ async function main() {
       input?.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
       return 'enter';
     })()`);
-    await sleep(900);
-    await cdp.shot('/tmp/remote-oauth-2-state-error.png');
-    check('shot 2 state error', existsSync('/tmp/remote-oauth-2-state-error.png'));
+    // 红字错误必须出现（state 不匹配）：等它出现再截图，截图里要看得见
+    const redErr = await waitFor(() => hasText(cdp, '链接与本次授权不匹配'), {
+      timeout: 8_000,
+      label: 'red rejection error',
+    }).catch(async () => {
+      const dlgErr = await inDoc(
+        cdp,
+        `
+        const d = doc.querySelector('[role="dialog"]');
+        return d ? (d.textContent ?? '').slice(0, 500) : 'no-dialog';
+      `
+      );
+      console.log('state error dialog:', JSON.stringify(dlgErr));
+      return false;
+    });
+    check('red rejection error shown', !!redErr);
+    await sleep(400);
+    await cdp.shot('/tmp/remote-oauth-zh-2-state-error.png');
+    check('shot 2 state error', existsSync('/tmp/remote-oauth-zh-2-state-error.png'));
 
     /* 场景 3：粘贴成功完成登录 */
     const goodUrl = `${redirect}?code=verify-code-1&state=${encodeURIComponent(state)}`;
@@ -848,28 +935,32 @@ async function main() {
       input?.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
       return 'enter';
     })()`);
-    await waitFor(async () => hasText(cdp, 'Exchanging authorization code'), {
+    await waitFor(async () => hasText(cdp, '正在用授权码换取令牌'), {
       timeout: 8_000,
       label: 'exchanging tokens',
     }).catch(() => {});
     // 换 token 很快，通常只能截到完成后的账号页：任一终态都算登录成功
     const done = await waitFor(
       async () =>
-        (await hasText(cdp, 'Exchanging authorization code')) ||
-        (await hasText(cdp, 'Log out')) || (await hasText(cdp, 'Sign out')) ||
+        (await hasText(cdp, '正在用授权码换取令牌')) ||
+        (await hasText(cdp, '退出登录')) ||
+        (await hasText(cdp, 'Log out')) ||
         (await hasText(cdp, 'Remove')),
       { timeout: 10_000, label: 'login terminal state' }
     ).catch(async () => {
-      const dlg4 = await inDoc(cdp, `
+      const dlg4 = await inDoc(
+        cdp,
+        `
         const d = doc.querySelector('[role="dialog"]');
         return d ? (d.textContent ?? '').slice(0, 500) : 'no-dialog';
-      `);
+      `
+      );
       console.log('login terminal dialog:', JSON.stringify(dlg4));
       return false;
     });
     await sleep(400);
-    await cdp.shot('/tmp/remote-oauth-3-paste-success.png');
-    check('shot 3 paste success', existsSync('/tmp/remote-oauth-3-paste-success.png'));
+    await cdp.shot('/tmp/remote-oauth-zh-3-paste-success.png');
+    check('shot 3 paste success', existsSync('/tmp/remote-oauth-zh-3-paste-success.png'));
     check('login reached exchange/done', !!done);
   }
 
@@ -877,7 +968,7 @@ async function main() {
   const failed = results.filter((r) => !r.ok);
   log(`\n${results.length - failed.length}/${results.length} checks passed`);
   for (const f of failed) log(`failed: ${f.name}`);
-  log(`screenshots: /tmp/remote-oauth-*.png ; logs: ${OUT}`);
+  log(`screenshots: /tmp/remote-oauth-zh-*.png ; logs: ${OUT}`);
 
   cdp.close();
   fake.server.close();

@@ -91,6 +91,38 @@ describe('OAuth exact locator state machine', () => {
     });
   });
 
+  it('prompt 带上的拒绝原因原样留下，下一条提示换掉', () => {
+    const rejected = 'That is not an authorization callback address.';
+    const withError = reduceOauthLoginFlowState(
+      running,
+      event(wizardA, {
+        type: 'prompt',
+        prompt: {
+          requestId: 'prompt-1',
+          type: 'manual_code',
+          message: 'Paste the address',
+          error: rejected,
+        },
+      })
+    );
+    expect(withError).toMatchObject({
+      phase: 'running',
+      prompt: { requestId: 'prompt-1', error: rejected },
+    });
+    const replaced = reduceOauthLoginFlowState(
+      withError,
+      event(wizardA, {
+        type: 'prompt',
+        prompt: { requestId: 'prompt-2', type: 'manual_code', message: 'Paste the address' },
+      })
+    );
+    expect(replaced).toMatchObject({
+      prompt: { requestId: 'prompt-2', message: 'Paste the address' },
+    });
+    if (replaced.phase !== 'running') throw new Error('expected running');
+    expect(replaced.prompt?.error).toBeUndefined();
+  });
+
   it('auth_url 把完整链接放进 fullAuthUrl，剥参链接仍留给展示', () => {
     const full =
       'https://accounts.example.test/authorize?state=secret&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb';

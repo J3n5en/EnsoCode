@@ -78,19 +78,15 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
 export const OAUTH_MANUAL_PASTE_MESSAGE =
   'After you authorize, the browser opens a localhost page that will not load. Paste the full address from the address bar here.';
 
-/** 拒绝原因对应的下一轮提示。不要把用户粘贴的内容拼进来，里面有 code。 */
+/** 粘贴被拒时显示在输入框下的原因。不要把用户粘贴的内容拼进来，里面有 code。 */
 export function oauthManualPasteRejection(reason: string): string {
   switch (reason) {
     case 'state':
-      return 'That link does not match this login. Paste the full address from the latest authorization page.';
+      return 'The link does not match this authorization. Copy the latest address again.';
     case 'code':
       return 'That input has no authorization code. Paste the full localhost address from the address bar.';
-    case 'host':
-    case 'port':
-    case 'path':
-      return "That link is not this login's localhost callback. Paste the full address from the address bar.";
     default:
-      return 'Paste the full localhost address from the address bar, or a code#state value.';
+      return 'That is not an authorization callback address.';
   }
 }
 
@@ -139,6 +135,8 @@ function parseManualCodeState(input: string, expectedState: string): ParsedManua
 export interface OauthManualPromptRequest {
   type: 'manual_code';
   message: string;
+  /** 上一轮粘贴被拒的原因。首轮没有。message 始终是粘贴指引。 */
+  error?: string;
   placeholder?: string;
   signal: AbortSignal;
 }
@@ -154,7 +152,7 @@ export async function waitForOauthCallbackCode(
   signal?: AbortSignal
 ): Promise<string> {
   const placeholder = `${server.redirectUri}?code=...&state=...`;
-  let message = OAUTH_MANUAL_PASTE_MESSAGE;
+  let rejection: string | undefined;
   const callback = server.waitForCode().then(
     (code) => ({ won: 'callback' as const, code }),
     (error: unknown) => ({ won: 'callback-error' as const, error })
@@ -163,8 +161,15 @@ export async function waitForOauthCallbackCode(
   for (;;) {
     if (signal?.aborted) throw new Error('登录已取消');
     const manualAbort = new AbortController();
+    const request: OauthManualPromptRequest = {
+      type: 'manual_code',
+      message: OAUTH_MANUAL_PASTE_MESSAGE,
+      placeholder,
+      signal: manualAbort.signal,
+      ...(rejection ? { error: rejection } : {}),
+    };
     const manual = Promise.resolve()
-      .then(() => prompt({ type: 'manual_code', message, placeholder, signal: manualAbort.signal }))
+      .then(() => prompt(request))
       .then(
         (input) => ({ won: 'manual' as const, input }),
         (error: unknown) => ({ won: 'manual-error' as const, error })
@@ -187,7 +192,7 @@ export async function waitForOauthCallbackCode(
       if (settled.won === 'callback-error') throw settled.error;
       return settled.code;
     }
-    message = oauthManualPasteRejection(submitted.reason);
+    rejection = oauthManualPasteRejection(submitted.reason);
   }
 }
 

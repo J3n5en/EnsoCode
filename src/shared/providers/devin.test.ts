@@ -173,6 +173,7 @@ describe('Devin 远程粘贴登录', () => {
     let state = '';
     let attempt = 0;
     const messages: string[] = [];
+    const errors: Array<string | undefined> = [];
     const tokenBodies: string[] = [];
     const original = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -195,6 +196,9 @@ describe('Devin 远程粘贴登录', () => {
       onPrompt: async (prompt) => {
         attempt += 1;
         messages.push(prompt.message);
+        errors.push(
+          'error' in prompt && typeof prompt.error === 'string' ? prompt.error : undefined
+        );
         return paste(redirect, state, attempt);
       },
       onDeviceCode: () => {},
@@ -202,7 +206,7 @@ describe('Devin 远程粘贴登录', () => {
     };
     try {
       const credential = await devinProviderConfig().oauth?.login(callbacks);
-      return { credential, messages, tokenBodies, attempt };
+      return { credential, messages, errors, tokenBodies, attempt };
     } finally {
       globalThis.fetch = original;
     }
@@ -226,7 +230,9 @@ describe('Devin 远程粘贴登录', () => {
         : `${redirect}?code=${secret}&state=${state}`
     );
     expect(result.attempt).toBe(2);
-    expect(result.messages[1]).toContain('does not match');
+    expect(result.messages[1]).toBe(result.messages[0]);
+    expect(result.errors[0]).toBeUndefined();
+    expect(result.errors[1]).toContain('does not match');
     expect(result.messages.join('\n')).not.toContain(secret);
     expect(result.tokenBodies).toHaveLength(1);
   });
