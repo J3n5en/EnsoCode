@@ -14,19 +14,25 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { findNestedBoxes } from './kit/boxes';
 import { setupPin } from './pin.testUtils';
 
-/** 迁移时只改这里：分区 → 页面组件。逐个点控件较慢，机器忙时 5s 默认超时不够 */
-async function MEMORY_GROUP_PAGES() {
-  const { MemorySettings } = await import('./MemorySettings');
-  const { MemoryKnowledge } = await import('./MemoryKnowledge');
-  const { MemoryLibrary } = await import('./MemoryLibrary');
-  const { InstructionsSettings } = await import('./InstructionsSettings');
+/**
+ * 迁移时只改这里：分区 → 页面组件。import 顶层并行发起：顺序瀑布在高负载下要
+ * 十几秒，会撑爆 beforeAll 的 10s 超时；顶层 await 属于模块求值，不进钩子计时。
+ */
+const MEMORY_GROUP_PAGES = await (async () => {
+  const [{ MemorySettings }, { MemoryKnowledge }, { MemoryLibrary }, { InstructionsSettings }] =
+    await Promise.all([
+      import('./MemorySettings'),
+      import('./MemoryKnowledge'),
+      import('./MemoryLibrary'),
+      import('./InstructionsSettings'),
+    ]);
   return {
     memory: MemorySettings,
     memoryKnowledge: MemoryKnowledge,
     memoryLibrary: MemoryLibrary,
     instructions: InstructionsSettings,
   };
-}
+})();
 
 const STATS: MemoryStats = {
   total: 4,
@@ -176,7 +182,7 @@ const INSTRUCTIONS: InstructionEntry[] = [
 ];
 
 const CONFIG: Parameters<typeof setupPin>[0] = {
-  pages: MEMORY_GROUP_PAGES,
+  pages: () => MEMORY_GROUP_PAGES,
   results: {
     'electronAPI.memory.stats': STATS,
     'electronAPI.memory.jobs': JOBS,

@@ -4,17 +4,32 @@ import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { setupPin } from './pin.testUtils';
 
-/** 迁移时只改这里：分区 → 页面组件 */
-async function SYSTEM_GROUP_PAGES() {
-  const { SecretarySettings } = await import('./SecretarySettings');
-  const { ContactsSettings } = await import('./ContactsSettings');
-  const { DevicesSettings } = await import('./DevicesSettings');
-  const { SshSettings } = await import('./SshSettings');
-  const { UsageSettings } = await import('./UsageSettings');
-  const { ResourcesSettings } = await import('./ResourcesSettings');
-  const { ExperimentalSettings } = await import('./ExperimentalSettings');
-  const { BotSettings } = await import('./BotSettings');
-  const { BotTemplatesSettings } = await import('./BotTemplatesSettings');
+/**
+ * 迁移时只改这里：分区 → 页面组件。import 顶层并行发起：顺序瀑布在高负载下要
+ * 十几秒，会撑爆 beforeAll 的 10s 超时；顶层 await 属于模块求值，不进钩子计时。
+ */
+const SYSTEM_GROUP_PAGES = await (async () => {
+  const [
+    { SecretarySettings },
+    { ContactsSettings },
+    { DevicesSettings },
+    { SshSettings },
+    { UsageSettings },
+    { ResourcesSettings },
+    { ExperimentalSettings },
+    { BotSettings },
+    { BotTemplatesSettings },
+  ] = await Promise.all([
+    import('./SecretarySettings'),
+    import('./ContactsSettings'),
+    import('./DevicesSettings'),
+    import('./SshSettings'),
+    import('./UsageSettings'),
+    import('./ResourcesSettings'),
+    import('./ExperimentalSettings'),
+    import('./BotSettings'),
+    import('./BotTemplatesSettings'),
+  ]);
   return {
     secretary: SecretarySettings,
     contacts: ContactsSettings,
@@ -26,7 +41,7 @@ async function SYSTEM_GROUP_PAGES() {
     bots: BotSettings,
     botTemplates: BotTemplatesSettings,
   };
-}
+})();
 
 const PROFILE: SecretaryProfile = {
   version: 1,
@@ -111,7 +126,7 @@ const USAGE: UsageSummary = {
 };
 
 const pin = setupPin({
-  pages: SYSTEM_GROUP_PAGES,
+  pages: () => SYSTEM_GROUP_PAGES,
   results: {
     'electronAPI.secretary.list': [{ id: 's1', name: '秘书' }],
     'electronAPI.secretary.getProfile': { ok: true, profile: PROFILE, persona: '' },

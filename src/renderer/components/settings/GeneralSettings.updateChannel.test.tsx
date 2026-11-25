@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { setupPin } from './pin.testUtils';
 
+// 顶层 await 让模块求值期就完成加载：之后的 beforeAll 钩子里只剩渲染本身，
+// 模块加载不占钩子的 10s 预算
+const GENERAL_PAGE = await import('./GeneralSettings');
+
 /** 更新渠道行：服务端宿主也要显示（原来只在桌面宿主显示） */
 describe('更新渠道设置行', { timeout: 30_000 }, () => {
   const pin = setupPin({
-    pages: async () => ({ general: (await import('./GeneralSettings')).GeneralSettings }),
+    pages: () => ({ general: GENERAL_PAGE.GeneralSettings }),
     results: {
       'electronAPI.sourceAuthority.read': { projects: [], conversations: [] },
       'electronAPI.updater.getState': {
