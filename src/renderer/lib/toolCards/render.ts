@@ -980,6 +980,80 @@ register('repo_status', (call, ctx) => {
   );
 });
 
+register('repo_diff', (call, ctx) => {
+  const output = rec(parseJson(call.output)) ?? {};
+  const project = projectLabel(str(output.projectId) ?? str(rec(call.args)?.projectId), ctx);
+  const error = errorText(call, ctx);
+  const base = str(output.base);
+  const ref = str(output.ref);
+  const totalFiles = typeof output.totalFiles === 'number' ? output.totalFiles : 0;
+  const added = typeof output.added === 'number' ? output.added : 0;
+  const deleted = typeof output.deleted === 'number' ? output.deleted : 0;
+  const truncated = output.truncated === true;
+  const blocks: ToolCardBlock[] = [];
+  if (error) blocks.push({ kind: 'error', text: error });
+  blocks.push({
+    kind: 'kv',
+    rows: [
+      { label: ctx.t('Base'), value: base ?? '' },
+      { label: ctx.t('Ref'), value: ref ?? '' },
+      {
+        label: ctx.t('Changed files'),
+        value: ctx.t('{{count}} files (+{{added}} −{{deleted}})', {
+          count: totalFiles,
+          added,
+          deleted,
+        }),
+      },
+    ],
+  });
+  const files = Array.isArray(output.files) ? output.files : [];
+  if (files.length > 0)
+    blocks.push({
+      kind: 'list',
+      items: files.flatMap((entry) => {
+        const row = rec(entry);
+        const filePath = str(row?.path);
+        if (!row || !filePath) return [];
+        const badge = str(row.status) ?? '';
+        const lines =
+          typeof row.added === 'number' && typeof row.deleted === 'number'
+            ? `+${row.added} −${row.deleted}`
+            : row.binary === true
+              ? ctx.t('Binary')
+              : '';
+        const from = str(row.fromPath);
+        const detail = [lines, from ? ctx.t('from {{path}}', { path: from }) : '']
+          .filter(Boolean)
+          .join(' · ');
+        return [{ title: filePath, badge, ...(detail ? { detail } : {}) }];
+      }),
+    });
+  if (truncated)
+    blocks.push({
+      kind: 'kv',
+      rows: [
+        {
+          label: ctx.t('Truncated'),
+          value: ctx.t('{{count}} files total, only the first ones are listed', {
+            count: totalFiles,
+          }),
+        },
+      ],
+    });
+  return view(
+    call,
+    ctx.t('Repository diff {{project}}', { project }),
+    blocks,
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : {
+          tone: 'neutral',
+          label: ctx.t('+{{added}} −{{deleted}}', { added, deleted }),
+        }
+  );
+});
+
 register('session_tasks', (call, ctx) => {
   const output = rec(parseJson(call.output));
   const id = str(output?.conversationId) ?? str(rec(call.args)?.conversationId);

@@ -45,6 +45,18 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     numbers: ['limit'],
     aliases: { id: 'projectId', dir: 'path', directory: 'path', cwd: 'path', sha: 'contains' },
   },
+  repo_diff: {
+    keys: ['projectId', 'path', 'base', 'ref', 'mergeBase'],
+    booleans: ['mergeBase'],
+    aliases: {
+      id: 'projectId',
+      dir: 'path',
+      directory: 'path',
+      cwd: 'path',
+      branch: 'ref',
+      head: 'ref',
+    },
+  },
   session_list: { keys: ['projectId', 'limit'], numbers: ['limit'] },
   claims_list: { keys: ['prefix', 'sessionId', 'pluginId'] },
   threads_list: {
@@ -450,6 +462,36 @@ const SCHEMAS: Record<
         minLength: 4,
         maxLength: 40,
         description: 'Optional commit sha; reports whether it is already in HEAD',
+      },
+    }),
+  },
+  repo_diff: {
+    description:
+      'Read-only diff summary of a branch or ref against a base: which files changed, per-file added/deleted line counts, the status letter (A added, M modified, D deleted, R renamed, with the original path on renames), plus totals. Binary files are marked binary with null counts. Use it before merging a pull request or reporting what a branch changed: it is the verification counterpart to what a session claims. By default the diff is base...ref (three-dot, merge-base semantics): only what the branch itself changed since it diverged, the same as a GitHub PR. Pass mergeBase false for a plain two-dot comparison. base defaults to origin/main and ref to HEAD; both must be plain branch names, refs or shas. At most 200 files are listed; totalFiles and the line totals always cover the full diff. It never returns file contents and never writes to the repository. Paths are redacted, not untrusted-wrapped.',
+    parameters: object({
+      projectId: id('Project id from project_list'),
+      path: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+        description: 'A visible project checkout, or a git worktree of the same repository',
+      },
+      base: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 200,
+        description: 'Optional branch or ref to diff against (default origin/main)',
+      },
+      ref: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 200,
+        description: 'Optional branch, ref or commit to diff, e.g. the PR branch (default HEAD)',
+      },
+      mergeBase: {
+        type: 'boolean',
+        description:
+          'Optional: false for a plain two-dot diff instead of the default merge-base (three-dot) semantics',
       },
     }),
   },

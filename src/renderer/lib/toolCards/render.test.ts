@@ -92,6 +92,16 @@ const zh: Record<string, string> = {
   Read: '已读取',
   'Repository status {{project}}': '仓库状态 {{project}}',
   Branch: '分支',
+  'Repository diff {{project}}': '分支差异 {{project}}',
+  Base: '基线',
+  Ref: '目标',
+  'Changed files': '改动文件',
+  '{{count}} files (+{{added}} −{{deleted}})': '{{count}} 个文件（+{{added}} −{{deleted}}）',
+  Binary: '二进制',
+  'from {{path}}': '来自 {{path}}',
+  Truncated: '已截断',
+  '{{count}} files total, only the first ones are listed': '共 {{count}} 个文件，只列出前一部分',
+  '+{{added}} −{{deleted}}': '+{{added}} −{{deleted}}',
   HEAD: 'HEAD',
   'Working tree': '工作区',
   '{{count}} changed files': '{{count}} 个文件有改动',
@@ -707,6 +717,40 @@ describe('只读核实卡片', () => {
     );
     expect(card.status).toEqual({ tone: 'error', label: '被拒绝' });
     expect(cardPlainText(card)).toContain('path-out-of-scope');
+  });
+
+  it('repo_diff 显示基线、目标、增删统计与文件清单', () => {
+    const card = renderToolCall(
+      call(
+        'repo_diff',
+        { projectId: 'p1' },
+        {
+          projectId: 'p1',
+          base: 'origin/main',
+          ref: 'feat/x',
+          mergeBase: true,
+          totalFiles: 3,
+          truncated: false,
+          added: 42,
+          deleted: 7,
+          binary: 1,
+          files: [
+            { status: 'M', path: 'src/a.ts', added: 40, deleted: 7 },
+            { status: 'A', path: 'img/logo.png', added: null, deleted: null, binary: true },
+            { status: 'R', path: 'src/renamed.ts', added: 2, deleted: 0, fromPath: 'src/old.ts' },
+          ],
+        }
+      ),
+      ctx('zh', { projectName: () => 'enso-code' })
+    );
+    expect(card.title).toBe('分支差异 enso-code');
+    const text = cardPlainText(card);
+    expect(text).toContain('origin/main');
+    expect(text).toContain('feat/x');
+    expect(text).toContain('+42 −7');
+    expect(text).toContain('src/a.ts');
+    expect(text).toContain('二进制');
+    expect(text).toContain('src/old.ts');
   });
 
   it('session_tasks 显示命令、状态与存活判断', () => {

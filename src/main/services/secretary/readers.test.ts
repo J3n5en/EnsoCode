@@ -1265,6 +1265,105 @@ describe('repo_status', () => {
   });
 });
 
+describe('repo_diff', () => {
+  const handlers = (repo: RepoStatusDeps = fakeRepo(), projects = [project()]) =>
+    createSecretaryReadHandlers(makePorts({ projects: () => projects, repo }));
+
+  const diffResult = {
+    'diff --numstat -z origin/main...HEAD': {
+      code: 0,
+      stdout: '5\t1\tsrc/a.ts\0-\t-\timg/pic.png\0',
+      stderr: '',
+    },
+    'diff --name-status -z origin/main...HEAD': {
+      code: 0,
+      stdout: 'M\tsrc/a.ts\0A\timg/pic.png\0',
+      stderr: '',
+    },
+  } satisfies Partial<Record<string, GitResult>>;
+
+  it('按 projectId 给出分支相对 origin/main 的文件清单与增删统计', async () => {
+    const result = await run(handlers(fakeRepo(diffResult)).repo_diff, { projectId: 'p1' });
+    expect(result).toMatchObject({
+      projectId: 'p1',
+      base: 'origin/main',
+      ref: 'HEAD',
+      mergeBase: true,
+      totalFiles: 2,
+      truncated: false,
+      added: 5,
+      deleted: 1,
+      binary: 1,
+      files: [
+        { status: 'M', path: 'src/a.ts', added: 5, deleted: 1 },
+        { status: 'A', path: 'img/pic.png', added: null, deleted: null, binary: true },
+      ],
+    });
+  });
+
+  it('ref / base / mergeBase 透传进 git 命令', async () => {
+    const seen: string[] = [];
+    const baseRepo = fakeRepo({});
+    const repo: RepoStatusDeps = {
+      ...baseRepo,
+      async git(cwd, args) {
+        seen.push(args.join(' '));
+        if (args[0] === 'diff') return { code: 0, stdout: '', stderr: '' };
+        return baseRepo.git(cwd, args);
+      },
+    };
+    await run(handlers(repo).repo_diff, {
+      projectId: 'p1',
+      base: 'main',
+      ref: 'feat/x',
+      mergeBase: false,
+    });
+    expect(seen.some((call) => call.includes('main..feat/x'))).toBe(true);
+  });
+
+  it('路径越界与 ssh 项目拒绝', async () => {
+    const repo = fakeRepo(diffResult, { known: ['/repo/alpha'] });
+    expect(
+      await handlers(repo).repo_diff({ path: '/etc' }, { secretaryConversationId: 'sec-1' })
+    ).toEqual({ ok: false, error: 'path-out-of-scope' });
+    const ssh = [project({ kind: 'ssh', sshHost: 'host' })];
+    expect(
+      await handlers(fakeRepo(diffResult), ssh).repo_diff(
+        { projectId: 'p1' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'ssh-project' });
+    expect(await handlers().repo_diff({}, { secretaryConversationId: 'sec-1' })).toEqual({
+      ok: false,
+      error: 'invalid arguments',
+    });
+  });
+
+  it('非法 ref 拒绝，unknown ref 返回 diff-failed', async () => {
+    expect(
+      await handlers(fakeRepo(diffResult)).repo_diff(
+        { projectId: 'p1', ref: '--exec=rm' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'invalid-ref' });
+    expect(
+      await handlers(fakeRepo({})).repo_diff(
+        { projectId: 'p1' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'diff-failed' });
+  });
+
+  it('同仓 worktree 路径放行', async () => {
+    const repo = fakeRepo(diffResult, {
+      known: ['/repo/alpha', '/wt/alpha-1'],
+      common: { '/repo/alpha': '/repo/alpha/.git', '/wt/alpha-1': '/repo/alpha/.git' },
+    });
+    const result = await run(handlers(repo).repo_diff, { path: '/wt/alpha-1' });
+    expect(result).toMatchObject({ projectId: 'p1', totalFiles: 2 });
+  });
+});
+
 describe('排队会话的读取', () => {
   const queued = (queuedAt: number, extra: Record<string, unknown> = {}) =>
     row({

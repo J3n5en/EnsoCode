@@ -34,6 +34,7 @@ import { currentBranch, repoIsClean } from '../worktree/service';
 import { autoArchived } from './autoArchive';
 import { leftoverReason, taskIsPersistent } from './leftover';
 import { projectAliasesFromSettings, secretaryProjectNames } from './projectLabel';
+import { readRepoDiff } from './repoDiff';
 import {
   REPO_STATUS_COMMIT_DEFAULT,
   REPO_STATUS_COMMIT_MAX,
@@ -114,6 +115,7 @@ export interface SecretaryReadHandlers {
   project_list: SecretaryOpHandler;
   project_info: SecretaryOpHandler;
   repo_status: SecretaryOpHandler;
+  repo_diff: SecretaryOpHandler;
   session_list: SecretaryOpHandler;
   claims_list: SecretaryOpHandler;
   threads_list: SecretaryOpHandler;
@@ -680,30 +682,11 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
     },
 
     async repo_status(params) {
-      const projectId = stringParam(params, 'projectId');
-      const requestedPath = stringParam(params, 'path');
-      if (!projectId && !requestedPath) return invalidArguments;
       const limit = countParam(params.limit, REPO_STATUS_COMMIT_DEFAULT, REPO_STATUS_COMMIT_MAX);
       const base = stringParam(params, 'base');
       const contains = stringParam(params, 'contains');
-      const { projects } = await collect(ports);
-      // ssh 项目的分支在远端，本机跑 git 只会得到错误
-      const candidates: RepoScopeCandidate[] = projects
-        .filter((project) => project.kind !== 'ssh')
-        .map((project) => ({ projectId: project.projectId, path: project.canonicalPath }));
-      let scope: { projectId: string; root: string } | null = null;
-      if (requestedPath) {
-        scope = await resolveRepoScope(ports.repo, candidates, requestedPath);
-        // 同时给了 projectId 时，路径必须落在同一个项目里，不能借路径跨项目
-        if (scope && projectId && scope.projectId !== projectId)
-          return { ok: false, error: 'path-out-of-scope' };
-      } else {
-        const project = projects.find((candidate) => candidate.projectId === projectId);
-        if (!project) return notFound;
-        if (project.kind === 'ssh') return { ok: false, error: 'ssh-project' };
-        scope = { projectId: project.projectId, root: project.canonicalPath };
-      }
-      if (!scope) return { ok: false, error: 'path-out-of-scope' };
+      const scope = await repoScopeOf(params);
+      if ('error' in scope) return { ok: false, error: scope.error };
       const outcome = await readRepoStatus(ports.repo, {
         root: scope.root,
         limit,
@@ -719,7 +702,72 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         },
       };
     },
+
+    async repo_diff(params) {
+      const base = stringParam(params, 'base');
+      const ref = stringParam(params, 'ref');
+      const scope = await repoScopeOf(params);
+      if ('error' in scope) return { ok: false, error: scope.error };
+      const outcome = await readRepoDiff(ports.repo, {
+        root: scope.root,
+        ...(base ? { base } : {}),
+        ...(ref ? { ref } : {}),
+        ...(params.mergeBase === false ? { mergeBase: false } : {}),
+      });
+      if (!outcome.ok) return { ok: false, error: outcome.code };
+      return {
+        ok: true,
+        result: {
+          projectId: scope.projectId,
+          base: outcome.diff.base,
+          ref: outcome.diff.ref,
+          mergeBase: outcome.diff.mergeBase,
+          totalFiles: outcome.diff.totalFiles,
+          truncated: outcome.diff.truncated,
+          added: outcome.diff.added,
+          deleted: outcome.diff.deleted,
+          binary: outcome.diff.binary,
+          // 路径沿用 repo_status 口径只脱敏；ref/路径是秘书自己要回传的信息，不包 untrusted
+          files: outcome.diff.files.map((file) => ({
+            status: file.status,
+            path: redactSecrets(file.path),
+            added: file.added,
+            deleted: file.deleted,
+            ...(file.binary ? { binary: true } : {}),
+            ...(file.fromPath ? { fromPath: redactSecrets(file.fromPath) } : {}),
+          })),
+        },
+      };
+    },
   };
+
+  /**
+   * repo_status / repo_diff 共用的范围收窄：projectId 直接取可见项目检出目录，
+   * path 必须落在可见项目或同仓 worktree 根；ssh 项目与越界路径一律拒绝。
+   */
+  async function repoScopeOf(
+    params: Record<string, unknown>
+  ): Promise<{ projectId: string; root: string } | { error: string }> {
+    const projectId = stringParam(params, 'projectId');
+    const requestedPath = stringParam(params, 'path');
+    if (!projectId && !requestedPath) return { error: 'invalid arguments' };
+    const { projects } = await collect(ports);
+    // ssh 项目的分支在远端，本机跑 git 只会得到错误
+    const candidates: RepoScopeCandidate[] = projects
+      .filter((project) => project.kind !== 'ssh')
+      .map((project) => ({ projectId: project.projectId, path: project.canonicalPath }));
+    if (requestedPath) {
+      const scope = await resolveRepoScope(ports.repo, candidates, requestedPath);
+      if (!scope) return { error: 'path-out-of-scope' };
+      // 同时给了 projectId 时，路径必须落在同一个项目里，不能借路径跨项目
+      if (projectId && scope.projectId !== projectId) return { error: 'path-out-of-scope' };
+      return scope;
+    }
+    const project = projects.find((candidate) => candidate.projectId === projectId);
+    if (!project) return { error: 'not-found' };
+    if (project.kind === 'ssh') return { error: 'ssh-project' };
+    return { projectId: project.projectId, root: project.canonicalPath };
+  }
 }
 
 /** 一个秘书的只读端口：档案（可见项目）按秘书读，降权回合传收窄后的档案 */
