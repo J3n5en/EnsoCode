@@ -88,8 +88,11 @@ const AGENTS: AgentTypeEntry[] = [
   },
 ];
 
-/** 迁移时只改这里：分区 → 页面组件 */
-async function MODELS_GROUP_PAGES() {
+/**
+ * 迁移时只改这里：分区 → 页面组件。import 顶层并行发起：顺序瀑布在高负载下要
+ * 十几秒，会撑爆 beforeAll 的 10s 超时；顶层 await 属于模块求值，不进钩子计时。
+ */
+const MODELS_GROUP_PAGES = await (async () => {
   const { useSettingsStore } = await import('@/stores/settings');
   useSettingsStore.setState({
     providers: PROVIDERS,
@@ -104,14 +107,16 @@ async function MODELS_GROUP_PAGES() {
     presets: PRESETS,
     agentTypes: AGENTS,
   });
-  const { ProvidersSettings } = await import('./ProvidersSettings');
-  const { PresetsSettings } = await import('./PresetsSettings');
-  const { AgentTypesSettings } = await import('./AgentTypesSettings');
+  const [{ ProvidersSettings }, { PresetsSettings }, { AgentTypesSettings }] = await Promise.all([
+    import('./ProvidersSettings'),
+    import('./PresetsSettings'),
+    import('./AgentTypesSettings'),
+  ]);
   return { providers: ProvidersSettings, presets: PresetsSettings, agents: AgentTypesSettings };
-}
+})();
 
 const pin = setupPin({
-  pages: MODELS_GROUP_PAGES,
+  pages: () => MODELS_GROUP_PAGES,
   results: {
     'electronAPI.providers.listOauth': [],
     'electronAPI.providers.classifierModels': { ok: true, models: [] },
@@ -134,9 +139,10 @@ describe('模型与服务商组设置迁移前后行为一致', () => {
     expect(pin.rows()).toMatchSnapshot();
   });
 
+  // 逐个点控件较慢，机器忙时 5s 默认超时不够（与其他 pin 组一致）
   it('每个控件的当前值（默认值）与读写的 store key / electronAPI 调用不变', async () => {
     expect(await pin.probe()).toMatchSnapshot();
-  });
+  }, 30_000);
 
   it('关掉标题总结与子代理模型后同样不变', async () => {
     await act(async () =>
@@ -144,5 +150,5 @@ describe('模型与服务商组设置迁移前后行为一致', () => {
     );
     await pin.settle();
     expect(await pin.probe()).toMatchSnapshot();
-  });
+  }, 30_000);
 });

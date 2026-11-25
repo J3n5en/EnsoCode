@@ -2,15 +2,28 @@ import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { setupPin } from './pin.testUtils';
 
-/** 迁移时只改这里：分区 → 页面组件 */
-async function APP_GROUP_PAGES() {
-  const { GeneralSettings } = await import('./GeneralSettings');
-  const { AppearanceSettings } = await import('./AppearanceSettings');
-  const { ConversationSettings } = await import('./ConversationSettings');
-  const { TerminalSettings } = await import('./TerminalSettings');
-  const { RuntimeSettings } = await import('./RuntimeSettings');
-  const { PrivacySettings } = await import('./PrivacySettings');
-  const { DevToolsSection } = await import('./DevToolsSection');
+/**
+ * 迁移时只改这里：分区 → 页面组件。import 顶层并行发起：顺序瀑布在高负载下要
+ * 十几秒，会撑爆 beforeAll 的 10s 超时；顶层 await 属于模块求值，不进钩子计时。
+ */
+const APP_GROUP_PAGES = await (async () => {
+  const [
+    { GeneralSettings },
+    { AppearanceSettings },
+    { ConversationSettings },
+    { TerminalSettings },
+    { RuntimeSettings },
+    { PrivacySettings },
+    { DevToolsSection },
+  ] = await Promise.all([
+    import('./GeneralSettings'),
+    import('./AppearanceSettings'),
+    import('./ConversationSettings'),
+    import('./TerminalSettings'),
+    import('./RuntimeSettings'),
+    import('./PrivacySettings'),
+    import('./DevToolsSection'),
+  ]);
   return {
     general: GeneralSettings,
     appearance: AppearanceSettings,
@@ -20,10 +33,10 @@ async function APP_GROUP_PAGES() {
     privacy: PrivacySettings,
     devTools: DevToolsSection,
   };
-}
+})();
 
 const pin = setupPin({
-  pages: APP_GROUP_PAGES,
+  pages: () => APP_GROUP_PAGES,
   results: {
     'electronAPI.compaction.getReserveTokens': 16384,
     'electronAPI.sourceAuthority.read': { projects: [], conversations: [] },
