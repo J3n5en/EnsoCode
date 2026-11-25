@@ -1227,7 +1227,11 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     ).deliverNotification(parent.sessionId, 'task done');
     expect(live.prompt).toHaveBeenLastCalledWith(
       '<agent-notification>\ntask done\n</agent-notification>',
-      { source: 'extension', streamingBehavior: 'followUp' }
+      expect.objectContaining({
+        source: 'extension',
+        streamingBehavior: 'followUp',
+        preflightResult: expect.any(Function),
+      })
     );
     await supervisor.shutdown();
   });
@@ -1320,10 +1324,10 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(childNames).not.toEqual(expect.arrayContaining(['apply_patch', 'edit', 'write']));
     expect(messageMain).toBeDefined();
     await messageMain!.execute('call', { message: 'explicit handoff', urgent: true });
-    expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'), {
-      source: 'extension',
-      streamingBehavior: 'followUp',
-    });
+    expect(parentSession.prompt).toHaveBeenCalledWith(
+      expect.stringContaining('explicit handoff'),
+      expect.objectContaining({ source: 'extension', streamingBehavior: 'followUp' })
+    );
   });
 
   it('spawn-child 的类型级 reasoning/thinkingLevel 作为类型预设进入子会话', async () => {
