@@ -8,6 +8,7 @@ import {
   BOT_AVATAR_HOST,
   LOCAL_IMAGE_SCHEME,
   PLUGIN_ASSET_HOST,
+  PROJECT_ICON_HOST,
   SECRETARY_AVATAR_HOST,
   SECRETARY_REPORT_HOST,
 } from './localImage';
@@ -41,7 +42,10 @@ function parse(url: string): { pair: string; identity: string } | null {
   const id =
     host === SECRETARY_AVATAR_HOST
       ? `${host}?s=${inner.searchParams.get('s') ?? ''}`
-      : host === BOT_AVATAR_HOST || host === PLUGIN_ASSET_HOST || host === SECRETARY_REPORT_HOST
+      : host === BOT_AVATAR_HOST ||
+          host === PLUGIN_ASSET_HOST ||
+          host === SECRETARY_REPORT_HOST ||
+          host === PROJECT_ICON_HOST
         ? `${host}${inner.pathname}`
         : null;
   return id ? { pair: match[1], identity: `${match[1]}\n${id}` } : null;

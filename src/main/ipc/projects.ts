@@ -2,6 +2,7 @@ import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { app, ipcMain, shell } from '@platform';
 import { conversationCwd } from '@shared/conversationCwd';
+import type { ProjectIconInfo } from '@shared/projectIcon';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   parseCreateProjectAuthorityRequest,
@@ -12,7 +13,9 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { listProjectCodeSources } from '../../agent/projectCodeSources';
 import { searchHostDirs } from '../services/hostDirSearch';
 import { createHostDir, listHostDirs } from '../services/hostDirs';
+import { setProjectIconResolver } from '../services/localImageProtocol';
 import { openInApps } from '../services/openInApps';
+import { getProjectIconStore } from '../services/projectIconStore';
 import { getRecentProjects } from '../services/recentProjects';
 import { isMainRenderer } from '../services/renderers';
 import { unfollowTargetEverywhere } from '../services/secretary/following';
@@ -41,6 +44,25 @@ function parseRevealRequest(
     ...(typeof conversationId === 'string' ? { conversationId } : {}),
     ...(typeof appId === 'string' ? { appId } : {}),
   };
+}
+
+const NONE_ICON: ProjectIconInfo = { revision: 'none', kind: 'none' };
+const CUSTOM_ICON_BLOCKED = new Set(['scratch', 'secretary', 'bot-home']);
+
+function parseProjectId(request: unknown): string | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const projectId = (request as { projectId?: unknown }).projectId;
+  return typeof projectId === 'string' && projectId.length > 0 ? projectId : null;
+}
+
+function parseSetIcon(request: unknown): { projectId: string; image: Uint8Array | null } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const projectId = parseProjectId(request);
+  if (!projectId || !('image' in request)) return null;
+  const image = (request as { image?: unknown }).image;
+  if (image === null) return { projectId, image: null };
+  if (image instanceof Uint8Array) return { projectId, image };
+  return null;
 }
 
 function isDirectory(value: string): boolean {
@@ -114,6 +136,14 @@ function resolveLocalCwd(parsed: {
 }
 
 export function registerProjectHandlers(): void {
+  const icons = getProjectIconStore();
+  icons.setProjectLookup((projectId) => {
+    const project = getSourceAuthorityRegistry()?.project(projectId);
+    if (project?.state !== 'active') return null;
+    return { canonicalPath: project.canonicalPath, kind: project.kind };
+  });
+  setProjectIconResolver((projectId) => icons.serveIconFile(projectId));
+
   ipcMain.handle(IPC_CHANNELS.PROJECTS_GET_RECENT, async () => {
     try {
       return await getRecentProjects();
@@ -184,6 +214,38 @@ export function registerProjectHandlers(): void {
     return 'cwd' in resolved ? listProjectCodeSources(resolved.cwd) : [];
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECTS_GET_ICON,
+    async (event, request: unknown): Promise<ProjectIconInfo> => {
+      if (!isMainRenderer(event.sender.id)) return NONE_ICON;
+      const projectId = parseProjectId(request);
+      const project = projectId ? getSourceAuthorityRegistry()?.project(projectId) : null;
+      if (project?.state !== 'active') return NONE_ICON;
+      const icon = await getProjectIconStore().getIcon(
+        project.projectId,
+        project.canonicalPath,
+        project.kind
+      );
+      return icon.info;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.PROJECTS_SET_ICON, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'unavailable' };
+    const parsed = parseSetIcon(request);
+    if (!parsed) return { ok: false, error: 'invalid' };
+    const project = getSourceAuthorityRegistry()?.project(parsed.projectId);
+    if (project?.state !== 'active') return { ok: false, error: 'unavailable' };
+    if (project.kind && CUSTOM_ICON_BLOCKED.has(project.kind)) {
+      return { ok: false, error: 'unsupported' };
+    }
+    const store = getProjectIconStore();
+    const written = await store.setCustomIcon(project.projectId, parsed.image);
+    if (!written.ok) return written;
+    const icon = await store.getIcon(project.projectId, project.canonicalPath, project.kind);
+    return { ok: true, info: icon.info };
+  });
+
   ipcMain.handle(IPC_CHANNELS.SOURCE_PROJECT_CREATE, async (event, request: unknown) => {
     const parsed = parseCreateProjectAuthorityRequest(request);
     const registry = getSourceAuthorityRegistry();
@@ -224,6 +286,7 @@ export function registerProjectHandlers(): void {
       .conversations.filter((conversation) => conversation.projectId === parsed.projectId);
     const result = registry.removeProject(parsed);
     if (result.accepted) {
+      getProjectIconStore().removeProjectData(parsed.projectId);
       const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
       for (const conversation of conversations) {
         removeConversationSessionFiles({

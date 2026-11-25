@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { net } from '@platform';
 import { sniffAvatar } from '@shared/bots/cardPng';
+import { sniffImageMime } from '@shared/imageSniff';
 import {
   BOT_AVATAR_HOST,
   IMAGE_EXTENSIONS,
@@ -12,6 +13,7 @@ import {
   localImageUrlToPath,
   mediaExtension,
   PLUGIN_ASSET_HOST,
+  PROJECT_ICON_HOST,
   REMOTE_FETCH_HOST,
   SECRETARY_AVATAR_HOST,
   SECRETARY_REPORT_HOST,
@@ -22,6 +24,18 @@ let botAvatarResolver: (botId: string) => string | null = () => null;
 
 export function setBotAvatarResolver(resolve: (botId: string) => string | null): void {
   botAvatarResolver = resolve;
+}
+
+export interface ProjectIconFile {
+  path: string;
+  mimeType?: string;
+}
+
+let projectIconResolver: (projectId: string) => Promise<ProjectIconFile | null> = async () => null;
+export function setProjectIconResolver(
+  resolve: (projectId: string) => Promise<ProjectIconFile | null>
+): void {
+  projectIconResolver = resolve;
 }
 
 let secretaryAvatarResolver: (secretaryId: string | null) => string | null = () => null;
@@ -104,10 +118,62 @@ export async function handleLocalImageRequest(
   if (url.hostname === BOT_AVATAR_HOST) {
     return serveBotAvatar(decodeURIComponent(url.pathname.slice(1)));
   }
+  if (url.hostname === PROJECT_ICON_HOST) return serveProjectIcon(url);
   if (url.hostname === SECRETARY_AVATAR_HOST) return serveSecretaryAvatar(url);
   if (url.hostname === PLUGIN_ASSET_HOST) return servePluginAsset(url);
   if (url.hostname === SECRETARY_REPORT_HOST) return serveSecretaryReport(url);
   return serveLocalMedia(url, rangeHeader);
+}
+
+const PROJECT_ICON_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+]);
+
+function projectIconId(url: URL): { id: string } | { error: 400 | 403 } {
+  const rawParts = url.pathname.split('/').filter((part) => part.length > 0);
+  if (rawParts.length !== 1) return { error: 403 };
+  const decoded = decodeSegment(rawParts[0] ?? '');
+  if (decoded === null) return { error: 400 };
+  if (!decoded || decoded.includes('..') || !/^[a-zA-Z0-9_-]+$/.test(decoded)) {
+    return { error: 403 };
+  }
+  return { id: decoded };
+}
+
+async function serveProjectIcon(url: URL): Promise<Response> {
+  const target = projectIconId(url);
+  if ('error' in target) {
+    return new Response(target.error === 400 ? 'Bad path' : 'Forbidden', { status: target.error });
+  }
+  let file: ProjectIconFile | null;
+  try {
+    file = await projectIconResolver(target.id);
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+  if (!file?.path) return new Response('Not found', { status: 404 });
+  return serveProjectIconFile(file.path);
+}
+
+async function serveProjectIconFile(file: string): Promise<Response> {
+  try {
+    const data = new Uint8Array(await readFile(file));
+    const mime = sniffImageMime(data);
+    if (!mime || !PROJECT_ICON_MIMES.has(mime)) return new Response('Forbidden', { status: 403 });
+    return new Response(data, {
+      headers: {
+        'Content-Type': mime,
+        'Cache-Control': 'max-age=31536000',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
 }
 
 function pluginAssetType(ext: string): string | null {
