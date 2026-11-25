@@ -532,7 +532,7 @@ export function VirtualModelsSettings() {
           />
         ))}
         {!seed && (
-          <p className="border-border border-b py-3 text-muted-foreground text-xs">
+          <p className="px-4 py-3 text-muted-foreground text-xs max-sm:px-3">
             {t('Enable a model and configure valid provider credentials first.')}
           </p>
         )}

@@ -2,6 +2,7 @@ import { RotateCcw, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
+import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import {
   ACTION_HINT_KEYS,
@@ -116,7 +117,7 @@ function PluginKeybindingsSection() {
   };
 
   return (
-    <SettingsSection title="插件命令">
+    <SettingsSection title={t('Plugin commands')}>
       {rows.map(({ action, command, binding, custom, conflict }) => {
         const isCapturing = capturing === action;
         return (
@@ -148,7 +149,13 @@ function PluginKeybindingsSection() {
               </IconAction>
             )}
             {custom && !isCapturing && (
-              <IconAction title={t('Reset to default')} onClick={() => resetKeybinding(action)}>
+              <IconAction
+                title={t('Reset to default')}
+                onClick={() => {
+                  resetKeybinding(action);
+                  addToast({ type: 'info', title: t('Reset to defaults') });
+                }}
+              >
                 <RotateCcw className="h-3.5 w-3.5" />
               </IconAction>
             )}
@@ -252,7 +259,13 @@ function KeybindingsSection() {
               </IconAction>
             )}
             {isCustom && !isCapturing && (
-              <IconAction title={t('Reset to default')} onClick={() => resetKeybinding(action)}>
+              <IconAction
+                title={t('Reset to default')}
+                onClick={() => {
+                  resetKeybinding(action);
+                  addToast({ type: 'info', title: t('Reset to defaults') });
+                }}
+              >
                 <RotateCcw className="h-3.5 w-3.5" />
               </IconAction>
             )}

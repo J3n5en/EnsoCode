@@ -43,7 +43,7 @@ const pin = setupPin({
     'electronAPI.privacyMask.records': [],
     'electronAPI.window.shellIntegrationStatus': { installed: false },
   },
-  props: { 'electronAPI.env.platform': 'darwin' },
+  props: { 'electronAPI.env.platform': 'darwin', 'electronAPI.remote': undefined },
 });
 
 // 逐页渲染并点遍控件较慢，机器忙时 5s 默认超时会偶发失败

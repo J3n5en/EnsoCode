@@ -1,3 +1,4 @@
+import { MotionGlobalConfig } from 'framer-motion';
 import { parseHTML } from 'linkedom';
 import * as React from 'react';
 import { act, type ComponentProps, type ReactNode } from 'react';
@@ -5,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SettingsDangerAction,
+  SettingsEmptyState,
   SettingsExpandableRow,
   SettingsInput,
   SettingsPage,
@@ -52,9 +54,10 @@ vi.mock('@/components/ui/input', () => ({
   // linkedom 下 React 收不到 change，按 input 事件转发
   Input: ({
     size: _size,
+    unstyled: _unstyled,
     onChange,
     ...props
-  }: Omit<ComponentProps<'input'>, 'size'> & { size?: string }) => (
+  }: Omit<ComponentProps<'input'>, 'size'> & { size?: string; unstyled?: boolean }) => (
     <input {...props} onInput={onChange as ComponentProps<'input'>['onInput']} />
   ),
 }));
@@ -100,6 +103,7 @@ const byText = (selector: string, text: string) => {
 };
 
 beforeEach(() => {
+  MotionGlobalConfig.skipAnimations = true;
   const dom = parseHTML('<html><body><div id="root"></div></body></html>');
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.document);
@@ -111,6 +115,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  MotionGlobalConfig.skipAnimations = false;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -270,6 +275,109 @@ describe('SettingsSearch', () => {
 
   it('不画带框容器', async () => {
     await render(<SettingsSearch value="" onValueChange={() => {}} placeholder="Search" />);
+    expect(findNestedBoxes(container)).toEqual([]);
+  });
+
+  it('有输入时显示清空按钮，点击后清空并保持焦点', async () => {
+    await render(<Harness onOuterEscape={() => {}} />);
+    expect(container.querySelector('button[aria-label="Clear search"]')).toBeNull();
+    const input = container.querySelector('input') as HTMLInputElement;
+    await type(input, 'proxy');
+    const clearBtn = container.querySelector(
+      'button[aria-label="Clear search"]'
+    ) as HTMLButtonElement | null;
+    expect(clearBtn).not.toBeNull();
+    const focusSpy = vi.spyOn(input, 'focus');
+    await act(async () => clearBtn?.click());
+    expect(input.value).toBe('');
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('button[aria-label="Clear search"]')).toBeNull();
+  });
+});
+
+describe('SettingsSegmented', () => {
+  it('支持图标，初始挂载直接定位不滑入，切换选项时启用滑动过渡，ResizeObserver 更新不滑动', async () => {
+    let roCallback: (() => void) | null = null;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          roCallback = cb;
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const IconA = () => <svg data-testid="icon-a" />;
+    const IconB = () => <svg data-testid="icon-b" />;
+    const options = [
+      { value: 'a', label: 'First', icon: IconA },
+      { value: 'b', label: 'Second', icon: IconB },
+    ] as const;
+
+    const setGeometry = () => {
+      const radios = [...container.querySelectorAll('[role="radio"]')] as HTMLElement[];
+      Object.defineProperty(radios[0], 'offsetLeft', { configurable: true, value: 0 });
+      Object.defineProperty(radios[0], 'offsetWidth', { configurable: true, value: 60 });
+      Object.defineProperty(radios[1], 'offsetLeft', { configurable: true, value: 64 });
+      Object.defineProperty(radios[1], 'offsetWidth', { configurable: true, value: 72 });
+    };
+
+    function SegHarness() {
+      const [val, setVal] = React.useState<'a' | 'b'>('a');
+      return <SettingsSegmented value={val} onValueChange={setVal} options={options} />;
+    }
+
+    await render(<SegHarness />);
+    expect(container.querySelector('[data-testid="icon-a"]')).not.toBeNull();
+    setGeometry();
+    // Trigger initial measurement via ResizeObserver callback (simulating layout pass)
+    await act(async () => roCallback?.());
+    let pill = container.querySelector('[data-slot="segmented-indicator"]') as HTMLElement | null;
+    expect(pill).not.toBeNull();
+    expect(pill?.style.width).toBe('60px');
+    expect(pill?.style.transform).toBe('translateX(0px)');
+    expect(pill?.className).not.toContain('transition-[transform,width]');
+
+    // Switching value enables slide transition
+    const radios = [...container.querySelectorAll('[role="radio"]')] as HTMLElement[];
+    await act(async () => radios[1].click());
+    pill = container.querySelector('[data-slot="segmented-indicator"]') as HTMLElement | null;
+    expect(pill?.style.width).toBe('72px');
+    expect(pill?.style.transform).toBe('translateX(64px)');
+    expect(pill?.className).toContain('transition-[transform,width]');
+
+    // ResizeObserver updates position without slide animation
+    await act(async () => roCallback?.());
+    pill = container.querySelector('[data-slot="segmented-indicator"]') as HTMLElement | null;
+    expect(pill?.className).not.toContain('transition-[transform,width]');
+  });
+});
+
+describe('SettingsEmptyState & SettingsSection', () => {
+  it('SettingsEmptyState 渲染图标、标题、说明与操作，SettingsSection bare 不包分组容器', async () => {
+    const DummyIcon = () => <svg data-testid="empty-icon" />;
+    await render(
+      <>
+        <SettingsSection bare title="Bare">
+          <div>content</div>
+        </SettingsSection>
+        <SettingsSection title="Grouped">
+          <SettingsEmptyState
+            icon={DummyIcon}
+            title="Nothing here"
+            description="Try adding one"
+            actions={<button type="button">Add</button>}
+          />
+        </SettingsSection>
+      </>
+    );
+    const groups = container.querySelectorAll('[data-slot="settings-group"]');
+    expect(groups).toHaveLength(1);
+    expect(container.querySelector('[data-slot="settings-empty"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="empty-icon"]')).not.toBeNull();
+    expect(container.textContent).toContain('Nothing here');
+    expect(container.textContent).toContain('Try adding one');
     expect(findNestedBoxes(container)).toEqual([]);
   });
 });

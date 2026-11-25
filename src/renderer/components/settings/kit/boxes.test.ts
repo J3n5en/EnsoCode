@@ -1,6 +1,6 @@
 import { parseHTML } from 'linkedom';
 import { describe, expect, it } from 'vitest';
-import { findNestedBoxes, isBoxedClassName } from './boxes';
+import { countBoxesInSource, findNestedBoxes, isBoxedClassName } from './boxes';
 
 describe('isBoxedClassName', () => {
   it.each([
@@ -45,5 +45,34 @@ describe('findNestedBoxes', () => {
       '<div data-settings-preview class="rounded-md border"><div class="rounded border"></div></div>'
     );
     expect(findNestedBoxes(bad as unknown as Element)).toHaveLength(1);
+  });
+
+  it('section 顶层 settings-group 放行，嵌套的 settings-group 算违规', () => {
+    const ok = dom(
+      '<section><div data-slot="settings-group" class="rounded-[12px] border bg-card"><div data-slot="settings-row">a</div></div></section>'
+    );
+    expect(findNestedBoxes(ok as unknown as Element)).toEqual([]);
+    const nested = dom(
+      '<div data-slot="settings-group" class="rounded-[12px] border"><div data-slot="settings-group" class="rounded-[12px] border"></div></div>'
+    );
+    expect(findNestedBoxes(nested as unknown as Element)).toHaveLength(1);
+  });
+
+  it('settings-preview 在 settings-group 内算违规，独立或 bare section 内放行', () => {
+    const standalone = dom(
+      '<section><div><div data-slot="settings-preview" data-settings-preview class="rounded-[12px] border bg-card">chart</div></div></section>'
+    );
+    expect(findNestedBoxes(standalone as unknown as Element)).toEqual([]);
+    const insideGroup = dom(
+      '<div data-slot="settings-group" class="rounded-[12px] border"><div data-slot="settings-preview" data-settings-preview class="rounded-[12px] border">chart</div></div>'
+    );
+    expect(findNestedBoxes(insideGroup as unknown as Element)).toHaveLength(1);
+  });
+});
+
+describe('countBoxesInSource', () => {
+  it('不允许页面代码手写 data-slot="settings-group" 或 settings-preview', () => {
+    expect(countBoxesInSource('<div data-slot="settings-group" />')).toBe(1);
+    expect(countBoxesInSource('<div data-slot="settings-preview" />')).toBe(1);
   });
 });

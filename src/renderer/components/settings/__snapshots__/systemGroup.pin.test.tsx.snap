@@ -384,10 +384,7 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     ],
     "kind": "choice",
     "row": null,
-    "selected": [
-      "Output",
-      "Input",
-    ],
+    "selected": [],
   },
   {
     "current": "",
@@ -767,8 +764,19 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     "kind": "choice",
     "row": null,
     "selected": [
+      "Output",
+      "Input",
       "Cache",
     ],
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": null,
+    "selected": [],
   },
   {
     "current": "",

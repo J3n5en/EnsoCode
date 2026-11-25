@@ -128,13 +128,14 @@ export function MemoryKnowledge({ revision = 0 }: { revision?: number } = {}) {
 
   return (
     <SettingsSection
+      bare
       rowId="memory.knowledge"
       title={t('Knowledge')}
       description={t(
         'Browse what the agent knows as a graph or a tree, ask for an interpretation, and consolidate related memories into a crystal.'
       )}
     >
-      <div className="flex flex-wrap items-center gap-2 border-border border-b py-2">
+      <div className="flex flex-wrap items-center gap-2 py-2">
         <Select
           value={mode}
           items={modeItems}
