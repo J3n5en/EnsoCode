@@ -139,7 +139,8 @@ const pin = setupPin({
   props: { 'electronAPI.env.platform': 'darwin', 'electronAPI.remote': undefined },
 });
 
-describe('秘书 / 连接 / 系统组设置迁移前后行为一致', () => {
+// 逐页渲染并点遍控件较慢，机器忙时 5s 默认超时会偶发失败
+describe('秘书 / 连接 / 系统组设置迁移前后行为一致', { timeout: 30_000 }, () => {
   it('每页都渲染出来了', () => {
     const empty = [...pin.container.querySelectorAll('[data-pin-page]')]
       .filter((page) => (page.textContent ?? '').trim() === '')

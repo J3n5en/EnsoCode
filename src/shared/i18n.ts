@@ -4429,6 +4429,23 @@ export const zhTranslations: Record<string, string> = {
   'Report screenshots': '报告截图',
   'Copies of screenshots in finished reports, kept for 7 days after completion. Cleaning removes all of them; report text is kept.':
     '已完成报告里截图的副本，完成后保留 7 天。清理会删掉全部截图，报告文字保留。',
+  'Not vectorized': '未向量化',
+  'Completion backend': '推理后端',
+  'Local GGUF runs on this machine. Remote uses the model below.':
+    '本地 GGUF 在本机运行；远程则使用下方的模型。',
+  'Local model selected but the weights are not on disk. Distillation and interpretation will wait until you click Download.':
+    '已选择本地模型，但权重文件不在磁盘上。提炼和解读会等你点击下载后再进行。',
+  'Download in progress. Distillation waits until the model is ready.':
+    '正在下载，模型就绪后才开始提炼。',
+  'Automatic distillation is on, but the local model is not ready. Sessions will queue until you download it.':
+    '已开启自动提炼，但本地模型尚未就绪。会话会排队，直到你下载模型。',
+  '{{version}} asks for more and is waiting for approval': '{{version}} 需要更多权限，等待你批准',
+  'No tools yet': '还没有工具',
+  'Asks every call': '每次调用都询问',
+  'Show the code': '查看代码',
+  Plugins: '插件',
+  'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.':
+    '秘书为自己编写的 Python 或 Node 工具。它会在对话里提出，你确认后才会写入。只读工具直接运行，其他工具每次调用都要你批准。',
 };
 
 export function normalizeLocale(input?: string): Locale {
