@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { lstatSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import type { GitCloneRequest, GitCloneResult } from '@shared/types';
 
@@ -155,7 +156,11 @@ function runClone(cloneUrl: string, target: string): Promise<GitCloneResult> {
 export async function gitClone(request: unknown): Promise<GitCloneResult> {
   const parsed = parseRequest(request);
   if (!parsed) return { ok: false, error: 'Invalid request.' };
-  if (!path.isAbsolute(parsed.parentDir)) return { ok: false, error: 'Invalid request.' };
+  // 与 hostDirs 一致：`~` 与 `~/...` 展开到家目录
+  const input = parsed.parentDir.trim();
+  const expanded = input === '~' ? homedir() : input.startsWith('~/') ? path.join(homedir(), input.slice(2)) : input;
+  if (!path.isAbsolute(expanded)) return { ok: false, error: 'Invalid request.' };
+  const parentDir = expanded;
 
   const remote = resolveRemote(parsed.url);
   if ('error' in remote) return { ok: false, error: remote.error };
@@ -164,7 +169,7 @@ export async function gitClone(request: unknown): Promise<GitCloneResult> {
   const name = explicit || remote.name;
   if (!isSafeName(name)) return { ok: false, error: 'Invalid folder name.' };
 
-  const parent = path.resolve(parsed.parentDir);
+  const parent = path.resolve(parentDir);
   try {
     if (!statSync(parent).isDirectory()) return { ok: false, error: 'Not a directory.' };
   } catch (error) {

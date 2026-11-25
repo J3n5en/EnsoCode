@@ -132,6 +132,23 @@ describe('gitClone', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it('expands ~ and ~/... in the parent directory', async () => {
+    const child = arm();
+    const home = process.env.HOME;
+    expect(home).toBeTruthy();
+    const pending = gitClone({ url: 'acme/widget', parentDir: '~' });
+    child.emit('close', 0);
+    await expect(pending).resolves.toEqual({
+      ok: true,
+      path: path.join(home as string, 'widget'),
+    });
+    expect(spawn).toHaveBeenCalledWith(
+      'git',
+      ['clone', 'https://github.com/acme/widget.git', path.join(home as string, 'widget')],
+      expect.anything()
+    );
+  });
+
   it('refuses when the target already exists', async () => {
     mkdirSync(path.join(parentDir, 'widget'));
     const result = await gitClone({ url: 'acme/widget', parentDir });
