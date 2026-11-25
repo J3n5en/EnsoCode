@@ -82,7 +82,8 @@ export function PresetsSettings() {
       actions={
         <>
           <Input
-            className="h-8 w-56 min-w-0 max-w-full"
+            size="sm"
+            className="w-56 min-w-0 max-w-full"
             value={importUrl}
             disabled={importing}
             placeholder={t('https://example.com/preset.json')}

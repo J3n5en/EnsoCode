@@ -138,11 +138,11 @@ export function McpSettings() {
       actions={
         <>
           <SettingsButton onClick={() => setImportOpen(true)}>
-            <HardDriveDownload className="mr-1.5 h-4 w-4" />
+            <HardDriveDownload className="h-4 w-4" />
             {t('Import from local apps')}
           </SettingsButton>
           <SettingsButton onClick={() => setEditing('new')}>
-            <Plus className="mr-1.5 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             {t('Add MCP server')}
           </SettingsButton>
         </>
@@ -267,9 +267,9 @@ export function McpSettings() {
                           onClick={() => void runAuthorize(server.id)}
                         >
                           {authorizing ? (
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
-                            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                            <ShieldCheck className="h-3.5 w-3.5" />
                           )}
                           {authorizing ? t('Authorizing') : t('Authorize')}
                         </SettingsButton>
@@ -278,20 +278,20 @@ export function McpSettings() {
                     {authorizedMap[server.id] === true && (
                       <SettingsSubRow label={t('Revoke authorization')}>
                         <SettingsButton onClick={() => void revoke(server.id)}>
-                          <ShieldOff className="mr-1.5 h-3.5 w-3.5" />
+                          <ShieldOff className="h-3.5 w-3.5" />
                           {t('Revoke authorization')}
                         </SettingsButton>
                       </SettingsSubRow>
                     )}
                     <SettingsSubRow label={t('Edit')}>
                       <SettingsButton onClick={() => setEditing(server)}>
-                        <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                         {t('Edit')}
                       </SettingsButton>
                     </SettingsSubRow>
                     <SettingsSubRow label={t('Delete')}>
                       <SettingsButton onClick={() => removeMcpServer(server.id)}>
-                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        <Trash2 className="h-3.5 w-3.5" />
                         {t('Delete')}
                       </SettingsButton>
                     </SettingsSubRow>

@@ -26,7 +26,6 @@ export interface SettingsOption<T extends string> {
   label: string;
 }
 
-const HEIGHT = 'sm:h-(--settings-control-h) sm:min-h-(--settings-control-h)';
 const WIDTH = { default: 'w-[220px]', wide: 'w-[280px]' } as const;
 
 export function SettingsSwitch({
@@ -49,8 +48,9 @@ export function SettingsSwitch({
   );
 }
 
-export function SettingsButton({ className, ...props }: React.ComponentProps<typeof Button>) {
-  return <Button size="sm" variant="outline" className={cn(HEIGHT, className)} {...props} />;
+/** 与对话框、工作区同一套：ui Button 的 sm 尺寸，默认描边款 */
+export function SettingsButton(props: React.ComponentProps<typeof Button>) {
+  return <Button size="sm" variant="outline" {...props} />;
 }
 
 export function SettingsSelect<T extends string>({
@@ -83,7 +83,7 @@ export function SettingsSelect<T extends string>({
         size="sm"
         {...a11y}
         aria-label={ariaLabel}
-        className={cn(WIDTH[width], 'max-w-full', HEIGHT)}
+        className={cn(WIDTH[width], 'max-w-full')}
       >
         <SelectValue />
       </SelectTrigger>
@@ -205,7 +205,7 @@ export function SettingsInput({
       onBlur={() => commit(draft)}
       className={cn(
         WIDTH[width],
-        'max-w-full max-sm:[&>input]:h-[42px] max-sm:[&>input]:leading-[42px] sm:[&>input]:h-[26px] sm:[&>input]:leading-[26px]'
+        'max-w-full max-sm:[&>input]:h-[42px] max-sm:[&>input]:leading-[42px]'
       )}
     />
   );
@@ -275,7 +275,7 @@ export function SettingsStepper({
     >
       <NumberFieldGroup>
         <NumberFieldDecrement />
-        <NumberFieldInput {...a11y} className="sm:h-[26px] sm:leading-[26px]" />
+        <NumberFieldInput {...a11y} />
         <NumberFieldIncrement />
       </NumberFieldGroup>
     </NumberField>

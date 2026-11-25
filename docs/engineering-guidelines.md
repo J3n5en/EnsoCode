@@ -85,7 +85,9 @@ pnpm typecheck && pnpm lint && pnpm test:changed
 设置页用 `src/renderer/components/settings/kit/` 里的组件拼，不自写行和分组：
 
 - 一层容器。页面已经在主区卡片里，页内不再画带边框或 `bg-card` 的框。分组是标题加行间 1px 分隔线，组间留白 40px。主题缩略图这类「内容本身是对象」的预览可以有框，元素上标 `data-settings-preview`，里面不能再套框。
-- 设置行是左边标签加一行说明、右边控件。控件桌面端 28px 高，用 kit 的 `SettingsSwitch`、`SettingsSelect`、`SettingsSegmented`、`SettingsInput`、`SettingsStepper`、`SettingsButton`，它们会把控件和标签、说明关联起来。
+- 内容列最宽 920px（`--settings-content-max`），宽屏下居中，窄窗口铺满不横向溢出。
+- 页头是标题、标签、说明加页级操作。标题区至少 280px，操作按钮放不下时整组换到标题下面，标签和标题按基线对齐。
+- 设置行是左边标签加一行说明、右边控件。用 kit 的 `SettingsSwitch`、`SettingsSelect`、`SettingsSegmented`、`SettingsInput`、`SettingsStepper`、`SettingsButton`，它们会把控件和标签、说明关联起来。按钮、下拉、输入框就是 ui 组件的 `sm` 尺寸，和对话框、工作区同一套，不在 kit 或页面里改高度、圆角和字号；直接用 ui `SelectTrigger` 时也传 `size="sm"`。
 - 服务商、插件、MCP 这类列表用 `SettingsExpandableRow`，展开后是缩进的 `SettingsSubRow`，不嵌卡片。
 - 危险操作放在页面最后一个 `SettingsSection tone="danger"`，用 `SettingsDangerAction`，一律先弹确认。红色文字和描边用 `--destructive-text`。
 - 文本框停止输入 600ms 或失焦即保存，行内显示「已保存」，不加保存按钮，也不弹 toast。
