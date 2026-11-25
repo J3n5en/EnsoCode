@@ -921,4 +921,24 @@ describe('退出重启保留转后台命令', () => {
     expect(posted(next, 'detach-background-tasks')).toHaveLength(0);
     expect(fork.children[next].killed).toBe(1);
   });
+
+  it('调用方显式要求保留后台任务（headless 一次性 run）：先发交出请求再终止', async () => {
+    const index = bootWithSession();
+    // headless run 没人调 prepareAgentWorkerForQuit，模块里 keepBackgroundOnQuit 是 false；
+    // cleanup 直接在 stopAgentWorkerForQuit 上传 keepBackgroundTasks
+    const stopping = stopAgentWorkerForQuit(100, { keepBackgroundTasks: true });
+    await Promise.resolve();
+    expect(posted(index, 'detach-background-tasks')).toHaveLength(1);
+    expect(fork.children[index].killed).toBe(0);
+    fork.children[index].emit('message', { type: 'background-tasks-detached', detached: 1 });
+    await stopping;
+    expect(fork.children[index].killed).toBe(1);
+
+    // 不带参数的原调用方不受影响：不发交出请求直接终止
+    stopAgentWorker();
+    const next = bootWithSession();
+    await stopAgentWorkerForQuit(100);
+    expect(posted(next, 'detach-background-tasks')).toHaveLength(0);
+    expect(fork.children[next].killed).toBe(1);
+  });
 });

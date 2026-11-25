@@ -725,8 +725,15 @@ export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
  * 应用退出时 Electron 不给 utility 进程发 SIGTERM，worker 的收尾（中止会话→pi 杀 detached
  * bash 进程组、断开 MCP）跑不到，命令会成孤儿进程。退出前主动发信号并等它自行退出。
  * 等安全点超时的话，worker 收尾（中止命令）时可能才落断点：退出后据此补写恢复清单。
+ * keepBackgroundTasks：终止前先让 worker 把能脱离的后台命令交出去（detached 进程组本就独立存活，
+ * 不再被收尾 stopAll 杀掉）。GUI 场景由 prepareAgentWorkerForQuit 的同名选项置位；
+ * headless 一次性 run 没有「下一代」，但 eval / verifier 需要 agent 起的服务活到进程退出之后，
+ * 由调用方逐次显式传，不沾染共享的 keepBackgroundOnQuit。
  */
-export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
+export async function stopAgentWorkerForQuit(
+  timeoutMs: number,
+  options: { keepBackgroundTasks?: boolean } = {}
+): Promise<void> {
   quitStopped = true;
   const child = worker;
   const pending = quitCheckpoint;
@@ -736,7 +743,8 @@ export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   gracefulRestart.reset();
   if (child) {
     // 应用会重新打开：先让 worker 把能脱离的后台命令交出去、写好恢复清单，再终止它
-    if (keepBackgroundOnQuit) await detachBackgroundTasks(child, DETACH_ACK_TIMEOUT_MS);
+    if (keepBackgroundOnQuit || options.keepBackgroundTasks)
+      await detachBackgroundTasks(child, DETACH_ACK_TIMEOUT_MS);
     await killAndWaitExit(child, timeoutMs);
   }
   if (pending) writePendingLateManifest(pending);

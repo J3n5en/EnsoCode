@@ -272,7 +272,9 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
           new Promise<void>((done) => setTimeout(done, 3_000)),
         ]);
       }
-      await stopAgentWorkerForQuit(3_000);
+      // headless 一次性 run：agent 起的常驻服务（dev server、pypi 镜像等）要活到进程退出之后
+      // 供外部 verifier 使用，退出前让 worker 交出后台任务而不是整树停掉
+      await stopAgentWorkerForQuit(3_000, { keepBackgroundTasks: true });
       stopAgentWorker();
     };
     const stop = (next: Stop) => {
