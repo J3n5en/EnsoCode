@@ -1,7 +1,24 @@
-import { Bug, Compass, FlaskConical, History, type LucideIcon } from 'lucide-react';
+import {
+  Bug,
+  ClipboardList,
+  Compass,
+  FlaskConical,
+  GitBranch,
+  History,
+  type LucideIcon,
+  Send,
+  Sun,
+} from 'lucide-react';
 import { useI18n } from '@/i18n';
 
-const SUGGESTIONS: { icon: LucideIcon; title: string; hint: string; prompt: string }[] = [
+interface Suggestion {
+  icon: LucideIcon;
+  title: string;
+  hint: string;
+  prompt: string;
+}
+
+const PROJECT_SUGGESTIONS: Suggestion[] = [
   {
     icon: Compass,
     title: 'Map the project',
@@ -30,12 +47,47 @@ const SUGGESTIONS: { icon: LucideIcon; title: string; hint: string; prompt: stri
   },
 ];
 
+const SECRETARY_SUGGESTIONS: Suggestion[] = [
+  {
+    icon: Sun,
+    title: "Check today's progress",
+    hint: 'Progress report and items waiting on you',
+    prompt: "Summarize today's progress and list anything waiting on me.",
+  },
+  {
+    icon: Send,
+    title: 'Assign a task',
+    hint: 'A one-off job for the secretary to run',
+    prompt: 'Take care of a one-off task: ',
+  },
+  {
+    icon: ClipboardList,
+    title: 'Organize the to-do list',
+    hint: 'Sort the board into clear next steps',
+    prompt: 'Go through the board and organize it into clear next steps.',
+  },
+  {
+    icon: GitBranch,
+    title: 'Clean up merged branches',
+    hint: 'Remove branches that are already merged',
+    prompt: 'Clean up merged branches and worktrees you no longer need.',
+  },
+];
+
 /** 空会话的建议卡片：点击把对应提示词填进输入框，由用户确认后发送 */
-export function WelcomeSuggestions({ onPick }: { onPick: (prompt: string) => void }) {
+export function WelcomeSuggestions({
+  onPick,
+  variant = 'project',
+}: {
+  onPick: (prompt: string) => void;
+  /** 秘书会话给秘书语境的建议；默认项目语境 */
+  variant?: 'project' | 'secretary';
+}) {
   const { t } = useI18n();
+  const suggestions = variant === 'secretary' ? SECRETARY_SUGGESTIONS : PROJECT_SUGGESTIONS;
   return (
     <div className="mx-auto grid w-full max-w-[560px] grid-cols-1 gap-2.5 text-left @min-[36rem]:grid-cols-2">
-      {SUGGESTIONS.map(({ icon: Icon, title, hint, prompt }) => (
+      {suggestions.map(({ icon: Icon, title, hint, prompt }) => (
         <button
           key={title}
           type="button"

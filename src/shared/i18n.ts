@@ -1405,6 +1405,22 @@ export const zhTranslations: Record<string, string> = {
   'A digest based on git log': '基于 git log 生成变更摘要',
   'Summarize the recent changes in this repository based on git log.':
     '根据 git log 总结这个仓库最近的改动。',
+  'Tell the secretary what to take care of…': '要秘书处理什么，直接说…',
+  "Check today's progress": '看看今天的进展',
+  'Progress report and items waiting on you': '进展汇报，以及需要你拍板的事',
+  "Summarize today's progress and list anything waiting on me.":
+    '汇报一下今天的进展，把需要我处理的事列出来。',
+  'Assign a task': '派一个任务',
+  'A one-off job for the secretary to run': '一次性的事，说完秘书就去办',
+  'Take care of a one-off task: ': '帮我处理一件一次性的事：',
+  'Organize the to-do list': '整理待办',
+  'Sort the board into clear next steps': '把看板上的事整理成清晰的下一步',
+  'Go through the board and organize it into clear next steps.':
+    '过一遍看板上的事，整理成清晰的下一步。',
+  'Clean up merged branches': '清理已完成的分支',
+  'Remove branches that are already merged': '删掉已经合并、不再需要的分支',
+  'Clean up merged branches and worktrees you no longer need.':
+    '清理一下已经合并的分支和不再需要的 worktree。',
   'Loading Mermaid diagram...': '加载 Mermaid 图表...',
   'Mermaid render error': 'Mermaid 渲染错误',
   'Mermaid render failed': 'Mermaid 渲染失败',
