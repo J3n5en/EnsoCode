@@ -71,7 +71,7 @@ export function SkillsSettings() {
       description={t('Skills registered by reference; files stay in their original location')}
       actions={
         <SettingsButton onClick={() => setImportOpen(true)}>
-          <HardDriveDownload className="mr-1.5 h-4 w-4" />
+          <HardDriveDownload className="h-4 w-4" />
           {t('Import from local apps')}
         </SettingsButton>
       }

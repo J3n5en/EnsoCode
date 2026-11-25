@@ -55,10 +55,7 @@ export function SettingsDangerAction({
       <Button
         size="sm"
         variant={irreversible ? 'destructive' : 'destructive-outline'}
-        className={cn(
-          'sm:h-(--settings-control-h)',
-          !irreversible && 'border-destructive-text/45 text-destructive-text'
-        )}
+        className={cn(!irreversible && 'border-destructive-text/45 text-destructive-text')}
         onClick={() => setOpen(true)}
       >
         {actionLabel}

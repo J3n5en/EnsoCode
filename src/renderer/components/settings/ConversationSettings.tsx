@@ -140,7 +140,7 @@ function RoleSlider({
           onWeight(next as ChatTypographyWeight);
         }}
       >
-        <SelectTrigger className="w-24 max-w-full" aria-label={label}>
+        <SelectTrigger size="sm" className="w-24 max-w-full" aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectPopup>
@@ -365,7 +365,7 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
                   value={String(headerRecentMinutes)}
                   onValueChange={(value) => setHeaderRecentMinutes(Number(value))}
                 >
-                  <SelectTrigger className="w-28 max-w-full">
+                  <SelectTrigger size="sm" className="w-28 max-w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectPopup>

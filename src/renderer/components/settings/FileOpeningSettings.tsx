@@ -60,7 +60,7 @@ function TargetPicker({
         if (TARGETS.includes(target as Target)) onChange(target as Target);
       }}
     >
-      <SelectTrigger className="w-[min(100%,13rem)]" aria-label={t('File opening')}>
+      <SelectTrigger size="sm" className="w-[min(100%,13rem)]" aria-label={t('File opening')}>
         <SelectValue />
       </SelectTrigger>
       <SelectPopup>
