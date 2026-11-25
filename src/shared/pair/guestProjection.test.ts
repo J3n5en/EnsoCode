@@ -273,6 +273,15 @@ describe('applyGuestSnapshot（尾窗快照）', () => {
     expect(out[0].view.messages.size).toBe(0);
     expect(out[0].lastIndex).toBe(-1);
   });
+
+  it('首次空消息快照也建出空视图，调用方不必把缺席当成还在读取', () => {
+    const out = applyGuestSnapshot(new Map(), { sessions: [snap('fresh', 0, [])] });
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('fresh');
+    expect(out[0].view.messages.size).toBe(0);
+    expect(out[0].view.status).toBe('idle');
+    expect(out[0].lastIndex).toBe(-1);
+  });
 });
 
 describe('applyGuestHistory（上滑分页应答）', () => {

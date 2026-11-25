@@ -1461,7 +1461,12 @@ interface PairSnapshotSession {
 }
 
 function forwardSnapshot(event: RendererAgentEvent): void {
-  const full = event as { type: string; sessions?: PairSnapshotSession[] };
+  const full = event as {
+    type: string;
+    sessions?: PairSnapshotSession[];
+    partial?: boolean;
+    sessionId?: string;
+  };
   const baselines = new Map<string, { cursor: PairSyncCursor; rotated: boolean }>();
   for (const session of full.sessions ?? []) {
     const sessionId = session.identity?.sessionId ?? session.sessionId;
@@ -1522,6 +1527,41 @@ function forwardSnapshot(event: RendererAgentEvent): void {
           cursor: baseline.cursor,
           mode: 'snapshot',
           snapshot: narrowed,
+        },
+        () => isCurrentSync(conn, sync.revision, subscribedId)
+      );
+      continue;
+    }
+
+    // 未 spawn：supervisor 回 partial + 空 sessions。这不是读失败，要回空 session-sync
+    // 并放行后续 live 事件。无 partial、id 不符、或桌面完整模式保持不应答。
+    if (
+      !conn.deskGuest &&
+      !narrowed &&
+      full.partial === true &&
+      full.sessionId === subscribedId &&
+      (full.sessions?.length ?? 0) === 0 &&
+      sync?.sessionId === subscribedId &&
+      !sync.answered
+    ) {
+      const snapshot = {
+        type: 'snapshot' as const,
+        sessions: [{ sessionId: subscribedId, messages: [] as unknown[], baseIndex: 0 }],
+      };
+      const cursor = replayLog.checkpoint(subscribedId, snapshot);
+      conn.syncLiveRevision = sync.revision;
+      conn.sinceIndex = undefined;
+      conn.pendingSnapshot = undefined;
+      sync.answered = true;
+      void send(
+        conn,
+        {
+          type: 'session-sync',
+          sessionId: subscribedId,
+          requestId: sync.requestId,
+          cursor,
+          mode: 'snapshot',
+          snapshot,
         },
         () => isCurrentSync(conn, sync.revision, subscribedId)
       );

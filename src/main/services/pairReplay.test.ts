@@ -585,6 +585,75 @@ describe('pairHost session-sync 接线', () => {
     await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
     expect((await sentPayloads())[0]).toMatchObject({ type: 'history', sessionId: 's1' });
   });
+
+  it('未 spawn 的空 partial 快照也回空 session-sync，随后同会话 live 事件放行', async () => {
+    await receive({ type: 'subscribe', sessionId: 'fresh', sync: { requestId: 'request-empty' } });
+    await vi.waitFor(() => expect(hostMocks.requestSnapshot).toHaveBeenCalledWith('fresh'));
+
+    forwardAgentEvent({
+      type: 'snapshot',
+      partial: true,
+      sessionId: 'fresh',
+      sessions: [],
+    });
+    await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
+    const sync = (await sentPayloads())[0];
+    expect(sync).toMatchObject({
+      type: 'session-sync',
+      mode: 'snapshot',
+      sessionId: 'fresh',
+      requestId: 'request-empty',
+      snapshot: {
+        type: 'snapshot',
+        sessions: [{ sessionId: 'fresh', messages: [], baseIndex: 0 }],
+      },
+    });
+
+    hostMocks.socket?.send.mockClear();
+    forwardAgentEvent({
+      type: 'message-upsert',
+      identity: { sessionId: 'fresh', generation: 'generation-1' },
+      seq: 1,
+      index: 0,
+      message: { role: 'user', content: [{ type: 'text', text: 'from-pc' }] },
+    } as RendererAgentEvent);
+    await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
+    expect((await sentPayloads())[0]).toMatchObject({
+      type: 'agent-event',
+      event: { type: 'message-upsert', sessionId: 'fresh', index: 0 },
+    });
+  });
+
+  it('无订阅、id 不匹配、或没有 partial 的空快照不发 session-sync', async () => {
+    hostMocks.socket?.send.mockClear();
+    forwardAgentEvent({
+      type: 'snapshot',
+      partial: true,
+      sessionId: 'fresh',
+      sessions: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(hostMocks.socket?.send).not.toHaveBeenCalled();
+
+    await receive({ type: 'subscribe', sessionId: 'other', sync: { requestId: 'other' } });
+    await vi.waitFor(() => expect(hostMocks.requestSnapshot).toHaveBeenCalledWith('other'));
+    hostMocks.socket?.send.mockClear();
+    forwardAgentEvent({
+      type: 'snapshot',
+      partial: true,
+      sessionId: 'fresh',
+      sessions: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(hostMocks.socket?.send).not.toHaveBeenCalled();
+
+    await receive({ type: 'subscribe', sessionId: 'fresh', sync: { requestId: 'fresh' } });
+    await vi.waitFor(() => expect(hostMocks.requestSnapshot).toHaveBeenCalledWith('fresh'));
+    hostMocks.socket?.send.mockClear();
+    forwardAgentEvent({ type: 'snapshot', sessions: [] });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(hostMocks.socket?.send).not.toHaveBeenCalled();
+  });
 });
 
 describe('pairHost Bot 会话接线', () => {
