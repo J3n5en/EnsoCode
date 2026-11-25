@@ -126,6 +126,7 @@ import {
 import { createStatePublisher } from '../services/secretary/statePublisher';
 import { SecretaryStore } from '../services/secretary/store';
 import { readSessionReminders } from '../services/sessionReminders';
+import { reseatUpstreamWaiters } from '../services/upstreamRecovery';
 import { deleteUntouchedSessionBranch } from '../services/worktree/service';
 import {
   getSourceAuthorityRegistry,
@@ -739,9 +740,21 @@ export function registerSecretaryHandlers(): void {
       return getSourceAuthorityRegistry()?.conversation(conversationId)?.selection?.providerId;
     },
   });
-  setUpstreamSessionWakeHandler(
-    (conversationId, reason) => driver?.wakeUpstream(conversationId, reason) ?? false
-  );
+  setUpstreamSessionWakeHandler((conversationId, reason) => {
+    const outcome = driver?.wakeUpstream(conversationId, reason);
+    // delivered / dropped 都按「已处理」交给布尔语义：dropped 时返回 false，
+    // 让 Main 回落到 renderer 广播（desktop 会话的 waiting 不在驱动者这里）
+    if (outcome === 'retry') return 'retry';
+    return outcome === 'delivered';
+  });
+  // 重启后闸门内存是空的：把磁盘上还挂着 waiting(upstream) 的会话重新登记，
+  // 沿用 since/attempt 退避进度，倒计时到点真正发起重试——否则卡片永远「等待上游恢复」却无人重试
+  {
+    const recovery = getUpstreamRecoveryService();
+    if (recovery) {
+      reseatUpstreamWaiters(recovery, readPersistedConversations(), Date.now());
+    }
+  }
   const queued = createQueuedSessions(queuedSessionPorts());
   setQueuedSessions(queued);
   // 用户点确认或提案执行完立刻投给秘书，不等下一分钟的 tick

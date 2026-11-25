@@ -661,6 +661,14 @@ export function setSecretaryForgetListener(
   forgetListener = listener;
 }
 
+/**
+ * 会话被删除/归档时撤掉驱动者的续跑、看门狗与上游等待：
+ * 不通知的话闸门内存里的 waiter 永远指向一个不会再跑的会话，状态条倒计时永远空转。
+ */
+export function forgetDispatchSession(conversationId: string): void {
+  forgetListener?.(conversationId);
+}
+
 export function notifySecretaryChanged(): void {
   try {
     stateListener?.();
@@ -3468,7 +3476,24 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     },
     audit: (entry) => appendAudit(ctx.dir, entry),
     recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
-    cleanup: realCleanupPorts(ctx),
+    cleanup: (() => {
+      const base = realCleanupPorts(ctx);
+      return {
+        ...base,
+        archive: async (conversationId, at, via) => {
+          await base.archive(conversationId, at, via);
+          // 归档的会话绝不再自动重试：撤掉上游 waiter 与驱动者续跑，
+          // 免得状态条继续为它倒计时而唤醒永远落空
+          try {
+            const { cancelUpstreamWaitForSession } = await import('../../ipc/agent');
+            cancelUpstreamWaitForSession(conversationId);
+          } catch {
+            // agent 模块未就绪时 waiter 也不存在，跳过
+          }
+          forgetListener?.(conversationId);
+        },
+      };
+    })(),
     projects: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
     async projectAliases() {

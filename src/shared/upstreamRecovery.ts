@@ -35,6 +35,8 @@ export type ProviderHealthState = 'ok' | 'degraded' | 'probing';
 
 export interface ProviderHealthSnapshot {
   provider: string;
+  /** 用户可读的供应商名（设置里的 name / 订阅账号标签）；Main 出口处填，可能缺失 */
+  providerName?: string;
   state: Exclude<ProviderHealthState, 'ok'>;
   since: number;
   errorKind: 'transient' | 'quota';
