@@ -635,39 +635,35 @@ function inside(point, rect) {
   );
 }
 
-// 连续悬停窗口：从首个贴近 anchor 的样本起，只要位移不超过 holdRadius 就一直累计，
-// 位移一旦超出半径即终止（模拟肉眼「停住了」的判断）。
-function hoverWindow(flights, near, anchorFor, holdRadius) {
-  let active = false;
-  let anchor = null;
-  let start = null;
-  let end = null;
+// 连续静止窗口：相邻样本帧间位移都不超过 holdRadius 的最长区间（模拟肉眼「停住了」）。
+// 返回 { start, end, first, last }，外加每帧位移明细便于排查。
+function stillnessWindow(flights, holdRadius) {
   let best = null;
-  for (const sample of flights) {
-    if (!active) {
-      if (!near(sample)) continue;
-      active = true;
-      anchor = anchorFor(sample);
-      start = sample.t;
-      end = sample.t;
-      continue;
-    }
-    if (near(sample) && hypot(sample.flight, anchor) <= holdRadius) {
-      end = sample.t;
-      continue;
-    }
-    if (start !== null && (!best || end - start > best.end - best.start)) {
-      best = { start, end, anchor };
-    }
-    active = false;
-    anchor = null;
-    start = null;
-    end = null;
+  let start = 0;
+  for (let index = 1; index < flights.length; index += 1) {
+    const step = hypot(flights[index].flight, flights[index - 1].flight);
+    if (step <= holdRadius) continue;
+    best = pickLonger(best, flights, start, index - 1);
+    start = index;
   }
-  if (start !== null && (!best || end - start > best.end - best.start)) {
-    best = { start, end, anchor };
-  }
+  best = pickLonger(best, flights, start, flights.length - 1);
   return best;
+}
+
+function pickLonger(best, flights, from, to) {
+  if (to - from < 1) return best;
+  const span = flights[to].t - flights[from].t;
+  if (best && span <= best.end - best.start) return best;
+  return { start: flights[from].t, end: flights[to].t, first: from, last: to };
+}
+
+// 在 target 附近（nearRadius 内）的连续静止窗口。
+function dwellNear(flights, targetFor, nearRadius, holdRadius) {
+  const near = flights.filter((sample) => {
+    const target = targetFor(sample);
+    return target && hypot(sample.flight, target) <= nearRadius;
+  });
+  return stillnessWindow(near, holdRadius);
 }
 
 // 亮相帧：取悬停窗口中点前后最近的一张截图，另存命名清晰的副本。
@@ -723,23 +719,11 @@ function judge(log, gone, sendResult) {
     Boolean(gone) ||
     (last ? samples.slice(last.index + 1).some((sample) => !sample.flight) : false);
   const nearBadge = badgeDist !== null && badgeDist < 30;
+  const cardHold = dwellNear(flights, (sample) => sample.card, 25, 8);
+  const afterCard = cardHold ? flights.filter((sample) => sample.t >= cardHold.end) : [];
   const rowEdge = (sample) =>
     sample.row ? { x: sample.row.left + 2, y: (sample.row.top + sample.row.bottom) / 2 } : null;
-  const cardHold = hoverWindow(
-    flights,
-    (sample) => Boolean(sample.card) && hypot(sample.flight, sample.card) < 60,
-    (sample) => ({ x: sample.flight.x, y: sample.flight.y }),
-    6
-  );
-  const rowHold = hoverWindow(
-    flights.filter((sample) => !cardHold || sample.t >= cardHold.end),
-    (sample) => {
-      const edge = rowEdge(sample);
-      return Boolean(edge) && hypot(sample.flight, edge) < 24;
-    },
-    (sample) => ({ x: sample.flight.x, y: sample.flight.y }),
-    6
-  );
+  const rowHold = dwellNear(afterCard.length ? afterCard : flights, rowEdge, 24, 8);
 
   add('send 已接受', sendResult === null, `result=${JSON.stringify(sendResult)}`);
   add('flight 至少 3 帧', flights.length >= 3, `frames=${flights.length}`);
@@ -764,14 +748,18 @@ function judge(log, gone, sendResult) {
     `moved=${moved} monotonic=${monotonic} badgeDx=${badgeDist === null ? 'null' : badgeDist.toFixed(1)} faded=${faded} tail=${tail.map((sample) => sample.flight.x.toFixed(0)).join(',')}`
   );
   add(
-    '落卡后悬停 ≥ 200ms（亮相真实存在）',
+    '落卡后位置静止 ≥ 200ms（亮相真实存在）',
     cardHold && cardHold.end - cardHold.start >= 200,
-    cardHold ? `hold=${(cardHold.end - cardHold.start).toFixed(0)}ms` : '没有悬停窗口'
+    cardHold
+      ? `hold=${(cardHold.end - cardHold.start).toFixed(0)}ms samples=${cardHold.last - cardHold.first + 1}`
+      : '没有静止窗口'
   );
   add(
-    '落到行后悬停 ≥ 150ms 再滑向徽标',
+    '落到行后位置静止 ≥ 150ms 再滑向徽标',
     rowHold && rowHold.end - rowHold.start >= 150,
-    rowHold ? `hold=${(rowHold.end - rowHold.start).toFixed(0)}ms` : '没有悬停窗口'
+    rowHold
+      ? `hold=${(rowHold.end - rowHold.start).toFixed(0)}ms samples=${rowHold.last - rowHold.first + 1}`
+      : '没有静止窗口'
   );
   add('flight 最终离开 DOM', gone === true, gone ? 'gone' : '仍在');
   return { checks, cardHold, rowHold };
@@ -780,10 +768,17 @@ function judge(log, gone, sendResult) {
 function summarize(log) {
   const samples = Array.isArray(log) ? log : [];
   const frames = samples.filter((sample) => sample?.flight);
-  const point = (box) => (box ? `${Math.round(box.x)},${Math.round(box.y)}` : '-');
-  const points = frames.map((sample) => point(sample.flight));
-  const shown = points.length <= 40 ? points : [...points.slice(0, 15), '…', ...points.slice(-10)];
-  return `samples=${samples.length} flight=${frames.length} card=${samples.some((sample) => sample?.card)} row=${samples.some((sample) => sample?.row)} badge=${samples.some((sample) => sample?.badge)} avatar=${samples.some((sample) => sample?.avatar)} path=${shown.join(' ')}`;
+  const rows = frames.map((sample, index) => {
+    const previous = frames[index - 1];
+    const step = previous ? hypot(sample.flight, previous.flight) : 0;
+    const cardD = sample.card ? hypot(sample.flight, sample.card) : null;
+    const edge = sample.row
+      ? { x: sample.row.left + 2, y: (sample.row.top + sample.row.bottom) / 2 }
+      : null;
+    const rowD = edge ? hypot(sample.flight, edge) : null;
+    return `  f${index} dt=${sample.t - frames[0].t} xy=${sample.flight.x.toFixed(1)},${sample.flight.y.toFixed(1)} step=${step.toFixed(1)} cardD=${cardD === null ? '-' : cardD.toFixed(1)} rowD=${rowD === null ? '-' : rowD.toFixed(1)}`;
+  });
+  return `samples=${samples.length} flight=${frames.length} card=${samples.some((sample) => sample?.card)} row=${samples.some((sample) => sample?.row)} badge=${samples.some((sample) => sample?.badge)} avatar=${samples.some((sample) => sample?.avatar)}\n${rows.join('\n')}`;
 }
 
 async function cleanup() {

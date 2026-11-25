@@ -246,7 +246,7 @@ describe('buildDispatchFlightKeyframes', () => {
   it('偏移单调，并经过拱起、落地和缩小', () => {
     const offsets = frames.map((frame) => frame.offset);
     expect(offsets).toEqual([
-      0, 0.06, 0.187, 0.227, 0.25, 0.267, 0.31, 0.353, 0.49, 0.67, 0.71, 0.77, 0.82, 0.96, 1,
+      0, 0.06, 0.187, 0.22, 0.243, 0.39, 0.41, 0.53, 0.71, 0.745, 0.84, 0.86, 0.96, 1,
     ]);
     for (let index = 1; index < offsets.length; index += 1) {
       expect(offsets[index]).toBeGreaterThan(offsets[index - 1] ?? 0);
@@ -259,21 +259,23 @@ describe('buildDispatchFlightKeyframes', () => {
     expect(frames[2]?.transform).toBe('translate(0px, 100px) scale(1.16) rotate(0deg)');
     expect(frames[3]?.transform).toBe('translate(0px, 103px) scale(0.94) rotate(0deg)');
     expect(frames[5]?.transform).toBe('translate(0px, 100px) scale(1) rotate(0deg)');
-    // 落卡落定呼吸：0.267 到 0.353 都在落点附近，scale 轻微鼓一下收稳。
-    for (const index of [4, 5, 6, 7]) {
+    // 落卡落定亮相：0.22 之后位置完全停住，scale 缓缓收稳当呼吸，重复帧干脆收尾。
+    for (const index of [4, 5, 6]) {
       expect(frames[index]?.transform).toContain('translate(0px, 100px)');
     }
-    expect(frames[8]?.transform).toBe('translate(26.9px, 40px) scale(0.75) rotate(3deg)');
-    expect(frames[9]?.transform).toBe('translate(100px, 20px) scale(0.525) rotate(0deg)');
-    // 行缘落定呼吸：0.71 到 0.82 都在行缘，scale 轻微鼓一下收稳。
-    for (const index of [10, 11, 12]) {
+    expect(frames[5]?.transform).toBe(frames[6]?.transform);
+    expect(frames[7]?.transform).toBe('translate(26.9px, 40px) scale(0.75) rotate(3deg)');
+    expect(frames[8]?.transform).toBe('translate(100px, 20px) scale(0.525) rotate(0deg)');
+    // 行缘落定亮相：0.71 之后位置完全停住，scale 缓缓收稳，重复帧干脆收尾。
+    for (const index of [9, 10, 11]) {
       expect(frames[index]?.transform).toContain('translate(100px, 20px)');
     }
-    expect(frames[13]).toMatchObject({
+    expect(frames[10]?.transform).toBe(frames[11]?.transform);
+    expect(frames[12]).toMatchObject({
       transform: 'translate(125px, 20px) scale(0.5) rotate(0deg)',
       opacity: 1,
     });
-    expect(frames[14]).toMatchObject({
+    expect(frames[13]).toMatchObject({
       transform: 'translate(120px, 20px) scale(0.5) rotate(0deg)',
       opacity: 0,
     });

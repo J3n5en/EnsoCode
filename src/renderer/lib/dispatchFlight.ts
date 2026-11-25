@@ -24,7 +24,7 @@ export const DISPATCH_FLIGHT_EASING = 'cubic-bezier(0.45, 0, 0.2, 1)';
 // 弧线飞行与落定用柔和慢入慢出，挤压回弹用快出慢入。
 const FLOAT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 const SETTLE_EASING = 'cubic-bezier(0.3, 0, 0.15, 1)';
-// 只飞到卡片时走完落定亮相（offset 0.353），剩余部分用于淡出。
+// 只飞到卡片时走完落定亮相（offset 0.39），剩余部分用于淡出。
 export const DISPATCH_FLIGHT_CARD_PORTION = 0.47;
 export const DISPATCH_FLIGHT_CARD_MS = Math.round(
   DISPATCH_FLIGHT_MS * DISPATCH_FLIGHT_CARD_PORTION
@@ -245,14 +245,14 @@ export function buildDispatchFlightKeyframes(
       easing: FLOAT_EASING,
     },
     { offset: 0.187, at: p1, scale: 1.16, rotate: 0, opacity: 1, easing: FLOAT_EASING },
-    { offset: 0.227, at: { x: p1.x, y: p1.y + 3 }, scale: 0.94, rotate: 0, opacity: 1 },
-    { offset: 0.25, at: p1, scale: 1.04, rotate: 0, opacity: 1, easing: SETTLE_EASING },
-    // 落定呼吸：轻微鼓一下再收稳，停到 1.06s，眼睛跟得上。
-    { offset: 0.267, at: p1, scale: 1, rotate: 0, opacity: 1, easing: SETTLE_EASING },
-    { offset: 0.31, at: p1, scale: 1.03, rotate: 0, opacity: 1, easing: SETTLE_EASING },
-    { offset: 0.353, at: p1, scale: 1, rotate: 0, opacity: 1 },
+    { offset: 0.22, at: { x: p1.x, y: p1.y + 3 }, scale: 0.94, rotate: 0, opacity: 1 },
+    // 落定亮相：位置完全停住，scale 回弹后缓缓收稳当呼吸；重复帧让结束干脆利落，
+    // 避免整体缓动把动身往亮相里渗。
+    { offset: 0.243, at: p1, scale: 1.04, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    { offset: 0.39, at: p1, scale: 1, rotate: 0, opacity: 1 },
+    { offset: 0.41, at: p1, scale: 1, rotate: 0, opacity: 1 },
     {
-      offset: 0.49,
+      offset: 0.53,
       at: arcLeft(p1, p2),
       scale: (1 + endScale) / 2,
       rotate: 3,
@@ -260,22 +260,23 @@ export function buildDispatchFlightKeyframes(
       easing: FLOAT_EASING,
     },
     {
-      offset: 0.67,
+      offset: 0.71,
       at: p2,
       scale: endScale * 1.05,
       rotate: 0,
       opacity: 1,
       easing: FLOAT_EASING,
     },
-    { offset: 0.71, at: p2, scale: endScale, rotate: 0, opacity: 1, easing: SETTLE_EASING },
-    // 行缘落定呼吸：轻微鼓一下收稳，停到 2.46s，再滑向徽标归位。
-    { offset: 0.77, at: p2, scale: endScale * 1.02, rotate: 0, opacity: 1, easing: SETTLE_EASING },
-    { offset: 0.82, at: p2, scale: endScale, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    // 行缘落定亮相：位置完全停住只靠 scale 缓缓收稳，重复帧干脆收尾，
+    // 之后 420ms 滑向徽标归位淡出。
+    { offset: 0.745, at: p2, scale: endScale, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    { offset: 0.84, at: p2, scale: endScale, rotate: 0, opacity: 1 },
+    { offset: 0.86, at: p2, scale: endScale, rotate: 0, opacity: 1 },
     { offset: 0.96, at: { x: p3.x + 5, y: p3.y }, scale: endScale, rotate: 0, opacity: 1 },
     { offset: 1, at: p3, scale: endScale, rotate: 0, opacity: 0 },
   ];
   if (mode === 'full') return poses.map((pose) => frame(p0, pose));
-  const kept = poses.filter((pose) => pose.offset <= 0.353);
+  const kept = poses.filter((pose) => pose.offset <= 0.39);
   const landed = kept[kept.length - 1] ?? poses[0];
   return [
     ...kept.map((pose) =>
