@@ -1,5 +1,4 @@
 import type { BrowserSearchTab } from '@shared/searchAnything';
-import { parseSettingsDeepLink, type SettingsDeepLink } from '@shared/settingsDeepLink';
 
 export function parseBrowserSearchTabsResult(raw: unknown): BrowserSearchTab[] {
   if (!Array.isArray(raw)) return [];
@@ -21,9 +20,4 @@ export function parseBrowserSearchTabsResult(raw: unknown): BrowserSearchTab[] {
     });
   }
   return out;
-}
-
-export function parseOpenSettingsRequest(raw: unknown): SettingsDeepLink | null {
-  if (raw === undefined || raw === null) return null;
-  return parseSettingsDeepLink(raw);
 }

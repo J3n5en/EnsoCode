@@ -5,7 +5,7 @@ import {
   readCompactReserveTokens,
   writeCompactReserveTokens,
 } from '../services/piCompactionSettings';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 
 /** worker 的 PI_CODING_AGENT_DIR 下的 pi 全局设置；会话启动时由 pi 读取 */
 const piSettingsPath = (): string =>
@@ -13,12 +13,10 @@ const piSettingsPath = (): string =>
 
 export function registerCompactionHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.COMPACTION_RESERVE_TOKENS_GET, (event) =>
-    isMainRenderer(event.sender.id) || isSettingsRenderer(event.sender.id)
-      ? readCompactReserveTokens(piSettingsPath())
-      : null
+    isMainRenderer(event.sender.id) ? readCompactReserveTokens(piSettingsPath()) : null
   );
   ipcMain.handle(IPC_CHANNELS.COMPACTION_RESERVE_TOKENS_SET, (event, value: unknown) =>
-    isMainRenderer(event.sender.id) || isSettingsRenderer(event.sender.id)
+    isMainRenderer(event.sender.id)
       ? writeCompactReserveTokens(piSettingsPath(), value)
       : { ok: false, error: 'forbidden' }
   );

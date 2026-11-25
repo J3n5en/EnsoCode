@@ -3,10 +3,10 @@ import { app, ipcMain } from '@platform';
 import { parseTemplateLibrary } from '@shared/bots/templateLibrary';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { readJson, writeJsonAtomic } from '../services/bots/files';
-import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 
 const libraryPath = () => path.join(app.getPath('userData'), 'bot-templates.json');
-const trusted = (id: number) => isMainRenderer(id) || isSettingsRenderer(id);
+const trusted = (id: number) => isMainRenderer(id);
 
 export function registerBotTemplateHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.BOT_TEMPLATES_GET, (event) => {

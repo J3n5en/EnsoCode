@@ -1,6 +1,8 @@
+import { Search } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import {
   NumberField,
   NumberFieldDecrement,
@@ -206,6 +208,38 @@ export function SettingsInput({
         'max-w-full max-sm:[&>input]:h-[42px] max-sm:[&>input]:leading-[42px]'
       )}
     />
+  );
+}
+
+/** 设置导航的搜索框：边输边筛；有字时 Esc 只清空，不往外冒到「Esc 退出设置」 */
+export function SettingsSearch({
+  value,
+  onValueChange,
+  placeholder,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <InputGroup data-size="sm" className="max-md:[&_input]:h-10 max-md:[&_input]:text-base">
+      <InputGroupAddon>
+        <Search />
+      </InputGroupAddon>
+      <InputGroupInput
+        size="sm"
+        value={value}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        onChange={(event) => onValueChange(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || value.length === 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onValueChange('');
+        }}
+      />
+    </InputGroup>
   );
 }
 

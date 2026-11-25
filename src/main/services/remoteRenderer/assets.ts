@@ -5,7 +5,7 @@ import { encodeBase64, gzipRemoteJson, REMOTE_GZIP_MIN_CHARS } from '@enso/pair'
 
 /** 浏览器 renderer 的入口：先跑 web-preload（经父页面隧道实现 window.electronAPI），再加载桌面原样产物 */
 export const WEB_PRELOAD_FILE = 'web-preload.js';
-const HTML_ENTRIES = new Set(['index.html', 'settings.html']);
+const HTML_ENTRIES = new Set(['index.html']);
 const MAX_ASSET_BYTES = 32 * 1024 * 1024;
 
 const MIME: Record<string, string> = {
@@ -92,7 +92,7 @@ export async function readRendererAsset(root: string, raw: string): Promise<Rend
 /** 入口与 web-preload 的内容指纹：浏览器缓存按它分代，桌面升级后自动换新 */
 export async function rendererBuildId(root: string, appVersion: string): Promise<string | null> {
   const hash = createHash('sha256').update(appVersion);
-  for (const file of ['index.html', 'settings.html', WEB_PRELOAD_FILE]) {
+  for (const file of ['index.html', WEB_PRELOAD_FILE]) {
     try {
       hash.update(await readFile(join(root, file)));
     } catch {

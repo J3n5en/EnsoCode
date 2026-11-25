@@ -21,7 +21,6 @@ vi.mock('electron', () => ({
 }));
 vi.mock('../services/renderers', () => ({
   isMainRenderer: (id: number) => id === 1,
-  isSettingsRenderer: () => false,
 }));
 vi.mock('../services/sshConnectionStore', () => ({
   getSshConnectionStore: () => ({ getSecret: mocks.getSecret }),

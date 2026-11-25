@@ -3,7 +3,7 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 
 /**
  * 远程节点主界面是对方下发的代码，跑在本机进程里。它能请本机 main 代办的只有这里列出的：
- * 节点切换器、请本机切回本机界面打开配对对话框、所在窗口的控件、打开该节点的设置、上报正在看的会话；
+ * 节点切换器、请本机切回本机界面打开配对对话框、所在窗口的控件、上报正在看的会话；
  * 参数在此收窄。配对（链接只能由用户在本机界面输入）、节点增删改、本机文件夹、外壳集成、标题栏外观等一律拒绝。
  */
 
@@ -52,8 +52,6 @@ const LOCAL_CALLS = new Map<string, Narrow>([
     IPC_CHANNELS.WINDOW_POPUP_MENU,
     ([items, x, y]) => (menuItems(items) && coordinate(x) && coordinate(y) ? [items, x, y] : null),
   ],
-  // 深链由 parseSettingsDeepLink 收窄
-  [IPC_CHANNELS.WINDOW_OPEN_SETTINGS, ([link]) => [link]],
   [IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, ([id]) => (id === null || text(id) ? [id] : null)],
 ]);
 

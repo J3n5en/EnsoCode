@@ -82,6 +82,7 @@ import {
   isEventInSidePanel,
   menuAlreadyHandled,
 } from '@/lib/keybindings';
+import { bindMainSettingsRequests } from '@/lib/mainSettingsRequests';
 import { easeOutLayout, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
 import { bindSettingsHistory } from '@/lib/settingsHistory';
@@ -516,15 +517,7 @@ export default function App() {
   useEffect(() => {
     if (settingsOpen) setDrawerOpen(false);
   }, [settingsOpen]);
-  // 主进程推来的深链（enso://install-plugin 等）：挂载时拉一次，之后每次推送再拉
-  useEffect(() => {
-    void window.electronAPI.window.consumeSettingsDeepLink().then((link) => {
-      if (link) openSettings(link);
-    });
-    return window.electronAPI.window.onSettingsDeepLink(() => {
-      void window.electronAPI.window.consumeSettingsDeepLink().then(openSettings);
-    });
-  }, []);
+  useEffect(() => bindMainSettingsRequests(window.electronAPI.window), []);
   // 浏览器版（/desk）：设置层级同步到历史，后退 / 手势返回先退出设置，不离开页面
   const isMobileRef = useRef(isMobile);
   isMobileRef.current = isMobile;

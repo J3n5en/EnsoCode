@@ -203,12 +203,11 @@ describe('parseWinProcesses', () => {
 });
 
 describe('chromiumRole', () => {
-  const kinds = { main: new Set([2]), settings: new Set([3]), browser: new Set([4]) };
+  const kinds = { main: new Set([2]), browser: new Set([4]) };
   it.each([
     [{ pid: 1, type: 'Browser' }, 'main'],
     [{ pid: 9, type: 'GPU' }, 'gpu'],
     [{ pid: 2, type: 'Tab' }, 'window'],
-    [{ pid: 3, type: 'Tab' }, 'window'],
     [{ pid: 4, type: 'Tab' }, 'browser'],
     [{ pid: 8, type: 'Tab' }, 'window'],
     [{ pid: 5, type: 'Utility', serviceName: 'enso-agent-worker' }, 'agent'],

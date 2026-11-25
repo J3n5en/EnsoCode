@@ -1754,8 +1754,7 @@ export async function grantTakeover(
 /** 撤销接管：只认接管来的记录，派出会话撤不掉；点名授权一并收回，未投递的结果不再推给秘书 */
 export function revokeTakeover(
   ports: SecretaryDispatchPorts,
-  conversationId: string,
-  from: 'session' | 'settings'
+  conversationId: string
 ): TakeoverResult {
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
@@ -1766,7 +1765,7 @@ export function revokeTakeover(
       op: 'takeover_revoke',
       targetId: conversationId,
       ok: false,
-      detail: `${from}: not-found`,
+      detail: 'not-found',
     });
     return { ok: false, error: 'not-found' };
   }
@@ -1791,7 +1790,6 @@ export function revokeTakeover(
     op: 'takeover_revoke',
     targetId: conversationId,
     ok: true,
-    detail: from,
   });
   notifySecretaryChanged();
   // 权限收回：ask_user 恢复成直接问用户

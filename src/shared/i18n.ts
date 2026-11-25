@@ -431,6 +431,7 @@ export const zhTranslations: Record<string, string> = {
   'Remove from favorites': '取消收藏',
   'Search themes...': '搜索主题...',
   Settings: '设置',
+  'Settings…': '设置…',
   'Search settings': '搜索设置',
   'Back to workspace': '返回工作区',
   '{{n}} sessions running': '{{n}} 个会话运行中',

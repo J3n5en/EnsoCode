@@ -18,7 +18,6 @@ export function fakeLocalUi(
       .filter((wc) => !wc.isDestroyed?.());
   return {
     mainContents: () => null,
-    settingsContents: () => null,
     allContents: contents,
     windowContentIds: () => contents().map((wc) => wc.id),
     onWindowClosed() {},
@@ -27,7 +26,6 @@ export function fakeLocalUi(
     focusMain() {},
     chromiumRenderers: () => ({
       mainPids: new Set(),
-      settingsPids: new Set(),
       browserPids: new Set(),
       titles: new Map(),
     }),

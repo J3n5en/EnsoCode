@@ -29,9 +29,9 @@ import { registerResourceHandlers } from './resources';
 const pages: RemoteSender[] = [];
 
 /** 一个已配对的远程浏览器页面；frames 是经配对通道送到它那边的帧 */
-function remotePage(cid: string, kind: 'main' | 'settings') {
+function remotePage(cid: string) {
   const frames: HostToRemote[] = [];
-  const sender = new RemoteSender('pair-1', cid, kind, (frame) => frames.push(frame));
+  const sender = new RemoteSender('pair-1', cid, 'main', (frame) => frames.push(frame));
   addRemoteSender(sender);
   pages.push(sender);
   return { sender, frames };
@@ -60,13 +60,12 @@ describe('按会话清理', () => {
 
   // 背景：服务端没有本地主窗口（localMainContents 恒为 null），原实现直接抛 Main window is not open
   it('服务端没有本地主窗口：交给远端主界面 leader 执行并等它回报', async () => {
-    const leader = remotePage('cid-leader', 'main');
-    const follower = remotePage('cid-follower', 'main');
-    const settings = remotePage('cid-settings', 'settings');
+    const leader = remotePage('cid-leader');
+    const follower = remotePage('cid-follower');
     const snapshot = { roots: [], categories: [] };
     mocks.scanStorage.mockResolvedValue(snapshot);
 
-    const settled = invoke(settings.sender, IPC_CHANNELS.RESOURCES_SESSIONS_CLEAN, {
+    const settled = invoke(follower.sender, IPC_CHANNELS.RESOURCES_SESSIONS_CLEAN, {
       kind: 'one',
       id: 'conv-1',
     }).then(

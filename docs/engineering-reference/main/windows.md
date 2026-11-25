@@ -2,14 +2,18 @@
 
 ## 多窗口模型
 
-每个窗口是独立的 renderer 入口，在 `electron.vite.config.ts` 里声明：
+每个窗口是独立的 renderer 入口，在 `electron.vite.config.ts` 里声明。现在只有主窗口：
 
 ```ts
 input: {
   index: path.resolve(__dirname, 'src/renderer/index.html'),
-  settings: path.resolve(__dirname, 'src/renderer/settings.html'),
 }
 ```
+
+设置不是窗口，是主窗口里的一个视图（`stores/appView.ts`）。Main 侧的入口（托盘、macOS 应用菜单、
+`enso://install-plugin`）一律调 `windows/mainSettings.ts` 的 `openSettingsInMainWindow(link?)`：
+托盘态先退出托盘，否则唤起主窗口（没有就新建），再推 `SETTINGS_DEEP_LINK`；渲染层挂载或收到推送时
+用 `SETTINGS_DEEP_LINK_CONSUME` 取走同一份请求。渲染层内部的入口直接调 `openSettings(link?)`。
 
 新增窗口要同时加：入口 html、入口 tsx、`electron.vite.config.ts` 的 input、
 `src/main/windows/<Name>Window.ts`。
@@ -17,8 +21,8 @@ input: {
 窗口一律经 `createAppWindow()` 工厂创建，不要直接 `new BrowserWindow`。工厂统一处理了
 无边框样式、窗口状态持久化、可编辑区右键菜单、外链转系统浏览器、dev/prod 加载路径。
 
-单例窗口的模式见 `SettingsWindow.ts`：模块级变量持有引用，已存在则 `restore()` + `focus()`，
-`closed` 事件里置空。
+单例窗口的模式见 `MainWindow.ts`：模块级变量持有引用，`focusMainWindow()` 已存在则 `restore()` + `focus()`，
+不存在就新建；`closed` 事件里置空。
 
 ## 无边框标题栏
 

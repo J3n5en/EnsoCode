@@ -19,13 +19,13 @@ import {
   recordDcgAllow,
   revokeDcgExemption,
 } from '../services/dcgRuleMemory';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const UNTRUSTED: DcgStatus = { supported: false, installed: false, version: DCG_VERSION };
 
-const isTrusted = (id: number) => isMainRenderer(id) || isSettingsRenderer(id);
+const isTrusted = (id: number) => isMainRenderer(id);
 
 let installing: Promise<DcgActionResult> | null = null;
 

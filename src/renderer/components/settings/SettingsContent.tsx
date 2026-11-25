@@ -20,7 +20,6 @@ import {
   Plug,
   Puzzle,
   ScrollText,
-  Search,
   Server,
   Settings,
   Shield,
@@ -33,7 +32,6 @@ import {
   Wrench,
 } from 'lucide-react';
 import * as React from 'react';
-import { ChromeRow, useShellChrome, useWindowChromeKind } from '@/components/app/WindowChrome';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { useSettingsCatalog } from '@/hooks/useSettingsCatalog';
 import { useIsMobile } from '@/hooks/useViewport';
@@ -53,6 +51,7 @@ import { ExperimentalSettings } from './ExperimentalSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
+import { SettingsSearch } from './kit';
 import { LogsSettings } from './LogsSettings';
 import { McpSettings } from './McpSettings';
 import { MemoryKnowledge } from './MemoryKnowledge';
@@ -134,7 +133,7 @@ function restoreScrollTop(el: HTMLElement, top: number, onDone: () => void): () 
   return stop;
 }
 
-/** 嵌在主窗口里：返回按钮、侧栏宽度、窄屏两级由外层的设置路由掌管 */
+/** 返回按钮、侧栏宽度、窄屏两级由主窗口的设置路由掌管 */
 export interface EmbeddedSettings {
   initialCategory: SettingsCategory;
   onCategoryChange: (category: SettingsCategory) => void;
@@ -148,17 +147,17 @@ export interface EmbeddedSettings {
 }
 
 export function SettingsContent({
-  link = null,
-  linkSeq = 0,
+  link,
+  linkSeq,
   embedded,
 }: {
-  link?: SettingsDeepLink | null;
-  linkSeq?: number;
-  embedded?: EmbeddedSettings;
+  link: SettingsDeepLink | null;
+  linkSeq: number;
+  embedded: EmbeddedSettings;
 }) {
   const { t } = useI18n();
   const [activeCategory, setActiveCategory] = React.useState<SettingsCategory>(
-    () => link?.category ?? embedded?.initialCategory ?? 'general'
+    () => link?.category ?? embedded.initialCategory
   );
   const [flashRowId, setFlashRowId] = React.useState<string | null>(null);
   const [pluginInstallUrl, setPluginInstallUrl] = React.useState<string | null>(null);
@@ -168,10 +167,8 @@ export function SettingsContent({
   const [memoryRevision, setMemoryRevision] = React.useState(0);
   // 窄屏下分类列表与内容逐级进入
   const isMobile = useIsMobile();
-  const [ownMobileList, setOwnMobileList] = React.useState(true);
-  const mobileList = embedded ? !embedded.mobileDetail : ownMobileList;
-  const setMobileList = (list: boolean) =>
-    embedded ? embedded.onMobileDetailChange(!list) : setOwnMobileList(list);
+  const mobileList = !embedded.mobileDetail;
+  const setMobileList = (list: boolean) => embedded.onMobileDetailChange(!list);
   const [settingsQuery, setSettingsQuery] = React.useState('');
   const [sshConnections, setSshConnections] = React.useState<Array<{ id: string; name: string }>>(
     []
@@ -194,16 +191,15 @@ export function SettingsContent({
   React.useEffect(() => {
     if (!link) return;
     setActiveCategory(link.category);
-    if (!embedded) setOwnMobileList(false);
     setFlashRowId(link.rowId);
     if (link.pluginInstallUrl) setPluginInstallUrl(link.pluginInstallUrl);
     setFocusPluginId(link.pluginId ?? null);
     setMarketQuery(link.marketQuery ?? null);
   }, [linkSeq]);
 
-  const onCategoryChange = embedded?.onCategoryChange;
+  const onCategoryChange = embedded.onCategoryChange;
   React.useEffect(() => {
-    onCategoryChange?.(activeCategory);
+    onCategoryChange(activeCategory);
   }, [activeCategory, onCategoryChange]);
 
   React.useEffect(() => {
@@ -322,8 +318,6 @@ export function SettingsContent({
   }, [resolvedCategory, activeCategory]);
 
   const activeLabel = categories.find((c) => c.id === activeCategory)?.label;
-  const shell = useShellChrome();
-  const chromeKind = useWindowChromeKind();
 
   return (
     <div className="flex h-full w-full">
@@ -331,54 +325,34 @@ export function SettingsContent({
       {showList && (
         <nav
           data-enso="settings-nav"
-          className={cn(
-            'flex min-h-0 shrink-0 flex-col',
-            isMobile ? 'w-full' : embedded ? '' : shell ? 'w-56' : 'w-56 border-r'
-          )}
-          style={embedded && !isMobile ? { width: embedded.navWidth } : undefined}
+          className={cn('flex min-h-0 shrink-0 flex-col', isMobile && 'w-full')}
+          style={isMobile ? undefined : { width: embedded.navWidth }}
         >
-          {shell && !embedded && chromeKind === 'mac' && (
-            <div aria-hidden className="drag-region -mb-2 h-[44px] shrink-0" />
-          )}
-          {embedded && (
-            <div className={cn('flex shrink-0 items-center px-2', isMobile ? 'h-12' : 'h-9')}>
-              <button
-                type="button"
-                data-enso="settings-back"
-                onClick={embedded.onBack}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent/50',
-                  isMobile ? 'h-11 pl-1.5' : 'h-8 pl-1'
-                )}
-                title={t('Back to workspace')}
-                aria-label={t('Back to workspace')}
-              >
-                <ArrowLeft className="h-4 w-4 text-muted-foreground" />
-                {t('Settings')}
-              </button>
-              {!isMobile && (
-                <span className="ml-auto pr-1 text-[11px] text-muted-foreground">Esc</span>
+          <div className={cn('flex shrink-0 items-center px-2', isMobile ? 'h-12' : 'h-9')}>
+            <button
+              type="button"
+              data-enso="settings-back"
+              onClick={embedded.onBack}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent/50',
+                isMobile ? 'h-11 pl-1.5' : 'h-8 pl-1'
               )}
-            </div>
-          )}
-          <div
-            className={cn('sticky top-0 z-10 px-2 pt-2', !shell && !embedded && 'bg-background')}
-          >
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={settingsQuery}
-                onChange={(event) => setSettingsQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== 'Escape' || settingsQuery.length === 0) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setSettingsQuery('');
-                }}
-                placeholder={t('Search settings')}
-                className="h-8 w-full max-md:h-10 max-md:text-base rounded-md border bg-transparent pr-2 pl-7 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
+              title={t('Back to workspace')}
+              aria-label={t('Back to workspace')}
+            >
+              <ArrowLeft className="h-4 w-4 text-muted-foreground" />
+              {t('Settings')}
+            </button>
+            {!isMobile && (
+              <span className="ml-auto pr-1 text-[11px] text-muted-foreground">Esc</span>
+            )}
+          </div>
+          <div className="sticky top-0 z-10 px-2 pt-2">
+            <SettingsSearch
+              value={settingsQuery}
+              onValueChange={setSettingsQuery}
+              placeholder={t('Search settings')}
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {settingsQuery.trim() && groupedCategories.length === 0 ? (
@@ -389,13 +363,7 @@ export function SettingsContent({
                   <div className="px-2 pb-1.5 text-xs font-semibold text-foreground/55">
                     {t(group.label)}
                   </div>
-                  <div
-                    className={cn(
-                      'space-y-0.5',
-                      // 主窗口里与工作区侧栏一致：平铺，不再套一层分组底
-                      !embedded && 'rounded-lg bg-muted/60 p-1'
-                    )}
-                  >
+                  <div className="space-y-0.5">
                     {group.items.map((category) => (
                       <div key={category.id}>
                         <button
@@ -438,11 +406,11 @@ export function SettingsContent({
               ))
             )}
           </div>
-          {embedded?.footer}
+          {embedded.footer}
         </nav>
       )}
       {/* 和工作区侧栏同一个手柄、同一个宽度值：在哪边拖，另一边都跟着变 */}
-      {showList && embedded?.onNavResize && !isMobile && (
+      {showList && embedded.onNavResize && !isMobile && (
         <div data-enso="settings-nav-resize" className="flex shrink-0">
           <ResizeHandle edge onResize={embedded.onNavResize} />
         </div>
@@ -454,21 +422,15 @@ export function SettingsContent({
           data-enso="settings-content"
           className={cn(
             'flex min-w-0 flex-1 flex-col',
-            embedded && !isMobile
-              ? 'mr-[8px] mb-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
-              : shell &&
-                  'my-[8px] mr-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
+            !isMobile &&
+              'mr-[8px] mb-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
           )}
         >
-          {shell && !embedded && <ChromeRow data-enso="title-bar" />}
           <div
             ref={scrollRef}
             data-enso="settings-scroll"
             onScroll={rememberScroll}
-            className={cn(
-              'min-h-0 flex-1 overflow-y-auto',
-              isMobile ? 'px-4 pb-6' : shell && !embedded ? 'px-6 pb-6' : 'p-6'
-            )}
+            className={cn('min-h-0 flex-1 overflow-y-auto', isMobile ? 'px-4 pb-6' : 'p-6')}
           >
             {isMobile && (
               <button

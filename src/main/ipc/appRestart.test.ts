@@ -158,7 +158,7 @@ describe('app restart IPC', () => {
     expect(pushed()).toEqual([{ phase: 'waiting', reason: 'tool', exit: 'quit' }, null]);
   });
 
-  it('开始等命令时把主窗口唤到前台：设置窗口里点的重启更新也看得见等待层', () => {
+  it('开始等命令时把主窗口唤到前台：设置页里点的重启更新也看得见等待层', () => {
     setRestartOverlay({ phase: 'restarting' });
     expect(mocks.present).not.toHaveBeenCalled();
     setRestartOverlay({ phase: 'waiting', reason: 'tool', exit: 'update' });

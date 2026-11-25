@@ -4,15 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { countBoxesInSource } from './kit/boxes';
 
-/**
- * 设置页内容渲染在主区那一层卡片里，页面代码再画任何带框容器就是卡片套卡片。
- * 迁到 kit/ 的页面一个都不许有；还没迁的列在白名单里，PR3 迁一页删一行。
- */
-const LEGACY = new Set([
-  // PR4 去掉独立窗口时（导航搜索框）
-  'SettingsContent.tsx',
-]);
-
 const DIR = fileURLToPath(new URL('.', import.meta.url));
 
 function pageSources(): { file: string; boxes: number }[] {
@@ -34,23 +25,11 @@ function pageSources(): { file: string; boxes: number }[] {
   return out;
 }
 
+/** 设置页内容渲染在主区那一层卡片里，页面代码再画任何带框容器就是卡片套卡片：没有例外，全部扫描 */
 describe('设置页不套卡片', () => {
-  const pages = pageSources();
-
-  it('白名单以外的页面没有带框容器', () => {
-    const offenders = pages.filter((p) => !LEGACY.has(p.file) && p.boxes > 0);
-    expect(offenders).toEqual([]);
-  });
-
-  it('白名单里的页面迁完要删掉对应条目', () => {
-    const migrated = pages.filter((p) => LEGACY.has(p.file) && p.boxes === 0).map((p) => p.file);
-    expect(migrated).toEqual([]);
-    const known = new Set(pages.map((p) => p.file));
-    expect([...LEGACY].filter((file) => !known.has(file))).toEqual([]);
-  });
-
-  it('已迁移的样板页在白名单之外', () => {
-    expect(LEGACY.has('LogsSettings.tsx')).toBe(false);
-    expect(LEGACY.has('KeybindingsSettings.tsx')).toBe(false);
+  it('没有任何页面画带框容器', () => {
+    const pages = pageSources();
+    expect(pages.length).toBeGreaterThan(30);
+    expect(pages.filter((p) => p.boxes > 0)).toEqual([]);
   });
 });

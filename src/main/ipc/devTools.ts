@@ -2,20 +2,15 @@ import { ipcMain } from '@platform';
 import { IPC_CHANNELS, type OpenDevToolsResult } from '@shared/types/ipc';
 import { getWindowWebContents } from '../windows/createAppWindow';
 import { getMainWindow } from '../windows/MainWindow';
-import { getSettingsWindow } from '../windows/SettingsWindow';
 import { isVerifyLaunch } from '../windows/verifyLaunch';
 
-/** 仅允许本机主窗口 UI 或本机设置窗口触发，拒绝内嵌网页、远程节点窗口等其他调用者 */
+/** 仅允许本机主窗口 UI 触发，拒绝内嵌网页、远程节点窗口等其他调用者 */
 function isAllowedSender(senderId: unknown): boolean {
   if (typeof senderId !== 'number') return false;
   const main = getMainWindow();
   if (main && !main.isDestroyed()) {
     const mainContents = getWindowWebContents(main);
     if (!mainContents.isDestroyed() && mainContents.id === senderId) return true;
-  }
-  const settings = getSettingsWindow();
-  if (settings && !settings.isDestroyed() && !settings.webContents.isDestroyed()) {
-    if (settings.webContents.id === senderId) return true;
   }
   return false;
 }

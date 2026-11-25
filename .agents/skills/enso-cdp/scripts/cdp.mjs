@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // EnsoCode CDP 驱动脚本（免依赖，node >= 22）。用法：
 //   node cdp.mjs pages                          列出可连接的 page 目标
-//   node cdp.mjs eval '<js>' [--page settings]  在页面里执行 JS（支持 await/Promise）
+//   node cdp.mjs eval '<js>' [--page index]     在页面里执行 JS（支持 await/Promise）
 //   node cdp.mjs shot /tmp/x.png [--page ...]   截图存文件
 //   node cdp.mjs keys ArrowDown ArrowDown Enter 受信任按键（走浏览器真实输入管线）
 //   node cdp.mjs type '@rev'                    受信任文本输入（Input.insertText）
 //   node cdp.mjs drag '<fromJS>' '<toJS>'       受信任鼠标拖拽（press→分段move→release）
 //     from/to 是返回 {x,y} 的 JS 表达式，如 '(()=>{const r=document.querySelector("x").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()'
-// --page 匹配 URL 子串，缺省 index.html（主窗口）；设置窗口用 --page settings.html。
+// --page 匹配 URL 子串，缺省 index.html（主窗口）。设置在主窗口里，用 __stores.appView 或点齿轮打开。
 //
 // 何时用 keys/type 而非 eval 里的合成事件：合成 KeyboardEvent 的 isTrusted=false，
 // 且不经过 IME/焦点管线；排查"真实键盘行为"必须用受信任事件。

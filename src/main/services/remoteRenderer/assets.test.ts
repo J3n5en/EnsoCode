@@ -21,7 +21,6 @@ function fixture() {
     join(root, 'index.html'),
     '<html><head><meta content="img-src \'self\' local-image:"></head><body></body></html>'
   );
-  writeFileSync(join(root, 'settings.html'), '<html><head></head></html>');
   writeFileSync(join(root, WEB_PRELOAD_FILE), 'void 0');
   writeFileSync(join(root, 'assets', 'a.js'), 'export {}');
   writeFileSync(join(base, 'secret.txt'), 'nope');

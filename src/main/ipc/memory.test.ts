@@ -64,7 +64,6 @@ vi.mock('./settings', () => ({
 vi.mock('../services/renderers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/renderers')>()),
   isMainRenderer: (id: number) => id === 1,
-  isSettingsRenderer: () => false,
   broadcastToRenderers: (channel: string, ...args: unknown[]) => mocks.send(channel, ...args),
 }));
 vi.mock('../services/memoryHost', () => ({

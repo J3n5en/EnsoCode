@@ -1959,7 +1959,7 @@ describe('接管', () => {
     await propose(h);
     expect(await resolveProposal(h.ports, 'id-1', 'confirm')).toMatchObject({ ok: true });
     expect(h.relays).toEqual([{ conversationId: 'c1', relay: { name: h.profileValue?.name } }]);
-    expect(revokeTakeover(h.ports, 'c1', 'session')).toEqual({ ok: true });
+    expect(revokeTakeover(h.ports, 'c1')).toEqual({ ok: true });
     expect(h.relays.at(-1)).toEqual({ conversationId: 'c1', relay: null });
   });
 
@@ -2085,7 +2085,7 @@ describe('接管', () => {
       conversationId: 'c1',
       text: 'x',
     });
-    expect(revokeTakeover(h.ports, 'c1', 'session')).toEqual({ ok: true });
+    expect(revokeTakeover(h.ports, 'c1')).toEqual({ ok: true });
     expect(h.file.dispatched).toEqual({});
     expect(h.file.named).toEqual([]);
     expect(h.file.outbox).toEqual([]);
@@ -2094,7 +2094,6 @@ describe('接管', () => {
       targetId: 'c1',
       secretaryConversationId: 'sec-chat',
       ok: true,
-      detail: 'session',
     });
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: false,
@@ -2105,7 +2104,7 @@ describe('接管', () => {
 
   it('派出的会话不能当接管撤销', () => {
     const h = harness({ file: dispatchedFile() });
-    expect(revokeTakeover(h.ports, 'c1', 'settings')).toEqual({ ok: false, error: 'not-found' });
+    expect(revokeTakeover(h.ports, 'c1')).toEqual({ ok: false, error: 'not-found' });
     expect(h.file.dispatched.c1).toBeDefined();
     expect(h.audits).toMatchObject([{ op: 'takeover_revoke', ok: false }]);
   });
@@ -2285,7 +2284,7 @@ describe('不再跟踪', () => {
       ok: true,
       result: { status: 'sent' },
     });
-    expect(revokeTakeover(h.ports, 'c1', 'session')).toEqual({ ok: true });
+    expect(revokeTakeover(h.ports, 'c1')).toEqual({ ok: true });
     expect(h.file.dispatched).toEqual({});
     expect(h.file.untracked).toEqual(['c1']);
 
@@ -4702,7 +4701,7 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
       at: NOW,
       summary: '接管来的',
     });
-    revokeTakeover(h.ports, 'c2', 'settings');
+    revokeTakeover(h.ports, 'c2');
     expect(new FollowingStore(dir).list()).toEqual([]);
   });
 });

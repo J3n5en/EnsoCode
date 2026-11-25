@@ -2,7 +2,6 @@ import type { RendererContents } from '@platform';
 
 export interface ChromiumRendererInfo {
   mainPids: ReadonlySet<number>;
-  settingsPids: ReadonlySet<number>;
   browserPids: ReadonlySet<number>;
   titles: ReadonlyMap<number, string>;
 }
@@ -10,7 +9,6 @@ export interface ChromiumRendererInfo {
 /** 本地界面（桌面窗口）。服务器没有本地界面，保持未安装。 */
 export interface LocalUi {
   mainContents(): RendererContents | null;
-  settingsContents(): RendererContents | null;
   allContents(): RendererContents[];
   /** 能力网关用的宿主 webContents id（不含远程 renderer） */
   windowContentIds(): number[];

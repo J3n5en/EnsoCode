@@ -30,7 +30,6 @@ vi.mock('../windows/MainWindow', () => ({
   getMainWindow: () => mocks.win,
   focusMainWindow: vi.fn(),
 }));
-vi.mock('../windows/SettingsWindow', () => ({ getSettingsWindow: () => null }));
 vi.mock('../services/appServerMode', () => ({ isServerMode: () => false }));
 
 describe('desktop LocalUi', () => {

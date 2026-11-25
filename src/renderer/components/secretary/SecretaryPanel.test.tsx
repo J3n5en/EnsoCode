@@ -209,7 +209,6 @@ beforeEach(() => {
       respondApproval: async () => ({ ok: true }),
       respondAsk: async () => ({ ok: true }),
     },
-    window: { openSettings: async () => ({ ok: true }) },
   };
   (dom.window as unknown as Record<string, unknown>).electronAPI = api;
   container = dom.document.getElementById('root') as unknown as HTMLElement;

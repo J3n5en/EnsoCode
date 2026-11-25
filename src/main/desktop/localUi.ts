@@ -1,11 +1,10 @@
 import { app, BrowserWindow, powerMonitor, session, type WebContents, webContents } from 'electron';
 import { isServerMode } from '../services/appServerMode';
 import { partitionName } from '../services/browserPartition';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 import { type ChromiumRendererInfo, installLocalUi, type LocalUi } from '../services/uiHost';
 import { getWindowWebContents, getWorkbenchView } from '../windows/createAppWindow';
 import { focusMainWindow, getMainWindow } from '../windows/MainWindow';
-import { getSettingsWindow } from '../windows/SettingsWindow';
 
 const windowClosed = new Set<(webContentsId: number) => void>();
 
@@ -20,7 +19,6 @@ function alive(contents: WebContents | null | undefined): contents is WebContent
 function chromiumRenderers(): ChromiumRendererInfo {
   const browserSession = session.fromPartition(partitionName(app.isPackaged));
   const mainPids = new Set<number>();
-  const settingsPids = new Set<number>();
   const browserPids = new Set<number>();
   const titles = new Map<number, string>();
   for (const contents of webContents.getAllWebContents()) {
@@ -28,12 +26,11 @@ function chromiumRenderers(): ChromiumRendererInfo {
     const pid = contents.getOSProcessId();
     if (pid <= 0) continue;
     if (isMainRenderer(contents.id)) mainPids.add(pid);
-    else if (isSettingsRenderer(contents.id)) settingsPids.add(pid);
     else if (contents.session === browserSession) browserPids.add(pid);
     const title = contents.getTitle() || contents.getURL();
     if (title && !titles.has(pid)) titles.set(pid, title);
   }
-  return { mainPids, settingsPids, browserPids, titles };
+  return { mainPids, browserPids, titles };
 }
 
 const desktopUi: LocalUi = {
@@ -42,11 +39,6 @@ const desktopUi: LocalUi = {
     if (!win || win.isDestroyed()) return null;
     const contents = contentsOf(win);
     return alive(contents) ? contents : null;
-  },
-  settingsContents() {
-    const win = getSettingsWindow();
-    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return null;
-    return win.webContents;
   },
   allContents() {
     return BrowserWindow.getAllWindows()

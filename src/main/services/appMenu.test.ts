@@ -2,7 +2,9 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sendToLocalMain = vi.hoisted(() => vi.fn());
+const openSettingsInMainWindow = vi.hoisted(() => vi.fn());
 vi.mock('./renderers', () => ({ sendToLocalMain }));
+vi.mock('../windows/mainSettings', () => ({ openSettingsInMainWindow }));
 
 import { APP_DISPLAY_NAME, type AppMenuActions, macAppMenuTemplate } from './appMenu';
 import type { AppRestartState } from './appRestart';
@@ -76,6 +78,24 @@ describe('macAppMenuTemplate', () => {
     expect(template.indexOf(integrations ?? {})).toBe(template.length - 2);
     expect(JSON.stringify(template[0])).not.toContain('enso 命令');
     expect(macAppMenuTemplate('zh', false).some((menu) => menu.label === '集成')).toBe(false);
+  });
+
+  it('应用菜单「设置…」紧跟关于，在主窗口里打开设置；不占 ⌘,（留给可改绑的快捷键）', () => {
+    const items = macAppMenuTemplate('zh', false)[0].submenu as {
+      role?: string;
+      label?: string;
+      accelerator?: string;
+      click?: () => void;
+    }[];
+    const about = items.findIndex((item) => item.role === 'about');
+    expect(items[about + 1]).toEqual({ type: 'separator' });
+    const settings = items[about + 2];
+    expect(settings?.label).toBe('设置…');
+    expect(settings?.accelerator).toBeUndefined();
+    openSettingsInMainWindow.mockClear();
+    settings?.click?.();
+    expect(openSettingsInMainWindow).toHaveBeenCalledTimes(1);
+    expect(openSettingsInMainWindow).toHaveBeenCalledWith();
   });
 
   describe('重启', () => {

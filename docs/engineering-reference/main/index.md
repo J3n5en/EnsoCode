@@ -23,7 +23,7 @@ src/main/
   windows/
     createAppWindow.ts  通用无边框窗口工厂
     MainWindow.ts       主窗口
-    SettingsWindow.ts   设置窗口单例
+    mainSettings.ts     Main 侧「打开设置」：唤起主窗口并把请求交给它
 ```
 
 **分层原则**：`ipc/` 只做参数校验和转发，业务逻辑一律在 `services/`。

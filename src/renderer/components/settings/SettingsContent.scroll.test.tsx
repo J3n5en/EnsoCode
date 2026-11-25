@@ -1,7 +1,10 @@
+import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import { parseHTML } from 'linkedom';
+import * as React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { findNestedBoxes } from './kit/boxes';
 import { SettingsContent } from './SettingsContent';
 
 const harness = vi.hoisted(() => ({
@@ -16,11 +19,6 @@ const harness = vi.hoisted(() => ({
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/hooks/useViewport', () => ({ useIsMobile: () => harness.mobile }));
 vi.mock('@/hooks/useSettingsCatalog', () => ({ useSettingsCatalog: () => [] }));
-vi.mock('@/components/app/WindowChrome', () => ({
-  ChromeRow: () => null,
-  useShellChrome: () => null,
-  useWindowChromeKind: () => 'mac',
-}));
 vi.mock('@/stores/settings', () => {
   const state = { disabledBuiltinTools: [], botModeEnabled: false, secretaryEnabled: false };
   const useSettingsStore = (select: (s: typeof state) => unknown) => select(state);
@@ -66,6 +64,36 @@ vi.mock('./SkillsSettings', () => ({ SkillsSettings: harness.page('skills') }));
 vi.mock('./SshSettings', () => ({ SshSettings: harness.page('ssh') }));
 vi.mock('./UsageSettings', () => ({ UsageSettings: harness.page('usage') }));
 vi.mock('./WorkflowsSettings', () => ({ WorkflowsSettings: harness.page('workflows') }));
+
+const noop = () => {};
+
+/** 主窗口的设置路由：窄屏两级状态由外层持有 */
+function Settings({
+  link = null,
+  linkSeq = 0,
+  onNavResize,
+}: {
+  link?: SettingsDeepLink | null;
+  linkSeq?: number;
+  onNavResize?: (dx: number) => void;
+}) {
+  const [mobileDetail, setMobileDetail] = React.useState(false);
+  return (
+    <SettingsContent
+      link={link}
+      linkSeq={linkSeq}
+      embedded={{
+        initialCategory: 'general',
+        onCategoryChange: noop,
+        mobileDetail,
+        onMobileDetailChange: setMobileDetail,
+        onBack: noop,
+        navWidth: 260,
+        onNavResize,
+      }}
+    />
+  );
+}
 
 let root: Root;
 let container: HTMLElement;
@@ -130,7 +158,7 @@ afterEach(() => {
 
 describe('设置分区各自的滚动位置', () => {
   it('切到新分区从顶部开始', async () => {
-    await act(async () => root.render(<SettingsContent />));
+    await act(async () => root.render(<Settings />));
     await scrollTo(300);
     await open('Logs');
     expect(container.querySelector('[data-page="logs"]')).toBeTruthy();
@@ -138,7 +166,7 @@ describe('设置分区各自的滚动位置', () => {
   });
 
   it('切回来恢复各自上次离开时的位置', async () => {
-    await act(async () => root.render(<SettingsContent />));
+    await act(async () => root.render(<Settings />));
     await scrollTo(300);
     await open('Logs');
     await scrollTo(120);
@@ -152,7 +180,7 @@ describe('设置分区各自的滚动位置', () => {
 
   it('深链跳到某行：定位到那一行，不被保存的位置覆盖', async () => {
     const hits: string[] = [];
-    await act(async () => root.render(<SettingsContent />));
+    await act(async () => root.render(<Settings />));
     await open('Logs');
     await scrollTo(500);
     await open('General');
@@ -164,7 +192,7 @@ describe('设置分区各自的滚动位置', () => {
     };
     try {
       await act(async () =>
-        root.render(<SettingsContent link={{ category: 'logs', rowId: 'logs.row' }} linkSeq={1} />)
+        root.render(<Settings link={{ category: 'logs', rowId: 'logs.row' }} linkSeq={1} />)
       );
     } finally {
       proto.scrollIntoView = original;
@@ -184,7 +212,7 @@ describe('设置分区各自的滚动位置', () => {
     try {
       await act(async () =>
         root.render(
-          <SettingsContent
+          <Settings
             link={{ category: 'conversation', rowId: 'appearance.liveActivityFoldDelaySec' }}
             linkSeq={1}
           />
@@ -202,8 +230,17 @@ describe('设置分区各自的滚动位置', () => {
     ).toBe('true');
   });
 
+  it('导航搜索框用设置 kit，整个设置视图没有带框容器', async () => {
+    await act(async () => root.render(<Settings />));
+    const nav = container.querySelector('[data-enso="settings-nav"]') as HTMLElement;
+    expect(nav.querySelector('[data-slot="input-group"] input')?.getAttribute('aria-label')).toBe(
+      'Search settings'
+    );
+    expect(findNestedBoxes(container)).toEqual([]);
+  });
+
   it('导航列表有自己的滚动容器，不在内容滚动容器里', async () => {
-    await act(async () => root.render(<SettingsContent />));
+    await act(async () => root.render(<Settings />));
     const navList = container.querySelector('[data-enso="settings-nav"] .overflow-y-auto');
     expect(navList).toBeTruthy();
     expect(scroller().contains(navList)).toBe(false);
@@ -212,7 +249,7 @@ describe('设置分区各自的滚动位置', () => {
 
   it('窄屏：返回列表再进另一个分区从顶部开始，回到原分区恢复', async () => {
     harness.mobile = true;
-    await act(async () => root.render(<SettingsContent />));
+    await act(async () => root.render(<Settings />));
     await open('General');
     await scrollTo(300);
     const back = () => container.querySelector('[data-enso="settings-detail-back"]') as HTMLElement;
@@ -226,16 +263,7 @@ describe('设置分区各自的滚动位置', () => {
   });
 });
 
-describe('嵌入主窗口时侧栏导航可拖宽', () => {
-  const embedded = (onNavResize: (dx: number) => void) => ({
-    initialCategory: 'general' as const,
-    onCategoryChange: () => {},
-    mobileDetail: false,
-    onMobileDetailChange: () => {},
-    onBack: () => {},
-    navWidth: 260,
-    onNavResize,
-  });
+describe('侧栏导航可拖宽', () => {
   const handle = () =>
     container.querySelector(
       '[data-enso="settings-nav-resize"] .cursor-col-resize'
@@ -248,7 +276,7 @@ describe('嵌入主窗口时侧栏导航可拖宽', () => {
 
   it('导航宽度用工作区侧栏的宽度，拖手柄把位移交给同一个改宽回调', async () => {
     const resize = vi.fn();
-    await act(async () => root.render(<SettingsContent embedded={embedded(resize)} />));
+    await act(async () => root.render(<Settings onNavResize={resize} />));
     const nav = container.querySelector('[data-enso="settings-nav"]') as HTMLElement;
     expect(nav.style.width).toBe('260px');
     expect(handle(), 'resize handle').toBeTruthy();
@@ -263,7 +291,7 @@ describe('嵌入主窗口时侧栏导航可拖宽', () => {
 
   it('窄屏没有拖拽手柄', async () => {
     harness.mobile = true;
-    await act(async () => root.render(<SettingsContent embedded={embedded(vi.fn())} />));
+    await act(async () => root.render(<Settings onNavResize={vi.fn()} />));
     expect(handle()).toBeNull();
   });
 });

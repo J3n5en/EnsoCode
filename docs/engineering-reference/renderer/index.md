@@ -1,13 +1,12 @@
 # renderer 层规范（React 界面）
 
-`src/renderer/` 是两个窗口共用的一套 React 代码，通过不同入口挂载不同根组件。
+`src/renderer/` 是主窗口的 React 代码，设置页是主窗口里的一个视图（`stores/appView.ts`）。
 
 ## 结构
 
 ```
 src/renderer/
   index.html / index.tsx        主窗口入口
-  settings.html / settings.tsx  设置窗口入口
   App.tsx
   components/
     ui/                         base-ui 封装，约 50 个，kebab-case 文件名

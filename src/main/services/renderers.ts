@@ -2,7 +2,6 @@ import type { RendererContents } from '@platform';
 import {
   hasRemoteMain,
   isRemoteMainSender,
-  isRemoteSettingsSender,
   remoteSenderById,
   sendToRemoteRenderers,
 } from './remoteRenderer/senders';
@@ -21,11 +20,6 @@ export function isMainRendererAlive(): boolean {
 export function isMainRenderer(webContentsId: number): boolean {
   if (isRemoteMainSender(webContentsId)) return true;
   return localMainContents()?.id === webContentsId;
-}
-
-export function isSettingsRenderer(webContentsId: number): boolean {
-  if (isRemoteSettingsSender(webContentsId)) return true;
-  return localUi()?.settingsContents()?.id === webContentsId;
 }
 
 export function sendToLocalMain(channel: string, ...args: unknown[]): void {

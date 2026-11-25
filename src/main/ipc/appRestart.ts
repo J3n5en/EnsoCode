@@ -28,7 +28,7 @@ function ownerOf(state: RestartOverlayState): RestartOverlayOwner {
 
 /**
  * 弹层只推给本机主窗口；主窗口还没加载好时记下，挂载时来取。
- * 开弹层时盖着远程节点就切回本机界面；开始等命令时用户正在用本应用（如在设置窗口里点的重启更新），
+ * 开弹层时盖着远程节点就切回本机界面；开始等命令时用户正在用本应用（如在设置页里点的重启更新），
  * 把主窗口唤到前台让弹层看得见；后台自动重启不抢别的应用的焦点
  */
 export function setRestartOverlay(next: RestartOverlayState | null): void {

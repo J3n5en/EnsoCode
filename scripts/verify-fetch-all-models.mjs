@@ -97,12 +97,9 @@ async function main() {
   const mainPage = await waitForPage((p) => p.url.includes('index.html'));
   const main = await connect(mainPage.webSocketDebuggerUrl);
   await main.send('Runtime.enable');
-  await evalExpr(main.send, 'window.electronAPI.window.openSettings()');
-
-  const settingsPage = await waitForPage((p) => p.url.includes('settings.html'));
-  const settings = await connect(settingsPage.webSocketDebuggerUrl);
-  await settings.send('Runtime.enable');
-  await settings.send('Page.enable');
+  // 设置在主窗口里原地打开，沿用主窗口这条连接
+  await evalExpr(main.send, 'window.__stores.settingsView.open()');
+  const settings = main;
 
   const navFound = `[...document.querySelectorAll('button')].some((el) => el.textContent.trim() === '模型中心')`;
   await waitFor(settings.send, navFound);
