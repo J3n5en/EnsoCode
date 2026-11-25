@@ -41,6 +41,8 @@ export const SECRETARY_OPS = [
   'tool_propose',
   'secretary_list',
   'secretary_message',
+  'github_merge_pr',
+  'github_delete_branch',
 ] as const;
 
 export type SecretaryOp = (typeof SECRETARY_OPS)[number];
