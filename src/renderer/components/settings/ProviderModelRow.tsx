@@ -162,7 +162,7 @@ export function ProviderModelRow({
       {showEditors && (
         <div
           data-slot="model-override-editors"
-          className="mb-1 ml-8 space-y-2 rounded-md border border-dashed bg-muted/30 p-2"
+          className="mb-1 ml-8 space-y-2 rounded-md bg-muted/30 p-2"
         >
           <OverrideField label={t('Reasoning')}>
             <TriState
@@ -268,7 +268,7 @@ function TriState({
   ];
 
   return (
-    <div data-slot={slot} className="flex w-full rounded-md border bg-background p-0.5">
+    <div data-slot={slot} className="flex w-full min-w-0 rounded-md bg-muted p-0.5">
       {options.map((option) => {
         const selected = value === option.value;
         return (
@@ -279,9 +279,9 @@ function TriState({
             data-value={option.key}
             data-selected={selected ? 'true' : 'false'}
             className={cn(
-              'h-6 flex-1 rounded-sm px-1.5 text-[11px]',
+              'h-6 min-w-0 flex-1 rounded-sm px-1.5 text-[11px]',
               selected
-                ? 'bg-accent font-medium text-foreground'
+                ? 'bg-background text-foreground shadow-xs ring-1 ring-border'
                 : 'text-muted-foreground hover:text-foreground'
             )}
             onClick={() => onChange(option.value)}

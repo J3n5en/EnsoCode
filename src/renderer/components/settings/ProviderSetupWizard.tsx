@@ -218,12 +218,12 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
               {page.step === 'provider' && (
                 <DialogPanel bare className="space-y-2">
                   {loadError && (
-                    <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive">
+                    <div className="flex items-start justify-between gap-3 rounded-md bg-destructive/5 px-3 py-2 text-destructive-text">
                       <div className="min-w-0">
                         <p className="text-xs font-medium">
                           {t('Could not load subscription providers')}
                         </p>
-                        <p className="mt-0.5 break-words text-[11px] text-destructive/80">
+                        <p className="mt-0.5 break-words text-[11px] text-destructive-text/80">
                           {loadError}
                         </p>
                       </div>
@@ -244,7 +244,7 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                         <button
                           key={definition.id}
                           type="button"
-                          className="flex min-w-0 items-center gap-3 rounded-md border px-3 py-3 text-left transition-colors hover:bg-accent"
+                          className="flex min-w-0 items-center gap-3 rounded-md bg-muted/40 px-3 py-3 text-left transition-colors hover:bg-accent"
                           onClick={() => {
                             setSelectedId(definition.id);
                             setStep('method');
@@ -296,11 +296,11 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                   {availableProviderSetupMethods(selected).includes('oauth') && (
                     <button
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition-colors hover:bg-accent"
+                      className="flex w-full min-w-0 items-center gap-3 rounded-md bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-accent"
                       onClick={() => setStep('oauth')}
                     >
                       <BadgeCheck className="h-5 w-5 shrink-0 text-primary" />
-                      <span>
+                      <span className="min-w-0">
                         <span className="block text-sm font-medium">
                           {t('Provider subscription')}
                         </span>
@@ -313,11 +313,11 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                   {availableProviderSetupMethods(selected).includes('api-key') && (
                     <button
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition-colors hover:bg-accent"
+                      className="flex w-full min-w-0 items-center gap-3 rounded-md bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-accent"
                       onClick={() => setStep('api-key')}
                     >
                       <KeyRound className="h-5 w-5 shrink-0 text-primary" />
-                      <span>
+                      <span className="min-w-0">
                         <span className="block text-sm font-medium">{t('API Key')}</span>
                         <span className="block text-xs text-muted-foreground">
                           {t('Configure an endpoint and key, then fetch or test its models.')}

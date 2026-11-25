@@ -269,6 +269,24 @@ describe('SettingsExpandableRow', () => {
     await act(async () => toggle.click());
     expect(container.textContent).not.toContain('gpt-5');
   });
+
+  it('受控时由外部决定展开，点箭头只回调', async () => {
+    const onOpenChange = vi.fn();
+    const mount = (open: boolean) =>
+      render(
+        <SettingsExpandableRow label="Advanced" open={open} onOpenChange={onOpenChange}>
+          <SettingsSubRow label="Proxy" />
+        </SettingsExpandableRow>
+      );
+    await mount(true);
+    expect(container.textContent).toContain('Proxy');
+    const toggle = container.querySelector('button[aria-expanded]') as HTMLElement;
+    await act(async () => toggle.click());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(container.textContent).toContain('Proxy');
+    await mount(false);
+    expect(container.textContent).not.toContain('Proxy');
+  });
 });
 
 describe('SettingsDangerAction', () => {

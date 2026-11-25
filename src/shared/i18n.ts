@@ -932,6 +932,8 @@ export const zhTranslations: Record<string, string> = {
     '为子代理配置专属模型、技能与 MCP 服务（可选）',
   '{{count}} presets': '已有 {{count}} 个预设',
   'Model Providers': '模型中心',
+  'Models used by features': '各功能使用的模型',
+  Providers: '模型服务',
   'Automatically fetch models': '自动拉取模型',
   'Model fetch interval': '拉取间隔',
   'This interval applies when automatic fetching is enabled for this provider.':

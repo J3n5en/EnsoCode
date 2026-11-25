@@ -78,14 +78,17 @@ function PoolProviderForm({ provider, onClose }: { provider: ModelProvider; onCl
               'Use enabled, signed-in accounts in the listed order. Model and reasoning stay unchanged. Main agents and subagents share this pool.'
             )}
           </p>
-          <div className="mt-2 w-full space-y-1 rounded-md border p-1">
+          <div className="mt-2 w-full">
             {keys.map((key, index) => {
               const source = sources.find((item) => item.oauthAccountKey === key);
               const account = oauthInfos
                 .flatMap((info) => info.accounts)
                 .find((item) => item.key === key);
               return (
-                <label key={key} className="flex min-w-0 items-center gap-2 px-2 py-1.5 text-sm">
+                <label
+                  key={key}
+                  className="flex min-w-0 items-center gap-2 border-border border-b px-1 py-1.5 text-sm"
+                >
                   <Checkbox
                     checked={selected.includes(key)}
                     onCheckedChange={(checked) =>

@@ -191,4 +191,39 @@ describe('ProviderApiForm 独立代理（交互）', () => {
     await ui.click('Save');
     expect(ui.onSave.mock.calls[0]?.[0].proxy).toEqual(expected);
   });
+
+  it('展开高级后三档切换：直连、自定义（空地址拦截）、再切回跟随全局', async () => {
+    const ui = await mount({});
+    const advanced = [...ui.container.querySelectorAll('[data-slot="settings-row"]')].find((row) =>
+      row.textContent?.includes('Advanced')
+    );
+    await act(async () => advanced?.querySelector<HTMLElement>('button[aria-expanded]')?.click());
+    const pick = (label: string) =>
+      act(async () =>
+        [
+          ...ui.container.querySelectorAll<HTMLElement>(
+            '[data-slot="provider-proxy-mode"] [role="radio"]'
+          ),
+        ]
+          .find((radio) => radio.textContent === label)
+          ?.click()
+      );
+    const lastTested = () => ui.providers.test.mock.calls.at(-1)?.[0];
+
+    await pick('No proxy (direct)');
+    await ui.click('Test connection');
+    expect(lastTested()?.proxy).toEqual({ mode: 'none' });
+
+    await pick('Custom proxy');
+    expect(ui.container.querySelector('[role="alert"]')?.textContent).toBe(ERROR);
+    expect(ui.button('Save').disabled).toBe(true);
+    await ui.typeUrl('http://127.0.0.1:7890');
+    await ui.click('Test connection');
+    expect(lastTested()?.proxy).toEqual({ mode: 'custom', url: 'http://127.0.0.1:7890' });
+
+    await pick('Follow global proxy');
+    expect(ui.container.querySelector('[data-slot="provider-proxy-url"]')).toBeNull();
+    await ui.click('Save');
+    expect(ui.onSave.mock.calls[0]?.[0].proxy).toBeUndefined();
+  });
 });

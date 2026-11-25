@@ -12,7 +12,6 @@ import {
 import { Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -24,12 +23,12 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
-import { cn } from '@/lib/utils';
 import {
   useUsableClassifierProviders,
   useUsableProviders,
 } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { SettingsButton, SettingsExpandableRow, SettingsSection, SettingsSubRow } from './kit';
 
 const noop = () => undefined;
 const OFF = 'off';
@@ -62,7 +61,7 @@ function ClassifierTimeoutInput({
     if (timeoutMs !== effectiveMs) onChange({ ...classifier, timeoutMs, timeoutSet: true });
   };
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs">{t('Timeout')}</span>
       <Input
         type="number"
@@ -110,26 +109,6 @@ function MemberPicker({
         onReasoningChange={noop}
         onThinkingChange={noop}
       />
-    </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[6rem_1fr] items-start gap-2">
-      <div className="pt-1.5 text-xs">
-        <div>{label}</div>
-        {hint && <div className="text-[10px] text-muted-foreground">{hint}</div>}
-      </div>
-      <div className="min-w-0 space-y-1">{children}</div>
     </div>
   );
 }
@@ -361,128 +340,135 @@ function VirtualModelCard({
   }
   const update = (updates: Partial<Omit<VirtualModelEntry, 'id'>>) =>
     updateEntry(entry.id, updates);
+  const memberColumn = 'flex w-[280px] max-w-full items-center gap-1';
   return (
-    <div
-      data-slot="virtual-model-card"
-      className={cn(
-        'space-y-2 rounded-md border p-2',
-        !entry.enabled && 'bg-muted/50 text-muted-foreground'
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <Switch
-          aria-label={t('Enable virtual model')}
-          checked={entry.enabled}
-          onCheckedChange={(enabled) => update({ enabled })}
-        />
-        <Input
-          value={entry.name}
-          maxLength={60}
-          placeholder="Auto"
-          className="h-7 flex-1 text-xs"
-          onChange={(event) => update({ name: event.target.value })}
-        />
-        {!entry.enabled && (
-          <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
-            {t('Disabled')}
-          </Badge>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t('Delete')}
-          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-          onClick={() => removeEntry(entry.id)}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <Field label={t('Primary model')} hint={t('Default for each new turn')}>
-        <MemberPicker
-          providers={providers}
-          value={entry.primary}
-          onSelect={(primary) =>
-            update({
-              primary,
-              fallbacks: entry.fallbacks.filter(
-                (ref) => ref.providerId !== primary.providerId || ref.modelId !== primary.modelId
-              ),
-            })
-          }
-        />
-      </Field>
-      <Field label={t('Fast model')} hint={t('Summaries and simple turns')}>
-        <div className="flex items-center gap-1">
-          <MemberPicker
-            providers={providers}
-            value={entry.fast}
-            emptyLabel={t('Not used')}
-            onSelect={(fast) => update({ fast })}
-          />
-          {entry.fast && (
+    <div data-slot="virtual-model-card">
+      <SettingsExpandableRow
+        defaultOpen
+        label={entry.name || 'Auto'}
+        description={entry.enabled ? undefined : t('Disabled')}
+        control={
+          <>
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              aria-label={t('Clear')}
-              className="h-6 w-6 shrink-0 text-muted-foreground"
-              onClick={() => update({ fast: undefined })}
+              size="icon-sm"
+              aria-label={t('Delete')}
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => removeEntry(entry.id)}
             >
-              <X className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
-          )}
-        </div>
-      </Field>
-      <Field
-        label={t('Fallback models')}
-        hint={t('Used in order when a model is rate limited or down')}
+            <Switch
+              aria-label={t('Enable virtual model')}
+              checked={entry.enabled}
+              onCheckedChange={(enabled) => update({ enabled })}
+            />
+          </>
+        }
       >
-        {entry.fallbacks.map((ref, index) => (
-          <div key={`${ref.providerId}/${ref.modelId}`} className="flex items-center gap-1">
+        <SettingsSubRow label={t('Name')}>
+          <Input
+            value={entry.name}
+            maxLength={60}
+            placeholder="Auto"
+            size="sm"
+            className="w-[280px] max-w-full"
+            onChange={(event) => update({ name: event.target.value })}
+          />
+        </SettingsSubRow>
+        <SettingsSubRow label={t('Primary model')} description={t('Default for each new turn')}>
+          <div className={memberColumn}>
             <MemberPicker
               providers={providers}
-              value={ref}
-              onSelect={(next) =>
+              value={entry.primary}
+              onSelect={(primary) =>
                 update({
-                  fallbacks: entry.fallbacks.map((item, at) => (at === index ? next : item)),
+                  primary,
+                  fallbacks: entry.fallbacks.filter(
+                    (ref) =>
+                      ref.providerId !== primary.providerId || ref.modelId !== primary.modelId
+                  ),
                 })
               }
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t('Delete')}
-              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-              onClick={() => update({ fallbacks: entry.fallbacks.filter((_, at) => at !== index) })}
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
           </div>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          disabled={!nextFallback || entry.fallbacks.length >= 8}
-          onClick={() => {
-            if (nextFallback) update({ fallbacks: [...entry.fallbacks, nextFallback] });
-          }}
+        </SettingsSubRow>
+        <SettingsSubRow label={t('Fast model')} description={t('Summaries and simple turns')}>
+          <div className={memberColumn}>
+            <MemberPicker
+              providers={providers}
+              value={entry.fast}
+              emptyLabel={t('Not used')}
+              onSelect={(fast) => update({ fast })}
+            />
+            {entry.fast && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('Clear')}
+                className="text-muted-foreground"
+                onClick={() => update({ fast: undefined })}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </SettingsSubRow>
+        <SettingsSubRow
+          label={t('Fallback models')}
+          description={t('Used in order when a model is rate limited or down')}
         >
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          {t('Add fallback')}
-        </Button>
-      </Field>
-      <Field label={t('Difficulty routing')}>
-        <ClassifierField
-          entry={entry}
-          providers={providers}
-          classifierProviders={classifierProviders}
-          update={update}
-        />
-      </Field>
+          <div className="flex w-[280px] max-w-full flex-col items-stretch gap-1">
+            {entry.fallbacks.map((ref, index) => (
+              <div key={`${ref.providerId}/${ref.modelId}`} className="flex items-center gap-1">
+                <MemberPicker
+                  providers={providers}
+                  value={ref}
+                  onSelect={(next) =>
+                    update({
+                      fallbacks: entry.fallbacks.map((item, at) => (at === index ? next : item)),
+                    })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('Delete')}
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() =>
+                    update({ fallbacks: entry.fallbacks.filter((_, at) => at !== index) })
+                  }
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <SettingsButton
+              className="self-start"
+              disabled={!nextFallback || entry.fallbacks.length >= 8}
+              onClick={() => {
+                if (nextFallback) update({ fallbacks: [...entry.fallbacks, nextFallback] });
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t('Add fallback')}
+            </SettingsButton>
+          </div>
+        </SettingsSubRow>
+        <SettingsSubRow label={t('Difficulty routing')}>
+          <div className="w-[280px] max-w-full">
+            <ClassifierField
+              entry={entry}
+              providers={providers}
+              classifierProviders={classifierProviders}
+              update={update}
+            />
+          </div>
+        </SettingsSubRow>
+      </SettingsExpandableRow>
     </div>
   );
 }
@@ -514,19 +500,29 @@ export function VirtualModelsSettings() {
   }, [candidates, defaultModel]);
 
   return (
-    <section data-slot="virtual-models" className="space-y-2 rounded-lg border bg-card p-3">
-      <div>
-        <h4 className="font-medium text-sm">{t('Virtual models')}</h4>
-        <p className="mt-0.5 text-muted-foreground text-xs">
+    <SettingsSection
+      title={t('Virtual models')}
+      description={
+        <>
           {t(
             'A virtual model appears as one model in the picker and routes each request to a real model: fallbacks on rate limits or outages, image-capable or larger-context members when needed, and the fast model for summaries.'
           )}
-        </p>
-        <p className="mt-1 text-muted-foreground text-xs">
-          {t('Applies to newly started conversations.')}
-        </p>
-      </div>
-      <div className="space-y-2">
+          <span className="mt-1 block">{t('Applies to newly started conversations.')}</span>
+        </>
+      }
+      actions={
+        <SettingsButton
+          disabled={!seed}
+          onClick={() => {
+            if (seed) addEntry({ name: 'Auto', enabled: true, primary: seed, fallbacks: [] });
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t('New virtual model')}
+        </SettingsButton>
+      }
+    >
+      <div data-slot="virtual-models">
         {entries.map((entry) => (
           <VirtualModelCard
             key={entry.id}
@@ -535,25 +531,12 @@ export function VirtualModelsSettings() {
             classifierProviders={classifierProviders}
           />
         ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          disabled={!seed}
-          onClick={() => {
-            if (seed) addEntry({ name: 'Auto', enabled: true, primary: seed, fallbacks: [] });
-          }}
-        >
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          {t('New virtual model')}
-        </Button>
         {!seed && (
-          <p className="text-muted-foreground text-xs">
+          <p className="border-border border-b py-3 text-muted-foreground text-xs">
             {t('Enable a model and configure valid provider credentials first.')}
           </p>
         )}
       </div>
-    </section>
+    </SettingsSection>
   );
 }
