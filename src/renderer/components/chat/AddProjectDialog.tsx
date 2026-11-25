@@ -469,7 +469,7 @@ function RepoField({ value, onChange }: { value: string; onChange: (value: strin
         }}
       />
       {query !== null ? (
-        <div className="space-y-1.5">
+        <div className="w-full min-w-0 space-y-1.5">
           <p className="text-muted-foreground text-xs">{t('Search your repositories')}</p>
           {pending ? (
             <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -939,7 +939,9 @@ export function AddProjectDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
-        <form onSubmit={handleSubmit} className="flex flex-col">
+        {/* min-h-0 + h-full 让 flex 链成立：DialogPanel 的 ScrollArea 才能在弹窗限高内滚动，
+            否则仓库/目录搜索结果多时内容把弹窗撑高、底部被裁 */}
+        <form onSubmit={handleSubmit} className="flex h-full min-h-0 flex-col">
           <DialogHeader>
             <DialogTitle>{t('Add project')}</DialogTitle>
             <DialogDescription>
