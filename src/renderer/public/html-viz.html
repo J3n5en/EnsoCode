@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; frame-src about:"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // html-viz 壳：主界面 CSP 禁内联脚本，srcdoc 会继承它，所以可视化跑在本页的内层 iframe 里。
+      // 外层不加 sandbox（同 plugin-view.html，PWA 才能经 Service Worker 拿到本文件）；本页只有这段静态脚本。
+      // 内层 sandbox="allow-scripts"：不同源、不能弹窗/提交/顶层跳转，只能 postMessage 给本页，本页只转发白名单消息。
+      (() => {
+        const inner = document.createElement('iframe');
+        inner.setAttribute('sandbox', 'allow-scripts');
+        inner.setAttribute('referrerpolicy', 'no-referrer');
+        let theme = null;
+        let started = false;
+        const up = (message) => window.parent.postMessage(message, '*');
+        window.addEventListener('message', (event) => {
+          const data = event.data;
+          if (!data || typeof data !== 'object') return;
+          if (event.source === inner.contentWindow) {
+            if (data.type === 'enso-viz-height' && typeof data.height === 'number')
+              up({ type: 'enso-viz-height', height: data.height });
+            else if (data.type === 'enso-viz-error') {
+              let message = '';
+              try {
+                message = String(data.message).slice(0, 500);
+              } catch {
+                /* 不可序列化的错误只报类型 */
+              }
+              up({ type: 'enso-viz-error', message });
+            }
+            return;
+          }
+          if (event.source !== window.parent) return;
+          if (data.type === 'enso-viz-init' && !started && typeof data.srcdoc === 'string') {
+            started = true;
+            inner.srcdoc = data.srcdoc;
+          } else if (data.type === 'enso-viz-theme') {
+            theme = data;
+            inner.contentWindow?.postMessage(data, '*');
+          }
+        });
+        // 内层加载前到达的主题变化补发一次
+        inner.addEventListener('load', () => {
+          if (theme) inner.contentWindow?.postMessage(theme, '*');
+        });
+        document.body.append(inner);
+        up({ type: 'enso-viz-ready' });
+      })();
+    </script>
+  </body>
+</html>

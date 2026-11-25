@@ -41,7 +41,9 @@ import { usePluginSlotsVersion } from '../../plugins/usePluginSlots';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import { confirmFileLink, useFileLink } from './fileLinkResolver';
+import { HtmlVizRenderer } from './HtmlVizRenderer';
 import { highlightNode } from './highlightQuery';
+import { isHtmlVizLanguage } from './htmlViz';
 import { JsonTree } from './JsonTree';
 import { MermaidRenderer } from './MermaidRenderer';
 import {
@@ -990,6 +992,9 @@ export const markdownComponents: Components = {
     }
     if (language?.toLowerCase() === 'mermaid') {
       return <MermaidRenderer code={source} streaming={streaming} />;
+    }
+    if (isHtmlVizLanguage(language)) {
+      return <HtmlVizRenderer code={source} streaming={streaming} />;
     }
     return <RichFence source={source} language={language} streaming={streaming} />;
   },
