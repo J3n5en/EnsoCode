@@ -133,15 +133,28 @@ async function status(socketPath: string): Promise<void> {
   const pairStatus = reply.pair as PairStatus;
   const updater = reply.update as UpdaterState;
   const s = updater.status;
+  const applying = s?.status === 'applying' ? s.applying : undefined;
   const updateText =
     updater.mode !== 'npm'
       ? `手动（npm i -g ${manualInstallSpec(updater.channel === 'beta' ? 'beta' : 'stable')}）`
-      : s?.status === 'available' || s?.status === 'downloaded'
-        ? `有新版本 ${s.info?.version}，运行 \`enso-server update\``
-        : s?.status === 'error'
-          ? `检查失败: ${s.error}`
-          : '自动';
+      : applying
+        ? applying.stage === 'waiting-tasks'
+          ? `等待 ${applying.busyCount ?? 0} 个任务完成后安装 ${s?.info?.version}`
+          : applying.stage === 'installing'
+            ? `正在安装 ${s?.info?.version}`
+            : '正在重启'
+        : s?.status === 'available' || s?.status === 'downloaded'
+          ? `有新版本 ${s.info?.version}，运行 \`enso-server update\``
+          : s?.status === 'error'
+            ? `检查失败: ${s.error}`
+            : '自动';
   const channelText = updater.channel === 'beta' ? '内测 (beta)' : '正式 (stable)';
+  const restartText =
+    updater.restartMethod === 'supervisor'
+      ? '守护进程拉起'
+      : updater.restartMethod === 'reexec'
+        ? '自动（无守护，自重启）'
+        : '手动重启（容器或外部管理）';
   console.log(`状态: 运行中 (pid ${reply.pid})`);
   console.log(`版本: ${reply.version}`);
   console.log(`数据: ${reply.dataDir}`);
@@ -152,6 +165,7 @@ async function status(socketPath: string): Promise<void> {
   if (web) console.log(`Web: 监听 ${web.listen} → ${web.publicUrl}`);
   console.log(`更新: ${updateText}`);
   console.log(`渠道: ${channelText}`);
+  console.log(`重启: ${restartText}`);
   console.log('设备:');
   printDevices(pairStatus);
 }

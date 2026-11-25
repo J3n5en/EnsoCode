@@ -1,10 +1,16 @@
-import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
+import type {
+  ServerRestartMethod,
+  ServerUpdateMode,
+  UpdaterState,
+  UpdateStatus,
+} from '@shared/types/updater';
 import type { UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import {
   IdleRestartGate,
   type IdleRestartObservation,
 } from '../../main/services/updater/idleRestartGate';
+import { detectRestartMethod } from './reexec';
 import {
   compareVersions,
   DEFAULT_NPM_REGISTRY,
@@ -12,6 +18,10 @@ import {
   npmLatestUrl,
   parseNpmLatest,
 } from './version';
+
+/** 应用更新时等正在跑的 turn 收完的上限；超时后安全中断（断点续跑机制兜底） */
+const WAIT_FOR_TASKS_MS = 5 * 60 * 1000;
+const WAIT_POLL_MS = 1_000;
 
 /** 全局 npm 安装能力；装在 npx 缓存或不可写前缀时为 null */
 export interface NpmInstaller {
@@ -30,6 +40,18 @@ export interface ServerUpdaterDeps {
   quit: () => void;
   idle: () => IdleRestartObservation;
   now?: () => number;
+  /** 测试覆盖：进程 pid（reexec 探测 PID1 用） */
+  pid?: number;
+  /** 还在跑回合的工作区数（应用前等待用） */
+  busyCount?: () => number;
+  /** 无守护时拉起替代进程 */
+  spawnReexec?: () => void;
+  /** 健康检查标记：安装前写入、安装失败清除 */
+  writePending?: (update: { from: string; to: string }) => void;
+  clearPending?: () => void;
+  /** 测试缩短等待上限/轮询 */
+  waitForTasksMs?: number;
+  waitPollMs?: number;
 }
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -67,8 +89,12 @@ export class ServerUpdater {
     return this.deps.npm ? 'npm' : 'manual';
   }
 
+  restartMethod(): ServerRestartMethod {
+    return detectRestartMethod(this.deps.env, this.deps.pid ?? process.pid);
+  }
+
   canRestart(): boolean {
-    return this.deps.env.ENSO_SUPERVISED === '1' || Boolean(this.deps.env.INVOCATION_ID);
+    return this.restartMethod() !== 'manual';
   }
 
   state(): UpdaterState {
@@ -77,6 +103,7 @@ export class ServerUpdater {
       status: this.status,
       mode: this.mode(),
       canRestart: this.canRestart(),
+      restartMethod: this.restartMethod(),
       channel: this.channel,
     };
   }
@@ -230,17 +257,63 @@ export class ServerUpdater {
     this.applying = true;
     try {
       if (!this.deps.npm) throw new Error('this install cannot update itself; run npm i -g');
+      // 等正在跑的 turn 收完；超时后按推荐方案安全中断（退出收尾会写断点，重启后续跑）
+      const busyCount = this.deps.busyCount?.() ?? 0;
+      if (busyCount > 0) await this.waitForTasks(version);
+      this.setApplying('installing');
+      this.deps.writePending?.({ from: this.deps.version, to: version });
       await this.deps.npm.install(this.spec(version));
-      this.deps.quit();
+      this.setApplying('restarting');
+      this.restartProcess();
     } catch (error) {
       this.applying = false;
+      this.deps.clearPending?.();
       this.fail(error);
     }
   }
 
+  /** 广播 applying 阶段；waiting-tasks 之外不带 busyCount/deadline */
+  private setApplying(
+    stage: 'waiting-tasks' | 'installing' | 'restarting',
+    busyCount = 0,
+    deadlineMs = 0
+  ): void {
+    this.setStatus(
+      {
+        status: 'applying',
+        info: this.downloadedVersion ? { version: this.downloadedVersion } : undefined,
+        applying: {
+          stage,
+          ...(stage === 'waiting-tasks' ? { busyCount, deadlineMs } : {}),
+        },
+      },
+      true
+    );
+  }
+
+  private async waitForTasks(version: string): Promise<void> {
+    const now = this.now();
+    const limit = this.deps.waitForTasksMs ?? WAIT_FOR_TASKS_MS;
+    const poll = this.deps.waitPollMs ?? WAIT_POLL_MS;
+    const deadlineMs = now + limit;
+    for (;;) {
+      const busy = this.deps.busyCount?.() ?? 0;
+      if (busy === 0) return;
+      if (this.now() >= deadlineMs) return;
+      this.setApplying('waiting-tasks', busy, deadlineMs);
+      await new Promise((resolve) => setTimeout(resolve, poll));
+    }
+  }
+
+  /** 退出并由守护/替代进程拉起：supervisor 直接退，reexec 先放小脚本再退 */
+  private restartProcess(): void {
+    if (this.restartMethod() === 'reexec') this.deps.spawnReexec?.();
+    this.deps.quit();
+  }
+
   restart(): void {
     if (!this.canRestart()) throw new Error('enso-server is not running under a supervisor');
-    this.deps.quit();
+    this.restartProcess();
   }
 
   setAutoUpdateEnabled(enabled: boolean): void {

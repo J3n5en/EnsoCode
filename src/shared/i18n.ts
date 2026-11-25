@@ -335,6 +335,17 @@ export const zhTranslations: Record<string, string> = {
     '服务端（npm 全局安装）：用 npm 安装新版本后重启。',
   'This server must be updated on the machine itself.':
     '这台服务端无法远程更新，请在服务器上手动执行：',
+  'Not available for this install: it cannot update itself. Update manually instead.':
+    '此安装方式无法自我更新，该开关不生效。请手动更新。',
+  'Server updates install the new version with npm and restart gracefully: running tasks finish first (up to a limit), then the server restarts and tasks resume.':
+    '服务端（npm 全局安装）：自动更新会先等正在跑的任务收完（有上限），再安装并重启，任务重启后续跑。',
+  'Waiting for {{count}} running tasks to finish before installing…':
+    '正在等 {{count}} 个任务收完后安装…',
+  'Installing {{version}}…': '正在安装 {{version}}…',
+  'Restarting server…': '正在重启服务端…',
+  'Updating…': '正在更新…',
+  'New version {{version}} is downloaded. Applying it installs and then stops the server — you will need to restart it externally (container or process manager).':
+    '新版本 {{version}} 已下载。应用更新会安装后停止服务端——它需要你在容器或进程管理器里外部重启。',
   'Automatic updates': '自动更新',
   'Download and install updates automatically': '自动下载并安装更新',
   'Restart automatically to apply updates': '自动重启以应用更新',

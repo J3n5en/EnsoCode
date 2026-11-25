@@ -2,16 +2,20 @@ import { app, ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { isUpdateChannel } from '@shared/updater/channel';
 import { isAutoRestartMode, resolveAutoRestartMode } from '@shared/updater/idleRestart';
+import { agentSessionIndex } from '../../main/ipc/sessionIndex';
 import { patchSettingsState, readSettings } from '../../main/ipc/settings';
 import { allowRemoteHostControl } from '../../main/services/remoteRenderer';
 import { broadcastToRenderers } from '../../main/services/renderers';
 import { currentIdleRestartObservation } from '../../main/services/updater/idleRestartSnapshot';
 import { globalNpmInstaller } from './npm';
+import { clearPendingUpdate, writePendingUpdate } from './pendingUpdate';
+import { spawnReexec } from './reexec';
 import { ServerUpdater } from './serverUpdater';
 import { NPM_PACKAGE } from './version';
 
 /** 服务端用同一组 updater:* 通道实现自更新与重启，并开放给已配对的浏览器 */
 export function registerServerUpdater(): ServerUpdater {
+  const dataDir = app.getPath('userData');
   const updater = new ServerUpdater({
     version: app.getVersion(),
     packageName: NPM_PACKAGE,
@@ -21,6 +25,10 @@ export function registerServerUpdater(): ServerUpdater {
     broadcast: (status) => broadcastToRenderers(IPC_CHANNELS.UPDATER_STATUS, status),
     quit: () => app.quit(),
     idle: () => currentIdleRestartObservation(),
+    busyCount: () => agentSessionIndex.busyWorkspaceCount(),
+    spawnReexec: () => spawnReexec(dataDir),
+    writePending: (update) => writePendingUpdate(dataDir, { ...update, at: Date.now() }),
+    clearPending: () => clearPendingUpdate(dataDir),
   });
   ipcMain.handle(IPC_CHANNELS.UPDATER_GET_STATE, () => updater.state());
   ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, () => updater.checkForUpdates());

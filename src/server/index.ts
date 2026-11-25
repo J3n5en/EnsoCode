@@ -53,9 +53,46 @@ import { applyConfigEnv, readServerConfig } from './config';
 import { type PluginControlCommand, parseControlCommand, serveControlConnection } from './control';
 import { runCli } from './run/cli';
 import { registerServerUpdater } from './update/ipc';
+import { globalNpmInstaller } from './update/npm';
+import { HEALTHY_AFTER_MS, markUpdateReady, resolveUpdateBoot } from './update/pendingUpdate';
+import { detectRestartMethod, spawnReexec } from './update/reexec';
 import type { ServerUpdater } from './update/serverUpdater';
 import { startWeb } from './web';
 import { parseWebConfig, type WebConfig } from './web/config';
+
+/**
+ * 启动时的更新健康检查：pending-update.json 在，说明上次启动是为更新而来。
+ * 连续崩溃到上限（守护/launcher 反复拉起却没活到 markUpdateReady）就回滚到旧版本；
+ * 起来满 HEALTHY_AFTER_MS 算健康，清除标记。回滚安装完成后退出，由守护/reexec 脚本拉起旧版本。
+ */
+async function resolveStartupUpdate(): Promise<void> {
+  const dataDir = app.getPath('userData');
+  const decision = resolveUpdateBoot(dataDir, app.getVersion());
+  if (decision.kind === 'none' || decision.kind === 'stale') return;
+  if (decision.kind === 'rollback') {
+    console.warn(`[server] ${decision.to} 连续 ${3} 次没能起来，回滚到 ${decision.from}`);
+    const npm = globalNpmInstaller(app.getAppPath());
+    if (!npm) {
+      console.error('[server] 无法自动回滚（非全局 npm 安装），请手动执行 npm i -g 重装旧版本');
+      return;
+    }
+    try {
+      await npm.install(`@ensocode/server@${decision.from}`);
+      console.log(`[server] 已回滚到 ${decision.from}，重启后生效`);
+    } catch (error) {
+      console.error(
+        `[server] 回滚失败: ${error instanceof Error ? error.message : String(error)}，请手动重装旧版本`
+      );
+      return;
+    }
+    // 无守护时没人拉起旧版本：再放一个 reexec 脚本（崩溃循环下 launcher 早已退出）
+    if (detectRestartMethod(process.env, process.pid) === 'reexec') spawnReexec(dataDir);
+    process.exit(0);
+  }
+  // booting：起来满一分钟算健康
+  const timer = setTimeout(() => markUpdateReady(dataDir, app.getVersion()), HEALTHY_AFTER_MS);
+  timer.unref();
+}
 
 const socketPath = (): string => path.join(app.getPath('userData'), 'server.sock');
 
@@ -166,6 +203,7 @@ function listenControl(updater: ServerUpdater, web: WebConfig | null): void {
 }
 
 async function serve(web: WebConfig | null): Promise<void> {
+  await resolveStartupUpdate();
   // 先占端口：端口被占时直接失败，不留半启动的宿主
   const relay = web ? await startWeb(web) : null;
   await readySecureStores();

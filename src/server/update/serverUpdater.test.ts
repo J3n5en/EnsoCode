@@ -110,11 +110,12 @@ describe('ServerUpdater (npm)', () => {
     );
   });
 
-  it('restarts only under a supervisor', () => {
+  it('supervisor 下 restart 直接退出交给守护拉起', () => {
     const quit = vi.fn();
-    expect(() => updater({ quit }).restart()).toThrow();
-    updater({ quit, env: { ENSO_SUPERVISED: '1' } }).restart();
+    const spawnReexec = vi.fn();
+    updater({ quit, env: { ENSO_SUPERVISED: '1' }, spawnReexec }).restart();
     expect(quit).toHaveBeenCalledOnce();
+    expect(spawnReexec).not.toHaveBeenCalled();
   });
 });
 
@@ -199,5 +200,96 @@ describe('ServerUpdater 更新渠道', () => {
     // 作废 beta 下载后，下载到的应是 stable 渠道的版本
     await u.downloadUpdate();
     expect(npm.prefetch).toHaveBeenLastCalledWith('@ensocode/server@0.3.0');
+  });
+});
+
+describe('ServerUpdater 重启能力与优雅应用', () => {
+  it('restartMethod 按环境探测：systemd/pm2 是 supervisor，裸跑是 reexec，PID1 是 manual', () => {
+    expect(updater({ env: { INVOCATION_ID: 'x' } }).state().restartMethod).toBe('supervisor');
+    expect(updater({ env: { pm_id: '0' } }).state().restartMethod).toBe('supervisor');
+    expect(updater({ env: {} }).state().restartMethod).toBe('reexec');
+    expect(updater({ env: {}, pid: 1 }).state().restartMethod).toBe('manual');
+  });
+
+  it('canRestart 与 restartMethod 一致：manual 才算不能重启', () => {
+    expect(updater({ env: {} }).state().canRestart).toBe(true);
+    expect(updater({ env: {}, pid: 1 }).state().canRestart).toBe(false);
+  });
+
+  it('裸跑（reexec）restart 拉起替代进程后退出，不抛错', () => {
+    const quit = vi.fn();
+    const spawnReexec = vi.fn();
+    updater({ quit, env: {}, spawnReexec }).restart();
+    expect(spawnReexec).toHaveBeenCalledOnce();
+    expect(quit).toHaveBeenCalledOnce();
+  });
+
+  it('manual（容器 PID1）restart 仍然抛错', () => {
+    expect(() => updater({ env: {}, pid: 1 }).restart()).toThrow();
+  });
+
+  it('quitAndInstall 写健康检查标记并广播 installing/restarting 阶段', async () => {
+    const writePending = vi.fn();
+    const u = updater({ env: { INVOCATION_ID: 'x' }, writePending });
+    await u.checkForUpdates();
+    await u.downloadUpdate();
+    await u.quitAndInstall();
+    expect(writePending).toHaveBeenCalledWith({ from: '0.2.12', to: '0.3.0' });
+    const stages = statuses.filter((s) => s.status === 'applying').map((s) => s.applying?.stage);
+    expect(stages).toContain('installing');
+    expect(stages.at(-1)).toBe('restarting');
+  });
+
+  it('有任务在跑时先广播 waiting-tasks 并携带 busyCount，空闲后继续安装', async () => {
+    const now = { value: 1000 };
+    let busy = 2;
+    const u = updater({
+      env: { INVOCATION_ID: 'x' },
+      now: () => now.value,
+      busyCount: () => busy,
+    });
+    await u.checkForUpdates();
+    await u.downloadUpdate();
+    const applying = u.quitAndInstall();
+    await vi.waitFor(() => {
+      const waiting = statuses.find(
+        (s) => s.status === 'applying' && s.applying?.stage === 'waiting-tasks'
+      );
+      expect(waiting?.applying?.busyCount).toBe(2);
+      expect(waiting?.applying?.deadlineMs).toBeGreaterThan(now.value);
+    });
+    expect(npm.install).not.toHaveBeenCalled();
+    busy = 0;
+    await applying;
+    expect(npm.install).toHaveBeenCalledWith('@ensocode/server@0.3.0');
+  });
+
+  it('等待超过上限后仍然继续安装（turn 由退出时的安全中断机制兜底续跑）', async () => {
+    const now = { value: 1000 };
+    const u = updater({
+      env: { INVOCATION_ID: 'x' },
+      now: () => now.value,
+      busyCount: () => 3,
+      waitForTasksMs: 60_000,
+      waitPollMs: 10,
+    });
+    await u.checkForUpdates();
+    await u.downloadUpdate();
+    const applying = u.quitAndInstall();
+    await new Promise((r) => setTimeout(r, 30));
+    now.value += 61_000;
+    await applying;
+    expect(npm.install).toHaveBeenCalled();
+  });
+
+  it('安装失败：清除健康检查标记，不误判下回启动为崩溃', async () => {
+    const writePending = vi.fn();
+    const clearPending = vi.fn();
+    npm.install.mockRejectedValueOnce(new Error('EACCES'));
+    const u = updater({ env: { INVOCATION_ID: 'x' }, writePending, clearPending });
+    await u.checkForUpdates();
+    await u.downloadUpdate();
+    await u.quitAndInstall();
+    expect(clearPending).toHaveBeenCalledOnce();
   });
 });
