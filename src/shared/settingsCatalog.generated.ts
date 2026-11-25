@@ -64,6 +64,11 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
       'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running',
   },
   {
+    id: 'appearance.enable-custom-background',
+    category: 'appearance',
+    title: 'Enable custom background image',
+  },
+  {
     id: 'appearance.expandLiveEdits',
     category: 'conversation',
     title: 'Expand file edits while running',
@@ -187,7 +192,24 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   { id: 'contacts.channels', category: 'contacts', title: 'Contact channels' },
   { id: 'contacts.enable-contacts', category: 'contacts', title: 'Enable contacts' },
-  { id: 'contacts.owner', category: 'contacts', title: 'Owner identity' },
+  {
+    id: 'contacts.external-messages',
+    category: 'contacts',
+    title: 'Messages that are not from you',
+    description: 'Events from anyone else are left to the agent unless you require confirmation.',
+  },
+  { id: 'contacts.github-accounts', category: 'contacts', title: 'GitHub accounts' },
+  {
+    id: 'contacts.owner',
+    category: 'contacts',
+    title: 'Owner identity',
+    description: 'GitHub accounts that count as you.',
+  },
+  {
+    id: 'contacts.plugin-market',
+    category: 'contacts',
+    title: 'Find more contact channels in the plugin market',
+  },
   {
     id: 'contacts.root',
     category: 'contacts',
@@ -208,6 +230,12 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     title: 'Drop shelf',
     description:
       'When you drag files in Finder, a small panel appears at the top right of the screen. Drop them on it to reference them in the current conversation, or drop folders to open them as projects, even when EnsoCode is minimized or in the tray.',
+  },
+  {
+    id: 'experimental.root',
+    category: 'experimental',
+    title: 'Experimental',
+    description: 'Features still being tested. They may change or be removed.',
   },
   {
     id: 'experimental.scratchSessions',
@@ -911,7 +939,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description:
       'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.',
   },
-  { id: 'shortcuts.pluginCommands', category: 'shortcuts', title: '插件命令' },
+  { id: 'shortcuts.pluginCommands', category: 'shortcuts', title: 'Plugin commands' },
   {
     id: 'shortcuts.root',
     category: 'shortcuts',

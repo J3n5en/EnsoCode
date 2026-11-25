@@ -24,7 +24,11 @@ export function ContactsSettings() {
         secretaryId={current}
         frames={{
           owner: (node) => (
-            <SettingsSection title={t('Owner identity')} rowId="contacts.owner">
+            <SettingsSection
+              title={t('Owner identity')}
+              description={t('GitHub accounts that count as you.')}
+              rowId="contacts.owner"
+            >
               {node}
             </SettingsSection>
           ),

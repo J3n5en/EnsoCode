@@ -57,6 +57,7 @@ import { usePluginThemesStore } from '@/stores/pluginThemes';
 import { useSettingsStore } from '@/stores/settings';
 import {
   SettingsButton,
+  SettingsEmptyState,
   SettingsExpandableRow,
   SettingsPage,
   SettingsRow,
@@ -865,12 +866,12 @@ function ExtensionPluginRow({
         {plugin.interceptBreakers?.map((breaker) => (
           <p
             key={breaker.event}
-            className="border-border border-b py-2 pl-10 text-amber-600 text-xs dark:text-amber-400"
+            className="px-4 py-2 pl-10 text-amber-600 text-xs dark:text-amber-400 max-sm:pr-3 max-sm:pl-7"
           >
             {breaker.event} 检查连续失败，临时放行到 {new Date(breaker.until).toLocaleTimeString()}
           </p>
         ))}
-        <div className="border-border border-b py-3 pl-10">
+        <div className="px-4 py-3 pl-10 max-sm:pr-3 max-sm:pl-7">
           <PluginCapabilityBlock
             permissions={plugin.permissions}
             resident={plugin.resident}
@@ -912,7 +913,7 @@ function ExtensionPluginRow({
           </SettingsSubRow>
         )}
         {((plugin.pendingPermissions?.length ?? 0) > 0 || plugin.pendingRenderer) && (
-          <div className="space-y-1 border-border border-b py-3 pl-10">
+          <div className="space-y-1 px-4 py-3 pl-10 max-sm:pr-3 max-sm:pl-7">
             <p className="text-muted-foreground text-xs">待同意</p>
             <PermissionLines
               permissions={plugin.pendingPermissions ?? []}
@@ -1183,7 +1184,7 @@ export function EnsoPluginsSettings({
         </SettingsRow>
         <div
           data-settings-row="plugins.installUrl"
-          className="flex flex-wrap items-center gap-2 border-border border-b py-3"
+          className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3"
         >
           <InputGroup className="min-w-40 flex-1">
             <InputGroupAddon>
@@ -1207,7 +1208,7 @@ export function EnsoPluginsSettings({
             {downloading ? <Spinner /> : t('Install from URL')}
           </SettingsButton>
         </div>
-        <div className="flex flex-wrap items-center gap-1 border-border border-b py-2 text-muted-foreground text-xs">
+        <div className="flex flex-wrap items-center gap-1 px-4 py-2.5 text-muted-foreground text-xs max-sm:px-3">
           <span className="mr-1">{t('Or install from')}</span>
           <SettingsButton
             size="xs"
@@ -1320,13 +1321,13 @@ export function EnsoPluginsSettings({
         </DialogContent>
       </Dialog>
       {plugins.length === 0 && !preview && (
-        <div className="border-border border-b px-3 py-10 text-center">
-          <Puzzle className="mx-auto size-5 text-muted-foreground" />
-          <p className="mt-3 font-medium text-sm">{t('No Enso plugins installed')}</p>
-          <p className="mt-1 text-muted-foreground text-xs">
-            {t('Browse the marketplace or install from a GitHub URL, folder or zip.')}
-          </p>
-        </div>
+        <SettingsSection>
+          <SettingsEmptyState
+            icon={Puzzle}
+            title={t('No Enso plugins installed')}
+            description={t('Browse the marketplace or install from a GitHub URL, folder or zip.')}
+          />
+        </SettingsSection>
       )}
       {plugins.length > 0 && (
         <SettingsSection>

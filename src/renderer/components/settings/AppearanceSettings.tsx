@@ -1,6 +1,7 @@
 import { ACCENT_PRESETS } from '@shared/accentColor';
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
 import { resolveTheme } from '@shared/theme/themeKey';
+import { AnimatePresence, MotionGlobalConfig, motion, useReducedMotion } from 'framer-motion';
 import {
   FileCode,
   FolderOpen,
@@ -8,6 +9,7 @@ import {
   Monitor,
   Moon,
   RefreshCw,
+  RotateCcw,
   Sun,
   Terminal,
 } from 'lucide-react';
@@ -19,6 +21,7 @@ import { addToast } from '@/components/ui/toast';
 import { useEffectiveBackground } from '@/hooks/useBackgroundImage';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
+import { heightVariants } from '@/lib/motion';
 import { availableThemes } from '@/lib/themeStyles';
 import { cn } from '@/lib/utils';
 import { usePluginThemesStore } from '@/stores/pluginThemes';
@@ -35,8 +38,11 @@ import {
   SettingsPage,
   SettingsRow,
   SettingsSection,
+  SettingsSegmented,
   SettingsSelect,
+  SettingsStepper,
   SettingsSwitch,
+  useSettingsRow,
 } from './kit';
 import { ThemeGallery } from './ThemeGallery';
 
@@ -49,6 +55,72 @@ const ACCENT_LABELS = {
   graphite: 'Graphite',
 } as const satisfies Record<AccentColor, string>;
 
+function DraftSliderControls({
+  local,
+  setLocal,
+  value,
+  onCommit,
+  min,
+  max,
+  step,
+  unit,
+  defaultValue,
+}: {
+  local: number;
+  setLocal: (value: number) => void;
+  value: number;
+  onCommit: (value: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  unit: string;
+  defaultValue?: number;
+}) {
+  const { t } = useI18n();
+  const row = useSettingsRow();
+  return (
+    <>
+      {defaultValue !== undefined && local !== defaultValue && (
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          aria-label={t('Reset to default')}
+          title={t('Reset to default')}
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            setLocal(defaultValue);
+            onCommit(defaultValue);
+            row?.markSaved();
+          }}
+        >
+          <RotateCcw className="size-3.5" />
+        </Button>
+      )}
+      <div className="w-[140px] sm:w-[180px]">
+        <Slider
+          min={min}
+          max={max}
+          step={step}
+          value={local}
+          onValueChange={(next) => setLocal(Array.isArray(next) ? next[0] : next)}
+          onValueCommitted={(next) => {
+            const committed = Array.isArray(next) ? next[0] : next;
+            if (committed !== value) {
+              onCommit(committed);
+              row?.markSaved();
+            }
+          }}
+        />
+      </div>
+      <span className="shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">
+        {local}
+        {unit}
+      </span>
+    </>
+  );
+}
+
 function DraftSlider({
   label,
   value,
@@ -57,6 +129,7 @@ function DraftSlider({
   max = 100,
   step,
   unit = '%',
+  defaultValue,
 }: {
   label: string;
   value: number;
@@ -65,6 +138,7 @@ function DraftSlider({
   max?: number;
   step?: number;
   unit?: string;
+  defaultValue?: number;
 }) {
   const [local, setLocal] = React.useState(value);
   React.useEffect(() => {
@@ -72,21 +146,77 @@ function DraftSlider({
   }, [value]);
   return (
     <SettingsRow label={label}>
-      <div className="w-[140px] sm:w-[180px]">
-        <Slider
-          min={min}
-          max={max}
-          step={step}
-          value={local}
-          onValueChange={(next) => setLocal(Array.isArray(next) ? next[0] : next)}
-          onValueCommitted={(next) => onCommit(Array.isArray(next) ? next[0] : next)}
-        />
-      </div>
-      <span className="shrink-0 text-right text-[12px] text-muted-foreground tabular-nums">
-        {local}
-        {unit}
-      </span>
+      <DraftSliderControls
+        local={local}
+        setLocal={setLocal}
+        value={value}
+        onCommit={onCommit}
+        min={min}
+        max={max}
+        step={step}
+        unit={unit}
+        defaultValue={defaultValue}
+      />
     </SettingsRow>
+  );
+}
+
+function BackgroundPathControls({
+  localPath,
+  setLocalPath,
+  commitPath,
+  sourceType,
+  browse,
+  bumpRefresh,
+}: {
+  localPath: string;
+  setLocalPath: (value: string) => void;
+  commitPath: () => boolean;
+  sourceType: BackgroundSourceType;
+  browse: () => Promise<void>;
+  bumpRefresh: () => void;
+}) {
+  const { t } = useI18n();
+  const row = useSettingsRow();
+  const commit = () => {
+    if (commitPath()) row?.markSaved();
+  };
+  return (
+    <>
+      <Input
+        value={localPath}
+        onChange={(e) => setLocalPath(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          if (e.key === 'Enter') {
+            commit();
+            e.currentTarget.blur();
+          }
+        }}
+        placeholder={sourceType === 'url' ? 'https://example.com/image.jpg' : ''}
+        className="w-[min(100%,220px)] max-w-full"
+      />
+      {sourceType !== 'url' && (
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => void browse()}
+          aria-label={t('Browse')}
+        >
+          {sourceType === 'folder' ? (
+            <FolderOpen className="h-4 w-4" />
+          ) : (
+            <ImageIcon className="h-4 w-4" />
+          )}
+        </Button>
+      )}
+      {sourceType !== 'file' && (
+        <Button variant="outline" size="icon" onClick={bumpRefresh} aria-label={t('Refresh now')}>
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -132,17 +262,17 @@ function BackgroundImageSettings() {
     setLocalPath(storedPath);
   }, [storedPath]);
 
-  const commitPath = React.useCallback(() => {
+  const commitPath = React.useCallback((): boolean => {
     const value = localPath.trim();
+    if (value === storedPath) return false;
     if (sourceType === 'file') setImagePath(value);
     else if (sourceType === 'folder') setFolderPath(value);
     else setUrlPath(value);
-  }, [localPath, sourceType, setImagePath, setFolderPath, setUrlPath]);
+    return true;
+  }, [localPath, storedPath, sourceType, setImagePath, setFolderPath, setUrlPath]);
 
-  const [localInterval, setLocalInterval] = React.useState(randomInterval);
-  React.useEffect(() => {
-    setLocalInterval(randomInterval);
-  }, [randomInterval]);
+  const reducedMotion = useReducedMotion();
+  const reduced = reducedMotion === true || MotionGlobalConfig.skipAnimations === true;
 
   const browse = async () => {
     if (sourceType === 'folder') {
@@ -175,138 +305,136 @@ function BackgroundImageSettings() {
         ? t('Folder path')
         : t('Image URL');
 
+  const controls = (
+    <>
+      <SettingsRow rowId="appearance.source-type" label={t('Source type')}>
+        <SettingsSelect
+          value={sourceType}
+          options={sourceTypeOptions}
+          onValueChange={setSourceType}
+        />
+      </SettingsRow>
+      <SettingsRow label={pathLabel}>
+        <BackgroundPathControls
+          localPath={localPath}
+          setLocalPath={setLocalPath}
+          commitPath={commitPath}
+          sourceType={sourceType}
+          browse={browse}
+          bumpRefresh={bumpRefresh}
+        />
+      </SettingsRow>
+      {sourceType !== 'file' && (
+        <SettingsRow rowId="appearance.auto-switch" label={t('Auto switch')}>
+          <SettingsSwitch
+            checked={randomEnabled}
+            onCheckedChange={(checked) => setRandomEnabled(checked === true)}
+          />
+          {randomEnabled && (
+            <>
+              <SettingsStepper
+                min={5}
+                max={86400}
+                value={randomInterval}
+                onValueChange={setRandomInterval}
+              />
+              <span className="text-[12px] text-muted-foreground">{t('seconds')}</span>
+            </>
+          )}
+        </SettingsRow>
+      )}
+      <DraftSlider
+        label={t('Background visibility')}
+        value={Math.round(opacity * 100)}
+        defaultValue={85}
+        onCommit={(v) => setOpacity(v / 100)}
+      />
+      <DraftSlider
+        label={t('Blur')}
+        value={blur}
+        defaultValue={0}
+        onCommit={setBlur}
+        max={20}
+        unit="px"
+      />
+      <DraftSlider
+        label={t('Brightness')}
+        value={Math.round(brightness * 100)}
+        defaultValue={100}
+        onCommit={(v) => setBrightness(v / 100)}
+        max={200}
+      />
+      <DraftSlider
+        label={t('Saturation')}
+        value={Math.round(saturation * 100)}
+        defaultValue={100}
+        onCommit={(v) => setSaturation(v / 100)}
+        max={200}
+      />
+      <DraftSlider
+        label={t('Overlay')}
+        value={Math.round(mask * 100)}
+        defaultValue={50}
+        onCommit={(v) => setMask(v / 100)}
+      />
+      <DraftSlider
+        label={t('Composer opacity')}
+        value={Math.round(composerOpacity * 100)}
+        defaultValue={60}
+        onCommit={(v) => setComposerOpacity(v / 100)}
+      />
+      <DraftSlider
+        label={t('Code block opacity')}
+        value={Math.round(codeOpacity * 100)}
+        defaultValue={65}
+        onCommit={(v) => setCodeOpacity(v / 100)}
+      />
+      <SettingsRow rowId="appearance.size-mode" label={t('Size mode')}>
+        <SettingsSelect value={sizeMode} options={sizeModeOptions} onValueChange={setSizeMode} />
+      </SettingsRow>
+    </>
+  );
+
   return (
     <SettingsSection
       rowId="appearance.background-image"
       title={t('Background image')}
       description={t('Show a custom image behind the interface')}
-      actions={
+    >
+      <SettingsRow
+        rowId="appearance.enable-custom-background"
+        label={t('Enable custom background image')}
+        description={
+          themeBackground
+            ? t(
+                'The current theme has its own background. Turn this on to replace it with your image.'
+              )
+            : undefined
+        }
+      >
         <SettingsSwitch
           checked={enabled}
           onCheckedChange={(checked) => setEnabled(checked === true)}
         />
-      }
-    >
-      {themeBackground && (
-        <p className="py-2 text-[12px] text-muted-foreground">
-          {t(
-            'The current theme has its own background. Turn this on to replace it with your image.'
+      </SettingsRow>
+      {reduced ? (
+        enabled ? (
+          controls
+        ) : null
+      ) : (
+        <AnimatePresence initial={false}>
+          {enabled && (
+            <motion.div
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={heightVariants}
+              className="overflow-hidden"
+            >
+              {controls}
+            </motion.div>
           )}
-        </p>
-      )}
-      {enabled && (
-        <>
-          <SettingsRow rowId="appearance.source-type" label={t('Source type')}>
-            <SettingsSelect
-              value={sourceType}
-              options={sourceTypeOptions}
-              onValueChange={setSourceType}
-            />
-          </SettingsRow>
-          <SettingsRow label={pathLabel}>
-            <Input
-              value={localPath}
-              onChange={(e) => setLocalPath(e.target.value)}
-              onBlur={commitPath}
-              onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing) return;
-                if (e.key === 'Enter') {
-                  commitPath();
-                  e.currentTarget.blur();
-                }
-              }}
-              placeholder={sourceType === 'url' ? 'https://example.com/image.jpg' : ''}
-              className="w-[min(100%,220px)] max-w-full"
-            />
-            {sourceType !== 'url' && (
-              <Button variant="outline" size="icon" onClick={browse} aria-label={t('Browse')}>
-                {sourceType === 'folder' ? (
-                  <FolderOpen className="h-4 w-4" />
-                ) : (
-                  <ImageIcon className="h-4 w-4" />
-                )}
-              </Button>
-            )}
-            {sourceType !== 'file' && (
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={bumpRefresh}
-                aria-label={t('Refresh now')}
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            )}
-          </SettingsRow>
-          {sourceType !== 'file' && (
-            <SettingsRow rowId="appearance.auto-switch" label={t('Auto switch')}>
-              <SettingsSwitch
-                checked={randomEnabled}
-                onCheckedChange={(checked) => setRandomEnabled(checked === true)}
-              />
-              {randomEnabled && (
-                <>
-                  <Input
-                    type="number"
-                    min={5}
-                    max={86400}
-                    value={localInterval}
-                    onChange={(e) => setLocalInterval(Number(e.target.value))}
-                    onBlur={() => setRandomInterval(localInterval)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        setRandomInterval(localInterval);
-                        e.currentTarget.blur();
-                      }
-                    }}
-                    className="w-24 max-w-full"
-                  />
-                  <span className="text-[12px] text-muted-foreground">{t('seconds')}</span>
-                </>
-              )}
-            </SettingsRow>
-          )}
-          <DraftSlider
-            label={t('Background visibility')}
-            value={Math.round(opacity * 100)}
-            onCommit={(v) => setOpacity(v / 100)}
-          />
-          <DraftSlider label={t('Blur')} value={blur} onCommit={setBlur} max={20} unit="px" />
-          <DraftSlider
-            label={t('Brightness')}
-            value={Math.round(brightness * 100)}
-            onCommit={(v) => setBrightness(v / 100)}
-            max={200}
-          />
-          <DraftSlider
-            label={t('Saturation')}
-            value={Math.round(saturation * 100)}
-            onCommit={(v) => setSaturation(v / 100)}
-            max={200}
-          />
-          <DraftSlider
-            label={t('Overlay')}
-            value={Math.round(mask * 100)}
-            onCommit={(v) => setMask(v / 100)}
-          />
-          <DraftSlider
-            label={t('Composer opacity')}
-            value={Math.round(composerOpacity * 100)}
-            onCommit={(v) => setComposerOpacity(v / 100)}
-          />
-          <DraftSlider
-            label={t('Code block opacity')}
-            value={Math.round(codeOpacity * 100)}
-            onCommit={(v) => setCodeOpacity(v / 100)}
-          />
-          <SettingsRow rowId="appearance.size-mode" label={t('Size mode')}>
-            <SettingsSelect
-              value={sizeMode}
-              options={sizeModeOptions}
-              onValueChange={setSizeMode}
-            />
-          </SettingsRow>
-        </>
+        </AnimatePresence>
       )}
     </SettingsSection>
   );
@@ -384,25 +512,7 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
         description={t('Applied on top of any theme')}
       >
         <SettingsRow rowId="appearance.theme" label={t('Theme mode')}>
-          <div className="flex max-w-full flex-wrap rounded-lg bg-muted p-0.5">
-            {themeModeOptions.map((option) => (
-              <button
-                type="button"
-                key={option.value}
-                onClick={() => setTheme(option.value)}
-                aria-pressed={theme === option.value}
-                className={cn(
-                  'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors',
-                  theme === option.value
-                    ? 'bg-background text-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <option.icon className="size-3.5" />
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <SettingsSegmented value={theme} onValueChange={setTheme} options={themeModeOptions} />
         </SettingsRow>
         <SettingsRow
           rowId="appearance.accent"
@@ -457,46 +567,45 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
             'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.'
           )}
         >
-          <div className="flex w-full max-w-36 rounded-lg bg-muted p-0.5 text-xs pointer-coarse:max-w-none">
-            {railOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setNavRailSide(option.value)}
-                aria-pressed={navRailSide === option.value}
-                className={cn(
-                  'flex-1 rounded-md px-2 py-1 transition-colors pointer-coarse:min-w-[44px]',
-                  navRailSide === option.value
-                    ? 'bg-background font-medium text-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <SettingsSegmented
+            value={navRailSide}
+            onValueChange={setNavRailSide}
+            options={railOptions}
+          />
         </SettingsRow>
         <DraftSlider
           label={t('Border opacity')}
           value={Math.round(borderOpacity * 100)}
+          defaultValue={100}
           onCommit={(v) => setBorderOpacity(v / 100)}
         />
       </SettingsSection>
 
       <SettingsSection
+        bare
         rowId="appearance.themeGallery"
         title={t('Theme')}
         description={t('Built-in and plugin themes; each one is a set of color tokens')}
       >
-        <div className="py-3">
-          <ThemeGallery
-            themes={availableThemes(pluginThemes)}
-            selected={themeId}
-            mode={colorScheme}
-            onSelect={setThemeId}
-            onGetMore={onOpenPlugins}
-          />
-        </div>
+        {theme === 'sync-terminal' && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[10px] bg-muted/60 px-4 py-2.5 text-[12px] text-muted-foreground">
+            <span>
+              {t(
+                'Theme mode is set to Sync terminal theme, so interface colors follow your terminal theme instead of this gallery.'
+              )}
+            </span>
+            <SettingsButton size="xs" onClick={() => setTheme('system')}>
+              {t('Switch to System mode')}
+            </SettingsButton>
+          </div>
+        )}
+        <ThemeGallery
+          themes={availableThemes(pluginThemes)}
+          selected={themeId}
+          mode={colorScheme}
+          onSelect={setThemeId}
+          onGetMore={onOpenPlugins}
+        />
       </SettingsSection>
 
       <UserCssRow />

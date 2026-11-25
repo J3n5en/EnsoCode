@@ -53,6 +53,11 @@ function cronOf(schedule: SecretarySchedule): ReturnType<typeof parseCron> {
   return 'cron' in schedule && schedule.cron ? parseCron(schedule.cron) : undefined;
 }
 
+function ownedConversation(id: string | null | undefined): string | undefined {
+  const trimmed = id?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 /** 一次性按 at，cron 按 lastFiredAt（没有则创建时间）之后的下一次 */
 export function nextRunAt(schedule: SecretarySchedule): number | undefined {
   if ('at' in schedule && schedule.at) {
@@ -65,12 +70,14 @@ export function nextRunAt(schedule: SecretarySchedule): number | undefined {
 }
 
 function scheduleUpdate(schedule: SecretarySchedule, now: number): SecretaryUpdate {
+  const secretaryConversationId = ownedConversation(schedule.secretaryConversationId);
   return {
     key: `schedule:${schedule.id}:${now}`,
     at: now,
     kind: 'schedule',
     scheduleId: schedule.id,
     text: `${schedule.name}：${schedule.prompt}`,
+    ...(secretaryConversationId ? { secretaryConversationId } : {}),
   };
 }
 
@@ -122,6 +129,8 @@ export function scheduleView(schedule: SecretarySchedule): SecretaryScheduleView
   const next = nextRunAt(schedule);
   if (next !== undefined) view.nextRunAt = next;
   if (schedule.lastFiredAt !== undefined) view.lastFiredAt = schedule.lastFiredAt;
+  const secretaryConversationId = ownedConversation(schedule.secretaryConversationId);
+  if (secretaryConversationId) view.secretaryConversationId = secretaryConversationId;
   if (schedule.system) view.system = schedule.system;
   return view;
 }
@@ -269,18 +278,33 @@ export function createSecretaryScheduleHandlers(ports: SchedulePorts): Secretary
         return auditFailure(ports, ctx, 'schedule_add', 'exactly-one-of-at-or-cron');
       const now = ports.now();
       const id = ports.newId();
+      const secretaryConversationId = ownedConversation(ctx.secretaryConversationId);
       let schedule: SecretarySchedule;
       if (atRaw) {
         const time = Date.parse(atRaw);
         if (Number.isNaN(time)) return auditFailure(ports, ctx, 'schedule_add', 'invalid-at');
         if (time <= now) return auditFailure(ports, ctx, 'schedule_add', 'at-in-past');
-        schedule = { id, name, prompt, createdAt: now, at: new Date(time).toISOString() };
+        schedule = {
+          id,
+          name,
+          prompt,
+          createdAt: now,
+          at: new Date(time).toISOString(),
+          ...(secretaryConversationId ? { secretaryConversationId } : {}),
+        };
       } else {
         const cron = parseCron(cronRaw as string)?.source ?? parseScheduleText(cronRaw as string);
         const parsed = cron ? parseCron(cron) : undefined;
         if (!parsed || nextRun(parsed, now) === undefined)
           return auditFailure(ports, ctx, 'schedule_add', 'invalid-cron');
-        schedule = { id, name, prompt, createdAt: now, cron: parsed.source };
+        schedule = {
+          id,
+          name,
+          prompt,
+          createdAt: now,
+          cron: parsed.source,
+          ...(secretaryConversationId ? { secretaryConversationId } : {}),
+        };
       }
       ports.saveSchedules([...ports.schedules(), schedule]);
       ports.publish();

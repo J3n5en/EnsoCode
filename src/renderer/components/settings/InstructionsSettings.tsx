@@ -1,13 +1,21 @@
 import type { InstructionEntry } from '@shared/types';
 import { FileText, HardDriveDownload, Link2, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { InstructionEditDialog } from './InstructionEditDialog';
-import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
+import {
+  SettingsButton,
+  SettingsEmptyState,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSwitch,
+} from './kit';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
 import {
@@ -27,6 +35,7 @@ export function InstructionsSettings() {
   const removeInstruction = useSettingsStore((state) => state.removeInstruction);
   const [importOpen, setImportOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<InstructionEntry | 'new' | null>(null);
+  const [pendingRemove, setPendingRemove] = React.useState<InstructionEntry | null>(null);
   const instructionIds = instructions.map((instruction) => instruction.id);
   const occupancy = useOccupancyRows(instructionIds, (ids) =>
     window.electronAPI.assets.instructionOccupancy(ids)
@@ -53,7 +62,7 @@ export function InstructionsSettings() {
             <HardDriveDownload className="h-4 w-4" />
             {t('Import from local apps')}
           </SettingsButton>
-          <SettingsButton onClick={() => setEditing('new')}>
+          <SettingsButton variant="default" onClick={() => setEditing('new')}>
             <Plus className="h-4 w-4" />
             {t('Add instruction')}
           </SettingsButton>
@@ -66,13 +75,25 @@ export function InstructionsSettings() {
 
       <SettingsSection>
         {instructions.length === 0 ? (
-          <div className="border-border border-b py-8 text-center">
-            <FileText className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 font-medium text-[13px]">{t('No instruction files yet')}</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t('Import instruction files from local apps or add one manually to get started')}
-            </p>
-          </div>
+          <SettingsEmptyState
+            icon={FileText}
+            title={t('No instruction files yet')}
+            description={t(
+              'Import instruction files from local apps or add one manually to get started'
+            )}
+            actions={
+              <>
+                <SettingsButton variant="default" onClick={() => setEditing('new')}>
+                  <Plus className="h-4 w-4" />
+                  {t('Add instruction')}
+                </SettingsButton>
+                <SettingsButton onClick={() => setImportOpen(true)}>
+                  <HardDriveDownload className="h-4 w-4" />
+                  {t('Import from local apps')}
+                </SettingsButton>
+              </>
+            }
+          />
         ) : (
           instructions.map((instruction) => (
             <SettingsRow
@@ -128,7 +149,7 @@ export function InstructionsSettings() {
                 size="icon-sm"
                 aria-label={t('Delete')}
                 className="text-muted-foreground hover:text-destructive-text"
-                onClick={() => removeInstruction(instruction.id)}
+                onClick={() => setPendingRemove(instruction)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -139,6 +160,24 @@ export function InstructionsSettings() {
 
       <LocalAssetImportDialog kind="instruction" open={importOpen} onOpenChange={setImportOpen} />
       <InstructionEditDialog instruction={editing} onClose={() => setEditing(null)} />
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+        title={t('Delete instruction file?')}
+        description={
+          pendingRemove
+            ? t('This removes "{{name}}" from your instruction files.', {
+                name: pendingRemove.name,
+              })
+            : undefined
+        }
+        confirmLabel={t('Delete')}
+        onConfirm={() => {
+          if (pendingRemove) removeInstruction(pendingRemove.id);
+        }}
+      />
     </SettingsPage>
   );
 }

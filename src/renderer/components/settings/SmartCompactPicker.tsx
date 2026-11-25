@@ -90,7 +90,7 @@ export function SmartCompactPicker() {
       )}
 
       {enabled && (
-        <div className="border-border border-b py-3">
+        <div className="px-4 py-3 max-sm:px-3">
           <p className="font-medium text-[13px]">
             {t(strategy === 'continuous-memory' ? 'Background memory model' : 'Summary model')}
           </p>

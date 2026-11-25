@@ -159,15 +159,16 @@ function ErrorSummary() {
         </SettingsRow>
       )}
       {rows && rows.length === 0 ? (
-        <p className="border-border border-b py-6 text-center text-[13px] text-muted-foreground">
+        <p className="px-4 py-6 text-center text-[13px] text-muted-foreground max-sm:px-3">
           {t('No errors recorded.')}
         </p>
       ) : (
-        <ul>
+        // biome-ignore lint/complexity/noUselessFragments: 包一层会让行间发丝线失效，行必须是 settings-group 的直接子节点
+        <>
           {(rows ?? []).map(({ key, entry }) => {
             const open = expanded === key;
             return (
-              <li key={key} className="border-border border-b">
+              <div key={key} className="px-4 py-1 max-sm:px-3">
                 <button
                   type="button"
                   className="-mx-2 flex min-h-[44px] w-[calc(100%+1rem)] items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] hover:bg-accent/50"
@@ -200,10 +201,10 @@ function ErrorSummary() {
                     {entry.detail}
                   </pre>
                 )}
-              </li>
+              </div>
             );
           })}
-        </ul>
+        </>
       )}
     </SettingsSection>
   );

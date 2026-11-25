@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useI18n } from '@/i18n';
@@ -18,6 +19,7 @@ import { type McpServerStatus, useMcpStatusStore } from '@/stores/mcpStatus';
 import { useSettingsStore } from '@/stores/settings';
 import {
   SettingsButton,
+  SettingsEmptyState,
   SettingsExpandableRow,
   SettingsPage,
   SettingsSection,
@@ -93,6 +95,7 @@ export function McpSettings() {
     setAuthorizedHint(useMcpStatusStore.getState().authorized[serverId] === true ? serverId : null);
   };
   const [editing, setEditing] = React.useState<McpServerEntry | 'new' | null>(null);
+  const [pendingRemove, setPendingRemove] = React.useState<McpServerEntry | null>(null);
   const [query, setQuery] = React.useState('');
   const visible = mcpServers.filter((server) =>
     matchesFilter(query, [
@@ -141,7 +144,7 @@ export function McpSettings() {
             <HardDriveDownload className="h-4 w-4" />
             {t('Import from local apps')}
           </SettingsButton>
-          <SettingsButton onClick={() => setEditing('new')}>
+          <SettingsButton variant="default" onClick={() => setEditing('new')}>
             <Plus className="h-4 w-4" />
             {t('Add MCP server')}
           </SettingsButton>
@@ -150,13 +153,23 @@ export function McpSettings() {
     >
       <SettingsSection>
         {mcpServers.length === 0 ? (
-          <div className="border-border border-b py-8 text-center">
-            <Plug className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 font-medium text-sm">{t('No MCP servers yet')}</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t('Import MCP servers from local apps or add one manually to get started')}
-            </p>
-          </div>
+          <SettingsEmptyState
+            icon={Plug}
+            title={t('No MCP servers yet')}
+            description={t('Import MCP servers from local apps or add one manually to get started')}
+            actions={
+              <>
+                <SettingsButton variant="default" onClick={() => setEditing('new')}>
+                  <Plus className="h-4 w-4" />
+                  {t('Add MCP server')}
+                </SettingsButton>
+                <SettingsButton onClick={() => setImportOpen(true)}>
+                  <HardDriveDownload className="h-4 w-4" />
+                  {t('Import from local apps')}
+                </SettingsButton>
+              </>
+            }
+          />
         ) : (
           <>
             <ListFilterBar
@@ -172,9 +185,15 @@ export function McpSettings() {
               actionDisabled={selection.selectedIds.length === 0}
             />
             {visible.length === 0 ? (
-              <p className="border-border border-b py-6 text-center text-muted-foreground text-xs">
-                {t('No results')}
-              </p>
+              <SettingsEmptyState
+                compact
+                title={t('No results')}
+                actions={
+                  <SettingsButton variant="ghost" size="xs" onClick={() => setQuery('')}>
+                    {t('Clear filter')}
+                  </SettingsButton>
+                }
+              />
             ) : (
               visible.map((server) => {
                 // 事件可能缺 serverId（旧配置），按名字兜底
@@ -287,6 +306,16 @@ export function McpSettings() {
                         </SettingsButton>
                       </SettingsSubRow>
                     )}
+                    {status?.state === 'error' && status.error && (
+                      <SettingsSubRow
+                        label={<span className="text-destructive-text">{status.error}</span>}
+                      >
+                        <SettingsButton onClick={() => setEditing(server)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          {t('Edit')}
+                        </SettingsButton>
+                      </SettingsSubRow>
+                    )}
                     <SettingsSubRow rowId="mcp.edit" label={t('Edit')}>
                       <SettingsButton onClick={() => setEditing(server)}>
                         <Pencil className="h-3.5 w-3.5" />
@@ -294,13 +323,17 @@ export function McpSettings() {
                       </SettingsButton>
                     </SettingsSubRow>
                     <SettingsSubRow rowId="mcp.delete" label={t('Delete')}>
-                      <SettingsButton onClick={() => removeMcpServer(server.id)}>
+                      <SettingsButton
+                        variant="destructive-outline"
+                        className="border-destructive-text/45 text-destructive-text"
+                        onClick={() => setPendingRemove(server)}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
                         {t('Delete')}
                       </SettingsButton>
                     </SettingsSubRow>
                     {authorizedHint === server.id && (
-                      <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+                      <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pl-7">
                         {t(
                           'Authorized. Conversations that already include this server can use it on the next message.'
                         )}
@@ -316,6 +349,24 @@ export function McpSettings() {
 
       <LocalAssetImportDialog kind="mcp" open={importOpen} onOpenChange={setImportOpen} />
       <McpEditDialog server={editing} onClose={() => setEditing(null)} />
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+        title={t('Delete MCP server?')}
+        description={
+          pendingRemove
+            ? t('This permanently deletes the "{{name}}" MCP server configuration.', {
+                name: pendingRemove.name,
+              })
+            : undefined
+        }
+        confirmLabel={t('Delete')}
+        onConfirm={() => {
+          if (pendingRemove) removeMcpServer(pendingRemove.id);
+        }}
+      />
     </SettingsPage>
   );
 }

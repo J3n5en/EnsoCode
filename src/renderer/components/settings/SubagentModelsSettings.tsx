@@ -70,131 +70,125 @@ export function SubagentModelsSettings() {
 
   return (
     <SettingsSection>
-      <div data-slot="subagent-models">
-        <SettingsRow
-          rowId="providers.let-the-agent-pick-subagent-models"
-          label={t('Let the agent pick subagent models')}
-          description={
-            <>
-              {t(
-                'The main agent can pick one of these models when dispatching subagents or coworkers. The description tells it when to use each model.'
-              )}
-              <span className="mt-1 block">{t('Applies to newly started conversations.')}</span>
-            </>
-          }
-        >
-          <SettingsSwitch checked={enabled} onCheckedChange={setEnabled} />
-        </SettingsRow>
-
-        {enabled && (
+      <SettingsRow
+        rowId="providers.let-the-agent-pick-subagent-models"
+        label={t('Let the agent pick subagent models')}
+        description={
           <>
-            {entries.map((entry) => (
-              <div
-                key={entry.id}
-                data-slot="subagent-model-row"
-                className={cn(
-                  'flex flex-wrap items-center gap-2 border-border border-b py-2 pl-10',
-                  entry.enabled === false && 'text-muted-foreground'
-                )}
-              >
-                <Switch
-                  data-slot="subagent-model-enabled"
-                  aria-label={t('Enable subagent model')}
-                  title={t('Make this model available to subagents')}
-                  checked={entry.enabled !== false}
-                  onCheckedChange={(enabled) => updateEntry(entry.id, { enabled })}
-                />
-                {entry.enabled === false && (
-                  <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
-                    {t('Disabled')}
-                  </Badge>
-                )}
-                <div className="w-[220px] max-w-full shrink-0">
-                  <ModelPicker
-                    providers={candidates}
-                    virtualModels={virtualModels}
-                    providerId={entry.providerId}
-                    modelId={entry.modelId}
-                    modelCapabilityOverrides={pickModelCapabilityOverrides(entry)}
-                    side="bottom"
-                    triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
-                    reasoningMode={
-                      isReasoningOverride(entry.reasoning) ? entry.reasoning : 'follow'
-                    }
-                    reasoningEnabled={entry.reasoning === 'on'}
-                    thinkingLevel={
-                      isThinkingLevelOverride(entry.thinkingLevel) ? entry.thinkingLevel : 'medium'
-                    }
-                    onReasoningModeChange={(mode, level) => {
-                      if (mode === 'follow') {
-                        updateEntry(entry.id, { reasoning: undefined, thinkingLevel: undefined });
-                      } else if (mode === 'on' && !isThinkingLevelOverride(entry.thinkingLevel)) {
-                        updateEntry(entry.id, { reasoning: 'on', thinkingLevel: level });
-                      } else {
-                        updateEntry(entry.id, { reasoning: mode });
-                      }
-                    }}
-                    onSelect={(providerId, modelId) =>
-                      updateEntry(entry.id, { providerId, modelId })
-                    }
-                    onReasoningChange={(reasoningEnabled) =>
-                      updateEntry(entry.id, { reasoning: reasoningEnabled ? 'on' : 'off' })
-                    }
-                    onThinkingChange={(thinkingLevel) => updateEntry(entry.id, { thinkingLevel })}
-                    onReasoningNormalize={
-                      isReasoningOverride(entry.reasoning)
-                        ? (reasoningEnabled) =>
-                            updateEntry(entry.id, {
-                              reasoning: reasoningEnabled ? 'on' : 'off',
-                            })
-                        : ignoreInheritedNormalization
-                    }
-                    onThinkingNormalize={
-                      isThinkingLevelOverride(entry.thinkingLevel)
-                        ? (thinkingLevel) => updateEntry(entry.id, { thinkingLevel })
-                        : ignoreInheritedNormalization
-                    }
-                  />
-                </div>
-                <Input
-                  value={entry.description}
-                  placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}
-                  className="min-w-[min(100%,12rem)] flex-1"
-                  size="sm"
-                  onChange={(event) => updateEntry(entry.id, { description: event.target.value })}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t('Delete')}
-                  className={cn('shrink-0 text-muted-foreground hover:text-destructive')}
-                  onClick={() => removeEntry(entry.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-border border-b py-2 pl-10">
-              <SettingsButton
-                disabled={!seedSelection}
-                onClick={() => {
-                  if (seedSelection) addEntry({ ...seedSelection, description: '' });
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t('Add model')}
-              </SettingsButton>
-              {!seedSelection && (
-                <span className="text-muted-foreground text-xs">
-                  {t('Enable a model and configure valid provider credentials first.')}
-                </span>
-              )}
-            </div>
+            {t(
+              'The main agent can pick one of these models when dispatching subagents or coworkers. The description tells it when to use each model.'
+            )}
+            <span className="mt-1 block">{t('Applies to newly started conversations.')}</span>
           </>
-        )}
-      </div>
+        }
+      >
+        <SettingsSwitch checked={enabled} onCheckedChange={setEnabled} />
+      </SettingsRow>
+
+      {enabled && (
+        <>
+          {entries.map((entry) => (
+            <div
+              key={entry.id}
+              data-slot="subagent-model-row"
+              className={cn(
+                'flex flex-wrap items-center gap-2 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7',
+                entry.enabled === false && 'text-muted-foreground'
+              )}
+            >
+              <Switch
+                data-slot="subagent-model-enabled"
+                aria-label={t('Enable subagent model')}
+                title={t('Make this model available to subagents')}
+                checked={entry.enabled !== false}
+                onCheckedChange={(enabled) => updateEntry(entry.id, { enabled })}
+              />
+              {entry.enabled === false && (
+                <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
+                  {t('Disabled')}
+                </Badge>
+              )}
+              <div className="w-[220px] max-w-full shrink-0">
+                <ModelPicker
+                  providers={candidates}
+                  virtualModels={virtualModels}
+                  providerId={entry.providerId}
+                  modelId={entry.modelId}
+                  modelCapabilityOverrides={pickModelCapabilityOverrides(entry)}
+                  side="bottom"
+                  triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+                  reasoningMode={isReasoningOverride(entry.reasoning) ? entry.reasoning : 'follow'}
+                  reasoningEnabled={entry.reasoning === 'on'}
+                  thinkingLevel={
+                    isThinkingLevelOverride(entry.thinkingLevel) ? entry.thinkingLevel : 'medium'
+                  }
+                  onReasoningModeChange={(mode, level) => {
+                    if (mode === 'follow') {
+                      updateEntry(entry.id, { reasoning: undefined, thinkingLevel: undefined });
+                    } else if (mode === 'on' && !isThinkingLevelOverride(entry.thinkingLevel)) {
+                      updateEntry(entry.id, { reasoning: 'on', thinkingLevel: level });
+                    } else {
+                      updateEntry(entry.id, { reasoning: mode });
+                    }
+                  }}
+                  onSelect={(providerId, modelId) => updateEntry(entry.id, { providerId, modelId })}
+                  onReasoningChange={(reasoningEnabled) =>
+                    updateEntry(entry.id, { reasoning: reasoningEnabled ? 'on' : 'off' })
+                  }
+                  onThinkingChange={(thinkingLevel) => updateEntry(entry.id, { thinkingLevel })}
+                  onReasoningNormalize={
+                    isReasoningOverride(entry.reasoning)
+                      ? (reasoningEnabled) =>
+                          updateEntry(entry.id, {
+                            reasoning: reasoningEnabled ? 'on' : 'off',
+                          })
+                      : ignoreInheritedNormalization
+                  }
+                  onThinkingNormalize={
+                    isThinkingLevelOverride(entry.thinkingLevel)
+                      ? (thinkingLevel) => updateEntry(entry.id, { thinkingLevel })
+                      : ignoreInheritedNormalization
+                  }
+                />
+              </div>
+              <Input
+                value={entry.description}
+                placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}
+                className="min-w-[min(100%,12rem)] flex-1"
+                size="sm"
+                onChange={(event) => updateEntry(entry.id, { description: event.target.value })}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t('Delete')}
+                className={cn('shrink-0 text-muted-foreground hover:text-destructive')}
+                onClick={() => removeEntry(entry.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7">
+            <SettingsButton
+              disabled={!seedSelection}
+              onClick={() => {
+                if (seedSelection) addEntry({ ...seedSelection, description: '' });
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t('Add model')}
+            </SettingsButton>
+            {!seedSelection && (
+              <span className="text-muted-foreground text-xs">
+                {t('Enable a model and configure valid provider credentials first.')}
+              </span>
+            )}
+          </div>
+        </>
+      )}
     </SettingsSection>
   );
 }

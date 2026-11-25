@@ -573,6 +573,8 @@ export type SecretarySchedule = {
   prompt: string;
   createdAt: number;
   lastFiredAt?: number;
+  /** 创建这条定时的秘书会话。到点投回这里；没有则投到最近活跃会话。系统定时不带 */
+  secretaryConversationId?: string;
   system?: 'daily-brief' | { todoId: string };
 } & (
   | { /** 一次性，ISO 时间 */ at: string; cron?: never }
@@ -588,6 +590,7 @@ export interface SecretaryScheduleView {
   cron?: string;
   nextRunAt?: number;
   lastFiredAt?: number;
+  secretaryConversationId?: string;
   system?: 'daily-brief' | { todoId: string };
 }
 

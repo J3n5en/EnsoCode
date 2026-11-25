@@ -20,6 +20,28 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: translate, locale: 'zh' }) }));
+vi.mock('@/plugins/PluginIcon', () => ({ PluginIcon: () => null }));
+vi.mock('@/plugins/PluginView', () => ({ PluginFrame: () => null }));
+vi.mock('qrcode', () => ({ default: { toDataURL: async () => '' } }));
+vi.mock('@/components/ui/switch', () => ({
+  Switch: ({
+    checked,
+    onCheckedChange,
+    className: _className,
+    ...rest
+  }: { checked?: boolean; onCheckedChange?: (value: boolean) => void; className?: string } & Record<
+    string,
+    unknown
+  >) => (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked === true}
+      onClick={() => onCheckedChange?.(checked !== true)}
+      {...rest}
+    />
+  ),
+}));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: { projects: unknown[] }) => unknown) =>
     selector({ projects: [] }),
@@ -193,6 +215,54 @@ beforeEach(() => {
         const page = pageFeed(feedEvents(h.secretary.board as SecretaryBoard), query ?? {});
         return { ok: true, ...page };
       },
+      contactState: async () => ({
+        enabled: true,
+        channels: [
+          {
+            id: 'telegram',
+            title: 'Telegram',
+            builtin: true,
+            status: 'connected',
+            caps: {
+              buttons: true,
+              urlButtons: true,
+              edit: true,
+              typing: true,
+              format: 'html',
+              maxChars: 4096,
+              commandMenu: true,
+              images: true,
+              files: true,
+            },
+            prefs: {
+              enabled: true,
+              push: true,
+              cardConfirm: true,
+              syncMirror: false,
+              memory: false,
+            },
+          },
+        ],
+        telegram: {
+          status: 'bound',
+          chat: { id: 777, username: 'j3n5en' },
+          bot: { id: 42, username: 'enso_bot', name: 'Enso' },
+          allowCardConfirm: true,
+          allowMemory: false,
+          syncMirror: false,
+          groups: [],
+          following: [],
+          poll: { state: 'running' },
+          secure: true,
+        },
+        owner: { githubLogins: ['j3n5en'], externalConfirm: false },
+      }),
+      onContactChanged: () => () => {},
+      contactGithubSuggest: async () => ({ login: null }),
+    },
+    extensionPlugins: {
+      list: async () => [],
+      onChanged: () => () => {},
     },
     memory: {
       list: async () => ({ items: [] }),
@@ -666,6 +736,19 @@ describe('SecretaryPanel', () => {
     expect(rows).toHaveLength(2);
     expect(text('[data-enso="secretary-running"]')).toContain('[In progress]2');
     expect(text('[data-enso="secretary-summary"]')).toContain('2 running');
+  });
+
+  it('联系方式标签直接管理：分组卡片里有主人身份与渠道，不再是占位跳转', async () => {
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-panel-tab"][data-tab="contact"]');
+    await flush();
+    expect(container.querySelector('[data-enso="secretary-contact"]')).not.toBeNull();
+    expect(container.querySelector('[data-enso="secretary-contact-owner"]')).not.toBeNull();
+    expect(container.querySelector('[data-settings-row="contacts.owner"]')).not.toBeNull();
+    expect(container.querySelector('[data-settings-row="contacts.channels"]')).not.toBeNull();
+    expect(container.querySelector('[data-enso="secretary-contact-entry"]')).toBeNull();
+    expect(container.textContent).not.toContain('managed in Settings');
   });
 
   it('标签切到记忆与定时，定时分系统与秘书定的两组', async () => {

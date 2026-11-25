@@ -7,9 +7,9 @@ import type {
   SecretaryContactOutboundHealth,
   SecretaryContactState,
 } from '@shared/types/secretary';
+import { AnimatePresence, MotionGlobalConfig, motion, useReducedMotion } from 'framer-motion';
 import {
   Check,
-  ChevronDown,
   ChevronRight,
   CirclePause,
   Copy,
@@ -26,13 +26,17 @@ import {
 import QRCode from 'qrcode';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import {
+  SettingsButton,
   SettingsRow,
+  SettingsSegmented,
   SettingsSubRow,
   SettingsSwitch,
   useSettingsRowControl,
 } from '@/components/settings/kit';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { heightVariants } from '@/lib/motion';
 import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { PluginIcon } from '@/plugins/PluginIcon';
@@ -66,7 +70,8 @@ const ERROR_TEXT: Record<string, string> = {
   'invalid-github-login': 'That is not a GitHub login',
 };
 
-const STEP_CLASS = 'border-border border-b py-3';
+/** 渠道展开区（settings-sub-group）里的信息块：与子行文本同一左缩进，发丝线由分组 CSS 画 */
+const SUB_PAD = 'py-2.5 pl-10 pr-4 max-sm:pl-7 max-sm:pr-3';
 const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[12.5px] transition-colors hover:bg-muted disabled:opacity-50';
 const LINK_CLASS =
@@ -141,7 +146,7 @@ function OutboundNotice({
       data-enso="secretary-contact-outbound"
       data-state={outbound.state}
       className={cn(
-        'border-l-2 px-2.5 py-2 text-[12px]',
+        'border-l-2 px-4 py-2.5 text-[12px]',
         paused ? 'border-warning bg-warning/5' : 'border-destructive bg-destructive/5'
       )}
     >
@@ -264,54 +269,78 @@ function ChannelCard({
     !caps.edit && t('Cannot edit sent messages: answered questions are not marked there.'),
     !caps.typing && t('No typing indicator.'),
   ].filter((item): item is string => typeof item === 'string');
+  const open = !collapsed;
+  const regionId = `secretary-contact-channel-${channel.id}-body`;
+  const reducedMotion = useReducedMotion();
+  const reduced = reducedMotion === true || MotionGlobalConfig.skipAnimations === true;
   return (
-    <div
-      data-enso="secretary-contact-channel"
-      data-channel={channel.id}
-      className="border-border border-b"
-    >
-      <div className="flex items-center gap-2 py-2">
-        <button
-          type="button"
-          data-enso="secretary-contact-channel-toggle"
-          aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          onClick={onToggle}
-        >
-          {collapsed ? (
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          {channel.pluginId ? (
-            <PluginIcon pluginId={channel.pluginId} icon={channel.icon} className="size-4" />
-          ) : (
-            <Send className="size-4 shrink-0" />
-          )}
-          <span className="truncate text-[13px] font-medium">{channel.title}</span>
-          <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] text-muted-foreground">
-            {channel.builtin ? t('Built-in') : t('Plugin')}
-          </span>
+    <div data-enso="secretary-contact-channel" data-channel={channel.id}>
+      <SettingsRow
+        interactive
+        label={
+          // biome-ignore lint/a11y/useKeyWithClickEvents: 键盘走左侧的展开按钮
           <span
-            data-enso="secretary-contact-channel-status"
-            className={cn('shrink-0 rounded px-1 text-[10.5px]', STATUS_CLASS[channel.status])}
+            className="cursor-pointer"
+            onClick={(event) => {
+              event.preventDefault();
+              onToggle();
+            }}
           >
-            {t(STATUS_LABEL[channel.status])}
-          </span>
-          {channel.outbound && (
-            <span
-              data-enso="secretary-contact-channel-outbound"
-              className={cn(
-                'shrink-0 rounded px-1 text-[10.5px]',
-                channel.outbound.state === 'paused'
-                  ? 'bg-warning/15 text-warning'
-                  : 'bg-destructive/15 text-destructive'
+            <span className="flex min-w-0 items-center gap-2">
+              {channel.pluginId ? (
+                <PluginIcon pluginId={channel.pluginId} icon={channel.icon} className="size-4" />
+              ) : (
+                <Send className="size-4 shrink-0" />
               )}
-            >
-              {channel.outbound.state === 'paused' ? t('Pushes paused') : t('Send failed')}
+              <span className="truncate">{channel.title}</span>
+              <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] font-normal text-muted-foreground">
+                {channel.builtin ? t('Built-in') : t('Plugin')}
+              </span>
             </span>
-          )}
-        </button>
+          </span>
+        }
+        leading={
+          <button
+            type="button"
+            data-enso="secretary-contact-channel-toggle"
+            aria-expanded={open}
+            aria-controls={regionId}
+            aria-label={open ? t('Collapse') : t('Expand')}
+            onClick={onToggle}
+            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
+          >
+            <ChevronRight
+              className={cn(
+                'size-4 transition-transform duration-200 ease-[var(--ease-smooth-out)]',
+                open && 'rotate-90'
+              )}
+            />
+          </button>
+        }
+        status={
+          <>
+            <span
+              data-enso="secretary-contact-channel-status"
+              className={cn('shrink-0 rounded px-1 text-[10.5px]', STATUS_CLASS[channel.status])}
+            >
+              {t(STATUS_LABEL[channel.status])}
+            </span>
+            {channel.outbound && (
+              <span
+                data-enso="secretary-contact-channel-outbound"
+                className={cn(
+                  'shrink-0 rounded px-1 text-[10.5px]',
+                  channel.outbound.state === 'paused'
+                    ? 'bg-warning/15 text-warning'
+                    : 'bg-destructive/15 text-destructive'
+                )}
+              >
+                {channel.outbound.state === 'paused' ? t('Pushes paused') : t('Send failed')}
+              </span>
+            )}
+          </>
+        }
+      >
         <Switch
           data-enso="secretary-contact-channel-enabled"
           checked={prefs.enabled}
@@ -319,85 +348,176 @@ function ChannelCard({
           aria-label={t('Enable {{name}}', { name: channel.title })}
           onCheckedChange={(checked) => onPrefs({ enabled: checked })}
         />
-      </div>
-      {!collapsed && (
-        <div className="flex flex-col gap-2 border-border border-t py-2.5">
-          {channel.detail && channel.status === 'error' && (
-            <p className="text-[11.5px] text-destructive">{channel.detail}</p>
-          )}
-          {channel.outbound && (
-            <OutboundNotice outbound={channel.outbound} busy={busy} onRetry={onRetry} />
-          )}
-          <PrefRow
-            dataEnso="secretary-contact-push"
-            label={t('Push to this channel')}
-            hint={t(
-              'Milestones, questions from the secretary, cards and approval notices go out here.'
-            )}
-            checked={prefs.push}
-            disabled={busy}
-            onChange={(value) => onPrefs({ push: value })}
-          />
-          <PrefRow
-            dataEnso={
-              telegram ? 'secretary-contact-allow-dispatch' : 'secretary-contact-card-confirm'
-            }
-            label={
-              telegram
-                ? t('Allow confirming cards from Telegram')
-                : t('Confirm cards from the phone')
-            }
-            hint={
-              telegram
-                ? t(
-                    'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals are never handled from Telegram.'
-                  )
-                : caps.buttons
-                  ? t('Off by default. Approvals are never handled from the phone.')
-                  : t(
-                      'Off by default. Reply "confirm 1" to confirm a card. Approvals are never handled from the phone.'
-                    )
-            }
-            checked={prefs.cardConfirm}
-            disabled={busy}
-            onChange={(value) => onPrefs({ cardConfirm: value })}
-          />
-          <PrefRow
-            dataEnso="secretary-contact-mirror"
-            label={t('Mirror every reply')}
-            hint={t(
-              'Off by default. Every reply in the secretary conversation is sent here, not just milestones.'
-            )}
-            checked={prefs.syncMirror}
-            disabled={busy}
-            onChange={(value) => onPrefs({ syncMirror: value })}
-          />
-          <PrefRow
-            dataEnso={telegram ? 'secretary-contact-allow-memory' : 'secretary-contact-memory'}
-            label={
-              telegram
-                ? t('Allow viewing memory titles on Telegram')
-                : t('Allow viewing memory titles')
-            }
-            hint={t('Off by default. /memory lists titles only, never the memory text.')}
-            checked={prefs.memory}
-            disabled={busy}
-            onChange={(value) => onPrefs({ memory: value })}
-          />
-          {limits.length > 0 && (
-            <ul
-              data-enso="secretary-contact-limits"
-              className="flex flex-col gap-0.5 text-[11.5px] text-subtle-foreground"
+      </SettingsRow>
+      {reduced ? (
+        open ? (
+          <div
+            id={regionId}
+            data-slot="settings-sub-group"
+            className="overflow-hidden border-t border-border/60 bg-muted/45 dark:bg-background/40"
+          >
+            <ChannelBody
+              channel={channel}
+              telegram={telegram}
+              limits={limits}
+              busy={busy}
+              onPrefs={onPrefs}
+              onRetry={onRetry}
             >
-              {limits.map((item) => (
-                <li key={item}>· {item}</li>
-              ))}
-            </ul>
+              {children}
+            </ChannelBody>
+          </div>
+        ) : null
+      ) : (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              id={regionId}
+              data-slot="settings-sub-group"
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={heightVariants}
+              className="overflow-hidden border-t border-border/60 bg-muted/45 dark:bg-background/40"
+            >
+              <ChannelBody
+                channel={channel}
+                telegram={telegram}
+                limits={limits}
+                busy={busy}
+                onPrefs={onPrefs}
+                onRetry={onRetry}
+              >
+                {children}
+              </ChannelBody>
+            </motion.div>
           )}
-          {children}
-        </div>
+        </AnimatePresence>
       )}
     </div>
+  );
+}
+
+/** 渠道展开体：通用开关行加登录区内容，块统一缩进对齐子行文本 */
+function ChannelBody({
+  channel,
+  telegram,
+  limits,
+  busy,
+  onPrefs,
+  onRetry,
+  children,
+}: {
+  channel: SecretaryContactChannelView;
+  telegram: boolean;
+  limits: string[];
+  busy: boolean;
+  onPrefs: (prefs: Partial<SecretaryContactChannelPrefs>) => void;
+  onRetry: () => void;
+  children?: ReactNode;
+}) {
+  const { t } = useI18n();
+  const { prefs, caps } = channel;
+  return (
+    <>
+      {channel.detail && channel.status === 'error' && (
+        <p className={cn(SUB_PAD, 'text-[11.5px] text-destructive')}>{channel.detail}</p>
+      )}
+      {channel.outbound && (
+        <OutboundNotice outbound={channel.outbound} busy={busy} onRetry={onRetry} />
+      )}
+      <PrefRow
+        dataEnso="secretary-contact-push"
+        label={t('Push to this channel')}
+        hint={t(
+          'Milestones, questions from the secretary, cards and approval notices go out here.'
+        )}
+        checked={prefs.push}
+        disabled={busy}
+        onChange={(value) => onPrefs({ push: value })}
+      />
+      <PrefRow
+        dataEnso={telegram ? 'secretary-contact-allow-dispatch' : 'secretary-contact-card-confirm'}
+        label={
+          telegram ? t('Allow confirming cards from Telegram') : t('Confirm cards from the phone')
+        }
+        hint={
+          telegram
+            ? t(
+                'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals are never handled from Telegram.'
+              )
+            : caps.buttons
+              ? t('Off by default. Approvals are never handled from the phone.')
+              : t(
+                  'Off by default. Reply "confirm 1" to confirm a card. Approvals are never handled from the phone.'
+                )
+        }
+        checked={prefs.cardConfirm}
+        disabled={busy}
+        onChange={(value) => onPrefs({ cardConfirm: value })}
+      />
+      <PrefRow
+        dataEnso="secretary-contact-mirror"
+        label={t('Mirror every reply')}
+        hint={t(
+          'Off by default. Every reply in the secretary conversation is sent here, not just milestones.'
+        )}
+        checked={prefs.syncMirror}
+        disabled={busy}
+        onChange={(value) => onPrefs({ syncMirror: value })}
+      />
+      <PrefRow
+        dataEnso={telegram ? 'secretary-contact-allow-memory' : 'secretary-contact-memory'}
+        label={
+          telegram ? t('Allow viewing memory titles on Telegram') : t('Allow viewing memory titles')
+        }
+        hint={t('Off by default. /memory lists titles only, never the memory text.')}
+        checked={prefs.memory}
+        disabled={busy}
+        onChange={(value) => onPrefs({ memory: value })}
+      />
+      {limits.length > 0 && (
+        <ul
+          data-enso="secretary-contact-limits"
+          className={cn(SUB_PAD, 'flex flex-col gap-0.5 text-[11.5px] text-subtle-foreground')}
+        >
+          {limits.map((item) => (
+            <li key={item}>· {item}</li>
+          ))}
+        </ul>
+      )}
+      {children}
+    </>
+  );
+}
+
+/** 主人身份卡里 GitHub 账号的输入框：受控草稿在父组件，这里只接 a11y 与样式 */
+function OwnerLoginsInput({
+  value,
+  disabled,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const a11y = useSettingsRowControl();
+  return (
+    <Input
+      {...a11y}
+      id="secretary-github-logins"
+      data-enso="secretary-contact-github-logins"
+      size="sm"
+      value={value}
+      disabled={disabled}
+      placeholder={placeholder}
+      spellCheck={false}
+      autoComplete="off"
+      onChange={(event) => onChange((event.currentTarget ?? event.target).value)}
+      className="w-[240px] max-w-full"
+    />
   );
 }
 
@@ -407,14 +527,12 @@ function OwnerIdentity({
   busy,
   error,
   run,
-  showHeading = true,
 }: {
   owner: SecretaryContactState['owner'];
   secretaryId?: string;
   busy: boolean;
   error: string | null;
   run: (action: () => Promise<{ ok: boolean; error?: string }>) => void;
-  showHeading?: boolean;
 }) {
   const { t } = useI18n();
   const saved = owner.githubLogins.join(', ');
@@ -453,107 +571,97 @@ function OwnerIdentity({
   };
 
   return (
-    <div data-enso="secretary-contact-owner" className={STEP_CLASS}>
-      {showHeading && <div className="text-[12.5px] font-medium">{t('Owner identity')}</div>}
-      <p className={cn('text-[11.5px] text-muted-foreground', showHeading && 'mt-1')}>
-        {t(
-          'GitHub accounts that count as you. Events from anyone else are left to the agent unless you require confirmation.'
+    <div data-enso="secretary-contact-owner">
+      <SettingsRow
+        rowId="contacts.github-accounts"
+        label={t('GitHub accounts')}
+        description={
+          suggestion || error === 'invalid-github-login' ? (
+            <>
+              {suggestion && (
+                <span className="inline-flex flex-wrap items-center gap-x-1.5">
+                  {t('Detected the gh login {{login}} on this machine', { login: suggestion })}
+                  <button
+                    type="button"
+                    data-enso="secretary-contact-github-fill"
+                    disabled={busy}
+                    className="font-medium text-foreground underline decoration-foreground/30 underline-offset-2 transition-colors hover:decoration-foreground/70 disabled:opacity-50"
+                    onClick={() => fill(suggestion)}
+                  >
+                    {t('Fill in')}
+                  </button>
+                </span>
+              )}
+              {error === 'invalid-github-login' && (
+                <span className="mt-0.5 block text-destructive">
+                  {t('That is not a GitHub login')}
+                </span>
+              )}
+            </>
+          ) : undefined
+        }
+      >
+        <OwnerLoginsInput
+          value={draft}
+          disabled={busy}
+          placeholder={t('Comma or space separated')}
+          onChange={(value) => {
+            setDirty(true);
+            setDraft(value);
+          }}
+        />
+        <SettingsButton
+          data-enso="secretary-contact-github-save"
+          disabled={busy || !dirty}
+          onClick={() => {
+            const githubLogins = draft
+              .split(/[\s,]+/)
+              .map((item) => item.trim())
+              .filter(Boolean);
+            run(async () => {
+              const result = await window.electronAPI.secretary.contactSettings(
+                { githubLogins },
+                secretaryId
+              );
+              if (result.ok) setDirty(false);
+              return result;
+            });
+          }}
+        >
+          {t('Save GitHub accounts')}
+        </SettingsButton>
+      </SettingsRow>
+      <SettingsRow
+        rowId="contacts.external-messages"
+        label={t('Messages that are not from you')}
+        description={t(
+          'Events from anyone else are left to the agent unless you require confirmation.'
         )}
-      </p>
-      <label
-        className="mt-2 block text-[12px] text-muted-foreground"
-        htmlFor="secretary-github-logins"
       >
-        {t('GitHub accounts')}
-      </label>
-      <input
-        id="secretary-github-logins"
-        data-enso="secretary-contact-github-logins"
-        value={draft}
-        disabled={busy}
-        placeholder={t('Comma or space separated')}
-        className="mt-1 w-full rounded-lg border border-border bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-foreground/40"
-        onChange={(event) => {
-          setDirty(true);
-          setDraft(event.target.value);
-        }}
-      />
-      {suggestion && (
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          <span className="min-w-0 text-[11.5px] text-muted-foreground">
-            {t('Detected the gh login {{login}} on this machine', { login: suggestion })}
-          </span>
-          <button
-            type="button"
-            data-enso="secretary-contact-github-fill"
-            disabled={busy}
-            className={BUTTON_CLASS}
-            onClick={() => fill(suggestion)}
-          >
-            {t('Fill in')}
-          </button>
-        </div>
-      )}
-      <button
-        type="button"
-        data-enso="secretary-contact-github-save"
-        disabled={busy}
-        className={cn(PRIMARY_CLASS, 'mt-2')}
-        onClick={() => {
-          const githubLogins = draft
-            .split(/[\s,]+/)
-            .map((item) => item.trim())
-            .filter(Boolean);
-          run(async () => {
-            const result = await window.electronAPI.secretary.contactSettings(
-              { githubLogins },
-              secretaryId
-            );
-            if (result.ok) setDirty(false);
-            return result;
-          });
-        }}
-      >
-        {t('Save GitHub accounts')}
-      </button>
-      {error === 'invalid-github-login' && (
-        <p className="mt-1 text-[11.5px] text-destructive">{t('That is not a GitHub login')}</p>
-      )}
-      <div className="mt-3 text-[12px] text-muted-foreground">
-        {t('Messages that are not from you')}
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          data-enso="secretary-contact-external-agent"
-          aria-pressed={!owner.externalConfirm}
-          disabled={busy}
-          className={cn(BUTTON_CLASS, !owner.externalConfirm && 'bg-muted')}
-          onClick={() => {
-            if (!owner.externalConfirm) return;
+        <SettingsSegmented
+          aria-label={t('Messages that are not from you')}
+          value={owner.externalConfirm ? 'confirm' : 'agent'}
+          options={[
+            {
+              value: 'agent',
+              label: t('Let the agent decide'),
+              dataEnso: 'secretary-contact-external-agent',
+            },
+            {
+              value: 'confirm',
+              label: t('Require your confirmation'),
+              dataEnso: 'secretary-contact-external-confirm',
+            },
+          ]}
+          onValueChange={(value) => {
+            const externalConfirm = value === 'confirm';
+            if (externalConfirm === owner.externalConfirm) return;
             run(() =>
-              window.electronAPI.secretary.contactSettings({ externalConfirm: false }, secretaryId)
+              window.electronAPI.secretary.contactSettings({ externalConfirm }, secretaryId)
             );
           }}
-        >
-          {t('Let the agent decide')}
-        </button>
-        <button
-          type="button"
-          data-enso="secretary-contact-external-confirm"
-          aria-pressed={owner.externalConfirm}
-          disabled={busy}
-          className={cn(BUTTON_CLASS, owner.externalConfirm && 'bg-muted')}
-          onClick={() => {
-            if (owner.externalConfirm) return;
-            run(() =>
-              window.electronAPI.secretary.contactSettings({ externalConfirm: true }, secretaryId)
-            );
-          }}
-        >
-          {t('Require your confirmation')}
-        </button>
-      </div>
+        />
+      </SettingsRow>
     </div>
   );
 }
@@ -596,8 +704,8 @@ export function SecretaryContactPanel({
   frames,
 }: {
   secretaryId?: string;
-  frames?: SecretaryContactFrames;
-} = {}) {
+  frames: SecretaryContactFrames;
+}) {
   const { t } = useI18n();
   const [state, setState] = useState<SecretaryContactState | null>(null);
   const [token, setToken] = useState('');
@@ -736,7 +844,7 @@ export function SecretaryContactPanel({
   );
 
   const groupsStep = (
-    <div data-enso="secretary-contact-groups" className={STEP_CLASS}>
+    <div data-enso="secretary-contact-groups" className={SUB_PAD}>
       <div className="text-[12px] font-medium text-muted-foreground">{t('Groups and topics')}</div>
       <p className="mt-1 text-[11.5px] text-muted-foreground">
         {t(
@@ -811,7 +919,10 @@ export function SecretaryContactPanel({
   const telegramBody = (
     <>
       {tokenConflict && (
-        <p data-enso="secretary-contact-token-conflict" className="text-[11.5px] text-warning">
+        <p
+          data-enso="secretary-contact-token-conflict"
+          className={cn(SUB_PAD, 'text-[11.5px] text-warning')}
+        >
           {t(
             "The Telegram remote plugin (enso.telegram) is enabled. Do not give both the same bot token: only one place can poll a bot, so they would steal each other's messages."
           )}
@@ -819,7 +930,7 @@ export function SecretaryContactPanel({
       )}
       {telegram.status === 'bound' && (
         <>
-          <div data-enso="secretary-contact-bound" className={STEP_CLASS}>
+          <div data-enso="secretary-contact-bound" className={SUB_PAD}>
             <div className="flex items-center gap-2">
               <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
                 <Check className="size-3.5" />
@@ -883,7 +994,7 @@ export function SecretaryContactPanel({
           {groupsStep}
           <div
             data-enso="secretary-contact-sync"
-            className={cn(STEP_CLASS, telegram.syncMirror && 'border-warning/50 bg-warning/5')}
+            className={cn(SUB_PAD, telegram.syncMirror && 'border-warning/50 bg-warning/5')}
           >
             {telegram.syncMirror ? (
               <>
@@ -905,7 +1016,7 @@ export function SecretaryContactPanel({
               </p>
             )}
           </div>
-          <div data-enso="secretary-contact-commands" className={STEP_CLASS}>
+          <div data-enso="secretary-contact-commands" className={SUB_PAD}>
             <div className="text-[12px] font-medium text-muted-foreground">
               {t('Commands you can send')}
             </div>
@@ -926,7 +1037,7 @@ export function SecretaryContactPanel({
             </p>
           </div>
           {!telegram.secure && (
-            <p className="px-1 text-[11.5px] text-warning">
+            <p className={cn(SUB_PAD, 'text-[11.5px] text-warning')}>
               {t(
                 'No system keychain available: the bot token is stored unencrypted on this machine.'
               )}
@@ -936,14 +1047,14 @@ export function SecretaryContactPanel({
       )}
       {telegram.status === 'awaiting-start' && (
         <>
-          <div data-enso="secretary-contact-verified" className={STEP_CLASS}>
+          <div data-enso="secretary-contact-verified" className={SUB_PAD}>
             <StepHead index={2} label={t('Bot verified')} />
             <p className="mt-1 text-[13px] font-medium">
               {telegram.bot?.name}{' '}
               <span className="text-muted-foreground">@{telegram.bot?.username}</span>
             </p>
           </div>
-          <div data-enso="secretary-contact-code" className={STEP_CLASS}>
+          <div data-enso="secretary-contact-code" className={SUB_PAD}>
             <StepHead index={3} label={t('Open the bot and press Start')} />
             <div className="mt-2 flex items-center gap-3">
               {qr && (
@@ -1047,7 +1158,7 @@ export function SecretaryContactPanel({
       )}
       {telegram.status === 'unbound' && (
         <>
-          <div data-enso="secretary-contact-step1" className={STEP_CLASS}>
+          <div data-enso="secretary-contact-step1" className={SUB_PAD}>
             <StepHead index={1} label={t('Create a bot with @BotFather')} />
             <p className="mt-1 text-[11.5px] text-muted-foreground">
               {t('Send /newbot, pick a name, and copy the token it gives you.')}
@@ -1103,7 +1214,7 @@ export function SecretaryContactPanel({
               </button>
             )}
           </div>
-          <p className="px-1 text-[11.5px] text-subtle-foreground">
+          <p className={cn(SUB_PAD, 'text-[11.5px] text-subtle-foreground')}>
             {t('The token is stored with the system keychain and never written to logs.')}
           </p>
           {groupsStep}
@@ -1115,7 +1226,7 @@ export function SecretaryContactPanel({
   const setEnabled = (checked: boolean) =>
     run(() => window.electronAPI.secretary.contactSettings({ enabled: checked }, secretaryId));
   // 总开关管的是各渠道收发：设置页放在「联系渠道」组顶部
-  const masterSwitch = frames ? (
+  const masterSwitch = (
     <div data-enso="secretary-contact-master">
       <SettingsRow rowId="contacts.enable-contacts" label={t('Enable contacts')}>
         <EnableSwitch
@@ -1126,19 +1237,6 @@ export function SecretaryContactPanel({
         />
       </SettingsRow>
     </div>
-  ) : (
-    <div
-      data-enso="secretary-contact-master"
-      className="flex items-center justify-between gap-2 border-border border-b py-2"
-    >
-      <span className="text-[13px] font-medium">{t('Enable contacts')}</span>
-      <EnableSwitch
-        checked={state.enabled}
-        disabled={busy}
-        label={t('Enable contacts')}
-        onCheckedChange={setEnabled}
-      />
-    </div>
   );
   const ownerBlock = (
     <OwnerIdentity
@@ -1147,25 +1245,18 @@ export function SecretaryContactPanel({
       busy={busy}
       error={error}
       run={run}
-      showHeading={!frames}
     />
   );
   const channelsBlock = !state.enabled ? (
-    <p
-      className={
-        frames
-          ? 'border-border border-b py-3 text-[13px] text-muted-foreground'
-          : 'px-1 text-[11.5px] text-subtle-foreground'
-      }
-    >
+    <div className="px-4 py-3 text-[13px] text-muted-foreground max-sm:px-3">
       {t('Contacts are off: nothing is sent or received on any channel.')}
-    </p>
+    </div>
   ) : (
     <>
       {(shownError || pollFailed) && (
         <div
           data-enso="secretary-contact-error"
-          className="flex items-start gap-1.5 border-destructive border-l-2 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive"
+          className="flex items-start gap-1.5 border-destructive border-l-2 bg-destructive/5 px-4 py-2.5 text-[12px] text-destructive max-sm:px-3"
         >
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
           <span className="min-w-0 flex-1">
@@ -1176,7 +1267,7 @@ export function SecretaryContactPanel({
         </div>
       )}
       {notice && (
-        <div className="flex items-center gap-1.5 border-success border-l-2 bg-success/5 px-2.5 py-2 text-[12px] text-success">
+        <div className="flex items-center gap-1.5 border-success border-l-2 bg-success/5 px-4 py-2.5 text-[12px] text-success max-sm:px-3">
           <Check className="size-3.5 shrink-0" />
           <span>{notice}</span>
         </div>
@@ -1195,10 +1286,7 @@ export function SecretaryContactPanel({
           {channel.id === 'telegram' ? (
             telegramBody
           ) : channel.pluginId && channel.settingsView ? (
-            <div
-              data-enso="secretary-contact-plugin-view"
-              className="h-72 overflow-hidden border-border border-y"
-            >
+            <div data-enso="secretary-contact-plugin-view" className="h-72 overflow-hidden">
               <PluginFrame
                 pluginId={channel.pluginId}
                 entry={channel.settingsView}
@@ -1210,7 +1298,7 @@ export function SecretaryContactPanel({
         </ChannelCard>
       ))}
 
-      <div data-enso="secretary-contact-following" className={STEP_CLASS}>
+      <div data-enso="secretary-contact-following" className={SUB_PAD}>
         <div className="flex items-center justify-between gap-2">
           <div className="text-[12.5px] font-medium">
             {t('Followed from the phone: {{count}}', { count: telegram.following.length })}
@@ -1271,46 +1359,39 @@ export function SecretaryContactPanel({
         )}
       </div>
 
-      <button
-        type="button"
-        data-enso="secretary-contact-market"
-        className={cn(BUTTON_CLASS, frames ? 'mt-3' : 'self-start')}
-        onClick={() =>
-          openSettings({
-            category: 'plugins',
-            rowId: 'plugins.enso',
-            marketQuery: 'contact',
-          })
+      <SettingsRow
+        interactive
+        rowId="contacts.plugin-market"
+        label={
+          <button
+            type="button"
+            data-enso="secretary-contact-market"
+            className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
+            onClick={() =>
+              openSettings({
+                category: 'plugins',
+                rowId: 'plugins.enso',
+                marketQuery: 'contact',
+              })
+            }
+          >
+            {t('Find more contact channels in the plugin market')}
+          </button>
         }
-      >
-        <Search className="size-3.5" />
-        {t('Find more contact channels in the plugin market')}
-      </button>
+        leading={<Search className="size-4 shrink-0 text-muted-foreground" />}
+      />
     </>
   );
 
-  if (frames) {
-    return (
-      <div data-enso="secretary-contact">
-        {frames.owner(ownerBlock)}
-        {frames.channels(
-          <>
-            {masterSwitch}
-            {channelsBlock}
-          </>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div data-enso="secretary-contact" className="flex flex-col gap-2 px-3 py-3">
-      <p className="px-1 text-[11.5px] text-muted-foreground">
-        {t('Reach the secretary from your phone. Milestones go out; your replies come back.')}
-      </p>
-      {masterSwitch}
-      {ownerBlock}
-      {channelsBlock}
+    <div data-enso="secretary-contact">
+      {frames.owner(ownerBlock)}
+      {frames.channels(
+        <>
+          {masterSwitch}
+          {channelsBlock}
+        </>
+      )}
     </div>
   );
 }

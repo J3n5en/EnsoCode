@@ -82,13 +82,13 @@ export function UsageSettings() {
         </SettingsButton>
       }
     >
-      <SettingsSection>
-        <div className="border-border border-b py-3">
+      <SettingsSection bare>
+        <div className="py-1">
           <RangePills value={days} onChange={setDays} />
         </div>
-        {error && <p className="border-border border-b py-3 text-sm text-destructive">{error}</p>}
+        {error && <p className="py-3 text-sm text-destructive">{error}</p>}
         {summary && (
-          <div className="space-y-4 border-border border-b py-4">
+          <div className="mt-4 space-y-4">
             <StatGrid totals={summary.totals} previous={summary.previous} />
             <DailyTrendChart daily={summary.daily} />
             <HourlyHeatmap heatmap={summary.heatmap} />

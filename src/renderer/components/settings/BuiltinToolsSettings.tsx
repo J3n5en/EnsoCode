@@ -37,6 +37,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import {
@@ -156,13 +157,13 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
 
   return (
     <div data-settings-row="tools.webSearchChain">
-      <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+      <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
         {t(
           "Try these models' built-in search in order. Credentials resolve at call time; if all fail, the keyless Exa service is the permanent fallback."
         )}
       </p>
       {chain.length === 0 && (
-        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+        <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
           {t(
             "Default: use the current session model's built-in search when available, otherwise Exa."
           )}
@@ -171,7 +172,7 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
       {chain.map((entry, index) => (
         <div
           key={`${entry.providerId}/${entry.modelId}`}
-          className="flex min-h-11 items-center gap-2 border-border border-b py-2 pl-10"
+          className="flex min-h-11 items-center gap-2 px-4 py-2 pl-10 max-sm:pr-3 max-sm:pl-7"
           draggable={!disabled}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = 'move';
@@ -218,7 +219,7 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
         </div>
       ))}
       {chain.length < WEB_SEARCH_CHAIN_MAX && (
-        <div className="max-w-xs border-border border-b py-2 pl-10">
+        <div className="max-w-xs px-4 py-2 pl-10 max-sm:pr-3 max-sm:pl-7">
           <ModelPicker
             providers={candidates}
             providerId=""
@@ -233,7 +234,7 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
           />
         </div>
       )}
-      <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+      <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
         {t('Final fallback: Exa (keyless hosted search). Not a chain entry; always last.')}
       </p>
     </div>
@@ -269,6 +270,7 @@ export function BuiltinToolsSettings() {
     occupancy.rows
   );
   const [cleared, setCleared] = useState<BrowserClearKind | null>(null);
+  const [pendingClear, setPendingClear] = useState<BrowserClearKind | null>(null);
   const subagentEnabled = !disabled.includes('subagent');
   const setMode = (mode: AgentMode, enabled: boolean) => {
     setSubagentAllowedModes(
@@ -449,7 +451,7 @@ export function BuiltinToolsSettings() {
                     </SettingsSubRow>
                   ))}
                   {!subagentEnabled && (
-                    <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+                    <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
                       {t(
                         'The unified subagent tool is off. Re-enabling it keeps this mode selection.'
                       )}
@@ -460,20 +462,20 @@ export function BuiltinToolsSettings() {
               {tool.id === 'computer' && computerEnabled ? (
                 <div data-settings-row="tools.computer">
                   {capabilities && computerPermissionGuideKind(capabilities) === 'unsupported' ? (
-                    <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+                    <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
                       {t('This platform cannot operate the desktop yet.')}
                     </p>
                   ) : (
                     <>
                       {capabilities?.platform === 'darwin' && (
-                        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+                        <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
                           {t(
                             'Computer needs Screen Recording to capture windows and Accessibility to inspect or click them. Grant both to EnsoCode, then restart the app.'
                           )}
                         </p>
                       )}
                       {capabilities && (
-                        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+                        <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
                           {t(
                             capabilities.capturePermission === 'granted'
                               ? 'Capture: granted'
@@ -491,7 +493,7 @@ export function BuiltinToolsSettings() {
                           )}
                         </p>
                       )}
-                      <div className="flex flex-wrap gap-2 border-border border-b py-3 pl-10">
+                      <div className="flex flex-wrap gap-2 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7">
                         <SettingsButton onClick={() => setGuideOpen(true)}>
                           {t('Show permission guide')}
                         </SettingsButton>
@@ -550,14 +552,14 @@ export function BuiltinToolsSettings() {
                       onCheckedChange={setOpenLinksInBuiltinBrowser}
                     />
                   </SettingsSubRow>
-                  <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+                  <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
                     {t(
                       'Cookies and site storage of the built-in browser, separate from the app itself.'
                     )}
                   </p>
-                  <div className="flex flex-wrap gap-2 border-border border-b py-3 pl-10">
+                  <div className="flex flex-wrap gap-2 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7">
                     {(['cookies', 'cache', 'all'] as const).map((kind) => (
-                      <SettingsButton key={kind} onClick={() => void clear(kind)}>
+                      <SettingsButton key={kind} onClick={() => setPendingClear(kind)}>
                         {cleared === kind
                           ? t('Cleared')
                           : kind === 'cookies'
@@ -581,6 +583,32 @@ export function BuiltinToolsSettings() {
         capabilities={capabilities}
         onOpenChange={setGuideOpen}
       />
+      <ConfirmDialog
+        open={pendingClear !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingClear(null);
+        }}
+        title={
+          pendingClear === 'cookies'
+            ? t('Clear cookies?')
+            : pendingClear === 'cache'
+              ? t('Clear cache?')
+              : t('Clear all browsing data?')
+        }
+        description={t(
+          'Cookies and site storage of the built-in browser, separate from the app itself.'
+        )}
+        confirmLabel={
+          pendingClear === 'cookies'
+            ? t('Clear cookies')
+            : pendingClear === 'cache'
+              ? t('Clear cache')
+              : t('Clear all browsing data')
+        }
+        onConfirm={() => {
+          if (pendingClear) void clear(pendingClear);
+        }}
+      />
     </SettingsPage>
   );
 }
@@ -593,6 +621,7 @@ function DcgGuardRow() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmClearExemptions, setConfirmClearExemptions] = useState(false);
   const [update, setUpdate] = useState<DcgUpdateCheck | 'checking' | null>(null);
   const [cleared, setCleared] = useState<boolean | null>(null);
   const [exemptions, setExemptions] = useState<DcgRuleExemption[]>([]);
@@ -682,7 +711,7 @@ function DcgGuardRow() {
         />
       }
     >
-      <div className="flex flex-wrap items-center gap-2 border-border border-b py-3 pl-10 text-xs">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 pl-10 text-xs max-sm:pr-3 max-sm:pl-7">
         <span className="text-muted-foreground">
           {!status
             ? t('Loading…')
@@ -709,13 +738,13 @@ function DcgGuardRow() {
         )}
         {updateText && <span className="text-muted-foreground">{updateText}</span>}
         {installed && (
-          <SettingsButton onClick={() => void clearExemptions()}>
+          <SettingsButton onClick={() => setConfirmClearExemptions(true)}>
             {t('Clear rule exemptions')}
           </SettingsButton>
         )}
       </div>
       {installed && (
-        <div className="border-border border-b py-3 pl-10 text-xs">
+        <div className="px-4 py-2.5 pl-10 text-xs max-sm:pr-3 max-sm:pl-7">
           <p className="font-medium">
             {t('Exempted rules')} ({exemptions.length})
           </p>
@@ -747,13 +776,23 @@ function DcgGuardRow() {
         </div>
       )}
       {cleared !== null && (
-        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+        <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
           {cleared ? t('Rule exemptions cleared.') : t('Operation failed')}
         </p>
       )}
       {error && (
-        <p className="border-border border-b py-3 pl-10 text-destructive text-xs">{error}</p>
+        <p className="px-4 py-2.5 pl-10 text-destructive text-xs max-sm:pr-3 max-sm:pl-7">
+          {error}
+        </p>
       )}
+      <ConfirmDialog
+        open={confirmClearExemptions}
+        onOpenChange={setConfirmClearExemptions}
+        title={t('Clear rule exemptions?')}
+        description={t('All exempted dcg rules will require confirmation again.')}
+        confirmLabel={t('Clear rule exemptions')}
+        onConfirm={() => void clearExemptions()}
+      />
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md" zIndexLevel="nested">
           <DialogHeader>

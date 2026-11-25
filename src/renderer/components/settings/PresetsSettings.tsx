@@ -113,105 +113,66 @@ export function PresetsSettings() {
       )}
 
       <SettingsSection>
-        <ul>
-          {/* 内置全局预设：只读，跟随各条目的 enabled 开关 */}
-          <li className="flex flex-wrap items-center gap-2 border-border border-b py-2">
-            <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-                {t('Global')}
-                <Badge variant="outline">{t('Read-only')}</Badge>
-                {defaultPresetId === 'default' && <Badge variant="secondary">{t('Default')}</Badge>}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                {t('Follows the enabled switches on the Skills / MCP / Instructions pages')}
-              </p>
-            </div>
-            {defaultPresetId !== 'default' && (
-              <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId('default')}>
-                {t('Set as default')}
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t('View default role description')}
-              onClick={() => setPreviewDefault(true)}
-            >
-              <Eye className="h-4 w-4" />
+        {/* 内置全局预设：只读，跟随各条目的 enabled 开关 */}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3">
+          <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+              {t('Global')}
+              <Badge variant="outline">{t('Read-only')}</Badge>
+              {defaultPresetId === 'default' && <Badge variant="secondary">{t('Default')}</Badge>}
+            </p>
+            <p className="text-muted-foreground text-xs">
+              {t('Follows the enabled switches on the Skills / MCP / Instructions pages')}
+            </p>
+          </div>
+          {defaultPresetId !== 'default' && (
+            <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId('default')}>
+              {t('Set as default')}
             </Button>
-          </li>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('View default role description')}
+            onClick={() => setPreviewDefault(true)}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+        </div>
 
-          {presets
-            .filter((preset) => preset.id !== 'default')
-            .map((preset) => (
-              <li
-                key={preset.id}
-                className="flex flex-wrap items-center gap-2 border-border border-b py-2"
-              >
-                <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-                    <span className="max-w-full truncate">{preset.name}</span>
-                    {preset.pluginPresetId && (
-                      <Badge variant="outline">
-                        {`+ ${
-                          pluginPresets.find((item) => item.id === preset.pluginPresetId)?.name ??
-                          t('Unavailable plugin preset')
-                        }`}
-                      </Badge>
-                    )}
-                    {preset.systemPromptId && <Badge variant="outline">{t('Custom role')}</Badge>}
-                    {preset.systemPromptTailId && <Badge variant="outline">{t('Tail')}</Badge>}
-                    {preset.boostPromptId && <Badge variant="outline">{t('Boost')}</Badge>}
-                    {preset.refusalRetry && <Badge variant="outline">{t('Refusal retry')}</Badge>}
-                    {defaultPresetId === preset.id && (
-                      <Badge variant="secondary">{t('Default')}</Badge>
-                    )}
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    {t('{{skills}} skills · {{mcp}} MCP · {{instruction}} instruction', {
-                      skills: preset.skillIds.length,
-                      mcp: preset.mcpServerIds.length,
-                      instruction: preset.instructionId ? 1 : 0,
-                    })}
-                  </p>
-                </div>
-                {defaultPresetId !== preset.id && (
-                  <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId(preset.id)}>
-                    {t('Set as default')}
-                  </Button>
-                )}
-                <Button variant="ghost" size="icon-sm" onClick={() => setEditing(preset)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => removePreset(preset.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </li>
-            ))}
-
-          {pluginPresets.map((preset) => (
-            <li
+        {presets
+          .filter((preset) => preset.id !== 'default')
+          .map((preset) => (
+            <div
               key={preset.id}
-              className="flex flex-wrap items-center gap-2 border-border border-b py-2"
+              className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3"
             >
               <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
                   <span className="max-w-full truncate">{preset.name}</span>
-                  <Badge variant="outline">{t('Read-only')}</Badge>
+                  {preset.pluginPresetId && (
+                    <Badge variant="outline">
+                      {`+ ${
+                        pluginPresets.find((item) => item.id === preset.pluginPresetId)?.name ??
+                        t('Unavailable plugin preset')
+                      }`}
+                    </Badge>
+                  )}
+                  {preset.systemPromptId && <Badge variant="outline">{t('Custom role')}</Badge>}
+                  {preset.systemPromptTailId && <Badge variant="outline">{t('Tail')}</Badge>}
+                  {preset.boostPromptId && <Badge variant="outline">{t('Boost')}</Badge>}
+                  {preset.refusalRetry && <Badge variant="outline">{t('Refusal retry')}</Badge>}
                   {defaultPresetId === preset.id && (
                     <Badge variant="secondary">{t('Default')}</Badge>
                   )}
                 </p>
                 <p className="text-muted-foreground text-xs">
-                  {t('Bundled by {{plugin}}', { plugin: preset.pluginName })}
-                  {' · '}
                   {t('{{skills}} skills · {{mcp}} MCP · {{instruction}} instruction', {
-                    skills: preset.skills,
-                    mcp: preset.mcpServers,
-                    instruction: preset.instruction ? 1 : 0,
+                    skills: preset.skillIds.length,
+                    mcp: preset.mcpServerIds.length,
+                    instruction: preset.instructionId ? 1 : 0,
                   })}
                 </p>
               </div>
@@ -220,9 +181,41 @@ export function PresetsSettings() {
                   {t('Set as default')}
                 </Button>
               )}
-            </li>
+              <Button variant="ghost" size="icon-sm" onClick={() => setEditing(preset)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" onClick={() => removePreset(preset.id)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           ))}
-        </ul>
+
+        {pluginPresets.map((preset) => (
+          <div key={preset.id} className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3">
+            <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                <span className="max-w-full truncate">{preset.name}</span>
+                <Badge variant="outline">{t('Read-only')}</Badge>
+                {defaultPresetId === preset.id && <Badge variant="secondary">{t('Default')}</Badge>}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t('Bundled by {{plugin}}', { plugin: preset.pluginName })}
+                {' · '}
+                {t('{{skills}} skills · {{mcp}} MCP · {{instruction}} instruction', {
+                  skills: preset.skills,
+                  mcp: preset.mcpServers,
+                  instruction: preset.instruction ? 1 : 0,
+                })}
+              </p>
+            </div>
+            {defaultPresetId !== preset.id && (
+              <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId(preset.id)}>
+                {t('Set as default')}
+              </Button>
+            )}
+          </div>
+        ))}
       </SettingsSection>
 
       {editing !== null && (
@@ -932,7 +925,7 @@ export function PickList<T extends { id: string }>({
       </p>
       <div>
         {items.length > 0 && (
-          <div className="border-border border-b py-1.5">
+          <div className="border-b border-border/60 py-1">
             <ListFilterBar
               query={query}
               onQueryChange={setQuery}

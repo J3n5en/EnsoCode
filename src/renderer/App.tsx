@@ -53,6 +53,7 @@ import { PairNodeDialog } from '@/components/nodes/PairNodeDialog';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
+import { DispatchFlightLayer } from '@/components/secretary/DispatchFlightLayer';
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
 import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
 import { SettingsView } from '@/components/settings/SettingsView';
@@ -137,7 +138,12 @@ const SidePanel = lazy(() =>
   import('@/components/sidepanel/SidePanel').then((m) => ({ default: m.SidePanel }))
 );
 
-import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
+import {
+  resolveSidePanelWidth,
+  SIDE_PANEL_DEFAULT_WIDTH,
+  SIDE_PANEL_GAP_WIDTH,
+  SIDE_PANEL_HANDLE_WIDTH,
+} from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
 const dndCollision: CollisionDetection = (args) => {
@@ -156,7 +162,7 @@ function startNewConversation() {
 }
 
 const TOOLBAR_BUTTON =
-  'no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+  'no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,scale,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-[0.95] motion-reduce:transition-none motion-reduce:active:scale-100';
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 420;
 
@@ -250,7 +256,9 @@ export default function App() {
   useEffect(() => subscribeSidebarToggle(toggleSidebar), [toggleSidebar]);
   useEffect(() => window.electronAPI.window.onToggleSidebar(toggleSidebar), [toggleSidebar]);
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   const [sideResizing, setSideResizing] = useState(false);
+  const resetSidebarWidth = useCallback(() => setWidth(280), []);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -572,6 +580,19 @@ export default function App() {
     },
     [desktopShell]
   );
+  // 双击手柄复位到默认宽度：与拖拽同一套量宽口径，以当前可见宽度为基准 nudge
+  const handleSideReset = useCallback(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const style = getComputedStyle(workspace);
+    const contentWidth =
+      workspace.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const handleW = desktopShell ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH;
+    const currentVisible = resolveSidePanelWidth(sideWidth, contentWidth, handleW);
+    useSidePanelStore
+      .getState()
+      .nudgeWidth(SIDE_PANEL_DEFAULT_WIDTH - currentVisible, contentWidth, handleW);
+  }, [desktopShell, sideWidth]);
   const modeSwitch = botModeEnabled ? <ModeSwitch /> : null;
   // 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行；Windows 原生按钮由面板 tab 条右端让位，
   // Linux 自绘按钮在顶栏里会被面板盖住，保持独立卡片；网页版没有窗口按钮，同 mac
@@ -591,7 +612,7 @@ export default function App() {
     <button
       type="button"
       className={cn(
-        'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+        'flex items-center justify-center rounded-md transition-[background-color,color,scale,transform] duration-150 hover:bg-accent/50 active:scale-[0.95] motion-reduce:transition-none motion-reduce:active:scale-100',
         isMobile ? 'h-9 w-9' : desktopShell ? TOOLBAR_BUTTON : 'h-7 w-7',
         (botModeActive ? botPanelOpen : sideOpen) ? 'text-foreground' : 'text-muted-foreground'
       )}
@@ -606,7 +627,7 @@ export default function App() {
     <button
       type="button"
       className={cn(
-        'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+        'flex h-7 w-7 items-center justify-center rounded-md transition-[background-color,color,scale,transform] duration-150 hover:bg-accent/50 active:scale-[0.95] motion-reduce:transition-none motion-reduce:active:scale-100',
         chatWide ? 'text-foreground' : 'text-muted-foreground',
         isMobile && 'hidden'
       )}
@@ -614,7 +635,10 @@ export default function App() {
       aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
       title={chatWide ? t('Use reading width') : t('Use full chat width')}
     >
-      {chatWide ? <FoldHorizontal className="h-4 w-4" /> : <UnfoldHorizontal className="h-4 w-4" />}
+      <span className="t-icon-swap" data-state={chatWide ? 'a' : 'b'}>
+        <FoldHorizontal className="t-icon h-4 w-4" data-icon="a" aria-hidden="true" />
+        <UnfoldHorizontal className="t-icon h-4 w-4" data-icon="b" aria-hidden="true" />
+      </span>
     </button>
   );
   const panelActions = (
@@ -656,11 +680,10 @@ export default function App() {
                   onClick={toggleSidebar}
                   title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
                 >
-                  {collapsed ? (
-                    <PanelLeft className="h-4 w-4" />
-                  ) : (
-                    <PanelLeftClose className="h-4 w-4" />
-                  )}
+                  <span className="t-icon-swap" data-state={collapsed ? 'a' : 'b'}>
+                    <PanelLeft className="t-icon h-4 w-4" data-icon="a" aria-hidden="true" />
+                    <PanelLeftClose className="t-icon h-4 w-4" data-icon="b" aria-hidden="true" />
+                  </span>
                 </button>
               </div>
               {desktopShell && !settingsOpen && (
@@ -755,6 +778,7 @@ export default function App() {
               collapsed={collapsed}
               onToggleCollapse={toggleSidebar}
               onResize={handleResize}
+              onResetSidebarWidth={resetSidebarWidth}
             />
           ) : (
             <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
@@ -791,15 +815,26 @@ export default function App() {
                   </motion.div>
                 </>
               ) : (
-                <div ref={workbenchSidebarRef} className="flex min-h-0 shrink-0">
-                  <Sidebar
-                    width={collapsed ? undefined : width}
-                    collapsed={collapsed}
-                    onToggleCollapse={toggleSidebar}
-                    onOpenSearch={() => setSearchOpen(true)}
-                  />
-                  {!collapsed && <ResizeHandle edge={desktopShell} onResize={handleResize} />}
-                </div>
+                <>
+                  <div ref={workbenchSidebarRef} className="flex min-h-0 shrink-0">
+                    <Sidebar
+                      width={collapsed ? undefined : width}
+                      resizing={sidebarResizing}
+                      collapsed={collapsed}
+                      onToggleCollapse={toggleSidebar}
+                      onOpenSearch={() => setSearchOpen(true)}
+                    />
+                    {!collapsed && (
+                      <ResizeHandle
+                        edge={desktopShell}
+                        onResize={handleResize}
+                        onResizingChange={setSidebarResizing}
+                        onReset={resetSidebarWidth}
+                      />
+                    )}
+                  </div>
+                  <DispatchFlightLayer />
+                </>
               )}
               <div
                 ref={workspaceRef}
@@ -852,6 +887,7 @@ export default function App() {
                     inactive={!sideOpen}
                     onResize={handleSideResize}
                     onResizingChange={setSideResizing}
+                    onReset={handleSideReset}
                   />
                 )}
                 <Suspense fallback={null}>

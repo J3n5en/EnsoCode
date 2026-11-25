@@ -3,7 +3,7 @@ import type { UsageDailyPoint } from '@shared/usage/types';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { SettingsPreview } from '../kit';
+import { SettingsPreview, SettingsSegmented } from '../kit';
 
 type Metric = 'tokens' | 'cost';
 type SeriesId = 'output' | 'input' | 'cache';
@@ -204,27 +204,16 @@ export function MetricToggle({
   onChange: (m: Metric) => void;
 }) {
   const { t } = useI18n();
-  const items: Array<{ id: Metric; label: string }> = [
-    { id: 'tokens', label: t('Token') },
-    { id: 'cost', label: t('Cost') },
+  const options: Array<{ value: Metric; label: string }> = [
+    { value: 'tokens', label: t('Token') },
+    { value: 'cost', label: t('Cost') },
   ];
   return (
-    <div className="flex rounded-md bg-muted p-0.5">
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => onChange(item.id)}
-          className={cn(
-            'rounded px-2 py-0.5 text-[11px] transition-colors pointer-coarse:min-w-[44px]',
-            value === item.id
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
+    <SettingsSegmented
+      aria-label={t('Metric')}
+      value={value}
+      onValueChange={onChange}
+      options={options}
+    />
   );
 }

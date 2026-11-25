@@ -16,8 +16,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
 import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
@@ -76,8 +76,13 @@ function ChatTypographySection() {
           onWeight={(weight) => commitWeight(role, weight)}
         />
       ))}
-      <div className="flex justify-end py-2">
-        <SettingsButton onClick={() => resetChatTypography()}>
+      <div className="flex justify-end px-4 py-2.5 max-sm:px-3">
+        <SettingsButton
+          onClick={() => {
+            resetChatTypography();
+            addToast({ type: 'info', title: t('Reset to defaults') });
+          }}
+        >
           {t('Reset to defaults')}
         </SettingsButton>
       </div>

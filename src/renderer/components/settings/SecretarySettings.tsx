@@ -229,7 +229,7 @@ function BlurRow({
   );
 }
 
-const DIVIDER = 'border-border border-b py-3';
+const DIVIDER = 'px-4 py-3 max-sm:px-3';
 
 function formatWhen(at: number | undefined, locale: string): string {
   if (!at) return '';
@@ -261,7 +261,11 @@ function PluginPicker({
   }, []);
   const enabled = plugins.filter((plugin) => plugin.state === 'enabled');
   if (enabled.length === 0)
-    return <p className="text-xs text-muted-foreground">{t('No plugins enabled')}</p>;
+    return (
+      <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
+        {t('No plugins enabled')}
+      </p>
+    );
   return (
     <div>
       {enabled.map((plugin) => (
@@ -327,9 +331,11 @@ function OwnSkills({ busy }: { busy: boolean }) {
     await load();
   };
 
-  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  if (error) return <p className="px-4 py-3 text-xs text-destructive max-sm:px-3">{error}</p>;
   if (skills.length === 0)
-    return <p className="text-xs text-muted-foreground">{t('No skills yet')}</p>;
+    return (
+      <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">{t('No skills yet')}</p>
+    );
   return (
     <div>
       {skills.map((skill) => (
@@ -387,9 +393,11 @@ function OwnTools({ busy }: { busy: boolean }) {
     await load();
   };
 
-  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  if (error) return <p className="px-4 py-3 text-xs text-destructive max-sm:px-3">{error}</p>;
   if (tools.length === 0)
-    return <p className="text-xs text-muted-foreground">{t('No tools yet')}</p>;
+    return (
+      <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">{t('No tools yet')}</p>
+    );
   return (
     <div>
       {tools.map((tool) => (
@@ -444,7 +452,7 @@ function TakeoverScopePicker({
   );
   const selected = scope.mode === 'projects' ? scope.projectIds : [];
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 px-4 py-3 max-sm:px-3">
       <SaveChips
         enso="secretary-takeover-scope"
         value={scope.mode}
@@ -527,9 +535,11 @@ function Takeovers({ locale }: { locale: string }) {
 
   return (
     <>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="px-4 py-2.5 text-xs text-destructive max-sm:px-3">{error}</p> : null}
       {takeovers.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t('No sessions handed over')}</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
+          {t('No sessions handed over')}
+        </p>
       ) : (
         <div>
           {takeovers.map((entry) => (
@@ -588,7 +598,7 @@ function Untracked() {
 
   if (entries.length === 0 && !error) return null;
   return (
-    <div className="mt-3 space-y-2" data-enso="secretary-untracked">
+    <div className="space-y-2 px-4 py-3 max-sm:px-3" data-enso="secretary-untracked">
       <p className="text-xs text-muted-foreground">
         {t(
           'Not tracked: the takeover scope no longer covers these sessions. Removing one lets the scope cover it again.'
@@ -631,11 +641,11 @@ function GlobalSkillPicker({
   const visible = skills.filter((skill) => matchesFilter(query, [skill.name, skill.source]));
   return (
     <div>
-      <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+      <p className="px-4 pt-3 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase max-sm:px-3">
         {t('Global skills')}
       </p>
       {skills.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t('No skills yet')}</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">{t('No skills yet')}</p>
       ) : (
         <>
           <ListFilterBar
@@ -644,7 +654,7 @@ function GlobalSkillPicker({
             placeholder={t('Filter skills...')}
           />
           {visible.length === 0 && (
-            <p className="py-3 text-xs text-muted-foreground">{t('No results')}</p>
+            <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">{t('No results')}</p>
           )}
           {visible.map((skill) => {
             const checked = skillIds.includes(skill.id);
@@ -913,25 +923,27 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
             />
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
-        <SecretaryProfileForm
-          key={profile?.updatedAt ?? 'new'}
-          initialDraft={
-            profile ? draftFromProfile(profile, defaultName) : defaultDraft(defaultName)
-          }
-          submitLabel={t('Save')}
-          busy={busy}
-          hideMaxRunning
-          onSubmit={({ maxRunningDispatches: _, ...draft }) => {
-            void save(draft).then((ok) => {
-              if (ok) markProfileSaved();
-            });
-          }}
-        />
-        {profileSaved}
+        <div className="px-4 py-3 max-sm:px-3">
+          <SecretaryProfileForm
+            key={profile?.updatedAt ?? 'new'}
+            initialDraft={
+              profile ? draftFromProfile(profile, defaultName) : defaultDraft(defaultName)
+            }
+            submitLabel={t('Save')}
+            busy={busy}
+            hideMaxRunning
+            onSubmit={({ maxRunningDispatches: _, ...draft }) => {
+              void save(draft).then((ok) => {
+                if (ok) markProfileSaved();
+              });
+            }}
+          />
+          {profileSaved}
+        </div>
       </SettingsSection>
 
       <SettingsSection
@@ -942,18 +954,20 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
         rowId="secretary.dispatchLimit"
       >
         {profile ? (
-          <SaveChips
-            enso="secretary-dispatch-limit"
-            value={String(profile.maxRunningDispatches)}
-            options={DISPATCH_LIMIT_OPTIONS}
-            onPick={async (value) => {
-              const maxRunningDispatches = Number(value);
-              if (busy || maxRunningDispatches === profile.maxRunningDispatches) return false;
-              return save({ maxRunningDispatches });
-            }}
-          />
+          <div className="px-4 py-3 max-sm:px-3">
+            <SaveChips
+              enso="secretary-dispatch-limit"
+              value={String(profile.maxRunningDispatches)}
+              options={DISPATCH_LIMIT_OPTIONS}
+              onPick={async (value) => {
+                const maxRunningDispatches = Number(value);
+                if (busy || maxRunningDispatches === profile.maxRunningDispatches) return false;
+                return save({ maxRunningDispatches });
+              }}
+            />
+          </div>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
@@ -973,7 +987,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
             onChange={(pluginIds) => void save({ pluginIds })}
           />
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
@@ -989,7 +1003,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
         {profile ? (
           <div className="space-y-3">
             <div>
-              <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              <p className="px-4 pt-3 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase max-sm:px-3">
                 {t('Secretary skills')}
               </p>
               <OwnSkills busy={busy} />
@@ -1000,7 +1014,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
             />
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
@@ -1016,7 +1030,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
         {profile ? (
           <OwnTools busy={busy} />
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
@@ -1106,7 +1120,7 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
             onChange={(takeoverScope) => save({ takeoverScope })}
           />
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
             {t('The secretary has not been set up yet.')}
           </p>
         )}
@@ -1125,7 +1139,9 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
 
       <SettingsSection title={t('Scheduled tasks')} rowId="secretary.schedules">
         {schedules.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t('Nothing scheduled')}</p>
+          <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
+            {t('Nothing scheduled')}
+          </p>
         ) : (
           <div>
             {schedules.map((schedule) => (

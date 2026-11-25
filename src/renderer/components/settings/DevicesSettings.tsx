@@ -130,9 +130,9 @@ function AllowConnectionsSection() {
       }
     >
       {status && !status.secureStorage && <SecureStorageNote />}
-      {error && <p className="border-border border-b py-3 text-xs text-destructive">{error}</p>}
+      {error && <p className="px-4 py-3 text-xs text-destructive max-sm:px-3">{error}</p>}
       {status?.pairing && (
-        <div className="border-border border-b py-4 text-center">
+        <div className="px-4 py-4 text-center max-sm:px-3">
           {qrDataUrl ? (
             <img src={qrDataUrl} alt={t('Pairing QR code')} className="mx-auto h-52 w-52" />
           ) : (
@@ -172,9 +172,9 @@ function AllowConnectionsSection() {
           )}
         </div>
       )}
-      <p className="border-border border-b py-3 font-medium text-[13px]">{t('Paired devices')}</p>
+      <p className="px-4 py-3 font-medium text-[13px] max-sm:px-3">{t('Paired devices')}</p>
       {devices.length === 0 ? (
-        <div className="border-border border-b py-8 text-center">
+        <div className="px-4 py-8 text-center max-sm:px-3">
           <Smartphone className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 font-medium text-sm">{t('No paired devices')}</p>
           <p className="mt-1 text-muted-foreground text-xs">
@@ -191,7 +191,7 @@ function AllowConnectionsSection() {
 function SecureStorageNote() {
   const { t } = useI18n();
   return (
-    <p className="flex items-start gap-2 border-border border-b py-3 text-xs text-muted-foreground">
+    <p className="flex items-start gap-2 px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
       <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
       <span>
         {t('Secure storage is unavailable on this system, so pairing keys are stored unencrypted.')}
@@ -226,9 +226,9 @@ function ConnectToNodesSection() {
       }
     >
       {!secureStorage && <SecureStorageNote />}
-      <p className="border-border border-b py-3 font-medium text-[13px]">{t('Connected nodes')}</p>
+      <p className="px-4 py-3 font-medium text-[13px] max-sm:px-3">{t('Connected nodes')}</p>
       {nodes.length === 0 ? (
-        <div className="border-border border-b py-8 text-center">
+        <div className="px-4 py-8 text-center max-sm:px-3">
           <Monitor className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 font-medium text-sm">{t('No connected nodes')}</p>
           <p className="mt-1 text-muted-foreground text-xs">
@@ -276,7 +276,7 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
   };
 
   return (
-    <div className="group flex flex-wrap items-center justify-between gap-3 border-border border-b py-2">
+    <div className="group flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 max-sm:px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span
           className={cn(
@@ -371,7 +371,7 @@ function NodeRow({ node, onChanged }: { node: RemoteNodeStatus; onChanged: () =>
   };
 
   return (
-    <div className="group flex flex-wrap items-center justify-between gap-3 border-border border-b py-2">
+    <div className="group flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 max-sm:px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <NodeDot node={node} />
         {draft === null ? (

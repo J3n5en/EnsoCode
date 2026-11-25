@@ -258,7 +258,7 @@ function Note({
     <p
       data-settings-row={rowId}
       className={cn(
-        'border-border border-b py-2 text-[12px] leading-[18px]',
+        'px-4 py-2.5 text-[12px] leading-[18px] max-sm:px-3',
         tone === 'danger' ? 'text-destructive-text' : 'text-muted-foreground'
       )}
     >
@@ -1051,7 +1051,7 @@ export function MemorySettings({
                 })}
               </Note>
             )}
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-border border-b py-3 sm:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 px-4 py-3 sm:grid-cols-4 max-sm:px-3">
               <Stat label={t('Memories')} value={String(stats.total)} />
               <Stat label={t('Crystals')} value={String(stats.crystals)} />
               <Stat label={t('Entities')} value={String(stats.entities)} />
@@ -1327,7 +1327,7 @@ export function MemorySettings({
         ) : (
           <ul>
             {(allJobs ? jobRows : jobRows.slice(0, VISIBLE_JOBS)).map((row) => (
-              <li key={row.key} className="space-y-1 border-border border-b py-2">
+              <li key={row.key} className="space-y-1 px-4 py-2.5 max-sm:px-3">
                 <div className="flex items-center gap-2">
                   <Badge variant={row.state === 'failed' ? 'destructive' : 'secondary'}>
                     {t(JOB_KIND_LABELS[row.kind])}

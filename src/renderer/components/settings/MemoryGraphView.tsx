@@ -121,7 +121,7 @@ export function MemoryGraphView({
 
   if (graph.nodes.length === 0) {
     return (
-      <p className="border-border border-b py-6 text-[13px] text-muted-foreground">
+      <p className="py-6 text-[13px] text-muted-foreground">
         {loading
           ? t('Loading…')
           : t('No entities yet. Turn on entity extraction and store a few memories first.')}

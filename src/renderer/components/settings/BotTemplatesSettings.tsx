@@ -48,6 +48,7 @@ import {
   TeamRefField,
 } from '@/components/bots/BotFields';
 import { teamFileErrorText } from '@/components/bots/botText';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -79,7 +80,7 @@ import {
   useMemberTemplates,
   useTeamTemplates,
 } from '@/stores/bots/templateLibrary';
-import { SettingsButton, SettingsPage } from './kit';
+import { SettingsButton, SettingsPage, SettingsSection } from './kit';
 
 type Kind = 'members' | 'teams';
 type Editing<T> = { id?: string; data: T } | null;
@@ -135,6 +136,12 @@ export function BotTemplatesSettings() {
   const teams = useTeamTemplates(true);
   const [editingMember, setEditingMember] = useState<Editing<MemberTemplateData>>(null);
   const [editingTeam, setEditingTeam] = useState<Editing<TeamTemplateData>>(null);
+  const [pendingAction, setPendingAction] = useState<{
+    mode: 'delete' | 'restore';
+    kind: Kind;
+    id: string;
+    name: string;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const edit = async <K extends Kind>(
@@ -185,6 +192,7 @@ export function BotTemplatesSettings() {
   const actions = <T,>(
     kind: Kind,
     item: ResolvedTemplate<T>,
+    name: string,
     open: (editing: Editing<T>) => void
   ) => (
     <>
@@ -207,7 +215,7 @@ export function BotTemplatesSettings() {
       {item.modified && (
         <IconAction
           label={t('Restore default')}
-          onClick={() => void editSection(kind, (section) => removeTemplate(section, item.id))}
+          onClick={() => setPendingAction({ mode: 'restore', kind, id: item.id, name })}
         >
           <RotateCcw />
         </IconAction>
@@ -215,7 +223,7 @@ export function BotTemplatesSettings() {
       {item.source === 'custom' && (
         <IconAction
           label={t('Delete')}
-          onClick={() => void editSection(kind, (section) => removeTemplate(section, item.id))}
+          onClick={() => setPendingAction({ mode: 'delete', kind, id: item.id, name })}
         >
           <Trash2 />
         </IconAction>
@@ -236,26 +244,28 @@ export function BotTemplatesSettings() {
           <TabsTab value="members">{t('Member templates')}</TabsTab>
           <TabsTab value="teams">{t('Team templates')}</TabsTab>
         </TabsList>
-        <TabsPanel value="members" className="space-y-2 pt-3">
+        <TabsPanel value="members" className="space-y-3 pt-3">
           <SettingsButton onClick={() => setEditingMember({ data: blankMember() })}>
             <Plus />
             {t('New member template')}
           </SettingsButton>
-          {members.map((item) => (
-            <TemplateRow
-              key={item.id}
-              item={item}
-              avatar={
-                <BotAvatar bot={{ name: item.data.name, avatar: { color: item.data.color } }} />
-              }
-              title={item.data.name}
-              subtitle={item.data.title}
-              summary={item.data.summary}
-              actions={actions('members', item, setEditingMember)}
-            />
-          ))}
+          <SettingsSection>
+            {members.map((item) => (
+              <TemplateRow
+                key={item.id}
+                item={item}
+                avatar={
+                  <BotAvatar bot={{ name: item.data.name, avatar: { color: item.data.color } }} />
+                }
+                title={item.data.name}
+                subtitle={item.data.title}
+                summary={item.data.summary}
+                actions={actions('members', item, item.data.name, setEditingMember)}
+              />
+            ))}
+          </SettingsSection>
         </TabsPanel>
-        <TabsPanel value="teams" className="space-y-2 pt-3">
+        <TabsPanel value="teams" className="space-y-3 pt-3">
           <div className="flex gap-2">
             <SettingsButton onClick={() => setEditingTeam({ data: blankTeam() })}>
               <Plus />
@@ -277,44 +287,46 @@ export function BotTemplatesSettings() {
               }}
             />
           </div>
-          {teams.map((item) => (
-            <TemplateRow
-              key={item.id}
-              item={item}
-              avatar={
-                <div className="-space-x-1.5 flex shrink-0">
-                  {item.data.members.slice(0, 4).map((member) => (
-                    <BotAvatar
-                      key={member.key}
-                      size="sm"
-                      bot={{ name: member.name, avatar: { color: member.color } }}
-                    />
-                  ))}
-                </div>
-              }
-              title={item.data.title}
-              subtitle={t('{{n}} members', { n: item.data.members.length })}
-              summary={item.data.summary}
-              actions={
-                <>
-                  <IconAction
-                    label={t('Export JSON')}
-                    onClick={() =>
-                      downloadJson(`${item.data.title || 'team'}.team.json`, {
-                        format: TEAM_FILE_FORMAT,
-                        version: TEAM_FILE_VERSION,
-                        exportedAt: new Date().toISOString(),
-                        team: teamSpecOfTemplate(item.data),
-                      })
-                    }
-                  >
-                    <Download />
-                  </IconAction>
-                  {actions('teams', item, setEditingTeam)}
-                </>
-              }
-            />
-          ))}
+          <SettingsSection>
+            {teams.map((item) => (
+              <TemplateRow
+                key={item.id}
+                item={item}
+                avatar={
+                  <div className="-space-x-1.5 flex shrink-0">
+                    {item.data.members.slice(0, 4).map((member) => (
+                      <BotAvatar
+                        key={member.key}
+                        size="sm"
+                        bot={{ name: member.name, avatar: { color: member.color } }}
+                      />
+                    ))}
+                  </div>
+                }
+                title={item.data.title}
+                subtitle={t('{{n}} members', { n: item.data.members.length })}
+                summary={item.data.summary}
+                actions={
+                  <>
+                    <IconAction
+                      label={t('Export JSON')}
+                      onClick={() =>
+                        downloadJson(`${item.data.title || 'team'}.team.json`, {
+                          format: TEAM_FILE_FORMAT,
+                          version: TEAM_FILE_VERSION,
+                          exportedAt: new Date().toISOString(),
+                          team: teamSpecOfTemplate(item.data),
+                        })
+                      }
+                    >
+                      <Download />
+                    </IconAction>
+                    {actions('teams', item, item.data.title, setEditingTeam)}
+                  </>
+                }
+              />
+            ))}
+          </SettingsSection>
         </TabsPanel>
       </Tabs>
       {editingMember && (
@@ -335,6 +347,29 @@ export function BotTemplatesSettings() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingAction(null);
+        }}
+        title={
+          pendingAction?.mode === 'restore' ? t('Restore default template?') : t('Delete template?')
+        }
+        description={
+          pendingAction
+            ? pendingAction.mode === 'restore'
+              ? t('This discards customizations to "{{name}}".', { name: pendingAction.name })
+              : t('This permanently deletes "{{name}}".', { name: pendingAction.name })
+            : undefined
+        }
+        confirmLabel={pendingAction?.mode === 'restore' ? t('Restore default') : t('Delete')}
+        onConfirm={() => {
+          if (!pendingAction) return;
+          void editSection(pendingAction.kind, (section) =>
+            removeTemplate(section, pendingAction.id)
+          );
+        }}
+      />
     </SettingsPage>
   );
 }
@@ -383,7 +418,7 @@ function TemplateRow<T>({
   const { t } = useI18n();
   return (
     <div
-      className="flex flex-wrap items-center gap-3 border-border border-b py-3"
+      className="flex flex-wrap items-center gap-3 px-4 py-3 max-sm:px-3"
       data-template-id={item.id}
     >
       <div className={cn('flex min-w-0 flex-1 items-center gap-3', item.hidden && 'opacity-50')}>
@@ -573,6 +608,9 @@ function TeamTemplateDialog({
   const { t } = useI18n();
   const [draft, setDraft] = useState(initial);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [pendingRemoveMember, setPendingRemoveMember] = useState<TeamTemplateMemberData | null>(
+    null
+  );
   const nameOf = (key: string) => draft.members.find((member) => member.key === key)?.name || key;
   const patch = (next: Partial<TeamTemplateData>) =>
     setDraft((current) => ({ ...current, ...next }));
@@ -675,7 +713,11 @@ function TeamTemplateDialog({
             const boss = member.key === draft.bossKey;
             const others = draft.members.filter((m) => m.key !== member.key).map((m) => m.key);
             return (
-              <div key={member.key} className="border-border border-b" data-member-key={member.key}>
+              <div
+                key={member.key}
+                className="border-b border-border/60 last:border-b-0"
+                data-member-key={member.key}
+              >
                 <div className="flex items-center gap-2 px-2.5 py-2">
                   <button
                     type="button"
@@ -703,7 +745,7 @@ function TeamTemplateDialog({
                   <IconAction
                     label={t('Remove')}
                     disabled={boss || draft.members.length <= 2}
-                    onClick={() => removeMember(member.key)}
+                    onClick={() => setPendingRemoveMember(member)}
                   >
                     <Trash2 />
                   </IconAction>
@@ -735,6 +777,25 @@ function TeamTemplateDialog({
           })}
         </div>
       </div>
+      <ConfirmDialog
+        open={pendingRemoveMember !== null}
+        zIndexLevel="nested"
+        onOpenChange={(open) => {
+          if (!open) setPendingRemoveMember(null);
+        }}
+        title={t('Remove member?')}
+        description={
+          pendingRemoveMember
+            ? t('Remove "{{name}}" from this team template?', {
+                name: pendingRemoveMember.name || t('Unnamed'),
+              })
+            : undefined
+        }
+        confirmLabel={t('Remove')}
+        onConfirm={() => {
+          if (pendingRemoveMember) removeMember(pendingRemoveMember.key);
+        }}
+      />
     </TemplateDialog>
   );
 }

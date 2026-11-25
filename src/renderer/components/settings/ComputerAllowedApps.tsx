@@ -32,7 +32,7 @@ export function ComputerAllowedApps() {
 
   return (
     <div data-settings-row="tools.computerApps">
-      <div className="border-border border-b py-3 pl-10">
+      <div className="px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7">
         <p className="font-medium text-[13px] leading-5">{t('Apps the AI may control')}</p>
         <p className="mt-px text-[12px] text-muted-foreground leading-[18px]">
           {t(
@@ -50,7 +50,7 @@ export function ComputerAllowedApps() {
         <SettingsSwitch checked={allowAll} onCheckedChange={setAllowAll} />
       </SettingsSubRow>
       {apps && apps.length === 0 ? (
-        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
+        <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
           {t('No apps are always allowed yet.')}
         </p>
       ) : null}

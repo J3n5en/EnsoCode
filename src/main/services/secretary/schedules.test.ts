@@ -141,6 +141,20 @@ describe('到点触发', () => {
     expect(nextRunAt(once())).toBe(at(10));
     expect(nextRunAt(cron({ lastFiredAt: at(10) }))).toBe(at(10, 0, 14));
   });
+
+  it('到点的更新带上创建它的会话', () => {
+    const fired = fireDue([once({ secretaryConversationId: 'sec-b' })], at(10));
+    expect(fired.updates[0]).toMatchObject({
+      kind: 'schedule',
+      scheduleId: 's1',
+      secretaryConversationId: 'sec-b',
+    });
+  });
+
+  it('旧定时没有会话 id 时，更新也不凭空带上', () => {
+    const fired = fireDue([once()], at(10));
+    expect(fired.updates[0].secretaryConversationId).toBeUndefined();
+  });
 });
 
 describe('schedule_add', () => {
@@ -218,6 +232,29 @@ describe('schedule_add', () => {
     expect(h.state.published).toBe(1);
     await handlers(h).schedule_add({ name: 'n', prompt: 'p', cron: '0 0 30 2 *' }, ctx);
     expect(h.state.published).toBe(1);
+  });
+
+  it('把当前会话 id 记在定时上，到点的更新带同一个 id', async () => {
+    const h = harness([], at(9));
+    const added = await handlers(h).schedule_add(
+      { name: '喝水', prompt: '提醒我喝水', at: iso(at(10)) },
+      { secretaryConversationId: 'sec-b' }
+    );
+    expect(added.ok).toBe(true);
+    expect(h.state.schedules[0]).toMatchObject({ secretaryConversationId: 'sec-b' });
+    const fired = fireDue(h.state.schedules, at(10));
+    expect(fired.updates[0]).toMatchObject({ secretaryConversationId: 'sec-b' });
+  });
+
+  it('没有会话 id 时不写入 secretaryConversationId', async () => {
+    const h = harness([], at(9));
+    const added = await handlers(h).schedule_add(
+      { name: '喝水', prompt: '提醒我喝水', at: iso(at(10)) },
+      { secretaryConversationId: null }
+    );
+    expect(added.ok).toBe(true);
+    expect(h.state.schedules[0].secretaryConversationId).toBeUndefined();
+    expect(fireDue(h.state.schedules, at(10)).updates[0].secretaryConversationId).toBeUndefined();
   });
 });
 
@@ -328,5 +365,21 @@ describe('系统定时', () => {
     const h = harness([], at(9));
     syncSystemSchedules(h.ports, profile({ dailyBriefAt: '08:30' }), []);
     expect(h.state.published).toBe(1);
+  });
+
+  it('系统定时不带会话，重复同步不会因为该字段被判成变化', () => {
+    const h = harness([once({ secretaryConversationId: 'sec-b' })], at(9));
+    syncSystemSchedules(h.ports, profile({ dailyBriefAt: '08:30' }), [todo({ dueAt: at(18) })]);
+    const system = h.state.schedules.filter((schedule) => schedule.system);
+    expect(system.length).toBeGreaterThan(0);
+    expect(system.every((schedule) => schedule.secretaryConversationId === undefined)).toBe(true);
+    expect(
+      h.state.schedules.find((schedule) => schedule.id === 's1')?.secretaryConversationId
+    ).toBe('sec-b');
+    const saves = h.state.saves;
+    const published = h.state.published;
+    syncSystemSchedules(h.ports, profile({ dailyBriefAt: '08:30' }), [todo({ dueAt: at(18) })]);
+    expect(h.state.saves).toBe(saves);
+    expect(h.state.published).toBe(published);
   });
 });

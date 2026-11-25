@@ -1,12 +1,21 @@
+import type { SkillEntry } from '@shared/types';
 import { HardDriveDownload, Sparkles, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
+import {
+  SettingsButton,
+  SettingsEmptyState,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSwitch,
+} from './kit';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
@@ -28,6 +37,7 @@ export function SkillsSettings() {
   const loadHarnessAssets = useSettingsStore((state) => state.loadHarnessAssets);
   const setLoadHarnessAssets = useSettingsStore((state) => state.setLoadHarnessAssets);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [pendingRemove, setPendingRemove] = React.useState<SkillEntry | null>(null);
   const [query, setQuery] = React.useState('');
   const visible = skills.filter((skill) =>
     matchesFilter(query, [skill.name, skill.source, skill.description, skill.path])
@@ -97,13 +107,17 @@ export function SkillsSettings() {
 
       <SettingsSection>
         {skills.length === 0 ? (
-          <div className="border-border border-b py-8 text-center">
-            <Sparkles className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 font-medium text-sm">{t('No skills yet')}</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t('Import skills from Claude Code, Codex or Cursor to get started')}
-            </p>
-          </div>
+          <SettingsEmptyState
+            icon={Sparkles}
+            title={t('No skills yet')}
+            description={t('Import skills from Claude Code, Codex or Cursor to get started')}
+            actions={
+              <SettingsButton variant="default" onClick={() => setImportOpen(true)}>
+                <HardDriveDownload className="h-4 w-4" />
+                {t('Import from local apps')}
+              </SettingsButton>
+            }
+          />
         ) : (
           <>
             <ListFilterBar
@@ -119,9 +133,15 @@ export function SkillsSettings() {
               actionDisabled={selection.selectedIds.length === 0}
             />
             {visible.length === 0 ? (
-              <p className="border-border border-b py-6 text-center text-muted-foreground text-xs">
-                {t('No results')}
-              </p>
+              <SettingsEmptyState
+                compact
+                title={t('No results')}
+                actions={
+                  <SettingsButton variant="ghost" size="xs" onClick={() => setQuery('')}>
+                    {t('Clear filter')}
+                  </SettingsButton>
+                }
+              />
             ) : (
               visible.map((skill) => (
                 <SettingsRow
@@ -162,7 +182,7 @@ export function SkillsSettings() {
                     size="icon"
                     className="size-7 text-muted-foreground hover:text-destructive"
                     aria-label={t('Delete')}
-                    onClick={() => removeSkill(skill.id)}
+                    onClick={() => setPendingRemove(skill)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -174,6 +194,22 @@ export function SkillsSettings() {
       </SettingsSection>
 
       <LocalAssetImportDialog kind="skill" open={importOpen} onOpenChange={setImportOpen} />
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+        title={t('Delete skill?')}
+        description={
+          pendingRemove
+            ? t('This removes "{{name}}" from your skills list.', { name: pendingRemove.name })
+            : undefined
+        }
+        confirmLabel={t('Delete')}
+        onConfirm={() => {
+          if (pendingRemove) removeSkill(pendingRemove.id);
+        }}
+      />
     </SettingsPage>
   );
 }

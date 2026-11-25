@@ -64,19 +64,6 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "appearance.background-image",
   },
   {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "backgroundImageEnabled": false,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": "appearance.background-image",
-  },
-  {
     "current": {
       "chatTypography": {
         "body": {
@@ -537,6 +524,19 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       {
         "api": [],
         "store": {
+          "backgroundImageEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "appearance.enable-custom-background",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
           "expandLiveEdits": false,
         },
       },
@@ -586,6 +586,17 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     ],
     "kind": "switch",
     "row": "appearance.headerSessionTabs",
+  },
+  {
+    "current": {
+      "navRailSide": "left",
+    },
+    "effects": [
+      "{"store":{"navRailSide":"off"},"api":[]}",
+      "{"store":{"navRailSide":"right"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "appearance.navRailSide",
   },
   {
     "current": "false",
@@ -654,6 +665,18 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     ],
     "kind": "choice",
     "row": "appearance.source-type",
+  },
+  {
+    "current": {
+      "theme": "system",
+    },
+    "effects": [
+      "{"store":{"theme":"dark"},"api":[]}",
+      "{"store":{"theme":"light"},"api":[]}",
+      "{"store":{"theme":"sync-terminal"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "appearance.theme",
   },
   {
     "current": "false",
@@ -1146,17 +1169,6 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "terminal.bold-font-weight",
   },
   {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "checkbox",
-    "row": "terminal.color-scheme",
-  },
-  {
     "current": "Dracula",
     "effects": [],
     "kind": "input",
@@ -1216,19 +1228,6 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     ],
     "kind": "switch",
     "row": "appearance.autoCollapseTurns",
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "backgroundImageEnabled": true,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": "appearance.background-image",
   },
   {
     "current": {
@@ -1686,6 +1685,19 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     "row": "appearance.compactReadOnlyTools",
   },
   {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "backgroundImageEnabled": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "appearance.enable-custom-background",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -1741,6 +1753,17 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     "row": "appearance.headerSessionTabs",
   },
   {
+    "current": {
+      "navRailSide": "left",
+    },
+    "effects": [
+      "{"store":{"navRailSide":"off"},"api":[]}",
+      "{"store":{"navRailSide":"right"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "appearance.navRailSide",
+  },
+  {
     "current": "false",
     "effects": [
       {
@@ -1784,6 +1807,18 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     ],
     "kind": "switch",
     "row": "appearance.quoteSelectionButton",
+  },
+  {
+    "current": {
+      "theme": "system",
+    },
+    "effects": [
+      "{"store":{"theme":"dark"},"api":[]}",
+      "{"store":{"theme":"light"},"api":[]}",
+      "{"store":{"theme":"sync-terminal"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "appearance.theme",
   },
   {
     "current": "false",
@@ -2056,17 +2091,6 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     "row": "terminal.bold-font-weight",
   },
   {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "checkbox",
-    "row": "terminal.color-scheme",
-  },
-  {
     "current": "Dracula",
     "effects": [],
     "kind": "input",
@@ -2121,6 +2145,7 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "appearance.collapseCompletedActivity",
   "appearance.collapseLiveActivity",
   "appearance.compactReadOnlyTools",
+  "appearance.enable-custom-background",
   "appearance.expandLiveEdits",
   "appearance.expandLiveReasoning",
   "appearance.fileOpening",
@@ -2146,7 +2171,10 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "general.compactReserveTokens",
   "general.configSync",
   "general.current-version",
+  "general.ensoCommand",
+  "general.finderQuickAction",
   "general.generationStallTimeout",
+  "general.integrations",
   "general.language",
   "general.longCacheRetention",
   "general.network",
@@ -2160,6 +2188,7 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "general.updates",
   "general.windowsLocalShell",
   "general.worktreeRoot",
+  "logs.devTools",
   "privacy.enabled",
   "privacy.records",
   "privacy.root",

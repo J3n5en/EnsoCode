@@ -118,7 +118,7 @@ export function GitCommitSettings() {
           }}
         />
       </SettingsRow>
-      <div className="space-y-2 border-border border-b py-3">
+      <div className="space-y-2 px-4 py-3 max-sm:px-3">
         <p className="font-medium text-[13px] leading-5">{t('Prompt')}</p>
         <Textarea
           size="sm"

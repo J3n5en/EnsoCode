@@ -136,13 +136,13 @@ describe('KeybindingsSettings', () => {
   });
 
   it('插件命令单独一组，默认键被内置占用时标出占用方', async () => {
-    expect(container.textContent).not.toContain('插件命令');
+    expect(container.textContent).not.toContain('Plugin commands');
     harness.keybindings = { 'toggle-sidebar': 'alt+q' };
     harness.commands = [
       { pluginId: 'p', pluginName: 'Demo plugin', id: 'run', title: 'Run demo', key: 'alt+q' },
     ];
     await remount();
-    expect(container.textContent).toContain('插件命令');
+    expect(container.textContent).toContain('Plugin commands');
     expect(row('Run demo').textContent).toContain('Demo plugin');
     expect(row('Run demo').textContent).toContain('Already used by "Toggle sidebar"');
   });

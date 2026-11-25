@@ -220,7 +220,7 @@ function ProcessUsage({ metric }: { metric: Metric }) {
               {rows.map((p) => (
                 <div
                   key={p.pid}
-                  className="flex min-w-[28rem] items-center gap-3 border-border border-b py-2 text-sm"
+                  className="flex min-w-[28rem] items-center gap-3 px-4 py-2.5 text-sm max-sm:px-3"
                 >
                   <span className="w-20 shrink-0 truncate text-xs text-muted-foreground">
                     {roleLabel(p.role, t)}
@@ -423,9 +423,7 @@ function StorageUsage() {
                     format={formatBytes}
                   />
                 ) : (
-                  <div className="border-border border-b py-3 font-mono text-2xl font-semibold">
-                    {formatBytes(used)}
-                  </div>
+                  <div className="py-3 font-mono text-2xl font-semibold">{formatBytes(used)}</div>
                 )}
                 {roots.map((root) => (
                   <div key={root.id} className="flex items-center gap-2 px-1 text-xs">
@@ -439,7 +437,7 @@ function StorageUsage() {
               </div>
             );
           })}
-          <div>
+          <SettingsSection>
             {categories.map((category) => (
               <StorageRow
                 key={category.id}
@@ -456,7 +454,7 @@ function StorageUsage() {
                 }
               />
             ))}
-          </div>
+          </SettingsSection>
           <SessionStorage
             sessions={snapshot.sessions}
             busy={busy === 'sessions'}
@@ -528,7 +526,7 @@ function StorageRow({
   const { t } = useI18n();
   const [label, description] = CATEGORY_LABELS[category.id];
   return (
-    <div className="border-border border-b py-2">
+    <div className="px-4 py-2.5 max-sm:px-3">
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -660,8 +658,8 @@ function SessionStorage({
         );
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b py-2">
+    <SettingsSection>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 max-sm:px-3">
         <div className="shrink-0 text-sm font-medium">
           {t('Conversations')}
           <span className="ml-2 font-mono text-xs text-muted-foreground">
@@ -736,7 +734,7 @@ function SessionStorage({
         {visible.map((session) => (
           <div
             key={session.id}
-            className="group flex items-center gap-3 border-border border-b py-2 text-sm"
+            className="group flex items-center gap-3 px-4 py-2.5 text-sm max-sm:px-3"
           >
             <div className="min-w-0 flex-1">
               <div className="truncate" title={session.title}>
@@ -776,7 +774,7 @@ function SessionStorage({
         <button
           type="button"
           onClick={() => setShowAll(!showAll)}
-          className="w-full border-t px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          className="w-full px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
         >
           {showAll ? t('Show less') : t('Show all')}
         </button>
@@ -820,6 +818,6 @@ function SessionStorage({
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-    </div>
+    </SettingsSection>
   );
 }

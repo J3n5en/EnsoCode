@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,12 +18,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsRow, useSettingsRowControl } from './layout';
 
 export interface SettingsOption<T extends string> {
   value: T;
   label: string;
+  icon?: React.ElementType;
+  /** 行为测试与验收钩子 */
+  dataEnso?: string;
 }
 
 const WIDTH = { default: 'w-[220px]', wide: 'w-[280px]' } as const;
@@ -111,42 +115,110 @@ export function SettingsSegmented<T extends string>({
   'aria-label'?: string;
 }) {
   const a11y = useSettingsRowControl();
+  const trackRef = React.useRef<HTMLDivElement>(null);
+  const buttonRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+  const [indicator, setIndicator] = React.useState<{ left: number; width: number } | null>(null);
+  const [animate, setAnimate] = React.useState(false);
+  const hasMeasuredRef = React.useRef(false);
+  const prevValueRef = React.useRef(value);
+
+  const measure = React.useCallback(
+    (shouldAnimate: boolean) => {
+      const activeIndex = options.findIndex((option) => option.value === value);
+      const btn = activeIndex >= 0 ? buttonRefs.current[activeIndex] : null;
+      if (!btn || btn.offsetWidth === 0) {
+        setIndicator(null);
+        return;
+      }
+      const left = btn.offsetLeft;
+      const width = btn.offsetWidth;
+      setAnimate(shouldAnimate && hasMeasuredRef.current);
+      setIndicator({ left, width });
+      hasMeasuredRef.current = true;
+    },
+    [options, value]
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: options.length tracks dynamic option lists
+  React.useLayoutEffect(() => {
+    const changed = prevValueRef.current !== value;
+    prevValueRef.current = value;
+    measure(changed);
+  }, [value, options.length, measure]);
+
+  React.useEffect(() => {
+    const track = trackRef.current;
+    if (!track || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => measure(false));
+    ro.observe(track);
+    return () => ro.disconnect();
+  }, [measure]);
+
   const move = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (!step) return;
     event.preventDefault();
     const next = (index + step + options.length) % options.length;
     onValueChange(options[next].value);
-    const siblings = event.currentTarget.parentElement?.querySelectorAll('button');
-    (siblings?.[next] as HTMLButtonElement | undefined)?.focus();
+    buttonRefs.current[next]?.focus();
   };
   return (
     <div
       role="radiogroup"
       {...a11y}
       aria-label={ariaLabel}
-      className="flex h-(--settings-control-h) max-w-full items-center rounded-md bg-muted p-0.5"
+      className="inline-flex h-(--settings-control-h) max-w-full items-center rounded-[8px] bg-muted/85 p-0.5 dark:bg-muted/70"
     >
       {/* 触屏热区高 44px：滚动框会把它上下裁掉，用 padding 放出、负 margin 抵消，布局不变 */}
-      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto pointer-coarse:-my-[12px] pointer-coarse:py-[12px]">
+      <div
+        ref={trackRef}
+        className="relative flex min-w-0 items-center gap-0.5 overflow-x-auto pointer-coarse:-my-[12px] pointer-coarse:py-[12px]"
+      >
+        {indicator && (
+          <span
+            aria-hidden="true"
+            data-slot="segmented-indicator"
+            style={{
+              width: `${indicator.width}px`,
+              transform: `translateX(${indicator.left}px)`,
+            }}
+            className={cn(
+              'pointer-events-none absolute top-0 bottom-0 left-0 z-0 rounded-[6px]',
+              'bg-background shadow-[0_1px_2px_oklch(0_0_0/0.08),0_0_0_0.5px_var(--color-border)]',
+              'dark:bg-popover dark:shadow-[0_1px_3px_oklch(0_0_0/0.35),0_0_0_0.5px_var(--color-border)]',
+              'pointer-coarse:top-[12px] pointer-coarse:bottom-[12px]',
+              animate &&
+                'transition-[transform,width] duration-200 ease-[var(--ease-smooth-out)] motion-reduce:transition-none'
+            )}
+          />
+        )}
         {options.map((option, index) => {
           const on = option.value === value;
+          const Icon = option.icon;
           return (
             <button
               key={option.value}
+              ref={(el) => {
+                buttonRefs.current[index] = el;
+              }}
               type="button"
               role="radio"
+              data-enso={option.dataEnso}
               aria-checked={on}
               tabIndex={on ? 0 : -1}
               onClick={() => onValueChange(option.value)}
               onKeyDown={(event) => move(event, index)}
               className={cn(
-                'h-6 shrink-0 whitespace-nowrap rounded-[4px] px-2.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-w-[44px]',
+                'relative z-10 inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] px-2.5 text-[12px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-w-[44px]',
                 on
-                  ? 'bg-background text-foreground shadow-xs ring-1 ring-border'
+                  ? cn(
+                      'font-medium text-foreground',
+                      !indicator && 'bg-background shadow-xs ring-1 ring-border'
+                    )
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
+              {Icon && <Icon className="size-3.5 shrink-0" />}
               {option.label}
             </button>
           );
@@ -222,18 +294,27 @@ export function SettingsSearch({
   value: string;
   onValueChange: (value: string) => void;
   placeholder: string;
-  inputRef?: React.Ref<HTMLInputElement>;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   /** 有命中时，向下把焦点交给第一条结果 */
   onArrowDown?: () => void;
 }) {
+  const { t } = useI18n();
+  const localRef = React.useRef<HTMLInputElement>(null);
+  const setRefs = React.useCallback(
+    (node: HTMLInputElement | null) => {
+      localRef.current = node;
+      if (inputRef) inputRef.current = node;
+    },
+    [inputRef]
+  );
   return (
     <InputGroup data-size="sm" className="max-md:[&_input]:h-10 max-md:[&_input]:text-base">
       <InputGroupAddon>
         <Search />
       </InputGroupAddon>
       <InputGroupInput
+        ref={setRefs}
         size="sm"
-        ref={inputRef}
         value={value}
         placeholder={placeholder}
         aria-label={placeholder}
@@ -250,6 +331,22 @@ export function SettingsSearch({
           onValueChange('');
         }}
       />
+      {value.length > 0 && (
+        <InputGroupAddon align="inline-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('Clear search')}
+            onClick={() => {
+              onValueChange('');
+              localRef.current?.focus();
+            }}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </InputGroupAddon>
+      )}
     </InputGroup>
   );
 }

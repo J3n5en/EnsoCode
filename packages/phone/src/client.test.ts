@@ -512,6 +512,30 @@ describe('PairClient 缓存与续传', () => {
     expect(client.getSession('fresh')?.messages.get(0)).toEqual(text('first turn'));
   });
 
+  it('空 session-sync 给出空视图并结束 syncing，时间线不再停在读取历史', async () => {
+    const socket = await start();
+    client.subscribe('empty');
+    await settle();
+    expect(events.onSync).toHaveBeenLastCalledWith('syncing');
+    expect(client.getSession('empty')).toBeUndefined();
+    socket.receive({
+      type: 'session-sync',
+      sessionId: 'empty',
+      requestId: subscription(socket).sync?.requestId,
+      mode: 'snapshot',
+      cursor: { epoch: 'empty-epoch', seq: 0 },
+      snapshot: {
+        type: 'snapshot',
+        sessions: [{ sessionId: 'empty', baseIndex: 0, messages: [] }],
+      },
+    });
+    await settle();
+    expect(events.onSync).toHaveBeenLastCalledWith('synced');
+    const view = client.getSession('empty');
+    expect(view).toBeDefined();
+    expect(view?.messages.size).toBe(0);
+  });
+
   it('新建会话收到带 cursor 的事件时升级为同步协议，而不是空转重订阅', async () => {
     const socket = await start();
     client.subscribe('fresh', { fresh: true });

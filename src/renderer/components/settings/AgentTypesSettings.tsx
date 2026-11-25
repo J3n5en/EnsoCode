@@ -7,6 +7,7 @@ import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types/llm';
 import { findVirtualModel } from '@shared/virtualModels';
 import { AlertCircle, Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { MODEL_PICKER_DIALOG_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -122,6 +123,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
   const [editing, setEditing] = React.useState<
     AgentTypeEntry | 'new' | { defaults: Omit<AgentTypeEntry, 'id'> } | null
   >(null);
+  const [pendingRemove, setPendingRemove] = React.useState<AgentTypeEntry | null>(null);
   // 同名自定义覆盖内置：被覆盖的内置行隐藏（与 registry / 编码工具路径同口径），
   // 否则设置页会出现两个同名行，且内置行的开关看似有效实则已被顶替。
   const overriddenNames = React.useMemo(
@@ -131,104 +133,102 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
 
   return (
     <>
-      <ul>
-        <li className="flex flex-wrap items-center gap-2 border-border border-b py-2">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3">
+        <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+            general
+            <Badge variant="secondary">{t('Built-in')}</Badge>
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {t('Follows the conversation model, full toolset')}
+          </p>
+        </div>
+      </div>
+
+      {BUILTIN_AGENT_TYPES.filter((type) => !overriddenNames.has(type.name)).map((type) => (
+        <div key={type.name} className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-              general
+              {type.name}
               <Badge variant="secondary">{t('Built-in')}</Badge>
+              {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
             </p>
-            <p className="text-muted-foreground text-xs">
-              {t('Follows the conversation model, full toolset')}
+            <p className="truncate text-xs text-muted-foreground">{type.description}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground/80">
+              {hasSubagentModels
+                ? t('Picked by main agent')
+                : `${t('Picked by main agent')} (${t('Follows the conversation model')})`}
             </p>
           </div>
-        </li>
+          <Button variant="ghost" size="icon-sm" onClick={() => setEditing({ defaults: type })}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <SettingsSwitch
+            checked={!disabledBuiltins.includes(type.name)}
+            onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
+          />
+        </div>
+      ))}
 
-        {BUILTIN_AGENT_TYPES.filter((type) => !overriddenNames.has(type.name)).map((type) => (
-          <li
-            key={type.name}
-            className="flex flex-wrap items-center gap-2 border-border border-b py-2"
-          >
+      {agentTypes.map((entry) => {
+        const provider = providers.find((p) => p.id === entry.providerId);
+        const virtual = findVirtualModel(virtualModels, entry);
+        const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
+        const modeLabel =
+          mode === 'agent_pick'
+            ? hasSubagentModels
+              ? t('Picked by main agent')
+              : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
+            : mode === 'fixed'
+              ? virtual
+                ? virtual.name
+                : `${provider?.name ?? '?'} / ${entry.modelId}`
+              : t('Follows the conversation model');
+        const thinkingChoice = mode !== 'agent_pick' ? thinkingChoiceOf(entry) : '';
+
+        return (
+          <div key={entry.id} className="flex flex-wrap items-center gap-2 px-4 py-3 max-sm:px-3">
             <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-                {type.name}
-                <Badge variant="secondary">{t('Built-in')}</Badge>
-                {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
+                <span className="max-w-full truncate">{entry.name}</span>
+                {BUILTIN_AGENT_TYPES.some(
+                  (type) => type.name === entry.name.trim().toLowerCase()
+                ) && <Badge variant="secondary">{t('Overrides built-in')}</Badge>}
+                {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
               </p>
-              <p className="truncate text-xs text-muted-foreground">{type.description}</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground/80">
-                {hasSubagentModels
-                  ? t('Picked by main agent')
-                  : `${t('Picked by main agent')} (${t('Follows the conversation model')})`}
+              <p className="truncate text-xs text-muted-foreground">
+                {modeLabel}
+                {thinkingChoice
+                  ? ` · ${t('Thinking level')}: ${thinkingChoice === 'off' ? t('Off') : thinkingChoice}`
+                  : ''}
+                {entry.description ? ` · ${entry.description}` : ''}
               </p>
             </div>
-            <Button variant="ghost" size="icon-sm" onClick={() => setEditing({ defaults: type })}>
+            <Button variant="ghost" size="icon-sm" onClick={() => setEditing(entry)}>
               <Pencil className="h-4 w-4" />
             </Button>
-            <SettingsSwitch
-              checked={!disabledBuiltins.includes(type.name)}
-              onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
-            />
-          </li>
-        ))}
-
-        {agentTypes.map((entry) => {
-          const provider = providers.find((p) => p.id === entry.providerId);
-          const virtual = findVirtualModel(virtualModels, entry);
-          const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
-          const modeLabel =
-            mode === 'agent_pick'
-              ? hasSubagentModels
-                ? t('Picked by main agent')
-                : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
-              : mode === 'fixed'
-                ? virtual
-                  ? virtual.name
-                  : `${provider?.name ?? '?'} / ${entry.modelId}`
-                : t('Follows the conversation model');
-          const thinkingChoice = mode !== 'agent_pick' ? thinkingChoiceOf(entry) : '';
-
-          return (
-            <li
-              key={entry.id}
-              className="flex flex-wrap items-center gap-2 border-border border-b py-2"
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('Delete')}
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => setPendingRemove(entry)}
             >
-              <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-                  <span className="max-w-full truncate">{entry.name}</span>
-                  {BUILTIN_AGENT_TYPES.some(
-                    (type) => type.name === entry.name.trim().toLowerCase()
-                  ) && <Badge variant="secondary">{t('Overrides built-in')}</Badge>}
-                  {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {modeLabel}
-                  {thinkingChoice
-                    ? ` · ${t('Thinking level')}: ${thinkingChoice === 'off' ? t('Off') : thinkingChoice}`
-                    : ''}
-                  {entry.description ? ` · ${entry.description}` : ''}
-                </p>
-              </div>
-              <Button variant="ghost" size="icon-sm" onClick={() => setEditing(entry)}>
-                <Pencil className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon-sm" onClick={() => removeAgentType(entry.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </li>
-          );
-        })}
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        );
+      })}
 
-        <li className="border-border border-b py-2">
-          <SettingsButton onClick={() => setEditing('new')}>
-            <Plus className="h-4 w-4" />
-            {t('New agent type')}
-          </SettingsButton>
-        </li>
-      </ul>
+      <div className="px-4 py-3 max-sm:px-3">
+        <SettingsButton onClick={() => setEditing('new')}>
+          <Plus className="h-4 w-4" />
+          {t('New agent type')}
+        </SettingsButton>
+      </div>
       {editing && (
         <AgentTypeEditDialog
           entry={editing !== 'new' && 'id' in editing ? editing : null}
@@ -237,6 +237,24 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
           onClose={() => setEditing(null)}
         />
       )}
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+        title={t('Delete agent type?')}
+        description={
+          pendingRemove
+            ? t('This permanently deletes the "{{name}}" agent type.', {
+                name: pendingRemove.name,
+              })
+            : undefined
+        }
+        confirmLabel={t('Delete')}
+        onConfirm={() => {
+          if (pendingRemove) removeAgentType(pendingRemove.id);
+        }}
+      />
     </>
   );
 }
