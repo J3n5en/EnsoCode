@@ -1149,6 +1149,161 @@ describe('session_activity', () => {
   });
 });
 
+describe('session_stats', () => {
+  const baseStats = {
+    turns: 3,
+    steps: 7,
+    llmMs: 1000,
+    toolMs: 200,
+    inputTokens: 120_000,
+    outputTokens: 4_000,
+    cacheHitPercent: 80,
+    ttftAvgMs: 500,
+    tokensPerSecond: 40,
+    toolCalls: 12,
+    topTools: [
+      { name: 'bash', count: 7 },
+      { name: 'read', count: 5 },
+    ],
+    compactions: 2,
+    lastCompactionTokensBefore: 521_000,
+    lastActivityAt: Date.now() - 5_000,
+    recentEvents: 4,
+  };
+
+  function statsPorts(overrides: Partial<SecretaryReadPorts> = {}) {
+    return makePorts({
+      projects: () => [project()],
+      rows: () => ({ s1: { ...row(), createdAt: 1_000_000 } }),
+      conversations: () => [conversation('s1', 'p1')],
+      status: () => ({ state: 'running', pendingAsks: 1, pendingApprovals: 0 }),
+      historyStats: async () => baseStats,
+      meta: async () => ({
+        contextWindow: 1_000_000,
+        occupancy: {
+          buckets: {
+            system: 0,
+            instructions: 0,
+            skills: 0,
+            tools: 0,
+            conversation: 500_000,
+            compaction: 0,
+            projectMemory: 0,
+            reminders: 0,
+          },
+          used: 500_000,
+          estimated: false,
+          compactedMessageCount: 10,
+          compactionModelMismatch: false,
+          percent: 50,
+        },
+      }),
+      ...overrides,
+    });
+  }
+
+  it('组装耗时、轮次、工具分布、token、上下文水位与最近活跃度', async () => {
+    const handlers = createSecretaryReadHandlers(statsPorts());
+    const result = await run(handlers.session_stats, { conversationId: 's1' });
+    expect(result.state).toBe('running');
+    expect(result.pending).toEqual({ approvals: 0, asks: 1 });
+    expect(result.createdAt).toBe(1_000_000);
+    expect(typeof result.ageMs).toBe('number');
+    expect(result.turns).toBe(3);
+    expect(result.steps).toBe(7);
+    expect(result.toolCalls).toBe(12);
+    expect(result.topTools).toEqual([
+      { name: 'bash', count: 7 },
+      { name: 'read', count: 5 },
+    ]);
+    expect(result.compactions).toBe(2);
+    expect(result.lastCompactionTokensBefore).toBe(521_000);
+    expect(result.usage).toEqual({
+      inputTokens: 120_000,
+      outputTokens: 4_000,
+      cacheHitPercent: 80,
+    });
+    const activity = result.activity as Record<string, unknown>;
+    expect(activity.recentEventsLastMinute).toBe(4);
+    expect(typeof activity.idleForMs).toBe('number');
+    expect(result.context).toMatchObject({
+      source: 'live',
+      used: 500_000,
+      window: 1_000_000,
+      percent: 50,
+      estimated: false,
+    });
+    expect(result.missing).toBeUndefined();
+    // 统计是纯数字，不该带任何消息正文
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('会话行上的 goal 原样透出状态', async () => {
+    const handlers = createSecretaryReadHandlers(
+      statsPorts({
+        rows: () => ({
+          s1: { ...row(), createdAt: 1_000, goal: { text: '修完构建', status: 'active' } },
+        }),
+      })
+    );
+    const result = await run(handlers.session_stats, { conversationId: 's1' });
+    expect(result.goal).toEqual({ text: '修完构建', status: 'active' });
+  });
+
+  it('不在运行中的会话没有占用读数，missing 说明原因', async () => {
+    const handlers = createSecretaryReadHandlers(statsPorts({ meta: async () => undefined }));
+    const result = await run(handlers.session_stats, { conversationId: 's1' });
+    expect(result.context).toEqual({ source: 'unavailable' });
+    expect(result.missing).toEqual([expect.stringContaining('context')]);
+  });
+
+  it('占用缺窗口大小时 missing 说明水位百分比不可得', async () => {
+    const handlers = createSecretaryReadHandlers(
+      statsPorts({
+        meta: async () => ({
+          occupancy: {
+            buckets: {
+              system: 0,
+              instructions: 0,
+              skills: 0,
+              tools: 0,
+              conversation: 500_000,
+              compaction: 0,
+              projectMemory: 0,
+              reminders: 0,
+            },
+            used: 500_000,
+            estimated: true,
+            compactedMessageCount: 0,
+            compactionModelMismatch: false,
+          },
+        }),
+      })
+    );
+    const result = await run(handlers.session_stats, { conversationId: 's1' });
+    expect((result.context as Record<string, unknown>).window).toBeUndefined();
+    expect(result.missing).toEqual([expect.stringContaining('context.window')]);
+  });
+
+  it('历史不可读时统计整体缺省并在 missing 说明', async () => {
+    const handlers = createSecretaryReadHandlers(statsPorts({ historyStats: async () => null }));
+    const result = await run(handlers.session_stats, { conversationId: 's1' });
+    expect(result.turns).toBeUndefined();
+    expect(result.missing).toEqual([expect.stringContaining('usage')]);
+  });
+
+  it('未知会话与坏参数', async () => {
+    const handlers = createSecretaryReadHandlers(statsPorts());
+    const notFoundResult = await handlers.session_stats(
+      { conversationId: 'nope' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(notFoundResult).toEqual({ ok: false, error: 'not-found' });
+    const invalid = await handlers.session_stats({}, { secretaryConversationId: 'sec-1' });
+    expect(invalid.ok).toBe(false);
+  });
+});
+
 describe('repo_status', () => {
   const handlers = (repo: RepoStatusDeps = fakeRepo(), projects = [project()]) =>
     createSecretaryReadHandlers(makePorts({ projects: () => projects, repo }));

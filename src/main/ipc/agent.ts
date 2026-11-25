@@ -248,6 +248,10 @@ import {
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import { createFileMemo } from '../services/sessionHistoryCache';
 import {
+  projectSessionHistoryStats,
+  type SessionHistoryStats,
+} from '../services/sessionHistoryStats';
+import {
   displayMessages,
   findHistoryMessage,
   type HistoryProjectionOptions,
@@ -410,6 +414,13 @@ export function observedSubagentsRunning(sessionId: string): boolean {
 /** 主会话名下正在运行的子代理进度快照（秘书查询、看板、侧栏同源） */
 export function observedSubagentProgress(sessionId: string): AgentRunProgress[] {
   return agentService?.progress(sessionId) ?? [];
+}
+
+/** 会话最近一次 session-meta 的运行时读数（上下文占用、窗口、用量）；worker 退出或没观察到为 undefined */
+export function observedSessionMeta(
+  sessionId: string
+): ReturnType<typeof agentSessionIndex.sessionMeta> {
+  return agentSessionIndex.sessionMeta(sessionId);
 }
 
 /** 冷启动时该父会话是否有停在安全点、正在按 #418 自动续跑的子代理 Run */
@@ -1554,6 +1565,14 @@ export async function readSessionActivity(
     Math.max(1, Math.floor(Number.isFinite(limit) ? limit : ACTIVITY_LIMIT_DEFAULT))
   );
   return projectSessionActivity(await readFullSessionHistory(sessionFile), bounded);
+}
+
+/** 秘书 session_stats：对全量投影跑一次性统计（与 activity 共用同一份备忘解析结果） */
+export async function readSessionHistoryStats(
+  sessionFile: string | undefined
+): Promise<SessionHistoryStats | null> {
+  const messages = await readFullSessionHistory(sessionFile);
+  return messages.length === 0 ? null : projectSessionHistoryStats(messages);
 }
 
 /**
