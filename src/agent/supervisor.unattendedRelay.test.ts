@@ -117,7 +117,11 @@ function fakeSession(options: Record<string, unknown>) {
     messages: [],
     sessionFile: `/tmp/session-${mocks.sessions.length}.jsonl`,
     subscribe: vi.fn(() => () => undefined),
-    prompt: vi.fn(async () => undefined),
+    prompt: vi.fn(
+      async (_text: string, options?: { preflightResult?: (disposition: string) => void }) => {
+        options?.preflightResult?.('started');
+      }
+    ),
     agent: { steeringQueue: { messages: [] as unknown[] } },
     getSteeringMessages: () => [],
     _emitQueueUpdate: vi.fn(),

@@ -7,6 +7,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
     locale: 'zh',
+    tNode: (key: string, params?: Record<string, unknown>) => {
+      const parts: unknown[] = [];
+      const regex = /\{\{(\w+)\}\}/g;
+      let last = 0;
+      let m: RegExpExecArray | null = regex.exec(key);
+      while (m) {
+        if (m.index > last) parts.push(key.slice(last, m.index));
+        parts.push(params?.[m[1]] ?? m[0]);
+        last = m.index + m[0].length;
+        m = regex.exec(key);
+      }
+      if (last < key.length) parts.push(key.slice(last));
+      return parts;
+    },
     t: (key: string, params?: Record<string, string | number>) =>
       params ? key.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String(params[k] ?? '')) : key,
   }),
@@ -26,6 +40,11 @@ vi.mock('@/stores/secretary', () => ({
       focusedId: null;
     }) => unknown
   ) => selector({ secretary: { board: { running: mockRunning } }, states: {}, focusedId: null }),
+}));
+
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: (selector: (s: { conversations: Record<string, never> }) => unknown) =>
+    selector({ conversations: {} }),
 }));
 
 vi.mock('@/stores/sessionPeek', () => ({

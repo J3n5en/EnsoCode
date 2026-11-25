@@ -117,6 +117,49 @@ describe('桌面会话上游故障自动恢复', () => {
     expect(after?.goal?.retry).toBeUndefined();
   });
 
+  it('唤醒后 worker 发出 status:running 时 goal 立即收敛为 active 并清掉 retry，不等轮次结束', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          lastProviderId: 'anthropic',
+          goal: {
+            text: '修复上线流程',
+            status: 'waiting' as const,
+            autoTurns: 1,
+            noProgressRuns: 0,
+            retry: {
+              reason: 'upstream' as const,
+              kind: 'transient' as const,
+              provider: 'anthropic',
+              attempt: 1,
+              since: 1_000,
+              at: 61_000,
+              lastError: '503 Service Unavailable: No available accounts',
+            },
+          },
+        },
+      },
+    }));
+
+    // worker 真正开跑（wake 注入的 continuation 被接受）：waiting 必须立刻收敛，
+    // 否则运行中的几分钟里目标条一直显示「等待上游恢复 · 下次 xx:xx + 立即重试」
+    onAgentEvent?.({
+      type: 'status',
+      identity: { sessionId: 'parent', generation: 'g1' },
+      seq: 5,
+      status: 'running',
+      turnId: 't2',
+    } as RendererAgentEvent);
+
+    const conv = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(conv?.goal?.status).toBe('active');
+    expect(conv?.goal?.retry).toBeUndefined();
+  });
+
   it('等待上游恢复期间用户手动停止（abort）取消闸门等待并置 paused，后续唤醒不再续跑', async () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

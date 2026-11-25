@@ -226,7 +226,6 @@ async function main(): Promise<void> {
   let version = '';
   /** 换构建整页重载中：旧构建的快照和只读缓存不再有用，别在离开时写存储 */
   let leaving = false;
-  let settingsLink: unknown = null;
   let settingsLoaded = false;
   let snapshot: HTMLIFrameElement | null = null;
   let snapshotTimer: ReturnType<typeof setInterval> | null = null;
@@ -301,31 +300,14 @@ async function main(): Promise<void> {
     const iframe = document.createElement('iframe');
     iframe.className = kind;
     iframe.allow = 'clipboard-read; clipboard-write';
-    iframe.src = `${base}/${kind === 'main' ? 'index' : 'settings'}.html`;
+    iframe.src = `${base}/index.html`;
     iframe.addEventListener('load', () => {
       const doc = iframe.contentDocument;
       if (doc) keyboard?.watchDocument(doc);
     });
-    if (kind === 'settings') {
-      const backdrop = document.createElement('div');
-      backdrop.className = 'settings-backdrop';
-      backdrop.addEventListener('click', () => closeSettings());
-      frames.appendChild(backdrop);
-    }
     frames.appendChild(iframe);
     iframes[kind] = iframe;
     return iframe;
-  };
-
-  const closeSettings = () => {
-    // iOS WebKit 移除 iframe 时 pagehide 不可靠，必须显式通知隧道关闭旧 slot
-    attached.settings?.close();
-    delete attached.settings;
-    iframes.settings?.remove();
-    delete iframes.settings;
-    frames.querySelector('.settings-backdrop')?.remove();
-    // 输入框随 iframe 一起移除时不一定有 focusout
-    keyboard?.sync();
   };
 
   const push = pushDeps((message) => tunnel.sendGuest(message));
@@ -382,31 +364,24 @@ async function main(): Promise<void> {
       attached[kind]?.close();
       const frame = tunnel.attach(kind, () => {
         const iframe = iframes[kind];
-        if (kind === 'main') {
-          void (async () => {
-            await keepSnapshot();
-            settingsLoaded = false;
-            await coverWithSnapshot();
-            if (iframes.main === iframe) iframe?.contentWindow?.location.reload();
-          })();
-          return;
-        }
-        iframe?.contentWindow?.location.reload();
+        void (async () => {
+          await keepSnapshot();
+          settingsLoaded = false;
+          await coverWithSnapshot();
+          if (iframes.main === iframe) iframe?.contentWindow?.location.reload();
+        })();
       });
       attached[kind] = frame;
       return {
-        invoke:
-          kind === 'main'
-            ? (channel, payload) => {
-                const result = frame.invoke(channel, payload);
-                if (channel === IPC_CHANNELS.SETTINGS_READ)
-                  void result.then(() => {
-                    if (!settingsLoaded) void markReady(version);
-                    settingsLoaded = true;
-                  });
-                return result;
-              }
-            : frame.invoke,
+        invoke: (channel, payload) => {
+          const result = frame.invoke(channel, payload);
+          if (channel === IPC_CHANNELS.SETTINGS_READ)
+            void result.then(() => {
+              if (!settingsLoaded) void markReady(version);
+              settingsLoaded = true;
+            });
+          return result;
+        },
         send: frame.send,
         on: frame.on,
         close: () => {
@@ -416,20 +391,6 @@ async function main(): Promise<void> {
       };
     },
     leader: () => tunnel.leader,
-    openSettings(link) {
-      settingsLink = link ?? null;
-      if (iframes.settings) {
-        if (link) attached.settings?.emit(IPC_CHANNELS.SETTINGS_DEEP_LINK, [link]);
-        return;
-      }
-      mount('settings');
-    },
-    closeSettings,
-    consumeSettingsLink() {
-      const link = settingsLink;
-      settingsLink = null;
-      return link;
-    },
     exitDesk() {
       leaveGuard?.release();
       location.href = PHONE_URL;
@@ -461,15 +422,13 @@ async function main(): Promise<void> {
     },
   };
   (window as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote = bridge;
-  // 后退先关抽屉、设置层，其余情况确认后才离开
+  // 后退先关抽屉，其余情况确认后才离开
   leaveGuard = installLeaveGuard(window, '确定离开 EnsoCode 完整版？', () => {
     if (drawer.isOpen()) {
       drawer.close();
       return true;
     }
-    if (!iframes.settings) return false;
-    closeSettings();
-    return true;
+    return false;
   });
 
   /**
@@ -734,9 +693,7 @@ async function main(): Promise<void> {
     await coverWithSnapshot();
     revealFrames();
   }
-  // 设置是弹窗时不铺满，状态栏 / 安全区底色仍跟主界面
-  const settingsModal = matchMedia('(min-width: 800px) and (min-height: 560px)');
-  watchDeskChrome(() => (settingsModal.matches ? undefined : iframes.settings) ?? iframes.main);
+  watchDeskChrome(() => iframes.main);
 
   const timeout = launched
     ? undefined
@@ -788,7 +745,6 @@ async function main(): Promise<void> {
   use(current);
   dropSnapshot();
   settingsLoaded = false;
-  closeSettings();
   attached.main?.close();
   delete attached.main;
   iframes.main?.remove();

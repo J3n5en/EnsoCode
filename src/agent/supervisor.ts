@@ -407,7 +407,7 @@ import { ACTIVE_WORKFLOW_RUN_IDS, createWorkflowTool, WORKFLOW_STOPPED_BY_USER }
 import { claimInterruptedWorkflowRuns } from './workflowJournal';
 import { listWorkflowPresets, loadWorkflowPreset, workflowPresetRoots } from './workflowPresets';
 import { WorkspaceClaims, withExclusiveCommand, withFileClaims } from './workspaceClaims';
-import { WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
+import { VIZ_GUIDANCE_PROMPT, WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
 import { WorkspaceSwitchGate, workspaceBranchContextExtension } from './workspaceSwitch';
 import { extractEditTargetPath, withWritePreflight, withWriteScope } from './writeScope';
 
@@ -824,6 +824,7 @@ function createSessionResourceLoader(options: {
       skillChainExtension(() => loader.getSkills().skills),
       options.silentTurnRecovery,
       appendSystemPromptExtension('workspace-policy', WORKSPACE_POLICY_PROMPT),
+      appendSystemPromptExtension('viz-guidance', VIZ_GUIDANCE_PROMPT),
       ...(options.childContract
         ? [appendSystemPromptExtension('subagent-contract', SUBAGENT_CONTRACT_PROMPT)]
         : []),
@@ -1173,31 +1174,56 @@ export class SessionSupervisor {
     if (!managed) return;
     if (this.workspaceSwitch.defer(sessionId, () => this.deliverNotification(sessionId, text)))
       return;
+    // 先入持久化账簿：通知只有在确认送达（user 消息进轮）或被工具结果搭车消费时才出账。
+    // 送达是尽力而为且可能静默失败（pi 收尾期 defer 的 prompt 抛错无人观察、压缩期被拒），
+    // 留在账簿里的条目由 pump 的各触发点收敛补投——这是「完成/失败/超时必然唤醒」的保证。
+    this.queueReminder(managed, text);
     // 断点已落盘：不再唤起新回合，进持久化队列由下一代补投
-    if (this.restart?.committed) {
-      this.queueReminder(managed, text);
-      return;
-    }
+    if (this.restart?.committed) return;
+    // 已有一轮通知在起飞（roundPending）：这条留在账簿，那一轮的收口触发点会把它带上
+    if (managed.roundPending) return;
     // 失败（含前台中止后按错误收口）同空闲：能接新回合就立即唤起，不攒到用户下一条消息
-    if (managed.status !== 'running') {
-      managed.roundPending = true;
-      // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过。
-      // 投影说空闲、pi 却还在跑时用 followUp 排进活轮，不抛 already processing
-      void managed.session
-        .prompt(`<agent-notification>\n${text}\n</agent-notification>`, {
-          source: 'extension',
-          streamingBehavior: 'followUp',
-        })
-        .finally(() => {
-          if (managed.status !== 'running') managed.roundPending = false;
-        })
-        .catch(() => {
-          // status 是我们的投影,pi loop 可能仍在收尾拒绝 prompt——退回 pending 待搭车/轮末重投,绝不静默丢
-          this.queueReminder(managed, text);
-        });
-    } else {
-      this.queueReminder(managed, text);
+    if (managed.status !== 'running' && !managed.compaction && !managed.session.isCompacting) {
+      this.promptNotification(managed, [text]);
     }
+  }
+
+  /**
+   * 把一组通知合成一轮合成提示投给空闲会话。
+   * 确认语义：pi 的 preflightResult 只在 prompt 被接受后回调（handled/queued/started），
+   * 被拒收时不回调而是直接抛错——回调即视为送达，从账簿出清；拒收留在账簿由下一触发点补投。
+   */
+  private promptNotification(managed: ManagedSession, texts: string[]): void {
+    managed.roundPending = true;
+    const bundle = texts.join('\n\n---\n\n');
+    // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过。
+    // 投影说空闲、pi 却还在跑时用 followUp 排进活轮，不抛 already processing
+    void managed.session
+      .prompt(`<agent-notification>\n${bundle}\n</agent-notification>`, {
+        source: 'extension',
+        streamingBehavior: 'followUp',
+        preflightResult: () => {
+          this.clearDeliveredNotifications(managed, texts);
+        },
+      })
+      .finally(() => {
+        if (managed.status !== 'running') managed.roundPending = false;
+      })
+      .catch(() => {
+        // 拒收（压缩中 / pi 收尾中）不出账：条目留在账簿，由 pump 的下一触发点补投
+      });
+  }
+
+  /** 出清已确认送达的账簿条目：按文本逐条移除（一条送达一条出账，同批未投的不误清） */
+  private clearDeliveredNotifications(managed: ManagedSession, texts: string[]): void {
+    let cleared = 0;
+    for (const text of texts) {
+      const index = managed.pendingTaskReminders.indexOf(text);
+      if (index === -1) continue;
+      managed.pendingTaskReminders.splice(index, 1);
+      cleared += 1;
+    }
+    if (cleared > 0) this.persistPendingReminders(managed);
   }
 
   private queueReminder(managed: ManagedSession, text: string): void {
@@ -1337,15 +1363,26 @@ export class SessionSupervisor {
     return path.join(this.options.sessionDir, 'workflows');
   }
 
-  /** 回合收口后补投攒下的通知（中止后 pi 收尾期间被拒的 prompt 也在这里） */
+  /**
+   * 回合收口 / 压缩结束等触发点补投账簿里未确认送达的通知（中止后 pi 收尾期间被拒的 prompt 也在这里）。
+   * 不 splice 出账：条目由 user 消息进轮的确认（message_start 含 <agent-notification>）或工具结果搭车消费移除，
+   * 投递本身静默失败（pi defer 窗口吞错）时下一轮触发点会再投——收敛而不是一次性尝试。
+   */
   private flushPendingReminders(managed: ManagedSession): void {
     if (managed.pendingTaskReminders.length === 0) return;
     setTimeout(() => {
       if (managed.status === 'running' || managed.pendingTaskReminders.length === 0) return;
-      const texts = managed.pendingTaskReminders.splice(0);
-      this.persistPendingReminders(managed);
-      this.deliverNotification(managed.identity.sessionId, texts.join('\n\n---\n\n'));
+      this.deliverPendingNotifications(managed);
     }, 150);
+  }
+
+  /** 把账簿里全部未确认送达的通知合成一轮合成提示投给空闲会话（忙碌时不动：搭车消费或轮末再投） */
+  private deliverPendingNotifications(managed: ManagedSession): void {
+    if (this.sessions.get(managed.identity.sessionId) !== managed) return;
+    if (managed.status === 'running' || managed.compaction || managed.session.isCompacting) return;
+    if (this.restart?.committed) return;
+    if (managed.roundPending) return;
+    this.promptNotification(managed, [...managed.pendingTaskReminders]);
   }
 
   constructor(private readonly options: SupervisorOptions) {
@@ -5203,6 +5240,9 @@ export class SessionSupervisor {
           ...(error ? { error } : {}),
           ...(!error && event.aborted ? { abandoned: true as const } : {}),
         });
+        // 压缩期间被拒 / 排队未投的通知：压缩一结束就补投，否则空闲会话会永远干等已结束的命令。
+        // 这是 pi 拒绝 prompt（compaction in progress）之后唯一必然到来的事件，必须在这里收口账簿。
+        this.flushPendingReminders(managed);
         return;
       }
       case 'agent_end': {

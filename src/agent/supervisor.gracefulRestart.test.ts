@@ -158,7 +158,11 @@ function fakeSession(options: Record<string, unknown>) {
     emit(event: { type: string; [key: string]: unknown }) {
       for (const listener of listeners) listener(event);
     },
-    prompt: vi.fn(async () => undefined),
+    prompt: vi.fn(
+      async (_text: string, options?: { preflightResult?: (disposition: string) => void }) => {
+        options?.preflightResult?.('started');
+      }
+    ),
     steer: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
     compact: vi.fn(async () => undefined),

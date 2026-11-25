@@ -35,6 +35,7 @@ import { useSecretaryStore } from '@/stores/secretary';
 import { openSessionFromSecretary } from '@/stores/secretaryReturn';
 import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
+import { DependencyNote } from './SecretaryDependencyLinks';
 import { SecretaryFace } from './SecretaryFace';
 import { SecretaryProposalRow } from './SecretaryProposalRow';
 import { RunningCards } from './SecretaryRunningList';
@@ -187,7 +188,7 @@ function PendingProblemCard({ pending }: { pending: PendingDispatch }) {
       </div>
       <p className="mt-1 text-[13px] font-medium">{title}</p>
       <p className="mt-0.5 text-[12px] text-muted-foreground">
-        {t('Waited for {{ids}}', { ids: pending.after.join(', ') })}
+        <DependencyNote template="Waited for {{ids}}" ids={pending.after} />
       </p>
       {pending.status === 'failed' && (
         <div className="mt-2 flex items-center gap-1.5">

@@ -6,9 +6,11 @@ import {
   mergeBrowserSearchTabs,
   recentBrowserTabs,
   SEARCH_ANYTHING_BROWSER_LIMIT,
+  SEARCH_ANYTHING_PROJECTS_LIMIT,
   SEARCH_ANYTHING_RECENT_BROWSER,
   SEARCH_ANYTHING_SETTINGS_LIMIT,
   searchBrowserTabs,
+  searchProjectEntries,
   searchSettingsEntries,
 } from './searchAnything';
 import { relocateSettingsLink, type SettingsCategory } from './settingsDeepLink';
@@ -296,7 +298,7 @@ describe('buildSettingsCatalog', () => {
     const categoryOf = (id: string) => buildSettingsCatalog().find((e) => e.id === id)?.category;
     expect(categoryOf('appearance.headerSessionTabs')).toBe('conversation');
     expect(categoryOf('appearance.chatTypography')).toBe('conversation');
-    expect(categoryOf('appearance.navRailSide')).toBe('appearance');
+    expect(categoryOf('appearance.navRailSide')).toBe('conversation');
     expect(categoryOf('general.terminalShell')).toBe('terminal');
     expect(categoryOf('general.autoArchiveIdleDays')).toBe('runtime');
     expect(categoryOf('general.proxy')).toBe('general');
@@ -309,7 +311,7 @@ describe('buildSettingsCatalog', () => {
         translate: (text) => getTranslation('zh', text),
       }).map((e) => `${e.category}:${e.id}`);
     expect(hits('代理')).toContain('general:general.proxy');
-    expect(hits('字体')).toContain('terminal:terminal.font');
+    expect(hits('字体')).toContain('appearance:terminal.font');
     expect(hits('归档闲置')).toContain('runtime:general.autoArchiveIdleDays');
   });
 
@@ -406,5 +408,58 @@ describe('buildSettingsCatalog', () => {
     expect(catalog.some(({ id }) => id === 'providers.autoFetchModels')).toBe(false);
     expect(ids('拉取间隔')).not.toContain('providers.modelFetchInterval');
     expect(ids('Model fetch interval')).not.toContain('providers.modelFetchInterval');
+  });
+});
+
+describe('searchProjectEntries', () => {
+  const projects = [
+    { id: 'path-only', name: 'zeta', path: '/work/term-app' },
+    { id: 'by-name', name: 'term beta', path: '/other/beta' },
+    { id: 'by-alias', name: 'alpha', path: '/other/alpha', alias: 'term alias' },
+    { id: 'by-name-first', name: 'term alpha', path: '/other/alpha-2' },
+    { id: 'miss', name: 'unrelated', path: '/tmp/miss' },
+  ];
+
+  it('name 与 alias 命中排在仅 path 命中之前，同 rank 按 name 排序', () => {
+    expect(searchProjectEntries(projects, 'term').map((entry) => entry.id)).toEqual([
+      'by-alias',
+      'by-name-first',
+      'by-name',
+      'path-only',
+    ]);
+  });
+
+  it('只命中 alias 时返回该项目', () => {
+    expect(searchProjectEntries(projects, 'alias').map((entry) => entry.id)).toEqual(['by-alias']);
+  });
+
+  it('只命中 path 时返回该项目', () => {
+    expect(searchProjectEntries(projects, 'term-app').map((entry) => entry.id)).toEqual([
+      'path-only',
+    ]);
+  });
+
+  it('CJK 查询按子串命中项目名', () => {
+    const local = [{ id: 'zh', name: '测试项目', path: '/tmp/a' }];
+    expect(searchProjectEntries(local, '测试').map((entry) => entry.id)).toEqual(['zh']);
+  });
+
+  it('空查询返回空数组', () => {
+    expect(searchProjectEntries(projects, '')).toEqual([]);
+    expect(searchProjectEntries(projects, '   ')).toEqual([]);
+  });
+
+  it('默认上限 20，可传更小的 limit，保留按 name 排序后的前几条', () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({
+      id: `p${String(index).padStart(2, '0')}`,
+      name: `term ${String(index).padStart(2, '0')}`,
+      path: `/tmp/${index}`,
+    }));
+    expect(searchProjectEntries(many, 'term')).toHaveLength(SEARCH_ANYTHING_PROJECTS_LIMIT);
+    expect(searchProjectEntries(many, 'term', { limit: 3 }).map((entry) => entry.id)).toEqual([
+      'p00',
+      'p01',
+      'p02',
+    ]);
   });
 });

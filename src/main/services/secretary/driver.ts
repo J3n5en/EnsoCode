@@ -575,6 +575,20 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         save(conversationId, event.kind === 'complete' ? { ...next, goal: undefined } : next);
         return;
       }
+      if (event.type === 'status' && event.status === 'running') {
+        // 会话真正跑起来：waiting(upstream) 的等待语义到此结束，立刻收敛回 active。
+        // 若等到轮次结束才清，运行中的几分钟里卡片/状态条会一直显示「等待上游恢复+倒计时」。
+        // 探测轮再失败时 turn-failed 会重新 reportFailure，闸门侧的 waiter 仍在（probing），
+        // since/attempt 由 existing waiter 沿用，提前清掉行上的 retry 不丢退避进度。
+        if (runtime.goal?.status === 'waiting' && runtime.goal.retry?.reason === 'upstream') {
+          save(conversationId, {
+            ...runtime,
+            status: 'running',
+            goal: { ...runtime.goal, status: 'active', note: undefined, retry: undefined },
+          });
+        }
+        return;
+      }
       if (event.type === 'turn-failed') {
         forgetDeliveries(conversationId);
         const goal = runtime.goal;

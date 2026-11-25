@@ -2072,6 +2072,22 @@ export const useSessionsStore = create<SessionsState>()(
             ...(event.type === 'parent-rejected' || event.type === 'child-rejected'
               ? { started: false }
               : {}),
+            // 会话真正跑起来：waiting(upstream) 立即收敛回 active 并清掉 retry。
+            // 若等到轮次结束才清，运行中的几分钟里目标条会一直显示「等待上游恢复+倒计时+立即重试」。
+            // 探测轮再失败时 turn-failed 重新走 report，闸门侧 waiter 仍在（probing），
+            // since/attempt 由 existing waiter 沿用，提前清掉渲染侧的 retry 不丢退避进度。
+            ...(event.type === 'status' &&
+            event.status === 'running' &&
+            isUpstreamWaitingGoal(conversation.goal)
+              ? {
+                  goal: {
+                    ...conversation.goal!,
+                    status: 'active' as const,
+                    note: undefined,
+                    retry: undefined,
+                  },
+                }
+              : {}),
             // 会话已结束/被拒，或回退命令本身抛错（worker 只发 status failed）：rewind-done 不会再来
             ...(event.type === 'parent-ended' ||
             event.type === 'child-ended' ||

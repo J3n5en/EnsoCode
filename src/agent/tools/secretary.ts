@@ -45,6 +45,18 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     numbers: ['limit'],
     aliases: { id: 'projectId', dir: 'path', directory: 'path', cwd: 'path', sha: 'contains' },
   },
+  repo_diff: {
+    keys: ['projectId', 'path', 'base', 'ref', 'mergeBase'],
+    booleans: ['mergeBase'],
+    aliases: {
+      id: 'projectId',
+      dir: 'path',
+      directory: 'path',
+      cwd: 'path',
+      branch: 'ref',
+      head: 'ref',
+    },
+  },
   session_list: { keys: ['projectId', 'limit'], numbers: ['limit'] },
   claims_list: { keys: ['prefix', 'sessionId', 'pluginId'] },
   threads_list: {
@@ -253,6 +265,16 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     booleans: ['asTodo'],
     aliases: { secretary: 'to', secretaryId: 'to', message: 'text', todo: 'asTodo' },
   },
+  github_merge_pr: {
+    keys: ['repo', 'number', 'method', 'auto', 'projectId'],
+    numbers: ['number'],
+    booleans: ['auto'],
+    aliases: { pr: 'number', prNumber: 'number', id: 'projectId' },
+  },
+  github_delete_branch: {
+    keys: ['repo', 'branch', 'projectId'],
+    aliases: { name: 'branch', id: 'projectId' },
+  },
   secretary_profile_propose: {
     keys: [
       'name',
@@ -457,6 +479,36 @@ const SCHEMAS: Record<
       },
     }),
   },
+  repo_diff: {
+    description:
+      'Read-only diff summary of a branch or ref against a base: which files changed, per-file added/deleted line counts, the status letter (A added, M modified, D deleted, R renamed, with the original path on renames), plus totals. Binary files are marked binary with null counts. Use it before merging a pull request or reporting what a branch changed: it is the verification counterpart to what a session claims. By default the diff is base...ref (three-dot, merge-base semantics): only what the branch itself changed since it diverged, the same as a GitHub PR. Pass mergeBase false for a plain two-dot comparison. base defaults to origin/main and ref to HEAD; both must be plain branch names, refs or shas. At most 200 files are listed; totalFiles and the line totals always cover the full diff. It never returns file contents and never writes to the repository. Paths are redacted, not untrusted-wrapped.',
+    parameters: object({
+      projectId: id('Project id from project_list'),
+      path: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+        description: 'A visible project checkout, or a git worktree of the same repository',
+      },
+      base: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 200,
+        description: 'Optional branch or ref to diff against (default origin/main)',
+      },
+      ref: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 200,
+        description: 'Optional branch, ref or commit to diff, e.g. the PR branch (default HEAD)',
+      },
+      mergeBase: {
+        type: 'boolean',
+        description:
+          'Optional: false for a plain two-dot diff instead of the default merge-base (three-dot) semantics',
+      },
+    }),
+  },
   session_list: {
     description:
       'List root sessions across the projects you can see, newest first, with state and a short summary. Child sessions, sessions the user archived and other secretaries are excluded. A session you dispatched that an earlier version archived automatically when it finished is still listed, marked archived: true.',
@@ -597,7 +649,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. Refused (session-queued) while the session is still queued behind the dispatch limit: wait for it to start or cancel it with session_stop. A session reached through the scope starts reporting results to you only after this call. attachments forwards images instead of describing them: when the target model can see images they go in as images with the message, the same as the user pasting them, so the session does not need image_view (a model without image input gets the paths and opens them with image_view). Pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete, was marked done by hand, never had a goal, or its goal is blocked or paused: the new goal is attached (a blocked or paused goal is replaced and audited) and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still active or waiting — a live goal is never replaced. Every send starts tracking the session again, even after it was marked done, completed, failed, was interrupted or stalled: the results of the follow-up reach you as usual.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "steer" (default) is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle; mode "queue" waits behind the current turn — use it when several messages must arrive in order or when the message can wait for the whole turn. Refused while the session waits for the user, in both modes. Refused (session-queued) while the session is still queued behind the dispatch limit: wait for it to start or cancel it with session_stop. A session reached through the scope starts reporting results to you only after this call. attachments forwards images instead of describing them: when the target model can see images they go in as images with the message, the same as the user pasting them, so the session does not need image_view (a model without image input gets the paths and opens them with image_view). Pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete, was marked done by hand, never had a goal, or its goal is blocked or paused: the new goal is attached (a blocked or paused goal is replaced and audited) and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still active or waiting — a live goal is never replaced. Every send starts tracking the session again, even after it was marked done, completed, failed, was interrupted or stalled: the results of the follow-up reach you as usual.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -606,7 +658,7 @@ const SCHEMAS: Record<
           type: 'string',
           enum: [...SECRETARY_SEND_MODES],
           description:
-            'queue (default): wait behind the current turn. steer: cut in at the next tool boundary to change priority or correct direction.',
+            'steer (default): cut in at the next tool boundary to change priority or correct direction. queue: wait behind the current turn, for several messages that must arrive in order or anything that can wait.',
         },
         goal: {
           type: 'string',
@@ -959,6 +1011,61 @@ const SCHEMAS: Record<
   schedule_remove: {
     description: 'Remove one of your schedules.',
     parameters: object({ scheduleId: id('Schedule id from schedule_list') }, ['scheduleId']),
+  },
+  github_merge_pr: {
+    description:
+      "Merge one open GitHub pull request of a visible project directly, without dispatching a session. It runs gh pr merge with squash, delete-branch and, by default, auto: squash is the only method, there is no admin or force option and no way to bypass branch protection, so a merge the protection rules do not allow simply fails or queues. Before merging it reads the PR and refuses anything that is not open. The result carries the mergeStateStatus before the merge and, when it can be re-read, the state and autoMergeRequest after. repo is the owner/repo of a visible project (it must match the project's git origin, anything else is refused); omit it only when exactly one of your visible projects has a GitHub origin. auto false merges immediately instead of enabling auto-merge. Never use it for a branch you have not reviewed the latest push of — the dispatch sessions report their own state and you decide. Every call is audited.",
+    parameters: object(
+      {
+        repo: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "owner/repo of a visible project. Must match the project's git origin. Omit only when exactly one visible project has a GitHub origin.",
+        },
+        projectId: id("Optional: resolve the repo from this visible project's origin"),
+        number: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Pull request number',
+        },
+        method: {
+          type: 'string',
+          enum: ['squash'],
+          description: 'Only squash exists. Anything else is refused.',
+        },
+        auto: {
+          type: 'boolean',
+          description:
+            'true (default) queues with auto-merge, waiting for checks and reviews; false merges immediately. It never bypasses branch protection.',
+        },
+      },
+      ['number']
+    ),
+  },
+  github_delete_branch: {
+    description:
+      "Delete one remote branch of a visible project directly, without dispatching a session. Only the remote branch goes away (git push origin --delete); local branches are never touched. Hard refusals, all audited: the protected branches main and feat/signpath-windows, any branch that is the head of an open pull request (the result names the PR numbers), and branches that do not exist on the remote. Use it after a merged PR whose remote branch was not auto-deleted. repo is the owner/repo of a visible project (must match the project's git origin); omit it only when exactly one of your visible projects has a GitHub origin.",
+    parameters: object(
+      {
+        repo: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "owner/repo of a visible project. Must match the project's git origin. Omit only when exactly one visible project has a GitHub origin.",
+        },
+        projectId: id("Optional: resolve the repo from this visible project's origin"),
+        branch: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'Remote branch name to delete',
+        },
+      },
+      ['branch']
+    ),
   },
   secretary_profile_propose: {
     description:

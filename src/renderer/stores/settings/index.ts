@@ -230,6 +230,8 @@ const initialState = {
   memoryDecayStaleDays: DEFAULT_FORGETTING_SETTINGS.staleDays,
   memoryDecayMaxImportance: DEFAULT_FORGETTING_SETTINGS.maxImportance,
   memoryDecayIntervalDays: DEFAULT_FORGETTING_SETTINGS.intervalDays,
+  // 派发时注入相关记忆：缺省开；关掉后秘书派活不再检索记忆库
+  memoryDispatchRecallEnabled: true,
   botModeEnabled: false,
   scratchSessionsEnabled: false,
   dropShelfEnabled: false,
@@ -449,6 +451,8 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryDecayStaleDays: (memoryDecayStaleDays) => set({ memoryDecayStaleDays }),
       setMemoryDecayMaxImportance: (memoryDecayMaxImportance) => set({ memoryDecayMaxImportance }),
       setMemoryDecayIntervalDays: (memoryDecayIntervalDays) => set({ memoryDecayIntervalDays }),
+      setMemoryDispatchRecallEnabled: (memoryDispatchRecallEnabled) =>
+        set({ memoryDispatchRecallEnabled }),
       setBotModeEnabled: (botModeEnabled) => set({ botModeEnabled }),
       setScratchSessionsEnabled: (scratchSessionsEnabled) => set({ scratchSessionsEnabled }),
       setDropShelfEnabled: (dropShelfEnabled) => set({ dropShelfEnabled }),

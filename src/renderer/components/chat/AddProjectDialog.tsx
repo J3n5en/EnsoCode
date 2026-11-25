@@ -1,5 +1,5 @@
 import type { ProjectGroup, RecentProject, SshHostKeyChallenge } from '@shared/types';
-import { Loader2 } from 'lucide-react';
+import { Folder, Loader2 } from 'lucide-react';
 import * as React from 'react';
 import { hostKeyFromSshFailure, SshHostKeyDialog } from '@/components/chat/SshHostKeyDialog';
 import {
@@ -285,6 +285,111 @@ interface AddProjectDialogProps {
   }) => void;
   groups?: readonly ProjectGroup[];
   defaultGroupId?: string;
+}
+
+/** 本机目录搜索：debounce 后查家目录，点选回填路径。仅 local tab 使用。 */
+function DirSearch({ onSelect }: { onSelect: (path: string) => void }) {
+  const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
+  const [host, setHost] = React.useState('');
+  const [results, setResults] = React.useState<{ path: string; displayPath: string }[]>([]);
+  const [pending, setPending] = React.useState(false);
+  const [settled, setSettled] = React.useState(false);
+  const seq = React.useRef(0);
+
+  React.useEffect(() => {
+    const trimmed = query.trim();
+    const id = ++seq.current;
+    if (!trimmed) {
+      setPending(false);
+      setSettled(false);
+      setResults([]);
+      return;
+    }
+    setPending(true);
+    setSettled(false);
+    setResults([]);
+    const timer = setTimeout(() => {
+      void window.electronAPI.projects
+        .searchHostDirs(trimmed)
+        .then((result) => {
+          if (id !== seq.current) return;
+          if (result.ok) {
+            setHost(result.host);
+            setResults(result.results);
+          } else {
+            setResults([]);
+          }
+          setSettled(true);
+        })
+        .catch(() => {
+          if (id !== seq.current) return;
+          setResults([]);
+          setSettled(true);
+        })
+        .finally(() => {
+          if (id === seq.current) setPending(false);
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  React.useEffect(
+    () => () => {
+      seq.current += 1;
+    },
+    []
+  );
+
+  const trimmed = query.trim();
+  return (
+    <div className="space-y-1.5">
+      <Input
+        value={query}
+        size="sm"
+        className="font-mono text-xs"
+        placeholder={t('Search for directory')}
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {host && trimmed ? (
+        <p className="text-muted-foreground text-xs">
+          {t('Find a directory on {{host}}', { host })}
+        </p>
+      ) : null}
+      {pending ? (
+        <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {t('Searching...')}
+        </p>
+      ) : null}
+      {settled && results.length === 0 ? (
+        <p className="text-muted-foreground text-xs">{t('No matching directories')}</p>
+      ) : null}
+      {settled && results.length > 0 ? (
+        <div className="max-h-40 overflow-auto rounded-md border bg-muted/30">
+          {results.map((result) => (
+            <button
+              key={result.path}
+              type="button"
+              className="flex w-full items-center gap-2 px-2 py-1 text-left font-mono text-xs hover:bg-muted"
+              onClick={() => {
+                onSelect(result.path);
+                setQuery('');
+              }}
+            >
+              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate" title={result.path}>
+                {result.displayPath}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function AddProjectDialog({
@@ -582,56 +687,59 @@ export function AddProjectDialog({
                 {formError && <p className="text-destructive text-xs">{formError}</p>}
               </>
             ) : (
-              <Field className="w-full">
-                <FieldLabel>{t('Working directory')}</FieldLabel>
-                <Autocomplete
-                  value={pathValue}
-                  onValueChange={(value) => setPathValue(value ?? '')}
-                  items={items}
-                  filter={filterProject}
-                  itemToStringValue={(item) => item.path}
-                >
-                  <div className="flex w-full gap-2">
-                    <div className="min-w-0 flex-1">
-                      <AutocompleteInput
-                        placeholder={t('Type a path or select from recent projects...')}
-                        showClear={!!pathValue}
-                        showTrigger
-                      />
+              <>
+                <DirSearch key={open ? 'open' : 'closed'} onSelect={setPathValue} />
+                <Field className="w-full">
+                  <FieldLabel>{t('Working directory')}</FieldLabel>
+                  <Autocomplete
+                    value={pathValue}
+                    onValueChange={(value) => setPathValue(value ?? '')}
+                    items={items}
+                    filter={filterProject}
+                    itemToStringValue={(item) => item.path}
+                  >
+                    <div className="flex w-full gap-2">
+                      <div className="min-w-0 flex-1">
+                        <AutocompleteInput
+                          placeholder={t('Type a path or select from recent projects...')}
+                          showClear={!!pathValue}
+                          showTrigger
+                        />
+                      </div>
+                      <Button type="button" variant="outline" onClick={() => void handleBrowse()}>
+                        {t('Browse')}
+                      </Button>
                     </div>
-                    <Button type="button" variant="outline" onClick={() => void handleBrowse()}>
-                      {t('Browse')}
-                    </Button>
-                  </div>
-                  <AutocompletePopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <AutocompleteEmpty>{t('No matching projects found')}</AutocompleteEmpty>
-                    <AutocompleteList>
-                      {(project: RecentProject) => (
-                        <AutocompleteItem key={project.path} value={project} className="gap-2">
-                          <span className="min-w-0 flex-1 truncate" title={project.path}>
-                            {project.displayPath}
-                          </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {project.sourceName}
-                          </span>
-                        </AutocompleteItem>
-                      )}
-                    </AutocompleteList>
-                  </AutocompletePopup>
-                </Autocomplete>
-                {browserOpen && hostBrowse && (
-                  <DirBrowser
-                    list={listHostDirs}
-                    create={createHostDir}
-                    initialPath={pathValue.trim() || undefined}
-                    onSelect={(selected) => {
-                      setPathValue(selected);
-                      setBrowserOpen(false);
-                    }}
-                    onClose={() => setBrowserOpen(false)}
-                  />
-                )}
-              </Field>
+                    <AutocompletePopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
+                      <AutocompleteEmpty>{t('No matching projects found')}</AutocompleteEmpty>
+                      <AutocompleteList>
+                        {(project: RecentProject) => (
+                          <AutocompleteItem key={project.path} value={project} className="gap-2">
+                            <span className="min-w-0 flex-1 truncate" title={project.path}>
+                              {project.displayPath}
+                            </span>
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {project.sourceName}
+                            </span>
+                          </AutocompleteItem>
+                        )}
+                      </AutocompleteList>
+                    </AutocompletePopup>
+                  </Autocomplete>
+                  {browserOpen && hostBrowse && (
+                    <DirBrowser
+                      list={listHostDirs}
+                      create={createHostDir}
+                      initialPath={pathValue.trim() || undefined}
+                      onSelect={(selected) => {
+                        setPathValue(selected);
+                        setBrowserOpen(false);
+                      }}
+                      onClose={() => setBrowserOpen(false)}
+                    />
+                  )}
+                </Field>
+              </>
             )}
             {groups.length > 0 && (
               <Field>

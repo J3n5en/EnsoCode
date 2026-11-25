@@ -10,6 +10,7 @@ import {
   normalizeForgettingSettings,
 } from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
+import type { MemoryRecallHit } from '@shared/memory/recall';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
 import { parseProviderProxy, sameProviderProxy } from '@shared/providers/providerProxy';
 import type { MemoryOp } from '@shared/types/agent';
@@ -84,6 +85,7 @@ import { approvePendingWrite } from './memory/pending';
 import { type ReconcileSummary, runReconcile } from './memory/reconcile';
 import { getReembedJob, type ReembedJob, runReembedJob } from './memory/reembed';
 import { sanitizeMemoryWrite } from './memory/safety';
+import { searchMemories } from './memory/search';
 import { distillSpaces, type MemorySpaceContext } from './memory/space';
 import { getMemory } from './memory/store';
 import type { Embedder, Memory } from './memory/types';
@@ -1118,6 +1120,40 @@ export function rootSessionId(identity: SessionIdentity | ChildSessionIdentity):
   const id = parent ?? identity.sessionId;
   const sep = id.indexOf('::');
   return sep === -1 ? id : id.slice(0, sep);
+}
+
+/**
+ * 秘书派发注入的记忆检索：与 memory_search 同一条 searchMemories 链路（含命中计数），
+ * 但不走面向模型的投影与秘书脱敏——注入方是 Main 自己，拿到的是命中投影（正文原样）。
+ * 阈值过滤与超时都在 Main 侧做：这里只负责忠实检索，不做额外排序加工。
+ */
+export async function recallMemories(opts: {
+  query: string;
+  spaceIds: string[];
+  limit: number;
+}): Promise<MemoryRecallHit[]> {
+  const conn = memoryDbIfExists();
+  if (!conn) return [];
+  // 与 invokeMemory 检索一致：不陪模型冷加载，没加载好就只有全文 + 实体通道
+  const ready = embedder;
+  if (!ready) void memoryEmbedder();
+  const hits = await searchMemories(conn, {
+    q: opts.query,
+    spaceIds: opts.spaceIds,
+    limit: opts.limit,
+    embedder: ready,
+    mmr: true,
+    mode: 'fast',
+    vectorBudgetMs: SEARCH_VECTOR_BUDGET_MS,
+  });
+  return hits.map((hit) => ({
+    id: hit.memory.id,
+    title: hit.memory.title,
+    content: hit.memory.content,
+    spaceId: hit.memory.spaceId,
+    relevance: hit.relevance,
+    ...(hit.challengedBy ? { challengedBy: hit.challengedBy } : {}),
+  }));
 }
 
 /** scope：会话记忆上下文（memorySpaceContext 推导）；兼容旧调用传 projectId 字符串 / null */

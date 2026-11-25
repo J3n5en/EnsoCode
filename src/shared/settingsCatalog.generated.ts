@@ -84,7 +84,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: 'appearance.fileOpening',
-    category: 'terminal',
+    category: 'general',
     title: 'File opening',
     description: 'Configure how local workspace file links open by extension.',
   },
@@ -103,7 +103,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: 'appearance.navRailSide',
-    category: 'appearance',
+    category: 'conversation',
     title: 'Turn marks',
     description:
       'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.',
@@ -980,18 +980,35 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   { id: 'terminal.appearance', category: 'terminal', title: 'Terminal appearance' },
   { id: 'terminal.bold-font-weight', category: 'terminal', title: 'Bold font weight' },
-  { id: 'terminal.color-scheme', category: 'terminal', title: 'Color scheme' },
+  {
+    id: 'terminal.color-scheme',
+    category: 'terminal',
+    title: 'Color scheme',
+    description: 'Also used by command output in conversations',
+  },
   {
     id: 'terminal.context-menu-opening',
-    category: 'terminal',
+    category: 'general',
     title: 'Context menu opening',
     description:
       'Select the opening methods shown in file link context menus. You can add multiple applications.',
   },
-  { id: 'terminal.font', category: 'terminal', title: 'Font' },
-  { id: 'terminal.font-size', category: 'terminal', title: 'Font size' },
+  {
+    id: 'terminal.font',
+    category: 'appearance',
+    title: 'Interface mono font',
+    description:
+      'Monospace font for the side panel terminal, code blocks and command output in conversations.',
+  },
+  {
+    id: 'terminal.font-size',
+    category: 'appearance',
+    title: 'Interface font size',
+    description:
+      'Scales all interface text and command output in conversations; also the side panel terminal size. Conversation body text is set separately in Conversation display.',
+  },
   { id: 'terminal.font-weight', category: 'terminal', title: 'Font weight' },
-  { id: 'terminal.root', category: 'terminal', title: 'Terminal & editor' },
+  { id: 'terminal.root', category: 'terminal', title: 'Terminal' },
   { id: 'terminal.shell', category: 'terminal', title: 'Shell' },
   {
     id: 'tools.allow-all-apps',

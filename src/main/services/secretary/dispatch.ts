@@ -341,6 +341,11 @@ export interface SecretaryDispatchPorts {
     conversationId: string,
     secretaryConversationId: string | null
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * 派发时按任务内容检索相关记忆，返回拼进首条 prompt 末尾的小节（空串 = 不注入）。
+   * 实现必须自行保证失败/超时静默降级，绝不抛出阻塞派发。缺省表示不注入。
+   */
+  memoryRecall?(input: { prompt: string; goal?: string; projectId: string }): Promise<string>;
 }
 
 const DISPATCH_OPS = [
@@ -463,7 +468,7 @@ function sessionFields(
     value: {
       conversationId: conversationId.value,
       message: message.value,
-      mode: (mode as SecretarySendMode | undefined) ?? 'queue',
+      mode: (mode as SecretarySendMode | undefined) ?? 'steer',
       clearQueue: clearQueue === true,
       taskId: taskId.value,
       attachments: attachments.value,
@@ -940,9 +945,21 @@ async function executeDispatch(
 ): Promise<DispatchOutcome> {
   // 排队的会话只存图片路径，开始时再读
   const queuedPaths = limit ? draft.attachments : undefined;
+  // 按任务内容注入相关记忆：真正建会话这一刻才检索（排队的也在建会话时、after 的依赖齐了才执行），
+  // 注入文本随 prompt 存进 queuedStart，启动时原样投出。端口必须自行降级，这里仍再包一层防御性 catch
+  let recall = '';
+  if (ports.memoryRecall) {
+    recall = await ports
+      .memoryRecall({
+        prompt: draft.prompt,
+        ...(draft.goal ? { goal: draft.goal } : {}),
+        projectId: draft.projectId,
+      })
+      .catch(() => '');
+  }
   const created = await ports.createSession({
     projectId: draft.projectId,
-    prompt: draft.prompt,
+    prompt: `${draft.prompt}${recall}`,
     worktree: draft.worktree,
     ...(attachments ? { attachments } : {}),
     ...(limit ? { queued: true } : {}),
@@ -3668,5 +3685,7 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
     },
     refollow: (from, to) => renameFollowedTarget(from, to, follow()),
     unfollow: (targetId) => unfollowTarget(targetId, follow()),
+    // 按任务内容检索过往经验注入首条 prompt；检索/超时/开关的降级全部收敛在 dispatchRecall 里
+    memoryRecall: async (input) => (await import('./dispatchRecall')).recallSectionText(input),
   };
 }

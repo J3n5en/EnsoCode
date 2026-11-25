@@ -69,6 +69,9 @@ export const SETTINGS_DATA_COVERAGE = {
   memoryDecayIntervalDays: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryKgEnabled: excluded('Memory entity-graph extraction preference; not an Enso capability.'),
   memoryReconcileEnabled: excluded('Memory conflict review preference; not an Enso capability.'),
+  memoryDispatchRecallEnabled: excluded(
+    'Secretary dispatch memory recall preference; not an Enso capability.'
+  ),
   protectedActionsInCode: excluded(
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
   ),
@@ -275,6 +278,9 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Memory entity-graph extraction preference; not an Enso capability.'
   ),
   setMemoryReconcileEnabled: excluded('Memory conflict review preference; not an Enso capability.'),
+  setMemoryDispatchRecallEnabled: excluded(
+    'Secretary dispatch memory recall preference; not an Enso capability.'
+  ),
   setBotModeEnabled: excluded(
     'Experimental Bot mode toggle; device-local, not an Enso capability.'
   ),
@@ -840,6 +846,7 @@ export const IPC_PRODUCT_COVERAGE = {
   PROJECTS_GET_RECENT: surfaces('projects.recent'),
   PROJECTS_LIST_HOST_DIRS: surfaces('projects.add'),
   PROJECTS_CREATE_HOST_DIR: surfaces('projects.add'),
+  PROJECTS_SEARCH_HOST_DIRS: surfaces('projects.add'),
   PROJECTS_REVEAL: surfaces('projects.list'),
   PROJECTS_OPEN_IN_APPS: surfaces('projects.list'),
   PROJECTS_CODE_SOURCES: excluded(

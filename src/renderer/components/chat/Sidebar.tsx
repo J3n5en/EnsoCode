@@ -66,7 +66,6 @@ import {
   Search,
   Settings,
   Smartphone,
-  TextSearch,
   Trash2,
 } from 'lucide-react';
 import type * as React from 'react';
@@ -166,7 +165,13 @@ import {
   readCollapsedProjects,
   subscribeCollapsedProjects,
 } from '@/lib/importLocalProject';
-import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
+import {
+  ADD_PROJECT_SHORTCUT,
+  effectiveKeybindings,
+  formatBinding,
+  IS_MAC,
+  isAddProjectShortcut,
+} from '@/lib/keybindings';
 import {
   heightVariants,
   sidebarWidthTransition,
@@ -249,6 +254,9 @@ const ICON_BUTTON_CLASS =
 /** 分区标题右侧的悬停按钮；无悬停的触屏常显 */
 const SECTION_ACTION_CLASS =
   '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100';
+/** 添加项目需要被发现，不依赖悬停才显现 */
+const SECTION_ACTION_PERSISTENT_CLASS =
+  '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground hover:bg-foreground/5 hover:text-foreground';
 
 interface SidebarProps {
   width?: number;
@@ -696,7 +704,6 @@ export function Sidebar({
   >(null);
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [listSearchOpen, setListSearchOpen] = useState(false);
   const [pendingProject, setPendingProject] = useState<{
     name: string;
     path: string;
@@ -788,7 +795,6 @@ export function Sidebar({
   const [revealedExtras, setRevealedExtras] = useState<Record<string, number>>({});
   // 临时会话分组同理,与整组折叠(scratchCollapsed)互不影响
   const [scratchRevealedExtra, setScratchRevealedExtra] = useState(0);
-  const [listQuery, setListQuery] = useState('');
   const modHeld = useSessionSwitchState((state) => state.modHeld);
   const setModHeld = useCallback((value: boolean) => {
     useSessionSwitchState.setState({ modHeld: value });
@@ -835,28 +841,17 @@ export function Sidebar({
     orderedProjects.map((project) => project.id),
     archivedProjectIds
   ).filter((group) => scratchSessionsEnabled || group.projectId !== scratchProject?.id);
-  const searching = listQuery.trim().length > 0;
-  const convMatches = (id: string) =>
-    matchesQuery(listQuery, [conversations[id]?.title || t('New conversation')]);
   const scratchVisibleIds = scratchProject
-    ? projectConversationIds(order, conversations, scratchProject.id).filter(
-        (id) => !searching || convMatches(id)
-      )
+    ? projectConversationIds(order, conversations, scratchProject.id)
     : [];
-  // 搜索时强制展开，避免命中的临时会话被收起状态挡住
-  const scratchFolded = searching ? false : scratchCollapsed;
-  // 搜索时全量列出命中项,不受条数折叠限制,与项目分组一致
-  const scratchShownCount = searching
-    ? scratchVisibleIds.length
-    : shownConversationCount(scratchVisibleIds.length, scratchRevealedExtra);
+  const scratchFolded = scratchCollapsed;
+  const scratchShownCount = shownConversationCount(scratchVisibleIds.length, scratchRevealedExtra);
   const scratchHiddenIds = scratchVisibleIds.slice(scratchShownCount);
   const inActiveGroup = (id: string) => {
     const projectId = conversations[id]?.projectId;
     return !projectId || slicedIdSet.has(projectId);
   };
-  const visibleActiveIds = (searching ? activeIds.filter(convMatches) : activeIds).filter(
-    inActiveGroup
-  );
+  const visibleActiveIds = activeIds.filter(inActiveGroup);
   const sidebarSlots = sessionSwitchSlotIds({
     order,
     conversations,
@@ -865,14 +860,6 @@ export function Sidebar({
     archivedProjectIds,
     collapsedProjects,
     revealedExtras,
-    searching,
-    matches: convMatches,
-    projectMatches: (projectId) => {
-      const project = orderedProjects.find((item) => item.id === projectId);
-      return Boolean(
-        project && matchesQuery(listQuery, [project.alias ?? '', project.name, project.path])
-      );
-    },
     leadingIds: visibleActiveIds,
   });
   const headerTabIds = headerSessionTabIds(
@@ -892,9 +879,7 @@ export function Sidebar({
   const switchSlotsRef = useRef(switchSlots);
   switchSlotsRef.current = switchSlots;
   useEffect(() => publishSessionSwitch(headerTabIds, switchSlots));
-  const visiblePinnedIds = (searching ? pinnedIds.filter(convMatches) : pinnedIds).filter(
-    inActiveGroup
-  );
+  const visiblePinnedIds = pinnedIds.filter(inActiveGroup);
   const visiblePinnedSet = new Set(visiblePinnedIds);
   const visibleActiveSet = new Set(visibleActiveIds);
   const switchHintFor = (id: string, surface: 'active' | 'pinned' | 'project') => {
@@ -909,7 +894,7 @@ export function Sidebar({
     if (owner !== surface) return undefined;
     return formatBinding(`mod+${index + 1}`);
   };
-  // 已归档弹窗(缺省关闭,重启回到关闭);搜索框独立于侧栏搜索
+  // 已归档弹窗(缺省关闭,重启回到关闭)
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveQuery, setArchiveQuery] = useState('');
   const [archiveCleanupOpen, setArchiveCleanupOpen] = useState<string | null>(null);
@@ -990,6 +975,11 @@ export function Sidebar({
       const mod = IS_MAC ? e.metaKey : e.ctrlKey;
       const switchMode = mod && !e.shiftKey && !e.altKey;
       setModHeld(switchMode);
+      if (isAddProjectShortcut(e)) {
+        e.preventDefault();
+        setAddOpen(true);
+        return;
+      }
       if (!switchMode || e.repeat) return;
       const n = Number(e.key);
       if (n < 1 || n > 9) return;
@@ -1017,6 +1007,10 @@ export function Sidebar({
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [selectConversation, setModHeld]);
+
+  const addProjectTitle = t('Add project ({{shortcut}})', {
+    shortcut: formatBinding(ADD_PROJECT_SHORTCUT),
+  });
 
   // worktree 徽标状态：挂载 + 窗口聚焦 + 30s 轻量轮询（只查隔离会话，不每帧跑 git）
   useEffect(() => {
@@ -1126,7 +1120,8 @@ export function Sidebar({
             type="button"
             onClick={() => setAddOpen(true)}
             className={ICON_BUTTON_CLASS}
-            title={t('Add project')}
+            title={addProjectTitle}
+            aria-label={addProjectTitle}
           >
             <FolderPlus className="h-4 w-4" />
           </button>
@@ -1187,10 +1182,6 @@ export function Sidebar({
               UNGROUPED_GROUP_ID
             ).length
           }
-          query={listQuery}
-          onQueryChange={setListQuery}
-          searchOpen={listSearchOpen}
-          onSearchOpenChange={setListSearchOpen}
           onSelect={selectGroup}
           onAddGroup={() => setGroupEditor({ mode: 'create' })}
           onEditGroup={(id) => setGroupEditor({ mode: 'edit', id })}
@@ -1327,7 +1318,8 @@ export function Sidebar({
               onClick={() => setAddOpen(true)}
               className="mt-2 w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-brand/50 hover:text-foreground"
             >
-              {t('Add a project to start')}
+              <span className="block">{t('Add a project to start')}</span>
+              <span className="mt-1 block text-xs">{formatBinding(ADD_PROJECT_SHORTCUT)}</span>
             </button>
           )}
           {orderedProjects.length === 0 && scratchSessionsEnabled && scratchProject && (
@@ -1504,7 +1496,7 @@ export function Sidebar({
                           onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                         />
                       ))}
-                      {!searching && scratchVisibleIds.length > COLLAPSED_SESSION_LIMIT && (
+                      {scratchVisibleIds.length > COLLAPSED_SESSION_LIMIT && (
                         <div className="flex items-center gap-1 pl-2">
                           {scratchHiddenIds.length > 0 && (
                             <ContextMenu>
@@ -1558,29 +1550,15 @@ export function Sidebar({
             <SidebarSectionLabel
               section="projects"
               actions={
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setListSearchOpen(true)}
-                    className={cn(
-                      SECTION_ACTION_CLASS,
-                      (listSearchOpen || searching) && 'bg-foreground/5 text-foreground opacity-100'
-                    )}
-                    title={t('Search conversations...')}
-                    aria-label={t('Search conversations...')}
-                  >
-                    <TextSearch className="size-3.25" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAddOpen(true)}
-                    className={SECTION_ACTION_CLASS}
-                    title={t('Add project')}
-                    aria-label={t('Add project')}
-                  >
-                    <Plus className="size-3.25" />
-                  </button>
-                </>
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  className={SECTION_ACTION_PERSISTENT_CLASS}
+                  title={addProjectTitle}
+                  aria-label={addProjectTitle}
+                >
+                  <FolderPlus className="size-3.25" />
+                </button>
               }
             >
               {t('Projects')}
@@ -1625,22 +1603,13 @@ export function Sidebar({
                   conversations,
                   project.id
                 );
-                const projectHit = matchesQuery(listQuery, [
-                  project.alias ?? '',
-                  project.name,
-                  project.path,
-                ]);
-                const visibleConversations =
-                  !searching || projectHit
-                    ? projectConversations
-                    : projectConversations.filter(convMatches);
-                if (searching && visibleConversations.length === 0) return null;
-                const folded = searching ? false : collapsedProjects[project.id] === true;
+                const folded = collapsedProjects[project.id] === true;
                 const revealedExtra = revealedExtras[project.id] ?? 0;
-                const shownCount = searching
-                  ? visibleConversations.length
-                  : shownConversationCount(visibleConversations.length, revealedExtra);
-                const hiddenIds = visibleConversations.slice(shownCount);
+                const shownCount = shownConversationCount(
+                  projectConversations.length,
+                  revealedExtra
+                );
+                const hiddenIds = projectConversations.slice(shownCount);
                 // 项目右键菜单项;抽成数据是为了把动态分组列表与固定项平铺在一起
                 const projectPinned = pinnedProjectIds.includes(project.id);
                 const projectActions: ProjectAction[] = [
@@ -1830,7 +1799,7 @@ export function Sidebar({
                                       className="overflow-hidden"
                                     >
                                       <div className="flex flex-col">
-                                        {visibleConversations.slice(0, shownCount).map((id) => (
+                                        {projectConversations.slice(0, shownCount).map((id) => (
                                           <motion.div
                                             key={id}
                                             layout={
@@ -1870,69 +1839,66 @@ export function Sidebar({
                                             </DraggableChat>
                                           </motion.div>
                                         ))}
-                                        {!searching &&
-                                          projectConversations.length > COLLAPSED_SESSION_LIMIT && (
-                                            <div className="flex items-center gap-1 pl-6">
-                                              {hiddenIds.length > 0 && (
-                                                <ContextMenu>
-                                                  <ContextMenuTrigger
-                                                    render={
-                                                      (
-                                                        <button
-                                                          type="button"
-                                                          onClick={() =>
-                                                            setRevealedExtras((prev) => ({
-                                                              ...prev,
-                                                              [project.id]: nextRevealedExtra(
-                                                                visibleConversations.length,
-                                                                prev[project.id] ?? 0
-                                                              ),
-                                                            }))
-                                                          }
-                                                          className={SHOW_MORE_CLASS}
-                                                        >
-                                                          {t('Show {{n}} more', {
-                                                            n: hiddenIds.length,
-                                                          })}
-                                                        </button>
-                                                      ) as React.ReactElement<
-                                                        Record<string, unknown>
+                                        {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
+                                          <div className="flex items-center gap-1 pl-6">
+                                            {hiddenIds.length > 0 && (
+                                              <ContextMenu>
+                                                <ContextMenuTrigger
+                                                  render={
+                                                    (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                          setRevealedExtras((prev) => ({
+                                                            ...prev,
+                                                            [project.id]: nextRevealedExtra(
+                                                              projectConversations.length,
+                                                              prev[project.id] ?? 0
+                                                            ),
+                                                          }))
+                                                        }
+                                                        className={SHOW_MORE_CLASS}
                                                       >
-                                                    }
-                                                  />
-                                                  <ContextMenuPopup className="min-w-36">
-                                                    <ContextMenuItem
-                                                      onClick={() =>
-                                                        void handleArchiveMany(hiddenIds)
-                                                      }
-                                                    >
-                                                      <Archive />
-                                                      {t('Archive {{n}} conversations', {
-                                                        n: hiddenIds.length,
-                                                      })}
-                                                    </ContextMenuItem>
-                                                  </ContextMenuPopup>
-                                                </ContextMenu>
-                                              )}
-                                              {revealedExtra > 0 && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() =>
-                                                    setRevealedExtras((prev) => ({
-                                                      ...prev,
-                                                      [project.id]: prevRevealedExtra(
-                                                        prev[project.id] ?? 0
-                                                      ),
-                                                    }))
+                                                        {t('Show {{n}} more', {
+                                                          n: hiddenIds.length,
+                                                        })}
+                                                      </button>
+                                                    ) as React.ReactElement<Record<string, unknown>>
                                                   }
-                                                  className={SHOW_MORE_CLASS}
-                                                >
-                                                  {t('Collapse')}
-                                                </button>
-                                              )}
-                                            </div>
-                                          )}
-                                        {visibleConversations.length === 0 && (
+                                                />
+                                                <ContextMenuPopup className="min-w-36">
+                                                  <ContextMenuItem
+                                                    onClick={() =>
+                                                      void handleArchiveMany(hiddenIds)
+                                                    }
+                                                  >
+                                                    <Archive />
+                                                    {t('Archive {{n}} conversations', {
+                                                      n: hiddenIds.length,
+                                                    })}
+                                                  </ContextMenuItem>
+                                                </ContextMenuPopup>
+                                              </ContextMenu>
+                                            )}
+                                            {revealedExtra > 0 && (
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  setRevealedExtras((prev) => ({
+                                                    ...prev,
+                                                    [project.id]: prevRevealedExtra(
+                                                      prev[project.id] ?? 0
+                                                    ),
+                                                  }))
+                                                }
+                                                className={SHOW_MORE_CLASS}
+                                              >
+                                                {t('Collapse')}
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+                                        {projectConversations.length === 0 && (
                                           <p className="py-1.5 pl-8 text-xs text-subtle-foreground">
                                             {t('No conversations yet')}
                                           </p>
@@ -1953,7 +1919,7 @@ export function Sidebar({
                   </SortableProject>
                 );
               };
-              if (recentView && !searching && activeProjects.length === 0) {
+              if (recentView && activeProjects.length === 0) {
                 return (
                   <p className="px-2 py-6 text-center text-xs text-muted-foreground">
                     {t('No projects active in the last {{n}} days', {
@@ -1962,7 +1928,7 @@ export function Sidebar({
                   </p>
                 );
               }
-              if (!searching && orderedProjects.length > 0 && activeProjects.length === 0) {
+              if (orderedProjects.length > 0 && activeProjects.length === 0) {
                 return (
                   <p className="px-2 py-1.5 text-xs text-subtle-foreground">
                     {t('No projects in this group yet')}
@@ -1981,9 +1947,7 @@ export function Sidebar({
                       </div>
                     )}
                     {groupSections.map((section) => {
-                      const foldedSection = searching
-                        ? false
-                        : collapsedGroupIds[section.groupId] === true;
+                      const foldedSection = collapsedGroupIds[section.groupId] === true;
                       return (
                         <div key={section.groupId}>
                           <ProjectGroupHeader
@@ -2053,6 +2017,16 @@ export function Sidebar({
           ) : (
             <NodeSwitcher />
           )}
+          <button
+            type="button"
+            data-enso="add-project-footer"
+            onClick={() => setAddOpen(true)}
+            className={ICON_BUTTON_CLASS}
+            title={addProjectTitle}
+            aria-label={addProjectTitle}
+          >
+            <FolderPlus className="h-4 w-4" />
+          </button>
           <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
           <ArchiveEntryButton
             count={archivedCount}

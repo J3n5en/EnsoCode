@@ -123,6 +123,7 @@ import type {
   GitRequest,
   GitStatusResult,
   HostDirListing,
+  HostDirSearchResult,
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
@@ -1097,6 +1098,9 @@ const electronAPI = {
     /** 在宿主机 parent 目录下新建子文件夹，成功时返回新目录的列表 */
     createHostDir: (parent: string, name: string): Promise<HostDirListing> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_CREATE_HOST_DIR, parent, name),
+    /** 在本机家目录下按关键词搜索目录；空查询返回空列表，host 是机器名 */
+    searchHostDirs: (query: string): Promise<HostDirSearchResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEARCH_HOST_DIRS, query),
     /** 在系统文件管理器（或 appId 指定的应用）里打开项目或会话的实际工作目录；ssh 项目返回 unsupported */
     reveal: (request: {
       projectId: string;

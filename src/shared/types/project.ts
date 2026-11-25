@@ -69,6 +69,11 @@ export type HostDirListing =
   | { ok: true; path: string; parent: string | null; dirs: string[] }
   | { ok: false; error: string };
 
+/** 本机目录搜索：host 是机器名，displayPath 在家目录下写成 ~/... */
+export type HostDirSearchResult =
+  | { ok: true; host: string; results: { path: string; displayPath: string }[] }
+  | { ok: false; error: string };
+
 /** 本机已安装、可用于打开项目目录的编辑器 / 终端（id 是注册表标识，不是路径） */
 export interface OpenInApp {
   id: string;
