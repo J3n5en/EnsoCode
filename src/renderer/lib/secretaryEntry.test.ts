@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { latestSecretaryConversation, secretaryConversationIds } from './secretaryEntry';
+import {
+  latestSecretaryConversation,
+  secretaryConversationIds,
+  secretaryUnreadCount,
+} from './secretaryEntry';
 
 const directory = {
   order: ['old', 'new', 'archived', 'other'],
@@ -12,6 +16,20 @@ const directory = {
 };
 
 describe('latestSecretaryConversation', () => {
+  it('未读数只数该秘书侧栏列表里的会话（不含归档、子会话与别的项目）', () => {
+    const conversations = {
+      a: { projectId: 'sec', createdAt: 1, unread: true, messages: [] },
+      b: { projectId: 'sec', createdAt: 2, messages: [] },
+      archived: { projectId: 'sec', createdAt: 3, unread: true, archived: true, messages: [] },
+      child: { projectId: 'sec', createdAt: 4, unread: true, parentId: 'a', messages: [] },
+      other: { projectId: 'p1', createdAt: 5, unread: true, messages: [] },
+      c: { projectId: 'sec', createdAt: 6, unread: true, messages: [] },
+    };
+    const order = Object.keys(conversations);
+    expect(secretaryUnreadCount('sec', order, conversations)).toBe(2);
+    expect(secretaryUnreadCount(null, order, conversations)).toBe(0);
+  });
+
   it('取该秘书项目下最近活跃且未归档的会话', () => {
     expect(latestSecretaryConversation('sec', directory)).toBe('new');
   });
