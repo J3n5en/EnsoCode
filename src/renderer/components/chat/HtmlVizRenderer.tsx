@@ -126,60 +126,68 @@ function HtmlVizPreview({ code }: { code: string }) {
 
   const onMessage = useCallback((msg: VizMessage) => setViz((s) => nextVizState(s, msg)), []);
 
-  if (viz.failure !== null) {
-    const failed = viz.failure.kind === 'error' ? viz.failure.message : '';
-    return (
-      <details data-enso="html-viz" className="my-2 rounded-lg border border-border">
-        <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
-          {t('Visualization failed to render, showing source')}
-          {failed && `: ${failed}`}
-        </summary>
-        <div className="px-2 pb-2">
-          <CodeBlock code={code} language="html" />
-        </div>
-      </details>
-    );
-  }
+  const failed = viz.failure?.kind === 'error' ? viz.failure.message : null;
+  const fallback = viz.failure !== null;
+  // 脚本错误不再尝试渲染，卸载 iframe 杀掉它；超时只是占位，
+  // 保持挂载、裁到 0 高度藏住，迟到的 height 上报后恢复成预览
+  const frameAlive = viz.failure?.kind !== 'error';
 
   const title = t('Visualization preview');
   return (
     <div data-enso="html-viz" className="my-2 overflow-hidden rounded-lg border border-border">
-      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-2 py-1">
-        <span className="font-mono text-xs text-muted-foreground">html-viz</span>
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            className={ICON_BUTTON}
-            onClick={() => setShowSource((v) => !v)}
-            title={showSource ? t('Show preview') : t('Show source')}
-          >
-            {showSource ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            type="button"
-            className={ICON_BUTTON}
-            onClick={() => setFullscreen(true)}
-            title={t('View fullscreen')}
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </button>
-          <CopyButton text={code} className={ICON_BUTTON} />
-        </div>
-      </div>
-      {showSource && (
-        <div className="[&_[data-enso=code-block]>*]:my-0 [&_[data-enso=code-block]>*]:rounded-none [&_[data-enso=code-block]>*]:border-0">
-          <CodeBlock code={code} language="html" />
-        </div>
+      {fallback ? (
+        <details>
+          <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
+            {t('Visualization failed to render, showing source')}
+            {failed && `: ${failed}`}
+          </summary>
+          <div className="px-2 pb-2">
+            <CodeBlock code={code} language="html" />
+          </div>
+        </details>
+      ) : (
+        <>
+          <div className="flex items-center justify-between border-b border-border bg-muted/30 px-2 py-1">
+            <span className="font-mono text-xs text-muted-foreground">html-viz</span>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                className={ICON_BUTTON}
+                onClick={() => setShowSource((v) => !v)}
+                title={showSource ? t('Show preview') : t('Show source')}
+              >
+                {showSource ? <Eye className="h-3.5 w-3.5" /> : <Code className="h-3.5 w-3.5" />}
+              </button>
+              <button
+                type="button"
+                className={ICON_BUTTON}
+                onClick={() => setFullscreen(true)}
+                title={t('View fullscreen')}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </button>
+              <CopyButton text={code} className={ICON_BUTTON} />
+            </div>
+          </div>
+          {showSource && (
+            <div className="[&_[data-enso=code-block]>*]:my-0 [&_[data-enso=code-block]>*]:rounded-none [&_[data-enso=code-block]>*]:border-0">
+              <CodeBlock code={code} language="html" />
+            </div>
+          )}
+        </>
       )}
-      {/* 切到源码只隐藏不卸载，保住可视化内部状态 */}
-      <VizFrame
-        srcdoc={srcdoc}
-        theme={theme}
-        title={title}
-        className={cn(showSource && 'hidden')}
-        style={{ height: viz.height ?? 160 }}
-        onMessage={onMessage}
-      />
+      {/* 切到源码只隐藏不卸载，保住可视化内部状态；超时降级也保活 iframe 以便迟到的 height 恢复 */}
+      {frameAlive && (
+        <VizFrame
+          srcdoc={srcdoc}
+          theme={theme}
+          title={title}
+          // fallback 时不能 hidden：iframe 宽度归零会让内容测出的高度失真，靠 height: 0 藏住即可
+          className={cn(showSource && !fallback && 'hidden')}
+          style={{ height: fallback ? 0 : (viz.height ?? 160) }}
+          onMessage={onMessage}
+        />
+      )}
       {fullscreen && (
         <div
           className="fixed inset-0 flex flex-col bg-background"
