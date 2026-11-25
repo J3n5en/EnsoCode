@@ -6,7 +6,7 @@ import { useI18n } from '@/i18n';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useDefaultModelRevalidationStore, useSettingsStore } from '@/stores/settings';
-import { SettingsButton, SettingsRow } from './kit';
+import { SettingsRow, SettingsSwitch } from './kit';
 
 function selectionLabel(selection: DefaultModelRef, providers: readonly ModelProvider[]): string {
   const provider = providers.find((entry) => entry.id === selection.providerId);
@@ -64,49 +64,53 @@ export function DefaultModelPicker() {
   ].filter((note): note is string => Boolean(note));
 
   return (
-    <SettingsRow
-      label={t('Default model')}
-      description={
-        <>
-          {t(
-            defaultModelFollowLast
-              ? 'New conversations use the last model you picked.'
-              : 'Used for new conversations.'
-          )}
-          {notes.map((note) => (
-            <span key={note} className="mt-1 flex items-start gap-1">
-              <CircleAlert className="mt-0.5 size-3 shrink-0" />
-              {note}
-            </span>
-          ))}
-        </>
-      }
-    >
-      {!defaultModelFollowLast && candidates.length > 0 && (
-        <SettingsButton variant="ghost" onClick={() => setDefaultModelFollowLast(true)}>
-          {t('Follow last selection')}
-        </SettingsButton>
-      )}
+    <>
+      <SettingsRow
+        label={t('Default model')}
+        description={
+          <>
+            {t('Used for new conversations.')}
+            {notes.map((note) => (
+              <span key={note} className="mt-1 flex items-start gap-1">
+                <CircleAlert className="mt-0.5 size-3 shrink-0" />
+                {note}
+              </span>
+            ))}
+          </>
+        }
+      >
+        {candidates.length > 0 && (
+          <div className="w-[280px] max-w-full">
+            <ModelPicker
+              providers={candidates}
+              virtualModels={virtualModels}
+              providerId={selectedProvider?.id ?? defaultModel?.providerId ?? ''}
+              modelId={selectedModel?.id ?? defaultModel?.modelId ?? ''}
+              reasoningEnabled={defaultReasoningEnabled}
+              thinkingLevel={defaultThinkingLevel}
+              emptyLabel={t('Select model')}
+              triggerLabel={defaultModelFollowLast ? t('Follow last selection') : undefined}
+              side="bottom"
+              triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+              onSelect={(providerId, modelId) => setDefaultModel({ providerId, modelId })}
+              onReasoningChange={setDefaultReasoningEnabled}
+              onThinkingChange={setDefaultThinkingLevel}
+              showReasoningControls={!defaultModelFollowLast}
+            />
+          </div>
+        )}
+      </SettingsRow>
       {candidates.length > 0 && (
-        <div className="w-[280px] max-w-full">
-          <ModelPicker
-            providers={candidates}
-            virtualModels={virtualModels}
-            providerId={selectedProvider?.id ?? defaultModel?.providerId ?? ''}
-            modelId={selectedModel?.id ?? defaultModel?.modelId ?? ''}
-            reasoningEnabled={defaultReasoningEnabled}
-            thinkingLevel={defaultThinkingLevel}
-            emptyLabel={t('Select model')}
-            triggerLabel={defaultModelFollowLast ? t('Follow last selection') : undefined}
-            side="bottom"
-            triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
-            onSelect={(providerId, modelId) => setDefaultModel({ providerId, modelId })}
-            onReasoningChange={setDefaultReasoningEnabled}
-            onThinkingChange={setDefaultThinkingLevel}
-            showReasoningControls={!defaultModelFollowLast}
+        <SettingsRow
+          label={t('Follow last selection')}
+          description={t('New conversations use the last model you picked.')}
+        >
+          <SettingsSwitch
+            checked={defaultModelFollowLast}
+            onCheckedChange={setDefaultModelFollowLast}
           />
-        </div>
+        </SettingsRow>
       )}
-    </SettingsRow>
+    </>
   );
 }

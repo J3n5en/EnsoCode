@@ -80,12 +80,20 @@ vi.mock('@/components/chat/ModelPicker', () => ({
 }));
 
 describe('DefaultModelPicker', () => {
+  const followSwitch = (html: string) => {
+    const label = html.match(/<label id="([^"]+)"[^>]*>Follow last selection<\/label>/);
+    expect(label, 'follow-last row label').not.toBeNull();
+    const control = html.match(new RegExp(`<[^>]*aria-labelledby="${label?.[1]}"[^>]*>`))?.[0];
+    expect(control).toContain('role="switch"');
+    return control?.match(/aria-checked="(true|false)"/)?.[1];
+  };
+
   it('reuses ModelPicker with reasoning controls and writes selection + reasoning defaults', () => {
     harness.state.defaultModelFollowLast = false;
     const html = renderToStaticMarkup(createElement(DefaultModelPicker));
     expect(html).toContain('data-default-picker="true"');
     expect(html).toContain('data-reasoning-controls="true"');
-    expect(html).toContain('Follow last selection');
+    expect(followSwitch(html)).toBe('false');
 
     expect(harness.pickerProps?.reasoningEnabled).toBe(true);
     expect(harness.pickerProps?.thinkingLevel).toBe('high');
@@ -108,11 +116,11 @@ describe('DefaultModelPicker', () => {
     expect(harness.setDefaultThinkingLevel).toHaveBeenCalledWith('max');
   });
 
-  it('follow-last mode labels the picker and hides the extra option', () => {
+  it('follow-last mode labels the picker and turns the follow switch on', () => {
     harness.state.defaultModelFollowLast = true;
     const html = renderToStaticMarkup(createElement(DefaultModelPicker));
     expect(harness.pickerProps?.triggerLabel).toBe('Follow last selection');
     expect(harness.pickerProps?.showReasoningControls).toBe(false);
-    expect(html).not.toContain('Follow last selection');
+    expect(followSwitch(html)).toBe('true');
   });
 });
