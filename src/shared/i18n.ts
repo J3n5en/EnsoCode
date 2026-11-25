@@ -969,6 +969,7 @@ export const zhTranslations: Record<string, string> = {
     '使用订阅账号登录（SuperGrok、Claude Pro、ChatGPT 等）',
   'Add account': '添加账号',
   '{{count}} accounts': '{{count}} 个账号',
+  '{{count}} providers': '{{count}} 个服务商',
   'Log out': '退出登录',
   'Starting login...': '正在启动登录…',
   'Complete authorization in your browser': '请在浏览器中完成授权',

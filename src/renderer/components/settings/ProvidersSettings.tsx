@@ -52,6 +52,7 @@ import {
   refreshProvider,
   useProviderFetchState,
 } from './providerFetch';
+import { ProviderGroupLabel } from './providerGroupLabel';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
 import { TitleSummaryPicker } from './TitleSummaryPicker';
 import { VirtualModelsSettings } from './VirtualModelsSettings';
@@ -336,8 +337,7 @@ export function ProvidersSettings() {
               <SettingsExpandableRow
                 key={group.vendorId}
                 defaultOpen
-                label={label}
-                description={String(group.providers.length)}
+                label={<ProviderGroupLabel label={label} count={group.providers.length} />}
               >
                 {group.providers.map((provider) => {
                   const isSubscription = Boolean(provider.oauthAccountKey);
