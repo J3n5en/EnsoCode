@@ -216,7 +216,7 @@ export function MetricToggle({
           type="button"
           onClick={() => onChange(item.id)}
           className={cn(
-            'rounded px-2 py-0.5 text-[11px] transition-colors',
+            'rounded px-2 py-0.5 text-[11px] transition-colors pointer-coarse:min-w-[44px]',
             value === item.id
               ? 'bg-background text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'

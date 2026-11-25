@@ -25,8 +25,6 @@ export interface SettingsOption<T extends string> {
 }
 
 const HEIGHT = 'sm:h-(--settings-control-h) sm:min-h-(--settings-control-h)';
-/** 根字号 14px，Tailwind 的 11 只有 38.5px；触屏点击区按 44px 写死 */
-export const TOUCH_TARGET = 'pointer-coarse:after:min-h-[44px] pointer-coarse:after:min-w-[44px]';
 const WIDTH = { default: 'w-[220px]', wide: 'w-[280px]' } as const;
 
 export function SettingsSwitch({
@@ -44,20 +42,13 @@ export function SettingsSwitch({
       checked={checked}
       onCheckedChange={onCheckedChange}
       disabled={disabled}
-      className="relative pointer-coarse:after:absolute pointer-coarse:after:top-1/2 pointer-coarse:after:left-1/2 pointer-coarse:after:size-[44px] pointer-coarse:after:-translate-1/2"
+      className="relative"
     />
   );
 }
 
 export function SettingsButton({ className, ...props }: React.ComponentProps<typeof Button>) {
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      className={cn(HEIGHT, TOUCH_TARGET, className)}
-      {...props}
-    />
-  );
+  return <Button size="sm" variant="outline" className={cn(HEIGHT, className)} {...props} />;
 }
 
 export function SettingsSelect<T extends string>({
@@ -90,7 +81,7 @@ export function SettingsSelect<T extends string>({
         size="sm"
         {...a11y}
         aria-label={ariaLabel}
-        className={cn(WIDTH[width], 'max-w-full', HEIGHT, TOUCH_TARGET)}
+        className={cn(WIDTH[width], 'max-w-full', HEIGHT)}
       >
         <SelectValue />
       </SelectTrigger>
@@ -132,30 +123,33 @@ export function SettingsSegmented<T extends string>({
       role="radiogroup"
       {...a11y}
       aria-label={ariaLabel}
-      className="flex h-(--settings-control-h) max-w-full items-center gap-0.5 overflow-x-auto rounded-md bg-muted p-0.5"
+      className="flex h-(--settings-control-h) max-w-full items-center rounded-md bg-muted p-0.5"
     >
-      {options.map((option, index) => {
-        const on = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            tabIndex={on ? 0 : -1}
-            onClick={() => onValueChange(option.value)}
-            onKeyDown={(event) => move(event, index)}
-            className={cn(
-              'relative h-6 shrink-0 whitespace-nowrap rounded-[4px] px-2.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:top-1/2 pointer-coarse:after:h-[44px] pointer-coarse:after:-translate-y-1/2',
-              on
-                ? 'bg-background text-foreground shadow-xs ring-1 ring-border'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+      {/* 触屏热区高 44px：滚动框会把它上下裁掉，用 padding 放出、负 margin 抵消，布局不变 */}
+      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto pointer-coarse:-my-[11px] pointer-coarse:py-[11px]">
+        {options.map((option, index) => {
+          const on = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onValueChange(option.value)}
+              onKeyDown={(event) => move(event, index)}
+              className={cn(
+                'h-6 shrink-0 whitespace-nowrap rounded-[4px] px-2.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-w-[44px]',
+                on
+                  ? 'bg-background text-foreground shadow-xs ring-1 ring-border'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

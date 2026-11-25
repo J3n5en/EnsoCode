@@ -239,7 +239,7 @@ export function SettingsExpandableRow({
             aria-controls={regionId}
             aria-label={open ? t('Collapse') : t('Expand')}
             onClick={() => setOpen((value) => !value)}
-            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pointer-coarse:after:absolute pointer-coarse:after:size-[44px]"
+            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ChevronRight className={cn('size-4 transition-transform', open && 'rotate-90')} />
           </button>
