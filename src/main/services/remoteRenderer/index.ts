@@ -28,6 +28,7 @@ import {
   addRemoteSender,
   getRemoteSender,
   hasRemoteMain,
+  primeSecretaryRereads,
   RemoteSender,
   remoteLeaderId,
   remoteSenderById,
@@ -36,6 +37,13 @@ import {
 } from './senders';
 
 let hostControl = false;
+
+/** 秘书清单由 IPC 注册处注入（避免与 secretary/ipc 模块成环）；未注入时 prime 是空操作 */
+let secretaryIdProvider: () => readonly string[] = () => [];
+
+export function setRemoteSecretaryIdProvider(provider: () => readonly string[]): void {
+  secretaryIdProvider = provider;
+}
 
 /** 无界面服务端把自身的更新/重启开放给已配对的浏览器 */
 export function allowRemoteHostControl(): void {
@@ -192,6 +200,8 @@ async function hello(link: RemoteLink, command: Extract<RemoteToHost, { type: 'r
       leader,
       replay: true,
     });
+    // 接入/续连后补发秘书重读通知：丢失过推送的远端借此自愈，提案卡不再停在占位行
+    primeSecretaryRereads(sender, secretaryIdProvider());
   };
   const existing = getRemoteSender(link.pairId, command.cid);
   if (existing && existing.kind === command.kind) {

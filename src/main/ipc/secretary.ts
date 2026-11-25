@@ -15,6 +15,7 @@ import { getEventClaimStore } from '../services/eventClaims';
 import { interruptedTurnReason } from '../services/interruptedTurns';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
+import { setRemoteSecretaryIdProvider } from '../services/remoteRenderer';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
@@ -102,6 +103,7 @@ import {
   secretaryContext,
   secretaryContexts,
   secretaryIdOfConversation,
+  secretaryIds,
   secretaryRegistry,
   secretaryRoot,
 } from '../services/secretary/secretaries';
@@ -711,6 +713,8 @@ const NO_SECRETARY = { ok: false as const, error: 'secretary-required' };
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  // 远端主界面接入/续连时补发秘书重读通知，丢失过推送的远端自愈
+  setRemoteSecretaryIdProvider(() => secretaryIds());
   getEventClaimStore().onChanged(broadcastState);
   getDemandThreadStore().onChanged(broadcastState);
   // worker 报完启动时的任务表：启动时没敢判的、以前自动归档仍有任务在跑的会话在这里补判收回

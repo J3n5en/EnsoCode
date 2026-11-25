@@ -387,4 +387,62 @@ describe('newSecretaryConversation', () => {
     ).resolves.toBe('conv-1');
     expect(sessions.newConversation).toHaveBeenCalledWith('sec-project-2');
   });
+
+  it('提案在 store 里缺失时按需重拉所有秘书状态，卡片不再停在占位行', async () => {
+    // 初始状态里没有 pr1（推送丢失的场景）；Main 侧其实有
+    initialState = Promise.resolve({ ...stateWith('pending'), proposals: {} });
+    useSecretaryStore.setState({
+      focusedId: 'default',
+      secretaries: [
+        { id: 'default', projectId: 'sec-project', name: '秘书', avatar: null, order: 0 },
+      ],
+      states: { default: { ...stateWith('pending'), proposals: {} } },
+      secretary: { ...stateWith('pending'), proposals: {} },
+    });
+    let reads = 0;
+    const original = window.electronAPI.secretary.getState;
+    window.electronAPI.secretary.getState = ((id?: string) => {
+      reads++;
+      void id;
+      return Promise.resolve(stateWith('pending'));
+    }) as never;
+    try {
+      void useSecretaryStore.getState().ensureProposal('pr1');
+      await flush();
+      expect(reads).toBeGreaterThan(0);
+      expect(useSecretaryStore.getState().states.default?.proposals.pr1?.status).toBe('pending');
+      expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('pending');
+      // 已有提案时不重拉
+      reads = 0;
+      void useSecretaryStore.getState().ensureProposal('pr1');
+      await flush();
+      expect(reads).toBe(0);
+    } finally {
+      window.electronAPI.secretary.getState = original;
+    }
+  });
+
+  it('ensureProposal 并发调用合并成一次重拉', async () => {
+    useSecretaryStore.setState({
+      focusedId: 'default',
+      secretaries: [
+        { id: 'default', projectId: 'sec-project', name: '秘书', avatar: null, order: 0 },
+      ],
+      states: { default: { ...stateWith('pending'), proposals: {} } },
+    });
+    let reads = 0;
+    const original = window.electronAPI.secretary.getState;
+    window.electronAPI.secretary.getState = (() => {
+      reads++;
+      return Promise.resolve(stateWith('pending'));
+    }) as never;
+    try {
+      void useSecretaryStore.getState().ensureProposal('pr1');
+      void useSecretaryStore.getState().ensureProposal('pr2');
+      await flush();
+      expect(reads).toBe(1);
+    } finally {
+      window.electronAPI.secretary.getState = original;
+    }
+  });
 });
