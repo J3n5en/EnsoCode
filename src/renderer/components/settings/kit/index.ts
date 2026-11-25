@@ -2,6 +2,7 @@ export {
   SettingsButton,
   SettingsInput,
   type SettingsOption,
+  SettingsSearch,
   SettingsSegmented,
   SettingsSelect,
   SettingsStepper,
