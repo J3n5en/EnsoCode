@@ -296,7 +296,7 @@ describe('buildSettingsCatalog', () => {
     const categoryOf = (id: string) => buildSettingsCatalog().find((e) => e.id === id)?.category;
     expect(categoryOf('appearance.headerSessionTabs')).toBe('conversation');
     expect(categoryOf('appearance.chatTypography')).toBe('conversation');
-    expect(categoryOf('appearance.navRailSide')).toBe('appearance');
+    expect(categoryOf('appearance.navRailSide')).toBe('conversation');
     expect(categoryOf('general.terminalShell')).toBe('terminal');
     expect(categoryOf('general.autoArchiveIdleDays')).toBe('runtime');
     expect(categoryOf('general.proxy')).toBe('general');

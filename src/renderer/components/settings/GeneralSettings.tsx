@@ -22,6 +22,7 @@ import { isRemoteClient } from '@/lib/remoteClient';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
+import { FileOpeningSettings } from './FileOpeningSettings';
 import {
   SettingsButton,
   SettingsPage,
@@ -72,6 +73,7 @@ export function GeneralSettings() {
       </SettingsSection>
 
       <ConfigSyncSettings />
+      <FileOpeningSettings />
       <UpdateSection />
 
       {window.electronAPI.env.platform === 'darwin' && !isRemoteClient() && (

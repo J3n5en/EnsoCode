@@ -6,7 +6,7 @@ export const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   shortcuts: 'Shortcuts',
   appearance: 'Appearance',
   conversation: 'Conversation display',
-  terminal: 'Terminal & editor',
+  terminal: 'Terminal',
   runtime: 'Runtime & sessions',
   providers: 'Model Providers',
   skills: 'Skills',

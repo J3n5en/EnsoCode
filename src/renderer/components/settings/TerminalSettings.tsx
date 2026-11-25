@@ -22,7 +22,6 @@ import {
 import { cn } from '@/lib/utils';
 import { type FontWeight, useSettingsStore } from '@/stores/settings';
 import { fontWeightOptions } from './constants';
-import { FileOpeningSettings } from './FileOpeningSettings';
 import { SettingsPage, SettingsPreview, SettingsRow, SettingsSection, SettingsSelect } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
@@ -331,7 +330,6 @@ function TerminalAppearance() {
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const setTerminalTheme = useSettingsStore((s) => s.setTerminalTheme);
   const globalFontSize = useSettingsStore((s) => s.terminalFontSize);
-  const setTerminalFontSize = useSettingsStore((s) => s.setTerminalFontSize);
   const globalFontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const setTerminalFontFamily = useSettingsStore((s) => s.setTerminalFontFamily);
   const terminalFontWeight = useSettingsStore((s) => s.terminalFontWeight);
@@ -340,22 +338,12 @@ function TerminalAppearance() {
   const setTerminalFontWeightBold = useSettingsStore((s) => s.setTerminalFontWeightBold);
   const favoriteTerminalThemes = useSettingsStore((s) => s.favoriteTerminalThemes);
   const toggleFavoriteTerminalTheme = useSettingsStore((s) => s.toggleFavoriteTerminalTheme);
-  const [localFontSize, setLocalFontSize] = React.useState(globalFontSize);
   const [localFontFamily, setLocalFontFamily] = React.useState(globalFontFamily);
   const [showFavoritesOnly, setShowFavoritesOnly] = React.useState(false);
 
   React.useEffect(() => {
-    setLocalFontSize(globalFontSize);
-  }, [globalFontSize]);
-  React.useEffect(() => {
     setLocalFontFamily(globalFontFamily);
   }, [globalFontFamily]);
-
-  const applyFontSizeChange = React.useCallback(() => {
-    const validFontSize = Math.max(8, Math.min(32, localFontSize || 8));
-    if (validFontSize !== localFontSize) setLocalFontSize(validFontSize);
-    if (validFontSize !== globalFontSize) setTerminalFontSize(validFontSize);
-  }, [localFontSize, globalFontSize, setTerminalFontSize]);
 
   const applyFontFamilyChange = React.useCallback(() => {
     const validFontFamily = localFontFamily.trim() || globalFontFamily;
@@ -394,13 +382,17 @@ function TerminalAppearance() {
       <SettingsSection bare rowId="terminal.appearance" title={t('Terminal appearance')}>
         <TerminalPreview
           theme={previewTheme}
-          fontSize={localFontSize}
+          fontSize={globalFontSize}
           fontFamily={localFontFamily}
           fontWeight={terminalFontWeight}
         />
       </SettingsSection>
       <SettingsSection>
-        <SettingsRow rowId="terminal.color-scheme" label={t('Color scheme')}>
+        <SettingsRow
+          rowId="terminal.color-scheme"
+          label={t('Color scheme')}
+          description={t('Also used by command output in conversations')}
+        >
           <div className="flex min-w-0 items-center gap-2">
             <Button variant="outline" size="icon" onClick={handlePrevTheme}>
               <ChevronLeft className="h-4 w-4" />
@@ -423,7 +415,11 @@ function TerminalAppearance() {
             </Button>
           </div>
         </SettingsRow>
-        <SettingsRow rowId="terminal.font" label={t('Font')}>
+        <SettingsRow
+          rowId="terminal.font"
+          label={t('Font')}
+          description={t('Also used by command output in conversations')}
+        >
           <Input
             value={localFontFamily}
             onChange={(e) => setLocalFontFamily(e.target.value)}
@@ -438,24 +434,6 @@ function TerminalAppearance() {
             placeholder="JetBrains Mono, monospace"
             className="w-[min(100%,220px)] max-w-full"
           />
-        </SettingsRow>
-        <SettingsRow rowId="terminal.font-size" label={t('Font size')}>
-          <Input
-            type="number"
-            value={localFontSize}
-            onChange={(e) => setLocalFontSize(Number(e.target.value))}
-            onBlur={applyFontSizeChange}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                applyFontSizeChange();
-                e.currentTarget.blur();
-              }
-            }}
-            min={8}
-            max={32}
-            className="w-20 max-w-full"
-          />
-          <span className="text-[12px] text-muted-foreground">px</span>
         </SettingsRow>
         <SettingsRow rowId="terminal.font-weight" label={t('Font weight')}>
           <SettingsSelect
@@ -479,13 +457,12 @@ function TerminalAppearance() {
 export function TerminalSettings() {
   const { t } = useI18n();
   return (
-    <SettingsPage rowId="terminal.root" title={t('Terminal & editor')}>
+    <SettingsPage rowId="terminal.root" title={t('Terminal')}>
       <SettingsSection rowId="terminal.shell" title={t('Shell')}>
         <WindowsLocalShellRow />
         <TerminalShellRow />
       </SettingsSection>
       <TerminalAppearance />
-      <FileOpeningSettings />
     </SettingsPage>
   );
 }
