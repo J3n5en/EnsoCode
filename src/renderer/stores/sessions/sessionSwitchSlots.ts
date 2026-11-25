@@ -6,7 +6,7 @@ export const COLLAPSED_SESSION_LIMIT = 5;
 export const SESSION_EXPAND_STEP = 15;
 export const SESSION_SWITCH_SLOT_LIMIT = 9;
 
-/** 项目列表当前应露出的条数；searching 时调用方直接用 total */
+/** 项目列表当前应露出的条数 */
 export function shownConversationCount(total: number, revealedExtra: number): number {
   if (total <= 0) return 0;
   return Math.min(total, COLLAPSED_SESSION_LIMIT + Math.max(0, revealedExtra));
@@ -50,9 +50,6 @@ export function sessionSwitchSlotIds(input: {
   collapsedProjects?: Record<string, boolean>;
   /** 该项目已额外露出的条数；缺省 0 = 只露折叠上限 */
   revealedExtras?: Record<string, number>;
-  searching?: boolean;
-  matches?: (id: string) => boolean;
-  projectMatches?: (projectId: string) => boolean;
   /** 侧栏「活跃中」可见行，占 Cmd+1… 最前槽 */
   leadingIds?: readonly string[];
 }): string[] {
@@ -64,9 +61,6 @@ export function sessionSwitchSlotIds(input: {
     archivedProjectIds = [],
     collapsedProjects = {},
     revealedExtras = {},
-    searching = false,
-    matches = () => true,
-    projectMatches = () => false,
     leadingIds = [],
   } = input;
 
@@ -81,20 +75,17 @@ export function sessionSwitchSlotIds(input: {
   for (const id of leadingIds) push(id);
 
   const pinned = pinnedConversationIds(order, conversations, pinnedOrderIds, archivedProjectIds);
-  for (const id of searching ? pinned.filter(matches) : pinned) push(id);
+  for (const id of pinned) push(id);
 
   for (const projectId of projectIds) {
     if (slots.length >= SESSION_SWITCH_SLOT_LIMIT) break;
-    const folded = searching ? false : collapsedProjects[projectId] === true;
+    const folded = collapsedProjects[projectId] === true;
     if (folded) continue;
     const projectConversations = projectConversationIds(order, conversations, projectId);
-    const visible =
-      !searching || projectMatches(projectId)
-        ? projectConversations
-        : projectConversations.filter(matches);
-    const shown = searching
-      ? visible
-      : visible.slice(0, shownConversationCount(visible.length, revealedExtras[projectId] ?? 0));
+    const shown = projectConversations.slice(
+      0,
+      shownConversationCount(projectConversations.length, revealedExtras[projectId] ?? 0)
+    );
     for (const id of shown) push(id);
   }
 

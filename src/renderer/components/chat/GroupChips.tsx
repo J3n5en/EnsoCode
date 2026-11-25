@@ -6,7 +6,7 @@ import {
   RECENT_GROUP_ID,
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
-import { Check, ChevronDown, Pencil, Plus, TextSearch, X } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Plus } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type DragPayload, selectorGroupDropId } from '@/components/chat/dragDrop';
 import { indicatorOffset } from '@/components/chat/groupChipIndicator';
@@ -31,16 +31,12 @@ interface GroupChipsProps {
   totalCount: number;
   recentCount: number;
   ungroupedCount: number;
-  query: string;
-  onQueryChange: (query: string) => void;
-  searchOpen: boolean;
-  onSearchOpenChange: (open: boolean) => void;
   onSelect: (id: string) => void;
   onAddGroup: () => void;
   onEditGroup: (id: string) => void;
 }
 
-/** 侧栏分类条：横滑、拖动排序、接收项目拖入；放不下时出现 ⌄ 列出全部分组；搜索展开时就地换成搜索框 */
+/** 侧栏分类条：横滑、拖动排序、接收项目拖入；放不下时出现 ⌄ 列出全部分组 */
 export function GroupChips({
   groups,
   selectedId,
@@ -48,10 +44,6 @@ export function GroupChips({
   totalCount,
   recentCount,
   ungroupedCount,
-  query,
-  onQueryChange,
-  searchOpen,
-  onSearchOpenChange,
   onSelect,
   onAddGroup,
   onEditGroup,
@@ -59,8 +51,6 @@ export function GroupChips({
   const { t } = useI18n();
   const ordered = groups.slice().sort((a, b) => a.order - b.order);
   const hasGroups = ordered.length > 0;
-  const showSearch = searchOpen || query.length > 0;
-  const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLSpanElement>(null);
@@ -68,13 +58,6 @@ export function GroupChips({
   const [edges, setEdges] = useState({ left: false, right: false, overflow: false });
   // 拖动分组时父组件要跟着重排下划线
   const { active } = useDndContext();
-
-  const selectedGroup = ordered.find((group) => group.id === selectedId);
-  const selectedLabel =
-    selectedId === UNGROUPED_GROUP_ID ? t('Ungrouped') : (selectedGroup?.name ?? null);
-  const placeholder = selectedLabel
-    ? t('Search in {{group}}...', { group: selectedLabel })
-    : t('Search conversations...');
 
   // 下划线不能用按钮的 ::after：滚动容器 overflow 会裁掉伸出底边的部分，
   // 而它必须盖住底部分割线，底边才和分割线重合。
@@ -101,7 +84,7 @@ export function GroupChips({
   const measure = useCallback(() => {
     const el = scrollRef.current;
     placeIndicator();
-    // 搜索展开时标签条隐藏，宽度为 0，保留上次结果
+    // 宽度为 0 时保留上次结果
     if (!el || el.clientWidth === 0) return;
     setEdges((prev) => {
       const reclaim = prev.overflow ? OVERFLOW_TRIGGER_SPACE : 0;
@@ -126,11 +109,11 @@ export function GroupChips({
     return () => observer.disconnect();
   }, [measure]);
 
-  // 选中、展开搜索、拖动分组都会挪动标签，但测量只读 DOM
+  // 选中或拖动分组都会挪动标签，但测量只读 DOM
   // biome-ignore lint/correctness/useExhaustiveDependencies: 这些值是重测触发信号
   useLayoutEffect(() => {
     placeIndicator();
-  }, [placeIndicator, active, selectedId, showSearch, ordered.length]);
+  }, [placeIndicator, active, selectedId, ordered.length]);
 
   // 竖向滚轮转横滑：React 的 onWheel 是 passive，拦不住默认滚动
   useEffect(() => {
@@ -160,16 +143,7 @@ export function GroupChips({
     if (start < el.scrollLeft + EDGE_FADE) el.scrollTo({ left: start - EDGE_FADE, behavior });
     else if (end > el.scrollLeft + el.clientWidth - EDGE_FADE)
       el.scrollTo({ left: end - el.clientWidth + EDGE_FADE, behavior });
-  }, [selectedId, hasGroups, searchOpen]);
-
-  useEffect(() => {
-    if (searchOpen) inputRef.current?.focus();
-  }, [searchOpen]);
-
-  const closeSearch = () => {
-    onQueryChange('');
-    onSearchOpenChange(false);
-  };
+  }, [selectedId, hasGroups]);
 
   const fade = (on: boolean) => (on ? `${EDGE_FADE}px` : '0px');
   const maskImage =
@@ -181,43 +155,7 @@ export function GroupChips({
     <div className="group/bar shrink-0">
       {/* 35px + 1px 分割线 = 会话 tab 条 ChromeRow 的 36px；用 px，不随 rem 缩放，两条底线才能接上 */}
       <div className="relative z-[1] flex h-[35px] items-end gap-1.5 px-3.5">
-        {showSearch && (
-          <label className="mb-1 flex h-7 min-w-0 flex-1 cursor-text items-center gap-2 rounded-lg border border-transparent bg-foreground/5 pr-0.5 pl-2.5 text-xs text-muted-foreground transition-colors focus-within:border-brand/45">
-            <TextSearch className="size-3.5 shrink-0" />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Escape') return;
-                event.stopPropagation();
-                closeSearch();
-              }}
-              onBlur={() => {
-                // 切走窗口也会失焦，此时不收起
-                if (!query && document.hasFocus()) onSearchOpenChange(false);
-              }}
-              placeholder={placeholder}
-              className="h-full min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-            />
-            <button
-              type="button"
-              onClick={closeSearch}
-              className="flex size-5 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-foreground/5 hover:text-foreground"
-              title={t('Close')}
-              aria-label={t('Close')}
-            >
-              <X className="size-3" />
-            </button>
-          </label>
-        )}
-        <div
-          ref={rowRef}
-          className={cn(
-            'relative flex min-w-0 flex-1 items-center gap-1.5',
-            showSearch && 'hidden'
-          )}
-        >
+        <div ref={rowRef} className="relative flex min-w-0 flex-1 items-center gap-1.5">
           <div
             ref={scrollRef}
             onScroll={measure}

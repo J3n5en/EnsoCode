@@ -213,41 +213,6 @@ describe('sessionSwitchSlotIds', () => {
     ).toEqual(order);
   });
 
-  it('搜索时只保留命中行，折起项目也展开参与', () => {
-    const conversations = {
-      hit: conv('p1', 1, 20),
-      miss: conv('p1', 2, 10),
-      other: conv('p2', 3, 5),
-    };
-    expect(
-      sessionSwitchSlotIds({
-        order: ['hit', 'miss', 'other'],
-        conversations,
-        projectIds: ['p1', 'p2'],
-        collapsedProjects: { p1: true, p2: true },
-        searching: true,
-        matches: (id) => id === 'hit',
-      })
-    ).toEqual(['hit']);
-  });
-
-  it('搜索命中项目名时该项目全部会话入列', () => {
-    const conversations = {
-      a: conv('p1', 1, 20),
-      b: conv('p1', 2, 10),
-    };
-    expect(
-      sessionSwitchSlotIds({
-        order: ['a', 'b'],
-        conversations,
-        projectIds: ['p1'],
-        searching: true,
-        matches: () => false,
-        projectMatches: (id) => id === 'p1',
-      })
-    ).toEqual(['a', 'b']);
-  });
-
   it('归档会话不入列', () => {
     const conversations = {
       live: conv('p1', 1, 20),
