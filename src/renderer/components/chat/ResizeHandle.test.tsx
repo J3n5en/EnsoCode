@@ -1,6 +1,8 @@
-import { createElement } from 'react';
+import { parseHTML } from 'linkedom';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ResizeHandle } from './ResizeHandle';
 
 const render = (props: { gap?: boolean; inactive?: boolean }) => {
@@ -35,5 +37,65 @@ describe('ResizeHandle 常驻（面板收起时）', () => {
     expect(outer).not.toContain('invisible');
     expect(outer).toContain('bg-border');
     expect(html).toContain('cursor-col-resize');
+  });
+});
+
+describe('ResizeHandle 双击复位与拖拽通知', () => {
+  const setup = async (props: {
+    onReset?: () => void;
+    onResizingChange?: (r: boolean) => void;
+  }) => {
+    const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('document', window.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const container = window.document.getElementById('root') as unknown as HTMLElement;
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(createElement(ResizeHandle, { onResize: () => {}, ...props }))
+    );
+    const hitArea = container.querySelector('.cursor-col-resize') as HTMLElement;
+    return { root, container, hitArea, window };
+  };
+
+  it('双击手柄触发 onReset（默认宽度复位）', async () => {
+    const onReset = vi.fn();
+    const { root, hitArea, window } = await setup({ onReset });
+    await act(async () => {
+      hitArea.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
+    });
+    expect(onReset).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('拖拽开始/结束通知 onResizingChange，消费方可暂停宽度动画', async () => {
+    const events: boolean[] = [];
+    const { root, hitArea, window } = await setup({
+      onResizingChange: (r) => events.push(r),
+    });
+    await act(async () => {
+      {
+        const down = new window.Event('mousedown', { bubbles: true });
+        Object.assign(down, { clientX: 100 });
+        hitArea.dispatchEvent(down);
+      }
+    });
+    expect(events).toEqual([true]);
+    await act(async () => {
+      window.document.dispatchEvent(new window.Event('mouseup', { bubbles: true }));
+    });
+    expect(events).toEqual([true, false]);
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('未传 onReset 时双击不报错', async () => {
+    const { root, hitArea, window } = await setup({});
+    await act(async () => {
+      hitArea.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
+    });
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
   });
 });
