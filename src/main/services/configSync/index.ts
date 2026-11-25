@@ -205,6 +205,11 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   defaultModelFollowLast: { mode: 'portable' },
   titleSummaryEnabled: { mode: 'portable' },
   titleSummaryModel: { mode: 'portable' },
+  gitCommitModel: { mode: 'portable' },
+  gitCommitPromptCustomized: {
+    mode: 'excluded',
+    reason: 'custom Git commit prompt body is a device-local file',
+  },
   imageGenerationModel: { mode: 'portable' },
   memoryDistillModel: { mode: 'portable' },
   memoryChatModel: { mode: 'portable' },

@@ -45,6 +45,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
+import { GitCommitAiButton } from './GitCommitAiButton';
 import { GitDiffPreview } from './GitDiffPreview';
 import { type GitFileDirectory, GitFileList, GitFileViewToggle } from './GitFileList';
 import { GitFileRow } from './GitFileRow';
@@ -87,6 +88,9 @@ export function GitChangesView({
   const [view, setView] = useState<'changes' | 'history'>('changes');
   const [tree, setTree] = useState(true);
   const [message, setMessage] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const commitRow = useRef<HTMLDivElement>(null);
+  const focusMessage = useRef(false);
   const [query, setQuery] = useState('');
   const filterInput = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -159,6 +163,13 @@ export function GitChangesView({
     void editWriteKey;
     void refresh(true);
   }, [refresh, editWriteKey]);
+
+  // 生成结果回填后聚焦：等输入框解除禁用再聚焦
+  useEffect(() => {
+    if (!focusMessage.current || generating || !message) return;
+    focusMessage.current = false;
+    commitRow.current?.querySelector('textarea')?.focus();
+  }, [generating, message]);
 
   useEffect(() => {
     if (!selected || !status) return;
@@ -244,7 +255,8 @@ export function GitChangesView({
   };
 
   const blocked = disabled || unavailable || loading || busy !== null || !status;
-  const canCommit = !blocked && Boolean(message.trim()) && Boolean(status?.staged.length);
+  const canCommit =
+    !blocked && !generating && Boolean(message.trim()) && Boolean(status?.staged.length);
   const select = (file: GitFile, staged: boolean) => {
     if (selected?.path === file.path && selected.staged === staged) return;
     setDiff(null);
@@ -729,7 +741,7 @@ export function GitChangesView({
                   </p>
                 )}
               </div>
-              <div className="flex shrink-0 items-end gap-1.5 border-t p-2">
+              <div ref={commitRow} className="flex shrink-0 items-end gap-1.5 border-t p-2">
                 <Textarea
                   size="sm"
                   rows={3}
@@ -737,7 +749,7 @@ export function GitChangesView({
                   aria-label={t('Commit message')}
                   placeholder={t('Enter commit message…')}
                   className="min-w-0 flex-1 text-xs [&_textarea]:max-h-[calc(6lh+0.5rem)] [&_textarea]:min-h-[calc(3lh+0.5rem)] [&_textarea]:resize-none [&_textarea]:overflow-auto"
-                  disabled={busy !== null}
+                  disabled={busy !== null || generating}
                   onChange={(event) => setMessage(event.target.value)}
                   onKeyDown={(event) => {
                     if (
@@ -748,6 +760,16 @@ export function GitChangesView({
                       event.preventDefault();
                       commit();
                     }
+                  }}
+                />
+                <GitCommitAiButton
+                  request={request}
+                  message={message}
+                  disabled={blocked}
+                  onRunningChange={setGenerating}
+                  onGenerated={(generated) => {
+                    focusMessage.current = true;
+                    setMessage(generated);
                   }}
                 />
                 <Button

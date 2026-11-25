@@ -65,6 +65,7 @@ const STATE_KEYS = [
   'defaultModel',
   'defaultModelFollowLast',
   'titleSummaryModel',
+  'gitCommitModel',
   'imageGenerationModel',
   'memoryDistillModel',
   'memoryChatModel',
@@ -849,6 +850,7 @@ function validateReferences(
   for (const key of [
     'defaultModel',
     'titleSummaryModel',
+    'gitCommitModel',
     'imageGenerationModel',
     'memoryDistillModel',
     'smartCompactModel',

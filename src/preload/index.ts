@@ -13,6 +13,11 @@ import type { DropShelfDelivery } from '@shared/dropShelf';
 import type { ElevationRequestView } from '@shared/elevation';
 import type { InterruptedTurn } from '@shared/exitInterrupt';
 import type {
+  GenerateCommitMessageRequest,
+  GenerateCommitMessageResult,
+  GitCommitPromptResult,
+} from '@shared/gitCommitMessage';
+import type {
   ChatModelDto,
   DistillableSessionDto,
   EmbeddingDownloadProgressDto,
@@ -1132,6 +1137,21 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.GIT_PULL, request),
     push: (request: GitRequest): Promise<GitOperationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_PUSH, request),
+    generateCommitMessage: (
+      request: GenerateCommitMessageRequest
+    ): Promise<GenerateCommitMessageResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_GENERATE_COMMIT_MESSAGE, request),
+    abortCommitMessage: (request: {
+      requestId: string;
+    }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_GENERATE_COMMIT_MESSAGE_ABORT, request),
+    /** 自定义提示词存 userData 下独立文件；renderer 只传文本，不传路径 */
+    readCommitPrompt: (): Promise<GitCommitPromptResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_COMMIT_PROMPT_READ),
+    writeCommitPrompt: (request: { text: string }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_COMMIT_PROMPT_WRITE, request),
+    resetCommitPrompt: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_COMMIT_PROMPT_RESET),
   },
 
   changes: {
