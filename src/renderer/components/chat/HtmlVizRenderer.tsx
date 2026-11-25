@@ -9,10 +9,12 @@ import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import {
   buildHtmlVizDocument,
-  clampVizHeight,
+  nextVizState,
   parseVizMessage,
+  VIZ_INITIAL_STATE,
   VIZ_READY_TIMEOUT_MS,
   type VizMessage,
+  type VizState,
   type VizTheme,
   vizThemeMessage,
 } from './htmlViz';
@@ -99,17 +101,19 @@ function HtmlVizPreview({ code }: { code: string }) {
   const theme: VizTheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   // 主题只用于首帧，之后靠消息切换；换主题不重建 srcdoc，iframe 不重载
   const [srcdoc] = useState(() => buildHtmlVizDocument({ code, theme }));
-  const [height, setHeight] = useState<number | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  const [viz, setViz] = useState<VizState>(VIZ_INITIAL_STATE);
   const [showSource, setShowSource] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  useOverlayGuard(fullscreen && failed === null);
+  useOverlayGuard(fullscreen && viz.failure === null);
 
   useEffect(() => {
-    if (failed !== null || height !== null) return;
-    const timer = setTimeout(() => setFailed(''), VIZ_READY_TIMEOUT_MS);
+    if (viz.failure !== null || viz.height !== null) return;
+    const timer = setTimeout(
+      () => setViz((s) => nextVizState(s, { type: 'enso-viz-timeout' })),
+      VIZ_READY_TIMEOUT_MS
+    );
     return () => clearTimeout(timer);
-  }, [failed, height]);
+  }, [viz.failure, viz.height]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -120,15 +124,10 @@ function HtmlVizPreview({ code }: { code: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [fullscreen]);
 
-  const onMessage = useCallback((msg: VizMessage) => {
-    if (msg.type === 'enso-viz-height') setHeight(clampVizHeight(msg.height));
-    else setFailed(msg.message);
-  }, []);
-  const onFullscreenMessage = useCallback((msg: VizMessage) => {
-    if (msg.type === 'enso-viz-error') setFailed(msg.message);
-  }, []);
+  const onMessage = useCallback((msg: VizMessage) => setViz((s) => nextVizState(s, msg)), []);
 
-  if (failed !== null) {
+  if (viz.failure !== null) {
+    const failed = viz.failure.kind === 'error' ? viz.failure.message : '';
     return (
       <details data-enso="html-viz" className="my-2 rounded-lg border border-border">
         <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
@@ -178,7 +177,7 @@ function HtmlVizPreview({ code }: { code: string }) {
         theme={theme}
         title={title}
         className={cn(showSource && 'hidden')}
-        style={{ height: height ?? 160 }}
+        style={{ height: viz.height ?? 160 }}
         onMessage={onMessage}
       />
       {fullscreen && (
@@ -203,7 +202,7 @@ function HtmlVizPreview({ code }: { code: string }) {
             theme={theme}
             title={title}
             className="min-h-0 flex-1"
-            onMessage={onFullscreenMessage}
+            onMessage={onMessage}
           />
         </div>
       )}

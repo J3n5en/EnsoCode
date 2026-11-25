@@ -5,9 +5,11 @@ import {
   buildHtmlVizDocument,
   clampVizHeight,
   isHtmlVizLanguage,
+  nextVizState,
   parseVizMessage,
   scriptSafeJson,
   VIZ_CSP,
+  VIZ_INITIAL_STATE,
   VIZ_MAX_HEIGHT,
   VIZ_MIN_HEIGHT,
   VIZ_SANDBOX,
@@ -155,6 +157,27 @@ describe('parseVizMessage', () => {
     expect(parseVizMessage({ type: 'enso-viz-theme' })).toBeNull();
     expect(parseVizMessage(null)).toBeNull();
     expect(parseVizMessage('enso-viz-height')).toBeNull();
+  });
+});
+
+describe('nextVizState', () => {
+  it('超时只是占位：随后收到高度即恢复渲染', () => {
+    const timedOut = nextVizState(VIZ_INITIAL_STATE, { type: 'enso-viz-timeout' });
+    expect(timedOut).toEqual({ height: null, failure: { kind: 'timedOut' } });
+    const recovered = nextVizState(timedOut, { type: 'enso-viz-height', height: 240 });
+    expect(recovered).toEqual({ height: 240, failure: null });
+  });
+
+  it('脚本错误粘住：随后收到高度也不恢复', () => {
+    const failed = nextVizState(VIZ_INITIAL_STATE, { type: 'enso-viz-error', message: 'boom' });
+    expect(failed.failure).toEqual({ kind: 'error', message: 'boom' });
+    expect(nextVizState(failed, { type: 'enso-viz-height', height: 240 })).toBe(failed);
+  });
+
+  it('已收到高度后不再超时；高度仍按边界收敛', () => {
+    const sized = nextVizState(VIZ_INITIAL_STATE, { type: 'enso-viz-height', height: 5 });
+    expect(sized).toEqual({ height: VIZ_MIN_HEIGHT, failure: null });
+    expect(nextVizState(sized, { type: 'enso-viz-timeout' })).toBe(sized);
   });
 });
 

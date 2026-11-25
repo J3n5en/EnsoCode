@@ -5,7 +5,7 @@ export const VIZ_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src 'none'";
 export const VIZ_MIN_HEIGHT = 80;
 export const VIZ_MAX_HEIGHT = 1200;
-export const VIZ_READY_TIMEOUT_MS = 3000;
+export const VIZ_READY_TIMEOUT_MS = 5000;
 
 export const VIZ_TOKEN_NAMES = [
   'bg',
@@ -85,6 +85,30 @@ export function parseVizMessage(data: unknown): VizMessage | null {
 
 export function vizThemeMessage(theme: VizTheme) {
   return { type: 'enso-viz-theme', theme, tokens: vizTokens(theme) } as const;
+}
+
+export type VizFailure = { kind: 'timedOut' } | { kind: 'error'; message: string };
+
+export interface VizState {
+  height: number | null;
+  failure: VizFailure | null;
+}
+
+export const VIZ_INITIAL_STATE: VizState = { height: null, failure: null };
+
+export type VizEvent = VizMessage | { type: 'enso-viz-timeout' };
+
+/** 超时只是占位（脚本可能慢或还没上报高度），收到高度即恢复；脚本错误则粘住不再尝试渲染 */
+export function nextVizState(state: VizState, event: VizEvent): VizState {
+  if (event.type === 'enso-viz-timeout')
+    return state.height !== null || state.failure !== null
+      ? state
+      : { ...state, failure: { kind: 'timedOut' } };
+  if (event.type === 'enso-viz-height')
+    return state.failure?.kind === 'error'
+      ? state
+      : { height: clampVizHeight(event.height), failure: null };
+  return { ...state, failure: { kind: 'error', message: event.message } };
 }
 
 const BASE_CSS =
