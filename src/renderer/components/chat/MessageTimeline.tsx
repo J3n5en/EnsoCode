@@ -162,6 +162,8 @@ interface MessageTimelineProps {
   emptyDescription?: string;
   /** 空会话建议卡片的点击回调；不传则不显示建议 */
   onSuggestion?: (prompt: string) => void;
+  /** 空态语境：秘书会话用秘书的副标题和建议卡片 */
+  emptyVariant?: 'project' | 'secretary';
   /** 空时间线且 resume 失败时：再走一遍 jsonl 回放 */
   onRetryResume?: () => void;
   /** 准备超时降级：空态说明「暂无可显示的历史」并给重试入口，不冒充已同步 */
@@ -193,6 +195,8 @@ interface MessageTimelineProps {
   secretarySession?: boolean;
   /** 这条时间线所属秘书的脸；不传就用当前聚焦的秘书 */
   secretaryFace?: SecretaryFaceModel;
+  /** 这条时间线正在渲染的会话，用来取所属秘书的脸 */
+  conversationId?: string;
   /** 选中文字可引用到主输入框（只有带主 Composer 的会话视图开） */
   quotable?: boolean;
 }
@@ -213,6 +217,7 @@ export function MessageTimeline({
   emptyTitle,
   emptyDescription,
   onSuggestion,
+  emptyVariant,
   onRetryResume,
   onRetrySync,
   virtualize = true,
@@ -224,11 +229,12 @@ export function MessageTimeline({
   activeHit = null,
   secretarySession = false,
   secretaryFace,
+  conversationId,
   quotable = false,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const host = useChatHost();
-  const face = useSecretaryFace();
+  const face = useSecretaryFace(conversationId);
   const secretarySpeaker = secretarySession ? (secretaryFace ?? face) : null;
   const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
   const secretaryChat = secretarySession;
@@ -727,6 +733,7 @@ export function MessageTimeline({
             privacyMask={replyHead.replyPrivacyMask}
             secretarySession={secretaryChat}
             face={secretarySpeaker}
+            conversationId={conversationId}
           />
         )}
         <RowErrorBoundary itemKey={item.key}>
@@ -856,12 +863,15 @@ export function MessageTimeline({
                     </>
                   ) : emptyDescription !== '' ? (
                     <p className="t-stagger-line t-stagger-line--2 text-sm text-muted-foreground">
-                      {emptyDescription ?? t('Ask the agent…')}
+                      {emptyDescription ??
+                        (emptyVariant === 'secretary'
+                          ? t('Tell the secretary what to take care of…')
+                          : t('Ask the agent…'))}
                     </p>
                   ) : null}
                   {onSuggestion && (
                     <div className="t-stagger-line t-stagger-line--3 mt-5 w-full">
-                      <WelcomeSuggestions onPick={onSuggestion} />
+                      <WelcomeSuggestions onPick={onSuggestion} variant={emptyVariant} />
                     </div>
                   )}
                 </>

@@ -1398,6 +1398,7 @@ export function ReplyHeader({
   privacyMask,
   secretarySession = false,
   face: faceOverride,
+  conversationId,
 }: {
   model?: string;
   at?: number;
@@ -1406,9 +1407,11 @@ export function ReplyHeader({
   secretarySession?: boolean;
   /** 上层按会话所属秘书算好的脸；不传就用当前聚焦的秘书 */
   face?: SecretaryFaceModel | null;
+  /** 这条回复所属的会话；用来取那个秘书的脸，而不是当前聚焦的秘书 */
+  conversationId?: string;
 }) {
   const host = useChatHost();
-  const face = useSecretaryFace();
+  const face = useSecretaryFace(conversationId);
   const secretarySpeaker = secretarySession ? (faceOverride ?? face) : null;
   const speaker = host?.speaker ?? (host ? null : secretarySpeaker);
   const secretaryMark = !host && secretarySpeaker ? true : undefined;

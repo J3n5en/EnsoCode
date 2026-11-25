@@ -1,6 +1,12 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
-import { applyUpdateChannel, isPrereleaseVersion, type UpdateChannel } from './channel';
+import {
+  applyUpdateChannel,
+  isPrereleaseVersion,
+  manualInstallSpec,
+  manualInstallSpecForVersion,
+  type UpdateChannel,
+} from './channel';
 
 // 直接跑 electron-updater 真实的 GitHub provider，只把 HTTP 换成内存里的 Release 列表
 const req = createRequire(import.meta.url);
@@ -124,5 +130,15 @@ describe('更新渠道（electron-updater GitHub provider）', () => {
     expect(isPrereleaseVersion('0.3.13-beta.12')).toBe(true);
     expect(isPrereleaseVersion('0.3.12')).toBe(false);
     expect(isPrereleaseVersion('dev')).toBe(false);
+  });
+
+  it('手动安装规格按渠道区分 dist-tag', () => {
+    expect(manualInstallSpec('stable')).toBe('@ensocode/server@latest');
+    expect(manualInstallSpec('beta')).toBe('@ensocode/server@beta');
+  });
+
+  it('手动安装规格按目标版本区分 dist-tag', () => {
+    expect(manualInstallSpecForVersion('0.3.15-beta.231')).toBe('@ensocode/server@beta');
+    expect(manualInstallSpecForVersion('0.3.15')).toBe('@ensocode/server@latest');
   });
 });

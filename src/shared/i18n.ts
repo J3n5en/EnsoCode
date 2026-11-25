@@ -334,7 +334,18 @@ export const zhTranslations: Record<string, string> = {
   'Server updates install the new version with npm and restart.':
     '服务端（npm 全局安装）：用 npm 安装新版本后重启。',
   'This server must be updated on the machine itself.':
-    '这台服务端无法远程更新，请在服务器上执行 npm i -g @ensocode/server。',
+    '这台服务端无法远程更新，请在服务器上手动执行：',
+  'Not available for this install: it cannot update itself. Update manually instead.':
+    '此安装方式无法自我更新，该开关不生效。请手动更新。',
+  'Server updates install the new version with npm and restart gracefully: running tasks finish first (up to a limit), then the server restarts and tasks resume.':
+    '服务端（npm 全局安装）：自动更新会先等正在跑的任务收完（有上限），再安装并重启，任务重启后续跑。',
+  'Waiting for {{count}} running tasks to finish before installing…':
+    '正在等 {{count}} 个任务收完后安装…',
+  'Installing {{version}}…': '正在安装 {{version}}…',
+  'Restarting server…': '正在重启服务端…',
+  'Updating…': '正在更新…',
+  'New version {{version}} is downloaded. Applying it installs and then stops the server — you will need to restart it externally (container or process manager).':
+    '新版本 {{version}} 已下载。应用更新会安装后停止服务端——它需要你在容器或进程管理器里外部重启。',
   'Automatic updates': '自动更新',
   'Download and install updates automatically': '自动下载并安装更新',
   'Restart automatically to apply updates': '自动重启以应用更新',
@@ -973,6 +984,36 @@ export const zhTranslations: Record<string, string> = {
   'Log out': '退出登录',
   'Starting login...': '正在启动登录…',
   'Complete authorization in your browser': '请在浏览器中完成授权',
+  'Sign in to Devin in your browser.': '请在浏览器中登录 Devin。',
+  'Waiting for browser authentication...': '正在等待浏览器完成授权…',
+  'Exchanging authorization code for tokens...': '正在用授权码换取令牌…',
+  'After you authorize, the browser opens a localhost page that will not load. Paste the full address from the address bar here.':
+    '授权完成后，浏览器会跳到打不开的 localhost 页面。把地址栏里的完整链接粘贴到这里。',
+  'The link does not match this authorization. Copy the latest address again.':
+    '链接与本次授权不匹配，请重新复制最新的地址',
+  'That input has no authorization code. Paste the full localhost address from the address bar.':
+    '这里没有授权码。请粘贴地址栏里的完整 localhost 链接。',
+  'That is not an authorization callback address.': '这不是授权回调地址',
+  'Paste a Qoder Personal Access Token (pt-...), or leave empty for browser login':
+    '粘贴 Qoder 个人访问令牌（pt-...），或留空走浏览器登录',
+  'Paste a Qoder CN Personal Access Token, or leave empty to cancel':
+    '粘贴 Qoder CN 个人访问令牌，或留空取消',
+  'Paste your Qoder Personal Access Token (pt-...)': '请粘贴 Qoder 个人访问令牌（pt-...）',
+  'Paste your Qoder CN Personal Access Token': '请粘贴 Qoder CN 个人访问令牌',
+  'Please complete login in your browser...': '请在浏览器中完成登录…',
+  'Click to sign in with your Qoder account in the browser.': '点此在浏览器中使用 Qoder 账号登录。',
+  'Exchanging access token...': '正在交换访问令牌…',
+  'Fetching user profile...': '正在获取用户资料…',
+  'Login successful!': '登录成功',
+  'Login cancelled': '登录已取消',
+  'No Personal Access Token provided': '未提供个人访问令牌',
+  'Qoder device login network error': 'Qoder 设备登录网络出错',
+  'Authorization timed out': '授权超时',
+  'Device token poll returned invalid response': '设备登录返回了无效响应',
+  'Device token poll returned empty access token': '设备登录没有返回访问令牌',
+  'OAuth login ended unexpectedly': '登录意外结束',
+  'Verify OAuth': '验证用 OAuth',
+  'Verify Device': '验证用设备码',
   'Open authorization page': '打开授权页面',
   'Enter code': '输入代码',
   'Verifying...': '正在验证…',
@@ -1052,7 +1093,7 @@ export const zhTranslations: Record<string, string> = {
   // 统一的供应商设置、默认模型与 Enso
   'Add a provider subscription or API Key, or import providers from local AI apps':
     '添加服务商订阅或 API Key，也可从本地 AI 应用导入服务商',
-  'Add model or provider': '添加模型 / 服务商',
+  'Add model or provider': '添加模型或服务商',
   'Import providers from local apps or use the unified setup to get started':
     '从本地应用导入服务商，或使用统一向导开始配置',
   'Choose a provider first. You will select subscription or API Key next.':
@@ -1397,6 +1438,22 @@ export const zhTranslations: Record<string, string> = {
   'A digest based on git log': '基于 git log 生成变更摘要',
   'Summarize the recent changes in this repository based on git log.':
     '根据 git log 总结这个仓库最近的改动。',
+  'Tell the secretary what to take care of…': '要秘书处理什么，直接说…',
+  "Check today's progress": '看看今天的进展',
+  'Progress report and items waiting on you': '进展汇报，以及需要你拍板的事',
+  "Summarize today's progress and list anything waiting on me.":
+    '汇报一下今天的进展，把需要我处理的事列出来。',
+  'Assign a task': '派一个任务',
+  'A one-off job for the secretary to run': '一次性的事，说完秘书就去办',
+  'Take care of a one-off task: ': '帮我处理一件一次性的事：',
+  'Organize the to-do list': '整理待办',
+  'Sort the board into clear next steps': '把看板上的事整理成清晰的下一步',
+  'Go through the board and organize it into clear next steps.':
+    '过一遍看板上的事，整理成清晰的下一步。',
+  'Clean up merged branches': '清理已完成的分支',
+  'Remove branches that are already merged': '删掉已经合并、不再需要的分支',
+  'Clean up merged branches and worktrees you no longer need.':
+    '清理一下已经合并的分支和不再需要的 worktree。',
   'Loading Mermaid diagram...': '加载 Mermaid 图表...',
   'Mermaid render error': 'Mermaid 渲染错误',
   'Mermaid render failed': 'Mermaid 渲染失败',

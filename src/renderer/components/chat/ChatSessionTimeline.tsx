@@ -23,6 +23,7 @@ import {
 import { useSettingsStore } from '@/stores/settings';
 import { ChatFindBar, consumePendingFindQuery, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { timelineSearchHits } from './chatSearch';
+import { emptyStateTitle } from './emptyState';
 import { markFileLinksStale } from './fileLinkResolver';
 import { MarkdownLinkContext } from './Markdown';
 import { MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
@@ -75,6 +76,11 @@ export function ChatSessionTimeline({
           ?.profile ?? null)
       : null
   );
+  // 档案没到就用清单里的名字：别让空态标题回退到隐藏项目名
+  const secretarySummaryName = useSecretaryStore((state) =>
+    secretaryId ? state.secretaries.find((entry) => entry.id === secretaryId)?.name : undefined
+  );
+  const secretaryOwnerName = secretaryProfile?.name.trim() || secretarySummaryName?.trim() || null;
   const secretaryFace = useMemo(() => {
     if (!secretaryId || !secretaryProfile) return null;
     const imageVersion = secretaryProfile.avatar.imageVersion;
@@ -334,8 +340,13 @@ export function ChatSessionTimeline({
           runStartedAt={runStartedAt}
           lastOutputAt={lastOutputAt}
           error={terminalErrorText(messages, error)}
-          emptyTitle={emptyTitle}
+          emptyTitle={emptyStateTitle({
+            secretarySession,
+            ownerName: secretaryOwnerName,
+            fallback: emptyTitle,
+          })}
           onSuggestion={onSuggestion}
+          {...(secretarySession ? { emptyVariant: 'secretary' as const } : {})}
           onRetryResume={
             !readOnly && !started && sessionFile && status === 'failed'
               ? () => void useSessionsStore.getState().resumeConversation(conversationId)
@@ -354,6 +365,7 @@ export function ChatSessionTimeline({
           quotable={quotable}
           activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
           secretarySession={secretarySession}
+          conversationId={conversationId}
           {...(secretaryFace ? { secretaryFace } : {})}
         />
       )}

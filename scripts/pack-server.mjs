@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateServerPackTgz } from './server-package/validate.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -133,4 +134,13 @@ writeFileSync(
 mkdirSync(dest, { recursive: true });
 sh('npm', ['pack', '--pack-destination', dest], stage);
 const tgz = `${NAME.replace('@', '').replace('/', '-')}-${rootPkg.version}.tgz`;
-console.log(`\n${path.join(dest, tgz)}${existsSync(path.join(dest, tgz)) ? '' : ' (missing!)'}`);
+const packed = path.join(dest, tgz);
+// 发布前校验：缺浏览器版资源的包发出去，用户打开完整版只会看到「桌面端缺少浏览器版资源」。
+// 与其靠用户发现，不如在打包这一刻直接失败（beta 与正式版同一条流水线）。
+const validation = await validateServerPackTgz(packed);
+if (!validation.ok) {
+  rmSync(packed, { force: true });
+  console.error(`\n打包校验失败：${validation.error}`);
+  process.exit(1);
+}
+console.log(`\n${packed}${existsSync(packed) ? '' : ' (missing!)'}`);

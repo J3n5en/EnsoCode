@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { createInterface as createPromptInterface } from 'node:readline/promises';
 import type { PairStatus } from '@shared/types/pair';
 import type { UpdaterState } from '@shared/types/updater';
+import { manualInstallSpec, manualInstallSpecForVersion } from '@shared/updater/channel';
 import QRCode from 'qrcode';
 import {
   CONFIG_ENV_KEYS,
@@ -132,15 +133,28 @@ async function status(socketPath: string): Promise<void> {
   const pairStatus = reply.pair as PairStatus;
   const updater = reply.update as UpdaterState;
   const s = updater.status;
+  const applying = s?.status === 'applying' ? s.applying : undefined;
   const updateText =
     updater.mode !== 'npm'
-      ? '手动（npm i -g @ensocode/server@latest）'
-      : s?.status === 'available' || s?.status === 'downloaded'
-        ? `有新版本 ${s.info?.version}，运行 \`enso-server update\``
-        : s?.status === 'error'
-          ? `检查失败: ${s.error}`
-          : '自动';
+      ? `手动（npm i -g ${manualInstallSpec(updater.channel === 'beta' ? 'beta' : 'stable')}）`
+      : applying
+        ? applying.stage === 'waiting-tasks'
+          ? `等待 ${applying.busyCount ?? 0} 个任务完成后安装 ${s?.info?.version}`
+          : applying.stage === 'installing'
+            ? `正在安装 ${s?.info?.version}`
+            : '正在重启'
+        : s?.status === 'available' || s?.status === 'downloaded'
+          ? `有新版本 ${s.info?.version}，运行 \`enso-server update\``
+          : s?.status === 'error'
+            ? `检查失败: ${s.error}`
+            : '自动';
   const channelText = updater.channel === 'beta' ? '内测 (beta)' : '正式 (stable)';
+  const restartText =
+    updater.restartMethod === 'supervisor'
+      ? '守护进程拉起'
+      : updater.restartMethod === 'reexec'
+        ? '自动（无守护，自重启）'
+        : '手动重启（容器或外部管理）';
   console.log(`状态: 运行中 (pid ${reply.pid})`);
   console.log(`版本: ${reply.version}`);
   console.log(`数据: ${reply.dataDir}`);
@@ -151,6 +165,7 @@ async function status(socketPath: string): Promise<void> {
   if (web) console.log(`Web: 监听 ${web.listen} → ${web.publicUrl}`);
   console.log(`更新: ${updateText}`);
   console.log(`渠道: ${channelText}`);
+  console.log(`重启: ${restartText}`);
   console.log('设备:');
   printDevices(pairStatus);
 }
@@ -172,7 +187,9 @@ async function update(socketPath: string, flags: string[]): Promise<void> {
   if (reply.applying) console.log(`正在安装 ${s?.info?.version}，完成后服务自动重启`);
   else if (s?.status === 'not-available') console.log(`已是最新 (${s.info?.version})`);
   else if (s?.status === 'available')
-    console.log(`有新版本 ${s.info?.version}：执行 npm i -g @ensocode/server@latest 后重启`);
+    console.log(
+      `有新版本 ${s.info?.version}：执行 npm i -g ${manualInstallSpecForVersion(String(s.info?.version ?? ''))} 后重启`
+    );
   else console.log(JSON.stringify(s));
 }
 

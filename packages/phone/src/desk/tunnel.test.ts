@@ -223,4 +223,18 @@ describe('DeskTunnel', () => {
     mockState.events?.onState('online');
     expect(byes()).toHaveLength(0);
   });
+
+  it('等 ready 时桌面重进中继（再次 host-online）：立即重新 hello，不等 5s 重试', () => {
+    const tunnel = new DeskTunnel(
+      DEVICE,
+      () => {},
+      () => {}
+    );
+    tunnel.attach('main', () => {});
+    mockState.events?.onState('online');
+    expect(hellos()).toHaveLength(1);
+    mockState.sent = [];
+    mockState.events?.onState('online');
+    expect(hellos()).toHaveLength(1);
+  });
 });

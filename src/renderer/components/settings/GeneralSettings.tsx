@@ -2,7 +2,11 @@ import { CA_CERT_EXTENSIONS, type CaCertError, type CaCertStatus } from '@shared
 import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { ShellIntegration } from '@shared/shellIntegration';
 import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
-import { isPrereleaseVersion, type UpdateChannel } from '@shared/updater/channel';
+import {
+  isPrereleaseVersion,
+  manualInstallSpec,
+  type UpdateChannel,
+} from '@shared/updater/channel';
 import { isAutoRestartMode } from '@shared/updater/idleRestart';
 import * as React from 'react';
 import { ManualInstallActions } from '@/components/app/ManualInstallActions';
@@ -319,10 +323,22 @@ function CaCertSection() {
 
 function serverModeText(
   mode: ServerUpdateMode | undefined,
+  channel: UpdateChannel,
   t: ReturnType<typeof useI18n>['t']
-): string {
-  if (mode === 'npm') return t('Server updates install the new version with npm and restart.');
-  return t('This server must be updated on the machine itself.');
+): React.ReactNode {
+  if (mode === 'npm')
+    return t(
+      'Server updates install the new version with npm and restart gracefully: running tasks finish first (up to a limit), then the server restarts and tasks resume.'
+    );
+  return (
+    <>
+      {t('This server must be updated on the machine itself.')}
+      {/* 命令与渠道联动（内测装 @beta dist-tag），命令本身不翻译，所以拆出来直接渲染 */}
+      <code data-server-manual-command className="mt-0.5 block">
+        npm i -g {manualInstallSpec(channel)}
+      </code>
+    </>
+  );
 }
 
 /** 打包时由 vite 注入的 app 版本(见 electron.vite.config.ts define);dev 下取 package.json */
@@ -365,6 +381,7 @@ function UpdateSection() {
   const canDownload = host?.host === 'desktop' || (server !== null && server.mode !== 'manual');
   const hasNotes =
     (status?.status === 'available' || status?.status === 'downloaded') && !!status.info;
+  const applying = status?.status === 'applying';
 
   const statusText = (): string | null => {
     if (!status) return null;
@@ -384,12 +401,27 @@ function UpdateSection() {
           percent: Math.round(status.progress?.percent ?? 0),
         });
       case 'downloaded':
-        return t(
-          'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.',
-          {
-            version: status.info?.version ?? '',
-          }
-        );
+        return server?.restartMethod === 'manual'
+          ? t(
+              'New version {{version}} is downloaded. Applying it installs and then stops the server — you will need to restart it externally (container or process manager).',
+              { version: status.info?.version ?? '' }
+            )
+          : t(
+              'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.',
+              {
+                version: status.info?.version ?? '',
+              }
+            );
+      case 'applying': {
+        const stage = status.applying?.stage;
+        if (stage === 'waiting-tasks')
+          return t('Waiting for {{count}} running tasks to finish before installing…', {
+            count: status.applying?.busyCount ?? 0,
+          });
+        if (stage === 'installing')
+          return t('Installing {{version}}…', { version: status.info?.version ?? '' });
+        return t('Restarting server…');
+      }
       case 'error':
         if (status.manualInstall) {
           return t(
@@ -410,7 +442,9 @@ function UpdateSection() {
     <SettingsSection
       rowId="general.updates"
       title={t('Updates')}
-      description={server ? serverModeText(server.mode, t) : t('Application update settings')}
+      description={
+        server ? serverModeText(server.mode, updateChannel, t) : t('Application update settings')
+      }
     >
       <SettingsRow
         label={
@@ -431,6 +465,10 @@ function UpdateSection() {
         )}
         {status?.manualInstall ? (
           <ManualInstallActions manualInstall={status.manualInstall} />
+        ) : applying ? (
+          <SettingsButton variant="default" disabled>
+            {t('Updating…')}
+          </SettingsButton>
         ) : status?.status === 'downloaded' ? (
           <SettingsButton variant="default" onClick={() => void restartToUpdate(t)}>
             {t('Restart to update')}
@@ -482,10 +520,15 @@ function UpdateSection() {
       )}
       <SettingsRow
         label={t('Automatic updates')}
-        description={t('Download and install updates automatically')}
+        description={
+          server?.mode === 'manual'
+            ? t('Not available for this install: it cannot update itself. Update manually instead.')
+            : t('Download and install updates automatically')
+        }
       >
         <SettingsSwitch
           checked={autoUpdate}
+          disabled={server?.mode === 'manual'}
           onCheckedChange={(checked) => {
             setAutoUpdate(checked);
             void window.electronAPI.updater.setAutoUpdateEnabled(checked);
