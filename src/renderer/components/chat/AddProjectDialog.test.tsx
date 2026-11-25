@@ -3,7 +3,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AddProjectDialog } from './AddProjectDialog';
+import { AddProjectDialog, cloneFolderName, validateNewFolderName } from './AddProjectDialog';
 
 // t 必须稳定：DirBrowser 的 load 依赖 t，每次新建会让加载 effect 无限重跑
 const i18n = vi.hoisted(() => ({
@@ -350,5 +350,130 @@ describe('AddProjectDialog 本机目录搜索', () => {
     expect(searchInput()).toHaveProperty('value', '');
     await click('Remote (SSH)');
     expect(searchInput()).toBeNull();
+  });
+});
+
+describe('AddProjectDialog 新建与克隆', () => {
+  const button = (text: string) =>
+    [...container.querySelectorAll('button')].find((el) => el.textContent === text);
+  const input = (placeholder: string) =>
+    container.querySelector(`input[placeholder="${placeholder}"]`);
+
+  it('非法文件夹名显示红字并禁用创建', async () => {
+    await render(true);
+    await click('New folder');
+    const create = () => button('Create and add');
+    expect(create()?.hasAttribute('disabled')).toBe(true);
+
+    await type(input('Folder name'), 'bad/name');
+    expect(container.textContent).toContain(
+      'Folder name cannot contain slashes or control characters.'
+    );
+    expect(create()?.hasAttribute('disabled')).toBe(true);
+
+    await type(input('Folder name'), 'bad\\name');
+    expect(create()?.hasAttribute('disabled')).toBe(true);
+    await type(input('Folder name'), '..');
+    expect(container.textContent).toContain('Enter a folder name');
+    expect(create()?.hasAttribute('disabled')).toBe(true);
+    await type(input('Folder name'), 'a\u0001b');
+    expect(container.textContent).toContain(
+      'Folder name cannot contain slashes or control characters.'
+    );
+
+    await type(input('Parent directory'), '/Users/me');
+    await submit();
+    expect(createHostDir).not.toHaveBeenCalled();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('创建成功后只添加新目录一次', async () => {
+    let resolveCreate: (result: {
+      ok: boolean;
+      path?: string;
+      parent?: string | null;
+      dirs?: string[];
+      error?: string;
+    }) => void = () => {};
+    createHostDir.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      })
+    );
+    await render(true);
+    await click('New folder');
+    await type(input('Folder name'), '  demo  ');
+    await type(input('Parent directory'), '/Users/me/src/');
+    expect(container.textContent).toContain('/Users/me/src/demo');
+    expect(button('Create and add')?.hasAttribute('disabled')).toBe(false);
+    await submit();
+    await submit();
+    expect(createHostDir).toHaveBeenCalledTimes(1);
+    expect(createHostDir).toHaveBeenCalledWith('/Users/me/src', 'demo');
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(button('Create and add')?.hasAttribute('disabled')).toBe(true);
+    await act(async () => {
+      resolveCreate({ ok: true, path: '/Users/me/src/demo', parent: '/Users/me/src', dirs: [] });
+    });
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(onAdd).toHaveBeenCalledWith({ path: '/Users/me/src/demo' });
+  });
+
+  it('创建失败时显示错误且不添加项目', async () => {
+    createHostDir.mockResolvedValue({ ok: false, error: 'Permission denied' });
+    await render(true);
+    await click('New folder');
+    await type(input('Folder name'), 'demo');
+    await type(input('Parent directory'), '/Users/me');
+    await submit();
+    expect(container.textContent).toContain('Permission denied');
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(button('Create and add')?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('从仓库地址推导目录名，克隆成功后添加返回路径', async () => {
+    expect(cloneFolderName('https://github.com/acme/widget.git')).toBe('widget');
+    expect(cloneFolderName('git@github.com:acme/widget.git')).toBe('widget');
+    expect(cloneFolderName('acme/widget')).toBe('widget');
+    expect(cloneFolderName('https://github.com/acme/widget.git/')).toBe('widget');
+    expect(validateNewFolderName('ok')).toBeNull();
+
+    let resolveClone: (result: { ok: true; path: string } | { ok: false; error: string }) => void =
+      () => {};
+    const gitClone = vi.fn(
+      () =>
+        new Promise<{ ok: true; path: string } | { ok: false; error: string }>((resolve) => {
+          resolveClone = resolve;
+        })
+    );
+    window.electronAPI.projects.gitClone = gitClone;
+    await render(true);
+    await click('Clone');
+    expect(container.textContent).not.toContain('Search for directory');
+    await type(input('owner/repo or a git URL'), 'https://github.com/acme/widget.git');
+    await type(input('Parent directory'), '/Users/me/src');
+    expect(container.textContent).toContain('/Users/me/src/widget');
+    await submit();
+    await submit();
+    expect(gitClone).toHaveBeenCalledTimes(1);
+    expect(gitClone).toHaveBeenCalledWith({
+      url: 'https://github.com/acme/widget.git',
+      parentDir: '/Users/me/src',
+    });
+    expect(createHostDir).not.toHaveBeenCalled();
+    expect(onAdd).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveClone({ ok: false, error: 'Clone failed.' });
+    });
+    expect(container.textContent).toContain('Clone failed.');
+    expect(onAdd).not.toHaveBeenCalled();
+
+    await submit();
+    expect(gitClone).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      resolveClone({ ok: true, path: '/Users/me/src/widget' });
+    });
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(onAdd).toHaveBeenCalledWith({ path: '/Users/me/src/widget' });
   });
 });

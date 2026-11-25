@@ -425,6 +425,8 @@ export const IPC_CHANNELS = {
   PROJECTS_CREATE_HOST_DIR: 'projects:create-host-dir',
   /** 在本机家目录下按关键词搜索目录（添加项目） */
   PROJECTS_SEARCH_HOST_DIRS: 'projects:search-host-dirs',
+  /** 把远程 git 仓库克隆到本机目录（添加项目的 Clone；url 可为完整地址或 owner/repo） */
+  PROJECTS_GIT_CLONE: 'projects:git-clone',
   /** 在系统文件管理器或指定 appId 的应用里打开项目根目录或会话 worktree（仅本地项目） */
   PROJECTS_REVEAL: 'projects:reveal',
   PROJECTS_CODE_SOURCES: 'projects:code-sources',
