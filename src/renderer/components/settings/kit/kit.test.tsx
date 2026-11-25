@@ -272,6 +272,27 @@ describe('SettingsSearch', () => {
     await render(<SettingsSearch value="" onValueChange={() => {}} placeholder="Search" />);
     expect(findNestedBoxes(container)).toEqual([]);
   });
+
+  it('按下方向键把焦点交给结果列表', async () => {
+    const onArrowDown = vi.fn();
+    await render(
+      <SettingsSearch
+        value="proxy"
+        onValueChange={() => {}}
+        placeholder="Search"
+        onArrowDown={onArrowDown}
+      />
+    );
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      input.dispatchEvent(
+        Object.assign(new window.Event('keydown', { bubbles: true, cancelable: true }), {
+          key: 'ArrowDown',
+        })
+      );
+    });
+    expect(onArrowDown).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('SettingsExpandableRow', () => {
