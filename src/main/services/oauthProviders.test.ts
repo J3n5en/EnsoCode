@@ -1319,6 +1319,7 @@ describe('登录事件安全边界', () => {
         expect(events).toContainEqual({
           type: 'auth_url',
           url: 'https://accounts.example.test/oauth/authorize',
+          fullUrl: fullAuthUrl,
           instructions: 'Complete login',
         });
       });

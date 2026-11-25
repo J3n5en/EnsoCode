@@ -43,6 +43,7 @@ const mount = (prompt: OauthLoginPrompt) => {
       locator,
       progress: null,
       authUrl: null,
+      fullAuthUrl: null,
       userCode: null,
       prompt,
     },
@@ -108,5 +109,18 @@ describe('OauthLoginStep 留空提交', () => {
     await act(async () => submitButton().click());
     await pressEnter();
     expect(respond).not.toHaveBeenCalled();
+  });
+
+  it('manual_code 提示在窄行里渲染可粘贴的输入框', async () => {
+    await mount({
+      requestId: 'manual-1',
+      type: 'manual_code',
+      message: 'Paste the full address from the address bar.',
+      placeholder: 'http://127.0.0.1:1/callback?code=...&state=...',
+    });
+    const input = container.querySelector('input');
+    expect(input?.getAttribute('placeholder')).toContain('127.0.0.1');
+    expect(input?.className).toContain('min-w-0');
+    expect(container.textContent).toContain('Paste the full address from the address bar.');
   });
 });

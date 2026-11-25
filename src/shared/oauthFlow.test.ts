@@ -110,5 +110,22 @@ describe('OAuth exact locator/result', () => {
     expect(
       parseOauthFlowEvent({ flowId, event: { type: 'progress', message: 'Waiting' } })
     ).toBeNull();
+    const fullUrl = 'https://accounts.example.test/authorize?state=secret';
+    expect(
+      parseOauthFlowEvent({
+        locator: wizardLocator,
+        event: {
+          type: 'auth_url',
+          url: 'https://accounts.example.test/authorize',
+          fullUrl,
+        },
+      })?.event
+    ).toMatchObject({ type: 'auth_url', fullUrl });
+    expect(
+      parseOauthFlowEvent({
+        locator: wizardLocator,
+        event: { type: 'auth_url', url: 'https://accounts.example.test/authorize', fullUrl: '' },
+      })
+    ).toBeNull();
   });
 });

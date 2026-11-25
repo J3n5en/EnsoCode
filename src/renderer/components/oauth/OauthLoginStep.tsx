@@ -119,8 +119,9 @@ export function OauthLoginStep({ flow, providerLabel, onBack }: OauthLoginStepPr
               ))}
             </div>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex min-w-0 gap-2">
               <Input
+                className="min-w-0 flex-1"
                 type={prompt.type === 'secret' ? 'password' : 'text'}
                 value={promptValue}
                 placeholder={prompt.placeholder}

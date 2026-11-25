@@ -2,8 +2,10 @@ import type { OauthFlowEvent, OauthFlowLocator, StartOauthResult } from '@shared
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachedOauthLoginFlowState,
+  noteRemoteAuthOpen,
   type OauthLoginFlowState,
   reduceOauthLoginFlowState,
+  reopenOauthLoginFlow,
   startOauthLoginFlow,
 } from './useOauthLoginFlow';
 
@@ -87,6 +89,63 @@ describe('OAuth exact locator state machine', () => {
       authUrl: 'https://accounts.example.test/authorize',
       prompt: { requestId: 'prompt-1' },
     });
+  });
+
+  it('auth_url 把完整链接放进 fullAuthUrl，剥参链接仍留给展示', () => {
+    const full =
+      'https://accounts.example.test/authorize?state=secret&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb';
+    const next = reduceOauthLoginFlowState(
+      running,
+      event(wizardA, {
+        type: 'auth_url',
+        url: 'https://accounts.example.test/authorize',
+        fullUrl: full,
+        instructions: 'Continue in browser',
+      })
+    );
+    expect(next).toMatchObject({
+      authUrl: 'https://accounts.example.test/authorize',
+      fullAuthUrl: full,
+      progress: 'Continue in browser',
+    });
+  });
+
+  it('远程重开和首次授权都走 window.open，同一链接只自动开一次', () => {
+    const full = 'https://accounts.example.test/authorize?state=secret';
+    const open = vi.fn();
+    const ipc = vi.fn();
+    vi.stubGlobal('window', {
+      open,
+      electronAPI: { remote: {}, providers: { oauthLoginReopen: ipc } },
+    });
+    try {
+      const next = reduceOauthLoginFlowState(
+        running,
+        event(wizardA, {
+          type: 'auth_url',
+          url: 'https://accounts.example.test/authorize',
+          fullUrl: full,
+        })
+      );
+      const opened = noteRemoteAuthOpen(null, {
+        type: 'auth_url',
+        url: 'https://accounts.example.test/authorize',
+        fullUrl: full,
+      });
+      expect(
+        noteRemoteAuthOpen(opened, {
+          type: 'auth_url',
+          url: 'https://accounts.example.test/authorize',
+          fullUrl: full,
+        })
+      ).toBe(opened);
+      reopenOauthLoginFlow(next);
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(open).toHaveBeenCalledWith(full, '_blank', 'noopener,noreferrer');
+      expect(ipc).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('child locks only a matching child/generation/turn/request locator, then rejects all other fields', () => {

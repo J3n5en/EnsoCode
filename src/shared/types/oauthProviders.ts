@@ -88,7 +88,7 @@ export interface OauthLoginPrompt {
 /** 登录流程事件（Main → Renderer 单向推送） */
 export type OauthLoginEvent =
   | { type: 'info'; message: string }
-  | { type: 'auth_url'; url: string; instructions?: string }
+  | { type: 'auth_url'; url: string; fullUrl?: string; instructions?: string }
   | { type: 'device_code'; userCode: string; verificationUri: string }
   | { type: 'progress'; message: string }
   | { type: 'prompt'; prompt: OauthLoginPrompt }

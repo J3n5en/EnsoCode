@@ -15,7 +15,7 @@ import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages'
 import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from '@shared/modelThinking';
 import type { OauthUsageWindow } from '@shared/types';
 import { sanitizeOauthLabel } from '@shared/types/oauthProviders';
-import { startOauthCallbackServer } from './callbackServer';
+import { startOauthCallbackServer, waitForOauthCallbackCode } from './callbackServer';
 import {
   createEventStream,
   currentSystemPrompt,
@@ -596,7 +596,11 @@ async function login(callbacks: PiLoginCallbacks): Promise<PiOauthCredentials> {
       instructions: '在浏览器里完成 Google 登录并授权 Antigravity。',
     });
     callbacks.onProgress?.('等待浏览器完成授权…');
-    code = await server.waitForCode();
+    code = await waitForOauthCallbackCode(
+      server,
+      (request) => callbacks.onPrompt(request as Parameters<PiLoginCallbacks['onPrompt']>[0]),
+      signal
+    );
   } finally {
     server.close();
   }

@@ -972,6 +972,21 @@ export const zhTranslations: Record<string, string> = {
   'Log out': '退出登录',
   'Starting login...': '正在启动登录…',
   'Complete authorization in your browser': '请在浏览器中完成授权',
+  'Sign in to Devin in your browser.': '请在浏览器中登录 Devin。',
+  'Waiting for browser authentication...': '正在等待浏览器完成授权…',
+  'Exchanging authorization code for tokens...': '正在用授权码换取令牌…',
+  'After you authorize, the browser opens a localhost page that will not load. Paste the full address from the address bar here.':
+    '授权完成后，浏览器会跳到打不开的 localhost 页面。把地址栏里的完整链接粘贴到这里。',
+  'That link does not match this login. Paste the full address from the latest authorization page.':
+    '这个链接对不上这次登录。请粘贴最新授权页跳转后的完整地址。',
+  'That input has no authorization code. Paste the full localhost address from the address bar.':
+    '这里没有授权码。请粘贴地址栏里的完整 localhost 链接。',
+  "That link is not this login's localhost callback. Paste the full address from the address bar.":
+    '这不是这次登录的 localhost 回调链接。请粘贴地址栏里的完整地址。',
+  'Paste the full localhost address from the address bar, or a code#state value.':
+    '请粘贴地址栏里的完整 localhost 链接，或 code#state。',
+  'Verify OAuth': '验证用 OAuth',
+  'Verify Device': '验证用设备码',
   'Open authorization page': '打开授权页面',
   'Enter code': '输入代码',
   'Verifying...': '正在验证…',

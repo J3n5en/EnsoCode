@@ -7,6 +7,7 @@ import {
 } from '@shared/oauthFlow';
 import type { OauthAccount, OauthLoginEvent, OauthLoginPrompt } from '@shared/types';
 import * as React from 'react';
+import { isRemoteClient } from '@/lib/remoteClient';
 
 export type AgentChildOauthBinding = Omit<
   Extract<OauthFlowLocator, { host: 'agent-child-tab' }>,
@@ -23,6 +24,8 @@ export type OauthLoginFlowState =
       locator: OauthFlowLocator | null;
       progress: string | null;
       authUrl: string | null;
+      /** 远程浏览器要自己打开的完整授权链接。本机仍用剥参后的 authUrl 展示。 */
+      fullAuthUrl: string | null;
       userCode: string | null;
       prompt: OauthLoginPrompt | null;
     }
@@ -50,6 +53,7 @@ export const attachedOauthLoginFlowState = (
   locator: 'flowId' in binding ? binding : null,
   progress: 'Starting login...',
   authUrl: null,
+  fullAuthUrl: null,
   userCode: null,
   prompt: null,
 });
@@ -117,6 +121,7 @@ export function reduceOauthLoginFlowState(
       return {
         ...current,
         authUrl: event.url,
+        fullAuthUrl: event.fullUrl ?? event.url,
         progress: event.instructions ?? 'Complete authorization in your browser',
       };
     case 'device_code':
@@ -142,12 +147,36 @@ export function reduceOauthLoginFlowState(
   }
 }
 
+/** 远程收到授权链接时打开一次。返回已打开的地址，相同链接不再开。 */
+export function noteRemoteAuthOpen(
+  opened: string | null,
+  oauthEvent: OauthLoginEvent
+): string | null {
+  if (!isRemoteClient() || oauthEvent.type !== 'auth_url') return opened;
+  const url = oauthEvent.fullUrl || oauthEvent.url;
+  if (!url || opened === url) return opened;
+  window.open(url, '_blank', 'noopener,noreferrer');
+  return url;
+}
+
+/** 远程重开走当前浏览器；本机仍让 Main shell.openExternal。 */
+export function reopenOauthLoginFlow(state: OauthLoginFlowState): void {
+  if (state.phase !== 'running' || !state.locator) return;
+  if (isRemoteClient()) {
+    const url = state.fullAuthUrl ?? state.authUrl;
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  void window.electronAPI.providers.oauthLoginReopen({ locator: state.locator });
+}
+
 export function useOauthLoginFlow(options?: {
   onDone?: (providerId: string, account: OauthAccount) => void;
 }): OauthLoginFlow {
   const [state, setState] = React.useState<OauthLoginFlowState>({ phase: 'idle' });
   const stateRef = React.useRef(state);
   const onDoneRef = React.useRef(options?.onDone);
+  const openedAuthUrl = React.useRef<string | null>(null);
   onDoneRef.current = options?.onDone;
 
   React.useEffect(
@@ -157,6 +186,7 @@ export function useOauthLoginFlow(options?: {
         if (current.phase !== 'running') return;
         const next = reduceOauthLoginFlowState(current, event);
         if (next === current) return;
+        openedAuthUrl.current = noteRemoteAuthOpen(openedAuthUrl.current, event.event);
         stateRef.current = next;
         setState(next);
         if (event.event.type === 'done') {
@@ -167,6 +197,7 @@ export function useOauthLoginFlow(options?: {
   );
 
   const attach = React.useCallback((providerId: string, binding: OauthFlowBinding) => {
+    openedAuthUrl.current = null;
     const next = attachedOauthLoginFlowState(providerId, binding);
     stateRef.current = next;
     setState(next);
@@ -221,9 +252,7 @@ export function useOauthLoginFlow(options?: {
   }, [start]);
 
   const reopen = React.useCallback(() => {
-    const current = stateRef.current;
-    if (current.phase !== 'running' || !current.locator) return;
-    void window.electronAPI.providers.oauthLoginReopen({ locator: current.locator });
+    reopenOauthLoginFlow(stateRef.current);
   }, []);
 
   const respond = React.useCallback((requestId: string, value: string) => {
