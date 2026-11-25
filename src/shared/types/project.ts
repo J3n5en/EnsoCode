@@ -82,3 +82,14 @@ export interface OpenInApp {
   /** PNG data URL */
   icon?: string;
 }
+
+/** 添加项目：把远程仓库克隆到本机 parentDir 下。url 为完整 git 地址或 owner/repo */
+export interface GitCloneRequest {
+  url: string;
+  parentDir: string;
+  /** 省略时取 url 末段并去掉 .git */
+  name?: string;
+}
+
+/** path 是克隆出的目录绝对路径 */
+export type GitCloneResult = { ok: true; path: string } | { ok: false; error: string };
