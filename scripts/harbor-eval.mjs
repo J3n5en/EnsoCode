@@ -55,9 +55,9 @@ export function harborModelArg(model, apiFormat) {
 }
 
 export function resolveHarborConfig(env) {
-  const keyName = 'HARBOR_API_KEY';
+  const keyName = 'HARBOR_MODEL_API_KEY';
   const missing = [];
-  if (!env.HARBOR_API_KEY) missing.push(keyName);
+  if (!env.HARBOR_MODEL_API_KEY) missing.push(keyName);
   if (!env.HARBOR_MODEL) missing.push('HARBOR_MODEL');
   if (!env.HARBOR_BASE_URL) missing.push('HARBOR_BASE_URL');
   if (missing.length > 0) {
@@ -65,7 +65,7 @@ export function resolveHarborConfig(env) {
   }
   return {
     keyName,
-    apiKey: env.HARBOR_API_KEY,
+    apiKey: env.HARBOR_MODEL_API_KEY,
     model: env.HARBOR_MODEL,
     baseUrl: rewriteLoopback(env.HARBOR_BASE_URL),
     apiFormat: normalizeApiFormat(env.HARBOR_API_FORMAT),
@@ -135,7 +135,8 @@ function help() {
   console.log(`用法: node scripts/harbor-eval.mjs [选项]
 
 打包当前检出并跑 Harbor。连接信息放在仓库根的 .env.harbor（已 gitignore），不要写进命令。
-至少填 HARBOR_API_KEY、HARBOR_MODEL、HARBOR_BASE_URL。127.0.0.1 和 localhost 会改成 host.docker.internal。
+至少填 HARBOR_MODEL_API_KEY、HARBOR_MODEL、HARBOR_BASE_URL。127.0.0.1 和 localhost 会改成 host.docker.internal。
+HARBOR_MODEL_API_KEY 是模型 key，通过 --api-key-name 传给 harbor；不要用 HARBOR_API_KEY，它保留给 Harbor 平台自己的 hub 鉴权。
 
   --dataset, -d     数据集，默认 terminal-bench@2.0，也可用 HARBOR_DATASET
   --limit, -l       题数，默认 1，也可用 HARBOR_LIMIT
