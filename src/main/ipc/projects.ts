@@ -10,6 +10,7 @@ import {
 } from '@shared/types/agent';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { listProjectCodeSources } from '../../agent/projectCodeSources';
+import { gitClone } from '../services/gitClone';
 import { searchHostDirs } from '../services/hostDirSearch';
 import { createHostDir, listHostDirs } from '../services/hostDirs';
 import { openInApps } from '../services/openInApps';
@@ -146,6 +147,11 @@ export function registerProjectHandlers(): void {
     if (!isMainRenderer(event.sender.id) || typeof query !== 'string')
       return { ok: false, error: 'Invalid request.' };
     return searchHostDirs(query);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROJECTS_GIT_CLONE, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'Invalid request.' };
+    return gitClone(request);
   });
 
   // 渲染层只传标识符，磁盘路径由 Main 从权威记录推导，不接受任意路径
