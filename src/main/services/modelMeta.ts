@@ -1,13 +1,9 @@
 import {
   type CatalogModelEntry,
-  findCatalogModelById,
+  catalogModelLookup,
   positiveFiniteNumber,
 } from '@shared/modelCatalog';
-import {
-  findModelsDevModel,
-  mergeCatalogEntry,
-  withModelsDevOauthModels,
-} from '@shared/modelsDevCatalog';
+import { mergeCatalogEntry, withModelsDevOauthModels } from '@shared/modelsDevCatalog';
 import { supportedProjectThinkingLevels } from '@shared/modelThinking';
 import { expandOauthCatalog, mergeFetchedOauthModels } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
@@ -139,18 +135,12 @@ export async function queryModelMeta(query: ModelMetaQuery): Promise<ModelMetaRe
       return { ok: false, models: [], error: 'Invalid query' };
     }
 
-    const catalog = runtime.getModels() as readonly CatalogModelEntry[];
-    const devModels = getModelsDevModels();
+    const findPi = catalogModelLookup(runtime.getModels() as readonly CatalogModelEntry[]);
+    const findDev = catalogModelLookup(getModelsDevModels());
     return {
       ok: true,
       models: query.modelIds.map((modelId) =>
-        mapCatalogFallback(
-          modelId,
-          mergeCatalogEntry(
-            findCatalogModelById(catalog, modelId),
-            findModelsDevModel(devModels, modelId)
-          )
-        )
+        mapCatalogFallback(modelId, mergeCatalogEntry(findPi(modelId), findDev(modelId)))
       ),
     };
   } catch (error) {

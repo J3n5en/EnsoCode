@@ -34,10 +34,10 @@ describe('pluginInstallUrlsFromArgv', () => {
 });
 
 describe('pluginInstallSettingsLink', () => {
-  it('落到 Enso 插件设置行并带上安装地址', () => {
+  it('落到「从链接安装」那一行并带上安装地址', () => {
     expect(pluginInstallSettingsLink(SOURCE)).toEqual({
       category: 'plugins',
-      rowId: 'plugins.enso',
+      rowId: 'plugins.installUrl',
       pluginInstallUrl: SOURCE,
     });
   });

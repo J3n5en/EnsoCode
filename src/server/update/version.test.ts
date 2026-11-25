@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareVersions, npmLatestUrl, parseNpmLatest } from './version';
+import { compareVersions, npmDistTagUrl, npmLatestUrl, parseNpmLatest } from './version';
 
 describe('compareVersions', () => {
   it('orders numeric parts and treats prereleases as older', () => {
@@ -20,6 +20,15 @@ describe('npm registry', () => {
   it('builds the dist-tag url with an encoded scope', () => {
     expect(npmLatestUrl('https://registry.npmjs.org/', '@ensocode/server')).toBe(
       'https://registry.npmjs.org/@ensocode%2fserver/latest'
+    );
+  });
+
+  it('builds arbitrary dist-tag urls; beta is separate from latest', () => {
+    expect(npmDistTagUrl('https://registry.npmjs.org', '@ensocode/server', 'beta')).toBe(
+      'https://registry.npmjs.org/@ensocode%2fserver/beta'
+    );
+    expect(npmDistTagUrl('http://127.0.0.1:4873/', '@ensocode/server', 'stable')).toBe(
+      'http://127.0.0.1:4873/@ensocode%2fserver/stable'
     );
   });
 

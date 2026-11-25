@@ -43,6 +43,10 @@ export function npmLatestUrl(registry: string, name: string): string {
   return `${registry.replace(/\/+$/, '')}/${name.replace('/', '%2f')}/latest`;
 }
 
+/** 任意 dist-tag 的版本地址：beta 渠道查 beta，stable 渠道查 latest，互不干扰 */
+export function npmDistTagUrl(registry: string, name: string, tag: string): string {
+  return `${registry.replace(/\/+$/, '')}/${name.replace('/', '%2f')}/${encodeURIComponent(tag)}`;
+}
 export function parseNpmLatest(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const version = (payload as { version?: unknown }).version;

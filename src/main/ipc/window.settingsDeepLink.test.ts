@@ -45,7 +45,7 @@ describe('设置只在主窗口里打开', () => {
     openPluginInstallFromProtocol('https://example.com/p.zip');
     expect(mocks.openSettingsInMainWindow).toHaveBeenCalledWith({
       category: 'plugins',
-      rowId: 'plugins.enso',
+      rowId: 'plugins.installUrl',
       pluginInstallUrl: 'https://example.com/p.zip',
     });
   });

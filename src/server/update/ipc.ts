@@ -1,7 +1,8 @@
 import { app, ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types/ipc';
+import { isUpdateChannel } from '@shared/updater/channel';
 import { isAutoRestartMode, resolveAutoRestartMode } from '@shared/updater/idleRestart';
-import { readSettings } from '../../main/ipc/settings';
+import { patchSettingsState, readSettings } from '../../main/ipc/settings';
 import { allowRemoteHostControl } from '../../main/services/remoteRenderer';
 import { broadcastToRenderers } from '../../main/services/renderers';
 import { currentIdleRestartObservation } from '../../main/services/updater/idleRestartSnapshot';
@@ -32,11 +33,18 @@ export function registerServerUpdater(): ServerUpdater {
   ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_MODE, (_event, mode: unknown) => {
     if (isAutoRestartMode(mode)) updater.setAutoRestartMode(mode);
   });
+  ipcMain.handle(IPC_CHANNELS.UPDATER_SET_CHANNEL, (_event, channel: unknown) => {
+    if (!isUpdateChannel(channel)) return;
+    updater.setChannel(channel);
+    // 渠道是自己的设置项：在这里也落一份，即使渲染层落盘失败，重启后仍是所选渠道
+    patchSettingsState('updateChannel', channel);
+  });
   allowRemoteHostControl();
 
   const state = (
     readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
   )?.state;
+  if (isUpdateChannel(state?.updateChannel)) updater.setChannel(state.updateChannel);
   updater.start(state?.autoUpdate !== false, resolveAutoRestartMode(state));
   app.on('before-quit', () => updater.stop());
   return updater;

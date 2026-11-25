@@ -23,6 +23,21 @@ on:
         required: false
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      version:
+        description: 发布版本（如 0.2.13 或 0.3.0-beta.1），留空用 package.json 的版本
+        required: false
+        type: string
+      dist-tag:
+        description: npm dist-tag，留空时预发布版本用 next、其余用 latest
+        required: false
+        type: string
+      dry-run:
+        description: 只打包上传 artifact，不发布
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read

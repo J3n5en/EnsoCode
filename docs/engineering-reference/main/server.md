@@ -62,9 +62,12 @@ app 路径来自 `ENSO_DATA_DIR`（默认 `~/.enso-server`）与 `ENSO_APP_ROOT`
 
 服务端复用桌面的 `updater:*` 通道（多了 `getState` / `restart`），这些通道只有服务端会开放给远端（`allowRemoteHostControl`）；远端连桌面宿主时仍然拒绝。
 
-- 新版本以 npm registry 上 `@ensocode/server` 的 latest dist-tag 为准（`ENSO_NPM_REGISTRY` 可改）。
+- 新版本以 npm registry 上 `@ensocode/server` 的 dist-tag 为准（`ENSO_NPM_REGISTRY` 可改）。更新渠道（`updateChannel` 设置，`enso-server update --channel` 或设置页切换）：`stable` 只查 `latest`；`beta` 查 `beta` 与 `latest` 取较新。切回 `stable` 不降级（beta 通道下载的预发布版本作废），等下一个正式版。
 - 只有装在可写的全局 `node_modules` 下时才走 `npm` 模式；npx 缓存、源码目录下运行是 `manual`，只报告新版本。
 - 下载 = `npm cache add`。应用 = `npm i -g @ensocode/server@<v> --prefer-offline` 然后退出，由 systemd 拉起。全局安装改写的是正在运行的文件（懒加载 chunk 的文件名带 hash），所以真正安装放在退出前一刻。
 - 远程重启和"空闲时自动重启"都需要进程守护（systemd 自带 `INVOCATION_ID`，或设置 `ENSO_SUPERVISED=1`）。
-- 发布：`.github/workflows/publish-server.yml` 随正式版 `vX.Y.Z` tag 自动触发，也可手动触发（可填版本号、dist-tag、dry-run；预发布版本默认发到 `next`）。桌面端内测预发布 tag（`v*-*`，见 `beta.yml`）不触发它。走 npm Trusted Publishing（OIDC），不需要 token；npm 包设置里登记的是 `J3n5en/EnsoCode` 的 `publish-server.yml`。workflow_dispatch 只认默认分支上存在的 workflow 文件。
+- 发布：`.github/workflows/publish-server.yml` 随正式版 `vX.Y.Z` tag 自动触发，也可手动触发（可填版本号、dist-tag、dry-run；预发布版本默认发到 `next`）。桌面端内测预发布 tag（`v*-*`，见 `beta.yml`）不触发它；改由 `beta.yml` 的 `server-npm` job 经 workflow_call 复用本工作流，把同一版本号发到 npm 的 `beta` dist-tag（不动 latest；失败不影响桌面内测）。走 npm Trusted Publishing（OIDC），不需要 token。workflow_dispatch 只认默认分支上存在的 workflow 文件。
+- npm Trusted Publishing 的两个坑（都在真实运行中踩过）：
+  - 可复用工作流的 `id-token` 权限按**调用方**裁决：调用方 workflow 没声明 `id-token: write` 时 GitHub 在启动期直接判 startup_failure，整个 workflow 一个 job 都起不来；actionlint 查不出来。所以 `beta.yml` 也声明了 `id-token: write`。
+  - npm 对 token exchange 校验的是**调用方**（顶层）workflow 文件名，而不是真正执行 publish 的被调用文件。所以 npm 包后台需要登记**两个** trusted publisher：`publish-server.yml`（正式版直推 tag 触发）和 `beta.yml`（内测 workflow_call 链）；每个包最多 10 个。直连 tag 推送时两者是同一个文件，登记 `publish-server.yml` 就够了。
 - npm 11 起会对依赖的安装脚本给出警告（npm 12 默认阻止）。真正依赖安装脚本的只有 `@vscode/ripgrep`（下载 rg），缺失时只影响工作区文件搜索。
