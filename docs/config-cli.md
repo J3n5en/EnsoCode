@@ -87,6 +87,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `memoryReconcileEnabled` 只控制写入新记忆后是否自动复核，写入后立即生效；设置页的「立即复核」不受它限制。它是普通布尔开关，不是密钥、路径或执行入口，也不在启动时一次性读取，所以 `policy.ts` 不需要为它加规则。
 
+`memoryDispatchRecallEnabled`（缺省开）控制秘书派发会话时是否按任务内容检索本机记忆库并把相关经验注入首条 prompt。写入后立即生效（在派发时读取）；注入失败或超时静默降级，不阻塞派发。它只作用于本机记忆库，不参与配置同步；同样是普通布尔开关，`policy.ts` 不需要为它加规则。
+
 部分设置本来就只对新会话生效，例如 `subagentModels`、`subagentAllowedModes`、`editMode`、`rtkEnabled`。CLI 写入后，它们的行为与在设置页修改一致。
 
 `providers.<id>.autoFetchModels` 接受布尔值，默认关闭，仅在当前设备生效。开启这条已启用的 API Key 供应商时，或在保留此设置的情况下启动应用时，会立即拉取该供应商的模型。关闭开关会停止这条供应商的定时拉取，并取消该条正在进行的自动拉取。自动拉取只追加从未见过的模型，新模型默认禁用；用户删掉的模型不会再被加回。

@@ -89,6 +89,10 @@ export async function dispatchMemoryOp(op: string, args: unknown): Promise<unkno
       };
       return core.invokeMemory(memoryOp, params, scope);
     }
+    case 'recall': {
+      const input = args as Parameters<typeof core.recallMemories>[0];
+      return core.recallMemories(input);
+    }
     case 'approve-write':
       return core.approvePendingMemoryWrite((args as { id: string }).id);
     case 'edit-memory':
