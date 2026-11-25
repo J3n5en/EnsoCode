@@ -249,6 +249,16 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     booleans: ['asTodo'],
     aliases: { secretary: 'to', secretaryId: 'to', message: 'text', todo: 'asTodo' },
   },
+  github_merge_pr: {
+    keys: ['repo', 'number', 'method', 'auto', 'projectId'],
+    numbers: ['number'],
+    booleans: ['auto'],
+    aliases: { pr: 'number', prNumber: 'number', id: 'projectId' },
+  },
+  github_delete_branch: {
+    keys: ['repo', 'branch', 'projectId'],
+    aliases: { name: 'branch', id: 'projectId' },
+  },
   secretary_profile_propose: {
     keys: [
       'name',
@@ -950,6 +960,61 @@ const SCHEMAS: Record<
   schedule_remove: {
     description: 'Remove one of your schedules.',
     parameters: object({ scheduleId: id('Schedule id from schedule_list') }, ['scheduleId']),
+  },
+  github_merge_pr: {
+    description:
+      "Merge one open GitHub pull request of a visible project directly, without dispatching a session. It runs gh pr merge with squash, delete-branch and, by default, auto: squash is the only method, there is no admin or force option and no way to bypass branch protection, so a merge the protection rules do not allow simply fails or queues. Before merging it reads the PR and refuses anything that is not open. The result carries the mergeStateStatus before the merge and, when it can be re-read, the state and autoMergeRequest after. repo is the owner/repo of a visible project (it must match the project's git origin, anything else is refused); omit it only when exactly one of your visible projects has a GitHub origin. auto false merges immediately instead of enabling auto-merge. Never use it for a branch you have not reviewed the latest push of — the dispatch sessions report their own state and you decide. Every call is audited.",
+    parameters: object(
+      {
+        repo: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "owner/repo of a visible project. Must match the project's git origin. Omit only when exactly one visible project has a GitHub origin.",
+        },
+        projectId: id("Optional: resolve the repo from this visible project's origin"),
+        number: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Pull request number',
+        },
+        method: {
+          type: 'string',
+          enum: ['squash'],
+          description: 'Only squash exists. Anything else is refused.',
+        },
+        auto: {
+          type: 'boolean',
+          description:
+            'true (default) queues with auto-merge, waiting for checks and reviews; false merges immediately. It never bypasses branch protection.',
+        },
+      },
+      ['number']
+    ),
+  },
+  github_delete_branch: {
+    description:
+      "Delete one remote branch of a visible project directly, without dispatching a session. Only the remote branch goes away (git push origin --delete); local branches are never touched. Hard refusals, all audited: the protected branches main and feat/signpath-windows, any branch that is the head of an open pull request (the result names the PR numbers), and branches that do not exist on the remote. Use it after a merged PR whose remote branch was not auto-deleted. repo is the owner/repo of a visible project (must match the project's git origin); omit it only when exactly one of your visible projects has a GitHub origin.",
+    parameters: object(
+      {
+        repo: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "owner/repo of a visible project. Must match the project's git origin. Omit only when exactly one visible project has a GitHub origin.",
+        },
+        projectId: id("Optional: resolve the repo from this visible project's origin"),
+        branch: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'Remote branch name to delete',
+        },
+      },
+      ['branch']
+    ),
   },
   secretary_profile_propose: {
     description:
