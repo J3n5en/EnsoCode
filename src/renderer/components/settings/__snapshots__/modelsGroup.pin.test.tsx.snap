@@ -87,22 +87,113 @@ exports[`模型与服务商组设置迁移前后行为一致 > 关掉标题总�
   },
   {
     "current": {
-      "gitCommitModel": {
-        "modelId": "fast",
+      "approvalReviewer": null,
+    },
+    "effects": [
+      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"fast"}},"api":[]}",
+      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"smart"}},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "providers.assistant-approval-model",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "titleSummaryEnabled": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.conversation-title-summary",
+  },
+  {
+    "current": {
+      "defaultModel": {
+        "modelId": "smart",
         "providerId": "api",
       },
     },
     "effects": [
-      "{"store":{"gitCommitModel":{"providerId":"api","modelId":"smart"}},"api":[]}",
+      "{"store":{"defaultModel":{"providerId":"api","modelId":"fast"}},"api":[]}",
     ],
     "kind": "choice",
-    "row": "providers.gitCommit",
+    "row": "providers.default-model",
   },
   {
-    "current": {},
-    "effects": [],
+    "current": {
+      "virtualModels": [
+        {
+          "enabled": true,
+          "fallbacks": [
+            {
+              "modelId": "fast",
+              "providerId": "api",
+            },
+          ],
+          "fast": {
+            "modelId": "fast",
+            "providerId": "api",
+          },
+          "id": "auto",
+          "name": "Auto",
+          "primary": {
+            "modelId": "smart",
+            "providerId": "api",
+          },
+        },
+      ],
+    },
+    "effects": [
+      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"fast"},"fallbacks":[{"providerId":"api","modelId":"fast"}],"classifier":{"source":"judge","model":{"providerId":"api","modelId":"fast"},"timeoutMs":3000}}]},"api":[]}",
+    ],
     "kind": "choice",
-    "row": "providers.gitCommit",
+    "row": "providers.difficulty-routing",
+  },
+  {
+    "current": {
+      "virtualModels": [
+        {
+          "enabled": true,
+          "fallbacks": [
+            {
+              "modelId": "fast",
+              "providerId": "api",
+            },
+          ],
+          "fast": {
+            "modelId": "fast",
+            "providerId": "api",
+          },
+          "id": "auto",
+          "name": "Auto",
+          "primary": {
+            "modelId": "smart",
+            "providerId": "api",
+          },
+        },
+      ],
+    },
+    "effects": [
+      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"smart"},"fallbacks":[{"providerId":"api","modelId":"fast"}]}]},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "providers.fast-model",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "defaultModelFollowLast": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.follow-last-selection",
   },
   {
     "current": "You write a git commit message for the diff the user provides.
@@ -116,6 +207,38 @@ Rules:
     "effects": [],
     "kind": "textarea",
     "row": "providers.gitCommit",
+  },
+  {
+    "current": {
+      "gitCommitModel": {
+        "modelId": "fast",
+        "providerId": "api",
+      },
+    },
+    "effects": [
+      "{"store":{"gitCommitModel":{"providerId":"api","modelId":"smart"}},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "providers.gitCommitModel",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "subagentModelsEnabled": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.let-the-agent-pick-subagent-models",
+  },
+  {
+    "current": "Auto",
+    "effects": [],
+    "kind": "input",
+    "row": "providers.name",
   },
   {
     "current": "false",
@@ -167,30 +290,6 @@ Rules:
   },
   {
     "current": {
-      "approvalReviewer": null,
-    },
-    "effects": [
-      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"fast"}},"api":[]}",
-      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"smart"}},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "defaultModel": {
-        "modelId": "smart",
-        "providerId": "api",
-      },
-    },
-    "effects": [
-      "{"store":{"defaultModel":{"providerId":"api","modelId":"fast"}},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
       "virtualModels": [
         {
           "enabled": true,
@@ -217,67 +316,46 @@ Rules:
       "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"fast"},"fast":{"providerId":"api","modelId":"fast"},"fallbacks":[]}]},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "providers.primary-model",
   },
   {
-    "current": {
-      "virtualModels": [
-        {
-          "enabled": true,
-          "fallbacks": [
-            {
-              "modelId": "fast",
-              "providerId": "api",
-            },
-          ],
-          "fast": {
-            "modelId": "fast",
-            "providerId": "api",
-          },
-          "id": "auto",
-          "name": "Auto",
-          "primary": {
-            "modelId": "smart",
-            "providerId": "api",
-          },
-        },
-      ],
-    },
-    "effects": [
-      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"fast"},"fallbacks":[{"providerId":"api","modelId":"fast"}],"classifier":{"source":"judge","model":{"providerId":"api","modelId":"fast"},"timeoutMs":3000}}]},"api":[]}",
-    ],
+    "current": {},
+    "effects": [],
     "kind": "choice",
-    "row": null,
+    "row": "providers.provider",
   },
   {
-    "current": {
-      "virtualModels": [
-        {
-          "enabled": true,
-          "fallbacks": [
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "virtualModels": [
             {
-              "modelId": "fast",
-              "providerId": "api",
+              "enabled": false,
+              "fallbacks": [
+                {
+                  "modelId": "fast",
+                  "providerId": "api",
+                },
+              ],
+              "fast": {
+                "modelId": "fast",
+                "providerId": "api",
+              },
+              "id": "auto",
+              "name": "Auto",
+              "primary": {
+                "modelId": "smart",
+                "providerId": "api",
+              },
             },
           ],
-          "fast": {
-            "modelId": "fast",
-            "providerId": "api",
-          },
-          "id": "auto",
-          "name": "Auto",
-          "primary": {
-            "modelId": "smart",
-            "providerId": "api",
-          },
         },
-      ],
-    },
-    "effects": [
-      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"smart"},"fallbacks":[{"providerId":"api","modelId":"fast"}]}]},"api":[]}",
+      },
     ],
-    "kind": "choice",
-    "row": null,
+    "kind": "switch",
+    "row": "providers.virtual-models",
   },
   {
     "current": {},
@@ -285,51 +363,6 @@ Rules:
       "{"store":{},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": "Auto",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "defaultModelFollowLast": true,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "subagentModelsEnabled": true,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "titleSummaryEnabled": true,
-        },
-      },
-    ],
-    "kind": "switch",
     "row": null,
   },
   {
@@ -385,39 +418,6 @@ Rules:
         "store": {
           "disabledBuiltinAgentTypes": [
             "worker",
-          ],
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "virtualModels": [
-            {
-              "enabled": false,
-              "fallbacks": [
-                {
-                  "modelId": "fast",
-                  "providerId": "api",
-                },
-              ],
-              "fast": {
-                "modelId": "fast",
-                "providerId": "api",
-              },
-              "id": "auto",
-              "name": "Auto",
-              "primary": {
-                "modelId": "smart",
-                "providerId": "api",
-              },
-            },
           ],
         },
       },
@@ -515,22 +515,113 @@ exports[`模型与服务商组设置迁移前后行为一致 > 每个控件的�
   },
   {
     "current": {
-      "gitCommitModel": {
-        "modelId": "fast",
+      "approvalReviewer": null,
+    },
+    "effects": [
+      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"fast"}},"api":[]}",
+      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"smart"}},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "providers.assistant-approval-model",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "titleSummaryEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.conversation-title-summary",
+  },
+  {
+    "current": {
+      "defaultModel": {
+        "modelId": "smart",
         "providerId": "api",
       },
     },
     "effects": [
-      "{"store":{"gitCommitModel":{"providerId":"api","modelId":"smart"}},"api":[]}",
+      "{"store":{"defaultModel":{"providerId":"api","modelId":"fast"}},"api":[]}",
     ],
     "kind": "choice",
-    "row": "providers.gitCommit",
+    "row": "providers.default-model",
   },
   {
-    "current": {},
-    "effects": [],
+    "current": {
+      "virtualModels": [
+        {
+          "enabled": true,
+          "fallbacks": [
+            {
+              "modelId": "fast",
+              "providerId": "api",
+            },
+          ],
+          "fast": {
+            "modelId": "fast",
+            "providerId": "api",
+          },
+          "id": "auto",
+          "name": "Auto",
+          "primary": {
+            "modelId": "smart",
+            "providerId": "api",
+          },
+        },
+      ],
+    },
+    "effects": [
+      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"fast"},"fallbacks":[{"providerId":"api","modelId":"fast"}],"classifier":{"source":"judge","model":{"providerId":"api","modelId":"fast"},"timeoutMs":3000}}]},"api":[]}",
+    ],
     "kind": "choice",
-    "row": "providers.gitCommit",
+    "row": "providers.difficulty-routing",
+  },
+  {
+    "current": {
+      "virtualModels": [
+        {
+          "enabled": true,
+          "fallbacks": [
+            {
+              "modelId": "fast",
+              "providerId": "api",
+            },
+          ],
+          "fast": {
+            "modelId": "fast",
+            "providerId": "api",
+          },
+          "id": "auto",
+          "name": "Auto",
+          "primary": {
+            "modelId": "smart",
+            "providerId": "api",
+          },
+        },
+      ],
+    },
+    "effects": [
+      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"smart"},"fallbacks":[{"providerId":"api","modelId":"fast"}]}]},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "providers.fast-model",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "defaultModelFollowLast": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.follow-last-selection",
   },
   {
     "current": "You write a git commit message for the diff the user provides.
@@ -544,6 +635,38 @@ Rules:
     "effects": [],
     "kind": "textarea",
     "row": "providers.gitCommit",
+  },
+  {
+    "current": {
+      "gitCommitModel": {
+        "modelId": "fast",
+        "providerId": "api",
+      },
+    },
+    "effects": [
+      "{"store":{"gitCommitModel":{"providerId":"api","modelId":"smart"}},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "providers.gitCommitModel",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "subagentModelsEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.let-the-agent-pick-subagent-models",
+  },
+  {
+    "current": "Auto",
+    "effects": [],
+    "kind": "input",
+    "row": "providers.name",
   },
   {
     "current": "false",
@@ -595,60 +718,6 @@ Rules:
   },
   {
     "current": {
-      "approvalReviewer": null,
-    },
-    "effects": [
-      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"fast"}},"api":[]}",
-      "{"store":{"approvalReviewer":{"providerId":"api","modelId":"smart"}},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "defaultModel": {
-        "modelId": "smart",
-        "providerId": "api",
-      },
-    },
-    "effects": [
-      "{"store":{"defaultModel":{"providerId":"api","modelId":"fast"}},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "subagentModels": [
-        {
-          "description": "cheap",
-          "id": "sub",
-          "modelId": "fast",
-          "providerId": "api",
-        },
-      ],
-    },
-    "effects": [
-      "{"store":{"subagentModels":[{"id":"sub","providerId":"api","modelId":"smart","description":"cheap"}]},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "titleSummaryModel": {
-        "modelId": "fast",
-        "providerId": "api",
-      },
-    },
-    "effects": [
-      "{"store":{"titleSummaryModel":{"providerId":"api","modelId":"smart"}},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
       "virtualModels": [
         {
           "enabled": true,
@@ -675,64 +744,73 @@ Rules:
       "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"fast"},"fast":{"providerId":"api","modelId":"fast"},"fallbacks":[]}]},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "providers.primary-model",
+  },
+  {
+    "current": {},
+    "effects": [],
+    "kind": "choice",
+    "row": "providers.provider",
   },
   {
     "current": {
-      "virtualModels": [
-        {
-          "enabled": true,
-          "fallbacks": [
-            {
-              "modelId": "fast",
-              "providerId": "api",
-            },
-          ],
-          "fast": {
-            "modelId": "fast",
-            "providerId": "api",
-          },
-          "id": "auto",
-          "name": "Auto",
-          "primary": {
-            "modelId": "smart",
-            "providerId": "api",
-          },
-        },
-      ],
+      "titleSummaryModel": {
+        "modelId": "fast",
+        "providerId": "api",
+      },
     },
     "effects": [
-      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"fast"},"fallbacks":[{"providerId":"api","modelId":"fast"}],"classifier":{"source":"judge","model":{"providerId":"api","modelId":"fast"},"timeoutMs":3000}}]},"api":[]}",
+      "{"store":{"titleSummaryModel":{"providerId":"api","modelId":"smart"}},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "providers.titleSummaryModel",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "virtualModels": [
+            {
+              "enabled": false,
+              "fallbacks": [
+                {
+                  "modelId": "fast",
+                  "providerId": "api",
+                },
+              ],
+              "fast": {
+                "modelId": "fast",
+                "providerId": "api",
+              },
+              "id": "auto",
+              "name": "Auto",
+              "primary": {
+                "modelId": "smart",
+                "providerId": "api",
+              },
+            },
+          ],
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.virtual-models",
   },
   {
     "current": {
-      "virtualModels": [
+      "subagentModels": [
         {
-          "enabled": true,
-          "fallbacks": [
-            {
-              "modelId": "fast",
-              "providerId": "api",
-            },
-          ],
-          "fast": {
-            "modelId": "fast",
-            "providerId": "api",
-          },
-          "id": "auto",
-          "name": "Auto",
-          "primary": {
-            "modelId": "smart",
-            "providerId": "api",
-          },
+          "description": "cheap",
+          "id": "sub",
+          "modelId": "fast",
+          "providerId": "api",
         },
       ],
     },
     "effects": [
-      "{"store":{"virtualModels":[{"id":"auto","name":"Auto","enabled":true,"primary":{"providerId":"api","modelId":"smart"},"fast":{"providerId":"api","modelId":"smart"},"fallbacks":[{"providerId":"api","modelId":"fast"}]}]},"api":[]}",
+      "{"store":{"subagentModels":[{"id":"sub","providerId":"api","modelId":"smart","description":"cheap"}]},"api":[]}",
     ],
     "kind": "choice",
     "row": null,
@@ -746,28 +824,9 @@ Rules:
     "row": null,
   },
   {
-    "current": "Auto",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
-  {
     "current": "cheap",
     "effects": [],
     "kind": "input",
-    "row": null,
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "defaultModelFollowLast": true,
-        },
-      },
-    ],
-    "kind": "switch",
     "row": null,
   },
   {
@@ -835,65 +894,6 @@ Rules:
     "effects": [
       {
         "api": [],
-        "store": {
-          "subagentModelsEnabled": false,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "titleSummaryEnabled": false,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "virtualModels": [
-            {
-              "enabled": false,
-              "fallbacks": [
-                {
-                  "modelId": "fast",
-                  "providerId": "api",
-                },
-              ],
-              "fast": {
-                "modelId": "fast",
-                "providerId": "api",
-              },
-              "id": "auto",
-              "name": "Auto",
-              "primary": {
-                "modelId": "smart",
-                "providerId": "api",
-              },
-            },
-          ],
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
         "store": {},
       },
     ],
@@ -909,8 +909,25 @@ exports[`模型与服务商组设置迁移前后行为一致 > 深链行 id 一�
   "agents.root",
   "presets.root",
   "providers.api",
+  "providers.assistant-approval-model",
+  "providers.conversation-title-summary",
+  "providers.default-image-generation-model",
+  "providers.default-model",
+  "providers.difficulty-routing",
+  "providers.fallback-models",
+  "providers.fast-model",
+  "providers.follow-last-selection",
   "providers.gitCommit",
+  "providers.gitCommitModel",
+  "providers.let-the-agent-pick-subagent-models",
+  "providers.models-used-by-features",
+  "providers.name",
   "providers.off",
+  "providers.primary-model",
+  "providers.provider",
+  "providers.providers",
   "providers.root",
+  "providers.titleSummaryModel",
+  "providers.virtual-models",
 ]
 `;

@@ -136,7 +136,7 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
       },
     ],
     "kind": "switch",
-    "row": "contacts.channels",
+    "row": "contacts.enable-contacts",
   },
   {
     "current": {},
@@ -208,6 +208,23 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     ],
     "kind": "switch",
     "row": "experimental.secretary",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "phone.relay-server",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"style\\":\\"detailed\\"},null)"]}",
+    ],
+    "kind": "choice",
+    "row": "secretary.communication-style",
+    "selected": [
+      "Concise",
+    ],
   },
   {
     "current": {},
@@ -299,36 +316,13 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"style\\":\\"detailed\\"},null)"]}",
-    ],
-    "kind": "choice",
-    "row": "secretary.style",
-    "selected": [
-      "Concise",
-    ],
-  },
-  {
-    "current": {},
-    "effects": [
       "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"en\\"},null)"]}",
       "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"zh\\"},null)"]}",
     ],
     "kind": "choice",
-    "row": "secretary.style",
+    "row": "secretary.reply-language",
     "selected": [
       "Follow the interface language",
-    ],
-  },
-  {
-    "current": {},
-    "effects": [
-      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"off\\"},null)"]}",
-      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"with-done\\"},null)"]}",
-    ],
-    "kind": "choice",
-    "row": "secretary.style",
-    "selected": [
-      "Only what needs you",
     ],
   },
   {
@@ -348,6 +342,18 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     "effects": [],
     "kind": "textarea",
     "row": "secretary.style",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"off\\"},null)"]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"with-done\\"},null)"]}",
+    ],
+    "kind": "choice",
+    "row": "secretary.system-notifications",
+    "selected": [
+      "Only what needs you",
+    ],
   },
   {
     "current": {},
@@ -388,12 +394,6 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
       "Output",
       "Input",
     ],
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
   },
 ]
 `;
@@ -522,7 +522,7 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
       },
     ],
     "kind": "switch",
-    "row": "contacts.channels",
+    "row": "contacts.enable-contacts",
   },
   {
     "current": {},
@@ -595,6 +595,23 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     ],
     "kind": "switch",
     "row": "experimental.secretary",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "phone.relay-server",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"style\\":\\"detailed\\"},null)"]}",
+    ],
+    "kind": "choice",
+    "row": "secretary.communication-style",
+    "selected": [
+      "Concise",
+    ],
   },
   {
     "current": {},
@@ -684,36 +701,13 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
   {
     "current": {},
     "effects": [
-      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"style\\":\\"detailed\\"},null)"]}",
-    ],
-    "kind": "choice",
-    "row": "secretary.style",
-    "selected": [
-      "Concise",
-    ],
-  },
-  {
-    "current": {},
-    "effects": [
       "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"en\\"},null)"]}",
       "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"replyLanguage\\":\\"zh\\"},null)"]}",
     ],
     "kind": "choice",
-    "row": "secretary.style",
+    "row": "secretary.reply-language",
     "selected": [
       "Follow the interface language",
-    ],
-  },
-  {
-    "current": {},
-    "effects": [
-      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"off\\"},null)"]}",
-      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"with-done\\"},null)"]}",
-    ],
-    "kind": "choice",
-    "row": "secretary.style",
-    "selected": [
-      "Only what needs you",
     ],
   },
   {
@@ -733,6 +727,18 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     "effects": [],
     "kind": "textarea",
     "row": "secretary.style",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"off\\"},null)"]}",
+      "{"store":{},"api":["electronAPI.secretary.saveProfile({\\"notify\\":\\"with-done\\"},null)"]}",
+    ],
+    "kind": "choice",
+    "row": "secretary.system-notifications",
+    "selected": [
+      "Only what needs you",
+    ],
   },
   {
     "current": {},
@@ -770,38 +776,48 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
       "Cache",
     ],
   },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": null,
-  },
 ]
 `;
 
 exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 深链行 id 一个不少 1`] = `
 [
+  "botTemplates.root",
   "bots.assistantModel",
   "bots.maxRunningTurns",
+  "bots.root",
   "bots.routeClassifier",
   "contacts.channels",
+  "contacts.enable-contacts",
   "contacts.owner",
+  "contacts.root",
   "experimental.botMode",
   "experimental.dropShelf",
   "experimental.scratchSessions",
   "experimental.secretary",
+  "phone.connect-to-a-node",
+  "phone.devices",
+  "phone.relay-server",
   "phone.root",
+  "resources.root",
+  "secretary.communication-style",
+  "secretary.danger-zone",
+  "secretary.delete-secretary",
   "secretary.dispatchLimit",
   "secretary.plugins",
   "secretary.profile",
+  "secretary.reply-language",
   "secretary.reset",
+  "secretary.root",
   "secretary.schedules",
   "secretary.skills",
   "secretary.style",
+  "secretary.system-notifications",
   "secretary.takeoverScope",
   "secretary.takeovers",
   "secretary.tools",
   "ssh.root",
   "ssh.timeout",
+  "usage.root",
+  "usage.unit-prices",
 ]
 `;

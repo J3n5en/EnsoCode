@@ -78,6 +78,16 @@ exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地�
     "row": "memory.autoDownload",
   },
   {
+    "current": {
+      "memoryChatModel": "local:gemma",
+    },
+    "effects": [
+      "{"store":{"memoryChatModel":"remote"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.completion-backend",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -165,16 +175,6 @@ exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地�
     ],
     "kind": "switch",
     "row": "memory.distill",
-  },
-  {
-    "current": {
-      "memoryChatModel": "local:gemma",
-    },
-    "effects": [
-      "{"store":{"memoryChatModel":"remote"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": "memory.distillModel",
   },
   {
     "current": {
@@ -386,6 +386,8 @@ exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地�
   "instructions.i2",
   "instructions.root",
   "memory.autoDownload",
+  "memory.background-processing",
+  "memory.completion-backend",
   "memory.decay",
   "memory.decayAutoArchive",
   "memory.decayCandidates",
@@ -397,6 +399,7 @@ exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地�
   "memory.distillSessions",
   "memory.distillWindow",
   "memory.download",
+  "memory.embedding-model",
   "memory.embeddingModel",
   "memory.forgetting",
   "memory.jobs",
@@ -415,6 +418,16 @@ exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地�
 
 exports[`记忆与指令组设置迁移前后行为一致 > 每个控件的当前值（默认值）与读写的 store key / electronAPI 调用不变 1`] = `
 [
+  {
+    "current": {
+      "memoryChatModel": "remote",
+    },
+    "effects": [
+      "{"store":{"memoryChatModel":"local:gemma"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.completion-backend",
+  },
   {
     "current": {
       "memoryDecayIntervalDays": 7,
@@ -451,16 +464,6 @@ exports[`记忆与指令组设置迁移前后行为一致 > 每个控件的当�
     ],
     "kind": "choice",
     "row": "memory.decayStaleDays",
-  },
-  {
-    "current": {
-      "memoryChatModel": "remote",
-    },
-    "effects": [
-      "{"store":{"memoryChatModel":"local:gemma"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": "memory.distillModel",
   },
   {
     "current": {
@@ -631,6 +634,8 @@ exports[`记忆与指令组设置迁移前后行为一致 > 深链行 id 一个�
 [
   "instructions.root",
   "memory.autoDownload",
+  "memory.background-processing",
+  "memory.completion-backend",
   "memory.decay",
   "memory.decayAutoArchive",
   "memory.decayCandidates",
@@ -640,7 +645,9 @@ exports[`记忆与指令组设置迁移前后行为一致 > 深链行 id 一个�
   "memory.distill",
   "memory.distillModel",
   "memory.distillSessions",
+  "memory.distillation-model",
   "memory.download",
+  "memory.embedding-model",
   "memory.embeddingModel",
   "memory.forgetting",
   "memory.jobs",

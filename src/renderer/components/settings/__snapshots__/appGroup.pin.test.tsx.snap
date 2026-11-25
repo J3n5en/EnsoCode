@@ -16,6 +16,67 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "appearance.autoCollapseTurns",
   },
   {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "0",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "100",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "100",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "50",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "60",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "65",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "85",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.background-image",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "backgroundImageEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "appearance.background-image",
+  },
+  {
     "current": {
       "chatTypography": {
         "body": {
@@ -540,6 +601,12 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "appearance.openChangesOnFileEdit",
   },
   {
+    "current": "100",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.personalization",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -564,6 +631,29 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     ],
     "kind": "switch",
     "row": "appearance.quoteSelectionButton",
+  },
+  {
+    "current": {
+      "backgroundSizeMode": "cover",
+    },
+    "effects": [
+      "{"store":{"backgroundSizeMode":"center"},"api":[]}",
+      "{"store":{"backgroundSizeMode":"contain"},"api":[]}",
+      "{"store":{"backgroundSizeMode":"repeat"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "appearance.size-mode",
+  },
+  {
+    "current": {
+      "backgroundSourceType": "file",
+    },
+    "effects": [
+      "{"store":{"backgroundSourceType":"folder"},"api":[]}",
+      "{"store":{"backgroundSourceType":"url"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "appearance.source-type",
   },
   {
     "current": "false",
@@ -631,6 +721,21 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     ],
     "kind": "choice",
     "row": "general.autoDeleteArchivedDays",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.updater.setAutoUpdateEnabled(false)",
+        ],
+        "store": {
+          "autoUpdate": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "general.automatic-updates",
   },
   {
     "current": {
@@ -702,6 +807,12 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "general.notifyMainAgentOnly",
   },
   {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "general.proxy-url",
+  },
+  {
     "current": {
       "proxyMode": "custom",
     },
@@ -713,10 +824,15 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "general.proxy",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": "general.proxy",
+    "current": {
+      "autoRestartForUpdate": "off",
+    },
+    "effects": [
+      "{"store":{"autoRestartForUpdate":"idle"},"api":["electronAPI.updater.setAutoRestartMode(\\"idle\\")"]}",
+      "{"store":{"autoRestartForUpdate":"immediate"},"api":["electronAPI.updater.setAutoRestartMode(\\"immediate\\")"]}",
+    ],
+    "kind": "choice",
+    "row": "general.restart-automatically-to-apply-updates",
   },
   {
     "current": {
@@ -745,32 +861,6 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
   },
   {
     "current": {
-      "autoRestartForUpdate": "off",
-    },
-    "effects": [
-      "{"store":{"autoRestartForUpdate":"idle"},"api":["electronAPI.updater.setAutoRestartMode(\\"idle\\")"]}",
-      "{"store":{"autoRestartForUpdate":"immediate"},"api":["electronAPI.updater.setAutoRestartMode(\\"immediate\\")"]}",
-    ],
-    "kind": "choice",
-    "row": "general.updates",
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.updater.setAutoUpdateEnabled(false)",
-        ],
-        "store": {
-          "autoUpdate": false,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": "general.updates",
-  },
-  {
-    "current": {
       "windowsLocalShell": "auto",
     },
     "effects": [
@@ -791,6 +881,40 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "effects": [],
     "kind": "textarea",
     "row": "privacy.allow",
+  },
+  {
+    "current": {
+      "privacyMasking": {
+        "allow": [],
+        "custom": {
+          "action": "mask",
+          "rules": [],
+          "words": [],
+        },
+        "enabled": true,
+        "personal": {
+          "action": "mask",
+          "enabled": true,
+          "kinds": [
+            "email",
+            "phone",
+            "idCard",
+            "bankCard",
+          ],
+        },
+        "secrets": {
+          "action": "mask",
+          "enabled": true,
+          "shape": false,
+        },
+      },
+    },
+    "effects": [
+      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"mask","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"block"},"allow":[]}},"api":[]}",
+      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"mask","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"warn"},"allow":[]}},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "privacy.custom-rules",
   },
   {
     "current": "true",
@@ -829,124 +953,6 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "privacy.enabled",
   },
   {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
-    "row": "privacy.personal",
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "textarea",
-    "row": "privacy.rules",
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
-    "row": "privacy.secrets",
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
-    "row": "privacy.shape",
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "textarea",
-    "row": "privacy.words",
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [],
-        "store": {},
-      },
-    ],
-    "kind": "checkbox",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": {
-      "terminalFontWeight": "normal",
-    },
-    "effects": [
-      "{"store":{"terminalFontWeight":"100"},"api":[]}",
-      "{"store":{"terminalFontWeight":"200"},"api":[]}",
-      "{"store":{"terminalFontWeight":"300"},"api":[]}",
-      "{"store":{"terminalFontWeight":"400"},"api":[]}",
-      "{"store":{"terminalFontWeight":"500"},"api":[]}",
-      "{"store":{"terminalFontWeight":"600"},"api":[]}",
-      "{"store":{"terminalFontWeight":"700"},"api":[]}",
-      "{"store":{"terminalFontWeight":"800"},"api":[]}",
-      "{"store":{"terminalFontWeight":"900"},"api":[]}",
-      "{"store":{"terminalFontWeight":"bold"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": {
-      "terminalFontWeightBold": "500",
-    },
-    "effects": [
-      "{"store":{"terminalFontWeightBold":"100"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"200"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"300"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"400"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"600"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"700"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"800"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"900"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"bold"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "14",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "Dracula",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "Dracula",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
     "current": "false",
     "effects": [
       {
@@ -955,7 +961,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     ],
     "kind": "checkbox",
-    "row": null,
+    "row": "privacy.personal-data",
   },
   {
     "current": "true",
@@ -966,7 +972,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     ],
     "kind": "checkbox",
-    "row": null,
+    "row": "privacy.personal-data",
   },
   {
     "current": "true",
@@ -977,7 +983,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     ],
     "kind": "checkbox",
-    "row": null,
+    "row": "privacy.personal-data",
   },
   {
     "current": "true",
@@ -988,7 +994,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     ],
     "kind": "checkbox",
-    "row": null,
+    "row": "privacy.personal-data",
   },
   {
     "current": "true",
@@ -999,64 +1005,7 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     ],
     "kind": "checkbox",
-    "row": null,
-  },
-  {
-    "current": {
-      "backgroundSizeMode": "cover",
-    },
-    "effects": [
-      "{"store":{"backgroundSizeMode":"center"},"api":[]}",
-      "{"store":{"backgroundSizeMode":"contain"},"api":[]}",
-      "{"store":{"backgroundSizeMode":"repeat"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "backgroundSourceType": "file",
-    },
-    "effects": [
-      "{"store":{"backgroundSourceType":"folder"},"api":[]}",
-      "{"store":{"backgroundSourceType":"url"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
-    "current": {
-      "privacyMasking": {
-        "allow": [],
-        "custom": {
-          "action": "mask",
-          "rules": [],
-          "words": [],
-        },
-        "enabled": true,
-        "personal": {
-          "action": "mask",
-          "enabled": true,
-          "kinds": [
-            "email",
-            "phone",
-            "idCard",
-            "bankCard",
-          ],
-        },
-        "secrets": {
-          "action": "mask",
-          "enabled": true,
-          "shape": false,
-        },
-      },
-    },
-    "effects": [
-      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"block","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"mask"},"allow":[]}},"api":[]}",
-      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"warn","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"mask"},"allow":[]}},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
+    "row": "privacy.personal-data",
   },
   {
     "current": {
@@ -1090,7 +1039,35 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"mask","shape":false},"personal":{"enabled":true,"action":"warn","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"mask"},"allow":[]}},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "privacy.personal-data",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "privacy.personal",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "textarea",
+    "row": "privacy.rules",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "privacy.secrets",
   },
   {
     "current": {
@@ -1120,84 +1097,107 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
       },
     },
     "effects": [
-      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"mask","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"block"},"allow":[]}},"api":[]}",
-      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"mask","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"warn"},"allow":[]}},"api":[]}",
+      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"block","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"mask"},"allow":[]}},"api":[]}",
+      "{"store":{"privacyMasking":{"enabled":true,"secrets":{"enabled":true,"action":"warn","shape":false},"personal":{"enabled":true,"action":"mask","kinds":["email","phone","idCard","bankCard"]},"custom":{"words":[],"rules":[],"action":"mask"},"allow":[]}},"api":[]}",
     ],
     "kind": "choice",
-    "row": null,
+    "row": "privacy.secretsSection",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "privacy.shape",
   },
   {
     "current": "",
     "effects": [],
-    "kind": "input",
-    "row": null,
+    "kind": "textarea",
+    "row": "privacy.try-it",
   },
   {
-    "current": "0",
+    "current": "",
     "effects": [],
-    "kind": "slider",
-    "row": null,
+    "kind": "textarea",
+    "row": "privacy.words",
   },
   {
-    "current": "100",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "100",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "100",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "50",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "60",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "65",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "85",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
+    "current": {
+      "terminalFontWeightBold": "500",
+    },
+    "effects": [
+      "{"store":{"terminalFontWeightBold":"100"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"200"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"300"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"400"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"600"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"700"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"800"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"900"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"bold"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "terminal.bold-font-weight",
   },
   {
     "current": "true",
     "effects": [
       {
         "api": [],
-        "store": {
-          "backgroundImageEnabled": false,
-        },
+        "store": {},
       },
     ],
-    "kind": "switch",
-    "row": null,
+    "kind": "checkbox",
+    "row": "terminal.color-scheme",
   },
   {
-    "current": "",
+    "current": "Dracula",
     "effects": [],
-    "kind": "textarea",
-    "row": null,
+    "kind": "input",
+    "row": "terminal.color-scheme",
+  },
+  {
+    "current": "Dracula",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.color-scheme",
+  },
+  {
+    "current": "14",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.font-size",
+  },
+  {
+    "current": {
+      "terminalFontWeight": "normal",
+    },
+    "effects": [
+      "{"store":{"terminalFontWeight":"100"},"api":[]}",
+      "{"store":{"terminalFontWeight":"200"},"api":[]}",
+      "{"store":{"terminalFontWeight":"300"},"api":[]}",
+      "{"store":{"terminalFontWeight":"400"},"api":[]}",
+      "{"store":{"terminalFontWeight":"500"},"api":[]}",
+      "{"store":{"terminalFontWeight":"600"},"api":[]}",
+      "{"store":{"terminalFontWeight":"700"},"api":[]}",
+      "{"store":{"terminalFontWeight":"800"},"api":[]}",
+      "{"store":{"terminalFontWeight":"900"},"api":[]}",
+      "{"store":{"terminalFontWeight":"bold"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "terminal.font-weight",
+  },
+  {
+    "current": "ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.font",
   },
 ]
 `;
@@ -1216,6 +1216,19 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     ],
     "kind": "switch",
     "row": "appearance.autoCollapseTurns",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "backgroundImageEnabled": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "appearance.background-image",
   },
   {
     "current": {
@@ -1741,6 +1754,12 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     "row": "appearance.openChangesOnFileEdit",
   },
   {
+    "current": "100",
+    "effects": [],
+    "kind": "slider",
+    "row": "appearance.personalization",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -1832,6 +1851,21 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     ],
     "kind": "choice",
     "row": "general.autoDeleteArchivedDays",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.updater.setAutoUpdateEnabled(false)",
+        ],
+        "store": {
+          "autoUpdate": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "general.automatic-updates",
   },
   {
     "current": {
@@ -1915,6 +1949,17 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
   },
   {
     "current": {
+      "autoRestartForUpdate": "off",
+    },
+    "effects": [
+      "{"store":{"autoRestartForUpdate":"idle"},"api":["electronAPI.updater.setAutoRestartMode(\\"idle\\")"]}",
+      "{"store":{"autoRestartForUpdate":"immediate"},"api":["electronAPI.updater.setAutoRestartMode(\\"immediate\\")"]}",
+    ],
+    "kind": "choice",
+    "row": "general.restart-automatically-to-apply-updates",
+  },
+  {
+    "current": {
       "compactStrategy": "standard",
       "smartCompactEnabled": false,
     },
@@ -1937,32 +1982,6 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     ],
     "kind": "choice",
     "row": "general.terminalShell",
-  },
-  {
-    "current": {
-      "autoRestartForUpdate": "off",
-    },
-    "effects": [
-      "{"store":{"autoRestartForUpdate":"idle"},"api":["electronAPI.updater.setAutoRestartMode(\\"idle\\")"]}",
-      "{"store":{"autoRestartForUpdate":"immediate"},"api":["electronAPI.updater.setAutoRestartMode(\\"immediate\\")"]}",
-    ],
-    "kind": "choice",
-    "row": "general.updates",
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.updater.setAutoUpdateEnabled(false)",
-        ],
-        "store": {
-          "autoUpdate": false,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": "general.updates",
   },
   {
     "current": {
@@ -2018,6 +2037,25 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     "row": "privacy.enabled",
   },
   {
+    "current": {
+      "terminalFontWeightBold": "500",
+    },
+    "effects": [
+      "{"store":{"terminalFontWeightBold":"100"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"200"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"300"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"400"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"600"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"700"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"800"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"900"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"bold"},"api":[]}",
+      "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "terminal.bold-font-weight",
+  },
+  {
     "current": "false",
     "effects": [
       {
@@ -2026,7 +2064,25 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
       },
     ],
     "kind": "checkbox",
-    "row": "terminal.appearance",
+    "row": "terminal.color-scheme",
+  },
+  {
+    "current": "Dracula",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.color-scheme",
+  },
+  {
+    "current": "Dracula",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.color-scheme",
+  },
+  {
+    "current": "14",
+    "effects": [],
+    "kind": "input",
+    "row": "terminal.font-size",
   },
   {
     "current": {
@@ -2045,69 +2101,13 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
       "{"store":{"terminalFontWeight":"bold"},"api":[]}",
     ],
     "kind": "choice",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": {
-      "terminalFontWeightBold": "500",
-    },
-    "effects": [
-      "{"store":{"terminalFontWeightBold":"100"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"200"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"300"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"400"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"600"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"700"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"800"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"900"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"bold"},"api":[]}",
-      "{"store":{"terminalFontWeightBold":"normal"},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "14",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "Dracula",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "Dracula",
-    "effects": [],
-    "kind": "input",
-    "row": "terminal.appearance",
+    "row": "terminal.font-weight",
   },
   {
     "current": "ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace",
     "effects": [],
     "kind": "input",
-    "row": "terminal.appearance",
-  },
-  {
-    "current": "100",
-    "effects": [],
-    "kind": "slider",
-    "row": null,
-  },
-  {
-    "current": "false",
-    "effects": [
-      {
-        "api": [],
-        "store": {
-          "backgroundImageEnabled": true,
-        },
-      },
-    ],
-    "kind": "switch",
-    "row": null,
+    "row": "terminal.font",
   },
 ]
 `;
@@ -2116,6 +2116,7 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
 [
   "appearance.accent",
   "appearance.autoCollapseTurns",
+  "appearance.background-image",
   "appearance.chatTypography",
   "appearance.collapseCompletedActivity",
   "appearance.collapseLiveActivity",
@@ -2126,30 +2127,53 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "appearance.headerSessionTabs",
   "appearance.navRailSide",
   "appearance.openChangesOnFileEdit",
+  "appearance.personalization",
   "appearance.pinUnfinishedTodos",
   "appearance.quoteSelectionButton",
+  "appearance.root",
   "appearance.theme",
   "appearance.themeGallery",
   "appearance.userCss",
+  "conversation.root",
   "general.activeRetentionMinutes",
+  "general.application",
   "general.autoArchiveIdleDays",
   "general.autoArchiveMergedWorktrees",
   "general.autoDeleteArchivedDays",
   "general.autoRetryLimit",
+  "general.automatic-updates",
   "general.caCert",
   "general.compactReserveTokens",
   "general.configSync",
+  "general.current-version",
   "general.generationStallTimeout",
   "general.language",
   "general.longCacheRetention",
+  "general.network",
   "general.notifyMainAgentOnly",
+  "general.portable-enso-configuration",
   "general.proxy",
+  "general.restart-automatically-to-apply-updates",
+  "general.root",
   "general.smartCompactEnabled",
   "general.terminalShell",
   "general.updates",
   "general.windowsLocalShell",
   "general.worktreeRoot",
   "privacy.enabled",
+  "privacy.records",
+  "privacy.root",
+  "runtime.agent-runtime",
+  "runtime.root",
+  "runtime.sessions-worktrees",
   "terminal.appearance",
+  "terminal.bold-font-weight",
+  "terminal.color-scheme",
+  "terminal.context-menu-opening",
+  "terminal.font",
+  "terminal.font-size",
+  "terminal.font-weight",
+  "terminal.root",
+  "terminal.shell",
 ]
 `;
