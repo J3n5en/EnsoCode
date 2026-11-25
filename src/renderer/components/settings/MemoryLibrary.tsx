@@ -708,9 +708,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               >
                 <SelectTrigger
                   size="sm"
-                  className={cn(
-                    'w-auto min-w-0 gap-1 border-0 bg-transparent px-2 shadow-none before:hidden'
-                  )}
+                  className="w-auto min-w-0 gap-1 border-0 bg-transparent px-2 shadow-none before:hidden"
                 >
                   <SelectValue />
                 </SelectTrigger>
