@@ -1000,6 +1000,8 @@ export const zhTranslations: Record<string, string> = {
   'Fetch all models': '拉取全部模型',
   'Refresh model info': '刷新模型信息',
   'Refresh all models and info': '拉取全部模型与模型信息',
+  'Refresh provider models': '刷新此服务商的模型',
+  'Refresh failed': '刷新失败',
   'Model info updated': '模型信息已更新',
   'Model info refresh failed, using cache': '模型信息刷新失败，仍使用缓存',
   'Model info refresh failed': '模型信息刷新失败',
