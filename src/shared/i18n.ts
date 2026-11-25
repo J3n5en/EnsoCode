@@ -334,7 +334,7 @@ export const zhTranslations: Record<string, string> = {
   'Server updates install the new version with npm and restart.':
     '服务端（npm 全局安装）：用 npm 安装新版本后重启。',
   'This server must be updated on the machine itself.':
-    '这台服务端无法远程更新，请在服务器上执行 npm i -g @ensocode/server。',
+    '这台服务端无法远程更新，请在服务器上手动执行：',
   'Automatic updates': '自动更新',
   'Download and install updates automatically': '自动下载并安装更新',
   'Restart automatically to apply updates': '自动重启以应用更新',

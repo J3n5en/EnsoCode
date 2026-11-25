@@ -11,6 +11,16 @@ export function isPrereleaseVersion(version: string): boolean {
   return /^\d+\.\d+\.\d+-/.test(version);
 }
 
+/** 手动更新提示里 npm install 的包规格：内测渠道装 @beta，否则装正式版（@latest） */
+export function manualInstallSpec(channel: UpdateChannel): string {
+  return `@ensocode/server@${channel === 'beta' ? 'beta' : 'latest'}`;
+}
+
+/** 按目标版本本身判断手动安装规格：预发布版本用 beta dist-tag，正式版用 latest */
+export function manualInstallSpecForVersion(version: string): string {
+  return `@ensocode/server@${isPrereleaseVersion(version) ? 'beta' : 'latest'}`;
+}
+
 /**
  * 套到 electron-updater 上。GitHub provider 的取版逻辑：
  * - allowPrerelease=false：GET github.com/<owner>/<repo>/releases/latest（只会是标了 Latest 的正式版），读该 tag 下的 latest*.yml；
