@@ -848,6 +848,7 @@ export const IPC_PRODUCT_COVERAGE = {
   PROJECTS_CREATE_HOST_DIR: surfaces('projects.add'),
   PROJECTS_SEARCH_HOST_DIRS: surfaces('projects.add'),
   PROJECTS_GIT_CLONE: surfaces('projects.add'),
+  PROJECTS_SEARCH_GITHUB_REPOS: surfaces('projects.add'),
   PROJECTS_REVEAL: surfaces('projects.list'),
   PROJECTS_OPEN_IN_APPS: surfaces('projects.list'),
   PROJECTS_GET_ICON: surfaces('projects.list'),

@@ -1,5 +1,5 @@
-import type { ProjectGroup, RecentProject, SshHostKeyChallenge } from '@shared/types';
-import { Folder, Loader2 } from 'lucide-react';
+import type { GithubRepo, ProjectGroup, RecentProject, SshHostKeyChallenge } from '@shared/types';
+import { Folder, Loader2, Lock } from 'lucide-react';
 import * as React from 'react';
 import { hostKeyFromSshFailure, SshHostKeyDialog } from '@/components/chat/SshHostKeyDialog';
 import {
@@ -321,6 +321,10 @@ function ParentLocation({
   onBrowse: () => void;
 }) {
   const { t } = useI18n();
+  const [query, setQuery] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setQuery((current) => (current === parentDir ? current : null));
+  }, [parentDir]);
   return (
     <>
       <Field className="w-full">
@@ -330,21 +334,199 @@ function ParentLocation({
             value={parentDir}
             size="sm"
             className="min-w-0 flex-1 font-mono text-xs"
-            placeholder={t('Parent directory')}
+            placeholder={t('Search parent directory')}
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            onChange={(event) => onParentDirChange(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              onParentDirChange(event.target.value);
+            }}
           />
           <Button type="button" variant="outline" size="sm" onClick={onBrowse}>
             {t('Browse')}
           </Button>
         </div>
       </Field>
+      {query !== null ? (
+        <HostDirResultList
+          query={query}
+          onSelect={(path) => {
+            setQuery(null);
+            onParentDirChange(path);
+          }}
+        />
+      ) : null}
       {destination ? (
         <p className="truncate font-mono text-muted-foreground text-xs">{destination}</p>
       ) : null}
     </>
+  );
+}
+
+function GithubMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={className} aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.7 7.7 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+      />
+    </svg>
+  );
+}
+
+function isGitRemoteInput(value: string): boolean {
+  if (!value || value.startsWith('-') || /\s/.test(value)) return false;
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return true;
+  if (value.includes('://')) return true;
+  return /^[^/\s]+@[^/\s:]+:.+$/.test(value);
+}
+
+function useGithubRepoQuery(query: string | null) {
+  const [repos, setRepos] = React.useState<GithubRepo[]>([]);
+  const [pending, setPending] = React.useState(false);
+  const [settled, setSettled] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const seq = React.useRef(0);
+
+  React.useEffect(() => {
+    const id = ++seq.current;
+    if (query === null) {
+      setPending(false);
+      setSettled(false);
+      setRepos([]);
+      setError('');
+      return;
+    }
+    setPending(true);
+    setSettled(false);
+    setRepos([]);
+    setError('');
+    const timer = setTimeout(() => {
+      void window.electronAPI.projects
+        .searchGithubRepos(query.trim(), 10)
+        .then((result) => {
+          if (id !== seq.current) return;
+          if (result.ok) {
+            setRepos(result.repos);
+            setError('');
+          } else {
+            setRepos([]);
+            setError(result.error);
+          }
+          setSettled(true);
+        })
+        .catch(() => {
+          if (id !== seq.current) return;
+          setRepos([]);
+          setError('GitHub search failed.');
+          setSettled(true);
+        })
+        .finally(() => {
+          if (id === seq.current) setPending(false);
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  React.useEffect(
+    () => () => {
+      seq.current += 1;
+    },
+    []
+  );
+
+  return { repos, pending, settled, error };
+}
+
+function RepoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useI18n();
+  const [query, setQuery] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setQuery((current) => (current === value ? current : null));
+  }, [value]);
+  const { repos, pending, settled, error } = useGithubRepoQuery(query);
+  const typed = query?.trim() ?? '';
+  const typedCandidate = isGitRemoteInput(typed) ? typed : null;
+  const showTyped =
+    typedCandidate !== null &&
+    !repos.some((repo) => repo.nameWithOwner === typedCandidate || repo.url === typedCandidate);
+
+  return (
+    <Field className="w-full">
+      <FieldLabel>{t('Repository')}</FieldLabel>
+      <Input
+        value={value}
+        size="sm"
+        className="font-mono text-xs"
+        placeholder={t('owner/repo or a git URL')}
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onChange(event.target.value);
+        }}
+      />
+      {query !== null ? (
+        <div className="space-y-1.5">
+          <p className="text-muted-foreground text-xs">{t('Search your repositories')}</p>
+          {pending ? (
+            <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t('Searching...')}
+            </p>
+          ) : null}
+          {error ? <p className="text-destructive text-xs">{t(error)}</p> : null}
+          {settled && !error && repos.length === 0 && !showTyped ? (
+            <p className="text-muted-foreground text-xs">{t('No repositories found')}</p>
+          ) : null}
+          {showTyped || repos.length > 0 ? (
+            <div className="max-h-40 overflow-auto rounded-md border bg-muted/30">
+              {showTyped && typedCandidate ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-2 py-1 text-left font-mono text-xs hover:bg-muted"
+                  onClick={() => {
+                    setQuery(null);
+                    onChange(typedCandidate);
+                  }}
+                >
+                  <GithubMark className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{typedCandidate}</span>
+                </button>
+              ) : null}
+              {repos.map((repo) => (
+                <button
+                  key={repo.nameWithOwner}
+                  type="button"
+                  className="flex w-full items-center gap-2 px-2 py-1 text-left text-xs hover:bg-muted"
+                  onClick={() => {
+                    setQuery(null);
+                    onChange(repo.url);
+                  }}
+                >
+                  {repo.isPrivate ? (
+                    <Lock className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <GithubMark className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="shrink-0">{repo.nameWithOwner}</span>
+                  {repo.description ? (
+                    <span
+                      className="min-w-0 flex-1 truncate text-muted-foreground"
+                      title={repo.description}
+                    >
+                      {repo.description}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </Field>
   );
 }
 
@@ -361,10 +543,8 @@ interface AddProjectDialogProps {
   defaultGroupId?: string;
 }
 
-/** 本机目录搜索：debounce 后查家目录，点选回填路径。仅 local tab 使用。 */
-function DirSearch({ onSelect }: { onSelect: (path: string) => void }) {
+function useHostDirQuery(query: string) {
   const { t } = useI18n();
-  const [query, setQuery] = React.useState('');
   const [host, setHost] = React.useState('');
   const [results, setResults] = React.useState<{ path: string; displayPath: string }[]>([]);
   const [pending, setPending] = React.useState(false);
@@ -415,19 +595,20 @@ function DirSearch({ onSelect }: { onSelect: (path: string) => void }) {
     []
   );
 
+  return { host, results, pending, settled, t };
+}
+
+function HostDirResultList({
+  query,
+  onSelect,
+}: {
+  query: string;
+  onSelect: (path: string) => void;
+}) {
+  const { host, results, pending, settled, t } = useHostDirQuery(query);
   const trimmed = query.trim();
   return (
-    <div className="space-y-1.5">
-      <Input
-        value={query}
-        size="sm"
-        className="font-mono text-xs"
-        placeholder={t('Search for directory')}
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        onChange={(event) => setQuery(event.target.value)}
-      />
+    <>
       {host && trimmed ? (
         <p className="text-muted-foreground text-xs">
           {t('Find a directory on {{host}}', { host })}
@@ -449,10 +630,7 @@ function DirSearch({ onSelect }: { onSelect: (path: string) => void }) {
               key={result.path}
               type="button"
               className="flex w-full items-center gap-2 px-2 py-1 text-left font-mono text-xs hover:bg-muted"
-              onClick={() => {
-                onSelect(result.path);
-                setQuery('');
-              }}
+              onClick={() => onSelect(result.path)}
             >
               <Folder className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate" title={result.path}>
@@ -462,6 +640,33 @@ function DirSearch({ onSelect }: { onSelect: (path: string) => void }) {
           ))}
         </div>
       ) : null}
+    </>
+  );
+}
+
+/** 本机目录搜索：debounce 后查家目录，点选回填路径。仅现有目录 tab 使用。 */
+function DirSearch({ onSelect }: { onSelect: (path: string) => void }) {
+  const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
+  return (
+    <div className="space-y-1.5">
+      <Input
+        value={query}
+        size="sm"
+        className="font-mono text-xs"
+        placeholder={t('Search for directory')}
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      <HostDirResultList
+        query={query}
+        onSelect={(path) => {
+          onSelect(path);
+          setQuery('');
+        }}
+      />
     </div>
   );
 }
@@ -854,19 +1059,7 @@ export function AddProjectDialog({
                 </Tabs>
                 {localMethod === 'clone' ? (
                   <>
-                    <Field className="w-full">
-                      <FieldLabel>{t('Repository')}</FieldLabel>
-                      <Input
-                        value={repoUrl}
-                        size="sm"
-                        className="font-mono text-xs"
-                        placeholder={t('owner/repo or a git URL')}
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        onChange={(event) => setRepoUrl(event.target.value)}
-                      />
-                    </Field>
+                    <RepoField value={repoUrl} onChange={setRepoUrl} />
                     <ParentLocation
                       parentDir={parentDir}
                       destination={cloneDestination}
