@@ -109,7 +109,11 @@ function session(options: Record<string, unknown>) {
     messages: [],
     sessionFile: `/tmp/secretary-${mocks.sessions.length}.jsonl`,
     subscribe: vi.fn(() => () => undefined),
-    prompt: vi.fn(async () => undefined),
+    prompt: vi.fn(
+      async (_text: string, options?: { preflightResult?: (disposition: string) => void }) => {
+        options?.preflightResult?.('started');
+      }
+    ),
     abort: vi.fn(async () => undefined),
     waitForIdle: vi.fn(async () => undefined),
     dispose: vi.fn(),
