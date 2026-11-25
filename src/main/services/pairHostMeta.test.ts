@@ -305,7 +305,7 @@ describe('pairHost 目录下发', () => {
     };
     control('peer-joined');
     await deliverFromPhone({ type: 'remote-ack', bytes: 0 });
-    await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'settings' });
+    await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'main' });
     await vi.waitFor(() => expect(link).not.toBeNull());
     await new Promise((resolve) => setTimeout(resolve, 20));
 

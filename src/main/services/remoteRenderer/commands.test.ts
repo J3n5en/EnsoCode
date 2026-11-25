@@ -16,7 +16,7 @@ describe('parseRemoteCommand', () => {
       ok: true,
       command: { type: 'rpc-invoke', cid: 'c-1', id: 3, ch: 'files:read', args: [1] },
     });
-    expect(parseRemoteCommand({ type: 'rpc-hello', cid: 'abc', kind: 'settings' }).ok).toBe(true);
+    expect(parseRemoteCommand({ type: 'rpc-hello', cid: 'abc', kind: 'main' }).ok).toBe(true);
     expect(parseRemoteCommand({ type: 'asset-get', id: 0, path: 'r/index.html' }).ok).toBe(true);
   });
 
@@ -63,6 +63,7 @@ describe('parseRemoteCommand', () => {
     for (const bad of [
       { type: 'rpc-hello', cid: 'a b', kind: 'main' },
       { type: 'rpc-hello', cid: 'a', kind: 'other' },
+      { type: 'rpc-hello', cid: 'a', kind: 'settings' },
       { type: 'rpc-invoke', cid: 'a', id: -1, ch: 'x', args: [] },
       { type: 'rpc-invoke', cid: 'a', id: 1, ch: 'x', args: {} },
       { type: 'rpc-send', cid: 'a', ch: 'bad channel', args: [] },

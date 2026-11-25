@@ -13,7 +13,7 @@ export function parseRemoteCommand(v: Record<string, unknown>): Check {
   switch (v.type) {
     case 'rpc-hello':
       if (!isId(v.cid)) return { ok: false, error: 'invalid cid' };
-      if (v.kind !== 'main' && v.kind !== 'settings') return { ok: false, error: 'invalid kind' };
+      if (v.kind !== 'main') return { ok: false, error: 'invalid kind' };
       if (v.seq !== undefined && !isSeq(v.seq)) return { ok: false, error: 'invalid seq' };
       if (v.page !== undefined && !isId(v.page)) return { ok: false, error: 'invalid page' };
       return ok({

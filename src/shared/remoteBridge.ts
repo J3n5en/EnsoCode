@@ -3,7 +3,7 @@
  * 壳持有加密隧道；renderer 的 web-preload 经 `window.parent.__ensoRemote` 调用（顶层文档时 parent 即自身）。
  */
 
-export type RemoteFrameKind = 'main' | 'settings';
+export type RemoteFrameKind = 'main';
 
 /** 桌面远程节点层里改由所在电脑 main 处理的通道前缀：本机窗口、节点切换、系统通知 */
 export const REMOTE_LOCAL_PREFIXES = ['nodes:', 'window:', 'notification:'] as const;
@@ -25,10 +25,6 @@ export interface RemoteBridge {
   platform: string;
   attach(kind: RemoteFrameKind): RemoteBridgeFrame;
   leader(): boolean;
-  /** 旧版桌面的设置叠层：手机壳仍为它们提供，新版桌面 renderer 在主界面里原地打开设置，不再调用 */
-  openSettings?(link?: unknown): void;
-  closeSettings?(): void;
-  consumeSettingsLink?(): unknown;
   /** 离开桌面模式回手机版；只有手机壳提供 */
   exitDesk?(): void;
   /** 打开壳里的「电脑与通知」抽屉（推送、已配对电脑）；只有新版手机壳提供 */
