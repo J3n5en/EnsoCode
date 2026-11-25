@@ -20,7 +20,7 @@ import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } fro
 import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
-import { createDeviceDrawer } from './deviceDrawer';
+import { createDeviceDrawer, DESKTOP_DRAWER_QUERY } from './deviceDrawer';
 import { createDeskDevices, toggleDeskPush } from './devices';
 import { formatDiagnostics } from './diagnostics';
 import { themeOfFrame, watchFrameTheme } from './drawerTheme';
@@ -373,6 +373,7 @@ async function main(): Promise<void> {
         link: toRemoteLinkStatus(link, pushAvailability()),
         trace: tunnel.trace,
       }),
+    wide: () => matchMedia(DESKTOP_DRAWER_QUERY).matches,
   });
 
   const bridge: RemoteBridge = {
