@@ -20,6 +20,11 @@ export default defineConfig({
       // 主进程模块顶层会 import electron，node 环境下用桩替换
       electron: path.resolve(root, 'test/stubs/electron.ts'),
       '@electron-toolkit/utils': path.resolve(root, 'test/stubs/electron-toolkit-utils.ts'),
+      // vitest 对 TSX 始终用 development 变换，元素创建走 react 开发版 jsxDEV：
+      // 每个元素捕获组件栈帧并做属性校验，是渲染密集型快照测试的第一大开销
+      // （CPU profile 里 react-jsx-dev-runtime + react-dom DEV 校验合计过半）。
+      // 测试只观察渲染行为，不靠 DEV 警告；按生产语义实现 jsxDEV，行为不变。
+      'react/jsx-dev-runtime': path.resolve(root, 'test/stubs/react-jsx-dev-runtime.ts'),
     },
   },
   test: {
