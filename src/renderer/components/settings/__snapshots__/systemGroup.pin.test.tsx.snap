@@ -55,27 +55,45 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     "row": "contacts.channels",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"memory":true}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"syncMirror":true}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": "contacts.channels",
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"cardConfirm":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {
@@ -84,6 +102,34 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
       {
         "api": [
           "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"enabled":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"push":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"enabled":false},"s1")",
           "electronAPI.secretary.contactState("s1")",
         ],
         "store": {},
@@ -107,20 +153,6 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     "current": "j3n5en",
     "effects": [],
     "kind": "input",
-    "row": "contacts.owner",
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.secretary.contactSettings({"enabled":false},"s1")",
-          "electronAPI.secretary.contactState("s1")",
-        ],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
     "row": "contacts.owner",
   },
   {
@@ -409,27 +441,45 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     "row": "contacts.channels",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"memory":true}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"syncMirror":true}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {
-    "current": "",
-    "effects": [],
-    "kind": "input",
-    "row": "contacts.channels",
-  },
-  {
-    "current": "",
-    "effects": [],
-    "kind": "input",
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"cardConfirm":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {
@@ -438,6 +488,34 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
       {
         "api": [
           "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"enabled":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"push":false}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"enabled":false},"s1")",
           "electronAPI.secretary.contactState("s1")",
         ],
         "store": {},
@@ -461,20 +539,6 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     "current": "j3n5en",
     "effects": [],
     "kind": "input",
-    "row": "contacts.owner",
-  },
-  {
-    "current": "true",
-    "effects": [
-      {
-        "api": [
-          "electronAPI.secretary.contactSettings({"enabled":false},"s1")",
-          "electronAPI.secretary.contactState("s1")",
-        ],
-        "store": {},
-      },
-    ],
-    "kind": "switch",
     "row": "contacts.owner",
   },
   {

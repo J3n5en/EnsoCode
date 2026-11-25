@@ -58,7 +58,15 @@ function WorkbenchActivityStrip() {
 }
 
 /** 主窗口里的设置页（盖在工作区上，工作区保持挂载只是隐藏） */
-export function SettingsView({ navWidth, open }: { navWidth: number; open: boolean }) {
+export function SettingsView({
+  navWidth,
+  onNavResize,
+  open,
+}: {
+  navWidth: number;
+  onNavResize?: (deltaX: number) => void;
+  open: boolean;
+}) {
   const route = useAppViewStore((s) => s.settings);
   const initialCategory = useAppViewStore((s) => s.lastCategory);
   const mobileDetail = useAppViewStore((s) => s.mobileDetail);
@@ -91,9 +99,10 @@ export function SettingsView({ navWidth, open }: { navWidth: number; open: boole
       onMobileDetailChange: setSettingsMobileDetail,
       onBack: closeSettings,
       navWidth,
+      onNavResize,
       footer: <WorkbenchActivityStrip />,
     }),
-    [initialCategory, mobileDetail, navWidth]
+    [initialCategory, mobileDetail, navWidth, onNavResize]
   );
 
   return (
