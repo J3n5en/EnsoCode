@@ -38,6 +38,16 @@ function turnCompleted(sessionId: string, extra: Record<string, unknown> = {}): 
   } as unknown as RendererAgentEvent;
 }
 
+function statusRunning(sessionId: string): RendererAgentEvent {
+  return {
+    type: 'status',
+    identity: idOf(sessionId),
+    seq: 3,
+    status: 'running',
+    turnId: 't1',
+  } as unknown as RendererAgentEvent;
+}
+
 function createHarness(initialRows: Record<string, Record<string, unknown>>) {
   let clock = 1_700_000_000_000;
   const rows = new Map<string, Record<string, unknown>>(
@@ -315,6 +325,76 @@ describe('DispatchDriver 上游错误自动恢复', () => {
       expect(h.goalOf('s1')?.status).toBe('paused');
       expect(h.goalOf('s1')?.retry).toBeUndefined();
       expect(h.exhaustedEvents).toHaveLength(1);
+      h.recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('唤醒后 worker 发出 status:running 时 goal 立即收敛为 active 并清掉 retry，不等轮次结束', () => {
+    vi.useFakeTimers();
+    try {
+      const h = createHarness({
+        s1: {
+          driver: 'main',
+          status: 'running',
+          goal: { text: '完成发布验证', status: 'active', autoTurns: 1, noProgressRuns: 0 },
+        },
+      });
+
+      h.driver.observe(
+        turnFailed('s1', '503 Service Unavailable: No available accounts', {
+          provider: 'anthropic',
+          retryExhausted: true,
+        })
+      );
+      expect(h.goalOf('s1')?.status).toBe('waiting');
+
+      // 到点唤醒：continuation 注入，此刻 goal 仍是 waiting（turn 还没跑起来）
+      h.advance(TRANSIENT_BACKOFF_MS[0]);
+      expect(h.prompts).toHaveLength(1);
+      expect(h.goalOf('s1')?.status).toBe('waiting');
+
+      // worker 真正开跑：goal 必须立刻收敛，卡片/状态条不再显示「等待上游恢复」
+      h.driver.observe(statusRunning('s1'));
+      expect(h.goalOf('s1')?.status).toBe('active');
+      expect(h.goalOf('s1')?.retry).toBeUndefined();
+
+      // 本轮成功：保持 active，不重复收敛也不回退
+      h.driver.observe(turnCompleted('s1', { provider: 'anthropic' }));
+      expect(h.goalOf('s1')?.status).toBe('active');
+      expect(h.goalOf('s1')?.retry).toBeUndefined();
+      h.recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('探测轮再次失败时沿用原退避进度重新进入 waiting（running 收敛不丢 backoff）', () => {
+    vi.useFakeTimers();
+    try {
+      const h = createHarness({
+        s1: {
+          driver: 'main',
+          status: 'running',
+          goal: { text: '完成发布验证', status: 'active', autoTurns: 1, noProgressRuns: 0 },
+        },
+      });
+
+      h.driver.observe(turnFailed('s1', '503 No available accounts', { provider: 'anthropic' }));
+      const since = (h.goalOf('s1')?.retry as { since?: number } | undefined)?.since;
+
+      h.advance(TRANSIENT_BACKOFF_MS[0]);
+      expect(h.prompts).toHaveLength(1);
+      h.driver.observe(statusRunning('s1'));
+      expect(h.goalOf('s1')?.status).toBe('active');
+
+      // 探测轮又失败：重新 waiting，attempt 递增、since 沿用
+      h.driver.observe(turnFailed('s1', '503 No available accounts', { provider: 'anthropic' }));
+      const retry = h.goalOf('s1')?.retry as { attempt?: number; since?: number } | undefined;
+      expect(h.goalOf('s1')?.status).toBe('waiting');
+      expect(retry?.attempt).toBe(2);
+      expect(retry?.since).toBe(since);
       h.recovery.dispose();
     } finally {
       vi.useRealTimers();
