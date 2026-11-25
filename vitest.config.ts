@@ -3,6 +3,13 @@ import { defineConfig } from 'vitest/config';
 
 const root = import.meta.dirname;
 
+// 默认禁止任何隐式快照写入：vitest 的默认 updateSnapshot 是 "new"，本地并发跑
+// 同一测试（多个 vitest 实例或并行任务）时，第二轮的重复结果会以 "… 2" 的 key
+// 静默写进快照文件，跟着功能提交混进仓库——#535 的 obsolete snapshot 就是这么来的。
+// 显式更新快照用 `pnpm vitest run -u <文件>`（CLI 优先级高于此环境变量），
+// CI 上 vitest 本来就按 none 处理，不受这里影响。
+process.env.UPDATE_SNAPSHOT ??= 'none';
+
 export default defineConfig({
   resolve: {
     alias: {
