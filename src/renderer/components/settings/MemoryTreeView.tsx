@@ -29,14 +29,14 @@ export function MemoryTreeView({
 
   if (tree.length === 0) {
     return (
-      <p className="rounded-lg border px-3 py-6 text-muted-foreground text-sm">
+      <p className="border-border border-b py-6 text-[13px] text-muted-foreground">
         {loading ? t('Loading…') : t('No memories yet.')}
       </p>
     );
   }
 
   return (
-    <ul className="divide-y rounded-lg border">
+    <ul className="divide-y border-border border-b">
       {tree.map((group) => {
         const expanded = open.has(group.id);
         const memoryIds = (group.children ?? [])
@@ -44,7 +44,7 @@ export function MemoryTreeView({
           .filter((id): id is string => Boolean(id));
         return (
           <li key={group.id}>
-            <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <div className="flex items-center justify-between gap-3 py-2">
               <button
                 type="button"
                 className="min-w-0 flex-1 text-left"
@@ -71,9 +71,9 @@ export function MemoryTreeView({
               </Button>
             </div>
             {expanded && (
-              <ul className="divide-y border-t bg-muted/20">
+              <ul className="divide-y border-t bg-muted/20 pl-6">
                 {(group.children ?? []).map((child) => (
-                  <li key={child.id} className="flex items-center gap-2 px-3 py-2">
+                  <li key={child.id} className="flex items-center gap-2 py-2 pr-2">
                     {child.memoryId && (
                       <Checkbox
                         checked={selected.has(child.memoryId)}
@@ -88,7 +88,7 @@ export function MemoryTreeView({
                   </li>
                 ))}
                 {group.count > (group.children?.length ?? 0) && (
-                  <li className="px-3 py-2 text-muted-foreground text-xs">
+                  <li className="py-2 text-muted-foreground text-xs">
                     {t('Showing {{shown}} of {{total}}', {
                       shown: String(group.children?.length ?? 0),
                       total: String(group.count),
