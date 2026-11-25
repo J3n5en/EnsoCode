@@ -4566,6 +4566,7 @@ export const zhTranslations: Record<string, string> = {
   'This removes "{{name}}" from your skills list.': '将从技能列表中移除「{{name}}」。',
   'Delete SSH connection?': '删除 SSH 连接？',
   Metric: '指标',
+  'Add project ({{shortcut}})': '添加项目（{{shortcut}}）',
 };
 
 export function normalizeLocale(input?: string): Locale {

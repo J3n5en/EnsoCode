@@ -166,7 +166,13 @@ import {
   readCollapsedProjects,
   subscribeCollapsedProjects,
 } from '@/lib/importLocalProject';
-import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
+import {
+  ADD_PROJECT_SHORTCUT,
+  effectiveKeybindings,
+  formatBinding,
+  IS_MAC,
+  isAddProjectShortcut,
+} from '@/lib/keybindings';
 import {
   heightVariants,
   sidebarWidthTransition,
@@ -249,6 +255,9 @@ const ICON_BUTTON_CLASS =
 /** 分区标题右侧的悬停按钮；无悬停的触屏常显 */
 const SECTION_ACTION_CLASS =
   '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100';
+/** 添加项目需要被发现，不依赖悬停才显现 */
+const SECTION_ACTION_PERSISTENT_CLASS =
+  '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground hover:bg-foreground/5 hover:text-foreground';
 
 interface SidebarProps {
   width?: number;
@@ -990,6 +999,11 @@ export function Sidebar({
       const mod = IS_MAC ? e.metaKey : e.ctrlKey;
       const switchMode = mod && !e.shiftKey && !e.altKey;
       setModHeld(switchMode);
+      if (isAddProjectShortcut(e)) {
+        e.preventDefault();
+        setAddOpen(true);
+        return;
+      }
       if (!switchMode || e.repeat) return;
       const n = Number(e.key);
       if (n < 1 || n > 9) return;
@@ -1017,6 +1031,10 @@ export function Sidebar({
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [selectConversation, setModHeld]);
+
+  const addProjectTitle = t('Add project ({{shortcut}})', {
+    shortcut: formatBinding(ADD_PROJECT_SHORTCUT),
+  });
 
   // worktree 徽标状态：挂载 + 窗口聚焦 + 30s 轻量轮询（只查隔离会话，不每帧跑 git）
   useEffect(() => {
@@ -1126,7 +1144,8 @@ export function Sidebar({
             type="button"
             onClick={() => setAddOpen(true)}
             className={ICON_BUTTON_CLASS}
-            title={t('Add project')}
+            title={addProjectTitle}
+            aria-label={addProjectTitle}
           >
             <FolderPlus className="h-4 w-4" />
           </button>
@@ -1327,7 +1346,8 @@ export function Sidebar({
               onClick={() => setAddOpen(true)}
               className="mt-2 w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-brand/50 hover:text-foreground"
             >
-              {t('Add a project to start')}
+              <span className="block">{t('Add a project to start')}</span>
+              <span className="mt-1 block text-xs">{formatBinding(ADD_PROJECT_SHORTCUT)}</span>
             </button>
           )}
           {orderedProjects.length === 0 && scratchSessionsEnabled && scratchProject && (
@@ -1574,11 +1594,11 @@ export function Sidebar({
                   <button
                     type="button"
                     onClick={() => setAddOpen(true)}
-                    className={SECTION_ACTION_CLASS}
-                    title={t('Add project')}
-                    aria-label={t('Add project')}
+                    className={SECTION_ACTION_PERSISTENT_CLASS}
+                    title={addProjectTitle}
+                    aria-label={addProjectTitle}
                   >
-                    <Plus className="size-3.25" />
+                    <FolderPlus className="size-3.25" />
                   </button>
                 </>
               }
