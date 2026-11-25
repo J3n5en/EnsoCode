@@ -926,4 +926,45 @@ describe('parseSchedules', () => {
       ])
     ).toEqual([]);
   });
+
+  it('keeps the creating conversation and drops a blank one', () => {
+    expect(
+      parseSchedules([
+        {
+          id: 's1',
+          name: '喝水',
+          prompt: '提醒',
+          at: '2026-11-13T09:00:00.000Z',
+          createdAt: 1,
+          secretaryConversationId: 'sec-b',
+        },
+        {
+          id: 's2',
+          name: '简报',
+          prompt: '简报',
+          cron: '0 9 * * *',
+          createdAt: 1,
+          secretaryConversationId: '   ',
+        },
+        {
+          id: 's3',
+          name: '旧定时',
+          prompt: '没有会话字段',
+          cron: '0 8 * * *',
+          createdAt: 1,
+        },
+      ])
+    ).toEqual([
+      {
+        id: 's1',
+        name: '喝水',
+        prompt: '提醒',
+        at: '2026-11-13T09:00:00.000Z',
+        createdAt: 1,
+        secretaryConversationId: 'sec-b',
+      },
+      { id: 's2', name: '简报', prompt: '简报', cron: '0 9 * * *', createdAt: 1 },
+      { id: 's3', name: '旧定时', prompt: '没有会话字段', cron: '0 8 * * *', createdAt: 1 },
+    ]);
+  });
 });

@@ -151,6 +151,43 @@ describe('目标秘书会话解析', () => {
   });
 });
 
+describe('定时投回创建它的会话', () => {
+  function scheduleUpdate(secretaryConversationId?: string): SecretaryUpdate {
+    return {
+      key: 'k-schedule',
+      at: 0,
+      text: '喝水',
+      kind: 'schedule',
+      scheduleId: 'sch-1',
+      ...(secretaryConversationId ? { secretaryConversationId } : {}),
+    };
+  }
+
+  it('preferred 指向非最近活跃的会话时，投递落到 preferred', async () => {
+    // harness 默认 sec2.lastActiveAt 更新；没有 preferred 时会落到 sec2
+    const h = harness({ file: { outbox: [scheduleUpdate('sec1')] } });
+    expect(resolveTarget(h.ports)).toBe('sec2');
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts.map((prompt) => prompt.conversationId)).toEqual(['sec1']);
+  });
+
+  it('preferred 已归档或不存在时，仍退化为最近活跃的会话', async () => {
+    const archived = harness({
+      file: { outbox: [scheduleUpdate('sec1')] },
+      rows: {
+        sec1: { id: 'sec1', projectId: 'sec', archived: true, lastActiveAt: 99 },
+        sec2: { id: 'sec2', projectId: 'sec', lastActiveAt: 20 },
+      },
+    });
+    await flushDeliveries(archived.ports, 1000);
+    expect(archived.state.prompts.map((prompt) => prompt.conversationId)).toEqual(['sec2']);
+
+    const missing = harness({ file: { outbox: [scheduleUpdate('gone')] } });
+    await flushDeliveries(missing.ports, 1000);
+    expect(missing.state.prompts.map((prompt) => prompt.conversationId)).toEqual(['sec2']);
+  });
+});
+
 describe('注入', () => {
   it('目标空闲时合并注入一条 session-updates，并记下在途批次', async () => {
     const h = harness({ file: { outbox: [update()] } });

@@ -991,6 +991,8 @@ export function parseSchedules(value: unknown): SecretarySchedule[] {
       : { id, name, prompt, createdAt, cron: cron as string };
     const lastFiredAt = time(item.lastFiredAt);
     if (lastFiredAt !== undefined) schedule.lastFiredAt = lastFiredAt;
+    const secretaryConversationId = text(item.secretaryConversationId);
+    if (secretaryConversationId) schedule.secretaryConversationId = secretaryConversationId;
     if (item.system === 'daily-brief') schedule.system = 'daily-brief';
     else if (isObject(item.system) && text(item.system.todoId))
       schedule.system = { todoId: text(item.system.todoId)! };
