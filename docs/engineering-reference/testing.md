@@ -10,6 +10,10 @@ pnpm test:formal             # 形式化模型完整界限
 pnpm test:watch              # 监听模式
 ```
 
+本地默认禁止隐式写快照：缺快照/快照过期一律失败，不会自动补写（vitest 的默认
+`updateSnapshot: "new"` 会在并发跑同一测试时把重复结果写成「… 2」混入快照文件）。
+**有意更新快照时显式跑 `pnpm vitest run -u <测试文件>`**，确认 diff 后再提交。
+
 ## 跑哪些测试
 
 - **开发中只跑 `pnpm test:changed` 或相关文件。** 它相对 `origin/main` 的 merge-base（找不到就用 `main`，也可 `--base <ref>`）收集已提交、未提交和未跟踪的改动，用 vitest 的依赖图挑出 import 了这些文件的测试，开头打印跑了哪些文件、为什么跑。`--dry` 只打印不跑。
