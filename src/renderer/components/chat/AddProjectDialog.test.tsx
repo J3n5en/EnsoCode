@@ -1,3 +1,4 @@
+import type { HostDirSearchResult } from '@shared/types';
 import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -5,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AddProjectDialog } from './AddProjectDialog';
 
 // t 必须稳定：DirBrowser 的 load 依赖 t，每次新建会让加载 effect 无限重跑
-const i18n = vi.hoisted(() => ({ t: (key: string) => key }));
+const i18n = vi.hoisted(() => ({
+  t: (key: string, params?: Record<string, string | number>) =>
+    params ? key.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(params[name] ?? '')) : key,
+}));
 vi.mock('@/i18n', () => ({ useI18n: () => i18n }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: unknown) => unknown) => select({ projects: [] }),
@@ -169,6 +173,7 @@ beforeEach(() => {
         getRecent: vi.fn(async () => []),
         listHostDirs: vi.fn(async () => ({ ok: true, path: '/home', dirs: [] })),
         createHostDir,
+        searchHostDirs: vi.fn(async () => ({ ok: true, host: 'test-host', results: [] })),
       },
       dialog: { selectDirectory: vi.fn() },
     },
@@ -222,5 +227,128 @@ describe('AddProjectDialog 新建文件夹', () => {
     await type(input, '文档');
     await press(input, 'Enter', true);
     expect(createHostDir).not.toHaveBeenCalled();
+  });
+});
+
+describe('AddProjectDialog 本机目录搜索', () => {
+  const searchInput = () => container.querySelector('input[placeholder="Search for directory"]');
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('停顿后搜索，点结果填入路径并可提交', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const search = vi.fn(
+      async (): Promise<HostDirSearchResult> => ({
+        ok: true,
+        host: 'mbp',
+        results: [{ path: '/Users/me/proj', displayPath: '~/proj' }],
+      })
+    );
+    window.electronAPI.projects.searchHostDirs = search;
+    await render(true);
+    expect(container.textContent).not.toContain('Find a directory on mbp');
+    await type(searchInput(), '  proj');
+    expect(search).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Searching...');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(249);
+    });
+    expect(search).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenCalledWith('proj');
+    expect(container.textContent).toContain('Find a directory on mbp');
+    expect(container.textContent).toContain('~/proj');
+    await click('~/proj');
+    expect(searchInput()).toHaveProperty('value', '');
+    expect(container.textContent).not.toContain('~/proj');
+    const add = [...container.querySelectorAll('button')].find((el) => el.textContent === 'Add');
+    expect(add?.hasAttribute('disabled')).toBe(false);
+    await submit();
+    expect(onAdd).toHaveBeenCalledWith({ path: '/Users/me/proj' });
+  });
+
+  it('没有匹配时显示空结果，空白输入不搜索', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const search = vi.fn(
+      async (): Promise<HostDirSearchResult> => ({ ok: true, host: 'mbp', results: [] })
+    );
+    window.electronAPI.projects.searchHostDirs = search;
+    await render(true);
+    await type(searchInput(), '   ');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(search).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('No matching directories');
+    await type(searchInput(), 'nope');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(container.textContent).toContain('No matching directories');
+    expect(container.textContent).toContain('Find a directory on mbp');
+  });
+
+  it('新输入作废尚未返回的旧搜索', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let resolveOld: (value: HostDirSearchResult) => void = () => {};
+    const search = vi.fn((query: string): Promise<HostDirSearchResult> => {
+      if (query === 'old')
+        return new Promise((resolve) => {
+          resolveOld = resolve;
+        });
+      return Promise.resolve<HostDirSearchResult>({
+        ok: true,
+        host: 'mbp',
+        results: [{ path: '/work/new', displayPath: '~/new' }],
+      });
+    });
+    window.electronAPI.projects.searchHostDirs = search;
+    await render(true);
+    await type(searchInput(), 'old');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await type(searchInput(), 'new');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(container.textContent).toContain('~/new');
+    await act(async () => {
+      resolveOld({
+        ok: true,
+        host: 'mbp',
+        results: [{ path: '/work/old', displayPath: '~/old' }],
+      });
+    });
+    expect(container.textContent).not.toContain('~/old');
+    expect(container.textContent).toContain('~/new');
+  });
+
+  it('关闭再打开不保留上次搜索，远程页没有本机搜索', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    window.electronAPI.projects.searchHostDirs = vi.fn(
+      async (): Promise<HostDirSearchResult> => ({
+        ok: true,
+        host: 'mbp',
+        results: [{ path: '/Users/me/proj', displayPath: '~/proj' }],
+      })
+    );
+    await render(true);
+    await type(searchInput(), 'proj');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(container.textContent).toContain('~/proj');
+    await render(false);
+    await render(true);
+    expect(container.textContent).not.toContain('~/proj');
+    expect(searchInput()).toHaveProperty('value', '');
+    await click('Remote (SSH)');
+    expect(searchInput()).toBeNull();
   });
 });

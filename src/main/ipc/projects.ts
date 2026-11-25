@@ -10,6 +10,7 @@ import {
 } from '@shared/types/agent';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { listProjectCodeSources } from '../../agent/projectCodeSources';
+import { searchHostDirs } from '../services/hostDirSearch';
 import { createHostDir, listHostDirs } from '../services/hostDirs';
 import { openInApps } from '../services/openInApps';
 import { getRecentProjects } from '../services/recentProjects';
@@ -140,6 +141,12 @@ export function registerProjectHandlers(): void {
       return createHostDir(parent, name);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.PROJECTS_SEARCH_HOST_DIRS, async (event, query: unknown) => {
+    if (!isMainRenderer(event.sender.id) || typeof query !== 'string')
+      return { ok: false, error: 'Invalid request.' };
+    return searchHostDirs(query);
+  });
 
   // 渲染层只传标识符，磁盘路径由 Main 从权威记录推导，不接受任意路径
   ipcMain.handle(
