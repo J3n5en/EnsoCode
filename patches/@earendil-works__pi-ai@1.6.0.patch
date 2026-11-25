@@ -1,7 +1,7 @@
 diff --git a/dist/utils/retry.js b/dist/utils/retry.js
 --- a/dist/utils/retry.js
 +++ b/dist/utils/retry.js
-@@ -84,7 +84,8 @@
+@@ -95,7 +95,8 @@
      // (#4433); Bedrock/Smithy can throw an HTTP/2 no-response error (#3594).
      "ended without",
      "stream ended before message_stop",

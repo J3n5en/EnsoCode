@@ -45,11 +45,11 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.14.0",
-    "@earendil-works/pi-agent-core": "1.5.1",
-    "@earendil-works/pi-ai": "1.5.1",
-    "@earendil-works/pi-coding-agent": "1.5.1",
-    "@earendil-works/pi-mcp": "1.5.1",
-    "@earendil-works/pi-tui": "1.5.1",
+    "@earendil-works/pi-agent-core": "1.6.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@earendil-works/pi-mcp": "1.6.0",
+    "@earendil-works/pi-tui": "1.6.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@huggingface/tokenizers": "0.2.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -158,9 +158,9 @@
       "better-sqlite3"
     ],
     "patchedDependencies": {
-      "@earendil-works/pi-ai@1.5.1": "patches/@earendil-works__pi-ai@1.5.1.patch",
+      "@earendil-works/pi-ai@1.6.0": "patches/@earendil-works__pi-ai@1.6.0.patch",
       "@rahularya01/pi-cursor@1.4.39": "patches/@rahularya01__pi-cursor@1.4.39.patch",
-      "@earendil-works/pi-coding-agent@1.5.1": "patches/@earendil-works__pi-coding-agent@1.5.1.patch",
+      "@earendil-works/pi-coding-agent@1.6.0": "patches/@earendil-works__pi-coding-agent@1.6.0.patch",
       "electron-vite@5.0.0": "patches/electron-vite@5.0.0.patch"
     }
   },
