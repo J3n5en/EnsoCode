@@ -20,14 +20,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
-import {
-  SettingsButton,
-  SettingsPage,
-  SettingsRow,
-  SettingsSection,
-  SettingsSwitch,
-  TOUCH_TARGET,
-} from './kit';
+import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
 
 const CHAT_ROLE_LABELS = {
   body: 'Body',
@@ -147,7 +140,7 @@ function RoleSlider({
           onWeight(next as ChatTypographyWeight);
         }}
       >
-        <SelectTrigger className={cn('w-24 max-w-full', TOUCH_TARGET)} aria-label={label}>
+        <SelectTrigger className="w-24 max-w-full" aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectPopup>
@@ -372,7 +365,7 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
                   value={String(headerRecentMinutes)}
                   onValueChange={(value) => setHeaderRecentMinutes(Number(value))}
                 >
-                  <SelectTrigger className={cn('w-28 max-w-full', TOUCH_TARGET)}>
+                  <SelectTrigger className="w-28 max-w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectPopup>

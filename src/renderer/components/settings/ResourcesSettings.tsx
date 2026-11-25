@@ -46,13 +46,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import {
-  SettingsButton,
-  SettingsPage,
-  SettingsPreview,
-  SettingsSection,
-  TOUCH_TARGET,
-} from './kit';
+import { SettingsButton, SettingsPage, SettingsPreview, SettingsSection } from './kit';
 import { formatBytes } from './MemorySettings';
 
 type Tab = 'cpu' | 'memory' | 'storage';
@@ -590,10 +584,7 @@ function StorageRow({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className={cn(
-                  'opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100',
-                  TOUCH_TARGET
-                )}
+                className={cn('opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100')}
                 aria-label={t('Show in folder')}
                 onClick={() =>
                   void window.electronAPI.resources.revealStorage(entry.root, entry.path)
@@ -764,10 +755,7 @@ function SessionStorage({
             <Button
               variant="ghost"
               size="icon-sm"
-              className={cn(
-                'opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100',
-                TOUCH_TARGET
-              )}
+              className={cn('opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100')}
               disabled={disabled}
               aria-label={t('Delete')}
               onClick={() =>

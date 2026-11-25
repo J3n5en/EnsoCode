@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SettingsPreview } from './kit';
 import { buildLegend, graphStylesheet, toElements } from './memoryGraphStyle';
 
 /**
@@ -120,7 +121,7 @@ export function MemoryGraphView({
 
   if (graph.nodes.length === 0) {
     return (
-      <p className="rounded-lg border px-3 py-6 text-muted-foreground text-sm">
+      <p className="border-border border-b py-6 text-[13px] text-muted-foreground">
         {loading
           ? t('Loading…')
           : t('No entities yet. Turn on entity extraction and store a few memories first.')}
@@ -129,8 +130,8 @@ export function MemoryGraphView({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="relative overflow-hidden rounded-lg border bg-muted/20">
+    <div className="space-y-3 pt-3">
+      <SettingsPreview className="relative overflow-hidden bg-muted/20">
         <div ref={hostRef} className="h-[440px] w-full" />
         <div className="absolute right-2 bottom-2 flex gap-1">
           <Button
@@ -150,7 +151,7 @@ export function MemoryGraphView({
             {t('Relayout')}
           </Button>
         </div>
-      </div>
+      </SettingsPreview>
 
       <div className="space-y-2">
         <p className="text-muted-foreground text-xs">
@@ -165,10 +166,8 @@ export function MemoryGraphView({
                 setTypeFilter(typeFilter === entry.entityType ? null : entry.entityType)
               }
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors',
-                typeFilter === entry.entityType
-                  ? 'border-foreground/40 bg-accent'
-                  : 'hover:bg-accent/50'
+                'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs transition-colors',
+                typeFilter === entry.entityType ? 'bg-accent' : 'bg-muted/60 hover:bg-accent/60'
               )}
             >
               <span
@@ -189,7 +188,7 @@ export function MemoryGraphView({
       </div>
 
       {selected && (
-        <section className="space-y-2 rounded-lg border p-3">
+        <section className="space-y-2 border-border border-t pt-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="flex items-center gap-2 text-sm">
@@ -212,12 +211,12 @@ export function MemoryGraphView({
               {interpreting ? t('Interpreting…') : t('Interpret')}
             </Button>
           </div>
-          <ul className="divide-y rounded-lg border">
+          <ul className="divide-y border-border border-y">
             {memories.length === 0 && (
-              <li className="px-3 py-4 text-muted-foreground text-sm">{t('Loading…')}</li>
+              <li className="py-4 text-[13px] text-muted-foreground">{t('Loading…')}</li>
             )}
             {memories.map((m) => (
-              <li key={m.id} className="space-y-0.5 px-3 py-2">
+              <li key={m.id} className="space-y-0.5 py-2">
                 <p className="flex items-center gap-2 text-sm">
                   {m.isCrystal && <span title={t('Crystal')}>★</span>}
                   <span className="truncate">{m.title}</span>

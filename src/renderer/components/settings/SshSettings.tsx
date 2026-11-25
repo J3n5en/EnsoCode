@@ -23,14 +23,7 @@ import {
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
-import {
-  SettingsButton,
-  SettingsPage,
-  SettingsRow,
-  SettingsSection,
-  SettingsSelect,
-  TOUCH_TARGET,
-} from './kit';
+import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSelect } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
 const SSH_TIMEOUT_OPTIONS = [10, 15, 30, 60, 120, 300];
@@ -209,12 +202,7 @@ export function SshSettings() {
                   t('Test')
                 )}
               </SettingsButton>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className={TOUCH_TARGET}
-                onClick={() => void remove(connection.id)}
-              >
+              <Button size="icon-sm" variant="ghost" onClick={() => void remove(connection.id)}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             </li>

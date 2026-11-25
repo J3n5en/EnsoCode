@@ -52,7 +52,6 @@ import {
   SettingsExpandableRow,
   SettingsSegmented,
   SettingsSubRow,
-  TOUCH_TARGET,
   useSettingsRowControl,
 } from './kit';
 import { ListFilterBar, useVisibleSelection } from './ListFilterBar';
@@ -617,7 +616,7 @@ export function ProviderApiForm({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className={cn('shrink-0', TOUCH_TARGET)}
+                            className="shrink-0"
                             aria-label={t('Remove header')}
                             onClick={() =>
                               setHeaderRows((current) =>

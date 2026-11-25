@@ -40,7 +40,6 @@ import {
   SettingsSection,
   SettingsSelect,
   SettingsSwitch,
-  TOUCH_TARGET,
 } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
@@ -165,12 +164,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
                   : `${t('Picked by main agent')} (${t('Follows the conversation model')})`}
               </p>
             </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className={TOUCH_TARGET}
-              onClick={() => setEditing({ defaults: type })}
-            >
+            <Button variant="ghost" size="icon-sm" onClick={() => setEditing({ defaults: type })}>
               <Pencil className="h-4 w-4" />
             </Button>
             <SettingsSwitch
@@ -218,20 +212,10 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
                   {entry.description ? ` · ${entry.description}` : ''}
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={TOUCH_TARGET}
-                onClick={() => setEditing(entry)}
-              >
+              <Button variant="ghost" size="icon-sm" onClick={() => setEditing(entry)}>
                 <Pencil className="h-4 w-4" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={TOUCH_TARGET}
-                onClick={() => removeAgentType(entry.id)}
-              >
+              <Button variant="ghost" size="icon-sm" onClick={() => removeAgentType(entry.id)}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             </li>

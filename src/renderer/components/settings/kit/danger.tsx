@@ -10,7 +10,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { TOUCH_TARGET } from './controls';
 import { SettingsRow } from './layout';
 
 /**
@@ -58,7 +57,6 @@ export function SettingsDangerAction({
         variant={irreversible ? 'destructive' : 'destructive-outline'}
         className={cn(
           'sm:h-(--settings-control-h)',
-          TOUCH_TARGET,
           !irreversible && 'border-destructive-text/45 text-destructive-text'
         )}
         onClick={() => setOpen(true)}

@@ -48,14 +48,6 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { IS_MAC } from '@/lib/keybindings';
 import { isRemoteClient } from '@/lib/remoteClient';
@@ -63,6 +55,15 @@ import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { builtinToolsInSection, TOOL_SECTIONS, type ToolSectionId } from './builtinToolSections';
 import { ComputerAllowedApps } from './ComputerAllowedApps';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSubRow,
+  SettingsSwitch,
+} from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 import {
   enabledOccupancyTotal,
@@ -110,22 +111,24 @@ function ToolRow({
   newSession?: boolean | string;
 }) {
   return (
-    <div className="rounded-md border px-3 py-2.5" data-settings-row={rowId}>
-      <div className="flex items-center gap-3">
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">
+    <>
+      <SettingsRow
+        rowId={rowId}
+        leading={<Icon className="size-4 shrink-0 text-muted-foreground" />}
+        label={
+          <>
             {title}
             {newSession && (
               <NewSessionBadge note={typeof newSession === 'string' ? newSession : undefined} />
             )}
-          </p>
-          <p className="text-muted-foreground text-xs">{description}</p>
-        </div>
+          </>
+        }
+        description={description}
+      >
         {control}
-      </div>
-      {children ? <div className="mt-2 space-y-2 pl-7">{children}</div> : null}
-    </div>
+      </SettingsRow>
+      {children}
+    </>
   );
 }
 
@@ -152,14 +155,14 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
   };
 
   return (
-    <div className="space-y-2" data-settings-row="tools.webSearchChain">
-      <p className="text-muted-foreground text-xs">
+    <div data-settings-row="tools.webSearchChain">
+      <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
         {t(
           "Try these models' built-in search in order. Credentials resolve at call time; if all fail, the keyless Exa service is the permanent fallback."
         )}
       </p>
       {chain.length === 0 && (
-        <p className="text-muted-foreground text-xs">
+        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
           {t(
             "Default: use the current session model's built-in search when available, otherwise Exa."
           )}
@@ -168,7 +171,7 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
       {chain.map((entry, index) => (
         <div
           key={`${entry.providerId}/${entry.modelId}`}
-          className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+          className="flex min-h-11 items-center gap-2 border-border border-b py-2 pl-10"
           draggable={!disabled}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = 'move';
@@ -215,7 +218,7 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
         </div>
       ))}
       {chain.length < WEB_SEARCH_CHAIN_MAX && (
-        <div className="max-w-xs">
+        <div className="max-w-xs border-border border-b py-2 pl-10">
           <ModelPicker
             providers={candidates}
             providerId=""
@@ -230,7 +233,7 @@ function WebSearchChainEditor({ disabled }: { disabled: boolean }) {
           />
         </div>
       )}
-      <p className="text-muted-foreground text-xs">
+      <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
         {t('Final fallback: Exa (keyless hosted search). Not a chain entry; always last.')}
       </p>
     </div>
@@ -325,24 +328,14 @@ export function BuiltinToolsSettings() {
           'Choose how files are modified. Apply patch is the default. New and cold-restored sessions use this mode; already warm sessions keep their current mode.'
         )}
         control={
-          <Select
-            items={Object.fromEntries(EDIT_MODES.map((mode) => [mode, t(EDIT_MODE_LABEL[mode])]))}
+          <SettingsSelect
+            aria-label={t('File edit mode')}
             value={editMode}
+            options={EDIT_MODES.map((mode) => ({ value: mode, label: t(EDIT_MODE_LABEL[mode]) }))}
             onValueChange={(value) => {
               if (isEditMode(value)) setEditMode(value);
             }}
-          >
-            <SelectTrigger className="w-44 shrink-0" aria-label={t('File edit mode')}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {EDIT_MODES.map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {t(EDIT_MODE_LABEL[mode])}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+          />
         }
       />
     ),
@@ -355,7 +348,9 @@ export function BuiltinToolsSettings() {
           description={t(
             'Let the agent mark exploratory reads and keep only a short report in later model context. Timeline stays intact.'
           )}
-          control={<Switch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />}
+          control={
+            <SettingsSwitch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />
+          }
         />
         <ToolRow
           rowId="tools.rtkEnabled"
@@ -365,7 +360,7 @@ export function BuiltinToolsSettings() {
           description={t(
             'Compress supported command output before it enters the model context. Takes effect on new conversations.'
           )}
-          control={<Switch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />}
+          control={<SettingsSwitch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />}
         />
       </>
     ),
@@ -379,7 +374,10 @@ export function BuiltinToolsSettings() {
             'Even in full-access mode, ask before external sends, deletions, payments, deployments and secret-file access. Always on for Bot members not set to Full access. Takes effect on new conversations.'
           )}
           control={
-            <Switch checked={protectedActionsInCode} onCheckedChange={setProtectedActionsInCode} />
+            <SettingsSwitch
+              checked={protectedActionsInCode}
+              onCheckedChange={setProtectedActionsInCode}
+            />
           }
         />
         <DcgGuardRow />
@@ -388,20 +386,18 @@ export function BuiltinToolsSettings() {
   };
 
   return (
-    <div className="space-y-8">
-      <div data-settings-row="tools.root">
-        <h3 className="font-medium text-lg">
+    <SettingsPage
+      rowId="tools.root"
+      title={
+        <>
           {t('Built-in tools')}
           <OccupancyEnabledTotal tokens={enabledTokens} />
-        </h3>
-        <p className="text-muted-foreground text-sm">
-          {t('Toggle the built-in tools available to agents.')}
-        </p>
-      </div>
-
+        </>
+      }
+      description={t('Toggle the built-in tools available to agents.')}
+    >
       {TOOL_SECTIONS.map((section) => (
-        <section key={section.id} className="space-y-3">
-          <h4 className="border-b pb-2 text-base font-semibold">{t(section.label)}</h4>
+        <SettingsSection key={section.id} title={t(section.label)}>
           {builtinToolsInSection(BUILTIN_TOOLS, section.id).map((tool) => (
             <ToolRow
               key={tool.id}
@@ -421,7 +417,7 @@ export function BuiltinToolsSettings() {
                     row={occupancy.rows[tool.id]}
                     pending={occupancy.pending && !occupancy.rows[tool.id]}
                   />
-                  <Switch
+                  <SettingsSwitch
                     checked={!disabled.includes(tool.id)}
                     onCheckedChange={(checked) => {
                       toggle(tool.id, checked);
@@ -435,24 +431,23 @@ export function BuiltinToolsSettings() {
                 <WebSearchChainEditor disabled={disabled.includes('web')} />
               ) : null}
               {tool.id === 'subagent' ? (
-                <div className="space-y-2" data-settings-row="tools.subagentModes">
+                <div data-settings-row="tools.subagentModes">
                   {(
                     [
                       ['task', 'One-shot task agents'],
                       ['coworker', 'Persistent coworkers'],
                     ] as const
                   ).map(([mode, label]) => (
-                    <div key={mode} className="flex items-center justify-between gap-4">
-                      <span className="text-sm">{t(label)}</span>
-                      <Switch
+                    <SettingsSubRow key={mode} label={t(label)}>
+                      <SettingsSwitch
                         checked={subagentAllowedModes.includes(mode)}
                         disabled={!subagentEnabled}
                         onCheckedChange={(checked) => setMode(mode, checked)}
                       />
-                    </div>
+                    </SettingsSubRow>
                   ))}
                   {!subagentEnabled && (
-                    <p className="text-muted-foreground text-xs">
+                    <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
                       {t(
                         'The unified subagent tool is off. Re-enabling it keeps this mode selection.'
                       )}
@@ -461,22 +456,22 @@ export function BuiltinToolsSettings() {
                 </div>
               ) : null}
               {tool.id === 'computer' && computerEnabled ? (
-                <div className="space-y-2" data-settings-row="tools.computer">
+                <div data-settings-row="tools.computer">
                   {capabilities && computerPermissionGuideKind(capabilities) === 'unsupported' ? (
-                    <p className="text-muted-foreground text-xs">
+                    <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
                       {t('This platform cannot operate the desktop yet.')}
                     </p>
                   ) : (
                     <>
                       {capabilities?.platform === 'darwin' && (
-                        <p className="text-muted-foreground text-xs">
+                        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
                           {t(
                             'Computer needs Screen Recording to capture windows and Accessibility to inspect or click them. Grant both to EnsoCode, then restart the app.'
                           )}
                         </p>
                       )}
                       {capabilities && (
-                        <p className="text-muted-foreground text-xs">
+                        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
                           {t(
                             capabilities.capturePermission === 'granted'
                               ? 'Capture: granted'
@@ -494,51 +489,42 @@ export function BuiltinToolsSettings() {
                           )}
                         </p>
                       )}
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
+                      <div className="flex flex-wrap gap-2 border-border border-b py-3 pl-10">
+                        <SettingsButton onClick={() => setGuideOpen(true)}>
                           {t('Show permission guide')}
-                        </Button>
+                        </SettingsButton>
                         {capabilities?.platform === 'darwin' && (
                           <>
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            <SettingsButton
                               onClick={() =>
                                 void window.electronAPI.computer.openPermissions('screen')
                               }
                             >
                               {t('Open Screen Recording settings')}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            </SettingsButton>
+                            <SettingsButton
                               onClick={() =>
                                 void window.electronAPI.computer.openPermissions('accessibility')
                               }
                             >
                               {t('Open Accessibility settings')}
-                            </Button>
+                            </SettingsButton>
                           </>
                         )}
                       </div>
                       {capabilities?.platform === 'darwin' && (
                         <>
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-medium text-sm">
-                                {t('Show the app being operated')}
-                              </div>
-                              <p className="text-muted-foreground text-xs">
-                                {t(
-                                  'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.'
-                                )}
-                              </p>
-                            </div>
-                            <Switch
+                          <SettingsSubRow
+                            label={t('Show the app being operated')}
+                            description={t(
+                              'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.'
+                            )}
+                          >
+                            <SettingsSwitch
                               checked={computerPreview}
                               onCheckedChange={setComputerPreview}
                             />
-                          </div>
+                          </SettingsSubRow>
                           <ComputerAllowedApps />
                         </>
                       )}
@@ -547,37 +533,27 @@ export function BuiltinToolsSettings() {
                 </div>
               ) : null}
               {tool.id === 'browser' ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm">
-                        {t('Open chat links in the built-in browser')}
-                      </div>
-                      <p className="text-muted-foreground text-xs">
-                        {t(
-                          'Clicking a web link in chat opens it in the side panel browser. {{key}}+Click opens it in the external browser.',
-                          { key: IS_MAC ? 'Cmd' : 'Ctrl' }
-                        )}
-                      </p>
-                    </div>
-                    <Switch
+                <div>
+                  <SettingsSubRow
+                    label={t('Open chat links in the built-in browser')}
+                    description={t(
+                      'Clicking a web link in chat opens it in the side panel browser. {{key}}+Click opens it in the external browser.',
+                      { key: IS_MAC ? 'Cmd' : 'Ctrl' }
+                    )}
+                  >
+                    <SettingsSwitch
                       checked={openLinksInBuiltinBrowser}
                       onCheckedChange={setOpenLinksInBuiltinBrowser}
                     />
-                  </div>
-                  <p className="text-muted-foreground text-xs">
+                  </SettingsSubRow>
+                  <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
                     {t(
                       'Cookies and site storage of the built-in browser, separate from the app itself.'
                     )}
                   </p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 border-border border-b py-3 pl-10">
                     {(['cookies', 'cache', 'all'] as const).map((kind) => (
-                      <Button
-                        key={kind}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void clear(kind)}
-                      >
+                      <SettingsButton key={kind} onClick={() => void clear(kind)}>
                         {cleared === kind
                           ? t('Cleared')
                           : kind === 'cookies'
@@ -585,7 +561,7 @@ export function BuiltinToolsSettings() {
                             : kind === 'cache'
                               ? t('Clear cache')
                               : t('Clear all browsing data')}
-                      </Button>
+                      </SettingsButton>
                     ))}
                   </div>
                 </div>
@@ -593,7 +569,7 @@ export function BuiltinToolsSettings() {
             </ToolRow>
           ))}
           {sectionExtras[section.id]}
-        </section>
+        </SettingsSection>
       ))}
 
       <ComputerPermissionGuideDialog
@@ -601,7 +577,7 @@ export function BuiltinToolsSettings() {
         capabilities={capabilities}
         onOpenChange={setGuideOpen}
       />
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -695,10 +671,14 @@ function DcgGuardRow() {
         'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.'
       )}
       control={
-        <Switch checked={enabled && installed} disabled={!installed} onCheckedChange={setEnabled} />
+        <SettingsSwitch
+          checked={enabled && installed}
+          disabled={!installed}
+          onCheckedChange={setEnabled}
+        />
       }
     >
-      <div className="flex flex-wrap items-center gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 border-border border-b py-3 pl-10 text-xs">
         <span className="text-muted-foreground">
           {!status
             ? t('Loading…')
@@ -710,75 +690,51 @@ function DcgGuardRow() {
         </span>
         {status?.supported &&
           (installed ? (
-            <Button
-              variant="outline"
-              size="xs"
-              disabled={busy}
-              onClick={() => void run('uninstall')}
-            >
+            <SettingsButton disabled={busy} onClick={() => void run('uninstall')}>
               {t('Uninstall')}
-            </Button>
+            </SettingsButton>
           ) : (
-            <Button
-              variant="outline"
-              size="xs"
-              disabled={busy}
-              onClick={() => setConfirmOpen(true)}
-            >
+            <SettingsButton disabled={busy} onClick={() => setConfirmOpen(true)}>
               {busy ? t('Installing…') : t('Install')}
-            </Button>
+            </SettingsButton>
           ))}
         {status?.supported && (
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={update === 'checking'}
-            onClick={() => void checkUpdate()}
-          >
+          <SettingsButton disabled={update === 'checking'} onClick={() => void checkUpdate()}>
             {update === 'checking' ? t('Checking for updates…') : t('Check for updates')}
-          </Button>
+          </SettingsButton>
         )}
         {updateText && <span className="text-muted-foreground">{updateText}</span>}
         {installed && (
-          <Button variant="outline" size="xs" onClick={() => void clearExemptions()}>
+          <SettingsButton onClick={() => void clearExemptions()}>
             {t('Clear rule exemptions')}
-          </Button>
+          </SettingsButton>
         )}
       </div>
       {installed && (
-        <div className="mt-2 space-y-1.5 rounded-md border border-border/60 bg-muted/20 p-2.5 text-xs">
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {t('Exempted rules')} ({exemptions.length})
-            </span>
-          </div>
+        <div className="border-border border-b py-3 pl-10 text-xs">
+          <p className="font-medium">
+            {t('Exempted rules')} ({exemptions.length})
+          </p>
           {exemptions.length === 0 ? (
             <p className="text-muted-foreground">{t('No rule exemptions.')}</p>
           ) : (
-            <ul className="divide-y divide-border/50">
+            <ul className="mt-1.5">
               {exemptions.map((item) => {
                 const label =
                   locale === 'zh'
                     ? explainDcgGuard({ ruleId: item.ruleId, reason: item.ruleId }).what
                     : item.ruleId;
                 return (
-                  <li
-                    key={item.ruleId}
-                    className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0"
-                  >
+                  <li key={item.ruleId} className="flex items-center justify-between gap-2 py-1.5">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-foreground">{label}</p>
                       <p className="truncate font-mono text-[11px] text-muted-foreground">
                         {item.ruleId} · {new Date(item.at).toLocaleString()}
                       </p>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      onClick={() => void revokeExemption(item.ruleId)}
-                    >
+                    <SettingsButton onClick={() => void revokeExemption(item.ruleId)}>
                       {t('Revoke')}
-                    </Button>
+                    </SettingsButton>
                   </li>
                 );
               })}
@@ -787,11 +743,13 @@ function DcgGuardRow() {
         </div>
       )}
       {cleared !== null && (
-        <p className="text-muted-foreground text-xs">
+        <p className="border-border border-b py-3 pl-10 text-muted-foreground text-xs">
           {cleared ? t('Rule exemptions cleared.') : t('Operation failed')}
         </p>
       )}
-      {error && <p className="text-destructive text-xs">{error}</p>}
+      {error && (
+        <p className="border-border border-b py-3 pl-10 text-destructive text-xs">{error}</p>
+      )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md" zIndexLevel="nested">
           <DialogHeader>
@@ -804,7 +762,7 @@ function DcgGuardRow() {
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
-            <div className="flex gap-2 rounded-md border border-destructive/32 bg-destructive/8 p-3 text-sm">
+            <div className="flex gap-2 rounded-md bg-destructive/8 p-3 text-sm ring-1 ring-destructive/32">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
               <p>
                 {t(
@@ -857,7 +815,7 @@ function ComputerPermissionGuideDialog({
         <DialogPanel className="space-y-3">
           {!capabilities && <p className="text-muted-foreground text-sm">{t('Loading…')}</p>}
           {kind === 'needs-permission' && (
-            <div className="flex gap-2 rounded-md border border-destructive/32 bg-destructive/8 p-3 text-sm">
+            <div className="flex gap-2 rounded-md bg-destructive/8 p-3 text-sm ring-1 ring-destructive/32">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
               <p>
                 {t(

@@ -8,8 +8,6 @@ import type {
 import {
   BookOpen,
   Check,
-  ChevronDown,
-  ChevronRight,
   Copy,
   Files,
   FileText,
@@ -54,8 +52,18 @@ import { PluginArtifactList } from '@/plugins/artifactViews';
 import { coerceConfigValue } from '@/plugins/configValue';
 import { PluginIcon } from '@/plugins/PluginIcon';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
+import { openSettings } from '@/stores/appView';
 import { usePluginThemesStore } from '@/stores/pluginThemes';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsExpandableRow,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSubRow,
+  SettingsSwitch,
+} from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 import { PluginMarket } from './PluginMarket';
 import { PluginModelConfigField } from './PluginModelConfigField';
@@ -63,7 +71,7 @@ import { PluginReadmeDialog } from './PluginReadmeDialog';
 import { RegistryNoticeBanner } from './RegistryNoticeBanner';
 
 /** 插件配置表单：密钥不回显，留空保持不变 */
-function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
+function ExtensionPluginConfigForm({ pluginId }: { pluginId: string }) {
   const { t } = useI18n();
   const [fields, setFields] = React.useState<ExtensionPluginConfigField[]>([]);
   const [draft, setDraft] = React.useState<Record<string, string | boolean | null>>({});
@@ -118,7 +126,7 @@ function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plai
   };
 
   return (
-    <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
+    <div className="space-y-2">
       {fields.map((field) => (
         <div key={field.key} className="space-y-1">
           <p className="text-sm">
@@ -270,10 +278,9 @@ function parseLogLines(text: string): LogLine[] | null {
 }
 
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
-function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
+function ExtensionPluginLogs({ pluginId }: { pluginId: string }) {
   const { t } = useI18n();
   const pluginLoggingEnabled = useSettingsStore((state) => state.pluginLoggingEnabled === true);
-  const setPluginLoggingEnabled = useSettingsStore((state) => state.setPluginLoggingEnabled);
   const [text, setText] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -301,18 +308,18 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
     if (box && text) box.scrollTop = box.scrollHeight;
   }, [text]);
   return (
-    <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
+    <div className="space-y-2">
       {!pluginLoggingEnabled && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm">{t('Plugin logging is off')}</p>
             <p className="text-muted-foreground text-xs">
               {t('New plugin logs are not recorded while off. Existing log files are kept.')}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setPluginLoggingEnabled(true)}>
+          <SettingsButton onClick={() => openSettings({ category: 'logs', rowId: 'logs.root' })}>
             {t('Enable plugin logging')}
-          </Button>
+          </SettingsButton>
         </div>
       )}
       <div className="flex items-center justify-between">
@@ -376,15 +383,15 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
 function PluginErrorText({ message }: { message: string }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="space-y-0.5">
-      <p
+    <span className="mt-1 block space-y-0.5">
+      <span
         className={cn(
-          'select-text break-all font-mono text-destructive text-xs',
+          'block select-text break-all font-mono text-destructive text-xs',
           open ? 'max-h-48 overflow-auto whitespace-pre-wrap' : 'line-clamp-2'
         )}
       >
         {message}
-      </p>
+      </span>
       {message.length > 120 && (
         <button
           type="button"
@@ -394,7 +401,7 @@ function PluginErrorText({ message }: { message: string }) {
           {open ? '收起' : '展开全部'}
         </button>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -559,7 +566,7 @@ function InstallPreviewDetails({ preview }: { preview: ExtensionPluginInstallPre
   return (
     <>
       {preview.existingVersion && preview.expands && (
-        <p className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
+        <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
           {t(
             'This update asks for more than {{version}}. {{version}} keeps running until you allow the update in the plugin list.',
             { version: preview.existingVersion }
@@ -622,7 +629,7 @@ function ConfirmInstallButton({
   );
 }
 
-function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
+function ExtensionPluginArtifacts({ pluginId }: { pluginId: string }) {
   const [items, setItems] = React.useState<PluginArtifactInfo[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const load = React.useCallback(async () => {
@@ -636,12 +643,12 @@ function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain
     void load();
   }, [load]);
   return (
-    <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
+    <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-sm">产出文件</p>
-        <Button size="icon" variant="ghost" aria-label="刷新" onClick={() => void load()}>
+        <SettingsButton size="icon" variant="ghost" aria-label="刷新" onClick={() => void load()}>
           <RefreshCw className="size-4" />
-        </Button>
+        </SettingsButton>
       </div>
       {error && <p className="text-destructive text-xs">{error}</p>}
       <PluginArtifactList
@@ -653,6 +660,270 @@ function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain
           });
         }}
       />
+    </div>
+  );
+}
+
+function ExtensionPluginRow({
+  plugin,
+  themeErrors,
+  busy,
+  downloading,
+  forceOpen,
+  onUpdate,
+  onReinstall,
+  onPanel,
+  onGuide,
+}: {
+  plugin: ExtensionPluginSummary;
+  themeErrors?: readonly string[];
+  busy: boolean;
+  downloading: boolean;
+  /** 深链点到这一行时展开；之后由行内开关自己记 */
+  forceOpen: boolean;
+  onUpdate: () => void;
+  onReinstall: () => void;
+  onPanel: (kind: 'config' | 'logs' | 'artifacts') => void;
+  onGuide: () => void;
+}) {
+  const { t } = useI18n();
+  const summary = capabilitySummary(plugin);
+  return (
+    <div data-plugin-id={plugin.id}>
+      <SettingsExpandableRow
+        key={forceOpen ? 'open' : 'closed'}
+        defaultOpen={forceOpen}
+        label={
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span
+              className={cn(
+                'flex size-6 shrink-0 items-center justify-center rounded-md bg-muted',
+                plugin.state === 'enabled' ? 'text-foreground' : 'text-muted-foreground'
+              )}
+            >
+              <PluginIcon pluginId={plugin.id} icon={plugin.icon} className="size-3.5" />
+            </span>
+            <span className={cn('truncate', plugin.state === 'crashed' && 'text-destructive')}>
+              {plugin.name}
+            </span>
+            <Badge variant="outline" className="font-normal text-[11px]">
+              {plugin.version}
+            </Badge>
+            {plugin.state === 'crashed' && (
+              <Badge variant="destructive" className="font-normal text-[11px]">
+                {t('Stopped after crashes')}
+              </Badge>
+            )}
+            {plugin.availableVersion && (
+              <Badge className="font-normal text-[11px]">{t('Update')}</Badge>
+            )}
+            {plugin.pendingVersion && (
+              <Badge variant="warning" className="font-normal text-[11px]">
+                待授权
+              </Badge>
+            )}
+            {plugin.hasRenderer && (
+              <Badge variant="outline" className="font-normal text-[11px]">
+                受信任界面
+              </Badge>
+            )}
+            {plugin.devWatch && (
+              <Badge variant="secondary" className="font-normal text-[11px]">
+                开发模式
+              </Badge>
+            )}
+            {plugin.resident && (
+              <Badge
+                variant={plugin.running ? 'secondary' : 'outline'}
+                className="font-normal text-[11px]"
+              >
+                {plugin.running ? '常驻运行中' : '常驻未运行'}
+              </Badge>
+            )}
+          </span>
+        }
+        description={
+          <>
+            <span className="block truncate font-mono">{plugin.id}</span>
+            {summary && <span className="mt-0.5 block">{summary}</span>}
+            {plugin.availableVersion && (
+              <span className="mt-1 flex flex-wrap items-center gap-2 text-primary">
+                {t('Version {{version}} is available', { version: plugin.availableVersion })}
+                <SettingsButton size="xs" disabled={busy || downloading} onClick={onUpdate}>
+                  {downloading ? <Spinner /> : t('Update')}
+                </SettingsButton>
+              </span>
+            )}
+            {plugin.updateCheckError && (
+              <span className="mt-1 block">
+                {t('Update check failed: {{reason}}', { reason: plugin.updateCheckError })}
+              </span>
+            )}
+            {plugin.lastError && <PluginErrorText message={plugin.lastError.message} />}
+            {themeErrors?.map((item) => (
+              <PluginErrorText key={item} message={`主题加载失败：${item}`} />
+            ))}
+            {plugin.pendingVersion && (
+              <span className="mt-1 flex flex-wrap items-center gap-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-amber-700 dark:text-amber-400">
+                {t('{{version}} asks for more and is waiting for approval', {
+                  version: plugin.pendingVersion,
+                })}
+                <SettingsButton
+                  size="xs"
+                  variant="default"
+                  onClick={() => void window.electronAPI.extensionPlugins.approvePending(plugin.id)}
+                >
+                  {t('Allow')}
+                </SettingsButton>
+                <SettingsButton
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => void window.electronAPI.extensionPlugins.rejectPending(plugin.id)}
+                >
+                  {t('Keep current')}
+                </SettingsButton>
+              </span>
+            )}
+          </>
+        }
+        control={
+          <>
+            {plugin.source && (
+              <SettingsButton
+                size="icon"
+                variant="ghost"
+                disabled={busy || downloading}
+                aria-label={t('Reinstall from source')}
+                title={
+                  plugin.source.kind === 'url'
+                    ? `${t('Reinstall from source')}: ${plugin.source.url}`
+                    : t('Reinstall from source')
+                }
+                onClick={onReinstall}
+              >
+                <RotateCw className="size-4" />
+              </SettingsButton>
+            )}
+            <SettingsButton
+              size="icon"
+              variant="ghost"
+              aria-label="产出文件"
+              title="产出文件"
+              onClick={() => onPanel('artifacts')}
+            >
+              <Files className="size-4" />
+            </SettingsButton>
+            <SettingsButton
+              size="icon"
+              variant="ghost"
+              aria-label={t('Usage guide')}
+              title={t('Usage guide')}
+              onClick={onGuide}
+            >
+              <BookOpen className="size-4" />
+            </SettingsButton>
+            <SettingsButton
+              size="icon"
+              variant="ghost"
+              aria-label={t('Plugin logs')}
+              title={t('Plugin logs')}
+              onClick={() => onPanel('logs')}
+            >
+              <FileText className="size-4" />
+            </SettingsButton>
+            {plugin.configurable && (
+              <SettingsButton
+                size="icon"
+                variant="ghost"
+                aria-label={t('Configure')}
+                title={t('Configure')}
+                onClick={() => onPanel('config')}
+              >
+                <Settings2 className="size-4" />
+              </SettingsButton>
+            )}
+            <SettingsButton
+              size="icon"
+              variant="ghost"
+              aria-label={t('Uninstall')}
+              title={t('Uninstall')}
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => void window.electronAPI.extensionPlugins.uninstall(plugin.id)}
+            >
+              <Trash2 className="size-4" />
+            </SettingsButton>
+            <div className="mx-1.5 h-5 w-px bg-border" />
+            <SettingsSwitch
+              checked={plugin.state === 'enabled'}
+              onCheckedChange={(enabled) =>
+                void window.electronAPI.extensionPlugins.setEnabled(plugin.id, enabled)
+              }
+            />
+          </>
+        }
+      >
+        {plugin.interceptBreakers?.map((breaker) => (
+          <p
+            key={breaker.event}
+            className="border-border border-b py-2 pl-10 text-amber-600 text-xs dark:text-amber-400"
+          >
+            {breaker.event} 检查连续失败，临时放行到 {new Date(breaker.until).toLocaleTimeString()}
+          </p>
+        ))}
+        <div className="border-border border-b py-3 pl-10">
+          <PluginCapabilityBlock
+            permissions={plugin.permissions}
+            resident={plugin.resident}
+            running={plugin.running}
+            styles={plugin.themes.some((theme) => theme.css !== undefined)}
+            trustedUi={plugin.hasRenderer}
+            events={plugin.events}
+            schedules={plugin.schedules}
+          />
+        </div>
+        {plugin.crossSessionInject !== undefined && (
+          <SettingsSubRow
+            label="允许向任意运行中的会话发送消息"
+            description="关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行"
+          >
+            <SettingsSwitch
+              checked={plugin.crossSessionInject}
+              onCheckedChange={(allowed) =>
+                void window.electronAPI.extensionPlugins.setCrossSessionInject(plugin.id, allowed)
+              }
+            />
+          </SettingsSubRow>
+        )}
+        {plugin.devWatch !== undefined && (
+          <SettingsSubRow
+            label="开发模式：目录改动后自动重装"
+            description="授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭"
+          >
+            <SettingsSwitch
+              checked={plugin.devWatch}
+              onCheckedChange={(on) =>
+                void window.electronAPI.extensionPlugins.setDevWatch(plugin.id, on).then((res) => {
+                  if (!res.ok && res.error) addToast({ title: res.error });
+                })
+              }
+            />
+          </SettingsSubRow>
+        )}
+        {((plugin.pendingPermissions?.length ?? 0) > 0 || plugin.pendingRenderer) && (
+          <div className="space-y-1 border-border border-b py-3 pl-10">
+            <p className="text-muted-foreground text-xs">待同意</p>
+            <PermissionLines
+              permissions={plugin.pendingPermissions ?? []}
+              styles={plugin.pendingRenderer}
+            />
+            {plugin.pendingRenderer && (
+              <p className="text-amber-700 text-xs dark:text-amber-400">
+                新增界面代码：运行在主界面里，不受权限清单约束
+              </p>
+            )}
+          </div>
+        )}
+      </SettingsExpandableRow>
     </div>
   );
 }
@@ -691,7 +962,8 @@ export function EnsoPluginsSettings({
     pluginId: string;
     pluginName: string;
   } | null>(null);
-  const [expanded, setExpanded] = React.useState<readonly string[]>([]);
+  /** 深链点名的插件：挂上后展开一次，之后交给行自己的开关 */
+  const [forcedOpen, setForcedOpen] = React.useState<readonly string[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [url, setUrl] = React.useState('');
@@ -734,7 +1006,7 @@ export function EnsoPluginsSettings({
 
   React.useEffect(() => {
     if (!focusPluginId) return;
-    setExpanded((prev) => (prev.includes(focusPluginId) ? prev : [...prev, focusPluginId]));
+    setForcedOpen((prev) => (prev.includes(focusPluginId) ? prev : [...prev, focusPluginId]));
     if (!plugins.some((plugin) => plugin.id === focusPluginId)) return;
     const id = focusPluginId;
     window.requestAnimationFrame(() => {
@@ -867,33 +1139,23 @@ export function EnsoPluginsSettings({
   const marketPreview = previewInMarket ? preview : null;
 
   return (
-    <div className="space-y-5" data-settings-row="plugins.enso">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="font-medium text-lg">
-            {t('Enso plugins')}
-            <NewSessionBadge />
-          </h3>
-          <p className="mt-1 text-muted-foreground text-sm">
-            {t(
-              'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.'
-            )}
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+    <SettingsPage
+      rowId="plugins.enso"
+      title={t('Enso plugins')}
+      badge={<NewSessionBadge />}
+      description={t(
+        'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.'
+      )}
+      actions={
+        <>
           {plugins.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={checking}
-              onClick={() => void checkUpdates()}
-            >
+            <SettingsButton disabled={checking} onClick={() => void checkUpdates()}>
               {checking ? <Spinner /> : <RefreshCw className="size-4" />}
               {t('Check for updates')}
-            </Button>
+            </SettingsButton>
           )}
-          <Button
-            size="sm"
+          <SettingsButton
+            variant="default"
             onClick={() => {
               setMarketQuery('');
               setMarketOpen(true);
@@ -901,25 +1163,21 @@ export function EnsoPluginsSettings({
           >
             <Store className="size-4" />
             {t('Marketplace')}
-          </Button>
-        </div>
-      </div>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0">
-          <span className="block">{t('Update plugins automatically')}</span>
-          <span className="block text-muted-foreground text-xs">
-            {t('Marketplace updates that do not ask for new permissions install on their own.')}
-          </span>
-        </span>
-        <Switch
-          className="shrink-0"
-          checked={pluginAutoUpdate}
-          onCheckedChange={(on) => setPluginAutoUpdate(on)}
-        />
-      </label>
-      <div className="space-y-2.5 rounded-lg border bg-muted/30 p-3">
-        <div className="flex gap-2">
-          <InputGroup className="flex-1">
+          </SettingsButton>
+        </>
+      }
+    >
+      <SettingsSection>
+        <SettingsRow
+          label={t('Update plugins automatically')}
+          description={t(
+            'Marketplace updates that do not ask for new permissions install on their own.'
+          )}
+        >
+          <SettingsSwitch checked={pluginAutoUpdate} onCheckedChange={setPluginAutoUpdate} />
+        </SettingsRow>
+        <div className="flex flex-wrap items-center gap-2 border-border border-b py-3">
+          <InputGroup className="min-w-40 flex-1">
             <InputGroupAddon>
               <Link2 className="size-4 text-muted-foreground" />
             </InputGroupAddon>
@@ -932,18 +1190,16 @@ export function EnsoPluginsSettings({
               }}
             />
           </InputGroup>
-          <Button
-            size="sm"
-            variant="outline"
+          <SettingsButton
             disabled={busy || downloading || url.trim() === ''}
             onClick={() => void stageUrl()}
           >
             {downloading ? <Spinner /> : t('Install from URL')}
-          </Button>
+          </SettingsButton>
         </div>
-        <div className="flex items-center gap-1 text-muted-foreground text-xs">
+        <div className="flex flex-wrap items-center gap-1 border-border border-b py-2 text-muted-foreground text-xs">
           <span className="mr-1">{t('Or install from')}</span>
-          <Button
+          <SettingsButton
             size="xs"
             variant="ghost"
             disabled={busy || downloading}
@@ -951,8 +1207,8 @@ export function EnsoPluginsSettings({
           >
             <FolderOpen className="size-3.5" />
             {t('Install from folder')}
-          </Button>
-          <Button
+          </SettingsButton>
+          <SettingsButton
             size="xs"
             variant="ghost"
             disabled={busy || downloading}
@@ -960,9 +1216,9 @@ export function EnsoPluginsSettings({
           >
             <Package className="size-3.5" />
             {t('Install from zip')}
-          </Button>
+          </SettingsButton>
         </div>
-      </div>
+      </SettingsSection>
       {error && <p className="text-destructive text-sm">{error}</p>}
       <Dialog
         open={marketOpen}
@@ -1054,7 +1310,7 @@ export function EnsoPluginsSettings({
         </DialogContent>
       </Dialog>
       {plugins.length === 0 && !preview && (
-        <div className="rounded-lg border border-dashed px-3 py-10 text-center">
+        <div className="border-border border-b px-3 py-10 text-center">
           <Puzzle className="mx-auto size-5 text-muted-foreground" />
           <p className="mt-3 font-medium text-sm">{t('No Enso plugins installed')}</p>
           <p className="mt-1 text-muted-foreground text-xs">
@@ -1062,294 +1318,24 @@ export function EnsoPluginsSettings({
           </p>
         </div>
       )}
-      <div className="space-y-2">
-        {plugins.map((plugin) => (
-          <div
-            key={plugin.id}
-            data-plugin-id={plugin.id}
-            className={cn(
-              'overflow-hidden rounded-lg border bg-card transition-colors',
-              plugin.state === 'crashed' && 'border-destructive/50'
-            )}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-3">
-              <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
-                <div
-                  className={cn(
-                    'flex size-9 shrink-0 items-center justify-center rounded-md bg-muted',
-                    plugin.state === 'enabled' ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                >
-                  <PluginIcon pluginId={plugin.id} icon={plugin.icon} className="size-4" />
-                </div>
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <p className="flex flex-wrap items-center gap-1.5 text-sm">
-                    <span className="truncate font-medium">{plugin.name}</span>
-                    <Badge variant="outline" className="text-[11px]">
-                      {plugin.version}
-                    </Badge>
-                    {plugin.state === 'crashed' && (
-                      <Badge variant="destructive" className="text-[11px]">
-                        {t('Stopped after crashes')}
-                      </Badge>
-                    )}
-                    {plugin.availableVersion && (
-                      <Badge className="text-[11px]">{t('Update')}</Badge>
-                    )}
-                    {plugin.pendingVersion && (
-                      <Badge variant="warning" className="text-[11px]">
-                        待授权
-                      </Badge>
-                    )}
-                    {plugin.hasRenderer && (
-                      <Badge variant="outline" className="text-[11px]">
-                        受信任界面
-                      </Badge>
-                    )}
-                    {plugin.devWatch && (
-                      <Badge variant="secondary" className="text-[11px]">
-                        开发模式
-                      </Badge>
-                    )}
-                    {plugin.resident && (
-                      <Badge
-                        variant={plugin.running ? 'secondary' : 'outline'}
-                        className="text-[11px]"
-                      >
-                        {plugin.running ? '常驻运行中' : '常驻未运行'}
-                      </Badge>
-                    )}
-                  </p>
-                  <p className="truncate font-mono text-muted-foreground text-xs">{plugin.id}</p>
-                  {plugin.availableVersion && (
-                    <p className="mt-1 flex items-center gap-2 text-primary text-xs">
-                      {t('Version {{version}} is available', { version: plugin.availableVersion })}
-                      <Button
-                        size="xs"
-                        disabled={busy || downloading}
-                        onClick={() => void restage(plugin.id, plugin.source?.kind !== 'url')}
-                      >
-                        {downloading ? <Spinner /> : t('Update')}
-                      </Button>
-                    </p>
-                  )}
-                  {plugin.updateCheckError && (
-                    <p className="text-muted-foreground text-xs">
-                      {t('Update check failed: {{reason}}', { reason: plugin.updateCheckError })}
-                    </p>
-                  )}
-                  {plugin.lastError && <PluginErrorText message={plugin.lastError.message} />}
-                  {themeErrors[plugin.id]?.map((error) => (
-                    <PluginErrorText key={error} message={`主题加载失败：${error}`} />
-                  ))}
-                  {plugin.pendingVersion && (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
-                      {t('{{version}} asks for more and is waiting for approval', {
-                        version: plugin.pendingVersion,
-                      })}
-                      <Button
-                        size="xs"
-                        onClick={() =>
-                          void window.electronAPI.extensionPlugins.approvePending(plugin.id)
-                        }
-                      >
-                        {t('Allow')}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        onClick={() =>
-                          void window.electronAPI.extensionPlugins.rejectPending(plugin.id)
-                        }
-                      >
-                        {t('Keep current')}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="ml-auto flex shrink-0 items-center gap-0.5">
-                {plugin.source && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={busy || downloading}
-                    aria-label={t('Reinstall from source')}
-                    title={
-                      plugin.source.kind === 'url'
-                        ? `${t('Reinstall from source')}: ${plugin.source.url}`
-                        : t('Reinstall from source')
-                    }
-                    onClick={() => void restage(plugin.id)}
-                  >
-                    <RotateCw className="size-4" />
-                  </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="产出文件"
-                  title="产出文件"
-                  onClick={() =>
-                    setPanel({ kind: 'artifacts', pluginId: plugin.id, pluginName: plugin.name })
-                  }
-                >
-                  <Files className="size-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t('Usage guide')}
-                  title={t('Usage guide')}
-                  onClick={() => setGuide({ id: plugin.id, name: plugin.name, from: 'installed' })}
-                >
-                  <BookOpen className="size-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t('Plugin logs')}
-                  title={t('Plugin logs')}
-                  onClick={() =>
-                    setPanel({ kind: 'logs', pluginId: plugin.id, pluginName: plugin.name })
-                  }
-                >
-                  <FileText className="size-4" />
-                </Button>
-                {plugin.configurable && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={t('Configure')}
-                    title={t('Configure')}
-                    onClick={() =>
-                      setPanel({ kind: 'config', pluginId: plugin.id, pluginName: plugin.name })
-                    }
-                  >
-                    <Settings2 className="size-4" />
-                  </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t('Uninstall')}
-                  title={t('Uninstall')}
-                  className="text-muted-foreground hover:text-destructive"
-                  onClick={() => void window.electronAPI.extensionPlugins.uninstall(plugin.id)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-                <div className="mx-1.5 h-5 w-px bg-border" />
-                <Switch
-                  checked={plugin.state === 'enabled'}
-                  onCheckedChange={(enabled) =>
-                    void window.electronAPI.extensionPlugins.setEnabled(plugin.id, enabled)
-                  }
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              aria-expanded={expanded.includes(plugin.id)}
-              className={cn(
-                'flex w-full items-center gap-1 border-t bg-muted/20 px-3 py-1.5 text-left text-xs',
-                'text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground'
-              )}
-              onClick={() =>
-                setExpanded((prev) =>
-                  prev.includes(plugin.id)
-                    ? prev.filter((id) => id !== plugin.id)
-                    : [...prev, plugin.id]
-                )
-              }
-            >
-              {expanded.includes(plugin.id) ? (
-                <ChevronDown className="size-3" />
-              ) : (
-                <ChevronRight className="size-3" />
-              )}
-              {expanded.includes(plugin.id) ? '收起详情' : '详情'}
-              {!expanded.includes(plugin.id) && capabilitySummary(plugin) && (
-                <span className="ml-1 opacity-70">{capabilitySummary(plugin)}</span>
-              )}
-            </button>
-            {expanded.includes(plugin.id) && (
-              <div className="space-y-3 border-t px-3 py-3">
-                {plugin.interceptBreakers?.map((breaker) => (
-                  <p key={breaker.event} className="text-amber-600 text-xs dark:text-amber-400">
-                    {breaker.event} 检查连续失败，临时放行到{' '}
-                    {new Date(breaker.until).toLocaleTimeString()}
-                  </p>
-                ))}
-                <PluginCapabilityBlock
-                  permissions={plugin.permissions}
-                  resident={plugin.resident}
-                  running={plugin.running}
-                  styles={plugin.themes.some((theme) => theme.css !== undefined)}
-                  trustedUi={plugin.hasRenderer}
-                  events={plugin.events}
-                  schedules={plugin.schedules}
-                />
-                {plugin.crossSessionInject !== undefined && (
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <span>
-                      <span className="block">允许向任意运行中的会话发送消息</span>
-                      <span className="block text-muted-foreground">
-                        关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行
-                      </span>
-                    </span>
-                    <Switch
-                      aria-label="允许向任意运行中的会话发送消息"
-                      checked={plugin.crossSessionInject}
-                      onCheckedChange={(allowed) =>
-                        void window.electronAPI.extensionPlugins.setCrossSessionInject(
-                          plugin.id,
-                          allowed
-                        )
-                      }
-                    />
-                  </div>
-                )}
-                {plugin.devWatch !== undefined && (
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <span>
-                      <span className="block">开发模式：目录改动后自动重装</span>
-                      <span className="block text-muted-foreground">
-                        授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭
-                      </span>
-                    </span>
-                    <Switch
-                      aria-label="开发模式：目录改动后自动重装"
-                      checked={plugin.devWatch}
-                      onCheckedChange={(on) =>
-                        void window.electronAPI.extensionPlugins
-                          .setDevWatch(plugin.id, on)
-                          .then((res) => {
-                            if (!res.ok && res.error) addToast({ title: res.error });
-                          })
-                      }
-                    />
-                  </div>
-                )}
-                {((plugin.pendingPermissions?.length ?? 0) > 0 || plugin.pendingRenderer) && (
-                  <div className="space-y-1">
-                    <p className="text-muted-foreground text-xs">待同意</p>
-                    <PermissionLines
-                      permissions={plugin.pendingPermissions ?? []}
-                      styles={plugin.pendingRenderer}
-                    />
-                    {plugin.pendingRenderer && (
-                      <p className="text-amber-700 text-xs dark:text-amber-400">
-                        新增界面代码：运行在主界面里，不受权限清单约束
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+      {plugins.length > 0 && (
+        <SettingsSection>
+          {plugins.map((plugin) => (
+            <ExtensionPluginRow
+              key={plugin.id}
+              plugin={plugin}
+              themeErrors={themeErrors[plugin.id]}
+              busy={busy}
+              downloading={downloading}
+              forceOpen={forcedOpen.includes(plugin.id)}
+              onUpdate={() => void restage(plugin.id, plugin.source?.kind !== 'url')}
+              onReinstall={() => void restage(plugin.id)}
+              onPanel={(kind) => setPanel({ kind, pluginId: plugin.id, pluginName: plugin.name })}
+              onGuide={() => setGuide({ id: plugin.id, name: plugin.name, from: 'installed' })}
+            />
+          ))}
+        </SettingsSection>
+      )}
       <Dialog open={panel !== null} onOpenChange={(open) => !open && setPanel(null)}>
         <DialogContent>
           <DialogHeader>
@@ -1363,13 +1349,9 @@ export function EnsoPluginsSettings({
             </DialogTitle>
           </DialogHeader>
           <DialogPanel className="space-y-4">
-            {panel?.kind === 'config' && (
-              <ExtensionPluginConfigForm pluginId={panel.pluginId} plain />
-            )}
-            {panel?.kind === 'logs' && <ExtensionPluginLogs pluginId={panel.pluginId} plain />}
-            {panel?.kind === 'artifacts' && (
-              <ExtensionPluginArtifacts pluginId={panel.pluginId} plain />
-            )}
+            {panel?.kind === 'config' && <ExtensionPluginConfigForm pluginId={panel.pluginId} />}
+            {panel?.kind === 'logs' && <ExtensionPluginLogs pluginId={panel.pluginId} />}
+            {panel?.kind === 'artifacts' && <ExtensionPluginArtifacts pluginId={panel.pluginId} />}
           </DialogPanel>
         </DialogContent>
       </Dialog>
@@ -1380,6 +1362,6 @@ export function EnsoPluginsSettings({
         homepage={guide?.homepage}
         onClose={() => setGuide(null)}
       />
-    </div>
+    </SettingsPage>
   );
 }

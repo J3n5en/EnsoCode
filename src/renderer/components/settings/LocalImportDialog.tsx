@@ -135,7 +135,7 @@ export function LocalImportDialog({ open, onOpenChange }: LocalImportDialogProps
           <>
             <DialogPanel className="max-h-[50vh] space-y-4">
               {foundApps.length === 0 && (
-                <div className="rounded-md border border-dashed px-3 py-6 text-center">
+                <div className="px-3 py-6 text-center">
                   <p className="text-sm font-medium">{t('No local apps detected')}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t(
@@ -304,8 +304,8 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
     : provider.models;
 
   return (
-    <div className="rounded-md border">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+    <div className="border-border border-b">
+      <div className="flex items-center gap-2 py-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{provider.name}</span>
         <Badge variant="outline" className="shrink-0 text-[11px]">
           {provider.api}

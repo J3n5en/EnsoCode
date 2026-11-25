@@ -39,7 +39,6 @@ import {
   SettingsSection,
   SettingsSubRow,
   SettingsSwitch,
-  TOUCH_TARGET,
 } from './kit';
 import { LocalImportDialog } from './LocalImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
@@ -365,7 +364,7 @@ export function ProvidersSettings() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          className={cn('text-muted-foreground', TOUCH_TARGET)}
+                          className="text-muted-foreground"
                           aria-label={t('Edit Provider')}
                           onClick={() => setEditing(provider)}
                         >
@@ -376,10 +375,7 @@ export function ProvidersSettings() {
                           size="icon-sm"
                           disabled={removingId === provider.id}
                           aria-label={t('Remove')}
-                          className={cn(
-                            'text-muted-foreground hover:text-destructive',
-                            TOUCH_TARGET
-                          )}
+                          className={cn('text-muted-foreground hover:text-destructive')}
                           onClick={() => setPendingRemove(provider)}
                         >
                           {removingId === provider.id ? (

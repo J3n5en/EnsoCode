@@ -21,7 +21,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextMenuOpeningSettings } from './ContextMenuOpeningSettings';
-import { SettingsButton, SettingsRow, SettingsSection, TOUCH_TARGET } from './kit';
+import { SettingsButton, SettingsRow, SettingsSection } from './kit';
 
 type Target = FileOpenRule['target'];
 const TARGETS: Target[] = ['internal', 'reveal', 'system', 'application'];
@@ -60,10 +60,7 @@ function TargetPicker({
         if (TARGETS.includes(target as Target)) onChange(target as Target);
       }}
     >
-      <SelectTrigger
-        className={cn('w-[min(100%,13rem)]', TOUCH_TARGET)}
-        aria-label={t('File opening')}
-      >
+      <SelectTrigger className="w-[min(100%,13rem)]" aria-label={t('File opening')}>
         <SelectValue />
       </SelectTrigger>
       <SelectPopup>

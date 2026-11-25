@@ -3,7 +3,6 @@ import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { SETTINGS_SECRETARY_KEY } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
-import { TOUCH_TARGET } from './kit';
 
 function readSelected(): string | undefined {
   try {
@@ -76,7 +75,6 @@ export function SettingsSecretaryChips({
       onClick={() => onSelect(entry.id)}
       className={cn(
         'relative rounded-full px-2.5 py-1 text-xs ring-1 transition-colors',
-        TOUCH_TARGET,
         entry.id === current
           ? 'bg-foreground/5 text-foreground ring-foreground/40'
           : 'text-muted-foreground ring-border hover:text-foreground'

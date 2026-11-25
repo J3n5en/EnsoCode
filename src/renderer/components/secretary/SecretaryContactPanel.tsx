@@ -225,7 +225,7 @@ function PrefRow({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex items-start gap-2">
+    <label className="flex items-start gap-2 pointer-coarse:min-h-[44px]">
       <input
         type="checkbox"
         data-enso={dataEnso}

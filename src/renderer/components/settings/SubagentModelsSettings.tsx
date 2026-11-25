@@ -13,7 +13,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsButton, SettingsRow, SettingsSection, SettingsSwitch, TOUCH_TARGET } from './kit';
+import { SettingsButton, SettingsRow, SettingsSection, SettingsSwitch } from './kit';
 
 const isModelEnabled = (provider: ModelProvider, modelId: string): boolean =>
   provider.models.some((model) => model.id === modelId && model.enabled !== false);
@@ -167,10 +167,7 @@ export function SubagentModelsSettings() {
                   variant="ghost"
                   size="icon"
                   aria-label={t('Delete')}
-                  className={cn(
-                    'shrink-0 text-muted-foreground hover:text-destructive',
-                    TOUCH_TARGET
-                  )}
+                  className={cn('shrink-0 text-muted-foreground hover:text-destructive')}
                   onClick={() => removeEntry(entry.id)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />

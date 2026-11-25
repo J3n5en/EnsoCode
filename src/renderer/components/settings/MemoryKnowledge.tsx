@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/select';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SettingsSection } from './kit';
 import { MemoryGraphView } from './MemoryGraphView';
 import { MemoryTreeView } from './MemoryTreeView';
 
@@ -126,17 +127,14 @@ export function MemoryKnowledge({ revision = 0 }: { revision?: number } = {}) {
   const enoughForCrystal = selected.size >= CRYSTAL_MIN_SOURCES;
 
   return (
-    <div className="space-y-4" data-settings-row="memory.knowledge">
-      <div>
-        <h3 className="font-medium text-sm">{t('Knowledge')}</h3>
-        <p className="text-muted-foreground text-xs">
-          {t(
-            'Browse what the agent knows as a graph or a tree, ask for an interpretation, and consolidate related memories into a crystal.'
-          )}
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
+    <SettingsSection
+      rowId="memory.knowledge"
+      title={t('Knowledge')}
+      description={t(
+        'Browse what the agent knows as a graph or a tree, ask for an interpretation, and consolidate related memories into a crystal.'
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2 border-border border-b py-2">
         <Select
           value={mode}
           items={modeItems}
@@ -264,9 +262,9 @@ export function MemoryKnowledge({ revision = 0 }: { revision?: number } = {}) {
               <>
                 <p className="text-destructive text-sm">{crystal?.error}</p>
                 {crystal?.candidates && crystal.candidates.length > 0 && (
-                  <ul className="divide-y rounded-lg border">
+                  <ul className="divide-y border-border border-y">
                     {crystal.candidates.map((c) => (
-                      <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <li key={c.id} className="flex items-center justify-between gap-2 py-2">
                         <span className="truncate text-sm">{c.title}</span>
                         <Badge variant="secondary">{(c.similarity * 100).toFixed(0)}%</Badge>
                       </li>
@@ -281,6 +279,6 @@ export function MemoryKnowledge({ revision = 0 }: { revision?: number } = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </SettingsSection>
   );
 }

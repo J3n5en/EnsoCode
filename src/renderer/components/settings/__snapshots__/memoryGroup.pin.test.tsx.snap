@@ -1,0 +1,658 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地提炼模型后同样不变 > 每个控件的当前值与读写的 store key / electronAPI 调用不变 1`] = `
+[
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "instructions": [
+            {
+              "bytes": 2048,
+              "enabled": false,
+              "id": "i1",
+              "local": false,
+              "name": "CLAUDE.md",
+              "source": "Claude Code",
+              "sourcePath": "/tmp/CLAUDE.md",
+            },
+            {
+              "bytes": 100,
+              "enabled": false,
+              "id": "i2",
+              "local": true,
+              "name": "Team rules",
+              "source": "Manual",
+            },
+          ],
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "instructions.i1",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "instructions": [
+            {
+              "bytes": 2048,
+              "enabled": false,
+              "id": "i1",
+              "local": false,
+              "name": "CLAUDE.md",
+              "source": "Claude Code",
+              "sourcePath": "/tmp/CLAUDE.md",
+            },
+            {
+              "bytes": 100,
+              "enabled": true,
+              "id": "i2",
+              "local": true,
+              "name": "Team rules",
+              "source": "Manual",
+            },
+          ],
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "instructions.i2",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryEmbeddingAutoDownload": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.autoDownload",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryDecayEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.decay",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryDecayAutoArchive": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.decayAutoArchive",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryDecayArchiveCandidates": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.decayCandidates",
+  },
+  {
+    "current": {
+      "memoryDecayIntervalDays": 7,
+    },
+    "effects": [
+      "{"store":{"memoryDecayIntervalDays":14},"api":[]}",
+      "{"store":{"memoryDecayIntervalDays":1},"api":[]}",
+      "{"store":{"memoryDecayIntervalDays":30},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.decayInterval",
+  },
+  {
+    "current": {
+      "memoryDecayMaxImportance": 0.5,
+    },
+    "effects": [
+      "{"store":{"memoryDecayMaxImportance":0.3},"api":[]}",
+      "{"store":{"memoryDecayMaxImportance":0.6},"api":[]}",
+      "{"store":{"memoryDecayMaxImportance":0.7},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.decayMaxImportance",
+  },
+  {
+    "current": {
+      "memoryDecayStaleDays": 90,
+    },
+    "effects": [
+      "{"store":{"memoryDecayStaleDays":180},"api":[]}",
+      "{"store":{"memoryDecayStaleDays":30},"api":[]}",
+      "{"store":{"memoryDecayStaleDays":365},"api":[]}",
+      "{"store":{"memoryDecayStaleDays":60},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.decayStaleDays",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryDistillEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.distill",
+  },
+  {
+    "current": {
+      "memoryChatModel": "local:gemma",
+    },
+    "effects": [
+      "{"store":{"memoryChatModel":"remote"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.distillModel",
+  },
+  {
+    "current": {
+      "memoryDistillWindowMinutes": 5,
+    },
+    "effects": [
+      "{"store":{"memoryDistillWindowMinutes":0},"api":[]}",
+      "{"store":{"memoryDistillWindowMinutes":10},"api":[]}",
+      "{"store":{"memoryDistillWindowMinutes":2},"api":[]}",
+      "{"store":{"memoryDistillWindowMinutes":30},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.distillWindow",
+  },
+  {
+    "current": {
+      "memoryEmbeddingModel": "local:qwen3-0.6b-gguf",
+    },
+    "effects": [
+      "{"store":{"memoryEmbeddingModel":"remote:openai-compatible"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.embeddingModel",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryKgEnabled": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.kg",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.memory.tree({\\"groupBy\\":\\"unitType\\",\\"limitPerGroup\\":30})"]}",
+    ],
+    "kind": "choice",
+    "row": "memory.knowledge",
+  },
+  {
+    "current": {
+      "memoryLanguage": "en",
+    },
+    "effects": [
+      "{"store":{"memoryLanguage":"auto"},"api":[]}",
+      "{"store":{"memoryLanguage":"zh"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.language",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.library",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "memory.library",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.memory.evolvesPending()",
+          "electronAPI.memory.list({"includeArchived":true,"archiveCandidate":true,"limit":25,"offset":0,"mode":"exact"})",
+          "electronAPI.memory.stats()",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.library",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.memory.evolvesPending()",
+          "electronAPI.memory.list({"includeArchived":true,"limit":25,"offset":0,"mode":"exact"})",
+          "electronAPI.memory.stats()",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.library",
+  },
+  {
+    "current": {
+      "memoryModelIdleMinutes": 10,
+    },
+    "effects": [
+      "{"store":{"memoryModelIdleMinutes":0},"api":[]}",
+      "{"store":{"memoryModelIdleMinutes":30},"api":[]}",
+      "{"store":{"memoryModelIdleMinutes":5},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.modelIdleMinutes",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "memoryReconcileEnabled": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.reconcile",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.review",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.review",
+  },
+]
+`;
+
+exports[`启用记忆、有指令文件、打开提炼与遗忘、换成本地提炼模型后同样不变 > 深链行 id 一个不少 1`] = `
+[
+  "instructions.i1",
+  "instructions.i2",
+  "instructions.root",
+  "memory.autoDownload",
+  "memory.decay",
+  "memory.decayAutoArchive",
+  "memory.decayCandidates",
+  "memory.decayInterval",
+  "memory.decayMaxImportance",
+  "memory.decayStaleDays",
+  "memory.distill",
+  "memory.distillModel",
+  "memory.distillSessions",
+  "memory.distillWindow",
+  "memory.download",
+  "memory.embeddingModel",
+  "memory.forgetting",
+  "memory.jobs",
+  "memory.kg",
+  "memory.knowledge",
+  "memory.language",
+  "memory.library",
+  "memory.modelIdleMinutes",
+  "memory.pending-writes",
+  "memory.reconcile",
+  "memory.review",
+  "memory.root",
+  "memory.stats",
+]
+`;
+
+exports[`记忆与指令组设置迁移前后行为一致 > 每个控件的当前值（默认值）与读写的 store key / electronAPI 调用不变 1`] = `
+[
+  {
+    "current": {
+      "memoryDecayIntervalDays": 7,
+    },
+    "effects": [
+      "{"store":{"memoryDecayIntervalDays":14},"api":[]}",
+      "{"store":{"memoryDecayIntervalDays":1},"api":[]}",
+      "{"store":{"memoryDecayIntervalDays":30},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.decayInterval",
+  },
+  {
+    "current": {
+      "memoryDecayMaxImportance": 0.5,
+    },
+    "effects": [
+      "{"store":{"memoryDecayMaxImportance":0.3},"api":[]}",
+      "{"store":{"memoryDecayMaxImportance":0.6},"api":[]}",
+      "{"store":{"memoryDecayMaxImportance":0.7},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.decayMaxImportance",
+  },
+  {
+    "current": {
+      "memoryDecayStaleDays": 90,
+    },
+    "effects": [
+      "{"store":{"memoryDecayStaleDays":180},"api":[]}",
+      "{"store":{"memoryDecayStaleDays":30},"api":[]}",
+      "{"store":{"memoryDecayStaleDays":365},"api":[]}",
+      "{"store":{"memoryDecayStaleDays":60},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.decayStaleDays",
+  },
+  {
+    "current": {
+      "memoryChatModel": "remote",
+    },
+    "effects": [
+      "{"store":{"memoryChatModel":"local:gemma"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.distillModel",
+  },
+  {
+    "current": {
+      "memoryEmbeddingModel": "local:qwen3-0.6b-gguf",
+    },
+    "effects": [
+      "{"store":{"memoryEmbeddingModel":"remote:openai-compatible"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.embeddingModel",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":["electronAPI.memory.tree({\\"groupBy\\":\\"unitType\\",\\"limitPerGroup\\":30})"]}",
+    ],
+    "kind": "choice",
+    "row": "memory.knowledge",
+  },
+  {
+    "current": {
+      "memoryLanguage": "en",
+    },
+    "effects": [
+      "{"store":{"memoryLanguage":"auto"},"api":[]}",
+      "{"store":{"memoryLanguage":"zh"},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.language",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.library",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": {},
+    "effects": [
+      "{"store":{},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.library",
+  },
+  {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "memory.library",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.memory.evolvesPending()",
+          "electronAPI.memory.list({"includeArchived":true,"archiveCandidate":true,"limit":25,"offset":0,"mode":"exact"})",
+          "electronAPI.memory.stats()",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.library",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.memory.evolvesPending()",
+          "electronAPI.memory.list({"includeArchived":true,"limit":25,"offset":0,"mode":"exact"})",
+          "electronAPI.memory.stats()",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "memory.library",
+  },
+  {
+    "current": {
+      "memoryModelIdleMinutes": 10,
+    },
+    "effects": [
+      "{"store":{"memoryModelIdleMinutes":0},"api":[]}",
+      "{"store":{"memoryModelIdleMinutes":30},"api":[]}",
+      "{"store":{"memoryModelIdleMinutes":5},"api":[]}",
+    ],
+    "kind": "choice",
+    "row": "memory.modelIdleMinutes",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.review",
+  },
+  {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {},
+      },
+    ],
+    "kind": "checkbox",
+    "row": "memory.review",
+  },
+]
+`;
+
+exports[`记忆与指令组设置迁移前后行为一致 > 深链行 id 一个不少 1`] = `
+[
+  "instructions.root",
+  "memory.autoDownload",
+  "memory.decay",
+  "memory.decayAutoArchive",
+  "memory.decayCandidates",
+  "memory.decayInterval",
+  "memory.decayMaxImportance",
+  "memory.decayStaleDays",
+  "memory.distill",
+  "memory.distillModel",
+  "memory.distillSessions",
+  "memory.download",
+  "memory.embeddingModel",
+  "memory.forgetting",
+  "memory.jobs",
+  "memory.kg",
+  "memory.knowledge",
+  "memory.language",
+  "memory.library",
+  "memory.modelIdleMinutes",
+  "memory.pending-writes",
+  "memory.reconcile",
+  "memory.review",
+  "memory.root",
+  "memory.stats",
+]
+`;

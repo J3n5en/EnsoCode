@@ -45,6 +45,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { usePendingMemoryWrites, usePendingMemoryWritesStore } from '@/stores/memoryReview';
+import { SettingsSection } from './kit';
 
 /**
  * 记忆库浏览与维护。归档是默认动作；永久删除要二次确认（禁止静默删除）。
@@ -137,14 +138,14 @@ export function MemoryRows({
   emptyLabel?: string;
 }) {
   return (
-    <ul className="divide-y overflow-hidden rounded-lg border">
+    <ul className="divide-y border-border border-b">
       {items.length === 0 && (
-        <li className="px-3 py-6 text-sm text-muted-foreground">{emptyLabel}</li>
+        <li className="py-6 text-[13px] text-muted-foreground">{emptyLabel}</li>
       )}
       {items.map((item) => (
         <li
           key={item.id}
-          className={cn(HOVER_ROW_CLASS, 'flex items-center gap-2 px-3 py-2')}
+          className={cn(HOVER_ROW_CLASS, 'flex items-center gap-2 px-1 py-2')}
           data-memory-id={item.id}
         >
           {onToggle && (
@@ -303,21 +304,21 @@ export function PendingReviewSection({
 }) {
   if (items.length === 0) {
     return (
-      <section className="space-y-2" data-settings-row="memory.review">
-        <h3 className="text-sm font-medium">{t('Needs review')}</h3>
-        <p className="text-muted-foreground text-xs">
-          {t(
-            'Nothing to review. When a new memory contradicts an existing one, the pair shows up here.'
-          )}
-        </p>
-      </section>
+      <SettingsSection
+        rowId="memory.review"
+        title={t('Needs review')}
+        description={t(
+          'Nothing to review. When a new memory contradicts an existing one, the pair shows up here.'
+        )}
+      />
     );
   }
   const allSelected = items.every((item) => selected.has(item.edge.id));
   return (
-    <section className="space-y-2" data-settings-row="memory.review">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">{t('Needs review')}</h3>
+    <SettingsSection
+      rowId="memory.review"
+      title={t('Needs review')}
+      actions={
         <label className="flex items-center gap-2 text-muted-foreground text-xs">
           <Checkbox
             checked={allSelected}
@@ -326,8 +327,9 @@ export function PendingReviewSection({
           />
           {t('{{count}} pending', { count: String(items.length) })}
         </label>
-      </div>
-      <div className="space-y-0.5 text-muted-foreground text-xs">
+      }
+    >
+      <div className="space-y-0.5 border-border border-b py-2 text-muted-foreground text-xs">
         <p>
           {t(
             'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.'
@@ -345,7 +347,7 @@ export function PendingReviewSection({
         </p>
       </div>
       {items.length > PENDING_REVIEW_ALERT && (
-        <p className="text-warning text-xs" data-memory-review-alert>
+        <p className="border-border border-b py-2 text-warning text-xs" data-memory-review-alert>
           {t(
             '{{count}} contradictions are waiting for review. Clear them in bulk so real conflicts do not get buried.',
             { count: String(items.length) }
@@ -353,7 +355,7 @@ export function PendingReviewSection({
         </p>
       )}
       {selected.size > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-accent/30 px-3 py-2">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md bg-accent/40 px-3 py-2">
           <span className="text-sm">
             {t('{{count}} selected', { count: String(selected.size) })}
           </span>
@@ -371,16 +373,16 @@ export function PendingReviewSection({
         </div>
       )}
       {groupPendingReviews(items).map((group) => (
-        <div key={group.key} className="space-y-2">
+        <div key={group.key}>
           {group.label && (
-            <h4 className="text-muted-foreground text-xs">
+            <h4 className="pt-3 pb-1 text-muted-foreground text-xs">
               {group.label} · {t('{{count}} pending', { count: String(group.items.length) })}
             </h4>
           )}
           {group.items.map(({ edge, older, newer }) => (
             <div
               key={edge.id}
-              className="space-y-1.5 rounded-lg border px-3 py-2"
+              className="space-y-1.5 border-border border-b py-3"
               data-memory-review={edge.id}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -413,7 +415,7 @@ export function PendingReviewSection({
           ))}
         </div>
       ))}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -429,13 +431,13 @@ export function PendingWritesSection({
 }) {
   if (writes.length === 0) return null;
   return (
-    <section className="space-y-2" data-settings-row="memory.pending-writes">
-      <h3 className="text-sm font-medium">{t('Memory writes awaiting approval')}</h3>
-      <p className="text-xs text-muted-foreground">
-        {t('Bot members need your approval before writing to project or global memory.')}
-      </p>
+    <SettingsSection
+      rowId="memory.pending-writes"
+      title={t('Memory writes awaiting approval')}
+      description={t('Bot members need your approval before writing to project or global memory.')}
+    >
       {writes.map((write) => (
-        <div key={write.id} className="space-y-1 rounded-lg border px-3 py-2">
+        <div key={write.id} className="space-y-1 border-border border-b py-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {write.originLabel && <span className="text-foreground">{write.originLabel}</span>}
             <span>→ {write.spaceLabel}</span>
@@ -453,7 +455,7 @@ export function PendingWritesSection({
           </div>
         </div>
       ))}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -676,221 +678,224 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   ];
 
   return (
-    <div className="space-y-4" data-settings-row="memory.library">
-      <div>
-        <h3 className="text-sm font-medium">{t('Stored memories')}</h3>
-        <p className="text-xs text-muted-foreground">
-          {t('Everything the agent has saved. Archiving hides a memory from search but keeps it.')}
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {/* 检索方式属于「怎么搜」，和搜索框合成一个控件，不当作并列的筛选项 */}
-        <InputGroup className="w-full sm:w-96" data-size="sm">
-          <InputGroupInput
-            value={query}
-            placeholder={t('Search memories')}
-            onChange={(event) => {
-              setOffset(0);
-              setQuery(event.target.value);
-            }}
-          />
-          <InputGroupAddon align="inline-end" className="pe-1">
-            <Select
-              value={mode}
-              items={modeItems}
-              onValueChange={(value) => {
+    <>
+      <SettingsSection
+        rowId="memory.library"
+        title={t('Stored memories')}
+        description={t(
+          'Everything the agent has saved. Archiving hides a memory from search but keeps it.'
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-2 border-border border-b py-2">
+          {/* 检索方式属于「怎么搜」，和搜索框合成一个控件，不当作并列的筛选项 */}
+          <InputGroup className="w-full sm:w-96" data-size="sm">
+            <InputGroupInput
+              value={query}
+              placeholder={t('Search memories')}
+              onChange={(event) => {
                 setOffset(0);
-                setMode(value === 'deep' ? 'deep' : value === 'fast' ? 'fast' : 'exact');
+                setQuery(event.target.value);
               }}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-auto min-w-0 gap-1 border-0 bg-transparent px-2 shadow-none before:hidden"
+            />
+            <InputGroupAddon align="inline-end" className="pe-1">
+              <Select
+                value={mode}
+                items={modeItems}
+                onValueChange={(value) => {
+                  setOffset(0);
+                  setMode(value === 'deep' ? 'deep' : value === 'fast' ? 'fast' : 'exact');
+                }}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup>
-                {modeItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </InputGroupAddon>
-        </InputGroup>
-        {/* base-ui 的 Select 靠 items 把 value 映射成 label；不传时触发器会直接显示原始 value */}
-        <Select
-          value={spaceKind}
-          items={kindItems}
-          onValueChange={(value) => {
-            setOffset(0);
-            setSpaceKind(String(value));
-            setSpaceId(ALL);
-          }}
-        >
-          <SelectTrigger size="sm" className="w-36" data-memory-filter="space-kind">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {kindItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        <Select
-          value={spaceId}
-          items={spaceItems}
-          onValueChange={(value) => {
-            setOffset(0);
-            setSpaceId(String(value));
-          }}
-        >
-          <SelectTrigger size="sm" className="w-36" data-memory-filter="space">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {spaceItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        <Select
-          value={unitType}
-          items={unitTypeItems}
-          onValueChange={(value) => {
-            setOffset(0);
-            setUnitType(String(value));
-          }}
-        >
-          <SelectTrigger size="sm" className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {unitTypeItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        {mode === 'exact' && (
-          <label className="flex items-center gap-2 text-muted-foreground text-sm">
-            <Switch
-              checked={includeArchived}
-              onCheckedChange={(value) => {
-                setOffset(0);
-                setIncludeArchived(value === true);
-              }}
-            />
-            {t('Show archived')}
-          </label>
-        )}
-        {mode === 'exact' && (
-          <label className="flex items-center gap-2 text-muted-foreground text-sm">
-            <Switch
-              checked={candidatesOnly}
-              onCheckedChange={(value) => {
-                setOffset(0);
-                setCandidatesOnly(value === true);
-              }}
-            />
-            {t('Archive candidates only')}
-          </label>
-        )}
-      </div>
-
-      {isMemoryRetrievalMode(mode) && (
-        <p className="text-xs text-muted-foreground">
-          {t(
-            mode === 'deep'
-              ? 'Same recall as Fast, plus intent-weighted fusion and an optional short-timeout LLM rerank. Failures fall back; archived memories are excluded.'
-              : 'Same path the agent uses: full-text, vectors and entities merged by relevance. Shows the top matches only — no exact count, and archived memories are excluded.'
+                <SelectTrigger
+                  size="sm"
+                  className={cn(
+                    'w-auto min-w-0 gap-1 border-0 bg-transparent px-2 shadow-none before:hidden'
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {modeItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </InputGroupAddon>
+          </InputGroup>
+          {/* base-ui 的 Select 靠 items 把 value 映射成 label；不传时触发器会直接显示原始 value */}
+          <Select
+            value={spaceKind}
+            items={kindItems}
+            onValueChange={(value) => {
+              setOffset(0);
+              setSpaceKind(String(value));
+              setSpaceId(ALL);
+            }}
+          >
+            <SelectTrigger size="sm" className="w-36" data-memory-filter="space-kind">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {kindItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          <Select
+            value={spaceId}
+            items={spaceItems}
+            onValueChange={(value) => {
+              setOffset(0);
+              setSpaceId(String(value));
+            }}
+          >
+            <SelectTrigger size="sm" className="w-36" data-memory-filter="space">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {spaceItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          <Select
+            value={unitType}
+            items={unitTypeItems}
+            onValueChange={(value) => {
+              setOffset(0);
+              setUnitType(String(value));
+            }}
+          >
+            <SelectTrigger size="sm" className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {unitTypeItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          {mode === 'exact' && (
+            <label className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Switch
+                checked={includeArchived}
+                onCheckedChange={(value) => {
+                  setOffset(0);
+                  setIncludeArchived(value === true);
+                }}
+              />
+              {t('Show archived')}
+            </label>
           )}
-          {!vectorsUsed && ` ${t('Embedding model is not ready, so vectors are skipped.')}`}
-        </p>
-      )}
+          {mode === 'exact' && (
+            <label className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Switch
+                checked={candidatesOnly}
+                onCheckedChange={(value) => {
+                  setOffset(0);
+                  setCandidatesOnly(value === true);
+                }}
+              />
+              {t('Archive candidates only')}
+            </label>
+          )}
+        </div>
 
-      {selected.size > 0 && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border bg-accent/30 px-3 py-2">
-          <span className="text-sm">
-            {t('{{count}} selected', { count: String(selected.size) })}
-          </span>
-          <div className="flex gap-2">
+        {isMemoryRetrievalMode(mode) && (
+          <p className="border-border border-b py-2 text-xs text-muted-foreground">
+            {t(
+              mode === 'deep'
+                ? 'Same recall as Fast, plus intent-weighted fusion and an optional short-timeout LLM rerank. Failures fall back; archived memories are excluded.'
+                : 'Same path the agent uses: full-text, vectors and entities merged by relevance. Shows the top matches only — no exact count, and archived memories are excluded.'
+            )}
+            {!vectorsUsed && ` ${t('Embedding model is not ready, so vectors are skipped.')}`}
+          </p>
+        )}
+
+        {selected.size > 0 && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md bg-accent/40 px-3 py-2">
+            <span className="text-sm">
+              {t('{{count}} selected', { count: String(selected.size) })}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => setSelected(new Set())}
+              >
+                {t('Clear selection')}
+              </Button>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => bulkArchive()}>
+                {t('Archive selected')}
+              </Button>
+              <Button
+                variant="destructive-outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => setDeleteIds([...selected])}
+              >
+                {t('Delete permanently')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <MemoryRows
+          items={items}
+          onOpen={openDetail}
+          onEdit={(id) => setEditing({ id, reopen: false })}
+          onDelete={(id) => setDeleteIds([id])}
+          t={t}
+          selected={selected}
+          emptyLabel={
+            {
+              'needs-query': t('Type a query to search by meaning.'),
+              'library-empty': t(
+                'No memories yet. They appear here once the agent stores something.'
+              ),
+              'no-match': t('No memories match these filters.'),
+            }[emptyReason(mode, query, libraryExists, hasFilters)]
+          }
+          onToggle={(id) => {
+            const next = new Set(selected);
+            if (!next.delete(id)) next.add(id);
+            setSelected(next);
+          }}
+        />
+
+        {!approximate && total > MEMORY_PAGE_SIZE && (
+          <div className="flex items-center justify-between py-2 text-xs text-muted-foreground">
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              disabled={busy}
-              onClick={() => setSelected(new Set())}
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - MEMORY_PAGE_SIZE))}
             >
-              {t('Clear selection')}
+              {t('Previous')}
             </Button>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => bulkArchive()}>
-              {t('Archive selected')}
-            </Button>
+            <span>
+              {offset + 1}–{Math.min(offset + MEMORY_PAGE_SIZE, total)} / {total}
+            </span>
             <Button
-              variant="destructive-outline"
+              variant="outline"
               size="sm"
-              disabled={busy}
-              onClick={() => setDeleteIds([...selected])}
+              disabled={offset + MEMORY_PAGE_SIZE >= total}
+              onClick={() => setOffset(offset + MEMORY_PAGE_SIZE)}
             >
-              {t('Delete permanently')}
+              {t('Next')}
             </Button>
           </div>
-        </div>
-      )}
-
-      <MemoryRows
-        items={items}
-        onOpen={openDetail}
-        onEdit={(id) => setEditing({ id, reopen: false })}
-        onDelete={(id) => setDeleteIds([id])}
-        t={t}
-        selected={selected}
-        emptyLabel={
-          {
-            'needs-query': t('Type a query to search by meaning.'),
-            'library-empty': t(
-              'No memories yet. They appear here once the agent stores something.'
-            ),
-            'no-match': t('No memories match these filters.'),
-          }[emptyReason(mode, query, libraryExists, hasFilters)]
-        }
-        onToggle={(id) => {
-          const next = new Set(selected);
-          if (!next.delete(id)) next.add(id);
-          setSelected(next);
-        }}
-      />
-
-      {!approximate && total > MEMORY_PAGE_SIZE && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - MEMORY_PAGE_SIZE))}
-          >
-            {t('Previous')}
-          </Button>
-          <span>
-            {offset + 1}–{Math.min(offset + MEMORY_PAGE_SIZE, total)} / {total}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={offset + MEMORY_PAGE_SIZE >= total}
-            onClick={() => setOffset(offset + MEMORY_PAGE_SIZE)}
-          >
-            {t('Next')}
-          </Button>
-        </div>
-      )}
+        )}
+      </SettingsSection>
 
       <PendingWritesReview t={t} />
 
@@ -960,11 +965,11 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
                 {detail.crystalSources.length > 0 && (
                   <section className="space-y-1.5">
                     <p className="font-medium text-xs">{t('Synthesized from')}</p>
-                    <ul className="divide-y rounded-lg border">
+                    <ul className="divide-y border-border border-y">
                       {detail.crystalSources.map((source) => (
                         <li
                           key={source.id}
-                          className="flex items-center justify-between gap-2 px-3 py-2"
+                          className="flex items-center justify-between gap-2 py-2"
                         >
                           <span className="truncate text-sm">{source.title}</span>
                           <span className="shrink-0 text-muted-foreground text-xs">
@@ -979,9 +984,9 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
                 {detail.evolves.length > 0 && (
                   <section className="space-y-1.5">
                     <p className="font-medium text-xs">{t('Related versions')}</p>
-                    <ul className="divide-y rounded-lg border">
+                    <ul className="divide-y border-border border-y">
                       {detail.evolves.map((edge) => (
-                        <li key={edge.id} className="flex items-center gap-2 px-3 py-2">
+                        <li key={edge.id} className="flex items-center gap-2 py-2">
                           <Badge variant="outline">{edge.relation}</Badge>
                           <span className="text-muted-foreground text-xs">{edge.reviewState}</span>
                         </li>
@@ -1045,7 +1050,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         onClose={() => setDeleteIds(null)}
         onDeleted={onDeleted}
       />
-    </div>
+    </>
   );
 }
 

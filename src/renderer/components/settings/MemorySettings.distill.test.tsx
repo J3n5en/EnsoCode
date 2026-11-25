@@ -142,7 +142,7 @@ async function unmount() {
 
 function distillAllButton() {
   return container.querySelector(
-    '[data-settings-row="memory.distillSessions"] h3 + button'
+    '[data-settings-row="memory.distillSessions"] [data-memory-action="distill-all"]'
   ) as HTMLButtonElement | null;
 }
 

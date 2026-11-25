@@ -79,7 +79,7 @@ import {
   useMemberTemplates,
   useTeamTemplates,
 } from '@/stores/bots/templateLibrary';
-import { SettingsButton, SettingsPage, TOUCH_TARGET } from './kit';
+import { SettingsButton, SettingsPage } from './kit';
 
 type Kind = 'members' | 'teams';
 type Editing<T> = { id?: string; data: T } | null;
@@ -357,7 +357,7 @@ function IconAction({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={TOUCH_TARGET}
+      className="pointer-coarse:size-[44px]"
     >
       {children}
     </Button>

@@ -30,7 +30,7 @@ import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { type PluginPresetOption, useEnabledPluginPresets } from '@/plugins/usePluginPresets';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsButton, SettingsPage, SettingsSection, TOUCH_TARGET } from './kit';
+import { SettingsButton, SettingsPage, SettingsSection } from './kit';
 import { ListFilterBar, matchesFilter } from './ListFilterBar';
 import { NewSessionBadge } from './NewSessionBadge';
 
@@ -127,19 +127,13 @@ export function PresetsSettings() {
               </p>
             </div>
             {defaultPresetId !== 'default' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={TOUCH_TARGET}
-                onClick={() => setDefaultPresetId('default')}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId('default')}>
                 {t('Set as default')}
               </Button>
             )}
             <Button
               variant="ghost"
               size="icon-sm"
-              className={TOUCH_TARGET}
               aria-label={t('View default role description')}
               onClick={() => setPreviewDefault(true)}
             >
@@ -183,29 +177,14 @@ export function PresetsSettings() {
                   </p>
                 </div>
                 {defaultPresetId !== preset.id && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={TOUCH_TARGET}
-                    onClick={() => setDefaultPresetId(preset.id)}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId(preset.id)}>
                     {t('Set as default')}
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className={TOUCH_TARGET}
-                  onClick={() => setEditing(preset)}
-                >
+                <Button variant="ghost" size="icon-sm" onClick={() => setEditing(preset)}>
                   <Pencil className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className={TOUCH_TARGET}
-                  onClick={() => removePreset(preset.id)}
-                >
+                <Button variant="ghost" size="icon-sm" onClick={() => removePreset(preset.id)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </li>
@@ -236,12 +215,7 @@ export function PresetsSettings() {
                 </p>
               </div>
               {defaultPresetId !== preset.id && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={TOUCH_TARGET}
-                  onClick={() => setDefaultPresetId(preset.id)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId(preset.id)}>
                   {t('Set as default')}
                 </Button>
               )}

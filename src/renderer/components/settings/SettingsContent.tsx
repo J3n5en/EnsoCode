@@ -499,11 +499,10 @@ export function SettingsContent({
             {activeCategory === 'workflows' && <WorkflowsSettings />}
             {activeCategory === 'tools' && <BuiltinToolsSettings />}
             {activeCategory === 'memory' && (
-              <div className="space-y-8">
-                <MemorySettings onLibraryChanged={() => setMemoryRevision((n) => n + 1)} />
+              <MemorySettings onLibraryChanged={() => setMemoryRevision((n) => n + 1)}>
                 <MemoryKnowledge revision={memoryRevision} />
                 <MemoryLibrary revision={memoryRevision} />
-              </div>
+              </MemorySettings>
             )}
             {activeCategory === 'phone' && <DevicesSettings />}
             {activeCategory === 'ssh' && <SshSettings />}

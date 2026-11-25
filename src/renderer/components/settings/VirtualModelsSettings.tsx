@@ -23,19 +23,12 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
-import { cn } from '@/lib/utils';
 import {
   useUsableClassifierProviders,
   useUsableProviders,
 } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
-import {
-  SettingsButton,
-  SettingsExpandableRow,
-  SettingsSection,
-  SettingsSubRow,
-  TOUCH_TARGET,
-} from './kit';
+import { SettingsButton, SettingsExpandableRow, SettingsSection, SettingsSubRow } from './kit';
 
 const noop = () => undefined;
 const OFF = 'off';
@@ -361,7 +354,7 @@ function VirtualModelCard({
               variant="ghost"
               size="icon-sm"
               aria-label={t('Delete')}
-              className={cn('text-muted-foreground hover:text-destructive', TOUCH_TARGET)}
+              className="text-muted-foreground hover:text-destructive"
               onClick={() => removeEntry(entry.id)}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -415,7 +408,7 @@ function VirtualModelCard({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t('Clear')}
-                className={cn('text-muted-foreground', TOUCH_TARGET)}
+                className="text-muted-foreground"
                 onClick={() => update({ fast: undefined })}
               >
                 <X className="h-3.5 w-3.5" />
@@ -444,7 +437,7 @@ function VirtualModelCard({
                   variant="ghost"
                   size="icon-sm"
                   aria-label={t('Delete')}
-                  className={cn('text-muted-foreground hover:text-destructive', TOUCH_TARGET)}
+                  className="text-muted-foreground hover:text-destructive"
                   onClick={() =>
                     update({ fallbacks: entry.fallbacks.filter((_, at) => at !== index) })
                   }

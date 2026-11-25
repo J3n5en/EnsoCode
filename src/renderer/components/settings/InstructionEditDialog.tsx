@@ -151,10 +151,8 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
           {creating ? null : linked ? (
             <div
               className={cn(
-                'w-full rounded-md border px-3 py-2.5 transition-colors',
-                writeToSource
-                  ? 'border-destructive/32 bg-destructive/8'
-                  : 'border-amber-500/32 bg-amber-500/8'
+                'w-full rounded-md px-3 py-2.5 transition-colors',
+                writeToSource ? 'bg-destructive/8' : 'bg-amber-500/8'
               )}
             >
               <div className="flex items-center justify-between gap-3">
@@ -181,7 +179,7 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
               </p>
             </div>
           ) : (
-            <div className="flex w-full items-start gap-2 rounded-md border bg-muted/50 px-3 py-2">
+            <div className="flex w-full items-start gap-2 rounded-md bg-muted/50 px-3 py-2">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <p className="text-muted-foreground text-xs leading-relaxed">
                 {t('Local copy — edits stay in this app.')}
@@ -197,7 +195,7 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
           <Field>
             <FieldLabel>{t('Content')}</FieldLabel>
             {loading ? (
-              <div className="flex w-full items-center justify-center gap-2 rounded-md border py-12">
+              <div className="flex w-full items-center justify-center gap-2 py-12">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 <span className="text-muted-foreground text-xs">{t('Loading...')}</span>
               </div>

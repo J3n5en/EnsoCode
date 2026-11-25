@@ -987,3 +987,31 @@ html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
     }
   }
 }
+
+/*
+ * 设置页触屏点击区至少 44×44，视觉尺寸不变（根字号 14px，ui 原语的 min-h-11 只有 38.5px）。
+ * position 放 base 层，absolute/sticky 等工具类照常生效；::after 不进 @layer，盖过各控件自带的 after: 热区工具类。
+ */
+@layer base {
+  @media (pointer: coarse) {
+    [data-slot="settings-page"] :is(button, a[href], [role="button"], [role="switch"], [role="checkbox"], [role="radio"], [role="tab"]) {
+      position: relative;
+    }
+  }
+}
+
+@media (pointer: coarse) {
+  [data-slot="settings-page"] :is(button, a[href], [role="button"], [role="switch"], [role="checkbox"], [role="radio"], [role="tab"])::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    min-width: 0;
+    min-height: 0;
+    translate: -50% -50%;
+  }
+}
