@@ -1319,6 +1319,7 @@ describe('登录事件安全边界', () => {
         expect(events).toContainEqual({
           type: 'auth_url',
           url: 'https://accounts.example.test/oauth/authorize',
+          fullUrl: fullAuthUrl,
           instructions: 'Complete login',
         });
       });
@@ -1475,6 +1476,21 @@ describe('登录提示的留空提交', () => {
         expect(respond('   ')).toBe(false);
         expect(respond('auth-code')).toBe(true);
         await expect(answered).resolves.toBe('auth-code');
+        await completion;
+      }
+    );
+  });
+
+  it('手动粘贴的拒绝原因随提示事件透传，指引原文不动', async () => {
+    const message = 'Paste the full address from the address bar.';
+    const error = 'That is not an authorization callback address.';
+    await withPromptingLogin(
+      { type: 'manual_code', message, error },
+      async ({ prompt, respond, answered, completion }) => {
+        expect(prompt.message).toBe(message);
+        expect(prompt.error).toBe(error);
+        expect(respond('http://127.0.0.1/cb')).toBe(true);
+        await expect(answered).resolves.toBe('http://127.0.0.1/cb');
         await completion;
       }
     );

@@ -42,6 +42,7 @@ import {
   QODER_PROVIDER_ID,
   qoderProviderConfig,
 } from '@shared/providers/qoder';
+import { verifyOauthProviders } from '@shared/providers/verifyOauth';
 import type {
   OauthAccount,
   OauthAccountUsage,
@@ -53,7 +54,7 @@ import type {
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types/oauthProviders';
 import { OauthQuotaCoordinator } from './oauthQuotaCoordinator';
-import { sendToRemoteRenderers } from './remoteRenderer/senders';
+import { remoteSenderById, sendToRemoteRenderers } from './remoteRenderer/senders';
 import { localUi } from './uiHost';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
@@ -144,6 +145,9 @@ export function getRuntime(): Promise<ModelRuntimeType> {
     runtime.registerProvider(DEVIN_PROVIDER_ID, devinProviderConfig());
     runtime.registerProvider(QODER_PROVIDER_ID, qoderProviderConfig('global'));
     runtime.registerProvider(QODER_CN_PROVIDER_ID, qoderProviderConfig('cn'));
+    for (const [id, config] of verifyOauthProviders(app.isPackaged)) {
+      runtime.registerProvider(id, config);
+    }
     const { CURSOR_PROVIDER_ID, loadCursorProvider } = await import(
       '../../agent/cursor/loadProvider'
     );
@@ -496,7 +500,7 @@ interface ActiveLogin {
   pendingPrompts: Map<string, PendingPrompt>;
   resolveCompletion: (event: OauthLoginEvent) => void;
   settled: boolean;
-  /** 完整 URL 只留在 Main 内存里，Renderer 需要重开时经专用 IPC 请求 */
+  /** 完整 URL 留在 Main，供本机 shell.openExternal 重开。远程渲染端另收 fullUrl 自己打开。 */
   authUrl?: string;
 }
 
@@ -645,16 +649,18 @@ async function runOauthLogin(
             break;
           case 'auth_url':
             login.authUrl = event.url;
-            void shell.openExternal(event.url);
+            // 远程浏览器不在这台机器上，openExternal 只会在节点本机弹出或打日志
+            if (!remoteSenderById(sender.id)) void shell.openExternal(event.url);
             emit({
               type: 'auth_url',
               url: authUrlForRenderer(event.url),
+              fullUrl: event.url,
               instructions: event.instructions,
             });
             break;
           case 'device_code':
             login.authUrl = event.verificationUri;
-            void shell.openExternal(event.verificationUri);
+            if (!remoteSenderById(sender.id)) void shell.openExternal(event.verificationUri);
             emit({
               type: 'device_code',
               userCode: event.userCode,
@@ -672,6 +678,10 @@ async function runOauthLogin(
         // pi 的 AuthPrompt 类型没有 allowEmpty，但扩展的旧版提示（如 Qoder）会被整体展开进来；
         // 用 in 收窄、只认严格的 true，登记在 Main 侧供 respond 裁决空值。
         const allowEmpty = 'allowEmpty' in prompt && prompt.allowEmpty === true;
+        const pasteError =
+          'error' in prompt && typeof prompt.error === 'string' && prompt.error
+            ? prompt.error
+            : undefined;
         login.pendingPrompts.set(requestId, { resolve, reject, allowEmpty });
         prompt.signal?.addEventListener('abort', () => {
           if (login.pendingPrompts.delete(requestId)) {
@@ -691,6 +701,7 @@ async function runOauthLogin(
                 ? prompt.options.map((option) => ({ ...option }))
                 : undefined,
             allowEmpty,
+            ...(pasteError ? { error: pasteError } : {}),
           },
         });
         return promise;

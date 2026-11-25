@@ -261,6 +261,21 @@ export class AgentSessionIndex {
     );
   }
 
+  /** 还在跑回合的工作区数：应用更新前的「等待 N 个任务」进度 */
+  busyWorkspaceCount(): number {
+    const roots = new Set<string>();
+    for (const session of this.sessions.values()) {
+      if ('parent' in session.identity) continue;
+      roots.add(session.identity.sessionId);
+    }
+    for (const { child } of this.reservations.values()) {
+      roots.add(this.workspaceRoot(child.parent.sessionId));
+    }
+    let count = 0;
+    for (const root of roots) if (this.workspaceTreeRunning(root)) count += 1;
+    return count;
+  }
+
   /** 自身正在跑回合的父会话（更新重启前记下，重启后续跑） */
   runningRootSessionIds(): string[] {
     return [...this.sessions.values()]

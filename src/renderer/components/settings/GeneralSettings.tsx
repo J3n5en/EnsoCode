@@ -326,7 +326,10 @@ function serverModeText(
   channel: UpdateChannel,
   t: ReturnType<typeof useI18n>['t']
 ): React.ReactNode {
-  if (mode === 'npm') return t('Server updates install the new version with npm and restart.');
+  if (mode === 'npm')
+    return t(
+      'Server updates install the new version with npm and restart gracefully: running tasks finish first (up to a limit), then the server restarts and tasks resume.'
+    );
   return (
     <>
       {t('This server must be updated on the machine itself.')}
@@ -378,6 +381,7 @@ function UpdateSection() {
   const canDownload = host?.host === 'desktop' || (server !== null && server.mode !== 'manual');
   const hasNotes =
     (status?.status === 'available' || status?.status === 'downloaded') && !!status.info;
+  const applying = status?.status === 'applying';
 
   const statusText = (): string | null => {
     if (!status) return null;
@@ -397,12 +401,27 @@ function UpdateSection() {
           percent: Math.round(status.progress?.percent ?? 0),
         });
       case 'downloaded':
-        return t(
-          'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.',
-          {
-            version: status.info?.version ?? '',
-          }
-        );
+        return server?.restartMethod === 'manual'
+          ? t(
+              'New version {{version}} is downloaded. Applying it installs and then stops the server — you will need to restart it externally (container or process manager).',
+              { version: status.info?.version ?? '' }
+            )
+          : t(
+              'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.',
+              {
+                version: status.info?.version ?? '',
+              }
+            );
+      case 'applying': {
+        const stage = status.applying?.stage;
+        if (stage === 'waiting-tasks')
+          return t('Waiting for {{count}} running tasks to finish before installing…', {
+            count: status.applying?.busyCount ?? 0,
+          });
+        if (stage === 'installing')
+          return t('Installing {{version}}…', { version: status.info?.version ?? '' });
+        return t('Restarting server…');
+      }
       case 'error':
         if (status.manualInstall) {
           return t(
@@ -446,6 +465,10 @@ function UpdateSection() {
         )}
         {status?.manualInstall ? (
           <ManualInstallActions manualInstall={status.manualInstall} />
+        ) : applying ? (
+          <SettingsButton variant="default" disabled>
+            {t('Updating…')}
+          </SettingsButton>
         ) : status?.status === 'downloaded' ? (
           <SettingsButton variant="default" onClick={() => void restartToUpdate(t)}>
             {t('Restart to update')}
@@ -497,10 +520,15 @@ function UpdateSection() {
       )}
       <SettingsRow
         label={t('Automatic updates')}
-        description={t('Download and install updates automatically')}
+        description={
+          server?.mode === 'manual'
+            ? t('Not available for this install: it cannot update itself. Update manually instead.')
+            : t('Download and install updates automatically')
+        }
       >
         <SettingsSwitch
           checked={autoUpdate}
+          disabled={server?.mode === 'manual'}
           onCheckedChange={(checked) => {
             setAutoUpdate(checked);
             void window.electronAPI.updater.setAutoUpdateEnabled(checked);

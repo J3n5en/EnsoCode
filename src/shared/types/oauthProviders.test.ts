@@ -12,6 +12,10 @@ describe('OauthLoginPrompt 契约', () => {
       .toHaveProperty('allowEmpty')
       .toEqualTypeOf<boolean | undefined>();
   });
+
+  it('登录提示可以带上一轮粘贴被拒的原因', () => {
+    expectTypeOf<OauthLoginPrompt>().toHaveProperty('error').toEqualTypeOf<string | undefined>();
+  });
 });
 
 describe('sanitizeOauthLabel', () => {
