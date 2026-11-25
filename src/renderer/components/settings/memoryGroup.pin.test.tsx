@@ -11,6 +11,7 @@ import type {
 import type { InstructionEntry } from '@shared/types';
 import { act } from 'react';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { findNestedBoxes } from './kit/boxes';
 import { setupPin } from './pin.testUtils';
 
 /** 迁移时只改这里：分区 → 页面组件 */
@@ -236,6 +237,13 @@ describe('启用记忆、有指令文件、打开提炼与遗忘、换成本地�
 
   it('深链行 id 一个不少', () => {
     expect(pin.rows()).toMatchSnapshot();
+  });
+
+  it('渲染出的页面里没有卡片套卡片', () => {
+    const boxes = findNestedBoxes(pin.container).map(
+      (el) => `${el.tagName.toLowerCase()}.${el.getAttribute('class')}`
+    );
+    expect(boxes).toEqual([]);
   });
 
   it('每个控件的当前值与读写的 store key / electronAPI 调用不变', async () => {

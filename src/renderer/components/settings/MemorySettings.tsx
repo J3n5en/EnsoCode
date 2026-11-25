@@ -38,18 +38,19 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  SettingsButton,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSubRow,
+  SettingsSwitch,
+} from './kit';
 import { formatDateTime } from './MemoryLibrary';
 import { type JobKind, toJobRows } from './memoryJobRows';
 import {
@@ -213,20 +214,9 @@ function SwitchRow({
   disabled?: boolean;
 }) {
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-      data-settings-row={rowId}
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(value) => onChange(value === true)}
-      />
-    </div>
+    <SettingsRow rowId={rowId} label={title} description={description}>
+      <SettingsSwitch checked={checked} disabled={disabled} onCheckedChange={onChange} />
+    </SettingsRow>
   );
 }
 
@@ -248,36 +238,43 @@ function SelectRow({
   disabled?: boolean;
 }) {
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-      data-settings-row={rowId}
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Select
-        value={value}
-        items={items}
-        onValueChange={(next) => onChange(String(next))}
-        disabled={disabled}
-      >
-        <SelectTrigger className="w-40 shrink-0">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </div>
+    <SettingsRow rowId={rowId} label={title} description={description}>
+      <SettingsSelect value={value} options={items} onValueChange={onChange} disabled={disabled} />
+    </SettingsRow>
   );
 }
 
-export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => void } = {}) {
+/** 分组里夹在行之间的一行说明（状态、报错），沿用行的分隔线 */
+function Note({
+  tone,
+  rowId,
+  children,
+}: {
+  tone?: 'danger';
+  rowId?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <p
+      data-settings-row={rowId}
+      className={cn(
+        'border-border border-b py-2 text-[12px] leading-[18px]',
+        tone === 'danger' ? 'text-destructive-text' : 'text-muted-foreground'
+      )}
+    >
+      {children}
+    </p>
+  );
+}
+
+/** children：同页下方的知识与记忆库分区，放进同一个 SettingsPage */
+export function MemorySettings({
+  onLibraryChanged,
+  children,
+}: {
+  onLibraryChanged?: () => void;
+  children?: React.ReactNode;
+} = {}) {
   const { t } = useI18n();
   const disabledBuiltinTools = useSettingsStore((state) => state.disabledBuiltinTools);
   const embeddingModel = useSettingsStore((state) => state.memoryEmbeddingModel);
@@ -589,187 +586,132 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   runningSessionsRef.current = runningSessions;
   const distillBusy = distilling !== null || runningSessions.size > 0;
 
+  const downloadButtons = (
+    model: { id: string; state: string },
+    actions: { cancel: () => void; remove: () => void; download: () => void }
+  ) =>
+    model.state === 'downloading' ? (
+      <SettingsButton onClick={actions.cancel}>{t('Cancel')}</SettingsButton>
+    ) : model.state === 'ready' ? (
+      <SettingsButton onClick={actions.remove}>{t('Remove')}</SettingsButton>
+    ) : (
+      <SettingsButton variant="default" disabled={!memoryEnabled} onClick={actions.download}>
+        {t('Download')}
+      </SettingsButton>
+    );
+  const modelStateLabel = (state: string) =>
+    state === 'ready'
+      ? t('Model downloaded')
+      : state === 'downloading'
+        ? t('Downloading…')
+        : t('Model not downloaded');
+
   return (
-    <div className="space-y-6" data-settings-row="memory.root">
-      <section className="space-y-2">
-        <h2 className="text-base font-medium">{t('Memory')}</h2>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            'Durable knowledge the agent can search and write across sessions. Stored locally in a SQLite database.'
-          )}
-        </p>
-        {/* 开关只在「内置工具」页：这一页本身就是 memory 工具启用后才出现的，
-            在这里再放一个「关闭我自己」的开关，点下去整页消失，说明文字也永远看不到 */}
-        <p className="text-muted-foreground text-xs">{t('Turn memory off in Built-in tools.')}</p>
-      </section>
+    <SettingsPage
+      rowId="memory.root"
+      title={t('Memory')}
+      description={t(
+        'Durable knowledge the agent can search and write across sessions. Stored locally in a SQLite database.'
+      )}
+    >
+      {/* 开关只在「内置工具」页：这一页本身就是 memory 工具启用后才出现的，
+          在这里再放一个「关闭我自己」的开关，点下去整页消失，说明文字也永远看不到 */}
+      <p className="mt-1 text-[12px] text-muted-foreground">
+        {t('Turn memory off in Built-in tools.')}
+      </p>
 
-      <div
-        className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-        data-settings-row="memory.modelIdleMinutes"
-      >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Unload automatically when idle')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Release local model memory after this idle period. Models load automatically the next time they are needed.'
-            )}
-          </p>
-        </div>
-        <Select
-          value={String(modelIdleMinutes)}
-          items={modelIdleItems}
-          onValueChange={(value) => {
-            if (value !== null) setModelIdleMinutes(Number(value));
-          }}
-          disabled={!memoryEnabled}
-        >
-          <SelectTrigger className="w-56 shrink-0" aria-label={t('Unload automatically when idle')}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {modelIdleItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
-
-      <section className="space-y-2">
-        <h3 className="text-sm font-medium">{t('Embedding model')}</h3>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Used for semantic search and near-duplicate detection. Without it search still works using full-text only.'
+      <SettingsSection>
+        <SettingsRow
+          rowId="memory.modelIdleMinutes"
+          label={t('Unload automatically when idle')}
+          description={t(
+            'Release local model memory after this idle period. Models load automatically the next time they are needed.'
           )}
-        </p>
-        <div
-          className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-          data-settings-row="memory.embeddingModel"
         >
-          <div className="min-w-0">
-            <p className="text-sm">
-              {selectedModel
-                ? embeddingModelLabel(selectedModel)
-                : (remoteEmbeddingModel ??
-                  (showRemotePicker ? t('Remote (OpenAI-compatible)') : embeddingModel))}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {selectedModel
-                ? [
-                    selectedModel.dim ? `${selectedModel.dim}d` : null,
-                    selectedModel.downloadable ? formatBytes(selectedModel.approxBytes) : null,
-                    selectedModel.runtime,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                : showRemotePicker
-                  ? 'openai-compatible'
-                  : t('Unknown model; the default is used instead.')}
-            </p>
-          </div>
-          {/* items 必传：base-ui 靠它把 value 映射成 label，否则触发器显示原始 id */}
-          <Select
-            value={embeddingBackendSelectValue(embeddingModel)}
-            items={modelItems}
-            onValueChange={(value) => {
-              if (value !== null) {
-                setEmbeddingModel(nextEmbeddingBackend(embeddingModel, String(value)));
-              }
-            }}
+          <SettingsSelect
+            value={String(modelIdleMinutes)}
+            options={modelIdleItems}
+            onValueChange={(value) => setModelIdleMinutes(Number(value))}
             disabled={!memoryEnabled}
-          >
-            <SelectTrigger className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {modelItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
+          />
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('Embedding model')}
+        description={t(
+          'Used for semantic search and near-duplicate detection. Without it search still works using full-text only.'
+        )}
+      >
+        <SettingsRow
+          rowId="memory.embeddingModel"
+          label={
+            selectedModel
+              ? embeddingModelLabel(selectedModel)
+              : (remoteEmbeddingModel ??
+                (showRemotePicker ? t('Remote (OpenAI-compatible)') : embeddingModel))
+          }
+          description={
+            selectedModel
+              ? [
+                  selectedModel.dim ? `${selectedModel.dim}d` : null,
+                  selectedModel.downloadable ? formatBytes(selectedModel.approxBytes) : null,
+                  selectedModel.runtime,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : showRemotePicker
+                ? 'openai-compatible'
+                : t('Unknown model; the default is used instead.')
+          }
+        >
+          <SettingsSelect
+            value={embeddingBackendSelectValue(embeddingModel)}
+            options={modelItems}
+            onValueChange={(value) =>
+              setEmbeddingModel(nextEmbeddingBackend(embeddingModel, value))
+            }
+            disabled={!memoryEnabled}
+          />
+        </SettingsRow>
 
         {selectedModel?.downloadable && (
-          <div
-            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-            data-settings-row="memory.download"
+          <SettingsSubRow
+            rowId="memory.download"
+            label={modelStateLabel(selectedModel.state)}
+            description={
+              progress && progress.modelId === selectedModel.id
+                ? `${progress.file} · ${formatBytes(progress.received)}${
+                    progress.total ? ` / ${formatBytes(progress.total)}` : ''
+                  } (${progress.fileIndex + 1}/${progress.fileCount})`
+                : selectedModel.state === 'ready'
+                  ? formatBytes(selectedModel.downloadedBytes)
+                  : t('Semantic search stays off until the model is on disk.')
+            }
           >
-            <div className="min-w-0">
-              <p className="text-sm">
-                {selectedModel.state === 'ready'
-                  ? t('Model downloaded')
-                  : selectedModel.state === 'downloading'
-                    ? t('Downloading…')
-                    : t('Model not downloaded')}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {progress && progress.modelId === selectedModel.id
-                  ? `${progress.file} · ${formatBytes(progress.received)}${
-                      progress.total ? ` / ${formatBytes(progress.total)}` : ''
-                    } (${progress.fileIndex + 1}/${progress.fileCount})`
-                  : selectedModel.state === 'ready'
-                    ? formatBytes(selectedModel.downloadedBytes)
-                    : t('Semantic search stays off until the model is on disk.')}
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              {selectedModel.state === 'downloading' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void window.electronAPI.memory
-                      .cancelModelDownload(selectedModel.id)
-                      .then(refreshModels);
-                  }}
-                >
-                  {t('Cancel')}
-                </Button>
-              ) : selectedModel.state === 'ready' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void window.electronAPI.memory
-                      .deleteModel(selectedModel.id)
-                      .then(refreshModels);
-                  }}
-                >
-                  {t('Remove')}
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  disabled={!memoryEnabled}
-                  onClick={() => {
-                    void window.electronAPI.memory
-                      .downloadModel(selectedModel.id)
-                      .then(refreshModels);
-                  }}
-                >
-                  {t('Download')}
-                </Button>
-              )}
-            </div>
-          </div>
+            {downloadButtons(selectedModel, {
+              cancel: () =>
+                void window.electronAPI.memory
+                  .cancelModelDownload(selectedModel.id)
+                  .then(refreshModels),
+              remove: () =>
+                void window.electronAPI.memory.deleteModel(selectedModel.id).then(refreshModels),
+              download: () =>
+                void window.electronAPI.memory.downloadModel(selectedModel.id).then(refreshModels),
+            })}
+          </SettingsSubRow>
         )}
 
         {showRemotePicker && (
-          <div
-            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-            data-settings-row="memory.remoteModel"
+          <SettingsSubRow
+            rowId="memory.remoteModel"
+            label={t('Remote model')}
+            description={t(
+              'Credentials stay in the main process and are never sent to the renderer.'
+            )}
           >
-            <div className="min-w-0">
-              <p className="text-sm">{t('Remote model')}</p>
-              <p className="text-xs text-muted-foreground">
-                {t('Credentials stay in the main process and are never sent to the renderer.')}
-              </p>
-            </div>
             {embeddingCandidates.length > 0 ? (
-              <div className="w-56 shrink-0">
+              <div className="w-[220px] max-w-full">
                 <ModelPicker
                   providers={embeddingCandidates}
                   providerId={embeddingProvider?.id ?? remoteProviderId ?? ''}
@@ -789,21 +731,23 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 />
               </div>
             ) : (
-              <div className="w-56 shrink-0 space-y-1">
-                <p className="text-xs text-destructive">{t(NO_REMOTE_EMBEDDING_CANDIDATES)}</p>
+              <div className="w-[220px] max-w-full space-y-1">
+                <p className="text-[12px] text-destructive-text">
+                  {t(NO_REMOTE_EMBEDDING_CANDIDATES)}
+                </p>
                 {embeddingRejections.map((item) => (
-                  <p key={item.providerId} className="text-xs text-muted-foreground">
+                  <p key={item.providerId} className="text-[12px] text-muted-foreground">
                     {remoteEmbeddingRejectionMessage(item.reason, item.name, t)}
                   </p>
                 ))}
               </div>
             )}
-          </div>
+          </SettingsSubRow>
         )}
         {showRemotePicker && remoteIssueText && (
-          <p className="text-xs text-destructive" data-settings-row="memory.remoteModelIssue">
+          <Note tone="danger" rowId="memory.remoteModelIssue">
             {remoteIssueText}
-          </p>
+          </Note>
         )}
 
         <SwitchRow
@@ -816,182 +760,106 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           onChange={setAutoDownload}
           disabled={!memoryEnabled}
         />
-      </section>
+      </SettingsSection>
 
-      <section className="space-y-2" data-settings-row="memory.distillModel">
-        <h3 className="text-sm font-medium">{t('Distillation')}</h3>
-        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm">{t('Completion backend')}</p>
-            <p className="text-xs text-muted-foreground">
-              {t('Local GGUF runs on this machine. Remote uses the model below.')}
-            </p>
-          </div>
-          <Select
+      <SettingsSection rowId="memory.distillModel" title={t('Distillation')}>
+        <SettingsRow
+          label={t('Completion backend')}
+          description={t('Local GGUF runs on this machine. Remote uses the model below.')}
+        >
+          <SettingsSelect
             value={chatModel}
-            items={chatModelItems}
-            onValueChange={(value) => setChatModel(String(value))}
+            options={chatModelItems}
+            onValueChange={setChatModel}
             disabled={!memoryEnabled}
-          >
-            <SelectTrigger className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {chatModelItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
+          />
+        </SettingsRow>
         {selectedChatModel?.downloadable && (
-          <div
-            className={cn(
-              'flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5',
-              chatBlocked === 'missing' && 'border-destructive/50'
-            )}
+          <SettingsSubRow
+            label={modelStateLabel(selectedChatModel.state)}
+            description={
+              chatProgress && chatProgress.modelId === selectedChatModel.id
+                ? `${chatProgress.file} · ${formatBytes(chatProgress.received)}${
+                    chatProgress.total ? ` / ${formatBytes(chatProgress.total)}` : ''
+                  }`
+                : selectedChatModel.state === 'ready'
+                  ? formatBytes(selectedChatModel.downloadedBytes)
+                  : formatBytes(selectedChatModel.approxBytes)
+            }
           >
-            <div className="min-w-0">
-              <p className="text-sm">
-                {selectedChatModel.state === 'ready'
-                  ? t('Model downloaded')
-                  : selectedChatModel.state === 'downloading'
-                    ? t('Downloading…')
-                    : t('Model not downloaded')}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {chatProgress && chatProgress.modelId === selectedChatModel.id
-                  ? `${chatProgress.file} · ${formatBytes(chatProgress.received)}${
-                      chatProgress.total ? ` / ${formatBytes(chatProgress.total)}` : ''
-                    }`
-                  : selectedChatModel.state === 'ready'
-                    ? formatBytes(selectedChatModel.downloadedBytes)
-                    : formatBytes(selectedChatModel.approxBytes)}
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              {selectedChatModel.state === 'downloading' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void window.electronAPI.memory
-                      .cancelChatModelDownload(selectedChatModel.id)
-                      .then(refreshChatModels);
-                  }}
-                >
-                  {t('Cancel')}
-                </Button>
-              ) : selectedChatModel.state === 'ready' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void window.electronAPI.memory
-                      .deleteChatModel(selectedChatModel.id)
-                      .then(refreshChatModels);
-                  }}
-                >
-                  {t('Remove')}
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  disabled={!memoryEnabled}
-                  onClick={() => {
-                    void window.electronAPI.memory
-                      .downloadChatModel(selectedChatModel.id)
-                      .then(refreshChatModels);
-                  }}
-                >
-                  {t('Download')}
-                </Button>
-              )}
-            </div>
-          </div>
+            {downloadButtons(selectedChatModel, {
+              cancel: () =>
+                void window.electronAPI.memory
+                  .cancelChatModelDownload(selectedChatModel.id)
+                  .then(refreshChatModels),
+              remove: () =>
+                void window.electronAPI.memory
+                  .deleteChatModel(selectedChatModel.id)
+                  .then(refreshChatModels),
+              download: () =>
+                void window.electronAPI.memory
+                  .downloadChatModel(selectedChatModel.id)
+                  .then(refreshChatModels),
+            })}
+          </SettingsSubRow>
         )}
         {chatBlocked === 'missing' && (
-          <p className="text-xs text-destructive">
+          <Note tone="danger">
             {t(
               'Local model selected but the weights are not on disk. Distillation and interpretation will wait until you click Download.'
             )}
-          </p>
+          </Note>
         )}
         {chatBlocked === 'downloading' && (
-          <p className="text-xs text-muted-foreground">
-            {t('Download in progress. Distillation waits until the model is ready.')}
-          </p>
+          <Note>{t('Download in progress. Distillation waits until the model is ready.')}</Note>
         )}
         {chatModel === 'remote' && (
-          <>
-            <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-sm">{t('Distillation model')}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t('Reads finished sessions and writes the memories.')}
-                </p>
-              </div>
-              {modelCandidates.length > 0 && (
-                <div className="w-56 shrink-0">
-                  <ModelPicker
-                    providers={modelCandidates}
-                    providerId={distillProvider?.id ?? ''}
-                    modelId={distillModelEntry?.id ?? ''}
-                    reasoningEnabled={false}
-                    thinkingLevel="medium"
-                    showReasoningControls={false}
-                    emptyLabel={t('Follows the title-summary model')}
-                    side="bottom"
-                    triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
-                    onSelect={(providerId, modelId) => setDistillModel({ providerId, modelId })}
-                    onReasoningChange={() => {}}
-                    onThinkingChange={() => {}}
-                  />
-                </div>
-              )}
-            </div>
-            {distillModel && (
-              <Button variant="ghost" size="sm" onClick={() => setDistillModel(null)}>
-                {t('Follows the title-summary model')}
-              </Button>
-            )}
-          </>
-        )}
-        <div
-          className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-          data-settings-row="memory.language"
-        >
-          <div className="min-w-0">
-            <p className="text-sm">{t('Memory language')}</p>
-            <p className="text-xs text-muted-foreground">
-              {t(
-                'English keeps retrieval and near-duplicate detection stable across languages. Choose Follow conversation if your team only works in one language.'
-              )}
-            </p>
-          </div>
-          <Select
-            value={memoryLanguage}
-            items={languageItems}
-            onValueChange={(value) => setMemoryLanguage(String(value))}
-            disabled={!memoryEnabled}
+          <SettingsSubRow
+            label={t('Distillation model')}
+            description={t('Reads finished sessions and writes the memories.')}
           >
-            <SelectTrigger className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {languageItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
-      </section>
+            {distillModel && (
+              <SettingsButton variant="ghost" onClick={() => setDistillModel(null)}>
+                {t('Follows the title-summary model')}
+              </SettingsButton>
+            )}
+            {modelCandidates.length > 0 && (
+              <div className="w-[220px] max-w-full">
+                <ModelPicker
+                  providers={modelCandidates}
+                  providerId={distillProvider?.id ?? ''}
+                  modelId={distillModelEntry?.id ?? ''}
+                  reasoningEnabled={false}
+                  thinkingLevel="medium"
+                  showReasoningControls={false}
+                  emptyLabel={t('Follows the title-summary model')}
+                  side="bottom"
+                  triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+                  onSelect={(providerId, modelId) => setDistillModel({ providerId, modelId })}
+                  onReasoningChange={() => {}}
+                  onThinkingChange={() => {}}
+                />
+              </div>
+            )}
+          </SettingsSubRow>
+        )}
+        <SettingsRow
+          rowId="memory.language"
+          label={t('Memory language')}
+          description={t(
+            'English keeps retrieval and near-duplicate detection stable across languages. Choose Follow conversation if your team only works in one language.'
+          )}
+        >
+          <SettingsSelect
+            value={memoryLanguage}
+            options={languageItems}
+            onValueChange={setMemoryLanguage}
+            disabled={!memoryEnabled}
+          />
+        </SettingsRow>
+      </SettingsSection>
 
-      <section className="space-y-2">
-        <h3 className="text-sm font-medium">{t('Background processing')}</h3>
+      <SettingsSection title={t('Background processing')}>
         <SwitchRow
           rowId="memory.distill"
           title={t('Distill sessions automatically')}
@@ -1003,48 +871,27 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           disabled={!memoryEnabled}
         />
         {distillEnabled && chatBlocked && (
-          <p className="text-xs text-destructive">
+          <Note tone="danger">
             {t(
               'Automatic distillation is on, but the local model is not ready. Sessions will queue until you download it.'
             )}
-          </p>
+          </Note>
         )}
         {distillEnabled && (
-          <div
-            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-            data-settings-row="memory.distillWindow"
+          <SettingsSubRow
+            rowId="memory.distillWindow"
+            label={t('Merge sessions in the same project')}
+            description={t(
+              'Wait this long after a session ends, then distill every session of the same project that ended meanwhile in one run. Immediately distills each session on its own.'
+            )}
           >
-            <div className="min-w-0">
-              <p className="text-sm">{t('Merge sessions in the same project')}</p>
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  'Wait this long after a session ends, then distill every session of the same project that ended meanwhile in one run. Immediately distills each session on its own.'
-                )}
-              </p>
-            </div>
-            <Select
+            <SettingsSelect
               value={String(distillWindowMinutes)}
-              items={distillWindowItems}
-              onValueChange={(value) => {
-                if (value !== null) setDistillWindowMinutes(Number(value));
-              }}
+              options={distillWindowItems}
+              onValueChange={(value) => setDistillWindowMinutes(Number(value))}
               disabled={!memoryEnabled}
-            >
-              <SelectTrigger
-                className="w-56 shrink-0"
-                aria-label={t('Merge sessions in the same project')}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup>
-                {distillWindowItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </div>
+            />
+          </SettingsSubRow>
         )}
         <SwitchRow
           rowId="memory.kg"
@@ -1066,35 +913,31 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           onChange={setReconcileEnabled}
           disabled={!memoryEnabled}
         />
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
-          <p className="min-w-0 text-xs text-muted-foreground">
-            {reconcileRun === undefined
+        <SettingsSubRow
+          label={
+            reconcileRun === undefined
               ? t('Review now runs even when the switch above is off.')
               : reconcileRun === null
                 ? t('No model is available for memory tasks.')
                 : t('Checked {{pairs}} pairs, flagged {{count}} conflicts.', {
                     pairs: String(reconcileRun.judged),
                     count: String(reconcileRun.challenges),
-                  })}
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={reconcileBusy || !memoryEnabled}
-            onClick={runReconcile}
-          >
+                  })
+          }
+        >
+          <SettingsButton disabled={reconcileBusy || !memoryEnabled} onClick={runReconcile}>
             {reconcileBusy ? t('Running…') : t('Review now')}
-          </Button>
-        </div>
-      </section>
+          </SettingsButton>
+        </SettingsSubRow>
+      </SettingsSection>
 
-      <section className="space-y-2" data-settings-row="memory.forgetting">
-        <h3 className="text-sm font-medium">{t('Forgetting')}</h3>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'Decay only changes how search ranks a memory. Archiving keeps it and can be undone; nothing on this page ever deletes a memory.'
-          )}
-        </p>
+      <SettingsSection
+        rowId="memory.forgetting"
+        title={t('Forgetting')}
+        description={t(
+          'Decay only changes how search ranks a memory. Archiving keeps it and can be undone; nothing on this page ever deletes a memory.'
+        )}
+      >
         <SwitchRow
           rowId="memory.decay"
           title={t('Rank lower when never retrieved')}
@@ -1166,56 +1009,46 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
               onChange={(value) => setDecayIntervalDays(Number(value))}
               disabled={!memoryEnabled}
             />
-          </>
-        )}
-        {decayEnabled && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-sm">
-                {decayCandidates || decayAutoArchive
+            <SettingsRow
+              label={
+                decayCandidates || decayAutoArchive
                   ? t('Archive candidates: {{count}}', {
                       count: String(forgetting?.candidates ?? 0),
                     })
-                  : t('Archive candidates: marking is off')}
-              </p>
-              <p className="text-xs text-muted-foreground">{lastRunText}</p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <Button
-                size="sm"
-                variant="outline"
+                  : t('Archive candidates: marking is off')
+              }
+              description={lastRunText}
+            >
+              <SettingsButton
                 disabled={forgettingBusy !== null || !memoryEnabled}
                 onClick={runForgetting}
               >
                 {forgettingBusy === 'run' ? t('Running…') : t('Run now')}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
+              </SettingsButton>
+              <SettingsButton
                 disabled={!decayCandidates || (forgetting?.candidates ?? 0) === 0}
                 onClick={openCandidates}
               >
                 {t('Review candidates')}
-              </Button>
-            </div>
-          </div>
+              </SettingsButton>
+            </SettingsRow>
+          </>
         )}
-      </section>
+      </SettingsSection>
 
-      <section className="space-y-2" data-settings-row="memory.stats">
-        <h3 className="text-sm font-medium">{t('Library')}</h3>
+      <SettingsSection rowId="memory.stats" title={t('Library')}>
         {stats === null || stats.total === 0 ? (
-          <p className="text-xs text-muted-foreground">{t('No memories stored yet.')}</p>
+          <Note>{t('No memories stored yet.')}</Note>
         ) : (
           <>
             {embeddingErrorNotice(stats) && (
-              <p className="text-xs text-destructive">
+              <Note tone="danger">
                 {t('Vectors unavailable: {{reason}}', {
                   reason: embeddingErrorNotice(stats) ?? '',
                 })}
-              </p>
+              </Note>
             )}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-border border-b py-3 sm:grid-cols-4">
               <Stat label={t('Memories')} value={String(stats.total)} />
               <Stat label={t('Crystals')} value={String(stats.crystals)} />
               <Stat label={t('Entities')} value={String(stats.entities)} />
@@ -1254,34 +1087,33 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 }
               />
               <Stat label={t('Added in 7 days')} value={String(stats.addedLast7Days)} />
-            </div>
+            </dl>
           </>
         )}
-      </section>
+      </SettingsSection>
 
-      <section className="space-y-2" data-settings-row="memory.distillSessions">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-medium">{t('Distill past sessions')}</h3>
-          {pendingSessions.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
+      <SettingsSection
+        rowId="memory.distillSessions"
+        title={t('Distill past sessions')}
+        description={t(
+          'The automatic switch only covers sessions that end from now on. Distill earlier sessions here to fill the library.'
+        )}
+        actions={
+          pendingSessions.length > 0 && (
+            <SettingsButton
+              data-memory-action="distill-all"
               disabled={!memoryEnabled || !jobsLoaded || distillBusy || chatBlocked !== null}
               onClick={() => requestBulkDistill(sessions, 'all', t('All sessions'))}
             >
               {distillBusy
                 ? t('Distilling…')
                 : t('Distill all ({{count}})', { count: String(pendingSessions.length) })}
-            </Button>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'The automatic switch only covers sessions that end from now on. Distill earlier sessions here to fill the library.'
-          )}
-        </p>
+            </SettingsButton>
+          )
+        }
+      >
         {batch && (
-          <p className="text-xs text-muted-foreground">
+          <Note>
             {t('{{done}}/{{total}} done', {
               done: String(batch.done),
               total: String(batch.total),
@@ -1292,53 +1124,45 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 ? ''
                 : ` · ${t('about {{time}} left', { time: formatDuration(remaining) })}`;
             })()}
-          </p>
+          </Note>
         )}
         {groups.length === 0 ? (
-          <p className="text-muted-foreground text-sm">{t('No recorded sessions found.')}</p>
+          <Note>{t('No recorded sessions found.')}</Note>
         ) : (
-          <ul className="divide-y rounded-lg border">
-            {groups.map((group) => {
-              const groupPending = group.sessions.filter((s) => !s.distilled);
-              return (
-                <li key={group.key} className="flex items-center justify-between gap-3 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{group.name}</p>
-                    <p className="text-muted-foreground text-xs">
-                      {t('{{total}} sessions · {{pending}} not distilled', {
-                        total: String(group.sessions.length),
-                        pending: String(groupPending.length),
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => setSessionsOf(group)}>
-                      {t('View sessions')}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={
-                        !memoryEnabled ||
-                        !jobsLoaded ||
-                        distillBusy ||
-                        group.sessions.length === 0 ||
-                        chatBlocked !== null
-                      }
-                      onClick={() => requestBulkDistill(group.sessions, group.key, group.name)}
-                    >
-                      {distilling === group.key ||
-                      group.sessions.some((s) => runningSessions.has(s.sessionId))
-                        ? t('Distilling…')
-                        : t('Distill project')}
-                    </Button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          groups.map((group) => {
+            const groupPending = group.sessions.filter((s) => !s.distilled);
+            return (
+              <SettingsRow
+                key={group.key}
+                label={group.name}
+                description={t('{{total}} sessions · {{pending}} not distilled', {
+                  total: String(group.sessions.length),
+                  pending: String(groupPending.length),
+                })}
+              >
+                <SettingsButton variant="ghost" onClick={() => setSessionsOf(group)}>
+                  {t('View sessions')}
+                </SettingsButton>
+                <SettingsButton
+                  disabled={
+                    !memoryEnabled ||
+                    !jobsLoaded ||
+                    distillBusy ||
+                    group.sessions.length === 0 ||
+                    chatBlocked !== null
+                  }
+                  onClick={() => requestBulkDistill(group.sessions, group.key, group.name)}
+                >
+                  {distilling === group.key ||
+                  group.sessions.some((s) => runningSessions.has(s.sessionId))
+                    ? t('Distilling…')
+                    : t('Distill project')}
+                </SettingsButton>
+              </SettingsRow>
+            );
+          })
         )}
-      </section>
+      </SettingsSection>
 
       <Dialog open={sessionsOf !== null} onOpenChange={(open) => !open && setSessionsOf(null)}>
         <DialogContent>
@@ -1354,11 +1178,11 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 </DialogDescription>
               </DialogHeader>
               <DialogPanel>
-                <ul className="divide-y rounded-lg border">
+                <ul className="divide-y border-border border-y">
                   {sessionsOf.sessions.map((session) => (
                     <li
                       key={session.sessionId}
-                      className="flex items-center justify-between gap-3 px-3 py-2"
+                      className="flex items-center justify-between gap-3 py-2"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm">{session.title}</p>
@@ -1455,13 +1279,13 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
         </DialogContent>
       </Dialog>
 
-      <section className="space-y-2" data-settings-row="memory.jobs">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="font-medium text-sm">{t('Background tasks')}</h3>
-          <div className="flex shrink-0 items-center gap-1">
+      <SettingsSection
+        rowId="memory.jobs"
+        title={t('Background tasks')}
+        actions={
+          <>
             {jobs.kgFailed > 0 && (
-              <Button
-                size="sm"
+              <SettingsButton
                 variant="ghost"
                 onClick={() => {
                   void window.electronAPI.memory
@@ -1470,11 +1294,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 }}
               >
                 {t('Retry failed extractions ({{count}})', { count: String(jobs.kgFailed) })}
-              </Button>
+              </SettingsButton>
             )}
             {jobRows.some((row) => row.state !== 'running') && (
-              <Button
-                size="sm"
+              <SettingsButton
                 variant="ghost"
                 title={t(
                   'Removes completed and cancelled jobs. Running tasks are kept. Sessions will show as not distilled again, since that flag is derived from job history — re-distilling is deduplicated, so it will not create duplicate memories.'
@@ -1484,32 +1307,33 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 }}
               >
                 {t('Clear finished tasks')}
-              </Button>
+              </SettingsButton>
             )}
             {jobRows.length > VISIBLE_JOBS && (
-              <Button size="sm" variant="ghost" onClick={() => setAllJobs(!allJobs)}>
+              <SettingsButton variant="ghost" onClick={() => setAllJobs(!allJobs)}>
                 {allJobs
                   ? t('Show less')
                   : t('Show all {{count}}', { count: String(jobRows.length) })}
-              </Button>
+              </SettingsButton>
             )}
-          </div>
-        </div>
+          </>
+        }
+      >
         {jobRows.length === 0 ? (
-          <p className="text-muted-foreground text-sm">{t('Nothing running.')}</p>
+          <Note>{t('Nothing running.')}</Note>
         ) : (
-          <ul className="divide-y rounded-lg border">
+          <ul>
             {(allJobs ? jobRows : jobRows.slice(0, VISIBLE_JOBS)).map((row) => (
-              <li key={row.key} className="space-y-1 px-3 py-2">
+              <li key={row.key} className="space-y-1 border-border border-b py-2">
                 <div className="flex items-center gap-2">
                   <Badge variant={row.state === 'failed' ? 'destructive' : 'secondary'}>
                     {t(JOB_KIND_LABELS[row.kind])}
                   </Badge>
-                  <span className="min-w-0 flex-1 truncate text-sm">{row.target}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{row.target}</span>
                   <span
                     className={cn(
                       'shrink-0 text-xs',
-                      row.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'
+                      row.state === 'failed' ? 'text-destructive-text' : 'text-muted-foreground'
                     )}
                   >
                     {row.state === 'running' ? `⋯ ${row.detail}` : row.detail}
@@ -1524,7 +1348,9 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
             ))}
           </ul>
         )}
-      </section>
+      </SettingsSection>
+
+      {children}
 
       <Dialog open={candidates !== null} onOpenChange={(open) => !open && setCandidates(null)}>
         <DialogContent>
@@ -1562,9 +1388,9 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                       : t('Select all')}
                   </Button>
                 </div>
-                <ul className="divide-y rounded-lg border">
+                <ul className="divide-y border-border border-y">
                   {candidates.items.map((item) => (
-                    <li key={item.id} className="flex items-start gap-2 px-3 py-2">
+                    <li key={item.id} className="flex items-start gap-2 py-2">
                       <Checkbox
                         checked={candidateSelection.has(item.id)}
                         onCheckedChange={() =>
@@ -1619,7 +1445,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -1633,12 +1459,12 @@ function Stat({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border px-3 py-2">
-      <p className="text-muted-foreground text-xs">{label}</p>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm">{value}</p>
+    <div className="min-w-0">
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd className="flex items-center justify-between gap-2">
+        <span className="text-[13px]">{value}</span>
         {action}
-      </div>
+      </dd>
     </div>
   );
 }
