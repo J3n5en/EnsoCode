@@ -72,6 +72,12 @@ interface SecretaryStoreState {
     edits?: Partial<DispatchDraft>,
     profileDraft?: SecretaryProfileDraft
   ) => Promise<void>;
+  /**
+   * 聊天卡片发现 store 里没有这张提案时调用：按需重拉所有秘书状态。
+   * 远程桌面丢过一次推送时提案卡会一直停在占位行（没有确认按钮），靠它自愈。
+   * 并发调用合并成一次扫描；提案已在 store 里时不重拉。
+   */
+  ensureProposal: (proposalId: string) => Promise<void>;
 }
 
 /** 当前看着的那个秘书：没有选中时取清单里的第一个 */
@@ -154,26 +160,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
     const pushed = new Set<string>();
     let bound = true;
     const apply = (secretary: SecretaryState) => {
-      const id = secretary.secretaryId ?? get().focusedId;
-      if (!id) return;
-      set((state) => {
-        const states = { ...state.states, [id]: secretary };
-        syncTakenOver(states);
-        const focusedId = pickFocused(state.secretaries, state.focusedId) ?? id;
-        if (focusedId !== id) return { states, focusedId };
-        const before = state.states[id] ?? state.secretary;
-        return {
-          states,
-          focusedId,
-          secretary,
-          // 设置完成后欢迎页让位给会话；档案被重来清掉时再回到欢迎页（首次启动没有档案不弹）
-          welcomeOpen: secretary.profile
-            ? false
-            : before.profile !== null && before.enabled
-              ? true
-              : state.welcomeOpen,
-        };
-      });
+      applySecretaryStateMerge(secretary, set, get);
     };
     const off = window.electronAPI.secretary.onStateChanged((secretary) => {
       if (secretary.secretaryId) pushed.add(secretary.secretaryId);
@@ -295,7 +282,62 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       set({ resolving });
     }
   },
+
+  ensureProposal: async (proposalId) => {
+    if (Object.values(get().states).some((state) => state.proposals[proposalId])) return;
+    await scanSecretaryStates();
+  },
 }));
+
+/** 一次性重拉所有秘书状态：调用方负责先判断值得扫；在途合并 */
+let scanningStates: Promise<void> | null = null;
+async function scanSecretaryStates(): Promise<void> {
+  scanningStates ??= (async () => {
+    try {
+      const list = await window.electronAPI.secretary.list().catch(() => []);
+      for (const entry of list) {
+        const state = await window.electronAPI.secretary.getState(entry.id).catch(() => null);
+        if (!state) continue;
+        applySecretaryStateMerge(
+          { ...state, secretaryId: state.secretaryId ?? entry.id },
+          useSecretaryStore.setState,
+          useSecretaryStore.getState
+        );
+      }
+    } finally {
+      scanningStates = null;
+    }
+  })();
+  return scanningStates;
+}
+
+/** 推送与按需重拉共用的归并逻辑：states 里按秘书落位，聚焦的那份同时进 secretary */
+function applySecretaryStateMerge(
+  secretary: SecretaryState,
+  set: (fn: (state: SecretaryStoreState) => Partial<SecretaryStoreState>) => void,
+  get: () => SecretaryStoreState
+): void {
+  const id = secretary.secretaryId ?? get().focusedId;
+  if (!id) return;
+  set((state) => {
+    const states = { ...state.states, [id]: secretary };
+    syncTakenOver(states);
+    const focusedId = pickFocused(state.secretaries, state.focusedId) ?? id;
+    if (focusedId !== id) return { states, focusedId };
+    const before = state.states[id] ?? state.secretary;
+    return {
+      states,
+      focusedId,
+      secretary,
+      // 设置完成后欢迎页让位给会话；档案被重来清掉时再回到欢迎页（首次启动没有档案不弹）
+      welcomeOpen: secretary.profile
+        ? false
+        : before.profile !== null && before.enabled
+          ? true
+          : state.welcomeOpen,
+    };
+  });
+}
 
 /** 按「项目默认 → 分组默认 → 全局默认」只挑可用的模型，与普通会话同口径 */
 function resolveDefaultModel(projectId: string): { providerId: string; modelId: string } | null {

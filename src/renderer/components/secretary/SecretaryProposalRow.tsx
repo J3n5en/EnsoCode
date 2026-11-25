@@ -1,6 +1,7 @@
 import { projectDisplayName } from '@shared/projectName';
 import type { CleanupItem, ProposalStatus, SecretaryProposal } from '@shared/types/secretary';
 import * as React from 'react';
+import { useEffect } from 'react';
 import { useI18n } from '@/i18n';
 import { modelLabel } from '@/lib/modelLabel';
 import { cn } from '@/lib/utils';
@@ -82,14 +83,28 @@ export function SecretaryProposalRow({
 }) {
   const { t } = useI18n();
   const proposal = useSecretaryStore((state) => state.secretary.proposals[proposalId]);
+  // 提案属于哪个秘书会话就可能不在「当前看着的」秘书状态里：从全部秘书的状态里兜底
+  const fallback = useSecretaryStore((state) =>
+    proposal
+      ? undefined
+      : Object.values(state.states ?? {}).find((entry) => entry.proposals[proposalId])?.proposals[
+          proposalId
+        ]
+  );
   const resolving = useSecretaryStore((state) => state.resolving[proposalId] === true);
   const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
   const projects = useSettingsStore((state) => state.projects);
   const providers = useSettingsStore((state) => state.providers) ?? [];
   const virtualModels = useSettingsStore((state) => state.virtualModels);
+  const shown = proposal ?? fallback;
+
+  // 提案不在任何秘书的状态里：远程丢过一次推送就会这样。按需重拉，卡片不能一直停在占位行（没有确认按钮）
+  useEffect(() => {
+    if (!shown) void useSecretaryStore.getState().ensureProposal?.(proposalId);
+  }, [shown, proposalId]);
 
   // 状态推送还没到时只占位：卡片不能把这一行吞掉
-  if (!proposal) {
+  if (!shown) {
     return (
       <div
         data-enso="secretary-proposal"
@@ -99,20 +114,17 @@ export function SecretaryProposalRow({
       </div>
     );
   }
-  if (proposal.kind === 'profile')
-    return <ProfileProposalCard proposal={proposal} prominent={prominent} />;
-  if (proposal.kind === 'skill')
-    return <SkillProposalCard proposal={proposal} prominent={prominent} />;
-  if (proposal.kind === 'tool')
-    return <ToolProposalCard proposal={proposal} prominent={prominent} />;
-  if (proposal.kind === 'takeover')
-    return <TakeoverProposalCard proposal={proposal} prominent={prominent} />;
-  if (proposal.kind === 'cleanup')
-    return <CleanupProposalCard proposal={proposal} prominent={prominent} />;
+  const card = shown;
+  if (card.kind === 'profile') return <ProfileProposalCard proposal={card} prominent={prominent} />;
+  if (card.kind === 'skill') return <SkillProposalCard proposal={card} prominent={prominent} />;
+  if (card.kind === 'tool') return <ToolProposalCard proposal={card} prominent={prominent} />;
+  if (card.kind === 'takeover')
+    return <TakeoverProposalCard proposal={card} prominent={prominent} />;
+  if (card.kind === 'cleanup') return <CleanupProposalCard proposal={card} prominent={prominent} />;
 
-  const project = projects.find((entry) => entry.id === proposal.draft.projectId);
-  const failed = proposal.status === 'failed';
-  const model = modelLabel(providers, proposal.draft.model, virtualModels);
+  const project = projects.find((entry) => entry.id === card.draft.projectId);
+  const failed = card.status === 'failed';
+  const model = modelLabel(providers, card.draft.model, virtualModels);
 
   return (
     <div data-enso="secretary-proposal" className={cardClass(prominent)}>
@@ -125,42 +137,40 @@ export function SecretaryProposalRow({
             {projectDisplayName(project)}
           </span>
         )}
-        <span className="min-w-0 flex-1 truncate">{dispatchTitle(proposal)}</span>
+        <span className="min-w-0 flex-1 truncate">{dispatchTitle(card)}</span>
         <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
-          {proposal.draft.worktree ? t('Isolated worktree') : t('Project checkout')}
+          {card.draft.worktree ? t('Isolated worktree') : t('Project checkout')}
         </span>
       </div>
-      {(proposal.draft.branch ||
-        proposal.draft.baseRef ||
+      {(card.draft.branch ||
+        card.draft.baseRef ||
         model ||
-        (proposal.draft.after?.length ?? 0) > 0) && (
+        (card.draft.after?.length ?? 0) > 0) && (
         <div
           data-enso="secretary-proposal-base"
           className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"
         >
-          {proposal.draft.branch && <span>{proposal.draft.branch}</span>}
-          {proposal.draft.baseRef && (
-            <span>{t('from {{ref}}', { ref: proposal.draft.baseRef })}</span>
-          )}
+          {card.draft.branch && <span>{card.draft.branch}</span>}
+          {card.draft.baseRef && <span>{t('from {{ref}}', { ref: card.draft.baseRef })}</span>}
           {model && (
             <span data-enso="secretary-proposal-model">{t('Model: {{model}}', { model })}</span>
           )}
-          {proposal.draft.after && proposal.draft.after.length > 0 && (
-            <span>{t('After {{ids}}', { ids: proposal.draft.after.join(', ') })}</span>
+          {card.draft.after && card.draft.after.length > 0 && (
+            <span>{t('After {{ids}}', { ids: card.draft.after.join(', ') })}</span>
           )}
         </div>
       )}
       <div className="mt-1.5 flex items-center gap-1.5">
         <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>
-          {t(STATUS_LABELS[proposal.status])}
-          {failed && proposal.error ? ` · ${proposal.error}` : ''}
+          {t(STATUS_LABELS[card.status])}
+          {failed && card.error ? ` · ${card.error}` : ''}
         </span>
-        {proposal.status === 'pending' && (
+        {card.status === 'pending' && (
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               disabled={resolving}
-              onClick={() => void resolveProposal(proposal.id, 'confirm')}
+              onClick={() => void resolveProposal(card.id, 'confirm')}
               className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               {t('Confirm dispatch')}
@@ -168,7 +178,7 @@ export function SecretaryProposalRow({
             <button
               type="button"
               disabled={resolving}
-              onClick={() => void resolveProposal(proposal.id, 'reject')}
+              onClick={() => void resolveProposal(card.id, 'reject')}
               className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
               {t('Reject')}
