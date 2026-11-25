@@ -128,6 +128,62 @@ describe('run transcript', () => {
     expect(transcript.calls.map((call) => call.outputTokens)).toEqual([2, 5]);
   });
 
+  it('does not double count replayed history after compaction shifts indexes', () => {
+    const transcript = new RunTranscript('p', {});
+    const usage = { input: 100, output: 7, cacheRead: 50, cacheWrite: 0 };
+    const assistant = (index: number, timestamp: number, output = 7) =>
+      transcript.ingest(
+        `parent:${index}`,
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: `step ${timestamp}` }],
+          stopReason: 'toolUse',
+          usage: { ...usage, output },
+          model: 'm',
+          timestamp,
+        },
+        true
+      );
+    // 压缩前：两个真实调用依次定稿（index 1、2，时间戳 1000、2000）
+    assistant(1, 1000);
+    transcript.ingest('parent:2', { role: 'toolResult', content: [], timestamp: 1500 }, true);
+    assistant(2, 2000);
+    transcript.ingest('parent:3', { role: 'toolResult', content: [], timestamp: 2500 }, true);
+    expect(transcript.calls).toHaveLength(2);
+    // 压缩后历史重放：压缩摘要占位，同一逻辑调用从 index 1/2 移到 4/5，
+    // 消息内容、usage、timestamp 不变
+    transcript.ingest('parent:0', { role: 'user', content: [], timestamp: 500 }, true);
+    assistant(4, 1000);
+    assistant(5, 2000);
+    transcript.ingest('parent:6', { role: 'toolResult', content: [], timestamp: 2600 }, true);
+    transcript.flushTurn();
+    expect(transcript.calls).toHaveLength(2);
+  });
+
+  it('keeps a genuine retry with the same usage when the index is reused', () => {
+    const transcript = new RunTranscript('p', {});
+    const assistant = (index: number, timestamp: number) =>
+      transcript.ingest(
+        `parent:${index}`,
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: `step ${timestamp}` }],
+          stopReason: 'stop',
+          usage: { input: 100, output: 7, cacheRead: 50, cacheWrite: 0 },
+          model: 'm',
+          timestamp,
+        },
+        true
+      );
+    assistant(1, 1000);
+    transcript.ingest('parent:2', { role: 'toolResult', content: [], timestamp: 1500 }, true);
+    // 同一 key 换了新 timestamp 的消息：真实重试，是独立调用
+    assistant(1, 3000);
+    transcript.ingest('parent:2', { role: 'toolResult', content: [], timestamp: 3500 }, true);
+    transcript.flushTurn();
+    expect(transcript.calls).toHaveLength(2);
+  });
+
   it('reports null cost when any call has no known price', () => {
     const transcript = new RunTranscript('p', {
       priced: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },

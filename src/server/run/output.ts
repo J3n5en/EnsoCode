@@ -69,6 +69,10 @@ function toolResultText(message: TranscriptMessage): string {
 /**
  * 把 worker 的整条 message-upsert 收成增量事件。流式中途的消息也带 stopReason 和零用量，
  * 所以一次调用的用量要等同一会话出现下一条消息（或轮次结束）才算定稿并落一行。
+ *
+ * 压缩/重启会让 worker 重放全部历史且下标移位（压缩摘要占位），同一逻辑调用会以新 key
+ * 再次出现。消息的 timestamp 是请求开始时刻、重放时保持稳定，所以记账身份以 timestamp
+ * （消息身份）而非 key（数组下标）为准：同一逻辑调用在新 key 下的投影不重复计。
  */
 export class RunTranscript {
   private readonly texts = new Map<string, string>();
@@ -78,6 +82,7 @@ export class RunTranscript {
     string,
     {
       id: string;
+      usageKey: string;
       scope: string;
       index: number;
       model: string;
@@ -96,18 +101,32 @@ export class RunTranscript {
   ingest(key: string, message: TranscriptMessage, parent: boolean): StreamRecord[] {
     const records: StreamRecord[] = [];
     // 压缩、重试会让下标复用；用消息时间戳区分不同调用，同一条消息的重复投影只记一次
-    const id = `${key}@${message.timestamp ?? ''}`;
+    const stamp = message.timestamp ?? '';
+    const id = `${key}@${stamp}`;
+    // 记账身份：同一逻辑调用（timestamp 相同）跨下标复用、压缩移位、重启重放都只记一次
     const cut = key.lastIndexOf(':');
     const scope = cut >= 0 ? key.slice(0, cut) : '';
+    // scope 限定在同一 child 会话内，避免两个并发 child 同毫秒开始的调用互相误并
+    const usageKey = `${scope}@${stamp}`;
     const index = Number(key.slice(cut + 1));
     for (const [pendingKey, pending] of this.pending) {
       if (pending.scope !== scope) continue;
+      if (pending.usageKey === usageKey && pendingKey !== key) {
+        // 压缩/重启重放：同一逻辑调用移到了新下标，记账位置随消息迁移。
+        // 只认权威的重放顺序（新下标更靠后）；乱序投影按普通下标规则处理，不冒误并的风险
+        if (pending.index < index) {
+          this.pending.delete(pendingKey);
+          this.pending.set(key, { ...pending, id, index });
+          break;
+        }
+      }
       // 同一下标换了新消息，或后面出现了新消息；旧下标的重复投影不算
       const ended = pendingKey === key ? pending.id !== id : pending.index < index;
       if (!ended) continue;
       this.pending.delete(pendingKey);
-      if (!this.logged.has(pending.id)) {
+      if (!this.logged.has(pending.usageKey)) {
         records.push(this.log(pending.id, pending.model, pending.usage));
+        this.logged.add(pending.usageKey);
       }
     }
     if (message.role === 'assistant') {
@@ -131,9 +150,10 @@ export class RunTranscript {
           arguments: part.arguments ?? {},
         });
       }
-      if (message.usage && !this.logged.has(id)) {
+      if (message.usage && !this.logged.has(usageKey)) {
         this.pending.set(key, {
           id,
+          usageKey,
           scope,
           index,
           model: message.model || 'unknown',
@@ -156,8 +176,9 @@ export class RunTranscript {
   flushTurn(): StreamRecord[] {
     const records: StreamRecord[] = [];
     for (const pending of this.pending.values()) {
-      if (!this.logged.has(pending.id)) {
+      if (!this.logged.has(pending.usageKey)) {
         records.push(this.log(pending.id, pending.model, pending.usage));
+        this.logged.add(pending.usageKey);
       }
     }
     this.pending.clear();
