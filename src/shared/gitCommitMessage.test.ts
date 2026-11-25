@@ -8,6 +8,7 @@ import {
   parseGenerateCommitMessageAbort,
   parseGenerateCommitMessageRequest,
   parseGitCommitPromptWrite,
+  redactSensitiveDiff,
   selectCommitDiff,
   truncateCommitDiff,
 } from './gitCommitMessage';
@@ -45,6 +46,16 @@ describe('cleanCommitMessage', () => {
     expect(cleanCommitMessage('feat: a\n---\nfix: b')).toBe('feat: a');
   });
 
+  it('body 里的 --- 分隔与带类型前缀的编号列表原样保留', () => {
+    expect(cleanCommitMessage('feat: a\n\nIntro\n\n---\n\nMore details')).toBe(
+      'feat: a\n\nIntro\n\n---\n\nMore details'
+    );
+    expect(
+      cleanCommitMessage('feat(git): add generator\n\n1. fix: handle empty diff\n2. docs: readme')
+    ).toBe('feat(git): add generator\n\n1. fix: handle empty diff\n2. docs: readme');
+    expect(cleanCommitMessage('feat: a\n\nbody\n\n---')).toBe('feat: a\n\nbody');
+  });
+
   it('剥掉思考标签与多余空行', () => {
     expect(cleanCommitMessage('<think>hmm</think>\n\nfeat: a\n\n\n\nbody  ')).toBe(
       'feat: a\n\nbody'
@@ -54,6 +65,38 @@ describe('cleanCommitMessage', () => {
   it('空输出返回空串', () => {
     expect(cleanCommitMessage('```\n```')).toBe('');
     expect(cleanCommitMessage('   ')).toBe('');
+  });
+});
+
+describe('redactSensitiveDiff', () => {
+  const chunk = (file: string, body: string) =>
+    `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -0,0 +1 @@\n+${body}\n`;
+  it.each([
+    '.env',
+    'apps/web/.env.local',
+    '.envrc',
+    'certs/server.pem',
+    'tls.KEY',
+    'keys/id_rsa',
+    'home/.ssh/id_ed25519.pub',
+    'store.p12',
+    '.npmrc',
+  ])('%s 只留文件头，内容替换为说明', (file) => {
+    const out = redactSensitiveDiff(chunk(file, 'TOP-SECRET'));
+    expect(out).toContain(`diff --git a/${file} b/${file}`);
+    expect(out).toContain('content omitted');
+    expect(out).not.toContain('TOP-SECRET');
+  });
+  it('普通文件与相邻块不受影响', () => {
+    const diff = `${chunk('.env', 'S')}${chunk('src/env.ts', 'ok')}${chunk('docs/key.md', 'ok2')}`;
+    const out = redactSensitiveDiff(diff);
+    expect(out).toContain('+ok\n');
+    expect(out).toContain('+ok2\n');
+    expect(out).not.toContain('+S\n');
+  });
+  it('带引号的路径也能识别', () => {
+    const out = redactSensitiveDiff('diff --git "a/x\\ty/.env" "b/x\\ty/.env"\n+SECRET\n');
+    expect(out).not.toContain('SECRET');
   });
 });
 

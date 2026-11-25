@@ -10,6 +10,7 @@ import {
   type GitCommitConfigIssue,
   parseGenerateCommitMessageAbort,
   parseGenerateCommitMessageRequest,
+  redactSensitiveDiff,
   selectCommitDiff,
   truncateCommitDiff,
 } from '@shared/gitCommitMessage';
@@ -82,7 +83,10 @@ export function createCommitMessageGenerator(deps: CommitMessageDeps) {
       return { ok: false, code: 'git-error', error: errorText(error) };
     }
     if (signal.aborted) return aborted;
-    const selected = selectCommitDiff(diffs);
+    const selected = selectCommitDiff({
+      staged: redactSensitiveDiff(diffs.staged),
+      unstaged: redactSensitiveDiff(diffs.unstaged),
+    });
     if (!selected) return { ok: false, code: 'no-changes', error: 'No changes to commit.' };
     const { text, truncated } = truncateCommitDiff(selected.diff);
     let output: string;

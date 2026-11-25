@@ -57,6 +57,32 @@ export function selectCommitDiff(diffs: {
   return null;
 }
 
+/**
+ * 常见凭据文件（.env*、私钥、证书、密钥库、带 token 的 rc 文件）只告诉模型「改了这个文件」，
+ * 正文不出本机：这些文件即使被误跟踪，内容也大概率是密钥，而提交信息只需要文件名。
+ */
+const SENSITIVE_BASENAME =
+  /^(?:\.env.*|.*\.(?:pem|key|p12|pfx|jks|keystore)|id_(?:rsa|dsa|ecdsa|ed25519).*|\.(?:npmrc|netrc|pgpass))$/i;
+const DIFF_HEADER = 'diff --git ';
+
+function headerBasename(header: string): string {
+  const target = header.replace(/"$/, '');
+  return target.slice(target.lastIndexOf('/') + 1);
+}
+
+export function redactSensitiveDiff(diff: string): string {
+  const out: string[] = [];
+  let skipping = false;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith(DIFF_HEADER)) {
+      skipping = SENSITIVE_BASENAME.test(headerBasename(line));
+      out.push(line);
+      if (skipping) out.push('[content omitted: sensitive file]');
+    } else if (!skipping) out.push(line);
+  }
+  return out.join('\n');
+}
+
 export function truncateCommitDiff(
   diff: string,
   max = GIT_COMMIT_DIFF_MAX_CHARS
@@ -104,11 +130,19 @@ export function cleanCommitMessage(raw: string): string {
     start = lines.findIndex((line, index) => index > first && line.trim());
   }
   const out = [unwrap(lines[start].trim().replace(NUMBERED, '').replace(PREFIX, ''))];
+  const numberedCandidates = NUMBERED.test(lines[start].trim());
+  const isCandidate = (index: number) => {
+    const line = lines[index]?.trim() ?? '';
+    if (!COMMIT_HEADER.test(line)) return false;
+    return NUMBERED.test(line) ? numberedCandidates : !lines[index - 1].trim();
+  };
   for (let index = start + 1; index < lines.length; index++) {
     const line = lines[index];
-    if (SEPARATOR.test(line)) break;
-    if (COMMIT_HEADER.test(line.trim()) && (NUMBERED.test(line.trim()) || !lines[index - 1].trim()))
-      break;
+    if (SEPARATOR.test(line)) {
+      // 分隔线后紧跟另一条候选或什么都没有才算多余；body 里的正常分隔保留
+      const next = lines.findIndex((entry, at) => at > index && entry.trim());
+      if (next < 0 || COMMIT_HEADER.test(lines[next].trim())) break;
+    } else if (isCandidate(index)) break;
     out.push(line);
   }
   return out

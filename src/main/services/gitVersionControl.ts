@@ -401,30 +401,27 @@ export class GitRepository {
     return { ok: true, path: file, oldText, newText };
   }
 
-  /** 生成提交信息用的只读 diff：staged 与 unstaged（未跟踪文件只列路径）；禁用外部 diff / textconv */
+  /**
+   * 生成提交信息用的只读 diff：staged 与 unstaged（未跟踪文件只列路径）；禁用外部 diff / textconv。
+   * 工作区侧用 diff-files、未跟踪用 ls-files：porcelain 的 diff / status 会顺手刷新并改写 .git/index。
+   */
   async changeDiffs(): Promise<{ staged: string; unstaged: string }> {
-    const diff = (extra: string[]) =>
+    const git = (args: string[]) =>
       run(
         this.cwd,
-        [
-          '-c',
-          'core.quotePath=false',
-          'diff',
-          '--no-color',
-          '--no-ext-diff',
-          '--no-textconv',
-          ...extra,
-        ],
+        ['--no-optional-locks', '-c', 'core.quotePath=false', ...args],
         32_000_000
       ).then((output) => output.toString('utf8'));
-    const [staged, tracked, status] = await Promise.all([
-      diff(['--cached']),
-      diff([]),
-      this.status(),
+    const flags = ['-p', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
+    const [staged, tracked, others] = await Promise.all([
+      git(['diff', '--cached', ...flags]),
+      git(['diff-files', ...flags]),
+      git(['ls-files', '--others', '--exclude-standard', '-z']),
     ]);
-    const untracked = status.unstaged
-      .filter((file) => file.status === 'untracked')
-      .map((file) => `new untracked file: ${file.path}`);
+    const untracked = others
+      .split('\0')
+      .filter(Boolean)
+      .map((file) => `new untracked file: ${file}`);
     return {
       staged,
       unstaged: untracked.length

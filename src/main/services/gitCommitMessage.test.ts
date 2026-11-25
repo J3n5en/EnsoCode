@@ -59,6 +59,29 @@ describe('createCommitMessageGenerator', () => {
     }
   });
 
+  it('敏感文件只给文件名，内容不发给模型', async () => {
+    const d = deps({
+      readDiffs: async () => ({
+        staged: [
+          'diff --git a/.env b/.env',
+          '--- a/.env',
+          '+++ b/.env',
+          '@@ -1 +1 @@',
+          '+API_KEY=sk-live-secret',
+          'diff --git a/src/a.ts b/src/a.ts',
+          '+export const a = 1;',
+          '',
+        ].join('\n'),
+        unstaged: '',
+      }),
+    });
+    await createCommitMessageGenerator(d).generate(request);
+    const sent = vi.mocked(d.complete).mock.calls[0][0].userText;
+    expect(sent).toContain('diff --git a/.env b/.env');
+    expect(sent).not.toContain('sk-live-secret');
+    expect(sent).toContain('+export const a = 1;');
+  });
+
   it('模型解析失败按缺失类型回报，不调模型', async () => {
     const providerGone = deps({
       resolveModel: async () => ({ ok: false, error: 'Model provider is unavailable.' }),

@@ -8,6 +8,7 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -70,6 +71,23 @@ describe('Git 版本管理', () => {
     expect(diffs.unstaged).toContain('+second');
     expect(diffs.unstaged).toContain('new untracked file: new.txt');
     expect(diffs.unstaged).not.toContain('secret body');
+  });
+
+  it('changeDiffs 不改写索引：stat 过期的已跟踪文件也不触发 index 刷新', async () => {
+    writeFileSync(join(repo, 'a.txt'), 'base\n');
+    writeFileSync(join(repo, 'b.txt'), 'base\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-qm', 'base');
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(join(repo, 'a.txt'), later, later);
+    writeFileSync(join(repo, 'b.txt'), 'changed\n');
+    utimesSync(join(repo, 'b.txt'), later, later);
+    const index = join(repo, '.git', 'index');
+    const before = readFileSync(index);
+    const diffs = await (await GitRepository.open(repo)).changeDiffs();
+    expect(diffs.unstaged).toContain('+changed');
+    expect(diffs.unstaged).not.toContain('a.txt');
+    expect(readFileSync(index).equals(before)).toBe(true);
   });
 
   it('同一文件的暂存与未暂存内容独立展示，丢弃仅恢复到索引', async () => {
