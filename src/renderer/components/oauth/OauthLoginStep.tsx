@@ -15,7 +15,15 @@ interface OauthLoginStepProps {
 export function OauthLoginStep({ flow, providerLabel, onBack }: OauthLoginStepProps) {
   const { t } = useI18n();
   const [promptValue, setPromptValue] = React.useState('');
+  const [hiddenErrorRequestId, setHiddenErrorRequestId] = React.useState<string | null>(null);
   const prompt = flow.state.phase === 'running' ? flow.state.prompt : null;
+  const pasteError =
+    prompt &&
+    typeof prompt.error === 'string' &&
+    prompt.error &&
+    hiddenErrorRequestId !== prompt.requestId
+      ? prompt.error
+      : undefined;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: requestId 切换时必须清空上一条 OAuth prompt 的输入。
   React.useEffect(() => {
@@ -30,7 +38,7 @@ export function OauthLoginStep({ flow, providerLabel, onBack }: OauthLoginStepPr
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="min-w-0">
               <p className="text-sm font-medium">{t('Authorization failed')}</p>
-              <p className="mt-1 break-words text-xs">{flow.state.message}</p>
+              <p className="mt-1 break-words text-xs">{t(flow.state.message)}</p>
             </div>
           </div>
         </div>
@@ -119,26 +127,35 @@ export function OauthLoginStep({ flow, providerLabel, onBack }: OauthLoginStepPr
               ))}
             </div>
           ) : (
-            <div className="flex gap-2">
-              <Input
-                type={prompt.type === 'secret' ? 'password' : 'text'}
-                value={promptValue}
-                placeholder={prompt.placeholder}
-                onChange={(event) => setPromptValue(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing || event.key !== 'Enter') return;
-                  event.preventDefault();
-                  submitPrompt(promptValue);
-                }}
-              />
-              <Button
-                size="sm"
-                disabled={!promptValue.trim() && !allowEmpty}
-                onClick={() => submitPrompt(promptValue)}
-              >
-                {t('Submit')}
-              </Button>
-            </div>
+            <>
+              <div className="flex min-w-0 gap-2">
+                <Input
+                  className="min-w-0 flex-1"
+                  type={prompt.type === 'secret' ? 'password' : 'text'}
+                  value={promptValue}
+                  placeholder={prompt.placeholder}
+                  onChange={(event) => {
+                    setPromptValue(event.target.value);
+                    setHiddenErrorRequestId(prompt.requestId);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing || event.key !== 'Enter') return;
+                    event.preventDefault();
+                    submitPrompt(promptValue);
+                  }}
+                />
+                <Button
+                  size="sm"
+                  disabled={!promptValue.trim() && !allowEmpty}
+                  onClick={() => submitPrompt(promptValue)}
+                >
+                  {t('Submit')}
+                </Button>
+              </div>
+              {pasteError ? (
+                <p className="break-words text-sm text-destructive">{t(pasteError)}</p>
+              ) : null}
+            </>
           )}
         </div>
       )}

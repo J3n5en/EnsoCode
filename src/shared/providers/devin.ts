@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { OauthUsageWindow } from '@shared/types';
 import { toolSchemaForModel } from './antigravity';
-import { startOauthCallbackServer } from './callbackServer';
+import { startOauthCallbackServer, waitForOauthCallbackCode } from './callbackServer';
 import {
   CacheControlType,
   ChatMessagePromptSchema,
@@ -193,7 +193,11 @@ async function login(callbacks: PiLoginCallbacks): Promise<PiOauthCredentials> {
       instructions: 'Sign in to Devin in your browser.',
     });
     callbacks.onProgress?.('Waiting for browser authentication...');
-    const code = await server.waitForCode();
+    const code = await waitForOauthCallbackCode(
+      server,
+      (request) => callbacks.onPrompt(request as Parameters<PiLoginCallbacks['onPrompt']>[0]),
+      callbacks.signal
+    );
     callbacks.onProgress?.('Exchanging authorization code for tokens...');
     const token = await exchangeDevinCliToken(code, pkce.verifier);
     const email = emailFromJwt(token);

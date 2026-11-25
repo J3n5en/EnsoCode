@@ -42,7 +42,9 @@ const mount = (prompt: OauthLoginPrompt) => {
       binding: locator,
       locator,
       progress: null,
+      lastProgress: null,
       authUrl: null,
+      fullAuthUrl: null,
       userCode: null,
       prompt,
     },
@@ -108,5 +110,51 @@ describe('OauthLoginStep 留空提交', () => {
     await act(async () => submitButton().click());
     await pressEnter();
     expect(respond).not.toHaveBeenCalled();
+  });
+
+  it('manual_code 提示在窄行里渲染可粘贴的输入框', async () => {
+    await mount({
+      requestId: 'manual-1',
+      type: 'manual_code',
+      message: 'Paste the full address from the address bar.',
+      placeholder: 'http://127.0.0.1:1/callback?code=...&state=...',
+    });
+    const input = container.querySelector('input');
+    expect(input?.getAttribute('placeholder')).toContain('127.0.0.1');
+    expect(input?.className).toContain('min-w-0');
+    expect(container.textContent).toContain('Paste the full address from the address bar.');
+  });
+
+  it('粘贴被拒时在输入框下显示红字，改输入后清掉，换一条提示再显示新错误', async () => {
+    const rejected = 'That is not an authorization callback address.';
+    const mismatched = 'The link does not match this authorization. Copy the latest address again.';
+    await mount({
+      requestId: 'manual-err',
+      type: 'manual_code',
+      message: 'Paste the full address from the address bar.',
+      error: rejected,
+    });
+    const line = [...container.querySelectorAll('p')].find((el) => el.textContent === rejected);
+    expect(line?.className).toContain('text-destructive');
+    expect(line?.className).toContain('text-sm');
+    expect(line?.className).toContain('break-words');
+    expect(container.textContent).toContain('Paste the full address from the address bar.');
+
+    await act(async () => {
+      const input = container.querySelector('input');
+      if (!(input instanceof window.HTMLInputElement)) throw new Error('Missing prompt input');
+      input.value = 'http://127.0.0.1/cb';
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain(rejected);
+
+    await mount({
+      requestId: 'manual-err-2',
+      type: 'manual_code',
+      message: 'Paste the full address from the address bar.',
+      error: mismatched,
+    });
+    expect(container.textContent).toContain(mismatched);
+    expect(container.textContent).not.toContain(rejected);
   });
 });

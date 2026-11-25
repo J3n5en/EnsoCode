@@ -134,7 +134,8 @@ function isOauthLoginEvent(value: unknown): value is OauthLoginEvent {
     case 'auth_url':
       return (
         isNonEmptyString(value.url) &&
-        (value.instructions === undefined || typeof value.instructions === 'string')
+        (value.instructions === undefined || typeof value.instructions === 'string') &&
+        (value.fullUrl === undefined || isNonEmptyString(value.fullUrl))
       );
     case 'device_code':
       return isNonEmptyString(value.userCode) && isNonEmptyString(value.verificationUri);

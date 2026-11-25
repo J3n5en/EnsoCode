@@ -26,6 +26,7 @@ import {
   StopReason,
   toBinary,
 } from './devin/proto';
+import type { PiLoginCallbacks } from './piProviderTypes';
 
 function fakeJwt(payload: Record<string, unknown>): string {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -159,6 +160,81 @@ describe('Devin provider 注册', () => {
     expect(typeof config.streamSimple).toBe('function');
     expect(typeof config.refreshModels).toBe('function');
     expect(config.oauth?.getApiKey({ access: 'tok', refresh: 'tok', expires: 1 })).toBe('tok');
+  });
+});
+
+describe('Devin 远程粘贴登录', () => {
+  const secret = 'pasted-devin-code';
+
+  async function loginWithPaste(
+    paste: (redirect: string, state: string, attempt: number) => string
+  ) {
+    let redirect = '';
+    let state = '';
+    let attempt = 0;
+    const messages: string[] = [];
+    const errors: Array<string | undefined> = [];
+    const tokenBodies: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://api.devin.ai/auth/cli/token') {
+        tokenBodies.push(String(init?.body ?? ''));
+        return new Response(JSON.stringify({ token: fakeJwt({ email: 'a@devin.test' }) }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('nope', { status: 404 });
+    }) as typeof fetch;
+    const callbacks: PiLoginCallbacks = {
+      onAuth: (info) => {
+        const url = new URL(info.url);
+        redirect = url.searchParams.get('redirect_uri') ?? '';
+        state = url.searchParams.get('state') ?? '';
+      },
+      onPrompt: async (prompt) => {
+        attempt += 1;
+        messages.push(prompt.message);
+        errors.push(
+          'error' in prompt && typeof prompt.error === 'string' ? prompt.error : undefined
+        );
+        return paste(redirect, state, attempt);
+      },
+      onDeviceCode: () => {},
+      onSelect: async () => undefined,
+    };
+    try {
+      const credential = await devinProviderConfig().oauth?.login(callbacks);
+      return { credential, messages, errors, tokenBodies, attempt };
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  it('手动粘贴 localhost 链接后用打桩的换 token 完成登录', async () => {
+    const result = await loginWithPaste(
+      (redirect, state) => `${redirect}?code=${secret}&state=${state}`
+    );
+    expect(result.attempt).toBe(1);
+    expect(result.credential?.access).toContain('.');
+    expect(result.tokenBodies).toHaveLength(1);
+    expect(JSON.parse(result.tokenBodies[0]).code).toBe(secret);
+    expect(result.messages.join('\n')).not.toContain(secret);
+  });
+
+  it('state 不匹配的粘贴被拒绝并重新询问，通过后才换 token', async () => {
+    const result = await loginWithPaste((redirect, state, attempt) =>
+      attempt === 1
+        ? `${redirect}?code=${secret}&state=wrong-state`
+        : `${redirect}?code=${secret}&state=${state}`
+    );
+    expect(result.attempt).toBe(2);
+    expect(result.messages[1]).toBe(result.messages[0]);
+    expect(result.errors[0]).toBeUndefined();
+    expect(result.errors[1]).toContain('does not match');
+    expect(result.messages.join('\n')).not.toContain(secret);
+    expect(result.tokenBodies).toHaveLength(1);
   });
 });
 
