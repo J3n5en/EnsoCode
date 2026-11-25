@@ -245,7 +245,9 @@ describe('buildDispatchFlightKeyframes', () => {
 
   it('偏移单调，并经过拱起、落地和缩小', () => {
     const offsets = frames.map((frame) => frame.offset);
-    expect(offsets).toEqual([0, 0.16, 0.3, 0.36, 0.42, 0.47, 0.7, 0.88, 0.96, 1]);
+    expect(offsets).toEqual([
+      0, 0.06, 0.187, 0.22, 0.243, 0.39, 0.41, 0.53, 0.71, 0.745, 0.84, 0.86, 0.96, 1,
+    ]);
     for (let index = 1; index < offsets.length; index += 1) {
       expect(offsets[index]).toBeGreaterThan(offsets[index - 1] ?? 0);
     }
@@ -253,17 +255,27 @@ describe('buildDispatchFlightKeyframes', () => {
       transform: 'translate(0px, 0px) scale(1) rotate(0deg)',
       opacity: 1,
     });
-    expect(frames[1]?.transform).toBe('translate(0px, -24px) scale(1.12) rotate(-6deg)');
-    expect(frames[2]?.transform).toBe('translate(0px, 100px) scale(1.2) rotate(0deg)');
-    expect(frames[3]?.transform).toBe('translate(0px, 103px) scale(0.92) rotate(0deg)');
+    expect(frames[1]?.transform).toBe('translate(0px, -24px) scale(1.1) rotate(-4deg)');
+    expect(frames[2]?.transform).toBe('translate(0px, 100px) scale(1.16) rotate(0deg)');
+    expect(frames[3]?.transform).toBe('translate(0px, 103px) scale(0.94) rotate(0deg)');
     expect(frames[5]?.transform).toBe('translate(0px, 100px) scale(1) rotate(0deg)');
-    expect(frames[6]?.transform).toBe('translate(26.9px, 40px) scale(0.75) rotate(4deg)');
-    expect(frames[7]?.transform).toBe('translate(100px, 20px) scale(0.53) rotate(0deg)');
-    expect(frames[8]).toMatchObject({
+    // 落卡落定亮相：0.22 之后位置完全停住，scale 缓缓收稳当呼吸，重复帧干脆收尾。
+    for (const index of [4, 5, 6]) {
+      expect(frames[index]?.transform).toContain('translate(0px, 100px)');
+    }
+    expect(frames[5]?.transform).toBe(frames[6]?.transform);
+    expect(frames[7]?.transform).toBe('translate(26.9px, 40px) scale(0.75) rotate(3deg)');
+    expect(frames[8]?.transform).toBe('translate(100px, 20px) scale(0.525) rotate(0deg)');
+    // 行缘落定亮相：0.71 之后位置完全停住，scale 缓缓收稳，重复帧干脆收尾。
+    for (const index of [9, 10, 11]) {
+      expect(frames[index]?.transform).toContain('translate(100px, 20px)');
+    }
+    expect(frames[10]?.transform).toBe(frames[11]?.transform);
+    expect(frames[12]).toMatchObject({
       transform: 'translate(125px, 20px) scale(0.5) rotate(0deg)',
       opacity: 1,
     });
-    expect(frames[9]).toMatchObject({
+    expect(frames[13]).toMatchObject({
       transform: 'translate(120px, 20px) scale(0.5) rotate(0deg)',
       opacity: 0,
     });

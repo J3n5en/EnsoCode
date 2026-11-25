@@ -205,7 +205,7 @@ describe('DispatchFlightLayer', () => {
       expect(offsets[index]).toBeGreaterThan(offsets[index - 1] ?? 0);
     }
     expect(recorded[0]?.options).toMatchObject({
-      duration: 1050,
+      duration: 3000,
       easing: 'cubic-bezier(0.45, 0, 0.2, 1)',
       fill: 'forwards',
     });
@@ -277,7 +277,7 @@ describe('DispatchFlightLayer', () => {
       enqueue();
     });
     await pump();
-    expect(recorded[0]?.options.duration).toBeLessThan(1050);
+    expect(recorded[0]?.options.duration).toBeLessThan(3000);
     expect(recorded[0]?.keyframes.at(-1)?.opacity).toBe(0);
     await act(async () => {
       recorded[0]?.finish();
