@@ -104,7 +104,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 
 | 锚点 | 位置 |
 | --- | --- |
-| `canvas` | 主窗口和设置窗口的画布。侧栏坐在上面。 |
+| `canvas` | 主窗口的画布。侧栏坐在上面。 |
 | `sidebar-toggle` | 展开 / 折叠侧栏的按钮。窗口顶栏左侧那个，移动端顶栏打开抽屉的按钮和抽屉底部的收起按钮也挂。 |
 | `search-button` | 「Search anything」搜索按钮。窗口顶栏那个和移动端抽屉底部那个。 |
 | `new-session` | 窗口顶栏的新建会话按钮。 |
@@ -142,7 +142,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 - `data-enso-activity`：所有主会话里优先级最高的状态。
 - `data-enso-session`：当前打开的会话的状态。没有打开会话时是 `idle`。
 
-`waiting` 包括等待回答的提问、等待审批的工具调用和能力确认。未读不算状态。设置窗口不写这两个属性。
+`waiting` 包括等待回答的提问、等待审批的工具调用和能力确认。未读不算状态。
 
 思考块 `[data-enso="thinking"]` 在思考进行中带 `data-live`，结束后去掉。
 
@@ -241,7 +241,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 
 调色板只换变量。主题的 `css` 是开放的，选择器不受限制，可以改应用里任意界面。因此带 `css` 的主题在安装和更新时要单独同意。对话框写的是「修改界面样式：主题 CSS 可以改变应用的任意界面」。一个插件只要有一项主题带了 `css`，就有这项能力。从没有变成有，要重新同意。不带 `css` 的主题没有这项。不要把样式写进 `permissions`，未知名字会被拒绝。
 
-主窗口和设置窗口的 CSP 里，`style-src` 只有 `'self'` 和 `'unsafe-inline'`。注入的 `<style>` 能生效，远程样式表和 `@import` 不能。`font-src` 只有 `'self'` 和 `data:`。`local-image:` 协议本身绕过 CSP。不要在主题 CSS 里写远程 `url()`。
+主窗口的 CSP 里，`style-src` 只有 `'self'` 和 `'unsafe-inline'`。注入的 `<style>` 能生效，远程样式表和 `@import` 不能。`font-src` 只有 `'self'` 和 `data:`。`local-image:` 协议本身绕过 CSP。不要在主题 CSS 里写远程 `url()`。
 
 主题 CSS 可以用相对 `url()` 引用插件目录里的图片和字体。扩展名是 png、jpg、jpeg、gif、webp、bmp、svg、jfif、avif、woff2、woff、ttf、otf。加载时按 CSS 文件所在目录解析，并改写成 `local-image://plugin-asset/...`。只改写 `url()`，`image-set("a.png")` 这类字符串写法要改成 `image-set(url("a.png"))`。越出插件目录或带反斜杠转义的地址不改写。只有已启用插件的文件能读到。
 

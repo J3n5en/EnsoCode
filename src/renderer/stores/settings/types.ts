@@ -315,8 +315,8 @@ export interface SettingsState {
   backgroundCodeOpacity: number;
   backgroundSizeMode: BackgroundSizeMode;
   /**
-   * 手动刷新计数器。设置窗口点「立即刷新」时 +1，借设置持久化的多窗口同步
-   * 广播传到主窗口，驱动 BackgroundLayer 重新随机选图 / 绕开远程缓存。
+   * 手动刷新计数器。设置页点「立即刷新」时 +1，
+   * 驱动 BackgroundLayer 重新随机选图 / 绕开远程缓存。
    */
   backgroundRefreshNonce: number;
 

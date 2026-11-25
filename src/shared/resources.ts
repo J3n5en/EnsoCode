@@ -250,7 +250,6 @@ export function parseWinProcesses(json: string): PsRow[] {
 
 export interface ChromiumPidKinds {
   main: ReadonlySet<number>;
-  settings: ReadonlySet<number>;
   browser: ReadonlySet<number>;
 }
 

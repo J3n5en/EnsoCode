@@ -436,7 +436,6 @@ export function staleRemoteSenders(pairId: string, page: string | undefined): Re
 }
 
 export const isRemoteMainSender = (id: number): boolean => byId.get(id)?.kind === 'main';
-export const isRemoteSettingsSender = (id: number): boolean => byId.get(id)?.kind === 'settings';
 export const hasRemoteMain = (): boolean =>
   [...byId.values()].some((sender) => sender.kind === 'main');
 

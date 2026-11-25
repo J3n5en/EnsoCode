@@ -4,13 +4,13 @@ import { type LogExportResult, parseLogExportHours, parseLogSummaryLevel } from 
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, BrowserWindow, dialog, type WebContents } from 'electron';
 import { collectErrorSummary, ERROR_SUMMARY_LIMIT, exportLogs } from '../services/appLogs';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 
 /** 最近一次导出的位置：「打开所在文件夹」只认它，renderer 不传路径 */
 let lastExportPath: string | null = null;
 
 function assertTrusted(webContentsId: number): void {
-  if (!isMainRenderer(webContentsId) && !isSettingsRenderer(webContentsId)) {
+  if (!isMainRenderer(webContentsId)) {
     throw new Error('Untrusted sender');
   }
 }

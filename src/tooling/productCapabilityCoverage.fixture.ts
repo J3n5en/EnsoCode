@@ -608,15 +608,16 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_REFRESH_DRAG_REGIONS: excluded(
     'macOS window-shape refresh after a layout change; not a user product action.'
   ),
-  WINDOW_OPEN_SETTINGS: surfaces('window.open-settings'),
   WINDOW_OPEN_DEV_TOOLS: excluded(
     'Host-only troubleshooting action that opens Chromium DevTools for the local main window.'
   ),
   WINDOW_TOGGLE_SIDEBAR: excluded(
     'Main-to-renderer transport for the macOS View menu; the toggle itself stays in the renderer.'
   ),
-  SETTINGS_DEEP_LINK: excluded('Settings window deep-link transport.'),
-  SETTINGS_DEEP_LINK_CONSUME: excluded('Settings window deep-link handshake.'),
+  SETTINGS_DEEP_LINK: excluded(
+    'Main-to-renderer push for tray, app menu and enso:// settings requests.'
+  ),
+  SETTINGS_DEEP_LINK_CONSUME: excluded('Main-window handshake for pending settings requests.'),
   WINDOW_POPUP_MENU: excluded('Native application menu popup; renderer chrome only.'),
   WINDOW_TAKE_OPEN_FOLDERS: excluded(
     'Startup handoff that opens a folder chosen in the Windows shell.'
@@ -958,7 +959,6 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   NODES_REMOVE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_RENAME: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
-  NODES_OPEN_SETTINGS: excluded('Remote node settings window transport; not an Enso capability.'),
   NODES_SWITCH: excluded('Remote node (desktop guest) view switching; not an Enso capability.'),
   NODES_ACTIVE: excluded('Remote node (desktop guest) view switching; not an Enso capability.'),
   NODES_ACTIVE_CHANGED: excluded(

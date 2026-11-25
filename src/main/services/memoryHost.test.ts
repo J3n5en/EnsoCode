@@ -36,7 +36,6 @@ vi.mock('electron', () => ({
 vi.mock('./renderers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./renderers')>()),
   isMainRenderer: (id: number) => id === 1,
-  isSettingsRenderer: () => false,
 }));
 vi.mock('../ipc/settings', () => ({ readSettings: () => null }));
 vi.mock('./chatModels', () => ({

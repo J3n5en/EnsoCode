@@ -21,7 +21,7 @@ import {
 } from '../services/extensionPlugins';
 import type { OwnerBindings } from '../services/extensionPlugins/injectTrust';
 import { redactSecrets } from '../services/memory/distill';
-import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { createContactCommands } from '../services/secretary/contact/commands';
 import { suggestGithubLogin } from '../services/secretary/contact/githubSuggest';
@@ -116,7 +116,7 @@ export interface SecretaryContacts {
 }
 
 function isEditor(webContentsId: number): boolean {
-  return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
+  return isMainRenderer(webContentsId);
 }
 
 function replyLang(profile: SecretaryProfile | null): ContactLang {

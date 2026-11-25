@@ -7,6 +7,7 @@ import {
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
+import { openSettingsInMainWindow } from '../windows/mainSettings';
 import type { AppRestartState } from './appRestart';
 import { sendToLocalMain } from './renderers';
 
@@ -72,6 +73,8 @@ export function macAppMenuTemplate(
       label: APP_DISPLAY_NAME,
       submenu: [
         { role: 'about', label: `About ${APP_DISPLAY_NAME}` },
+        { type: 'separator' },
+        { label: translate(locale, 'Settings…'), click: () => openSettingsInMainWindow() },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },

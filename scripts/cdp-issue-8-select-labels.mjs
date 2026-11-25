@@ -137,11 +137,9 @@ async function main() {
     })()`
   );
 
-  await evalExpr(main.send, `window.electronAPI.window.openSettings()`);
-  const settingsTarget = await waitForPage((p) => p.url.includes('settings.html'));
-  const settings = await connect(settingsTarget.webSocketDebuggerUrl);
-  await settings.send('Runtime.enable');
-  await settings.send('Page.enable');
+  // 设置在主窗口里原地打开，沿用主窗口这条连接
+  await evalExpr(main.send, 'window.__stores.settingsView.open()');
+  const settings = main;
   await new Promise((r) => setTimeout(r, 800));
 
   const clickNav = (label) =>
@@ -236,7 +234,6 @@ async function main() {
   const failed = Object.entries(report.assertions).filter(([, ok]) => !ok);
   console.log(JSON.stringify(report, null, 2));
   main.ws.close();
-  settings.ws.close();
   if (failed.length) {
     throw new Error(`CDP assertions failed: ${failed.map(([k]) => k).join(', ')}`);
   }

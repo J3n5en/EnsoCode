@@ -4,11 +4,7 @@
  */
 
 import { coalesceRuns } from '@shared/coalesceRuns';
-import {
-  REMOTE_LOCAL_PREFIXES,
-  type RemoteBridge,
-  type RemoteFrameKind,
-} from '@shared/remoteBridge';
+import { REMOTE_LOCAL_PREFIXES, type RemoteBridge } from '@shared/remoteBridge';
 import {
   REREAD_MARK,
   RemoteReadClient,
@@ -24,15 +20,14 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { decodeRemoteValue, encodeRemoteValue } from '../../packages/pair/src/remote';
 import { isRemoteChannelAllowed } from '../main/services/remoteRenderer/channels';
 
-// 手机壳与节点设置窗口里 renderer 是 iframe，桥在父页面；桌面节点层的主界面是顶层文档，parent 即自身
+// 手机壳里 renderer 是 iframe，桥在父页面；桌面节点层的主界面是顶层文档，parent 即自身
 const bridge = (window.parent as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote;
 if (!bridge) {
   throw new Error('EnsoCode remote bridge is missing');
 }
 
 export const remoteBridge: RemoteBridge = bridge;
-const kind: RemoteFrameKind = /settings\.html$/.test(location.pathname) ? 'settings' : 'main';
-const frame = bridge.attach(kind);
+const frame = bridge.attach('main');
 addEventListener('pagehide', () => frame.close());
 
 /** 结果按内容 hash 缓存的只读通道：设置页与 iframe 重载时可直接复用（宿主回 same/增量） */
@@ -224,7 +219,7 @@ export const remoteFrame = {
 
 /**
  * 桌面远程节点层：本机窗口、节点切换与系统通知交给所在电脑的 main（由它白名单裁决），
- * 其余照旧经隧道到宿主。手机壳与节点设置窗口没有 bridge.local，不走这里。
+ * 其余照旧经隧道到宿主。手机壳没有 bridge.local，不走这里。
  */
 const native = bridge.local;
 const isNativeChannel = (channel: string): boolean =>
@@ -281,16 +276,14 @@ export async function uploadToHost(file: File): Promise<string | null> {
 const local: Record<string, (...args: unknown[]) => unknown> = {
   [IPC_CHANNELS.WINDOW_MINIMIZE]: () => undefined,
   [IPC_CHANNELS.WINDOW_MAXIMIZE]: () => undefined,
-  [IPC_CHANNELS.WINDOW_CLOSE]: () => {
-    if (kind === 'settings') bridge.closeSettings();
-  },
+  [IPC_CHANNELS.WINDOW_CLOSE]: () => undefined,
   [IPC_CHANNELS.WINDOW_IS_MAXIMIZED]: () => false,
   [IPC_CHANNELS.WINDOW_IS_FULLSCREEN]: () => false,
   [IPC_CHANNELS.WINDOW_SET_TITLE_BAR_APPEARANCE]: () => undefined,
   [IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE]: () => undefined,
-  [IPC_CHANNELS.WINDOW_OPEN_SETTINGS]: (link) => bridge.openSettings(link),
   [IPC_CHANNELS.WINDOW_POPUP_MENU]: () => null,
-  [IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME]: () => bridge.consumeSettingsLink() ?? null,
+  // 远程界面没有托盘、应用菜单和 enso://，不会有主进程转来的「打开设置」
+  [IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME]: () => null,
   [IPC_CHANNELS.DIALOG_SELECT_DIRECTORY]: () => {
     const path = window.prompt('输入宿主电脑上的目录绝对路径 / Absolute directory path on host');
     return path?.trim() || null;

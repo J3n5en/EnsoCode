@@ -8,12 +8,7 @@ import {
 } from '@shared/resources';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { remoteLeaderId } from '../services/remoteRenderer/senders';
-import {
-  isMainRenderer,
-  isSettingsRenderer,
-  localMainContents,
-  rendererById,
-} from '../services/renderers';
+import { isMainRenderer, localMainContents, rendererById } from '../services/renderers';
 import {
   cancelStorageScan,
   cleanStorage,
@@ -26,7 +21,7 @@ const CLEAN_TIMEOUT_MS = 60_000;
 const pendingCleans = new Map<string, (removed: number) => void>();
 
 function assertTrusted(webContentsId: number): void {
-  if (!isMainRenderer(webContentsId) && !isSettingsRenderer(webContentsId)) {
+  if (!isMainRenderer(webContentsId)) {
     throw new Error('Untrusted sender');
   }
 }

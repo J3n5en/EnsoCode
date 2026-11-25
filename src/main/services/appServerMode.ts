@@ -34,12 +34,11 @@ import {
   sendToWindow,
 } from '../windows/createAppWindow';
 import { createMainWindow, getMainWindow, isMainWindowAlive } from '../windows/MainWindow';
-import { getSettingsWindow } from '../windows/SettingsWindow';
+import { openSettingsInMainWindow } from '../windows/mainSettings';
 import { isVerifyLaunch, presentWindow } from '../windows/verifyLaunch';
 import { allowAppQuit, destroyWithoutCloseConfirm } from './appCloseConfirm';
 import type { AppRestartState } from './appRestart';
 import { browserHost } from './browserHost';
-import { closeNodeSettingsWindows } from './nodeRemote';
 import { refreshPowerKeepAlive } from './pairHost';
 import { setPairHeadless } from './pairSessionHost';
 
@@ -146,6 +145,10 @@ export function rebuildTrayMenu(): void {
       {
         label: trayToggleLabel(zh),
         click: () => toggleTrayMode(),
+      },
+      {
+        label: zh ? '设置…' : 'Settings…',
+        click: () => openSettingsInMainWindow(),
       },
       { type: 'separator' },
       {
@@ -260,9 +263,6 @@ export async function enterServerMode(): Promise<void> {
   active = true;
   setPairHeadless(true);
   refreshPowerKeepAlive();
-  const settings = getSettingsWindow();
-  if (settings && !settings.isDestroyed()) settings.close();
-  closeNodeSettingsWindows();
   ensureTray();
   await browserHost.hibernateAll();
   // 等待期间用户已唤回（Dock / 托盘 / 快捷键 / 二次启动）：不能再销毁窗口、隐藏 Dock

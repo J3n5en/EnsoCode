@@ -107,11 +107,11 @@ describe('NodeRemoteTunnel', () => {
 
   it('资源：分片重组后按 id 返回，上线时补发在途请求', async () => {
     const { sent, tunnel } = setup();
-    const asset = tunnel.fetchAsset('r/settings.html');
+    const asset = tunnel.fetchAsset('r/index.html');
     expect(sent).toEqual([]);
     tunnel.setOnline(true);
     const req = sent[1] as Extract<RemoteToHost, { type: 'asset-get' }>;
-    expect(req).toMatchObject({ type: 'asset-get', path: 'r/settings.html' });
+    expect(req).toMatchObject({ type: 'asset-get', path: 'r/index.html' });
     const frame: HostToRemote = {
       type: 'asset',
       id: req.id,

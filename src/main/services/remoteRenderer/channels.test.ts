@@ -28,7 +28,6 @@ describe('isRemoteChannelAllowed', () => {
 
   it('denies host-native and host-desktop side effects', () => {
     for (const ch of [
-      IPC_CHANNELS.WINDOW_OPEN_SETTINGS,
       IPC_CHANNELS.DIALOG_SELECT_DIRECTORY,
       IPC_CHANNELS.FILES_REVEAL,
       IPC_CHANNELS.FILES_REVEAL_EXTERNAL,
@@ -93,6 +92,6 @@ describe('isRemoteChannelAllowed', () => {
       expect(isRemoteChannelAllowed(ch, true)).toBe(false);
       expect(isRemoteChannelAllowed(ch, false, true)).toBe(true);
     }
-    expect(isRemoteChannelAllowed(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, true, true)).toBe(false);
+    expect(isRemoteChannelAllowed(IPC_CHANNELS.WINDOW_OPEN_DEV_TOOLS, true, true)).toBe(false);
   });
 });

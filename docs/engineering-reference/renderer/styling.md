@@ -112,7 +112,7 @@ style={{ backgroundColor: theme.background }}
   「面板 alpha + 常数」的公式——低可见度下会封顶到 1，用户感知为功能失效。
 
 改完在背景图开启状态下截图对比一次；`--bg-code-alpha` 默认 0.65，`useBackgroundImage`
-只在主窗口 `App.tsx` 调用，设置窗口不挂背景。
+只在主窗口 `App.tsx` 调用。
 
 ## 尺寸惯例
 

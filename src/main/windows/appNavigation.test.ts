@@ -10,7 +10,7 @@ const RENDERER = 'file:///Applications/EnsoCode.app/Contents/Resources/app.asar/
 describe('isAppNavigationAllowed 开发期（dev server）', () => {
   it('同源的应用页面放行，包括带 query / hash 的地址', () => {
     expect(isAppNavigationAllowed('http://localhost:5173/index.html', DEV)).toBe(true);
-    expect(isAppNavigationAllowed('http://localhost:5173/settings.html?tab=a#b', DEV)).toBe(true);
+    expect(isAppNavigationAllowed('http://localhost:5173/index.html?tab=a#b', DEV)).toBe(true);
   });
 
   it('外站、同主机不同端口都拒绝', () => {
@@ -27,7 +27,6 @@ describe('isAppNavigationAllowed 开发期（dev server）', () => {
 describe('isAppNavigationAllowed 生产（file://）', () => {
   it('renderer 目录内的页面放行（reload、其它入口、插件壳页面）', () => {
     expect(isAppNavigationAllowed(PROD, PROD)).toBe(true);
-    expect(isAppNavigationAllowed(`${RENDERER}/settings.html`, PROD)).toBe(true);
     expect(isAppNavigationAllowed(`${RENDERER}/plugin-view.html`, PROD)).toBe(true);
     expect(isAppNavigationAllowed(`${RENDERER}/assets/page.html?x=1#y`, PROD)).toBe(true);
   });

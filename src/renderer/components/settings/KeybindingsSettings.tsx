@@ -58,7 +58,7 @@ export function KeybindingsSettings() {
   );
 }
 
-/** 设置窗口不挂 PluginUiHost，直接拉插件列表 */
+/** 直接拉插件列表，不依赖 PluginUiHost 是否已挂载 */
 function usePluginCommandRefs(): PluginCommandRef[] {
   const [commands, setCommands] = React.useState<PluginCommandRef[]>([]);
   React.useEffect(() => {

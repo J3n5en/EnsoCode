@@ -39,9 +39,6 @@ describe('parseLocalCall', () => {
       10,
       20,
     ]);
-    expect(call(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, { section: 'providers' })?.args).toEqual([
-      { section: 'providers' },
-    ]);
     expect(call(IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, 's1')?.args).toEqual(['s1']);
     expect(call(IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, null)?.args).toEqual([null]);
   });
@@ -51,7 +48,7 @@ describe('parseLocalCall', () => {
       IPC_CHANNELS.NODES_PAIR,
       IPC_CHANNELS.NODES_REMOVE,
       IPC_CHANNELS.NODES_RENAME,
-      IPC_CHANNELS.NODES_OPEN_SETTINGS,
+      'window:open-settings',
       IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS,
       IPC_CHANNELS.WINDOW_INSTALL_SHELL_INTEGRATION,
       IPC_CHANNELS.WINDOW_SET_TITLE_BAR_APPEARANCE,
@@ -132,8 +129,8 @@ const attachNodeNavigationGuard = (contents: WebContents, nodeId: string) =>
 /** 节点界面带 __ensoRemote：主 frame 无论经链接、重定向还是 frame 跳转，都只能停在该节点的 enso-node 页面 */
 describe('attachNodeNavigationGuard', () => {
   afterEach(() => vi.restoreAllMocks());
-  const own = nodeShellUrl('n1', 'main').replace('shell.html?page=main', 'r/index.html');
-  const other = nodeShellUrl('n2', 'main');
+  const own = nodeShellUrl('n1').replace('shell.html', 'r/index.html');
+  const other = nodeShellUrl('n2');
 
   it('主 frame 跳转与重定向只放行同一节点的页面，外链交给系统浏览器', () => {
     const open = vi.spyOn(shell, 'openExternal').mockResolvedValue();

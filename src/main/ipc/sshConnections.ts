@@ -2,7 +2,7 @@ import { ipcMain } from '@platform';
 import { resolveSshTarget } from '@shared/ssh';
 import type { SshHostKeyChallenge } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { isMainRenderer } from '../services/renderers';
 import { getSshConnectionStore, type SshConnectionUpsert } from '../services/sshConnectionStore';
 import { trustSshHostKey } from '../services/sshHostKey';
 import { type SshProbeError, sshListRemoteDirs, sshProbeLogin } from '../services/sshProbe';
@@ -36,7 +36,7 @@ function trustOutcome(failure: SshProbeError | null): { ok: true } | { ok: false
 }
 
 function isTrustedWindow(webContentsId: number): boolean {
-  return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
+  return isMainRenderer(webContentsId);
 }
 
 function parseUpsert(value: unknown): SshConnectionUpsert | null {
