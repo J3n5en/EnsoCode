@@ -29,14 +29,14 @@ export function MemoryTreeView({
 
   if (tree.length === 0) {
     return (
-      <p className="border-border border-b py-6 text-[13px] text-muted-foreground">
+      <p className="py-6 text-[13px] text-muted-foreground">
         {loading ? t('Loading…') : t('No memories yet.')}
       </p>
     );
   }
 
   return (
-    <ul className="divide-y border-border border-b">
+    <ul className="divide-y divide-border/60">
       {tree.map((group) => {
         const expanded = open.has(group.id);
         const memoryIds = (group.children ?? [])

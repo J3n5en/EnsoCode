@@ -1,6 +1,8 @@
+import { AnimatePresence, MotionGlobalConfig, motion, useReducedMotion } from 'framer-motion';
 import { Check, ChevronRight } from 'lucide-react';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
+import { heightVariants } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 interface RowContextValue {
@@ -41,11 +43,18 @@ function useSavedFlash(): [boolean, () => void] {
   return [saved, mark];
 }
 
-export function SettingsSaved() {
+export function SettingsSaved({ className }: { className?: string } = {}) {
   const { t } = useI18n();
   return (
-    <span role="status" className="flex items-center gap-1 text-[12px] text-muted-foreground">
-      <Check className="size-3.5 text-success" />
+    <span
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'settings-saved-pop inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-0.5 font-normal text-[11px] leading-none text-success',
+        className
+      )}
+    >
+      <Check className="size-3 shrink-0" />
       {t('Saved')}
     </span>
   );
@@ -53,7 +62,56 @@ export function SettingsSaved() {
 
 /** 内容本身是个对象（图表、预览）：只这一层边框，里面不能再画框 */
 export function SettingsPreview({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-settings-preview="" className={cn('rounded-lg border', className)} {...props} />;
+  return (
+    <div
+      data-slot="settings-preview"
+      data-settings-preview=""
+      className={cn(
+        'overflow-hidden rounded-[12px] border border-border/80 bg-muted/35 dark:bg-card',
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+export function SettingsEmptyState({
+  icon: Icon,
+  title,
+  description,
+  actions,
+  compact = false,
+}: {
+  icon?: React.ElementType;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  actions?: React.ReactNode;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      data-slot="settings-empty"
+      className={cn(
+        'flex flex-col items-center justify-center px-4 text-center',
+        compact ? 'py-6' : 'py-9'
+      )}
+    >
+      {Icon && (
+        <div className="mb-3 flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-4" />
+        </div>
+      )}
+      <p className="font-medium text-[13px] text-foreground">{title}</p>
+      {description && (
+        <p className="mt-1 max-w-sm text-[12px] text-muted-foreground leading-[18px]">
+          {description}
+        </p>
+      )}
+      {actions && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">{actions}</div>
+      )}
+    </div>
+  );
 }
 
 export function SettingsPage({
@@ -72,16 +130,16 @@ export function SettingsPage({
   children?: React.ReactNode;
 }) {
   return (
-    <div data-slot="settings-page" className="mx-auto w-full max-w-(--settings-content-max) pb-10">
+    <div data-slot="settings-page" className="mx-auto w-full max-w-(--settings-content-max) pb-12">
       {/* 标题区按 280px 参与换行：操作按钮放不下时整组换到标题下面，标题不被挤成竖排 */}
       <header data-settings-row={rowId} className="flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="min-w-[min(100%,280px)] grow basis-[280px]">
-          <h1 className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-semibold text-[18px] leading-[26px]">
+          <h1 className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-semibold text-[19px] leading-[26px] tracking-[-0.015em]">
             {title}
             {badge}
           </h1>
           {description && (
-            <p className="mt-0.5 text-[13px] text-muted-foreground leading-5">{description}</p>
+            <p className="mt-1 text-[13px] text-muted-foreground leading-5">{description}</p>
           )}
         </div>
         {actions && (
@@ -100,6 +158,7 @@ export function SettingsSection({
   description,
   actions,
   tone,
+  bare = false,
   rowId,
   children,
 }: {
@@ -107,6 +166,7 @@ export function SettingsSection({
   description?: React.ReactNode;
   actions?: React.ReactNode;
   tone?: 'danger';
+  bare?: boolean;
   rowId?: string;
   children?: React.ReactNode;
 }) {
@@ -114,12 +174,12 @@ export function SettingsSection({
   return (
     <section data-settings-row={rowId} className="mt-(--settings-section-gap)">
       {hasHead && (
-        <div className="mb-2 flex flex-wrap items-end gap-x-4 gap-y-2">
+        <div className="mb-2 flex flex-wrap items-end gap-x-4 gap-y-2 px-1">
           <div className="min-w-0 flex-1">
             {title && (
               <h2
                 className={cn(
-                  'font-semibold text-[14px] leading-5',
+                  'font-semibold text-[13px] leading-5 tracking-[-0.005em] text-foreground/85',
                   tone === 'danger' && 'text-destructive-text'
                 )}
               >
@@ -135,7 +195,22 @@ export function SettingsSection({
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
       )}
-      <div className="border-border border-t">{children}</div>
+      {bare ? (
+        <div>{children}</div>
+      ) : (
+        <div
+          data-slot="settings-group"
+          data-tone={tone}
+          className={cn(
+            'empty:hidden overflow-hidden rounded-[12px] border border-border/80 bg-muted/35 dark:bg-card',
+            'shadow-[0_1px_2px_0_oklch(0_0_0/0.025)] dark:shadow-none',
+            tone === 'danger' &&
+              'border-destructive/30 bg-destructive/[0.03] dark:bg-destructive/[0.06]'
+          )}
+        >
+          {children}
+        </div>
+      )}
     </section>
   );
 }
@@ -149,6 +224,7 @@ export interface SettingsRowProps {
   /** 标签左侧的小元素（展开箭头、图标） */
   leading?: React.ReactNode;
   indent?: boolean;
+  interactive?: boolean;
   children?: React.ReactNode;
 }
 
@@ -159,6 +235,7 @@ export function SettingsRow({
   status,
   leading,
   indent = false,
+  interactive = false,
   children,
 }: SettingsRowProps) {
   const base = React.useId();
@@ -172,32 +249,38 @@ export function SettingsRow({
     }),
     [base, description, markSaved]
   );
-  const trailing = saved || status || children;
+  const trailing = status || children;
   return (
     <RowContext.Provider value={context}>
       <div
         data-slot="settings-row"
         data-settings-row={rowId}
         className={cn(
-          'flex flex-wrap items-center gap-x-6 gap-y-2 border-border border-b',
-          indent ? 'min-h-[44px] py-2 pl-10' : 'min-h-(--settings-row-min) py-3'
+          'flex flex-wrap items-center gap-x-6 gap-y-2 transition-colors duration-150',
+          indent
+            ? 'min-h-[44px] py-2.5 pl-10 pr-4 max-sm:pl-7 max-sm:pr-3'
+            : 'min-h-(--settings-row-min) px-4 py-3 max-sm:px-3',
+          interactive && 'hover:bg-accent/35'
         )}
       >
         <div className="flex min-w-[min(100%,12rem)] flex-1 items-center gap-2">
           {leading}
           <div className="min-w-0 flex-1">
-            <label
-              id={context.labelId}
-              htmlFor={context.controlId}
-              className={cn('block text-[13px] leading-5', !indent && 'font-medium')}
-            >
-              {label}
-            </label>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <label
+                id={context.labelId}
+                htmlFor={context.controlId}
+                className={cn('block text-[13px] leading-5', !indent && 'font-medium')}
+              >
+                {label}
+              </label>
+              {saved && <SettingsSaved />}
+            </div>
             {description && (
               // div：说明里可能放额度条这类块级内容
               <div
                 id={context.descriptionId}
-                className="mt-px text-[12px] text-muted-foreground leading-[18px]"
+                className="mt-0.5 text-[12px] text-muted-foreground leading-[18px]"
               >
                 {description}
               </div>
@@ -206,7 +289,6 @@ export function SettingsRow({
         </div>
         {trailing && (
           <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
-            {saved && <SettingsSaved />}
             {status}
             {children}
           </div>
@@ -229,7 +311,7 @@ export function SettingsExpandableRow({
   children,
   label,
   ...row
-}: Omit<SettingsRowProps, 'leading' | 'indent' | 'children'> & {
+}: Omit<SettingsRowProps, 'leading' | 'indent' | 'interactive' | 'children'> & {
   defaultOpen?: boolean;
   /** 受控展开：外部需要主动展开（例如校验失败要露出错误）时传 */
   open?: boolean;
@@ -241,6 +323,8 @@ export function SettingsExpandableRow({
   const [ownOpen, setOwnOpen] = React.useState(defaultOpen);
   const open = openProp ?? ownOpen;
   const regionId = React.useId();
+  const reducedMotion = useReducedMotion();
+  const reduced = reducedMotion === true || MotionGlobalConfig.skipAnimations === true;
   // 列表行点名字是展开；拦掉 label 的默认激活，免得顺手切了右侧的启用开关
   const setOpen = (next: boolean) => {
     setOwnOpen(next);
@@ -251,9 +335,10 @@ export function SettingsExpandableRow({
     setOpen(!open);
   };
   return (
-    <>
+    <div data-slot="settings-expandable">
       <SettingsRow
         {...row}
+        interactive
         label={
           // biome-ignore lint/a11y/useKeyWithClickEvents: 键盘走左侧的展开按钮
           <span className="cursor-pointer" onClick={toggle}>
@@ -267,15 +352,46 @@ export function SettingsExpandableRow({
             aria-controls={regionId}
             aria-label={open ? t('Collapse') : t('Expand')}
             onClick={() => setOpen(!open)}
-            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="relative -ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
           >
-            <ChevronRight className={cn('size-4 transition-transform', open && 'rotate-90')} />
+            <ChevronRight
+              className={cn(
+                'size-4 transition-transform duration-200 ease-[var(--ease-smooth-out)]',
+                open && 'rotate-90'
+              )}
+            />
           </button>
         }
       >
         {control}
       </SettingsRow>
-      {open && <div id={regionId}>{children}</div>}
-    </>
+      {reduced ? (
+        open ? (
+          <div
+            id={regionId}
+            data-slot="settings-sub-group"
+            className="overflow-hidden border-t border-border/60 bg-muted/45 dark:bg-background/40"
+          >
+            {children}
+          </div>
+        ) : null
+      ) : (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              id={regionId}
+              data-slot="settings-sub-group"
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={heightVariants}
+              className="overflow-hidden border-t border-border/60 bg-muted/45 dark:bg-background/40"
+            >
+              {children}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
+    </div>
   );
 }

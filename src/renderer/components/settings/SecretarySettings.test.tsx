@@ -486,9 +486,11 @@ describe('设置 → 秘书：技能分组', () => {
     for (const empty of empties) {
       let el: Element | null = empty;
       while (el && el !== section) {
-        expect(isBoxedClassName(el.getAttribute('class') ?? ''), el.outerHTML.slice(0, 80)).toBe(
-          false
-        );
+        if (el.getAttribute('data-slot') !== 'settings-group') {
+          expect(isBoxedClassName(el.getAttribute('class') ?? ''), el.outerHTML.slice(0, 80)).toBe(
+            false
+          );
+        }
         el = el.parentElement;
       }
     }

@@ -25,7 +25,7 @@ function pageSources(): { file: string; boxes: number }[] {
   return out;
 }
 
-/** 设置页内容渲染在主区那一层卡片里，页面代码再画任何带框容器就是卡片套卡片：没有例外，全部扫描 */
+/** Settings pages use `<SettingsSection>` (`settings-group`) and `<SettingsPreview>` from `kit/`; no page may draw ad-hoc bordered/rounded boxes or nest grouped containers. */
 describe('设置页不套卡片', () => {
   it('没有任何页面画带框容器', () => {
     const pages = pageSources();

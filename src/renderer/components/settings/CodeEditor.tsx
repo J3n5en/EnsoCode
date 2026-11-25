@@ -70,7 +70,7 @@ export function CodeEditor({
   }
 
   return (
-    <SettingsPreview className={cn('w-full overflow-hidden', className)}>
+    <SettingsPreview data-code-editor="" className={cn('w-full overflow-hidden', className)}>
       <EditProvider createEditor={createEditor}>
         <Virtualizer style={{ height: '100%', overflow: 'auto' }}>
           <File

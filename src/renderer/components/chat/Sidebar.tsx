@@ -167,7 +167,12 @@ import {
   subscribeCollapsedProjects,
 } from '@/lib/importLocalProject';
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
-import { heightVariants, springStandard } from '@/lib/motion';
+import {
+  heightVariants,
+  sidebarWidthTransition,
+  springStandard,
+  usePrefersReducedMotion,
+} from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
 import { secretaryConversationIds, secretaryUnreadCount } from '@/lib/secretaryEntry';
 import { openSecretarySettings } from '@/lib/secretarySettingsLink';
@@ -240,13 +245,15 @@ const SECRETARY_FOLDS_KEY = 'enso-collapsed-secretaries';
 const SECRETARY_VISIBLE_LIMIT = 3;
 
 const ICON_BUTTON_CLASS =
-  'flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
+  'flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-[background-color,color,scale,transform] duration-150 hover:bg-foreground/5 hover:text-foreground active:scale-[0.95] motion-reduce:transition-none motion-reduce:active:scale-100';
 /** 分区标题右侧的悬停按钮；无悬停的触屏常显 */
 const SECTION_ACTION_CLASS =
   '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100';
 
 interface SidebarProps {
   width?: number;
+  /** 拖拽调宽进行中：宽度瞬时跟手，弹簧不追手抖 */
+  resizing?: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onOpenSearch?: () => void;
@@ -256,12 +263,14 @@ interface SidebarProps {
 
 export function Sidebar({
   width,
+  resizing,
   collapsed,
   onToggleCollapse,
   onOpenSearch,
   onNavigate,
 }: SidebarProps) {
   const { t, locale } = useI18n();
+  const reduceMotion = usePrefersReducedMotion();
   const projects = useSettingsStore((state) => state.projects);
   const chromeKind = useWindowChromeKind();
   const mobile = chromeKind === 'mobile';
@@ -1103,7 +1112,7 @@ export function Sidebar({
     <motion.aside
       initial={false}
       animate={{ width: collapsed ? 48 : width }}
-      transition={springStandard}
+      transition={sidebarWidthTransition({ resizing, reducedMotion: reduceMotion })}
       data-enso="sidebar"
       className="flex shrink-0 flex-col overflow-hidden"
     >

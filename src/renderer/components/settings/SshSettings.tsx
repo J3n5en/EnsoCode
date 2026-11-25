@@ -1,6 +1,7 @@
 import type { SshAuth, SshConnection, SshHostKeyChallenge } from '@shared/types';
-import { Loader2, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Terminal, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { hostKeyFromSshFailure, SshHostKeyDialog } from '@/components/chat/SshHostKeyDialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,7 +24,14 @@ import {
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsButton, SettingsPage, SettingsRow, SettingsSection, SettingsSelect } from './kit';
+import {
+  SettingsButton,
+  SettingsEmptyState,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+} from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
 
 const SSH_TIMEOUT_OPTIONS = [10, 15, 30, 60, 120, 300];
@@ -48,6 +56,7 @@ export function SshSettings() {
     challenge: SshHostKeyChallenge;
   } | null>(null);
   const [trusting, setTrusting] = React.useState(false);
+  const [pendingRemove, setPendingRemove] = React.useState<SshConnection | null>(null);
 
   const reload = React.useCallback(() => {
     void window.electronAPI.sshConnections.list().then(setConnections);
@@ -167,16 +176,23 @@ export function SshSettings() {
     >
       {testHint && <p className="mt-3 text-[13px] text-muted-foreground">{testHint}</p>}
       <SettingsSection>
-        <ul>
-          {connections.length === 0 && (
-            <li className="border-border border-b py-6 text-[13px] text-muted-foreground">
-              {t('No SSH connections yet')}
-            </li>
-          )}
-          {connections.map((connection) => (
-            <li
+        {connections.length === 0 ? (
+          <SettingsEmptyState
+            compact
+            icon={Terminal}
+            title={t('No SSH connections yet')}
+            actions={
+              <SettingsButton variant="default" size="xs" onClick={openCreate}>
+                <Plus className="h-3.5 w-3.5" />
+                {t('Add connection')}
+              </SettingsButton>
+            }
+          />
+        ) : (
+          connections.map((connection) => (
+            <div
               key={connection.id}
-              className="flex flex-wrap items-center gap-2 border-border border-b py-2"
+              className="flex flex-wrap items-center gap-2 px-4 py-2.5 max-sm:px-3"
               data-settings-row={`ssh.${connection.id}`}
             >
               <button
@@ -202,14 +218,36 @@ export function SshSettings() {
                   t('Test')
                 )}
               </SettingsButton>
-              <Button size="icon-sm" variant="ghost" onClick={() => void remove(connection.id)}>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t('Delete')}
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => setPendingRemove(connection)}
+              >
                 <Trash2 className="h-4 w-4" />
               </Button>
-            </li>
-          ))}
-        </ul>
+            </div>
+          ))
+        )}
         <SshTimeoutRow />
       </SettingsSection>
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(openState) => {
+          if (!openState) setPendingRemove(null);
+        }}
+        title={t('Delete SSH connection?')}
+        description={
+          pendingRemove
+            ? t('This permanently deletes "{{name}}".', { name: pendingRemove.name })
+            : undefined
+        }
+        confirmLabel={t('Delete')}
+        onConfirm={() => {
+          if (pendingRemove) void remove(pendingRemove.id);
+        }}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">

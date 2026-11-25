@@ -36,17 +36,25 @@ import { NewGroupDialog } from './NewGroupDialog';
 import { NewTeamDialog } from './NewTeamDialog';
 
 const RAIL_BUTTON =
-  'relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+  'relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,scale,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-[0.95] motion-reduce:transition-none motion-reduce:active:scale-100';
 
 interface BotViewProps {
   sidebarWidth: number;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onResize: (deltaX: number) => void;
+  /** 双击拖拽手柄复位到默认宽度 */
+  onResetSidebarWidth?: () => void;
 }
 
 /** Bot 模式整块内容区：成员/群聊侧栏 + 聊天 / 收件箱 */
-export function BotView({ sidebarWidth, collapsed, onToggleCollapse, onResize }: BotViewProps) {
+export function BotView({
+  sidebarWidth,
+  collapsed,
+  onToggleCollapse,
+  onResize,
+  onResetSidebarWidth,
+}: BotViewProps) {
   const mobile = useWindowChromeKind() === 'mobile';
   const { t } = useI18n();
   const view = useBotsStore((s) => s.view);
@@ -189,7 +197,7 @@ export function BotView({ sidebarWidth, collapsed, onToggleCollapse, onResize }:
             onNewTeam={openTeam}
             onStartFromGoal={() => setGoalOpen(true)}
           />
-          <ResizeHandle onResize={onResize} />
+          <ResizeHandle onResize={onResize} onReset={onResetSidebarWidth} />
         </>
       )}
 

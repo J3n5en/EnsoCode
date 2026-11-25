@@ -2,6 +2,7 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { closeSettings, openSettings, useAppViewStore } from '@/stores/appView';
 import App from './App';
+import { useRestartOverlayStore } from './components/app/RestartWaitDialog';
 import { DiffWorkerPool } from './components/chat/DiffWorkerPool';
 import { syncOverlayGuard } from './lib/overlayGuard';
 import { installScrollbarActivity } from './lib/scrollbars';
@@ -27,6 +28,7 @@ if (import.meta.env.DEV) {
     sidePanel: useSidePanelStore,
     remoteNodes: useRemoteNodesStore,
     bots: useBotsStore,
+    restartOverlay: useRestartOverlayStore,
     secretary: useSecretaryStore,
     appView: useAppViewStore,
     settingsView: { open: openSettings, close: closeSettings },

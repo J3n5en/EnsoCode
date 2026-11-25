@@ -98,13 +98,14 @@ function ListField({
   return (
     <div data-settings-row={rowId} className="min-w-0">
       <SettingsRow label={label} description={hint} />
-      <Textarea
-        rows={3}
-        className="my-2"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => onCommit(draft.split('\n'))}
-      />
+      <div className="px-4 pb-3 max-sm:px-3">
+        <Textarea
+          rows={3}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onCommit(draft.split('\n'))}
+        />
+      </div>
     </div>
   );
 }
@@ -118,7 +119,7 @@ function TryIt({ settings }: { settings: PrivacyMaskSettings }) {
       title={t('Try it')}
       description={t('Runs locally. Nothing is remembered or sent anywhere.')}
     >
-      <div className="min-w-0 border-border border-b py-3">
+      <div className="min-w-0 px-4 py-3 max-sm:px-3">
         <Textarea
           rows={3}
           value={input}
@@ -126,7 +127,7 @@ function TryIt({ settings }: { settings: PrivacyMaskSettings }) {
           onChange={(e) => setInput(e.target.value)}
         />
         {input && (
-          <div data-settings-preview className="mt-3 space-y-1">
+          <div className="mt-3 space-y-1">
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs">
               {result.text}
             </pre>
@@ -221,7 +222,7 @@ function Records() {
         </>
       }
     >
-      <div className="flex flex-wrap gap-4 border-border border-b py-3 text-[13px]">
+      <div className="flex flex-wrap gap-4 px-4 py-3 text-[13px] max-sm:px-3">
         {(Object.keys(ACTION_LABELS) as MaskAction[]).map((a) => (
           <span key={a}>
             <span className={ACTION_TONE[a]}>{t(ACTION_LABELS[a])}</span>{' '}
@@ -230,7 +231,7 @@ function Records() {
         ))}
       </div>
       {totals.byKind.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-border border-b py-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-2 px-4 py-3 text-xs text-muted-foreground max-sm:px-3">
           {totals.byKind.map(([kind, n]) => (
             <span key={kind} className="rounded-md bg-muted px-1.5 py-0.5">
               {kind} {n}
@@ -238,10 +239,10 @@ function Records() {
           ))}
         </div>
       )}
-      <div className="max-h-80 min-w-0 overflow-auto">
+      <div className="max-h-80 min-w-0 overflow-auto px-4 pb-3 max-sm:px-3">
         <table className="w-max min-w-full text-left text-xs">
           <thead className="text-muted-foreground">
-            <tr className="border-border border-b">
+            <tr className="border-b border-border/60">
               <th className="py-2 pr-2 font-normal">{t('Requested at')}</th>
               <th className="py-2 pr-2 font-normal">{t('Source')}</th>
               <th className="py-2 pr-2 font-normal">{t('Model')}</th>
@@ -253,7 +254,7 @@ function Records() {
               const strongest = strongestAction(r.report);
               const key = `${r.at}:${r.sessionId ?? r.source}:${r.model}:${r.report.hits.map((h) => h.token).join(',')}`;
               return (
-                <tr key={key} className="border-border border-b align-top">
+                <tr key={key} className="border-b border-border/60 align-top last:border-b-0">
                   <td className="py-2 pr-2 whitespace-nowrap tabular-nums">
                     {new Date(r.at).toLocaleString()}
                   </td>
@@ -269,9 +270,7 @@ function Records() {
           </tbody>
         </table>
         {records?.length === 0 && (
-          <p className="border-border border-b py-4 text-center text-xs text-muted-foreground">
-            {t('No records yet')}
-          </p>
+          <p className="py-4 text-center text-xs text-muted-foreground">{t('No records yet')}</p>
         )}
       </div>
     </SettingsSection>
@@ -371,7 +370,7 @@ export function PrivacySettings() {
               />
             </SettingsRow>
             {settings.personal.enabled && (
-              <div className="flex flex-wrap gap-x-4 gap-y-2 border-border border-b py-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-2 px-4 py-3 max-sm:px-3">
                 {PERSONAL_KINDS.map((kind) => (
                   <label key={kind} className="flex items-center gap-1.5 text-[13px]">
                     <Checkbox
