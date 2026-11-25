@@ -15,6 +15,7 @@ import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgent
 import { normalizeLocale, translate } from '@shared/i18n';
 import type { ForgettingSettings } from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
+import type { MemoryRecallHit } from '@shared/memory/recall';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
 import { parseProviderProxy } from '@shared/providers/providerProxy';
 import type { MemoryOp } from '@shared/types/agent';
@@ -124,6 +125,19 @@ export function invokeMemory(
   scope: MemorySpaceContext | string | null
 ): Promise<unknown> {
   return memoryServiceOp('invoke', { op, params, scope });
+}
+
+/**
+ * 秘书派发注入的记忆检索：库不存在返回 []；阈值过滤与超时由调用方在 Main 侧做。
+ * 结果是命中投影（正文原样），不是面向模型的投影，不可信内容由调用方自行包裹。
+ */
+export async function recallMemoriesForDispatch(opts: {
+  query: string;
+  spaceIds: string[];
+  limit: number;
+}): Promise<MemoryRecallHit[]> {
+  const result = await memoryServiceOp<unknown>('recall', opts);
+  return Array.isArray(result) ? (result as MemoryRecallHit[]) : [];
 }
 
 export async function approvePendingMemoryWrite(

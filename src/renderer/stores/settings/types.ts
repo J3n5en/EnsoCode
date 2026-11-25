@@ -195,6 +195,8 @@ export interface SettingsState {
   memoryDecayMaxImportance: number;
   /** 巡检间隔（天）；缺省 7 */
   memoryDecayIntervalDays: number;
+  /** 秘书派发时按任务内容检索并注入相关记忆；缺省开 */
+  memoryDispatchRecallEnabled: boolean;
   /** 实验功能：Bot 模式；缺省关，关闭时 Main 不启动 Bot 后台逻辑 */
   botModeEnabled: boolean;
   /** 实验功能：临时会话；缺省关，关闭只藏入口，不删已有会话 */
@@ -439,6 +441,7 @@ export interface SettingsState {
   setMemoryDecayStaleDays: (value: number) => void;
   setMemoryDecayMaxImportance: (value: number) => void;
   setMemoryDecayIntervalDays: (value: number) => void;
+  setMemoryDispatchRecallEnabled: (value: boolean) => void;
   setBotModeEnabled: (value: boolean) => void;
   setScratchSessionsEnabled: (value: boolean) => void;
   setDropShelfEnabled: (value: boolean) => void;

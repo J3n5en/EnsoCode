@@ -4,6 +4,7 @@ import { cleanupHandlersFor } from './cleanup';
 import { contactSendFileHandlerFor } from './contactSend';
 import { toolHandlersFor } from './customTools';
 import { createSecretaryDispatchHandlers, dispatchPortsFor } from './dispatch';
+import { githubOpsHandlersFor } from './githubOps';
 import { imageViewHandlerFor } from './imageView';
 import { peerHandlersFor, turnRestriction } from './peers';
 import { profileHandlersFor } from './profile';
@@ -47,6 +48,7 @@ export function secretaryHandlersFor(
     ...cleanupHandlersFor(ctx, profile),
     ...createSecretaryDispatchHandlers(profile ? { ...dispatchPorts, profile } : dispatchPorts),
     ...scheduleHandlersFor(ctx),
+    ...githubOpsHandlersFor(ctx, profile),
     ...profileHandlersFor(ctx),
     ...skillHandlersFor(ctx),
     ...toolHandlersFor(ctx),
