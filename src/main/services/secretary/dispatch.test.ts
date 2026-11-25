@@ -1279,6 +1279,7 @@ describe('session_send 转发图片', () => {
     await call(queued.handlers.session_send, {
       conversationId: 'c1',
       message: '按图改',
+      mode: 'queue',
       attachments: [shot],
     });
     expect(queued.queued[0]?.message.text).toContain(`[图片 1] ${shot}`);
@@ -1462,6 +1463,7 @@ describe('session_send 转发图片', () => {
     await call(queued.handlers.session_send, {
       conversationId: 'c1',
       message: '按图改',
+      mode: 'queue',
       attachments: [shot],
     });
     expect(queued.queued[0]?.message.images).toEqual([block()]);
