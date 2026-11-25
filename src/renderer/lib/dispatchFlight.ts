@@ -19,9 +19,13 @@ export interface FlightPoint {
   y: number;
 }
 
-export const DISPATCH_FLIGHT_MS = 1050;
+export const DISPATCH_FLIGHT_MS = 3000;
 export const DISPATCH_FLIGHT_EASING = 'cubic-bezier(0.45, 0, 0.2, 1)';
-export const DISPATCH_FLIGHT_CARD_PORTION = 0.62;
+// 弧线飞行与落定用柔和慢入慢出，挤压回弹用快出慢入。
+const FLOAT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
+const SETTLE_EASING = 'cubic-bezier(0.3, 0, 0.15, 1)';
+// 只飞到卡片时走完落定亮相（offset 0.353），剩余部分用于淡出。
+export const DISPATCH_FLIGHT_CARD_PORTION = 0.47;
 export const DISPATCH_FLIGHT_CARD_MS = Math.round(
   DISPATCH_FLIGHT_MS * DISPATCH_FLIGHT_CARD_PORTION
 );
@@ -185,6 +189,7 @@ interface Pose {
   scale: number;
   rotate: number;
   opacity: number;
+  easing?: string;
 }
 
 function rounded(value: number, places: number): number {
@@ -200,6 +205,7 @@ function frame(origin: FlightPoint, pose: Pose): Keyframe {
     offset: pose.offset,
     transform: `translate(${x}px, ${y}px) scale(${scale}) rotate(${pose.rotate}deg)`,
     opacity: pose.opacity,
+    ...(pose.easing ? { easing: pose.easing } : {}),
   };
 }
 
@@ -230,24 +236,46 @@ export function buildDispatchFlightKeyframes(
   const endScale = s0 > 0 ? s1 / s0 : 1;
   const poses: Pose[] = [
     { offset: 0, at: p0, scale: 1, rotate: 0, opacity: 1 },
-    { offset: 0.16, at: arcUp(p0, p1), scale: 1.12, rotate: -6, opacity: 1 },
-    { offset: 0.3, at: p1, scale: 1.2, rotate: 0, opacity: 1 },
-    { offset: 0.36, at: { x: p1.x, y: p1.y + 3 }, scale: 0.92, rotate: 0, opacity: 1 },
-    { offset: 0.42, at: p1, scale: 1.08, rotate: 0, opacity: 1 },
-    { offset: 0.47, at: p1, scale: 1, rotate: 0, opacity: 1 },
     {
-      offset: 0.7,
+      offset: 0.06,
+      at: arcUp(p0, p1),
+      scale: 1.1,
+      rotate: -4,
+      opacity: 1,
+      easing: FLOAT_EASING,
+    },
+    { offset: 0.187, at: p1, scale: 1.16, rotate: 0, opacity: 1, easing: FLOAT_EASING },
+    { offset: 0.227, at: { x: p1.x, y: p1.y + 3 }, scale: 0.94, rotate: 0, opacity: 1 },
+    { offset: 0.25, at: p1, scale: 1.04, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    // 落定呼吸：轻微鼓一下再收稳，停到 1.06s，眼睛跟得上。
+    { offset: 0.267, at: p1, scale: 1, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    { offset: 0.31, at: p1, scale: 1.03, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    { offset: 0.353, at: p1, scale: 1, rotate: 0, opacity: 1 },
+    {
+      offset: 0.49,
       at: arcLeft(p1, p2),
       scale: (1 + endScale) / 2,
-      rotate: 4,
+      rotate: 3,
       opacity: 1,
+      easing: FLOAT_EASING,
     },
-    { offset: 0.88, at: p2, scale: endScale * 1.06, rotate: 0, opacity: 1 },
+    {
+      offset: 0.67,
+      at: p2,
+      scale: endScale * 1.05,
+      rotate: 0,
+      opacity: 1,
+      easing: FLOAT_EASING,
+    },
+    { offset: 0.71, at: p2, scale: endScale, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    // 行缘落定呼吸：轻微鼓一下收稳，停到 2.46s，再滑向徽标归位。
+    { offset: 0.77, at: p2, scale: endScale * 1.02, rotate: 0, opacity: 1, easing: SETTLE_EASING },
+    { offset: 0.82, at: p2, scale: endScale, rotate: 0, opacity: 1, easing: SETTLE_EASING },
     { offset: 0.96, at: { x: p3.x + 5, y: p3.y }, scale: endScale, rotate: 0, opacity: 1 },
     { offset: 1, at: p3, scale: endScale, rotate: 0, opacity: 0 },
   ];
   if (mode === 'full') return poses.map((pose) => frame(p0, pose));
-  const kept = poses.filter((pose) => pose.offset <= 0.47);
+  const kept = poses.filter((pose) => pose.offset <= 0.353);
   const landed = kept[kept.length - 1] ?? poses[0];
   return [
     ...kept.map((pose) =>

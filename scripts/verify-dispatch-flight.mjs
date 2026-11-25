@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -26,8 +27,8 @@ const argv = process.argv.slice(2);
 const KEEP = argv.includes('--keep');
 const ROOT = path.resolve(flag('--root') ?? path.resolve(import.meta.dirname, '..'));
 const VIEWPORT = { width: 1440, height: 900 };
-const FRAME_MS = 90;
-const SAMPLE_MS = 5000;
+const FRAME_MS = 70;
+const SAMPLE_MS = 9000;
 
 const children = [];
 const trackedPids = [];
@@ -548,7 +549,7 @@ function clearFrames() {
     return;
   }
   for (const name of names) {
-    if (!/^dispatch-flight-frame-\d{2}\.png$/.test(name)) continue;
+    if (!/^dispatch-flight-(frame-\d+|showcase-\w+)\.png$/.test(name)) continue;
     try {
       unlinkSync(path.join('/tmp', name));
     } catch {
@@ -557,14 +558,14 @@ function clearFrames() {
   }
 }
 
-// 派发本身要数秒，动画只播约 1 秒：从 arm 起持续录，flight 消失后停，
+// 派发本身要数秒，动画播约 3 秒：从 arm 起持续录，flight 消失后停，
 // 最后只保留 flight 出现前后各 2 帧的窗口，其余删掉，避免一堆静止帧。
 async function recordFrames(cdp) {
   const frames = [];
   const started = Date.now();
   let sawFlightAt = null;
   let goneAt = null;
-  for (let index = 0; Date.now() - started < 12_000 && index < 100; index += 1) {
+  for (let index = 0; Date.now() - started < 18_000 && index < 160; index += 1) {
     const tick = Date.now();
     const file = `/tmp/dispatch-flight-frame-${String(index).padStart(2, '0')}.png`;
     try {
@@ -615,7 +616,8 @@ async function recordFrames(cdp) {
   } else {
     log('截图里从未出现 flight 元素');
   }
-  return kept;
+  const byFile = new Map(frames.map((frame) => [frame.file, frame.t]));
+  return kept.map((file) => ({ file, t: byFile.get(file) ?? 0 }));
 }
 
 function hypot(a, b) {
@@ -631,6 +633,66 @@ function inside(point, rect) {
     point.y >= rect.top &&
     point.y <= rect.bottom
   );
+}
+
+// 连续悬停窗口：从首个贴近 anchor 的样本起，只要位移不超过 holdRadius 就一直累计，
+// 位移一旦超出半径即终止（模拟肉眼「停住了」的判断）。
+function hoverWindow(flights, near, anchorFor, holdRadius) {
+  let active = false;
+  let anchor = null;
+  let start = null;
+  let end = null;
+  let best = null;
+  for (const sample of flights) {
+    if (!active) {
+      if (!near(sample)) continue;
+      active = true;
+      anchor = anchorFor(sample);
+      start = sample.t;
+      end = sample.t;
+      continue;
+    }
+    if (near(sample) && hypot(sample.flight, anchor) <= holdRadius) {
+      end = sample.t;
+      continue;
+    }
+    if (start !== null && (!best || end - start > best.end - best.start)) {
+      best = { start, end, anchor };
+    }
+    active = false;
+    anchor = null;
+    start = null;
+    end = null;
+  }
+  if (start !== null && (!best || end - start > best.end - best.start)) {
+    best = { start, end, anchor };
+  }
+  return best;
+}
+
+// 亮相帧：取悬停窗口中点前后最近的一张截图，另存命名清晰的副本。
+function pickShowcaseFrames(kept, cardHold, rowHold) {
+  const showcase = [];
+  const pick = (hold, name) => {
+    if (!hold || kept.length === 0) return null;
+    const mid = (hold.start + hold.end) / 2;
+    let bestFrame = null;
+    for (const frame of kept) {
+      if (!bestFrame || Math.abs(frame.t - mid) < Math.abs(bestFrame.t - mid)) bestFrame = frame;
+    }
+    if (!bestFrame) return null;
+    const target = `/tmp/dispatch-flight-showcase-${name}.png`;
+    try {
+      writeFileSync(target, readFileSync(bestFrame.file));
+      showcase.push({ file: target, at: mid, source: bestFrame.file });
+      return target;
+    } catch {
+      return null;
+    }
+  };
+  pick(cardHold, 'card-land');
+  pick(rowHold, 'row-land');
+  return showcase;
 }
 
 function judge(log, gone, sendResult) {
@@ -661,6 +723,23 @@ function judge(log, gone, sendResult) {
     Boolean(gone) ||
     (last ? samples.slice(last.index + 1).some((sample) => !sample.flight) : false);
   const nearBadge = badgeDist !== null && badgeDist < 30;
+  const rowEdge = (sample) =>
+    sample.row ? { x: sample.row.left + 2, y: (sample.row.top + sample.row.bottom) / 2 } : null;
+  const cardHold = hoverWindow(
+    flights,
+    (sample) => Boolean(sample.card) && hypot(sample.flight, sample.card) < 60,
+    (sample) => ({ x: sample.flight.x, y: sample.flight.y }),
+    6
+  );
+  const rowHold = hoverWindow(
+    flights.filter((sample) => !cardHold || sample.t >= cardHold.end),
+    (sample) => {
+      const edge = rowEdge(sample);
+      return Boolean(edge) && hypot(sample.flight, edge) < 24;
+    },
+    (sample) => ({ x: sample.flight.x, y: sample.flight.y }),
+    6
+  );
 
   add('send 已接受', sendResult === null, `result=${JSON.stringify(sendResult)}`);
   add('flight 至少 3 帧', flights.length >= 3, `frames=${flights.length}`);
@@ -684,8 +763,18 @@ function judge(log, gone, sendResult) {
     moved && monotonic && (nearBadge || faded),
     `moved=${moved} monotonic=${monotonic} badgeDx=${badgeDist === null ? 'null' : badgeDist.toFixed(1)} faded=${faded} tail=${tail.map((sample) => sample.flight.x.toFixed(0)).join(',')}`
   );
+  add(
+    '落卡后悬停 ≥ 200ms（亮相真实存在）',
+    cardHold && cardHold.end - cardHold.start >= 200,
+    cardHold ? `hold=${(cardHold.end - cardHold.start).toFixed(0)}ms` : '没有悬停窗口'
+  );
+  add(
+    '落到行后悬停 ≥ 150ms 再滑向徽标',
+    rowHold && rowHold.end - rowHold.start >= 150,
+    rowHold ? `hold=${(rowHold.end - rowHold.start).toFixed(0)}ms` : '没有悬停窗口'
+  );
   add('flight 最终离开 DOM', gone === true, gone ? 'gone' : '仍在');
-  return checks;
+  return { checks, cardHold, rowHold };
 }
 
 function summarize(log) {
@@ -850,10 +939,12 @@ async function main() {
         `采样未完成: ${sampleError instanceof Error ? sampleError.message : String(sampleError)}`
       );
     log(`flightLog ${summarize(flightLog)}`);
-    const checks = judge(flightLog, gone === true, sendResult);
+    const { checks, cardHold, rowHold } = judge(flightLog, gone === true, sendResult);
     for (const check of checks) log(`${check.ok ? 'PASS' : 'FAIL'} ${check.name}: ${check.detail}`);
+    const showcase = pickShowcaseFrames(files, cardHold, rowHold);
     log(`截图 ${files.length} 帧`);
-    for (const file of files) log(file);
+    for (const frame of files) log(frame.file);
+    for (const shot of showcase) log(`亮相帧 ${shot.file} (源 ${shot.source})`);
     if (checks.some((check) => !check.ok)) throw new Error('dispatch flight 断言失败');
     log('PASS');
   } finally {
