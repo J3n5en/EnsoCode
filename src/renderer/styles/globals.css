@@ -356,19 +356,105 @@ html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
 
 :root {
   --settings-content-max: 920px;
-  --settings-row-min: 56px;
-  --settings-section-gap: 40px;
+  --settings-row-min: 52px;
+  --settings-section-gap: 28px;
   /* 与 ui 控件 sm 尺寸（h-7）一致，分段控件、快捷键键帽用它对齐 */
   --settings-control-h: 1.75rem;
+  --settings-group-radius: 0.75rem; /* 12px Apple grouped inset card */
+  --settings-divider-inset: 1rem;   /* 16px inset hairline between sibling rows */
 }
 
-@keyframes settings-row-flash {
-  0%, 100% { box-shadow: none; }
-  25%, 75% { box-shadow: 0 0 0 2px var(--color-ring); }
+/* Grouped-surface inset hairlines: ONLY between siblings, NEVER on first/last outer edge */
+[data-slot='settings-group'] > :not(:first-child),
+[data-slot='settings-group'] :where([data-slot='settings-row']) + [data-slot='settings-row'] {
+  position: relative;
 }
-[data-settings-flash="true"] {
+
+[data-slot='settings-group'] > :not(:first-child)::before,
+[data-slot='settings-group'] :where([data-slot='settings-row']) + [data-slot='settings-row']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--settings-divider-inset, 1rem);   /* aligns to px-4 (14px at 14px root) */
+  right: var(--settings-divider-inset, 1rem);
+  height: 1px;
+  background-color: color-mix(in oklab, var(--color-border) 75%, transparent);
+  pointer-events: none;
+}
+
+/* Deeper inset hairline between sibling rows inside an expanded SettingsSubRow region */
+[data-slot='settings-sub-group'] > :not(:first-child),
+[data-slot='settings-sub-group'] :where([data-slot='settings-row']) + [data-slot='settings-row'] {
+  position: relative;
+}
+
+[data-slot='settings-sub-group'] > :not(:first-child)::before,
+[data-slot='settings-sub-group'] :where([data-slot='settings-row']) + [data-slot='settings-row']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 2.5rem; /* aligns to pl-10 (35px at 14px root) */
+  right: var(--settings-divider-inset, 1rem);
+  height: 1px;
+  background-color: color-mix(in oklab, var(--color-border) 65%, transparent);
+  pointer-events: none;
+}
+
+/* Deep-link / search flash: INSET shadow so overflow-hidden on settings-group never clips it */
+@keyframes settings-row-flash {
+  0%, 100% {
+    box-shadow: none;
+    background-color: transparent;
+  }
+  25%, 75% {
+    box-shadow: inset 0 0 0 2px var(--color-ring);
+    background-color: color-mix(in oklab, var(--color-ring) 10%, transparent);
+  }
+}
+
+[data-settings-flash='true'] {
   animation: settings-row-flash 0.45s ease-in-out 3;
   border-radius: 0.5rem;
+}
+
+/* Layout-stable SettingsSaved pop-in */
+@keyframes settings-saved-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.settings-saved-pop {
+  animation: settings-saved-in 180ms var(--ease-smooth-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-saved-pop {
+    animation: none;
+  }
+  [data-settings-flash='true'] {
+    animation: none !important;
+    box-shadow: inset 0 0 0 2px var(--color-ring);
+  }
+}
+
+/* Wallpaper transparency rules (per docs/engineering-reference/renderer/styling.md):
+   Under html.bg-image-enabled, bg-background is already transparent (alpha=0) over BackgroundLayer.
+   Keep grouped containers & previews transparent with crisp border (following --ui-border-opacity),
+   matching welcome-suggestion / tool-details / bot-card. Never double-stack panel alpha! */
+html.bg-image-enabled [data-slot='settings-group'],
+html.bg-image-enabled [data-slot='settings-preview'] {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+html.bg-image-enabled [data-slot='settings-sub-group'] {
+  background-color: color-mix(in oklab, var(--color-foreground) 3%, transparent);
 }
 
 /* ── transitions-dev motion tokens & semantic variables ───────────── */
@@ -690,7 +776,6 @@ html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
     opacity   var(--icon-swap-dur) var(--icon-swap-ease),
     filter    var(--icon-swap-dur) var(--icon-swap-ease),
     transform var(--icon-swap-dur) var(--icon-swap-ease);
-  will-change: opacity, filter, transform;
 }
 .t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
 .t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
@@ -707,6 +792,96 @@ html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
 
 @media (prefers-reduced-motion: reduce) {
   .t-icon-swap .t-icon { transition: none !important; }
+}
+
+/* ── Number pop-in (PopDigits) ───────────────────────────────── */
+.t-digit-group {
+  display: inline-flex;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes t-digit-pop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--digit-distance, 6px));
+    filter: blur(var(--digit-blur, 2px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.t-digit-group.is-animating .t-digit {
+  display: inline-block;
+  animation: t-digit-pop var(--duration-medium) var(--ease-bounce) backwards;
+}
+.t-digit-group.is-animating .t-digit[data-stagger='1'] {
+  animation-delay: var(--duration-stagger);
+}
+.t-digit-group.is-animating .t-digit[data-stagger='2'] {
+  animation-delay: calc(var(--duration-stagger) * 2);
+}
+
+/* ── Text swap ───────────────────────────────────────────────── */
+@keyframes t-text-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--text-swap-translate-y, 4px));
+    filter: blur(var(--text-swap-blur, 2px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.t-text-swap {
+  display: inline-block;
+  animation: t-text-swap-in var(--text-swap-dur) var(--text-swap-ease);
+}
+
+/* ── Success check ───────────────────────────────────────────── */
+@keyframes t-success-pop {
+  from { opacity: 0; transform: scale(0.75); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes t-success-draw {
+  from { stroke-dashoffset: var(--check-len, 24); }
+  to   { stroke-dashoffset: 0; }
+}
+.t-success-check {
+  animation: t-success-pop var(--duration-medium) var(--ease-bounce) both;
+}
+.t-success-check path,
+.t-success-check polyline {
+  stroke-dasharray: var(--check-len, 24);
+  stroke-dashoffset: var(--check-len, 24);
+  animation: t-success-draw var(--duration-medium) var(--ease-smooth-out) var(--duration-micro) forwards;
+}
+
+/* ── Consolidated reduced-motion safety ──────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .t-digit-group.is-animating .t-digit,
+  .t-text-swap,
+  .t-success-check,
+  .t-success-check path,
+  .t-success-check polyline,
+  .animate-skeleton,
+  .animate-marquee {
+    animation: none !important;
+  }
+  .t-success-check path,
+  .t-success-check polyline {
+    stroke-dashoffset: 0 !important;
+  }
+  [data-slot$='-popup'],
+  [data-slot$='-backdrop'],
+  [data-slot='menu-sub-content'],
+  [data-slot='preview-card-content'],
+  [data-slot='toast-root'] {
+    transition: none !important;
+  }
 }
 
 /* ── Notification badge (03) — 会话未读圆点 pop-in ───────────── */
