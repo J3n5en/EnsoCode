@@ -225,3 +225,45 @@ describe('设置分区各自的滚动位置', () => {
     expect(top()).toBe(300);
   });
 });
+
+describe('嵌入主窗口时侧栏导航可拖宽', () => {
+  const embedded = (onNavResize: (dx: number) => void) => ({
+    initialCategory: 'general' as const,
+    onCategoryChange: () => {},
+    mobileDetail: false,
+    onMobileDetailChange: () => {},
+    onBack: () => {},
+    navWidth: 260,
+    onNavResize,
+  });
+  const handle = () =>
+    container.querySelector(
+      '[data-enso="settings-nav-resize"] .cursor-col-resize'
+    ) as HTMLElement | null;
+  const mouse = (target: EventTarget, type: string, clientX: number) => {
+    const ev = new doc.defaultView!.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(ev, { clientX, button: 0 });
+    target.dispatchEvent(ev);
+  };
+
+  it('导航宽度用工作区侧栏的宽度，拖手柄把位移交给同一个改宽回调', async () => {
+    const resize = vi.fn();
+    await act(async () => root.render(<SettingsContent embedded={embedded(resize)} />));
+    const nav = container.querySelector('[data-enso="settings-nav"]') as HTMLElement;
+    expect(nav.style.width).toBe('260px');
+    expect(handle(), 'resize handle').toBeTruthy();
+    await act(async () => {
+      mouse(handle() as HTMLElement, 'mousedown', 100);
+      mouse(doc, 'mousemove', 130);
+      mouse(doc, 'mousemove', 120);
+      mouse(doc, 'mouseup', 120);
+    });
+    expect(resize.mock.calls.map((c) => c[0])).toEqual([30, -10]);
+  });
+
+  it('窄屏没有拖拽手柄', async () => {
+    harness.mobile = true;
+    await act(async () => root.render(<SettingsContent embedded={embedded(vi.fn())} />));
+    expect(handle()).toBeNull();
+  });
+});

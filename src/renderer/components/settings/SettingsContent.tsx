@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { ChromeRow, useShellChrome, useWindowChromeKind } from '@/components/app/WindowChrome';
+import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { useSettingsCatalog } from '@/hooks/useSettingsCatalog';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
@@ -141,6 +142,8 @@ export interface EmbeddedSettings {
   onMobileDetailChange: (detail: boolean) => void;
   onBack: () => void;
   navWidth: number;
+  /** 拖侧栏手柄：位移交回外层，和工作区侧栏共用同一个宽度 */
+  onNavResize?: (deltaX: number) => void;
   footer?: React.ReactNode;
 }
 
@@ -437,6 +440,12 @@ export function SettingsContent({
           </div>
           {embedded?.footer}
         </nav>
+      )}
+      {/* 和工作区侧栏同一个手柄、同一个宽度值：在哪边拖，另一边都跟着变 */}
+      {showList && embedded?.onNavResize && !isMobile && (
+        <div data-enso="settings-nav-resize" className="flex shrink-0">
+          <ResizeHandle edge onResize={embedded.onNavResize} />
+        </div>
       )}
 
       {/* 右侧：设置面板 */}

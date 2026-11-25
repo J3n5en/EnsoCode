@@ -554,7 +554,7 @@ export default function App() {
         viewMotion?.top === 'workbench' ? 'z-0' : 'z-[2]'
       )}
     >
-      <SettingsView navWidth={width} open={settingsOpen} />
+      <SettingsView navWidth={width} onNavResize={handleResize} open={settingsOpen} />
     </div>
   ) : null;
 
