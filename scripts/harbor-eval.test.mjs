@@ -69,6 +69,9 @@ test('passes the model key name through and does not embed connection settings',
   assert.equal(args[args.indexOf('-m') + 1], 'openai/vendor/model');
   assert.equal(args[args.indexOf('--api-format') + 1], 'openai_chat_completions');
   assert.equal(args[args.indexOf('--base-url') + 1], 'https://api.example.test/v1');
+  // install 走网络对抖动敏感，超时要留足余量（360s 默认在跨境拉 node/npm 时不够）
+  assert.equal(args[args.indexOf('--agent-setup-timeout-multiplier') + 1], '2');
+  assert.equal(args[args.indexOf('--agent-timeout-multiplier') + 1], '1.5');
   const source = await readFile(path.join(here, 'harbor-eval.mjs'), 'utf8');
   assert.equal(source.includes('cline-pass'), false);
   assert.equal(source.includes('3425'), false);

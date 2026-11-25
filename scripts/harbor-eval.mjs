@@ -96,6 +96,11 @@ export function buildHarborArgs({ dataset, limit, concurrency, jobsDir, jobName,
     config.baseUrl,
     '--api-key-name',
     config.keyName,
+    // install.sh 走网络，节点抖动敏感；默认 360s 偏紧，给 setup 2 倍、agent 1.5 倍兜底
+    '--agent-setup-timeout-multiplier',
+    '2',
+    '--agent-timeout-multiplier',
+    '1.5',
   ];
 }
 
