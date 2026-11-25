@@ -1,7 +1,7 @@
 import type { DefaultModelRef } from '@shared/defaultModel';
 import type { ThinkingLevel } from '@shared/types';
 import { findVirtualModel } from '@shared/virtualModels';
-import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
+import { MODEL_PICKER_DIALOG_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { useI18n } from '@/i18n';
@@ -52,7 +52,7 @@ export function ScopedDefaultModelField({
             thinkingLevel={thinkingLevel}
             emptyLabel={inheritLabel}
             side="bottom"
-            triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+            triggerClassName={MODEL_PICKER_DIALOG_TRIGGER_CLASS}
             zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
             onSelect={(providerId, modelId) => onChange({ providerId, modelId })}
             onReasoningChange={onReasoningChange}

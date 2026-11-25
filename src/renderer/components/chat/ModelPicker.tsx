@@ -47,6 +47,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
+import { SelectChevron, selectTriggerClassName } from '@/components/ui/select-trigger';
 import { Switch } from '@/components/ui/switch';
 import { addToast } from '@/components/ui/toast';
 import { prefetchAccountUsage, useCachedAccountUsage } from '@/hooks/useAccountUsage';
@@ -61,8 +62,10 @@ import { type SessionUsageAccount, usageAccountKeyForProvider } from './sessionU
 export const OPEN_CHAT_MODEL_PICKER_EVENT = 'enso:open-chat-model-picker';
 
 /** 表单/设置里的整行下拉触发器 */
-export const MODEL_PICKER_FORM_TRIGGER_CLASS =
-  'h-8 w-full max-w-none border border-input bg-background px-2.5 text-sm text-foreground hover:bg-accent';
+/** 设置行里的模型选择：与 SettingsSelect（ui 下拉 sm）同一外观 */
+export const MODEL_PICKER_FORM_TRIGGER_CLASS = selectTriggerClassName('sm');
+/** 对话框表单里的模型选择：与对话框里的 ui 下拉（默认尺寸）同一外观 */
+export const MODEL_PICKER_DIALOG_TRIGGER_CLASS = selectTriggerClassName();
 
 export function requestOpenChatModelPicker() {
   window.dispatchEvent(new Event(OPEN_CHAT_MODEL_PICKER_EVENT));
@@ -1329,14 +1332,17 @@ export function ModelPicker({
       <Menu open={open} onOpenChange={handleRootOpenChange}>
         <MenuTrigger
           data-model-picker="trigger"
-          className={cn(
-            'flex shrink items-center rounded-lg text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-            compact ? 'h-[32px] w-full gap-0.5 px-1.5' : 'h-7 min-w-14 max-w-64 gap-1 px-2',
-            triggerClassName
-          )}
+          className={
+            formTrigger
+              ? triggerClassName
+              : cn(
+                  'flex shrink items-center rounded-lg text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                  compact ? 'h-[32px] w-full gap-0.5 px-1.5' : 'h-7 min-w-14 max-w-64 gap-1 px-2'
+                )
+          }
           title={triggerLabel}
         >
-          <span className="flex min-w-0 items-center gap-1">
+          <span className={cn('flex min-w-0 items-center gap-1', formTrigger && 'flex-1')}>
             <span className="min-w-0 truncate" data-model-picker-label>
               {visibleTriggerLabel}
             </span>
@@ -1356,12 +1362,12 @@ export function ModelPicker({
                 className="flex shrink-0 items-center gap-0.5 text-primary"
                 data-trigger-thinking={displayedThinkingLevel}
               >
-                <Brain className="h-3 w-3" />
+                <Brain className="size-3" />
                 {t(LEVEL_LABEL_KEYS[displayedThinkingLevel])}
               </span>
             ) : null}
           </span>
-          <ChevronDown className={cn('h-3 w-3 shrink-0', formTrigger && 'ms-auto opacity-80')} />
+          {formTrigger ? <SelectChevron /> : <ChevronDown className="h-3 w-3 shrink-0" />}
         </MenuTrigger>
         <MenuPopup
           data-model-picker="root"

@@ -299,6 +299,19 @@ Rules:
       {
         "api": [],
         "store": {
+          "defaultModelFollowLast": true,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": null,
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
           "subagentModelsEnabled": true,
         },
       },
@@ -742,6 +755,19 @@ Rules:
     "current": "cheap",
     "effects": [],
     "kind": "input",
+    "row": null,
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "defaultModelFollowLast": true,
+        },
+      },
+    ],
+    "kind": "switch",
     "row": null,
   },
   {
