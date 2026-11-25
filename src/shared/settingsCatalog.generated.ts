@@ -995,9 +995,10 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: 'terminal.font',
-    category: 'terminal',
-    title: 'Font',
-    description: 'Also used by command output in conversations',
+    category: 'appearance',
+    title: 'Interface mono font',
+    description:
+      'Monospace font for the side panel terminal, code blocks and command output in conversations.',
   },
   {
     id: 'terminal.font-size',

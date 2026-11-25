@@ -11,7 +11,6 @@ import {
   ComboboxList,
   ComboboxPopup,
 } from '@/components/ui/combobox';
-import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
 import {
   defaultDarkTheme,
@@ -331,7 +330,6 @@ function TerminalAppearance() {
   const setTerminalTheme = useSettingsStore((s) => s.setTerminalTheme);
   const globalFontSize = useSettingsStore((s) => s.terminalFontSize);
   const globalFontFamily = useSettingsStore((s) => s.terminalFontFamily);
-  const setTerminalFontFamily = useSettingsStore((s) => s.setTerminalFontFamily);
   const terminalFontWeight = useSettingsStore((s) => s.terminalFontWeight);
   const setTerminalFontWeight = useSettingsStore((s) => s.setTerminalFontWeight);
   const terminalFontWeightBold = useSettingsStore((s) => s.terminalFontWeightBold);
@@ -344,12 +342,6 @@ function TerminalAppearance() {
   React.useEffect(() => {
     setLocalFontFamily(globalFontFamily);
   }, [globalFontFamily]);
-
-  const applyFontFamilyChange = React.useCallback(() => {
-    const validFontFamily = localFontFamily.trim() || globalFontFamily;
-    if (validFontFamily !== localFontFamily) setLocalFontFamily(validFontFamily);
-    if (validFontFamily !== globalFontFamily) setTerminalFontFamily(validFontFamily);
-  }, [localFontFamily, globalFontFamily, setTerminalFontFamily]);
 
   const themeNames = React.useMemo(() => getThemeNames(), []);
   const displayThemes = React.useMemo(() => {
@@ -414,26 +406,6 @@ function TerminalAppearance() {
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-        </SettingsRow>
-        <SettingsRow
-          rowId="terminal.font"
-          label={t('Font')}
-          description={t('Also used by command output in conversations')}
-        >
-          <Input
-            value={localFontFamily}
-            onChange={(e) => setLocalFontFamily(e.target.value)}
-            onBlur={applyFontFamilyChange}
-            onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing) return;
-              if (e.key === 'Enter') {
-                applyFontFamilyChange();
-                e.currentTarget.blur();
-              }
-            }}
-            placeholder="JetBrains Mono, monospace"
-            className="w-[min(100%,220px)] max-w-full"
-          />
         </SettingsRow>
         <SettingsRow rowId="terminal.font-weight" label={t('Font weight')}>
           <SettingsSelect

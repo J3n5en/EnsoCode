@@ -70,6 +70,7 @@ const ROW_RELOCATIONS: Readonly<Record<string, SettingsCategory>> = {
   'appearance.fileOpening': 'general',
   'terminal.context-menu-opening': 'general',
   'terminal.font-size': 'appearance',
+  'terminal.font': 'appearance',
   'appearance.chatTypography': 'conversation',
   'appearance.navRailSide': 'conversation',
   'appearance.openChangesOnFileEdit': 'conversation',
