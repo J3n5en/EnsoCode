@@ -193,6 +193,8 @@ interface MessageTimelineProps {
   secretarySession?: boolean;
   /** 这条时间线所属秘书的脸；不传就用当前聚焦的秘书 */
   secretaryFace?: SecretaryFaceModel;
+  /** 这条时间线正在渲染的会话，用来取所属秘书的脸 */
+  conversationId?: string;
   /** 选中文字可引用到主输入框（只有带主 Composer 的会话视图开） */
   quotable?: boolean;
 }
@@ -224,11 +226,12 @@ export function MessageTimeline({
   activeHit = null,
   secretarySession = false,
   secretaryFace,
+  conversationId,
   quotable = false,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const host = useChatHost();
-  const face = useSecretaryFace();
+  const face = useSecretaryFace(conversationId);
   const secretarySpeaker = secretarySession ? (secretaryFace ?? face) : null;
   const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
   const secretaryChat = secretarySession;
@@ -727,6 +730,7 @@ export function MessageTimeline({
             privacyMask={replyHead.replyPrivacyMask}
             secretarySession={secretaryChat}
             face={secretarySpeaker}
+            conversationId={conversationId}
           />
         )}
         <RowErrorBoundary itemKey={item.key}>

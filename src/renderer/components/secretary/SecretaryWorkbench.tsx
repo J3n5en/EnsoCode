@@ -215,7 +215,7 @@ const PENDING_PROBLEM_LABELS: Record<NonNullable<PendingDispatch['problem']>, st
 
 function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const { t, locale } = useI18n();
-  const face = useSecretaryFace();
+  const face = useSecretaryFace(card.conversationId);
   const approvals = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingApprovals);
   const asks = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingAsks);
   const [stopping, setStopping] = useState(false);
@@ -578,7 +578,7 @@ function AddTodoRow({ onAdd }: { onAdd: () => void }) {
 
 function FeedEntry({ event }: { event: FeedEvent }) {
   const { t, locale } = useI18n();
-  const face = useSecretaryFace();
+  const face = useSecretaryFace(event.conversationId);
   const [stopping, setStopping] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const conversationId = event.conversationId;
