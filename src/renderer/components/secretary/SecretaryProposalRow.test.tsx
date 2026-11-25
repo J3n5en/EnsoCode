@@ -13,7 +13,30 @@ const h = vi.hoisted(() => ({
   resolveProposal: (() => {}) as (...args: unknown[]) => void,
 }));
 
-vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => `[${key}]` }) }));
+vi.mock('@/i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => `[${key}]`,
+    tNode: (key: string, params?: Record<string, unknown>) => {
+      const parts: unknown[] = [];
+      const regex = /\{\{(\w+)\}\}/g;
+      let last = 0;
+      let m: RegExpExecArray | null = regex.exec(key);
+      while (m) {
+        if (m.index > last) parts.push(key.slice(last, m.index));
+        parts.push(params?.[m[1]] ?? m[0]);
+        last = m.index + m[0].length;
+        m = regex.exec(key);
+      }
+      if (last < key.length) parts.push(key.slice(last));
+      return parts;
+    },
+  }),
+}));
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: (selector: (s: { conversations: Record<string, never> }) => unknown) =>
+    selector({ conversations: {} }),
+}));
+
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (
     selector: (state: { projects: { id: string; name: string; path: string }[] }) => unknown
