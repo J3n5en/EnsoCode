@@ -1861,7 +1861,14 @@ export function spawnSession(
     ...(remote ? { remote } : {}),
     ...(options?.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
     ...(promptKit.systemPrompt ? { systemPrompt: promptKit.systemPrompt } : {}),
-    ...(promptKit.systemPromptAppend ? { systemPromptAppend: promptKit.systemPromptAppend } : {}),
+    // 预设/插件尾段在前，调用方（headless run 等宿主）注入的追加段在后
+    ...([promptKit.systemPromptAppend, request.systemPromptAppend].filter(Boolean).length > 0
+      ? {
+          systemPromptAppend: [promptKit.systemPromptAppend, request.systemPromptAppend]
+            .filter(Boolean)
+            .join('\n\n'),
+        }
+      : {}),
     ...(promptKit.systemPromptBoost ? { systemPromptBoost: promptKit.systemPromptBoost } : {}),
     ...(promptKit.refusalRetryPrompt ? { refusalRetryPrompt: promptKit.refusalRetryPrompt } : {}),
     ...(options?.bot ? { botMode: true } : {}),

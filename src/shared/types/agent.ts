@@ -2043,6 +2043,8 @@ export interface AgentSpawnRequest {
   /** 秘书派出/跟踪的会话：ask_user 先转给秘书；恢复时一起带上，避免悄悄变回直接问用户 */
   askRelay?: { name: string };
   planMode?: boolean;
+  /** 追加到系统提示词尾部的文本；headless run 等宿主注入场景提示用，不改动预设本身 */
+  systemPromptAppend?: string;
 }
 
 export interface AgentActionResult {

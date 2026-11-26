@@ -406,4 +406,32 @@ describe.runIf(process.env.ENSO_RUN_E2E === '1').sequential('enso-server run', (
     expect(parsed.exitReason).toBe('auto-turns-exhausted');
     expect(parsed.turns).toBe(1);
   });
+
+  it('appends --append-system-prompt to the system prompt sent to the model', async () => {
+    const dir = workspace();
+    const marker = 'EVAL-SENTINEL-7f3a9c';
+    const result = await runCli(
+      [
+        '--prompt',
+        'Say hello',
+        '--cwd',
+        dir.work,
+        '--data-dir',
+        dir.data,
+        '--output-format',
+        'json',
+        '--timeout-ms',
+        '60000',
+        '--append-system-prompt',
+        marker,
+        ...providerArgs(),
+      ],
+      {}
+    );
+    expect(result.code, result.stderr).toBe(0);
+    const requestBody = stub.requests.find((entry) => entry.includes('chat/completions'));
+    expect(requestBody).toBeTruthy();
+    // system prompt 正文必须带着追加段到达模型端点
+    expect(requestBody).toContain(marker);
+  });
 });

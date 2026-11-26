@@ -60,6 +60,8 @@ export interface RunArgs {
   allowTools: string[];
   usageLog?: string;
   dataDir?: string;
+  /** 追加到系统提示词尾部的文本；评测等外部宿主用它注入场景提示，不动默认人设 */
+  systemPromptAppend?: string;
 }
 
 export type ParseResult =
@@ -92,10 +94,12 @@ export const RUN_USAGE = `enso-server run — 无界面跑一轮真实 agent 会
   --allow-tools <list>        重新允许 run 默认关掉的 web、browser、image_generation
   --usage-log <path>          用量 JSONL（每次模型调用一行，外加一行 summary）
   --data-dir <dir>            数据目录，覆盖 ENSO_DATA_DIR
+  --append-system-prompt <text>
+                              追加到系统提示词尾部的文本（也可用 ENSO_APPEND_SYSTEM_PROMPT）
 
 环境变量（命令行优先）:
   ENSO_DATA_DIR ENSO_PROVIDER_ID ENSO_MODEL ENSO_API_KEY ENSO_BASE_URL ENSO_API
-  ENSO_REASONING_EFFORT ENSO_TIMEOUT_MS
+  ENSO_REASONING_EFFORT ENSO_TIMEOUT_MS ENSO_APPEND_SYSTEM_PROMPT
   ENSO_API_KEY 和 ENSO_BASE_URL 都没设置、也没指定服务商但给了模型时，整组回退
   OPENAI_API_KEY + OPENAI_BASE_URL，其次 ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL
   未设置 ENSO_MODEL 时回退 OPENAI_MODEL；没给地址时用协议默认端点
@@ -129,6 +133,7 @@ const FLAG_VALUE = new Set([
   '--allow-tools',
   '--usage-log',
   '--data-dir',
+  '--append-system-prompt',
 ]);
 
 export function parseToolList(value: string): string[] {
@@ -296,6 +301,13 @@ export function parseRunArgs(
     api ??= vendor.api;
   }
 
+  const appendRaw =
+    values.get('--append-system-prompt') ?? envValue(env, 'ENSO_APPEND_SYSTEM_PROMPT');
+  const systemPromptAppend = appendRaw?.trim() || undefined;
+  if (values.has('--append-system-prompt') && !systemPromptAppend) {
+    return { ok: false, error: '--append-system-prompt 不能为空' };
+  }
+
   return {
     ok: true,
     args: {
@@ -318,6 +330,7 @@ export function parseRunArgs(
       allowTools: parseToolList(values.get('--allow-tools') ?? ''),
       usageLog: values.get('--usage-log')?.trim() || undefined,
       dataDir: values.get('--data-dir')?.trim() || undefined,
+      ...(systemPromptAppend ? { systemPromptAppend } : {}),
     },
   };
 }
