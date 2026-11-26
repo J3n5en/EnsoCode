@@ -222,7 +222,10 @@ function newService(w: World, restartCheckpoint: Checkpoint = []): AgentService 
     randomUuid: () => `id-${++w.ids}`,
     now: () => w.ids,
     notify: (_context, text) => {
+      // 上游等待通知不是 Run 结局（不带 ") <status> after" 终态），不计入结局告知次数
+      const terminal = /runId id-\d+\) \w+ after/.test(text) || /interrupted/i.test(text);
       for (const [, runId] of text.matchAll(/runId (id-\d+)/g)) {
+        if (!terminal) break;
         w.notified.set(runId!, (w.notified.get(runId!) ?? 0) + 1);
       }
       const done = /runId (id-\d+)\) (\w+) after/.exec(text);

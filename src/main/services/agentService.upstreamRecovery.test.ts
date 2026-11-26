@@ -1,6 +1,10 @@
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
 import type { AgentControlContext, AgentControlSpawnRequest } from '@shared/types/agent';
-import { TRANSIENT_BACKOFF_MS, TRANSIENT_MAX_WINDOW_MS } from '@shared/upstreamRecovery';
+import {
+  QUOTA_MAX_WINDOW_MS,
+  TRANSIENT_BACKOFF_MS,
+  TRANSIENT_MAX_WINDOW_MS,
+} from '@shared/upstreamRecovery';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentService, type AgentServiceRuntime } from './agentService';
 import { createUpstreamRecoveryService } from './upstreamRecovery';
@@ -116,8 +120,11 @@ describe('AgentService 子代理上游故障自动恢复', () => {
           retryExhausted: true,
           provider: 'anthropic',
         });
-        // 尚未通知父会话失败
-        expect(notify).not.toHaveBeenCalled();
+        // 尚未通知父会话失败终态（等待通知只发一次，不含终态用词 " failed after"）
+        const failureCalls = notify.mock.calls.filter((call) =>
+          /\) failed after/.test(call[1] as string)
+        );
+        expect(failureCalls).toEqual([]);
         // 推进到下一次探测
         await advance(TRANSIENT_BACKOFF_MS[Math.min(i, TRANSIENT_BACKOFF_MS.length - 1)]!);
       }
@@ -139,9 +146,11 @@ describe('AgentService 子代理上游故障自动恢复', () => {
         provider: 'anthropic',
       });
 
-      expect(notify).toHaveBeenCalledTimes(1);
-      expect(notify.mock.calls[0]![1]).toContain('succeeded');
-      expect(notify.mock.calls[0]![1]).toContain('全部完成');
+      // 1 次等待通知 + 1 次完成通知
+      expect(notify).toHaveBeenCalledTimes(2);
+      const completion = notify.mock.calls.at(-1)![1] as string;
+      expect(completion).toContain('succeeded');
+      expect(completion).toContain('全部完成');
       expect(recovery.snapshots()).toEqual([]);
       recovery.dispose();
     } finally {
@@ -259,7 +268,8 @@ describe('AgentService 子代理上游故障自动恢复', () => {
         provider: 'anthropic',
       });
 
-      expect(notify).toHaveBeenCalledTimes(1);
+      const calls = notify.mock.calls.map((call) => call[1] as string);
+      expect(calls.some((text) => text.includes('failed'))).toBe(true);
       // 窗口耗尽后仍可手动 resume（说明没消耗 3 次额度）
       for (let i = 0; i < 3; i++) {
         const resumed = await service.resume({
@@ -278,6 +288,119 @@ describe('AgentService 子代理上游故障自动恢复', () => {
           aborted: true,
         });
       }
+      recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('进入上游等待时立即通知父会话：说明故障、会自动续跑、不需要等', async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, recovery, children, notify } = createSetup();
+      const spawned = await service.spawn(spawnReq());
+      if (!spawned.ok) throw new Error(spawned.error);
+
+      service.observe({
+        type: 'turn-failed',
+        identity: children[0]!,
+        seq: 1,
+        turnId: spawned.value.runId,
+        error: '429 insufficient_quota: exceeded your current quota',
+        provider: 'anthropic',
+      });
+
+      // 进入等待而非失败：父会话必须立刻知情，否则会傻等一个不会来的完成通知
+      expect(notify).toHaveBeenCalledTimes(1);
+      const [contextArg, text, urgent] = notify.mock.calls[0]!;
+      expect(contextArg).toMatchObject({ owner: { ownerId: 'chat-1' } });
+      expect(text).toContain(spawned.value.runId);
+      expect(text).toContain('quota');
+      expect(urgent).toBe(false);
+      // 不是终态失败通知：不应谎称 succeeded/failed
+      expect(text).not.toContain('succeeded');
+      recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('配额错误进入等待后，wait 超时回执的 pending 进度带 upstreamWaiting', async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, recovery, children, advance } = createSetup();
+      const spawned = await service.spawn(spawnReq());
+      if (!spawned.ok) throw new Error(spawned.error);
+
+      service.observe({
+        type: 'turn-failed',
+        identity: children[0]!,
+        seq: 1,
+        turnId: spawned.value.runId,
+        error: 'insufficient_quota',
+        provider: 'anthropic',
+      });
+
+      const waitPromise = service.wait(
+        {
+          context,
+          requestId: 'wait-1',
+          runIds: [spawned.value.runId],
+          until: 'all',
+          timeoutMs: 1_000,
+        },
+        undefined
+      );
+      await advance(1_100);
+      const waited = await waitPromise;
+      expect(waited.ok).toBe(true);
+      if (!waited.ok) return;
+      expect(waited.value.timedOut).toBe(true);
+      const pending = waited.value.pending;
+      expect(pending).toBeDefined();
+      const entry = pending!.find((run) => run.runId === spawned.value.runId);
+      expect(entry?.upstreamWaiting).toMatchObject({
+        provider: 'anthropic',
+        errorKind: 'quota',
+      });
+      expect(typeof entry?.upstreamWaiting?.nextAt).toBe('number');
+      recovery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('quota 24 小时窗口耗尽后的失败通知说明自动恢复已放弃', async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, recovery, children, notify, advance } = createSetup();
+      const spawned = await service.spawn(spawnReq());
+      if (!spawned.ok) throw new Error(spawned.error);
+
+      service.observe({
+        type: 'turn-failed',
+        identity: children[0]!,
+        seq: 1,
+        turnId: spawned.value.runId,
+        error: 'insufficient_quota',
+        provider: 'anthropic',
+      });
+
+      // 推进到配额窗口耗尽之后再失败一次（探测依旧撞配额）
+      await advance(QUOTA_MAX_WINDOW_MS + 1_000);
+      service.observe({
+        type: 'turn-failed',
+        identity: children[0]!,
+        seq: 2,
+        turnId: spawned.value.runId,
+        error: 'insufficient_quota',
+        provider: 'anthropic',
+      });
+
+      const failureCall = notify.mock.calls.find((call) => (call[1] as string).includes('failed'));
+      expect(failureCall).toBeDefined();
+      // 失败文案要让父会话知道：不是第一次失败，是自动恢复已经放弃
+      expect((failureCall![1] as string).toLowerCase()).toMatch(/quota|恢复|recovery|retry|重试/);
       recovery.dispose();
     } finally {
       vi.useRealTimers();
