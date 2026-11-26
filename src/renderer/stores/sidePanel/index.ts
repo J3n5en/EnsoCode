@@ -66,8 +66,15 @@ interface SidePanelState {
    * 会话键不存在 = 尚未加载；已加载但无快照为 `{}`。
    */
   snapshotsByConversation: Record<string, SessionChangeSnapshots>;
+  /**
+   * 一次性信号（运行态，不 persist）：无 tab 的会话刚被展开，该会话的侧栏空态应直接弹出新建菜单。
+   * 按会话键控：dock 常驻、多张水印并存时只有目标会话的水印消费它。
+   * 菜单任何关闭动作负责 clear；收起再展开、有 tab 展开都不会置上。
+   */
+  newTabMenuPrompt: { conversationId: string; at: number } | null;
   toggleOpen: () => void;
   ensureOpen: (conversationId?: string) => void;
+  clearNewTabMenuPrompt: () => void;
   /**
    * 当前会话换了之后调用：把全局 fullscreen 换成这个会话自己记住的，
    * 免得秘书会话的全屏层继续盖住别的会话、点「打开侧栏」没有可见变化。
@@ -138,16 +145,24 @@ export const useSidePanelStore = create<SidePanelState>()(
       liveGlobalTabs: [],
       changesModeByConversation: {},
       snapshotsByConversation: {},
+      newTabMenuPrompt: null,
 
       toggleOpen: () => {
         const id = activeConversationId();
         if (!id) return;
         const open = !shownFor(get(), id);
+        // 无 tab 的会话从关到开：记下一次性信号，空态水印直接弹新建菜单，省一步点 +
+        const empty = open && Object.keys(get().layouts[id]?.panels ?? {}).length === 0;
         set({
           uiByConversation: patchUi(get(), id, { open }),
           fullscreen: open ? get().fullscreen : false,
           fullscreenByConversation: rememberFullscreen(get(), id, open ? get().fullscreen : false),
+          newTabMenuPrompt: empty ? { conversationId: id, at: Date.now() } : get().newTabMenuPrompt,
         });
+      },
+
+      clearNewTabMenuPrompt: () => {
+        if (get().newTabMenuPrompt !== null) set({ newTabMenuPrompt: null });
       },
 
       reconcileForActiveConversation: () => {

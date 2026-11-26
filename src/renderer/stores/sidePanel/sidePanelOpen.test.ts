@@ -343,3 +343,78 @@ describe('文件树宽度', () => {
     }
   });
 });
+
+describe('无 tab 展开时的新建菜单信号', () => {
+  beforeEach(() => {
+    vi.mocked(useSettingsStore.getState).mockReturnValue({
+      projects: [{ id: 'code', kind: 'project' }],
+    } as unknown as ReturnType<typeof useSettingsStore.getState>);
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      uiByConversation: {},
+      layouts: {},
+      liveGlobalTabs: [],
+      newTabMenuPrompt: null,
+    }));
+  });
+
+  it('无布局记录的会话从关到开：置上信号', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+  });
+
+  it('布局里有 tab 的会话展开：不置信号', () => {
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      layouts: {
+        normal: {
+          panels: { files: { id: 'files', contentComponent: 'files' } },
+        } as never,
+      },
+    }));
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('收起时不置信号', () => {
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      uiByConversation: { normal: { open: true, width: state.lastWidth } },
+    }));
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(false);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('信号是一次性的：清除后不再回来', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    useSidePanelStore.getState().clearNewTabMenuPrompt();
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('信号按会话键控：别的会话展开覆盖后只有新会话匹配', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    useSidePanelStore.getState().toggleOpen();
+    sessions('secretary');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('secretary');
+    useSidePanelStore.getState().clearNewTabMenuPrompt();
+  });
+
+  it('newTabMenuPrompt 不持久化', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    const saved = JSON.parse(localStorage.getItem('enso-side-panel') ?? '{}');
+    expect(saved.state.newTabMenuPrompt).toBeUndefined();
+    useSidePanelStore.getState().clearNewTabMenuPrompt();
+  });
+});
