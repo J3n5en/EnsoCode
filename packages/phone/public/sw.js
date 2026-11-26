@@ -305,7 +305,7 @@ async function askDeskShell(pairId, path) {
 }
 
 self.addEventListener('push', (event) => {
-  let payload = { title: 'EnsoCode', body: '', sessionId: '' };
+  let payload = { title: 'EnsoCode', body: '', sessionId: '', pending: false };
   try {
     payload = { ...payload, ...event.data.json() };
   } catch {
@@ -316,19 +316,25 @@ self.addEventListener('push', (event) => {
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     tag: payload.sessionId || 'enso',
-    data: { sessionId: payload.sessionId },
+    data: { sessionId: payload.sessionId, pending: payload.pending === true },
   });
   // 角标数未处理的审批和提问（同 tag 的通知会合并，按现存通知计）
   const badge = notify.then(() => syncBadge());
   event.waitUntil(badge);
 });
 
+// 旧载荷没有 pending 字段：退回按标题文字匹配（含新格式「会话名 · 需要审批」）
 const PENDING_TITLES = ['需要审批', '等待你的回答'];
+
+function isPendingNotification(item) {
+  if (item.data && typeof item.data.pending === 'boolean') return item.data.pending;
+  return PENDING_TITLES.some((t) => item.title === t || item.title.endsWith(` · ${t}`));
+}
 
 function syncBadge() {
   if (typeof self.registration.setAppBadge !== 'function') return Promise.resolve();
   return self.registration.getNotifications().then((items) => {
-    const n = items.filter((item) => PENDING_TITLES.includes(item.title)).length;
+    const n = items.filter(isPendingNotification).length;
     return n > 0 ? self.registration.setAppBadge(n) : self.registration.clearAppBadge?.();
   });
 }
