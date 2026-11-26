@@ -198,7 +198,10 @@ function isParked(tone: ConversationDotTone): boolean {
 }
 
 /** 不受留存窗口影响、始终留在「活跃中」:运行、待确认、未读、未读失败、续跑中、挂起等待 */
-function staysActive(tone: ConversationDotTone, conversation: SidebarConversation): boolean {
+export function staysActive(
+  tone: ConversationDotTone,
+  conversation: Pick<SidebarConversation, 'unread' | 'queueFailed' | 'goal'>
+): boolean {
   if (tone === 'failed')
     return conversation.unread === true || conversation.queueFailed !== undefined;
   if (isParked(tone) || conversation.goal?.status === 'active') return true;
@@ -206,7 +209,9 @@ function staysActive(tone: ConversationDotTone, conversation: SidebarConversatio
 }
 
 /** 留存窗口起点:最后一条消息与续期时刻中较晚者;都没有则不参与留存 */
-function retentionAnchor(conversation: SidebarConversation): number | undefined {
+export function retentionAnchor(
+  conversation: Pick<SidebarConversation, 'messages' | 'lastActiveAt' | 'activeRenewedAt'>
+): number | undefined {
   const messageAt = conversation.messages.at(-1)?.timestamp ?? conversation.lastActiveAt;
   return conversation.activeRenewedAt === undefined
     ? messageAt
