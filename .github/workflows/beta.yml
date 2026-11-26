@@ -136,6 +136,7 @@ jobs:
       PREMIUM_RELAY_SSH_KEY: ${{ secrets.PREMIUM_RELAY_SSH_KEY }}
       PREMIUM_RELAY_KNOWN_HOSTS: ${{ secrets.PREMIUM_RELAY_KNOWN_HOSTS }}
       PREMIUM_RELAY_PATH: ${{ secrets.PREMIUM_RELAY_PATH }}
+      # 名字沿用旧 secret（值不变，仍是 enso-relay），语义已从 pm2 进程名变为 systemd 单元名。
       PREMIUM_RELAY_PM2_NAME: ${{ secrets.PREMIUM_RELAY_PM2_NAME }}
       PREMIUM_RELAY_PUBLIC_URL: ${{ secrets.PREMIUM_RELAY_PUBLIC_URL }}
     steps:
@@ -247,7 +248,7 @@ jobs:
           Q_SWVER=$(printf '%q' "$EXPECTED_SHELL_VERSION")
           ssh -i ~/.ssh/premium_relay_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$PREMIUM_RELAY_USER@$PREMIUM_RELAY_HOST" \
-            "RELAY_PATH=$Q_PATH PM2_NAME=$Q_PM2 PUBLIC_URL=$Q_URL EXPECTED_SHELL_VERSION=$Q_SWVER bash -s" <<'REMOTE_EOF'
+            "RELAY_PATH=$Q_PATH SERVICE_NAME=$Q_PM2 PUBLIC_URL=$Q_URL EXPECTED_SHELL_VERSION=$Q_SWVER bash -s" <<'REMOTE_EOF'
           set -euo pipefail
           BIN="$RELAY_PATH/enso-relay-linux-amd64"
           NEW="$BIN.new"
@@ -287,7 +288,10 @@ jobs:
           fi
 
           mv "$NEW" "$BIN"
-          pm2 restart "$PM2_NAME" >/dev/null
+          # systemctl restart 失败时不要让 set -e 直接终结脚本，走 verify → 回滚路径
+          if ! systemctl restart "$SERVICE_NAME"; then
+            echo "systemctl restart failed after replace" >&2
+          fi
 
           if verify; then
             echo "deploy verified: shell=$EXPECTED_SHELL_VERSION"
@@ -305,7 +309,10 @@ jobs:
           mv "$BIN" "$BIN.failed-$TS" 2>/dev/null || true
           cp "$LATEST_BAK" "$BIN"
           chmod +x "$BIN"
-          pm2 restart "$PM2_NAME" >/dev/null
+          # 回滚重启失败也要继续走到下面的健康核对，输出真实状态
+          if ! systemctl restart "$SERVICE_NAME"; then
+            echo "systemctl restart failed during rollback" >&2
+          fi
 
           # 回滚后只核对服务恢复（旧二进制的 sw.js 版本本来就是旧的）
           RB_HEALTH=$(curl -fsS -m 5 "$PUBLIC_URL/healthz" 2>/dev/null || true)
