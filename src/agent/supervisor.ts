@@ -2390,8 +2390,10 @@ export class SessionSupervisor {
           managed.session.model ? Boolean(managed.session.model.reasoning) : false,
           command.model.modelId
         );
+        // 切走前记下：setModel 之后 session.model 已经是新模型
+        const leavingAgy = isAgyModel(managed.session.model ?? {}) && !isAgyModel(next);
         await managed.session.setModel(next);
-        if (isAgyModel(managed.session.model ?? {}) && !isAgyModel(next)) {
+        if (leavingAgy) {
           void closeAgySession(managed.identity.sessionId);
         }
         ensureAssistantUsage(managed.session.messages as unknown[]);
