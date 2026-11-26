@@ -1,10 +1,17 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import {
+  absolutizeEmTextPositions,
   exportMermaidPng,
+  exportMermaidSvg,
+  inlinePresentationAttrs,
   MAX_CANVAS_SIDE,
+  materializeMarkers,
   mermaidExportFileName,
   normalizeSvgMarkup,
   pngExportScale,
+  removeSvgStyleElements,
+  resolveContextPaints,
   svgViewBoxSize,
 } from './mermaidExport';
 
@@ -144,5 +151,223 @@ describe('exportMermaidPng', () => {
       download: vi.fn(),
     });
     expect(result).toEqual({ kind: 'failed' });
+  });
+});
+
+describe('exportMermaidSvg', () => {
+  const live = `<svg ${SVG_NS} viewBox="0 0 100 50"><foreignObject>live</foreignObject></svg>`;
+  const clean = `<svg ${SVG_NS} viewBox="0 0 100 50"><text>rerendered</text></svg>`;
+
+  it('重渲染产物无 foreignObject 时下载重渲染内容', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => live,
+      rerender: async () => clean,
+      download,
+    });
+    expect(result).toEqual({ kind: 'svg', source: 'rerender' });
+    expect(download).toHaveBeenCalledOnce();
+    const [blob, name] = download.mock.calls[0];
+    expect(name).toMatch(/\.svg$/);
+    const text = await (blob as Blob).text();
+    expect(text).toContain('<text>rerendered</text>');
+    expect(text).not.toMatch(/<foreignObject\b/i);
+  });
+
+  it('重渲染产物含 foreignObject 时下载 live 内容', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => live,
+      rerender: async () =>
+        `<svg ${SVG_NS} viewBox="0 0 10 10"><foreignObject>bad</foreignObject></svg>`,
+      download,
+    });
+    expect(result).toEqual({ kind: 'svg', source: 'live' });
+    const text = await (download.mock.calls[0][0] as Blob).text();
+    expect(text).toContain('<foreignObject>live</foreignObject>');
+    expect(text).not.toContain('bad');
+  });
+
+  it('重渲染抛错时回退 live', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => live,
+      rerender: async () => {
+        throw new Error('render failed');
+      },
+      download,
+    });
+    expect(result).toEqual({ kind: 'svg', source: 'live' });
+    expect(await (download.mock.calls[0][0] as Blob).text()).toContain(
+      '<foreignObject>live</foreignObject>'
+    );
+  });
+
+  it('重渲染抛错且 live 为空时返回 failed 且不下载', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => null,
+      rerender: async () => {
+        throw new Error('render failed');
+      },
+      download,
+    });
+    expect(result).toEqual({ kind: 'failed' });
+    expect(download).not.toHaveBeenCalled();
+  });
+});
+
+const SVG_XMLNS = 'http://www.w3.org/2000/svg';
+
+function parseSvg(markup: string): SVGSVGElement {
+  const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
+  const svg = doc.documentElement;
+  if (svg.localName !== 'svg') throw new Error(`not svg: ${svg.textContent ?? ''}`);
+  return svg as unknown as SVGSVGElement;
+}
+
+describe('inlinePresentationAttrs', () => {
+  it('把计算样式写成呈现属性，而不是 style', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="m"><path id="p"/></marker></defs><rect id="n"/></svg>`
+    );
+    inlinePresentationAttrs(svg, (el) => {
+      if (el.id === 'n' || el.id === 'p') {
+        return { fill: 'rgb(236, 236, 255)', stroke: '#9370DB', 'font-size': '16px' };
+      }
+      return {};
+    });
+    const rect = svg.querySelector('#n');
+    const head = svg.querySelector('#p');
+    expect(rect?.getAttribute('fill')).toBe('rgb(236, 236, 255)');
+    expect(rect?.getAttribute('stroke')).toBe('#9370DB');
+    expect(rect?.getAttribute('font-size')).toBe('16px');
+    expect(rect?.getAttribute('style')).toBeNull();
+    expect(head?.getAttribute('fill')).toBe('rgb(236, 236, 255)');
+    expect(new XMLSerializer().serializeToString(svg)).not.toContain('style=');
+  });
+
+  it('跳过等于初始值的 fill 与 stroke，非默认值仍写入', () => {
+    const svg = parseSvg(`<svg xmlns="${SVG_XMLNS}"><rect id="n"/></svg>`);
+    inlinePresentationAttrs(svg, () => ({
+      fill: 'rgb(0, 0, 0)',
+      stroke: 'none',
+      'stroke-width': '2px',
+    }));
+    const rect = svg.querySelector('#n');
+    expect(rect?.hasAttribute('fill')).toBe(false);
+    expect(rect?.hasAttribute('stroke')).toBe(false);
+    expect(rect?.getAttribute('stroke-width')).toBe('2px');
+  });
+});
+
+describe('resolveContextPaints', () => {
+  it('把 marker 上的 context-stroke 解析成引用元素的 stroke', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow"><path id="head" fill="context-stroke"/></marker></defs><path id="edge" marker-end="url(#arrow)"/></svg>`
+    );
+    resolveContextPaints(svg, (el) => (el.id === 'edge' ? { stroke: 'rgb(10, 20, 30)' } : {}));
+    expect(svg.querySelector('#head')?.getAttribute('fill')).toBe('rgb(10, 20, 30)');
+  });
+
+  it('没有引用元素时 context-stroke / context-fill 兜底为 #333333', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow"><path id="head" fill="context-stroke" stroke="context-fill"/></marker></defs></svg>`
+    );
+    resolveContextPaints(svg, () => ({}));
+    const head = svg.querySelector('#head');
+    expect(head?.getAttribute('fill')).toBe('#333333');
+    expect(head?.getAttribute('stroke')).toBe('#333333');
+  });
+
+  it('内联并解析后的序列化结果不含 context-stroke、context-fill 和 style 元素', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><style>path{fill:context-stroke;stroke:context-fill}</style><defs><marker id="arrow"><path id="head" fill="context-stroke" stroke="context-fill"/></marker></defs><path id="edge" marker-end="url(#arrow)"/></svg>`
+    );
+    const read = (el: Element): Record<string, string> => {
+      if (el.id === 'head') return { fill: 'context-stroke', stroke: 'context-fill' };
+      if (el.id === 'edge') return { stroke: '#333333', fill: 'none', 'marker-end': 'url(#arrow)' };
+      return {};
+    };
+    inlinePresentationAttrs(svg, read);
+    resolveContextPaints(svg, read);
+    removeSvgStyleElements(svg);
+    const xml = new XMLSerializer().serializeToString(svg);
+    expect(xml).not.toContain('context-stroke');
+    expect(xml).not.toContain('context-fill');
+    expect(xml).not.toMatch(/<style[\s>]/i);
+    expect(svg.querySelector('#head')?.getAttribute('fill')).toBe('#333333');
+  });
+
+  it('同一 marker 被不同颜色引用时按 stroke 拆成各自的箭头', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow"><path id="head" fill="context-stroke"/></marker></defs><path id="a" marker-end="url(#arrow)"/><path id="b" marker-end="url(#arrow)"/></svg>`
+    );
+    resolveContextPaints(svg, (el) => {
+      if (el.id === 'a') return { stroke: 'rgb(255, 0, 0)' };
+      if (el.id === 'b') return { stroke: 'rgb(0, 0, 255)' };
+      return {};
+    });
+    expect(svg.querySelector('#head')?.getAttribute('fill')).toBe('rgb(255, 0, 0)');
+    expect(svg.querySelector('#a')?.getAttribute('marker-end')).toBe('url(#arrow)');
+    expect(svg.querySelector('#b')?.getAttribute('marker-end')).toBe('url(#arrow-1)');
+    expect(svg.querySelector('#arrow-1 path')?.getAttribute('fill')).toBe('rgb(0, 0, 255)');
+    expect(new XMLSerializer().serializeToString(svg)).not.toContain('context-stroke');
+  });
+});
+
+describe('absolutizeEmTextPositions', () => {
+  it('把 tspan 的 em y/dy 折成绝对 px，并写回父 text', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><g transform="translate(390,8)"><text y="-10.1" font-size="16"><tspan x="0" y="-0.1em" dy="1.1em">订单仓</tspan></text></g></svg>`
+    );
+    absolutizeEmTextPositions(svg);
+    const text = svg.querySelector('text');
+    const tspan = svg.querySelector('tspan');
+    expect(text?.getAttribute('y')).toBe('16');
+    expect(tspan?.getAttribute('x')).toBe('0');
+    expect(tspan?.getAttribute('y')).toBe('16');
+    expect(tspan?.hasAttribute('dy')).toBe(false);
+    const once = new XMLSerializer().serializeToString(svg);
+    absolutizeEmTextPositions(svg);
+    expect(new XMLSerializer().serializeToString(svg)).toBe(once);
+  });
+
+  it('没有 em、也没有 dy 的 px 坐标保持原样', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><text y="12" font-size="16"><tspan x="4" y="12">Hi</tspan></text></svg>`
+    );
+    const before = new XMLSerializer().serializeToString(svg);
+    absolutizeEmTextPositions(svg);
+    expect(new XMLSerializer().serializeToString(svg)).toBe(before);
+    expect(svg.querySelector('text')?.getAttribute('y')).toBe('12');
+    expect(svg.querySelector('tspan')?.getAttribute('y')).toBe('12');
+    expect(svg.querySelector('tspan')?.hasAttribute('dy')).toBe(false);
+  });
+});
+
+describe('materializeMarkers', () => {
+  it('按端点方向把 marker 烘焙成填充三角，并去掉 marker-end', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs><path id="edge" d="M0 0 L100 0" marker-end="url(#arrow)" stroke="rgb(51, 51, 51)"/></svg>`
+    );
+    materializeMarkers(svg, () => ({ x: 100, y: 0, dx: 1, dy: 0 }));
+    const edge = svg.querySelector('#edge');
+    expect(edge?.hasAttribute('marker-end')).toBe(false);
+    const arrows = [...svg.querySelectorAll('path')].filter(
+      (el) => el.id !== 'edge' && !el.closest('marker')
+    );
+    expect(arrows).toHaveLength(1);
+    expect(arrows[0].getAttribute('fill')).toBe('rgb(51, 51, 51)');
+    expect(arrows[0].getAttribute('d')).toBe('M 96 -4 L 104 0 L 96 4 z');
+  });
+
+  it('实体化后序列化结果不再包含 marker-end', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs><path id="edge" d="M0 0 L40 0" marker-end="url(&quot;#arrow&quot;)" stroke="#333"/></svg>`
+    );
+    materializeMarkers(svg, () => ({ x: 40, y: 0, dx: 1, dy: 0 }));
+    expect(svg.querySelector('#edge')?.hasAttribute('marker-end')).toBe(false);
+    expect(new XMLSerializer().serializeToString(svg)).not.toContain('marker-end=');
   });
 });
