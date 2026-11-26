@@ -225,7 +225,8 @@ describe('TypeSafe settings', () => {
           onClose={vi.fn()}
         />
       );
-      expect(markup).toContain('data-chat-models="chat"');
+      // agy cli 可以当子会话模型，固定模型里有它
+      expect(markup).toContain('data-chat-models="chat,agy-cli"');
       expect(markup).not.toContain('typesafe');
     }
   );

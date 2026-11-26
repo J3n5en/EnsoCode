@@ -37,6 +37,28 @@ exports[`模型与服务商组设置迁移前后行为一致 > 关掉标题总�
     "row": "presets.root",
   },
   {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "providers.agy-binary-path",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "agy": {
+            "binaryPath": "",
+            "skipPermissions": true,
+          },
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.agy-skip-permissions",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -117,6 +139,7 @@ exports[`模型与服务商组设置迁移前后行为一致 > 关掉标题总�
       },
     },
     "effects": [
+      "{"store":{"defaultModel":{"providerId":"agy-cli","modelId":"default"}},"api":[]}",
       "{"store":{"defaultModel":{"providerId":"api","modelId":"fast"}},"api":[]}",
     ],
     "kind": "choice",
@@ -465,6 +488,28 @@ exports[`模型与服务商组设置迁移前后行为一致 > 每个控件的�
     "row": "presets.root",
   },
   {
+    "current": "",
+    "effects": [],
+    "kind": "input",
+    "row": "providers.agy-binary-path",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "agy": {
+            "binaryPath": "",
+            "skipPermissions": true,
+          },
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "providers.agy-skip-permissions",
+  },
+  {
     "current": "true",
     "effects": [
       {
@@ -545,6 +590,7 @@ exports[`模型与服务商组设置迁移前后行为一致 > 每个控件的�
       },
     },
     "effects": [
+      "{"store":{"defaultModel":{"providerId":"agy-cli","modelId":"default"}},"api":[]}",
       "{"store":{"defaultModel":{"providerId":"api","modelId":"fast"}},"api":[]}",
     ],
     "kind": "choice",
@@ -810,6 +856,7 @@ Rules:
       ],
     },
     "effects": [
+      "{"store":{"subagentModels":[{"id":"sub","providerId":"agy-cli","modelId":"default","description":"cheap"}]},"api":[]}",
       "{"store":{"subagentModels":[{"id":"sub","providerId":"api","modelId":"smart","description":"cheap"}]},"api":[]}",
     ],
     "kind": "choice",
@@ -908,6 +955,9 @@ exports[`模型与服务商组设置迁移前后行为一致 > 深链行 id 一�
   "agents.maxActiveCoworkers",
   "agents.root",
   "presets.root",
+  "providers.agy-binary-path",
+  "providers.agy-cli",
+  "providers.agy-skip-permissions",
   "providers.api",
   "providers.assistant-approval-model",
   "providers.conversation-title-summary",

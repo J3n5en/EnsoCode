@@ -6,6 +6,7 @@ import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/
 import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/i18n';
 import {
+  useOneShotProviders,
   useUsableClassifierProviders,
   useUsableProviders,
 } from '@/stores/modelDirectory/useProviders';
@@ -99,7 +100,7 @@ function BotAssistantModelRow() {
   const { t } = useI18n();
   const model = useSettingsStore((s) => s.botAssistantModel);
   const setModel = useSettingsStore((s) => s.setBotAssistantModel);
-  const candidates = useUsableProviders();
+  const candidates = useOneShotProviders();
   const provider = model ? candidates.find((p) => p.id === model.providerId) : undefined;
   const selected = provider?.models.find((m) => m.id === model?.modelId);
   return (

@@ -18,7 +18,7 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: unknown) => unknown) => select(harness.settings),
 }));
 vi.mock('@/stores/modelDirectory/useProviders', () => ({
-  useUsableProviders: () => harness.providers,
+  useOneShotProviders: () => harness.providers,
 }));
 vi.mock('@/stores/appView', () => ({ openSettings: harness.openSettings }));
 vi.mock('@/components/ui/toast', () => ({ addToast: harness.addToast }));

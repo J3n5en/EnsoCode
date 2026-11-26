@@ -751,6 +751,12 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   { id: 'providers.advanced', category: 'providers', title: 'Advanced' },
   {
+    id: 'providers.agy-binary-path',
+    category: 'providers',
+    title: 'Binary path',
+    description: 'Leave empty to find agy on PATH or in ~/.local/bin.',
+  },
+  {
     id: 'providers.agy-cli',
     category: 'providers',
     title: 'agy cli',

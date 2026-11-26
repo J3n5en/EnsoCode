@@ -7,8 +7,8 @@ import { useMemo } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { useI18n } from '@/i18n';
 import {
+  useOneShotProviders,
   useUsableClassifierProviders,
-  useUsableProviders,
 } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { SettingsButton, SettingsRow, SettingsSelect, SettingsSubRow, SettingsSwitch } from './kit';
@@ -29,7 +29,7 @@ export function ApprovalReviewerPicker() {
     '0.9': t('0.9 (default)'),
     '0.95': t('0.95 (stricter)'),
   };
-  const chatProviders = useUsableProviders();
+  const chatProviders = useOneShotProviders();
   const classifierProviders = useUsableClassifierProviders();
   const candidates = useMemo(
     () => [...chatProviders, ...classifierProviders.filter(isClassifierOnlyProvider)],

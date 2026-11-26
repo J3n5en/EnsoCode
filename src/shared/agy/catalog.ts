@@ -111,3 +111,28 @@ export function nearestThinking(level: string, options: readonly string[]): stri
   }
   return best;
 }
+
+/** IPC 返回值按 unknown 收窄：形状不对一律当 unknown。 */
+export function parseAgyAuthStatus(value: unknown): AgyAuthStatus {
+  const row = record(value);
+  const version = typeof row?.version === 'string' ? row.version : '';
+  switch (row?.status) {
+    case 'signed-in': {
+      if (!version) break;
+      const models: AgyModelOption[] = [];
+      for (const entry of Array.isArray(row.models) ? row.models : []) {
+        const model = record(entry);
+        if (typeof model?.id !== 'string' || !model.id) continue;
+        models.push({ id: model.id, name: typeof model.name === 'string' ? model.name : model.id });
+      }
+      return { status: 'signed-in', version, models };
+    }
+    case 'signed-out':
+      return version ? { status: 'signed-out', version } : { status: 'unknown' };
+    case 'too-old':
+      return version ? { status: 'too-old', version } : { status: 'unknown' };
+    case 'not-installed':
+      return { status: 'not-installed' };
+  }
+  return { status: 'unknown' };
+}

@@ -116,6 +116,8 @@ describe('parseVirtualModels', () => {
     expect(canBeVirtualMember({ oauthAccountKey: 'cursor' })).toBe(false);
     expect(canBeVirtualMember({ oauthAccountKey: 'anthropic#2' })).toBe(true);
     expect(canBeVirtualMember({})).toBe(true);
+    // agy cli 只在会话里经 bridge 跑，不能当路由成员
+    expect(canBeVirtualMember({ id: 'agy-cli' })).toBe(false);
   });
 
   it('可选虚拟模型要求条目启用且主模型行存在并启用', () => {

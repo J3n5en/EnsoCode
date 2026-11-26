@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classifyAuthProbe, modelsFromSessionResult, modelToSet, nearestThinking } from './catalog';
+import {
+  classifyAuthProbe,
+  modelsFromSessionResult,
+  modelToSet,
+  nearestThinking,
+  parseAgyAuthStatus,
+} from './catalog';
 
 const session = {
   sessionId: 's1',
@@ -72,5 +78,32 @@ describe('agy catalog', () => {
     expect(nearestThinking('off', ['low', 'medium', 'high', 'xhigh'])).toBe('low');
     expect(nearestThinking('max', ['low', 'medium', 'high', 'xhigh'])).toBe('xhigh');
     expect(nearestThinking('medium', ['low', 'medium', 'high', 'xhigh'])).toBe('medium');
+  });
+});
+
+describe('parseAgyAuthStatus', () => {
+  it('keeps a well-formed status and drops anything else to unknown', () => {
+    expect(
+      parseAgyAuthStatus({
+        status: 'signed-in',
+        version: '1.5.18',
+        models: [{ id: 'm', name: 'M' }, { id: '' }, 3],
+      })
+    ).toEqual({ status: 'signed-in', version: '1.5.18', models: [{ id: 'm', name: 'M' }] });
+    expect(parseAgyAuthStatus({ status: 'signed-out', version: '1.5.18' })).toEqual({
+      status: 'signed-out',
+      version: '1.5.18',
+    });
+    expect(parseAgyAuthStatus({ status: 'not-installed' })).toEqual({ status: 'not-installed' });
+    for (const bad of [
+      null,
+      undefined,
+      'signed-in',
+      {},
+      { status: 'signed-in' },
+      { status: 'x' },
+    ]) {
+      expect(parseAgyAuthStatus(bad)).toEqual({ status: 'unknown' });
+    }
   });
 });

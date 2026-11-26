@@ -1,3 +1,4 @@
+import { parseAgyAuthStatus } from '@shared/agy/catalog';
 import { parseAgySettings } from '@shared/agy/settings';
 import type { AgyAuthStatus } from '@shared/agy/types';
 import { Loader2 } from 'lucide-react';
@@ -6,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { useAgyAuthStore } from '@/stores/agyAuth';
 import { useSettingsStore } from '@/stores/settings';
-import { SettingsRow, SettingsSubRow, SettingsSwitch } from './kit';
+import { SettingsInput, SettingsRow, SettingsSubRow, SettingsSwitch } from './kit';
 
 function statusText(status: AgyAuthStatus, t: (key: string) => string): string {
   switch (status.status) {
@@ -36,8 +37,7 @@ export function AgyCliSettings() {
       setChecking(true);
       try {
         if (!window.electronAPI?.agy) return;
-        const next = await window.electronAPI.agy.authStatus(refresh);
-        setStatus(next);
+        setStatus(parseAgyAuthStatus(await window.electronAPI.agy.authStatus(refresh)));
       } finally {
         setChecking(false);
       }
@@ -59,15 +59,17 @@ export function AgyCliSettings() {
       )}
     >
       <div className="flex w-full max-w-xl flex-col gap-2">
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          {t('Binary path')}
-          <input
-            className="rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+        <SettingsSubRow
+          rowId="providers.agy-binary-path"
+          label={t('Binary path')}
+          description={t('Leave empty to find agy on PATH or in ~/.local/bin.')}
+        >
+          <SettingsInput
             value={settings.binaryPath}
             placeholder="agy"
-            onChange={(event) => setAgy({ ...settings, binaryPath: event.target.value })}
+            onCommit={(binaryPath) => setAgy({ ...settings, binaryPath })}
           />
-        </label>
+        </SettingsSubRow>
         <SettingsSubRow
           rowId="providers.agy-skip-permissions"
           label={t('Skip permissions')}

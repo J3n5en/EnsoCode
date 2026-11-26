@@ -1067,6 +1067,7 @@ export const zhTranslations: Record<string, string> = {
   'Runs sessions through the local agy acp command. EnsoCode does not sign in for you.':
     '会话通过本机 agy acp 运行。EnsoCode 不会替你登录。',
   'Binary path': '二进制路径',
+  'Leave empty to find agy on PATH or in ~/.local/bin.': '留空则在 PATH 或 ~/.local/bin 里找 agy。',
   'Skip permissions': '跳过权限确认',
   'Passes --dangerously-skip-permissions. agy will not ask before commands or edits.':
     '会传 --dangerously-skip-permissions。agy 在执行命令和改文件前不再询问。',

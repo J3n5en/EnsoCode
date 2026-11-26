@@ -25,3 +25,8 @@ export function agySettingsProvider(models: readonly AgyModelOption[]): ModelPro
     models: list.map((model) => ({ id: model.id, label: model.name })),
   };
 }
+
+/** 只能在会话里经 agy bridge 跑的 provider：标题、提交信息、代审、压缩这类一次性请求不能用。 */
+export function isSessionOnlyProvider(provider: { id?: string }): boolean {
+  return provider.id === AGY_PROVIDER_ID;
+}

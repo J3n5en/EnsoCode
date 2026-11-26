@@ -1,5 +1,5 @@
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
-import { agySettingsProvider } from '@shared/agy/settings';
+import { agySettingsProvider, isSessionOnlyProvider } from '@shared/agy/settings';
 import { type ModelDirectorySnapshot, materializeProviders } from '@shared/modelDirectory';
 import type { ModelProvider } from '@shared/types';
 import { useMemo } from 'react';
@@ -29,6 +29,15 @@ export function useUsableProviders(): ModelProvider[] {
   const providers = useMaterializedProviders();
   const snapshot = useOauthCredentialStore((state) => state.snapshot);
   return useMemo(() => usableProvidersForOauthSnapshot(providers, snapshot), [providers, snapshot]);
+}
+
+/** 一次性请求（标题、提交信息、代审、压缩、记忆、插件）的 picker：去掉只能在会话里跑的 agy cli。 */
+export function useOneShotProviders(): ModelProvider[] {
+  const providers = useUsableProviders();
+  return useMemo(
+    () => providers.filter((provider) => !isSessionOnlyProvider(provider)),
+    [providers]
+  );
 }
 
 /**

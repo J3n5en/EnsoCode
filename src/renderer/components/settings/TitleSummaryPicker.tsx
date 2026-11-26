@@ -1,6 +1,6 @@
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { useI18n } from '@/i18n';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import { useOneShotProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { SettingsButton, SettingsRow, SettingsSubRow, SettingsSwitch } from './kit';
 
@@ -14,7 +14,7 @@ export function TitleSummaryPicker() {
   const setEnabled = useSettingsStore((state) => state.setTitleSummaryEnabled);
   const model = useSettingsStore((state) => state.titleSummaryModel);
   const setModel = useSettingsStore((state) => state.setTitleSummaryModel);
-  const candidates = useUsableProviders();
+  const candidates = useOneShotProviders();
   const selectedProvider = model
     ? candidates.find((entry) => entry.id === model.providerId)
     : undefined;
