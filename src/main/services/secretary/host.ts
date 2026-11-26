@@ -1054,15 +1054,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       });
       return;
     }
-    if (event.type === 'approval-request') {
-      // 审批永远不能在手机上确认，只给一条回应用的入口
-      contact.onCardWaiting({ count: 1, approval: true, conversationId });
-      return;
-    }
-    if (event.type === 'approval-resolved') {
-      contact.onApprovalResolved(conversationId);
-      return;
-    }
+    // 审批卡不在这里：所有会话（含秘书会话）都由远程审批桥统一发到手机
     if (event.type !== 'turn-completed' || event.aborted) return;
     if (event.silent) {
       // 静默回合没有正文：把这一批回传的条数交出去，手机上只发一行摘要

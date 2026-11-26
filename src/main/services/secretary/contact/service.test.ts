@@ -8,9 +8,11 @@ import {
 } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
 import { parseInboundMessage } from '@shared/secretary/inbound';
+import type { ApprovalRequestInfo } from '@shared/types/agent';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FollowingStore } from '../following';
+import { RemoteApprovalBridge, remoteApprovalKey } from '../remoteApprovalBridge';
 import type {
   ChannelCaps,
   ChannelFile,
@@ -371,6 +373,41 @@ async function waitFor(check: () => boolean, label: string, timeoutMs = 3_000): 
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`timeout waiting for ${label}`);
+}
+
+/** 真的远程审批桥：这个服务是唯一的 sink，respondApproval 只记下来 */
+function approvalBridge(h: ReturnType<typeof harness>) {
+  const responded: [string, string][] = [];
+  const bridge = new RemoteApprovalBridge({
+    respondApproval: (_identity, requestId, decision) => {
+      responded.push([requestId, decision]);
+      return { ok: true };
+    },
+    sinks: () => [h.service],
+    sessionTitle: (sessionId) => (sessionId === 'conv-9' ? '修登录' : undefined),
+  });
+  h.ports.resolveRemoteApproval = (key, action, options) => bridge.resolve(key, action, options);
+  const identity = { sessionId: 'conv-9', generation: 'g1' };
+  let seq = 0;
+  return {
+    responded,
+    key: remoteApprovalKey('apr-1-1'),
+    ask: (patch: Partial<ApprovalRequestInfo> = {}) =>
+      bridge.observe({
+        type: 'approval-request',
+        identity,
+        seq: ++seq,
+        request: {
+          requestId: 'apr-1-1',
+          tool: 'bash',
+          kind: 'command',
+          summary: 'pnpm test',
+          ...patch,
+        },
+      }),
+    resolvedInApp: () =>
+      bridge.observe({ type: 'approval-resolved', identity, seq: ++seq, requestId: 'apr-1-1' }),
+  };
 }
 
 function privateMessage(text: string, chatId = 777): TelegramUpdate {
@@ -1495,20 +1532,6 @@ describe('确认卡与审批', () => {
     ]);
   });
 
-  it('审批永远只有提示与回应用入口，没有确认按钮', async () => {
-    const h = await bound();
-    h.service.onCardWaiting({ count: 1, approval: true, conversationId: 'sec-1' });
-    await waitFor(() => h.api.sent.length > 1, 'approval notice');
-    const message = h.api.sent.at(-1);
-    expect(message?.text).toContain('审批只能在应用里处理');
-    const buttons = message?.replyMarkup?.inline_keyboard.flat() ?? [];
-    expect(buttons.map((button) => button.text)).toEqual(['在应用里打开']);
-    expect(buttons[0].callback_data).toBe('card:o:approval:1');
-    // 审批消息里没有确认按钮：点不到就不可能在手机上确认
-    expect(buttons.some((button) => button.callback_data?.startsWith('card:c:'))).toBe(false);
-    expect(h.world.resolved).toHaveLength(0);
-  });
-
   it('「在应用里打开」只把卡片交给 Main，不确认', async () => {
     const h = await bound();
     h.service.syncPendingCards([card]);
@@ -1580,6 +1603,173 @@ describe('确认卡与审批', () => {
     h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'card:c:p1' } });
     await waitFor(() => h.api.callbacks.length > 0, 'callback');
     expect(h.api.callbacks.at(-1)?.text).toBe('这张卡已经处理过了');
+  });
+});
+
+describe('远程审批卡', () => {
+  const bound = async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  };
+  const cards = (h: ReturnType<typeof harness>) =>
+    h.api.sent.filter((item) => item.text.includes('🔐'));
+  const tap = (h: ReturnType<typeof harness>, data: string, id = 'cb-1') =>
+    h.api.push({
+      update_id: 50,
+      callback_query: {
+        id,
+        data,
+        from: { id: 777, first_name: 'J' },
+        message: { message_id: 2, chat: { id: 777, type: 'private' } },
+      },
+    });
+
+  it('开着远程审批：只发绑定私聊，带会话、命令与批准/拒绝/打开三个按钮', async () => {
+    const h = await bound();
+    // 推送群路由也在：审批内容不给群成员看
+    h.store.save({
+      ...h.store.file(),
+      telegramRoutes: [{ chatId: '-1001234567890', boundAt: 1 }],
+    });
+    expect(h.service.setChannelPrefs('telegram', { approvalRemote: true })).toEqual({ ok: true });
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(cards(h).map((item) => item.chatId)).toEqual([777]);
+    const card = cards(h)[0];
+    expect(card?.text).toContain('修登录');
+    expect(card?.text).toContain('bash：pnpm test');
+    const buttons = card?.replyMarkup?.inline_keyboard.flat() ?? [];
+    expect(buttons.map((button) => button.text)).toEqual(['批准', '拒绝', '在应用里打开']);
+    expect(buttons.map((button) => button.callback_data)).toEqual([
+      `appr:a:${remote.key}`,
+      `appr:d:${remote.key}`,
+      `appr:o:${remote.key}`,
+    ]);
+  });
+
+  it('点批准：单次 allow 交给会话，原消息换成已批准并清掉按钮', async () => {
+    const h = await bound();
+    h.service.setChannelPrefs('telegram', { approvalRemote: true });
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    tap(h, `appr:a:${remote.key}`);
+    await waitFor(() => h.api.edited.length > 0, 'settled');
+    expect(remote.responded).toEqual([['apr-1-1', 'allow']]);
+    expect(h.api.callbacks.at(-1)?.text).toBe('✅ 已批准');
+    expect(h.api.edited.at(-1)?.text).toBe('✅ 已批准：修登录 · bash');
+    expect(h.api.edited.at(-1)?.replyMarkup?.inline_keyboard ?? []).toEqual([]);
+    // 再点一次只提示，不会再放行一次
+    tap(h, `appr:d:${remote.key}`, 'cb-2');
+    await waitFor(() => h.api.callbacks.length > 1, 'second tap');
+    expect(h.api.callbacks.at(-1)?.text).toBe('已在别处处理');
+    expect(remote.responded).toHaveLength(1);
+  });
+
+  it('点拒绝：传 deny，原消息换成已拒绝', async () => {
+    const h = await bound();
+    h.service.setChannelPrefs('telegram', { approvalRemote: true });
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    tap(h, `appr:d:${remote.key}`);
+    await waitFor(() => h.api.edited.length > 0, 'settled');
+    expect(remote.responded).toEqual([['apr-1-1', 'deny']]);
+    expect(h.api.edited.at(-1)?.text).toBe('🚫 已拒绝：修登录 · bash');
+  });
+
+  it('远程审批默认关：只有回应用的入口，旧的批准按钮点了也不放行', async () => {
+    const h = await bound();
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    const card = cards(h)[0];
+    expect(card?.text).toContain('远程审批没开');
+    expect(card?.replyMarkup?.inline_keyboard.flat().map((button) => button.text)).toEqual([
+      '在应用里打开',
+    ]);
+    tap(h, `appr:a:${remote.key}`);
+    await waitFor(() => h.api.callbacks.length > 0, 'callback');
+    expect(h.api.callbacks.at(-1)?.text).toBe('远程审批没开，请在应用里处理');
+    expect(remote.responded).toEqual([]);
+  });
+
+  it('高危命令开着远程审批也只能回电脑', async () => {
+    const h = await bound();
+    h.service.setChannelPrefs('telegram', { approvalRemote: true });
+    const remote = approvalBridge(h);
+    remote.ask({ summary: 'git push origin main' });
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    const card = cards(h)[0];
+    expect(card?.text).toContain('必须在电脑上审批');
+    expect(card?.replyMarkup?.inline_keyboard.flat().map((button) => button.text)).toEqual([
+      '在应用里打开',
+    ]);
+    tap(h, `appr:a:${remote.key}`);
+    await waitFor(() => h.api.callbacks.length > 0, 'callback');
+    expect(h.api.callbacks.at(-1)?.text).toBe('高危操作，必须在电脑上审批');
+    expect(remote.responded).toEqual([]);
+  });
+
+  it('应用里先处理了：手机那条换成已在应用里处理', async () => {
+    const h = await bound();
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    remote.resolvedInApp();
+    await waitFor(() => h.api.edited.length > 0, 'settled');
+    expect(h.api.edited.at(-1)?.text).toBe('✅ 已在应用里处理：修登录 · bash');
+  });
+
+  it('查无此卡（重启后的旧按钮）：提示已失效，消息改成已失效并清按钮', async () => {
+    const h = await bound();
+    approvalBridge(h);
+    tap(h, 'appr:a:0123456789abcdef');
+    await waitFor(() => h.api.callbacks.length > 0, 'callback');
+    expect(h.api.callbacks.at(-1)?.text).toBe('这条审批已失效');
+    await waitFor(() => h.api.edited.length > 0, 'stale settled');
+    expect(h.api.edited.at(-1)).toMatchObject({ chatId: 777, messageId: 2 });
+    expect(h.api.edited.at(-1)?.text).toContain('审批已失效');
+  });
+
+  it('在应用里打开：回到发审批的会话', async () => {
+    const h = await bound();
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => cards(h).length > 0, 'approval card');
+    tap(h, `appr:o:${remote.key}`);
+    await waitFor(() => h.world.opened.length > 0, 'opened');
+    expect(h.world.opened).toEqual([{ conversationId: 'conv-9' }]);
+    expect(h.api.callbacks.at(-1)?.text).toBe('已在应用里打开');
+    expect(remote.responded).toEqual([]);
+  });
+
+  it('推送关着、没绑定都不发', async () => {
+    const unbound = harness();
+    approvalBridge(unbound).ask();
+    const h = await bound();
+    h.service.setChannelPrefs('telegram', { push: false });
+    approvalBridge(h).ask();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(cards(unbound)).toEqual([]);
+    expect(cards(h)).toEqual([]);
+  });
+
+  it('远程审批开关落盘，重启后还在', async () => {
+    const h = await bound();
+    const telegramPrefs = (service: typeof h.service) =>
+      service.state().channels.find((item) => item.id === 'telegram')?.prefs;
+    expect(telegramPrefs(h.service)?.approvalRemote).toBe(false);
+    h.service.setChannelPrefs('telegram', { approvalRemote: true });
+    const restarted = h.restart();
+    await restarted.start();
+    expect(telegramPrefs(restarted)?.approvalRemote).toBe(true);
+    await restarted.stop();
   });
 });
 
@@ -2577,11 +2767,13 @@ describe('手机关注的任务', () => {
     expect(h.api.sent).toEqual([]);
   });
 
-  it('回复里带确认卡或审批时点明「需要在应用里确认」', async () => {
+  it('回复里带确认卡时点明「需要在应用里确认」', async () => {
     const h = harness();
     await bound(h);
-    h.service.onCardWaiting({ count: 1, approval: true, conversationId: 'sec-1' });
-    await waitFor(() => h.api.sent.length === 1, 'approval notice');
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length === 1, 'card notice');
     h.api.push(privateMessage('把登录修一下'));
     await waitFor(() => h.world.delivered.length > 0, 'delivered');
     h.service.onTurnReply('sec-1', '已经确认了，正在跑', { turnId: 't1' });
@@ -2934,17 +3126,14 @@ describe('多渠道联系方式', () => {
     );
   });
 
-  it('审批在任何渠道都不能确认', async () => {
+  it('审批卡只发 Telegram 绑定私聊，插件渠道收不到', async () => {
     const h = await boundTelegram();
     const wechat = addWechat(h, { cardConfirm: true });
-    h.service.onCardWaiting({ count: 1, approval: true, conversationId: 'sec-1' });
-    await waitFor(() => wechat.sent.length > 0, 'approval');
-    expect(wechat.sent[0]?.text).toContain('审批只能在应用里处理');
-    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '确认 1' });
-    expect(h.world.resolved).toEqual([]);
-    h.api.push({ update_id: 9, callback_query: { id: 'cb', data: 'card:c:approval:1' } });
-    await waitFor(() => h.api.callbacks.length > 0, 'callback');
-    expect(h.world.resolved).toEqual([]);
+    const remote = approvalBridge(h);
+    remote.ask();
+    await waitFor(() => h.api.sent.some((item) => item.text.includes('🔐')), 'telegram card');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(wechat.sent.some((item) => item.text.includes('🔐'))).toBe(false);
   });
 
   it('总开关关掉：不收不发，只读命令也不回', async () => {

@@ -16,6 +16,10 @@ import {
 } from '@shared/secretary/commands';
 import {
   type AskSettledOutcome,
+  approvalButtonText,
+  approvalCallbackData,
+  approvalCallbackToast,
+  approvalSettledText,
   askCallbackData,
   askCallbackToast,
   askSettledLine,
@@ -37,8 +41,10 @@ import {
   formatFollowedScheduleMessage,
   formatMilestoneMessage,
   formatNeedsAppConfirmLine,
+  formatRemoteApprovalMessage,
   formatSilentTurnLine,
   formatTestMessage,
+  parseApprovalCallbackData,
   parseAskCallbackData,
   parseCardCallbackData,
   parseFeedCallback,
@@ -74,6 +80,13 @@ import type {
 } from '@shared/types/secretary';
 import { type FollowedTask, type FollowingPort, followingViews } from '../following';
 import type { SavedInboundImage } from '../inboundImages';
+import type {
+  RemoteApprovalAction,
+  RemoteApprovalCard,
+  RemoteApprovalResult,
+  RemoteApprovalSettle,
+  RemoteApprovalSink,
+} from '../remoteApprovalBridge';
 import {
   type ChannelButton,
   type ChannelCaps,
@@ -165,13 +178,6 @@ export interface ContactCardRef {
   conversationId?: string;
 }
 
-export interface ContactCardWaitingInput {
-  count: number;
-  /** 审批：永远不能在手机上确认，只给一条回应用的入口 */
-  approval?: boolean;
-  conversationId?: string;
-}
-
 /** 手机关注里的定时到点了：推一次就结束关注 */
 export interface ContactScheduleFiredInput {
   scheduleId: string;
@@ -193,8 +199,6 @@ export interface SecretaryContactPort {
   onAskRequest(conversationId: string, ask: AskRequestInfo): void;
   /** 提问收尾（应用里答了、超时、作废）：手机那条消息跟着标成已回答或已过期 */
   onAskResolved(conversationId: string, requestId: string, resolution?: AskResolvedInfo): void;
-  /** 审批在应用里收尾：那条提示的按钮跟着失效 */
-  onApprovalResolved(conversationId: string): void;
   /** 回合开始：这一轮的回复会发到手机时点亮「正在输入…」 */
   onTurnStart(conversationId: string): void;
   /** 回合收尾（完成 / 出错 / 被停）：立刻停掉续发 */
@@ -212,7 +216,6 @@ export interface SecretaryContactPort {
   follows?(conversationId: string): boolean;
   /** 静默回合：/sync 打开时只发一行摘要，正文不发 */
   onTurnSilent(conversationId: string, updates: number): void;
-  onCardWaiting(input: ContactCardWaitingInput): void;
 }
 
 /** 联系方式服务用到的 Main 侧能力；全部注入，单测里换成假的 */
@@ -245,6 +248,12 @@ export interface ContactServicePorts {
     proposalId: string,
     action: 'confirm' | 'reject'
   ): Promise<{ ok: boolean; error?: string }>;
+  /** 审批按钮交给全局远程审批桥：放不放行只有桥说了算；缺省一律当已失效 */
+  resolveRemoteApproval?(
+    key: string,
+    action: RemoteApprovalAction,
+    options: { remoteEnabled: boolean }
+  ): RemoteApprovalResult;
   /** 手机上点「在应用里打开」：聚焦窗口并定位到这张卡（或这个会话） */
   openInApp(target: { conversationId?: string; proposalId?: string }): void;
   /** 出站失败只提示，不打断秘书；channelId 是失败的渠道，detail 是渠道给的原因 */
@@ -329,7 +338,7 @@ interface PendingAsk {
   settled: boolean;
 }
 
-/** 已经发到手机上的确认卡（或审批提示）：处理掉之后各渠道一起收尾 */
+/** 已经发到手机上的确认卡：处理掉之后各渠道一起收尾 */
 interface TrackedCard extends ContactCardRef {
   sends: Delivery[];
   /** 「派发 修登录」：收尾时整条消息换成「✅ 已确认：…」 */
@@ -340,6 +349,14 @@ interface TrackedCard extends ContactCardRef {
    */
   pendingAction?: 'confirm' | 'reject';
   settled: boolean;
+}
+
+/** 发到绑定私聊的审批卡：收尾只认 key，「在应用里打开」回到发审批的会话 */
+interface ApprovalMessage {
+  conversationId: string;
+  /** 「修登录 · bash」：收尾时整条换成「✅ 已批准：…」 */
+  label: string;
+  sends: Delivery[];
 }
 
 type PostKind = 'sendText' | 'ask' | 'confirmCards' | 'approvalNotice';
@@ -375,9 +392,9 @@ function uniquePeers(peers: Iterable<Peer>): Peer[] {
  * 联系方式核心：秘书语义（里程碑、提问、确认卡、审批、关注、只读命令）在这里，
  * 渠道只负责收发。Telegram 是内置渠道，插件渠道经 ContactChannelRegistry 接进来。
  * 回复、正在输入、任务结果只回原来的联系人；主动推送发给所有打开推送且已连接的渠道，
- * 谁先答算谁的，其余渠道随后收尾。审批永远不能在手机上确认。
+ * 谁先答算谁的，其余渠道随后收尾。审批卡只发 Telegram 绑定私聊，放不放行由远程审批桥决定。
  */
-export class ContactService implements SecretaryContactPort {
+export class ContactService implements SecretaryContactPort, RemoteApprovalSink {
   readonly registry = new ContactChannelRegistry();
   /** 插件渠道的出站熔断：连续失败就暂停推送，界面上能看到原因 */
   private readonly outbound = new OutboundHealth();
@@ -389,8 +406,8 @@ export class ContactService implements SecretaryContactPort {
   private readonly cardsById = new Map<string, TrackedCard>();
   /** 提案 id → 已经提示过的那条消息：同一张卡只推一次，处理掉再收尾 */
   private readonly cardMessages = new Map<string, TrackedCard>();
-  /** 会话 id → 审批提示：审批在应用里收尾后清按钮 */
-  private readonly approvalCards = new Map<string, TrackedCard[]>();
+  /** 审批 key → 发出去的那条审批卡 */
+  private readonly approvals = new Map<string, ApprovalMessage>();
   /** 没按钮的渠道：联系人 → 最近一条提示里的卡片编号 */
   private readonly plainCards = new Map<string, string[]>();
   private slot = 1;
@@ -605,9 +622,8 @@ export class ContactService implements SecretaryContactPort {
     return false;
   }
 
-  /** 这个会话上还有手机上处理不了的卡或审批 */
+  /** 这个会话上还有手机上处理不了的卡 */
   private needsAppConfirm(conversationId: string): boolean {
-    if (this.approvalCards.has(conversationId)) return true;
     for (const card of this.cardsById.values()) {
       if (!card.settled && card.conversationId === conversationId) return true;
     }
@@ -863,9 +879,18 @@ export class ContactService implements SecretaryContactPort {
     if (!this.registry.get(channelId)) return { ok: false, error: 'not-found' };
     const caps = this.capsOf(channelId);
     const clean: Partial<SecretaryContactChannelPrefs> = {};
-    for (const key of ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const) {
+    for (const key of [
+      'enabled',
+      'push',
+      'cardConfirm',
+      'approvalRemote',
+      'syncMirror',
+      'memory',
+    ] as const) {
       if (typeof patch[key] === 'boolean') clean[key] = patch[key];
     }
+    // 审批卡只发 Telegram 私聊：别的渠道没有这个开关
+    if (channelId !== TELEGRAM_CHANNEL_ID) delete clean.approvalRemote;
     // 一个插件渠道同一时间只归一个秘书：别的秘书已经打开了就不能再开
     if (
       clean.enabled === true &&
@@ -1004,10 +1029,9 @@ export class ContactService implements SecretaryContactPort {
       }
     }
     for (const [id, card] of this.cardsById) if (dropCard(card)) this.cardsById.delete(id);
-    for (const [conversationId, list] of this.approvalCards) {
-      const rest = list.filter((card) => !dropCard(card));
-      if (rest.length > 0) this.approvalCards.set(conversationId, rest);
-      else this.approvalCards.delete(conversationId);
+    for (const [key, approval] of this.approvals) {
+      approval.sends = approval.sends.filter((send) => !hit(send.peer));
+      if (approval.sends.length === 0) this.approvals.delete(key);
     }
     for (const key of [...this.plainCards.keys()]) {
       if (key.startsWith(`${channelId}\u0000`)) this.plainCards.delete(key);
@@ -1496,57 +1520,61 @@ export class ContactService implements SecretaryContactPort {
   }
 
   /**
-   * 审批：永远不能在手机上确认，只给一条回应用的入口。
-   * 确认卡走 syncPendingCards，与界面状态同步。
+   * 审批卡只发 Telegram 绑定的私聊，不推群与话题：审批内容不给群成员看。
+   * 可远程且渠道开着远程审批才带批准/拒绝，否则只有回应用的入口。
    */
-  onCardWaiting(input: ContactCardWaitingInput): void {
-    const targets = this.pushTargets();
-    if (targets.length === 0 || input.count <= 0) return;
+  showApproval(card: RemoteApprovalCard): void {
+    const peerId = this.telegram.peerId();
+    const prefs = this.prefsOf(TELEGRAM_CHANNEL_ID);
+    if (!peerId || !prefs.push || !this.active(TELEGRAM_CHANNEL_ID)) return;
+    if (this.approvals.has(card.key)) return;
     const lang = this.ports.lang();
-    const link = input.conversationId ? conversationDeepLink(input.conversationId) : undefined;
-    const slot = this.slot++;
-    const entry: TrackedCard = {
-      id: `approval:${slot}`,
-      kind: 'dispatch',
-      sends: [],
-      label: lang === 'zh' ? '审批' : 'approval',
-      settled: false,
-      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    const mode = card.tier === 'desktop' ? 'desktop' : prefs.approvalRemote ? 'remote' : 'off';
+    const button = (action: 'allow' | 'deny'): ChannelButton => ({
+      text: approvalButtonText(lang, action),
+      data: approvalCallbackData(card.key, action),
+    });
+    const open: ChannelButton = {
+      text: cardOpenButtonText(lang),
+      data: approvalCallbackData(card.key, 'open'),
     };
-    this.cardsById.set(entry.id, entry);
-    if (input.conversationId) {
-      const list = this.approvalCards.get(input.conversationId) ?? [];
-      list.push(entry);
-      this.approvalCards.set(input.conversationId, list);
-    }
-    for (const peer of targets) {
-      const asButton = this.urlButtonFor(peer, link);
-      const buttons = this.hasButtons(peer);
-      const text = formatCardWaitingMessage(lang, {
-        count: input.count,
-        ...(input.approval ? { approval: true } : {}),
-        // 做成 url 按钮的深链不再在正文里重复一遍
-        ...(link && !asButton ? { link } : {}),
-      });
-      // 审批永远只有一个回应用的入口：手机上不给确认按钮
-      const message: ChannelMessage = buttons
-        ? { text, buttons: [[this.openButton(peer, lang, entry.id, link)]] }
-        : { text };
-      const delivery: Delivery = { peer, messageId: null, ready: Promise.resolve() };
-      entry.sends.push(delivery);
-      delivery.ready = this.post(peer, 'approvalNotice', message).then((sent) => {
-        this.audit('contact_card_waiting', sent.ok, sent.ok ? 'approval' : sent.error);
-        if (sent.ok) delivery.messageId = sent.messageId ?? null;
-      });
-    }
+    const peer: Peer = { channelId: TELEGRAM_CHANNEL_ID, peerId };
+    const delivery: Delivery = { peer, messageId: null, ready: Promise.resolve() };
+    this.approvals.set(card.key, {
+      conversationId: card.conversationId,
+      label: card.title ? `${card.title} · ${card.tool}` : card.tool,
+      sends: [delivery],
+    });
+    const message: ChannelMessage = {
+      text: formatRemoteApprovalMessage(lang, {
+        ...(card.title ? { title: card.title } : {}),
+        tool: card.tool,
+        summary: card.summary,
+        mode,
+      }),
+      buttons: mode === 'remote' ? [[button('allow'), button('deny')], [open]] : [[open]],
+    };
+    delivery.ready = this.post(peer, 'approvalNotice', message).then((sent) => {
+      this.audit('contact_approval_card', sent.ok, sent.ok ? mode : sent.error);
+      if (sent.ok) delivery.messageId = sent.messageId ?? null;
+    });
   }
 
-  /** 审批在应用里答完了：各渠道上的那条提示一起收尾 */
-  onApprovalResolved(conversationId: string): void {
-    const list = this.approvalCards.get(conversationId);
-    if (!list) return;
-    this.approvalCards.delete(conversationId);
-    for (const entry of list) void this.settleCard(entry);
+  /** 桥说这条审批收尾了（哪边处理的都一样）：整条换成结果并清按钮 */
+  settleApproval(key: string, how: RemoteApprovalSettle): void {
+    const approval = this.approvals.get(key);
+    if (!approval) return;
+    this.approvals.delete(key);
+    const text = approvalSettledText(this.ports.lang(), how, approval.label);
+    for (const send of approval.sends) void this.settleMessage(send, text, how);
+  }
+
+  private async settleMessage(send: Delivery, text: string, detail: string): Promise<void> {
+    await send.ready;
+    const channel = this.registry.get(send.peer.channelId)?.channel;
+    if (!channel?.caps().edit || send.messageId === null) return;
+    const result = await channel.settle(send.peer.peerId, send.messageId, text);
+    this.audit('contact_approval_settled', result.ok, result.ok ? detail : result.error);
   }
 
   /**
@@ -1863,6 +1891,11 @@ export class ContactService implements SecretaryContactPort {
       await this.handleFollowCallback(peer, message.messageId, follow, ack);
       return;
     }
+    const approval = parseApprovalCallbackData(data);
+    if (approval) {
+      await this.handleApprovalAction(peer, message.messageId, approval.key, approval.action, ack);
+      return;
+    }
     const card = parseCardCallbackData(data);
     if (card) {
       await this.handleCardAction(peer, card.id, card.action, ack);
@@ -1900,8 +1933,46 @@ export class ContactService implements SecretaryContactPort {
   }
 
   /**
+   * 审批按钮：服务不知道审批状态，放不放行只问桥；桥不放行就只回提示，
+   * 不做任何乐观反馈。查无此卡（多半是重启前发的）就把那条原地改成已失效。
+   */
+  private async handleApprovalAction(
+    peer: Peer,
+    messageId: string | undefined,
+    key: string,
+    action: 'allow' | 'deny' | 'open',
+    ack: (text?: string) => Promise<void>
+  ): Promise<void> {
+    const lang = this.ports.lang();
+    if (action === 'open') {
+      const conversationId = this.approvals.get(key)?.conversationId;
+      this.ports.openInApp(conversationId ? { conversationId } : {});
+      this.audit('contact_approval_open', true, key);
+      await ack(approvalCallbackToast(lang, 'open'));
+      return;
+    }
+    const result: RemoteApprovalResult = this.ports.resolveRemoteApproval?.(key, action, {
+      remoteEnabled: this.prefsOf(peer.channelId).approvalRemote,
+    }) ?? { kind: 'unknown' };
+    this.audit(
+      action === 'allow' ? 'contact_approval_allow' : 'contact_approval_deny',
+      result.kind === 'resolved',
+      `${result.kind} ${key}`
+    );
+    const outcome =
+      result.kind === 'resolved' ? (result.action === 'allow' ? 'allowed' : 'denied') : result.kind;
+    await ack(approvalCallbackToast(lang, outcome));
+    if (result.kind !== 'unknown' || !messageId) return;
+    await this.settleMessage(
+      { peer, messageId, ready: Promise.resolve() },
+      approvalSettledText(lang, 'expired'),
+      'stale'
+    );
+  }
+
+  /**
    * 确认卡的动作：确认直接执行，打开只回到应用。
-   * 渠道关着手机确认时只提醒回应用处理；审批根本没有确认入口。
+   * 渠道关着手机确认时只提醒回应用处理。
    * 卡片已经处理过（哪边处理的都算）就只提示。
    */
   private async handleCardAction(
@@ -1920,11 +1991,6 @@ export class ContactService implements SecretaryContactPort {
       });
       this.audit('contact_card_open', true, card ? cardKindLabel(lang, card.kind) : 'unknown');
       await ack(cardCallbackToast(lang, 'open'));
-      return;
-    }
-    // 审批永远不能在手机上确认
-    if (id.startsWith('approval:')) {
-      await ack(lang === 'zh' ? '审批只能在应用里处理' : 'Approvals stay in the app');
       return;
     }
     if (card?.settled) {
@@ -2418,8 +2484,8 @@ function plainCardsText(
   lines.push(
     confirmable
       ? lang === 'zh'
-        ? '回复「确认 1」直接处理对应的卡；审批永远只能在应用里处理。'
-        : 'Reply "confirm 1" to handle that card. Approvals always stay in the app.'
+        ? '回复「确认 1」直接处理对应的卡。'
+        : 'Reply "confirm 1" to handle that card.'
       : lang === 'zh'
         ? '这个渠道关着手机确认，请回应用处理。'
         : 'Phone confirm is off for this channel; handle it in the app.'

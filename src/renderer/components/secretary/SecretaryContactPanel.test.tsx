@@ -38,7 +38,14 @@ function contactState(groups: SecretaryContactState['telegram']['groups']): Secr
         builtin: true,
         status: 'connected',
         caps,
-        prefs: { enabled: true, push: true, cardConfirm: true, syncMirror: false, memory: false },
+        prefs: {
+          enabled: true,
+          push: true,
+          cardConfirm: true,
+          approvalRemote: false,
+          syncMirror: false,
+          memory: false,
+        },
       },
     ],
     telegram: {
@@ -710,5 +717,51 @@ describe('插件渠道出站失败', () => {
     state = withWechat();
     await render('sec-a');
     expect(wechatCard()?.querySelector('[data-enso="secretary-contact-outbound"]')).toBeNull();
+  });
+});
+
+describe('Telegram 远程审批开关', () => {
+  const row = (channelId: string) =>
+    container.querySelector(
+      `[data-enso="secretary-contact-channel"][data-channel="${channelId}"] [data-enso="secretary-contact-approval-remote"]`
+    );
+  /** Switch 在测试里被替换成空组件：顺着 fiber 找到它的 onCheckedChange 直接调 */
+  const toggle = async (element: Element, checked: boolean) => {
+    const key = Object.keys(element).find((name) => name.startsWith('__reactFiber'));
+    type Fiber = { memoizedProps?: Record<string, unknown>; child?: Fiber; sibling?: Fiber };
+    const root = key ? (element as unknown as Record<string, Fiber>)[key] : undefined;
+    const stack: Fiber[] = root?.child ? [root.child] : [];
+    let handler: ((value: boolean) => void) | undefined;
+    while (stack.length > 0 && !handler) {
+      const fiber = stack.pop() as Fiber;
+      const candidate = fiber.memoizedProps?.onCheckedChange;
+      if (typeof candidate === 'function') handler = candidate as (value: boolean) => void;
+      if (fiber.child) stack.push(fiber.child);
+      if (fiber.sibling) stack.push(fiber.sibling);
+    }
+    if (!handler) throw new Error('missing switch');
+    await act(async () => handler?.(checked));
+  };
+
+  it('只有 Telegram 有这个开关，打开时单独提交 approvalRemote', async () => {
+    const base = contactState([]);
+    const telegram = base.channels[0];
+    if (!telegram) throw new Error('missing telegram');
+    state = {
+      ...base,
+      channels: [
+        telegram,
+        { ...telegram, id: 'enso.clawbot:wechat', title: '微信', builtin: false, pluginId: 'x' },
+      ],
+    };
+    await render('sec-a');
+    const approval = row('telegram');
+    expect(approval?.textContent).toContain('Approve from Telegram');
+    expect(row('enso.clawbot:wechat')).toBeNull();
+    await toggle(approval as Element, true);
+    expect(contactSettings).toHaveBeenLastCalledWith(
+      { channelId: 'telegram', prefs: { approvalRemote: true } },
+      'sec-a'
+    );
   });
 });

@@ -251,13 +251,13 @@ const PLAIN_ASK_HINT: Record<ContactLang, string> = {
 };
 
 /**
- * 回推正文里的确认提示：手机上既看不到确认卡也处理不了审批，
+ * 回推正文里的确认提示：手机上看不到确认卡，
  * 秘书说「已确认」时必须在同一条里点明还得回应用点一下。
  */
 export function formatNeedsAppConfirmLine(lang: ContactLang): string {
   return lang === 'zh'
-    ? '⚠️ 需要在应用里确认：这条回复涉及确认卡或审批，手机上处理不了。'
-    : '⚠️ Confirm in the app: this reply involves a card or approval that the phone cannot handle.';
+    ? '⚠️ 需要在应用里确认：这条回复涉及确认卡，手机上处理不了。'
+    : '⚠️ Confirm in the app: this reply involves a card that the phone cannot handle.';
 }
 
 /** 秘书用 ask_user 问 J 哥：问题、选项、怎么答，一条说完 */
@@ -363,9 +363,9 @@ export function cardLabel(lang: ContactLang, kind: SecretaryCardKind, title?: st
 }
 
 /**
- * 确认卡与审批：正文说清这条消息上到底有什么按钮。
+ * 确认卡：正文说清这条消息上到底有什么按钮。
  * confirmable 只在「允许从 Telegram 确认卡片」打开时才是真的；关着时按钮还在，
- * 但点了只提醒回应用处理。审批永远只有提示。
+ * 但点了只提醒回应用处理。
  * link 只在 Telegram 不认这个 scheme、做不成 url 按钮时传进来，正文里用等宽字体包起来。
  */
 export function formatCardWaitingMessage(
@@ -374,28 +374,17 @@ export function formatCardWaitingMessage(
     count: number;
     title?: string;
     confirmable?: boolean;
-    approval?: boolean;
     link?: string;
   }
 ): string {
   const head = lang === 'zh' ? '🗂 有一张卡在等你' : '🗂 A card is waiting';
-  let body: string;
-  if (input.approval) {
-    body =
-      lang === 'zh'
-        ? '审批只能在应用里处理，手机上没有确认入口。'
-        : 'Approvals can only be handled in the app; there is no confirm button here.';
-  } else if (input.confirmable) {
-    body =
-      lang === 'zh'
-        ? '点「确认」直接处理，或点「在应用里打开」回应用看详情。审批永远只能在应用里处理。'
-        : 'Tap Confirm to handle it, or Open in the app for details. Approvals always stay in the app.';
-  } else {
-    body =
-      lang === 'zh'
-        ? '设置里关着手机确认：点「确认」只会提醒你回应用处理。审批永远只能在应用里处理。'
-        : 'Phone confirm is off in settings: tapping Confirm only reminds you to handle it in the app. Approvals always stay in the app.';
-  }
+  const body = input.confirmable
+    ? lang === 'zh'
+      ? '点「确认」直接处理，或点「在应用里打开」回应用看详情。'
+      : 'Tap Confirm to handle it, or Open in the app for details.'
+    : lang === 'zh'
+      ? '设置里关着手机确认：点「确认」只会提醒你回应用处理。'
+      : 'Phone confirm is off in settings: tapping Confirm only reminds you to handle it in the app.';
   const lines = [input.title ? `${head} · ${input.title}` : head, body];
   if (input.count > 1) lines.push(lang === 'zh' ? `共 ${input.count} 张` : `${input.count} cards`);
   if (input.link) lines.push(deepLinkLine(lang, input.link));
@@ -432,7 +421,7 @@ export function cardCallbackData(id: string, action: 'confirm' | 'reject' | 'ope
   return `card:${code}:${id}`;
 }
 
-/** 卡片 id 只可能是提案 uuid 或 approval:<n>：别的形状一律当坏数据 */
+/** 卡片 id 只可能是提案 uuid：别的形状一律当坏数据 */
 const CARD_ID = /^[A-Za-z0-9:_-]{1,48}$/u;
 
 export function parseCardCallbackData(
@@ -462,6 +451,104 @@ export function cardCallbackToast(
   return lang === 'zh'
     ? `已确认${target ? `：${target}` : '这张卡'}`
     : `Confirmed${target ? `: ${target}` : ' the card'}`;
+}
+
+export type ApprovalCallbackAction = 'allow' | 'deny' | 'open';
+/** remote：手机上能批；desktop：高危，只能回电脑；off：渠道没开远程审批 */
+export type RemoteApprovalCardMode = 'remote' | 'desktop' | 'off';
+export type ApprovalSettleKind = 'allowed' | 'denied' | 'elsewhere' | 'expired';
+export type ApprovalCallbackOutcome =
+  | 'unknown'
+  | 'settled'
+  | 'desktop'
+  | 'disabled'
+  | 'failed'
+  | 'allowed'
+  | 'denied'
+  | 'open';
+
+const APPROVAL_CODE: Record<ApprovalCallbackAction, string> = { allow: 'a', deny: 'd', open: 'o' };
+
+/** 审批按钮：appr:<a|d|o>:<key>，key 是 requestId 哈希的 16 位十六进制 */
+export function approvalCallbackData(key: string, action: ApprovalCallbackAction): string {
+  return `appr:${APPROVAL_CODE[action]}:${key}`;
+}
+
+export function parseApprovalCallbackData(
+  data: string
+): { key: string; action: ApprovalCallbackAction } | null {
+  const match = /^appr:([ado]):([0-9a-f]{16})$/u.exec(data.trim());
+  if (!match) return null;
+  const action = match[1] === 'a' ? 'allow' : match[1] === 'd' ? 'deny' : 'open';
+  return { key: match[2] ?? '', action };
+}
+
+const APPROVAL_HINT: Record<RemoteApprovalCardMode, Record<ContactLang, string>> = {
+  remote: {
+    zh: '点「批准」单次放行，或点「拒绝」。应用里先处理了就以那边为准。',
+    en: 'Tap Approve to allow it once, or Deny. Whichever side answers first wins.',
+  },
+  desktop: {
+    zh: '⚠️ 高危操作，必须在电脑上审批。',
+    en: '⚠️ High-risk action: approve it on the computer.',
+  },
+  off: {
+    zh: '远程审批没开（联系方式设置里可以打开），请在应用里处理。',
+    en: 'Remote approval is off (turn it on in contact settings); handle it in the app.',
+  },
+};
+
+/** 审批卡正文：哪个会话、什么工具、做什么，再说清这条上能不能批 */
+export function formatRemoteApprovalMessage(
+  lang: ContactLang,
+  input: { title?: string; tool: string; summary: string; mode: RemoteApprovalCardMode }
+): string {
+  const head = lang === 'zh' ? '🔐 等你审批' : '🔐 Approval needed';
+  return [
+    input.title ? `${head} · ${input.title}` : head,
+    `${input.tool}${lang === 'zh' ? '：' : ': '}${input.summary}`,
+    APPROVAL_HINT[input.mode][lang],
+  ].join('\n');
+}
+
+export function approvalButtonText(lang: ContactLang, action: 'allow' | 'deny'): string {
+  if (action === 'allow') return lang === 'zh' ? '批准' : 'Approve';
+  return lang === 'zh' ? '拒绝' : 'Deny';
+}
+
+const APPROVAL_SETTLED: Record<ApprovalSettleKind, Record<ContactLang, string>> = {
+  allowed: { zh: '✅ 已批准', en: '✅ Approved' },
+  denied: { zh: '🚫 已拒绝', en: '🚫 Denied' },
+  elsewhere: { zh: '✅ 已在应用里处理', en: '✅ Handled in the app' },
+  expired: { zh: '⌛ 审批已失效', en: '⌛ Approval expired' },
+};
+
+/** 审批收尾：整条消息换成这一句，按钮一起清掉 */
+export function approvalSettledText(
+  lang: ContactLang,
+  how: ApprovalSettleKind,
+  label?: string
+): string {
+  const mark = APPROVAL_SETTLED[how][lang];
+  return label ? `${mark}${lang === 'zh' ? '：' : ': '}${label}` : mark;
+}
+
+const APPROVAL_TOAST: Record<ApprovalCallbackOutcome, Record<ContactLang, string>> = {
+  unknown: { zh: '这条审批已失效', en: 'This approval is no longer valid' },
+  settled: { zh: '已在别处处理', en: 'Already handled elsewhere' },
+  desktop: { zh: '高危操作，必须在电脑上审批', en: 'High-risk: approve it on the computer' },
+  disabled: {
+    zh: '远程审批没开，请在应用里处理',
+    en: 'Remote approval is off; handle it in the app',
+  },
+  failed: { zh: '没送到会话，请在应用里处理', en: 'Could not reach the session; use the app' },
+  allowed: { zh: '✅ 已批准', en: '✅ Approved' },
+  denied: { zh: '已拒绝', en: 'Denied' },
+  open: { zh: '已在应用里打开', en: 'Opened in the app' },
+};
+
+export function approvalCallbackToast(lang: ContactLang, outcome: ApprovalCallbackOutcome): string {
+  return APPROVAL_TOAST[outcome][lang];
 }
 
 /** 绑定完成后的欢迎消息：告诉 J 哥现在能做什么 */
