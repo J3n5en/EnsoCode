@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 /**
  * 受控 fake provider（issue #27）：本地 anthropic-messages 兼容端点。
  *
@@ -25,8 +27,6 @@
  * - 记录每次请求，验收脚本可核对「worker 是否真的发出了请求」
  */
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
 
 function sha256Hex(text) {
   return createHash('sha256').update(text).digest('hex');
