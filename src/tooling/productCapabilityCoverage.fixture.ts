@@ -46,6 +46,7 @@ export const SETTINGS_DATA_COVERAGE = {
   ),
   rtkEnabled: excluded('RTK command compression is a desktop session preference.'),
   longCacheRetention: excluded('Prompt cache TTL is a device-local request cost preference.'),
+  agy: excluded('Device-local Antigravity CLI path and permission skip.'),
   computerPreview: excluded('Computer picture-in-picture is a desktop display preference.'),
   computerAllowAllApps: excluded('Computer app trust is a device-local security preference.'),
   openLinksInBuiltinBrowser: excluded(
@@ -251,6 +252,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setRtkEnabled: excluded('RTK command compression is a desktop session preference.'),
   setLongCacheRetention: excluded('Prompt cache TTL is a device-local request cost preference.'),
+  setAgy: excluded('Device-local Antigravity CLI path and permission skip.'),
   setComputerPreview: excluded('Computer picture-in-picture is a desktop display preference.'),
   setComputerAllowAllApps: excluded('Computer app trust is a device-local security preference.'),
   setOpenLinksInBuiltinBrowser: excluded(
@@ -1268,6 +1270,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_VIEW_STATE_GET: excluded('Enso 插件侧栏页面状态读取，替代 localStorage。'),
   EXTENSION_PLUGINS_VIEW_STATE_SET: excluded('Enso 插件侧栏页面状态写入，按插件 id 存在 Main。'),
   EXTENSION_PLUGINS_PICK_PATH: excluded('桌面专用：插件配置项选择文件或目录。'),
+  AGY_AUTH_STATUS: excluded('本机 agy 登录探测，只在设置页打开或重新检测时调用。'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

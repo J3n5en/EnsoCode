@@ -1,4 +1,5 @@
 import { registerAgentHandlers } from './agent';
+import { registerAgyHandlers } from './agy';
 import { registerAppBadgeHandlers } from './appBadge';
 import { registerAppearanceHandlers } from './appearance';
 import { registerAssetHandlers } from './assets';
@@ -41,6 +42,7 @@ export function registerIpcHandlers(): void {
   registerAppearanceHandlers();
   registerModelDirectoryHandlers();
   registerProviderHandlers();
+  registerAgyHandlers();
   registerAssetHandlers();
   registerExtensionPluginHandlers();
   registerAgentHandlers();

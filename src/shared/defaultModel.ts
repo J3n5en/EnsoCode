@@ -148,6 +148,7 @@ export function modelUsability(
   const model = provider.models.find((entry) => entry.id === selection.modelId);
   if (!model) return 'model-missing';
   if (model.enabled === false) return 'model-disabled';
+  if (provider.id === AGY_PROVIDER_ID) return 'usable';
   if (provider.oauthAccountPool !== undefined && !isOauthAccountPool(provider))
     return 'oauth-account-missing';
   if (!provider.oauthAccountKey) return provider.apiKey ? 'usable' : 'api-key-missing';
@@ -396,3 +397,5 @@ export function sanitizeDefaultModel(state: DefaultModelState): SanitizeDefaultM
     notice: { previous: state.defaultModel, next: null },
   };
 }
+
+import { AGY_PROVIDER_ID } from './agy/constants';

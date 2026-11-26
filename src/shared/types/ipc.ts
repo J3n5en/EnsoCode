@@ -270,6 +270,8 @@ export const IPC_CHANNELS = {
 
   // OAuth 订阅供应商（pi 内置）
   OAUTH_PROVIDERS_LIST: 'oauth-providers:list',
+  /** 只在设置页打开、重新检测，或会话收到 -32000 时调用。不要在窗口聚焦时探测。 */
+  AGY_AUTH_STATUS: 'agy:authStatus',
   OAUTH_LOGIN: 'oauth-providers:login',
   OAUTH_LOGIN_RESPOND: 'oauth-providers:login-respond',
   OAUTH_LOGIN_CANCEL: 'oauth-providers:login-cancel',

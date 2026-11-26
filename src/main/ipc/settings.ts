@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
+import { parseAgySettings } from '@shared/agy/settings';
 import { isAppLoggingEnabled, setAppLoggingEnabled } from '@shared/appLogFile';
 import { diffConversations, isEmptyConversationsStore } from '@shared/conversationsPatch';
 import {
@@ -86,6 +87,7 @@ export const SETTINGS_STATE_FIELDS = [
   'exploreFoldEnabled',
   'rtkEnabled',
   'longCacheRetention',
+  'agy',
   'computerPreview',
   'computerAllowAllApps',
   'editMode',
@@ -242,6 +244,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'autoRestartForUpdate',
   'updateChannel',
   'longCacheRetention',
+  'agy',
   'pluginAutoUpdate',
   'pluginLoggingEnabled',
   'appLoggingEnabled',
@@ -600,6 +603,7 @@ function scheduleWrite(
           pushMaxActiveCoworkers,
           pushAutoRetryLimit,
           pushLongCacheRetention,
+          pushAgyConfig,
           pushPrivacyMasking,
           pushShellLimits,
           pushDisabledWorkflowPresets,
@@ -613,6 +617,7 @@ function scheduleWrite(
           pushMaxActiveCoworkers();
           pushAutoRetryLimit();
           pushLongCacheRetention();
+          pushAgyConfig();
           pushPrivacyMasking();
           pushShellLimits();
           pushDisabledWorkflowPresets();
@@ -735,6 +740,7 @@ export function commitSettingsTransaction(
         pushMaxActiveCoworkers,
         pushAutoRetryLimit,
         pushLongCacheRetention,
+        pushAgyConfig,
         pushPrivacyMasking,
         pushShellLimits,
         pushDisabledWorkflowPresets,
@@ -748,6 +754,7 @@ export function commitSettingsTransaction(
         pushMaxActiveCoworkers();
         pushAutoRetryLimit();
         pushLongCacheRetention();
+        pushAgyConfig();
         pushPrivacyMasking();
         pushShellLimits();
         pushDisabledWorkflowPresets();
@@ -790,6 +797,8 @@ export function patchSettingsState(
     const config = parseContextMenuOpen(value);
     if (!config) return { ok: false, error: 'Invalid context menu opening' };
     targetValue = config;
+  } else if (targetField === 'agy') {
+    targetValue = parseAgySettings(value);
   }
   const current = readSettings() ?? {};
   const persisted =
