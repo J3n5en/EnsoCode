@@ -1,4 +1,9 @@
-import { conversationHasRunningChild } from '@shared/conversationDotTone';
+import {
+  type ConversationDotTone,
+  conversationDotTone,
+  conversationHasRunningChild,
+  userAskCount,
+} from '@shared/conversationDotTone';
 import { lastActiveAt } from '@/stores/sessions/pinned';
 
 /** 折叠栏要点开的项目。进行中只认 running / spawning / 子任务仍在跑，不含未读和待回答。 */
@@ -7,6 +12,39 @@ export interface CollapsedActiveProject {
   conversationId: string;
   parentId?: string;
   title: string;
+}
+
+/** 折叠 rail 悬停浮层里的一行：项目下某条未归档会话的可观察状态。 */
+export interface CollapsedProjectSession {
+  conversationId: string;
+  parentId?: string;
+  title: string;
+  tone: ConversationDotTone;
+  /** 最近活跃时间，浮层内排序用（新在前） */
+  activity: number;
+}
+
+/** 与侧栏会话行同一套 tone 计算，只是数据源是投影字段。 */
+function sessionTone(conversation: {
+  status?: string;
+  spawning?: boolean;
+  unread?: boolean;
+  pendingAsks?: readonly { relay?: unknown; answered?: unknown }[];
+  hasRunningChild?: boolean;
+  queued?: boolean;
+  queueFailed?: string;
+  hasPendingReminder?: boolean;
+  pendingApprovalCount?: number;
+}): ConversationDotTone {
+  return conversationDotTone({
+    status: conversation.queueFailed ? 'failed' : (conversation.status ?? 'idle'),
+    spawning: conversation.spawning,
+    unread: conversation.unread,
+    pendingAskCount: userAskCount(conversation.pendingAsks),
+    hasRunningChild: conversation.hasRunningChild,
+    queued: conversation.queued === true && !conversation.queueFailed,
+    hasPendingReminder: conversation.hasPendingReminder,
+  });
 }
 
 interface ActivityConversation {
@@ -19,7 +57,11 @@ interface ActivityConversation {
   messages?: { timestamp?: number }[];
   status?: string;
   spawning?: boolean;
+  unread?: boolean;
+  pendingAsks?: readonly { relay?: unknown; answered?: unknown }[];
   hasRunningChild?: boolean;
+  queued?: boolean;
+  queueFailed?: string;
   coworkerIds?: readonly string[];
   subagents?: readonly { status: string }[];
   backgroundTasks?: readonly { status: string }[];
@@ -91,6 +133,50 @@ export function collapsedActiveProjects(
         right.activity - left.activity || left.projectId.localeCompare(right.projectId)
     )
     .map(({ activity: _activity, ...entry }) => entry);
+}
+
+/**
+ * 折叠 rail 浮层的行数据：该项目全部未归档会话（含 coworker 子会话，后者有 parentId），
+ * 最近活跃在前；已删除/不存在的 parent 不挡行——打开逻辑自己会回退直接选会话。
+ */
+export function collapsedProjectSessions(
+  projectId: string,
+  conversations: Readonly<Record<string, ActivityConversation | undefined>>,
+  options?: { pendingReminderIds?: ReadonlySet<string>; now?: number }
+): CollapsedProjectSession[] {
+  const pendingReminderIds = options?.pendingReminderIds ?? new Set<string>();
+  return Object.entries(conversations)
+    .flatMap(([id, conversation]) =>
+      conversation && conversation.projectId === projectId && conversation.archived !== true
+        ? [[id, conversation] as const]
+        : []
+    )
+    .map(([conversationId, conversation]) => {
+      const parentId = conversation.parentId;
+      return {
+        conversationId,
+        ...(parentId && conversations[parentId] ? { parentId } : {}),
+        title: conversation.title ?? '',
+        tone: sessionTone({
+          ...conversation,
+          hasRunningChild:
+            conversation.hasRunningChild === true ||
+            conversationHasRunningChild(
+              {
+                status: conversation.status ?? 'idle',
+                spawning: conversation.spawning,
+                subagents: conversation.subagents,
+                coworkerIds: conversation.coworkerIds,
+                backgroundTasks: conversation.backgroundTasks,
+              },
+              conversations
+            ),
+          hasPendingReminder: pendingReminderIds.has(conversationId),
+        }),
+        activity: activityAt(conversation),
+      };
+    })
+    .sort((left, right) => right.activity - left.activity);
 }
 
 /** 与全局搜索 openHit 相同：子会话先选父，再选 tab。 */
