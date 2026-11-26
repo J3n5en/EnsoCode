@@ -38,6 +38,7 @@ import { AskBar } from './AskBar';
 import { ChatSessionTimeline } from './ChatSessionTimeline';
 import { ChildRunsButton } from './ChildRunsButton';
 import { Composer } from './Composer';
+import { ComposerImageButton } from './ComposerImageButton';
 import { ComposerToolbarItems } from './ComposerToolbarItems';
 import { ConversationStatusIndicator } from './ConversationStatusIndicator';
 import { CoworkerTabs } from './CoworkerTabs';
@@ -354,6 +355,10 @@ export function ChatView() {
     );
   }
 
+  const composerLocked =
+    (chrome.pendingApprovals ?? []).length > 0 ||
+    Boolean(chrome.rewinding || chrome.restoringFiles);
+
   const statusDot = (
     <StatusDot
       status={chrome.spawning ? 'running' : chrome.status}
@@ -501,10 +506,8 @@ export function ChatView() {
             commands={slashCommands}
             running={running}
             busy={busy}
-            locked={
-              (chrome.pendingApprovals ?? []).length > 0 ||
-              Boolean(chrome.rewinding || chrome.restoringFiles)
-            }
+            locked={composerLocked}
+            hideBuiltinImageButton={!chrome.displayedParentId}
             focusKey={chrome.id}
             pluginPresetId={pluginPresetId}
             planMode={planning}
@@ -596,6 +599,7 @@ export function ChatView() {
                         hasMessages && learnButtonEnabled ? (
                           <LearnButton conversationId={chrome.id} />
                         ) : null,
+                      'add-image': <ComposerImageButton disabled={composerLocked} />,
                     }}
                   />
                 )}

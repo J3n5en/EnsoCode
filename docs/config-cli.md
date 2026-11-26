@@ -103,7 +103,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `learnButtonEnabled`（布尔，默认 `true`）控制会话 composer 工具行是否显示「复盘」按钮，只接受布尔值，热生效，无需重启。
 
-`composerToolbar`（对象，默认 `{"order":["preset","worktree","plan-mode","approval-mode","model","learn"],"pinned":["preset","worktree","approval-mode","model"]}`）控制 composer 工具行按钮的排列顺序与 pin 状态：`order` 是全部按钮 id 的排列（popover 与工具行都按它排序），`pinned` 列出直接显示在工具行里的按钮，其余折叠进「更多」popover。合法 id：`preset`、`worktree`、`plan-mode`、`approval-mode`、`model`、`learn`；两个数组都不允许未知 id 或重复，热生效，无需重启。
+`composerToolbar`（对象，默认 `{"order":["preset","worktree","plan-mode","approval-mode","model","learn","add-image"],"pinned":["preset","worktree","approval-mode","model"]}`）控制 composer 工具行按钮的排列与 pin 状态。`order` 按这个顺序渲染 popover 和工具行。合法按钮 id：`preset`、`worktree`、`plan-mode`、`approval-mode`、`model`、`learn`、`add-image`。`order` 还可含最多 5 个不重复的弹性空白。编辑器插入 `spacer` 和 `spacer-2` 到 `spacer-5`。其它 `spacer-` 加数字的 key 也能通过校验。工具行把它们渲染成把后续元素推到右边的空白。`pinned` 只接受按钮 id，列出直接显示在工具行里的按钮，其余折叠进「更多」popover。未知 id 或重复会被拒绝。热生效，无需重启。
 
 `gitCommitModel`（`{ providerId, modelId }` 或 `null`，默认 `null`）是 Git 提交面板「AI 生成」使用的模型，只存 id，热生效（下一次点击生成时读取），参与配置同步（导入时按 provider 映射到本机条目）。提示词正文不进 `settings.json`，见上表 `gitCommitPromptCustomized`。
 

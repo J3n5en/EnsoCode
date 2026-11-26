@@ -40,6 +40,13 @@ const MAPPED_I18N_KEYS = [
   'Plan',
   'Model',
   'Learn',
+  'Add image',
+  'Edit toolbar layout',
+  'Done editing',
+  'Edit mode: drag to reorder, insert or remove spacers',
+  'Insert flexible space',
+  'Remove flexible space',
+  'Flexible space',
   // ApprovalModePicker.MODE_META.descKey
   'Approve every command and file change',
   'Edits run freely; commands and MCP still ask',

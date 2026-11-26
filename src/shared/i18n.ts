@@ -2930,9 +2930,16 @@ export const zhTranslations: Record<string, string> = {
   'Pin buttons to the toolbar, drag to reorder': '点图钉把按钮固定到工具行，拖动把手排序',
   'Pin to toolbar': '固定到工具行',
   'Unpin from toolbar': '从工具行收起',
+  'Add image': '添加图片',
+  'Edit toolbar layout': '编辑工具行布局',
+  'Done editing': '完成',
+  'Edit mode: drag to reorder, insert or remove spacers': '编辑模式：拖动排序，插入或移除空白',
+  'Insert flexible space': '插入弹性空白',
+  'Remove flexible space': '移除弹性空白',
+  'Flexible space': '弹性空白',
   'Composer toolbar buttons': '输入框工具行按钮',
-  'Pin buttons with the pin icon in the composer More menu; drag the handles there to reorder. Unpinned buttons fold into the More menu':
-    '在输入框「更多」菜单里点图钉固定按钮、拖把手排序；未固定的按钮折叠进「更多」菜单',
+  'Pin buttons in the composer More menu, drag to reorder, and use Edit mode to insert flexible spaces. Unpinned buttons fold into the More menu':
+    '在「更多」菜单里用图钉固定按钮、拖动排序，编辑模式可插入弹性空白。未固定的按钮折叠进「更多」菜单',
   // 状态栏段名（设置弹层行标签 + 状态栏 hover title 前缀）
   Turns: '轮次',
   Duration: '耗时',

@@ -95,6 +95,11 @@ interface ComposerProps {
   enterToSend?: boolean;
   /** 底部工具行左侧插槽（模型选择器等） */
   toolbar?: React.ReactNode;
+  /**
+   * 主会话工具行自己渲染「添加图片」时关掉内置按钮。
+   * 旁路输入框和子会话不传，仍用内置按钮。
+   */
+  hideBuiltinImageButton?: boolean;
   locked?: boolean;
   injectedDraft?: string;
   injectedImages?: AttachedImage[];
@@ -148,6 +153,7 @@ export function Composer({
   autoFocus = !window.electronAPI?.remote,
   enterToSend = !isTouchRemote(),
   toolbar,
+  hideBuiltinImageButton = false,
   locked = false,
   injectedDraft,
   injectedImages,
@@ -982,27 +988,31 @@ export function Composer({
               isMobile ? 'gap-0.5 overflow-x-auto [scrollbar-width:none]' : 'gap-1 overflow-hidden'
             )}
           >
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                ingestFiles(Array.from(event.target.files ?? []));
-                event.target.value = '';
-              }}
-            />
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => imageInputRef.current?.click()}
-              aria-label={t('Attach image')}
-              title={t('Attach image')}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 max-md:size-[32px]"
-            >
-              <ImagePlus className="h-3.5 w-3.5" />
-            </button>
+            {!hideBuiltinImageButton && (
+              <>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    ingestFiles(Array.from(event.target.files ?? []));
+                    event.target.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => imageInputRef.current?.click()}
+                  aria-label={t('Attach image')}
+                  title={t('Attach image')}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 max-md:size-[32px]"
+                >
+                  <ImagePlus className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
             <PluginComposerSlots side="left" {...pluginSlotProps} />
             {toolbar}
             {!isolated && <PluginStatusItems sessionId={pluginSlotProps.sessionId} />}
