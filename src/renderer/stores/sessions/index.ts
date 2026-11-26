@@ -361,6 +361,8 @@ export interface Conversation extends SessionProjection {
   btwParentId?: string;
   /** 旁路隔离提示，spawn 时注入 pendingRole */
   btwRolePrompt?: string;
+  /** 复盘旁路：spawn 时从该会话分叉消息序列（只允许等于 btwParentId） */
+  btwForkFrom?: string;
   coworkerName?: string;
   agentType?: string;
   /** typed mention child 的 Main 权威 metadata；普通 coworker 无此字段。 */
@@ -506,6 +508,7 @@ interface SessionsState {
     projectId: string;
     btwParentId: string;
     rolePrompt: string;
+    forkFrom?: string;
     lastProviderId?: string;
     lastModelId?: string;
     reasoningEnabled?: boolean;
@@ -3422,6 +3425,7 @@ export const useSessionsStore = create<SessionsState>()(
             createdAt: Date.now(),
             btwParentId: input.btwParentId,
             btwRolePrompt: input.rolePrompt,
+            ...(input.forkFrom ? { btwForkFrom: input.forkFrom } : {}),
             lastProviderId: input.lastProviderId,
             lastModelId: input.lastModelId,
             reasoningEnabled: input.reasoningEnabled,
@@ -3627,6 +3631,7 @@ export const useSessionsStore = create<SessionsState>()(
                   providerId: target.providerId,
                   modelId: target.modelId,
                   rolePrompt: conversation.btwRolePrompt ?? '',
+                  ...(conversation.btwForkFrom ? { forkFrom: conversation.btwForkFrom } : {}),
                   reasoningEnabled: conversation.reasoningEnabled,
                   thinkingLevel: conversation.thinkingLevel,
                   approvalMode:

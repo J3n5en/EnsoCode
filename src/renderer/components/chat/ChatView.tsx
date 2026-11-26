@@ -43,6 +43,7 @@ import { CoworkerTabs } from './CoworkerTabs';
 import { insertComposerText, requestFocusComposer } from './composerMentionBridge';
 import { routeComposerPayload } from './composerRouting';
 import { GoalBar } from './GoalBar';
+import { LearnButton } from './LearnButton';
 import { MarkdownLinkContext } from './Markdown';
 import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, type MessageTimelineHandle } from './MessageTimeline';
@@ -198,6 +199,9 @@ export function ChatView() {
     isVirtualRef(modelResolution) && chrome?.id
       ? lastReplyModel(state.conversations[chrome.id]?.messages)
       : undefined
+  );
+  const hasMessages = useSessionsStore((state) =>
+    chrome?.id ? (state.conversations[chrome.id]?.messages.length ?? 0) > 0 : false
   );
   const activeAccount = useSessionsStore(
     useShallow((state) =>
@@ -575,6 +579,7 @@ export function ChatView() {
                         useSessionsStore.getState().setThinking(chrome.id, level)
                       }
                     />
+                    {hasMessages && <LearnButton conversationId={chrome.id} />}
                   </>
                 )}
                 {chrome.displayedParentId && (

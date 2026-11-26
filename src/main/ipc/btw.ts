@@ -95,6 +95,10 @@ export function registerBtwHandlers(): void {
     if (existing && 'parent' in existing) return { ok: false, error: 'session id in use' };
     const workspace = resolveConversationWorkspace(parsed.parentConversationId);
     if (!workspace) return { ok: false, error: 'parent conversation unavailable' };
+    // 分叉源只允许是父会话本身：渲染层不能借 forkFrom 把别的会话的上下文灌进旁路
+    if (parsed.forkFrom !== undefined && parsed.forkFrom !== parsed.parentConversationId) {
+      return { ok: false, error: 'invalid request' };
+    }
     const identity =
       existing && !('parent' in existing)
         ? existing
@@ -127,8 +131,12 @@ export function registerBtwHandlers(): void {
       workspace.projectId,
       {
         rolePrompt: parsed.rolePrompt,
-        extraDisabledTools: BTW_DISABLED_TOOLS,
-        omitDispatchTools: true,
+        ...(parsed.forkFrom ? { forkFrom: parsed.forkFrom } : {}),
+        // 复盘旁路（forkFrom）要保持与主会话一致的工具表：工具声明不同会让提示词前缀失配，
+        // 注入的消息序列吃不到缓存。普通旁路照旧关掉派发与重资源工具。
+        ...(parsed.forkFrom
+          ? {}
+          : { extraDisabledTools: BTW_DISABLED_TOOLS, omitDispatchTools: true }),
       }
     );
   });
