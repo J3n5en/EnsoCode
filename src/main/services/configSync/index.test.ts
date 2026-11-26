@@ -860,4 +860,188 @@ describe('config sync preset system prompt resources', () => {
       rmSync(file, { force: true });
     }
   });
+
+  const keptProvider = {
+    id: 'keep-provider',
+    name: 'Keep',
+    api: 'openai-completions' as const,
+    baseUrl: 'https://example.test',
+    enabled: true,
+    models: [{ id: 'kept-model' }],
+  };
+  const keptSubagent = {
+    id: 'kept-sub',
+    providerId: 'keep-provider',
+    modelId: 'kept-model',
+    description: 'kept',
+    enabled: true,
+  };
+  const keptAgent = {
+    id: 'agent-kept',
+    name: 'cheap-scout',
+    description: '',
+    systemPrompt: 'stay',
+    tools: 'readonly' as const,
+    modelMode: 'follow' as const,
+  };
+
+  const clearModelFixtures = () => {
+    settings.patchSettingsState('providers', []);
+    settings.patchSettingsState('subagentModels', []);
+    settings.patchSettingsState('agentTypes', []);
+    settings.patchSettingsState('defaultModel', null);
+    settings.patchSettingsState('titleSummaryModel', null);
+    settings.flushSettings();
+  };
+
+  it('导出跳过解析不到的子代理模型并保留其余条目', async () => {
+    settings.patchSettingsState('providers', [keptProvider]);
+    settings.patchSettingsState('subagentModels', [
+      keptSubagent,
+      {
+        id: 'dangling-sub',
+        providerId: 'missing-provider',
+        modelId: 'missing-model',
+        description: 'dangling',
+        enabled: false,
+      },
+    ]);
+    settings.patchSettingsState('agentTypes', []);
+    const file = join(userData, 'dangling-subagent.enso-config');
+    try {
+      const result = await service.exportConfigToPath({ includeSecrets: false }, file);
+      expect(result).toEqual({
+        ok: true,
+        filePath: file,
+        skippedModelReferences: [
+          {
+            label: 'subagent model',
+            id: 'dangling-sub',
+            providerId: 'missing-provider',
+            modelId: 'missing-model',
+            reason: 'unknown-reference',
+          },
+        ],
+      });
+      expect((await decodeBundle(readFileSync(file))).state.subagentModels).toEqual([keptSubagent]);
+    } finally {
+      clearModelFixtures();
+      rmSync(file, { force: true });
+    }
+  });
+
+  it('导出跳过解析不到的 Agent 类型并保留其余条目', async () => {
+    settings.patchSettingsState('providers', [keptProvider]);
+    settings.patchSettingsState('subagentModels', []);
+    settings.patchSettingsState('agentTypes', [
+      keptAgent,
+      {
+        id: 'agent-dangling',
+        name: 'fixed-ghost',
+        description: '',
+        systemPrompt: 'gone',
+        tools: 'all',
+        modelMode: 'fixed',
+        providerId: 'keep-provider',
+        modelId: 'missing-model',
+      },
+    ]);
+    const file = join(userData, 'dangling-agent.enso-config');
+    try {
+      const result = await service.exportConfigToPath({ includeSecrets: false }, file);
+      expect(result).toEqual({
+        ok: true,
+        filePath: file,
+        skippedModelReferences: [
+          {
+            label: 'agent model',
+            id: 'agent-dangling',
+            providerId: 'keep-provider',
+            modelId: 'missing-model',
+            reason: 'unknown-reference',
+          },
+        ],
+      });
+      expect((await decodeBundle(readFileSync(file))).state.agentTypes).toEqual([keptAgent]);
+    } finally {
+      clearModelFixtures();
+      rmSync(file, { force: true });
+    }
+  });
+
+  it('导出跳过解析不到的 defaultModel，其余模型引用保留', async () => {
+    settings.patchSettingsState('providers', [keptProvider]);
+    settings.patchSettingsState('subagentModels', []);
+    settings.patchSettingsState('agentTypes', []);
+    settings.patchSettingsState('defaultModel', {
+      providerId: 'missing-provider',
+      modelId: 'missing-model',
+    });
+    settings.patchSettingsState('titleSummaryModel', {
+      providerId: 'keep-provider',
+      modelId: 'kept-model',
+    });
+    const file = join(userData, 'dangling-default-model.enso-config');
+    try {
+      const result = await service.exportConfigToPath({ includeSecrets: false }, file);
+      expect(result).toEqual({
+        ok: true,
+        filePath: file,
+        skippedModelReferences: [
+          {
+            label: 'defaultModel',
+            providerId: 'missing-provider',
+            modelId: 'missing-model',
+            reason: 'unknown-reference',
+          },
+        ],
+      });
+      const decoded = await decodeBundle(readFileSync(file));
+      expect(decoded.state).not.toHaveProperty('defaultModel');
+      expect(decoded.state.titleSummaryModel).toEqual({
+        providerId: 'keep-provider',
+        modelId: 'kept-model',
+      });
+    } finally {
+      clearModelFixtures();
+      rmSync(file, { force: true });
+    }
+  });
+
+  it('模型引用都能解析时不产生跳过记录', async () => {
+    const fixedAgent = {
+      id: 'agent-fixed',
+      name: 'fixed-scout',
+      description: '',
+      systemPrompt: 'stay',
+      tools: 'all' as const,
+      modelMode: 'fixed' as const,
+      providerId: 'keep-provider',
+      modelId: 'kept-model',
+    };
+    settings.patchSettingsState('providers', [keptProvider]);
+    settings.patchSettingsState('subagentModels', [keptSubagent]);
+    settings.patchSettingsState('agentTypes', [fixedAgent]);
+    settings.patchSettingsState('defaultModel', {
+      providerId: 'keep-provider',
+      modelId: 'kept-model',
+    });
+    const file = join(userData, 'valid-model-refs.enso-config');
+    try {
+      await expect(service.exportConfigToPath({ includeSecrets: false }, file)).resolves.toEqual({
+        ok: true,
+        filePath: file,
+      });
+      const decoded = await decodeBundle(readFileSync(file));
+      expect(decoded.state.subagentModels).toEqual([keptSubagent]);
+      expect(decoded.state.agentTypes).toEqual([fixedAgent]);
+      expect(decoded.state.defaultModel).toEqual({
+        providerId: 'keep-provider',
+        modelId: 'kept-model',
+      });
+    } finally {
+      clearModelFixtures();
+      rmSync(file, { force: true });
+    }
+  });
 });

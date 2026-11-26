@@ -304,4 +304,69 @@ describe('config sync codec', () => {
     const { reasoning: _reasoning, thinkingLevel: _level, ...legacy } = agentType;
     expect(() => validateBundle(withType(legacy))).not.toThrow();
   });
+
+  it('导入和严格编码仍拒绝解析不到的模型引用', async () => {
+    const source = {
+      ...bundle(),
+      state: {
+        ...bundle().state,
+        providers: [
+          {
+            id: 'p1',
+            name: 'P',
+            api: 'openai-completions' as const,
+            baseUrl: 'https://example.test',
+            enabled: true,
+            models: [{ id: 'model' }],
+          },
+        ],
+      },
+    };
+    const danglingSubagent = {
+      ...source,
+      state: {
+        ...source.state,
+        subagentModels: [
+          {
+            id: 'dangling-sub',
+            providerId: 'missing',
+            modelId: 'gone',
+            description: '',
+          },
+        ],
+      },
+    };
+    const danglingAgent = {
+      ...source,
+      state: {
+        ...source.state,
+        agentTypes: [
+          {
+            id: 'agent-dangling',
+            name: 'fixed-ghost',
+            description: '',
+            systemPrompt: '',
+            tools: 'all' as const,
+            modelMode: 'fixed' as const,
+            providerId: 'p1',
+            modelId: 'gone',
+          },
+        ],
+      },
+    };
+    const danglingDefault = {
+      ...source,
+      state: {
+        ...source.state,
+        defaultModel: { providerId: 'missing', modelId: 'gone' },
+      },
+    };
+    expect(() => validateBundle(danglingSubagent)).toThrow('Unknown subagent model reference');
+    expect(() => validateBundle(danglingAgent)).toThrow('Unknown agent model reference');
+    expect(() => validateBundle(danglingDefault)).toThrow('Unknown defaultModel reference');
+    await expect(encodeBundle(danglingDefault)).rejects.toThrow('Unknown defaultModel reference');
+    await expect(
+      decodeBundle(Buffer.from(JSON.stringify(danglingDefault), 'utf8'))
+    ).rejects.toThrow('Unknown defaultModel reference');
+  });
 });

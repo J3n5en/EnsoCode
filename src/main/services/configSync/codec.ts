@@ -17,6 +17,10 @@ import { STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import { BUILTIN_AGENT_TYPES, DEFAULT_PRESET_ID } from '@shared/types/assets';
 import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
+import {
+  CONFIG_SYNC_SKIPPED_MODEL_LABELS,
+  type ConfigSyncSkippedModelReference,
+} from '@shared/types/configSync';
 import { isEditMode, resolveEditMode } from '@shared/types/editMode';
 import { MODEL_API_KINDS } from '@shared/types/llm';
 import { hasBase64Shape } from './assets';
@@ -762,11 +766,57 @@ function validateSubagentModel(raw: unknown): RecordValue {
   return entry;
 }
 
-function validateRef(value: unknown, providers: Map<string, Set<string>>, label: string): void {
+const SCALAR_MODEL_REFERENCE_KEYS = [
+  'defaultModel',
+  'titleSummaryModel',
+  'gitCommitModel',
+  'imageGenerationModel',
+  'memoryDistillModel',
+  'smartCompactModel',
+  'approvalReviewer',
+] as const satisfies readonly ConfigSyncSkippedModelReference['label'][];
+
+function isSkippedModelLabel(value: string): value is ConfigSyncSkippedModelReference['label'] {
+  for (const label of CONFIG_SYNC_SKIPPED_MODEL_LABELS) if (label === value) return true;
+  return false;
+}
+
+function modelReference(value: unknown, label: string): { providerId: string; modelId: string } {
   if (!isRecord(value) || typeof value.providerId !== 'string' || typeof value.modelId !== 'string')
     throw new Error(`Invalid ${label}`);
-  const models = providers.get(value.providerId);
-  if (!models?.has(value.modelId)) throw new Error(`Unknown ${label} reference`);
+  return { providerId: value.providerId, modelId: value.modelId };
+}
+
+function knownModel(
+  ref: { providerId: string; modelId: string },
+  providers: Map<string, Set<string>>
+): boolean {
+  return providers.get(ref.providerId)?.has(ref.modelId) === true;
+}
+
+function entryId(value: RecordValue): string | undefined {
+  return typeof value.id === 'string' && value.id ? value.id : undefined;
+}
+
+/** 导出传入回调时跳过悬空引用；不传则保持导入用的严格抛错。返回 false 表示已跳过。 */
+function resolveModelRef(
+  value: unknown,
+  providers: Map<string, Set<string>>,
+  label: string,
+  onDanglingRef: ((ref: ConfigSyncSkippedModelReference) => void) | undefined,
+  id?: string
+): boolean {
+  const ref = modelReference(value, label);
+  if (knownModel(ref, providers)) return true;
+  if (!onDanglingRef || !isSkippedModelLabel(label)) throw new Error(`Unknown ${label} reference`);
+  onDanglingRef({
+    label,
+    providerId: ref.providerId,
+    modelId: ref.modelId,
+    reason: 'unknown-reference',
+    ...(id ? { id } : {}),
+  });
+  return false;
 }
 
 function redactEndpoint(value: string): { value: string; omissions: string[] } {
@@ -821,8 +871,16 @@ function validateReferences(
   instructions: RecordValue[],
   presets: RecordValue[],
   agentTypes: RecordValue[],
-  subagentModels: RecordValue[]
-): void {
+  subagentModels: RecordValue[],
+  onDanglingRef?: (ref: ConfigSyncSkippedModelReference) => void
+): {
+  skippedAgentTypeIds: Set<string>;
+  skippedSubagentModelIds: Set<string>;
+  skippedModelKeys: Set<string>;
+} {
+  const skippedAgentTypeIds = new Set<string>();
+  const skippedSubagentModelIds = new Set<string>();
+  const skippedModelKeys = new Set<string>();
   const providerModels = new Map(
     providers.map((provider) => [
       String(provider.id),
@@ -851,31 +909,42 @@ function validateReferences(
   for (const agent of agentTypes) {
     if (agent.skillIds !== undefined) checkIds(agent.skillIds, skillIds, 'agent skill');
     if (agent.mcpServerIds !== undefined) checkIds(agent.mcpServerIds, mcpIds, 'agent MCP server');
-    if (agent.providerId !== undefined || agent.modelId !== undefined)
-      validateRef(
-        { providerId: agent.providerId, modelId: agent.modelId },
-        providerModels,
-        'agent model'
-      );
+    if (agent.providerId !== undefined || agent.modelId !== undefined) {
+      const id = entryId(agent);
+      if (
+        !resolveModelRef(
+          { providerId: agent.providerId, modelId: agent.modelId },
+          providerModels,
+          'agent model',
+          onDanglingRef,
+          id
+        )
+      ) {
+        if (!id) throw new Error('Unknown agent model reference');
+        skippedAgentTypeIds.add(id);
+      }
+    }
   }
-  for (const entry of subagentModels) validateRef(entry, providerModels, 'subagent model');
-  for (const key of [
-    'defaultModel',
-    'titleSummaryModel',
-    'gitCommitModel',
-    'imageGenerationModel',
-    'memoryDistillModel',
-    'smartCompactModel',
-    'approvalReviewer',
-  ])
-    if (state[key] !== undefined && state[key] !== null)
-      validateRef(state[key], providerModels, key);
+  for (const entry of subagentModels) {
+    const id = entryId(entry);
+    if (!resolveModelRef(entry, providerModels, 'subagent model', onDanglingRef, id)) {
+      if (!id) throw new Error('Unknown subagent model reference');
+      skippedSubagentModelIds.add(id);
+    }
+  }
+  for (const key of SCALAR_MODEL_REFERENCE_KEYS) {
+    if (state[key] !== undefined && state[key] !== null) {
+      if (!resolveModelRef(state[key], providerModels, key, onDanglingRef))
+        skippedModelKeys.add(key);
+    }
+  }
   if (
     state.defaultPresetId !== undefined &&
     state.defaultPresetId !== DEFAULT_PRESET_ID &&
     !presetIds.has(String(state.defaultPresetId))
   )
     throw new Error('Unknown default preset reference');
+  return { skippedAgentTypeIds, skippedSubagentModelIds, skippedModelKeys };
 }
 
 function validateResources(
@@ -969,8 +1038,14 @@ function validateResources(
   };
 }
 
-/** 严格校验未知输入并返回收窄后的版本 1 配置包。 */
-export function validateBundle(value: unknown): ConfigSyncBundle {
+/**
+ * 严格校验未知输入并返回收窄后的版本 1 配置包。
+ * 只有导出传入 onDanglingRef 时才跳过解析不到的模型引用；导入不传，仍然抛错。
+ */
+export function validateBundle(
+  value: unknown,
+  options?: { onDanglingRef?: (ref: ConfigSyncSkippedModelReference) => void }
+): ConfigSyncBundle {
   const bundle = assertRecord(value, 'bundle');
   assertExactKeys(bundle, TOP_LEVEL_KEYS, 'bundle');
   if (bundle.format !== ENVELOPE_FORMAT || bundle.version !== VERSION)
@@ -1143,7 +1218,7 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
   ) {
     throw new Error('Invalid disabled built-in agent type');
   }
-  validateReferences(
+  const skipped = validateReferences(
     state,
     providers,
     skills,
@@ -1151,7 +1226,14 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     instructions,
     presets,
     agentTypes,
-    subagentModels
+    subagentModels,
+    options?.onDanglingRef
+  );
+  const keptAgentTypes = agentTypes.filter(
+    (entry) => typeof entry.id !== 'string' || !skipped.skippedAgentTypeIds.has(entry.id)
+  );
+  const keptSubagentModels = subagentModels.filter(
+    (entry) => typeof entry.id !== 'string' || !skipped.skippedSubagentModelIds.has(entry.id)
   );
   const resources = validateResources(
     bundle.resources,
@@ -1172,9 +1254,10 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     mcpServers,
     instructions,
     presets,
-    agentTypes,
-    subagentModels,
+    agentTypes: keptAgentTypes,
+    subagentModels: keptSubagentModels,
   };
+  for (const key of skipped.skippedModelKeys) delete canonicalState[key];
   if ('editMode' in state || 'hashlineEditEnabled' in state) {
     canonicalState.editMode = resolveEditMode(state.editMode, state.hashlineEditEnabled);
     delete canonicalState.hashlineEditEnabled;

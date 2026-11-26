@@ -25,8 +25,36 @@ export interface ConfigSyncExportOptions {
   password?: string;
 }
 
+export const CONFIG_SYNC_SKIPPED_MODEL_LABELS = [
+  'subagent model',
+  'agent model',
+  'defaultModel',
+  'titleSummaryModel',
+  'gitCommitModel',
+  'imageGenerationModel',
+  'memoryDistillModel',
+  'smartCompactModel',
+  'approvalReviewer',
+] as const;
+
+export type ConfigSyncSkippedModelLabel = (typeof CONFIG_SYNC_SKIPPED_MODEL_LABELS)[number];
+
+/** 导出时解析不到的模型引用。列表条目带 id 并被整条跳过；标量设置只省略该字段。 */
+export interface ConfigSyncSkippedModelReference {
+  label: ConfigSyncSkippedModelLabel;
+  providerId: string;
+  modelId: string;
+  reason: 'unknown-reference';
+  id?: string;
+}
+
 export type ConfigSyncExportResult =
-  | { ok: true; filePath: string; skippedInstructions?: string[] }
+  | {
+      ok: true;
+      filePath: string;
+      skippedInstructions?: string[];
+      skippedModelReferences?: ConfigSyncSkippedModelReference[];
+    }
   | { ok: false; error: string; cancelled?: boolean };
 
 export type ConfigSyncOpenResult =

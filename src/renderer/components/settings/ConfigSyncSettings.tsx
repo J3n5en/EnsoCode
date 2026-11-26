@@ -1,4 +1,9 @@
-import type { ConfigSyncMode, ConfigSyncOpenResult, ConfigSyncSummary } from '@shared/types';
+import type {
+  ConfigSyncMode,
+  ConfigSyncOpenResult,
+  ConfigSyncSkippedModelReference,
+  ConfigSyncSummary,
+} from '@shared/types';
 import {
   CircleAlert,
   CircleCheck,
@@ -51,6 +56,53 @@ const CATEGORIES: Array<{ category: ConfigSyncSummary['category']; label: string
   { category: 'subagentModels', label: 'Subagent Models' },
   { category: 'settings', label: 'Scalar settings' },
 ];
+
+function skippedModelReferenceLabel(
+  label: string,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  switch (label) {
+    case 'subagent model':
+      return t('Subagent model');
+    case 'agent model':
+      return t('Agent type model');
+    case 'defaultModel':
+      return t('Default model');
+    case 'titleSummaryModel':
+      return t('Title summary model');
+    case 'gitCommitModel':
+      return t('Git commit model');
+    case 'imageGenerationModel':
+      return t('Image generation model');
+    case 'memoryDistillModel':
+      return t('Memory distill model');
+    case 'smartCompactModel':
+      return t('Smart compact model');
+    case 'approvalReviewer':
+      return t('Approval reviewer');
+    default:
+      return label;
+  }
+}
+
+function skippedModelReferenceLine(
+  entry: ConfigSyncSkippedModelReference,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  const label = skippedModelReferenceLabel(entry.label, t);
+  return entry.id
+    ? t('{{label}} {{id}} ({{providerId}} / {{modelId}})', {
+        label,
+        id: entry.id,
+        providerId: entry.providerId,
+        modelId: entry.modelId,
+      })
+    : t('{{label}} ({{providerId}} / {{modelId}})', {
+        label,
+        providerId: entry.providerId,
+        modelId: entry.modelId,
+      });
+}
 
 export function ConfigSyncSettings() {
   const { t } = useI18n();
@@ -158,6 +210,9 @@ function ExportDialog({
   const [cancelled, setCancelled] = React.useState(false);
   const [filePath, setFilePath] = React.useState<string | null>(null);
   const [skippedInstructions, setSkippedInstructions] = React.useState<string[]>([]);
+  const [skippedModelReferences, setSkippedModelReferences] = React.useState<
+    ConfigSyncSkippedModelReference[]
+  >([]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -169,6 +224,7 @@ function ExportDialog({
     setCancelled(false);
     setFilePath(null);
     setSkippedInstructions([]);
+    setSkippedModelReferences([]);
   }, [open]);
 
   const close = () => {
@@ -205,6 +261,7 @@ function ExportDialog({
       }
       setFilePath(result.filePath);
       setSkippedInstructions(result.skippedInstructions ?? []);
+      setSkippedModelReferences(result.skippedModelReferences ?? []);
     } catch {
       setPassword('');
       setConfirmation('');
@@ -245,6 +302,26 @@ function ExportDialog({
                       )}
                     </p>
                     <p className="break-all text-foreground">{skippedInstructions.join(', ')}</p>
+                  </AlertDescription>
+                </Alert>
+              )}
+              {skippedModelReferences.length > 0 && (
+                <Alert variant="warning">
+                  <TriangleAlert />
+                  <AlertDescription>
+                    <p>
+                      {t(
+                        'These model references were skipped because their provider or model is not in this export:'
+                      )}
+                    </p>
+                    {skippedModelReferences.map((entry) => (
+                      <p
+                        key={`${entry.label}:${entry.id ?? ''}:${entry.providerId}:${entry.modelId}`}
+                        className="break-all text-foreground"
+                      >
+                        {skippedModelReferenceLine(entry, t)}
+                      </p>
+                    ))}
                   </AlertDescription>
                 </Alert>
               )}
