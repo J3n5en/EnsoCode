@@ -131,6 +131,9 @@ export const SETTINGS_DATA_COVERAGE = {
     'Renderer floating quote button preference; not an Enso capability.'
   ),
   learnButtonEnabled: excluded('Renderer composer button preference; not an Enso capability.'),
+  composerToolbar: excluded(
+    'Renderer composer toolbar pin/order preference; not an Enso capability.'
+  ),
   collapseCompletedActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
   ),
@@ -344,6 +347,9 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Renderer floating quote button preference; not an Enso capability.'
   ),
   setLearnButtonEnabled: excluded('Renderer composer button preference; not an Enso capability.'),
+  setComposerToolbar: excluded(
+    'Renderer composer toolbar pin/order preference; not an Enso capability.'
+  ),
   setCollapseCompletedActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
   ),

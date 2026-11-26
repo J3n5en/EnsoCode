@@ -34,6 +34,12 @@ const MAPPED_I18N_KEYS = [
   'Full access',
   'Assistant approval',
   'Assistant reviewing…',
+  // ComposerToolbarOverflow.COMPOSER_TOOLBAR_ITEM_LABEL_KEYS
+  'Preset',
+  'Worktree',
+  'Plan',
+  'Model',
+  'Learn',
   // ApprovalModePicker.MODE_META.descKey
   'Approve every command and file change',
   'Edits run freely; commands and MCP still ask',

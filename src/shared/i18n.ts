@@ -2925,6 +2925,14 @@ export const zhTranslations: Record<string, string> = {
   'No data yet': '暂无数据',
   '{{count}} coworkers': '{{count}} 名队员',
   'Drag to reorder': '拖动排序',
+  Preset: '预设',
+  'More toolbar buttons': '更多工具按钮',
+  'Pin buttons to the toolbar, drag to reorder': '点图钉把按钮固定到工具行，拖动把手排序',
+  'Pin to toolbar': '固定到工具行',
+  'Unpin from toolbar': '从工具行收起',
+  'Composer toolbar buttons': '输入框工具行按钮',
+  'Pin buttons with the pin icon in the composer More menu; drag the handles there to reorder. Unpinned buttons fold into the More menu':
+    '在输入框「更多」菜单里点图钉固定按钮、拖把手排序；未固定的按钮折叠进「更多」菜单',
   // 状态栏段名（设置弹层行标签 + 状态栏 hover title 前缀）
   Turns: '轮次',
   Duration: '耗时',
