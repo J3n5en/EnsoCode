@@ -1,6 +1,8 @@
 import type { BtwMode } from '@shared/btw';
 import {
   buildBtwSystemPrompt,
+  buildLearnFirstMessage,
+  buildLearnPrompt,
   formatBtwHandoff,
   lastAssistantText,
   snapshotMainConversation,
@@ -36,9 +38,11 @@ import { useSettingsStore } from '@/stores/settings';
 export function BtwView({
   conversationId: parentConversationId,
   panelApi,
+  learn = false,
 }: {
   conversationId: string;
   panelApi: DockviewPanelApi;
+  learn?: boolean;
 }) {
   const { t } = useI18n();
   const sessionId = panelApi.id.startsWith('btw:') ? panelApi.id.slice(4) : panelApi.id;
@@ -138,7 +142,8 @@ export function BtwView({
       id: sessionId,
       projectId: parent?.projectId ?? '',
       btwParentId: parentConversationId,
-      rolePrompt: buildBtwSystemPrompt('contextual', snapshot),
+      rolePrompt: learn ? buildLearnPrompt() : buildBtwSystemPrompt('contextual', snapshot),
+      ...(learn ? { forkFrom: parentConversationId } : {}),
       lastProviderId: parent?.lastProviderId ?? settings.defaultModel?.providerId,
       lastModelId: parent?.lastModelId ?? settings.defaultModel?.modelId,
       reasoningEnabled: parent?.reasoningEnabled ?? settings.defaultReasoningEnabled,
@@ -146,7 +151,31 @@ export function BtwView({
       approvalMode: parent?.approvalMode ?? 'full',
       presetId: parent?.presetId,
     });
-  }, [parentConversationId, sessionId, snapshot]);
+  }, [parentConversationId, sessionId, snapshot, learn]);
+
+  // 复盘旁路：会话准备好后自动发出首条复盘指令（send 内部完成 spawn + prompt）。
+  // 只发一次：messages 出现用户消息（乐观回显）后即停止重试。
+  useEffect(() => {
+    if (!learn) return;
+    const state = useSessionsStore.getState();
+    const conversation = state.conversations[sessionId];
+    if (!conversation || conversation.messages.length > 0) return;
+    if (!project) return;
+    const parent = state.conversations[parentConversationId];
+    const settings = useSettingsStore.getState();
+    const providerId =
+      conversation.lastProviderId ?? parent?.lastProviderId ?? settings.defaultModel?.providerId;
+    const modelId =
+      conversation.lastModelId ?? parent?.lastModelId ?? settings.defaultModel?.modelId;
+    if (!providerId || !modelId) return;
+    void state.send(
+      buildLearnFirstMessage({ forked: true, snapshot }),
+      { providerId, modelId, cwd: project.path },
+      undefined,
+      sessionId
+    );
+    // snapshot 冻结于挂载时；messages 非空后 effect 自然停止重发
+  }, [learn, sessionId, project, parentConversationId, snapshot]);
 
   useEffect(() => {
     if (title) panelApi.setTitle(title);
@@ -178,26 +207,35 @@ export function BtwView({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-[36px] shrink-0 items-center gap-1 border-b px-2">
-        <ModeChip
-          label={t('Contextual')}
-          active={mode === 'contextual'}
-          onClick={() => changeMode('contextual')}
-        />
-        <ModeChip
-          label={t('Tangent')}
-          active={mode === 'tangent'}
-          onClick={() => changeMode('tangent')}
-        />
-        <button
-          type="button"
-          className="ml-auto rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-          disabled={!lastAssistant}
-          onClick={inject}
-        >
-          {t('Insert into chat')}
-        </button>
-      </div>
+      {learn ? (
+        <div className="flex h-[36px] shrink-0 items-center gap-1 border-b px-2">
+          <span className="text-xs font-medium">{t('Learn review')}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {t('Reviewing this session in a side conversation')}
+          </span>
+        </div>
+      ) : (
+        <div className="flex h-[36px] shrink-0 items-center gap-1 border-b px-2">
+          <ModeChip
+            label={t('Contextual')}
+            active={mode === 'contextual'}
+            onClick={() => changeMode('contextual')}
+          />
+          <ModeChip
+            label={t('Tangent')}
+            active={mode === 'tangent'}
+            onClick={() => changeMode('tangent')}
+          />
+          <button
+            type="button"
+            className="ml-auto rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+            disabled={!lastAssistant}
+            onClick={inject}
+          >
+            {t('Insert into chat')}
+          </button>
+        </div>
+      )}
       {conversation ? (
         <ChatSessionTimeline
           conversationId={sessionId}

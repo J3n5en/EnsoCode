@@ -535,6 +535,23 @@ export function addSidePanelBtw(opts?: { title?: string }): void {
   });
 }
 
+/** 复盘旁路：在会话所属 dock 开一个 learn 模式的 btw tab，从主会话分叉消息序列复盘 */
+export function addSidePanelLearn(conversationId: string, opts?: { title?: string }): void {
+  const sessions = useSessionsStore.getState();
+  const conversation = sessions.conversations[conversationId];
+  if (!conversation) return;
+  const dockId = resolveSidePanelDockConversationId(sessions.conversations, conversationId);
+  const api = docks.get(dockId);
+  useSidePanelStore.getState().ensureOpen(dockId);
+  if (!api) return;
+  api.addPanel({
+    id: `btw:${crypto.randomUUID()}`,
+    component: 'btw',
+    title: opts?.title ?? 'Learn',
+    params: { conversationId, projectId: conversation.projectId, learn: true },
+  });
+}
+
 export function addSidePanelWorkflow(opts: {
   conversationId: string;
   runId: string;

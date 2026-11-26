@@ -1445,6 +1445,9 @@ export type AgentCommand =
       remote?: AgentRemoteConfig;
       /** 旁路会话：首条 prompt 前缀注入，消费一次 */
       rolePrompt?: string;
+      /** 复盘旁路：从该父会话分叉消息序列（注入其最近一次请求的消息快照，命中同一份提示缓存）。
+       *  源会话不存在、已换模型或还没有任何请求时静默降级为普通旁路。 */
+      forkFrom?: string;
       /** 仅普通 parent：替换 pi 默认提示词开头的角色段落，其余运行时内容保留 */
       systemPrompt?: string;
       /** skills/cwd 之后的真尾段 */
@@ -4129,6 +4132,7 @@ const agentCommandParsers = {
         'protectedActions',
         'planMode',
         'instanceId',
+        'forkFrom',
       ]) ||
       !parseSessionIdentity(value.identity) ||
       typeof value.cwd !== 'string' ||
@@ -4212,7 +4216,8 @@ const agentCommandParsers = {
           !Array.isArray(value.botWriteLock.ancestors) ||
           !value.botWriteLock.ancestors.every(isNonEmptyString))) ||
       (value.protectedActions !== undefined && typeof value.protectedActions !== 'boolean') ||
-      (value.instanceId !== undefined && !isUuid(value.instanceId))
+      (value.instanceId !== undefined && !isUuid(value.instanceId)) ||
+      (value.forkFrom !== undefined && !isNonEmptyString(value.forkFrom))
     ) {
       return null;
     }

@@ -130,6 +130,7 @@ export const SETTINGS_DATA_COVERAGE = {
   quoteSelectionButton: excluded(
     'Renderer floating quote button preference; not an Enso capability.'
   ),
+  learnButtonEnabled: excluded('Renderer composer button preference; not an Enso capability.'),
   collapseCompletedActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
   ),
@@ -342,6 +343,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setQuoteSelectionButton: excluded(
     'Renderer floating quote button preference; not an Enso capability.'
   ),
+  setLearnButtonEnabled: excluded('Renderer composer button preference; not an Enso capability.'),
   setCollapseCompletedActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
   ),

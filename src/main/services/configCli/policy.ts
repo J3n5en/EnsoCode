@@ -288,6 +288,8 @@ function validateField(field: string, value: unknown): string | null {
     return 'longCacheRetention must be a boolean';
   if (field === 'quoteSelectionButton' && typeof value !== 'boolean')
     return 'quoteSelectionButton must be a boolean';
+  if (field === 'learnButtonEnabled' && typeof value !== 'boolean')
+    return 'learnButtonEnabled must be a boolean';
   if (field === 'pluginLoggingEnabled' && typeof value !== 'boolean')
     return 'pluginLoggingEnabled must be a boolean';
   if (field === 'appLoggingEnabled' && typeof value !== 'boolean')

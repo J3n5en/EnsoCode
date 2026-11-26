@@ -246,6 +246,8 @@ export interface SettingsState {
   autoCollapseTurns: boolean;
   /** 会话里选中文字时浮出「引用」按钮；缺省 true */
   quoteSelectionButton: boolean;
+  /** composer 工具行显示「复盘」按钮，点击开旁路复盘会话；缺省 true */
+  learnButtonEnabled: boolean;
   /** 回答完成后把连续的思考与工具调用折成一行过程摘要 */
   collapseCompletedActivity: boolean;
   /** 这一轮还在跑时，工具和思考都结束后再把尾段折成一行；缺省关 */
@@ -470,6 +472,7 @@ export interface SettingsState {
   setExpandLiveReasoning: (value: boolean) => void;
   setAutoCollapseTurns: (value: boolean) => void;
   setQuoteSelectionButton: (value: boolean) => void;
+  setLearnButtonEnabled: (value: boolean) => void;
   setCollapseCompletedActivity: (value: boolean) => void;
   setCollapseLiveActivity: (value: boolean) => void;
   setLiveActivityFoldDelaySec: (value: number) => void;

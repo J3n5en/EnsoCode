@@ -1632,6 +1632,8 @@ export function spawnSession(
   projectId?: string,
   options?: {
     rolePrompt?: string;
+    /** 复盘旁路：worker 把该会话最近一次请求的消息序列注入新会话（提示缓存命中） */
+    forkFrom?: string;
     extraDisabledTools?: readonly string[];
     omitDispatchTools?: boolean;
     /** Bot 会话：人设、指令与技能/MCP 选择全由 Main 按成员档案组装，替代预设与插件资源 */
@@ -1880,6 +1882,7 @@ export function spawnSession(
     ...(options?.bot?.writeLock ? { botWriteLock: options.bot.writeLock } : {}),
     ...(options?.bot || state?.protectedActionsInCode === true ? { protectedActions: true } : {}),
     ...(options?.instanceId ? { instanceId: options.instanceId } : {}),
+    ...(options?.forkFrom ? { forkFrom: options.forkFrom } : {}),
   });
   if (sent.ok) {
     builtinToolScopes.remember(

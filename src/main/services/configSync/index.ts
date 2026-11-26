@@ -142,6 +142,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   expandLiveReasoning: { mode: 'portable' },
   autoCollapseTurns: { mode: 'portable' },
   quoteSelectionButton: { mode: 'portable' },
+  learnButtonEnabled: { mode: 'portable' },
   collapseCompletedActivity: { mode: 'portable' },
   collapseLiveActivity: { mode: 'portable' },
   liveActivityFoldDelaySec: { mode: 'portable' },

@@ -96,6 +96,13 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
       'Show active conversations as tabs above the conversation. Hold ⌘/Ctrl to see number shortcuts. Hidden while Bot mode is enabled.',
   },
   {
+    id: 'appearance.learnButtonEnabled',
+    category: 'appearance',
+    title: 'Learn button in composer',
+    description:
+      'Show a Learn button in the composer toolbar once the conversation has messages; it opens a side-by-side session that reviews this conversation and distills lessons',
+  },
+  {
     id: 'appearance.liveActivityFoldDelaySec',
     category: 'conversation',
     title: 'Wait before folding',

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 /**
  * 受控 fake provider（issue #27）：本地 anthropic-messages 兼容端点。
  *
@@ -25,6 +27,10 @@
  * - 记录每次请求，验收脚本可核对「worker 是否真的发出了请求」
  */
 import { createServer } from 'node:http';
+
+function sha256Hex(text) {
+  return createHash('sha256').update(text).digest('hex');
+}
 
 const PORT = Number(process.env.FAKE_PROVIDER_PORT || 8899);
 const requests = [];
@@ -225,6 +231,11 @@ const server = createServer((req, res) => {
       url,
       model: parsed?.model,
       messageCount: Array.isArray(parsed?.messages) ? parsed.messages.length : 0,
+      // system prompt 与每条消息的 sha256：验收据此验证两次请求的前缀是否字节一致（提示缓存命中条件）
+      systemSha256: parsed?.system ? sha256Hex(JSON.stringify(parsed.system)) : undefined,
+      messageSha256: Array.isArray(parsed?.messages)
+        ? parsed.messages.map((message) => sha256Hex(JSON.stringify(message)))
+        : [],
       // 只留摘要，避免验收日志里出现完整 prompt
       lastUserText: String(
         parsed?.messages?.at(-1)?.content?.[0]?.text ?? parsed?.messages?.at(-1)?.content ?? ''
@@ -237,6 +248,15 @@ const server = createServer((req, res) => {
       authKey: String(req.headers['x-api-key'] || req.headers.authorization || '').slice(-6),
     });
 
+    // 前缀对比验收：FAKE_PROVIDER_DUMP_DIR 设置时把每次请求完整 body 落盘（消息含完整 prompt，勿进仓库）
+    if (process.env.FAKE_PROVIDER_DUMP_DIR) {
+      try {
+        writeFileSync(
+          `${process.env.FAKE_PROVIDER_DUMP_DIR}/req-${requests.length}.json`,
+          JSON.stringify(parsed)
+        );
+      } catch {}
+    }
     if (failNext.count > 0) {
       failNext.count -= 1;
       console.log(`[fake-provider] simulated ${failNext.status} (${failNext.count} left)`);

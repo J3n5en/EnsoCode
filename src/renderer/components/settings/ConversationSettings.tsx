@@ -250,6 +250,8 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
   const setAutoCollapseTurns = useSettingsStore((s) => s.setAutoCollapseTurns);
   const quoteSelectionButton = useSettingsStore((s) => s.quoteSelectionButton);
   const setQuoteSelectionButton = useSettingsStore((s) => s.setQuoteSelectionButton);
+  const learnButtonEnabled = useSettingsStore((s) => s.learnButtonEnabled);
+  const setLearnButtonEnabled = useSettingsStore((s) => s.setLearnButtonEnabled);
   const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
   const setCollapseCompletedActivity = useSettingsStore((s) => s.setCollapseCompletedActivity);
   const collapseLiveActivity = useSettingsStore((s) => s.collapseLiveActivity);
@@ -342,6 +344,15 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
           )}
           checked={quoteSelectionButton}
           onChange={setQuoteSelectionButton}
+        />
+        <Toggle
+          rowId="appearance.learnButtonEnabled"
+          label={t('Learn button in composer')}
+          description={t(
+            'Show a Learn button in the composer toolbar once the conversation has messages; it opens a side-by-side session that reviews this conversation and distills lessons'
+          )}
+          checked={learnButtonEnabled}
+          onChange={setLearnButtonEnabled}
         />
         <Toggle
           rowId="appearance.collapseCompletedActivity"

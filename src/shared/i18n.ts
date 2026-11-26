@@ -750,6 +750,9 @@ export const zhTranslations: Record<string, string> = {
   'Quote button on text selection': '选中文字时显示「引用」按钮',
   'Show a floating Quote button when you select text in the conversation; click it to put the selection into the input box as a quote':
     '在会话里选中文字时浮出「引用」按钮，点击把选中内容作为引用块放进输入框',
+  'Learn button in composer': '输入框工具行显示「复盘」按钮',
+  'Show a Learn button in the composer toolbar once the conversation has messages; it opens a side-by-side session that reviews this conversation and distills lessons':
+    '会话有消息后，在输入框工具行显示「复盘」按钮；点击开一个旁路会话复盘这段对话并沉淀经验教训',
   Quote: '引用',
   'Quote into the input box': '引用到输入框继续对话',
   'Quote · {{count}} lines': '引用 · {{count}} 行',
@@ -3148,6 +3151,11 @@ export const zhTranslations: Record<string, string> = {
   'Ask a side question without sending it to the main agent.': '旁路提问，不会发给主 agent。',
   'New Btw tab': '新建旁路标签',
   'Open a Btw tab in the side panel': '在右侧栏打开旁路对话',
+  Learn: '复盘',
+  'Learn review': '复盘',
+  'Reviewing this session in a side conversation': '在旁路中复盘这段会话',
+  'Review this session in a side conversation and distill lessons':
+    '在旁路中复盘这段会话，沉淀经验教训',
   'Unified agents: delegate one-shot tasks or keep persistent coworkers under Main control':
     '统一 Agent：委派一次性任务，或在 Main 控制下保留持久 coworker',
   'Unified agent modes': '统一 Agent 模式',

@@ -5,6 +5,8 @@ import {
   btwModelCandidates,
   btwTabTitle,
   buildBtwSystemPrompt,
+  buildLearnFirstMessage,
+  buildLearnPrompt,
   flattenBtwUserText,
   formatBtwHandoff,
   isBtwIsolationPrompt,
@@ -291,5 +293,56 @@ describe('parseBtwDisposeRequest', () => {
   it('只要非空 sessionId', () => {
     expect(parseBtwDisposeRequest({ sessionId: 'btw-1' })).toEqual({ sessionId: 'btw-1' });
     expect(parseBtwDisposeRequest({ sessionId: '' })).toBeNull();
+  });
+});
+
+describe('buildLearnPrompt', () => {
+  it('以旁观视角约束开头，不含快照正文', () => {
+    const prompt = buildLearnPrompt();
+    expect(prompt).toContain('复盘');
+    expect(prompt).toMatch(/不是.*(犯错|当事|执行)/);
+    expect(prompt).toMatch(/纠错信号|纠正信号/);
+    expect(prompt).toMatch(/根因/);
+    expect(prompt).toMatch(/负样本|没学到/);
+    expect(prompt).toMatch(/evolvesFrom|更新已有/);
+    expect(prompt).toMatch(/批准|确认/);
+    expect(prompt).toMatch(/memory/);
+    expect(prompt).toMatch(/SKILL\.md|skill/);
+    expect(prompt).toMatch(/AGENTS\.md/);
+  });
+
+  it('要求提案先审批再落盘，并限定字符预算', () => {
+    const prompt = buildLearnPrompt();
+    expect(prompt).toMatch(/500/);
+    expect(prompt).toMatch(/ask_user/);
+  });
+});
+
+describe('buildLearnFirstMessage', () => {
+  it('fork 模式说明对话记录就在上文，非 fork 模式附上快照', () => {
+    const forked = buildLearnFirstMessage({ forked: true, snapshot: 'User: x' });
+    expect(forked).toMatch(/上面的对话|以上对话|这段对话/);
+    expect(forked).not.toContain('User: x');
+    const fallback = buildLearnFirstMessage({ forked: false, snapshot: 'User: x' });
+    expect(fallback).toContain('User: x');
+  });
+});
+
+describe('parseBtwSpawnRequest forkFrom', () => {
+  const valid = {
+    sessionId: 'btw-1',
+    parentConversationId: 'parent-1',
+    providerId: 'p',
+    modelId: 'm',
+    rolePrompt: 'You are aside',
+  };
+
+  it('收窄合法 forkFrom，拒绝空串与非字符串', () => {
+    expect(parseBtwSpawnRequest({ ...valid, forkFrom: 'parent-1' })).toEqual({
+      ...valid,
+      forkFrom: 'parent-1',
+    });
+    expect(parseBtwSpawnRequest({ ...valid, forkFrom: '' })).toBeNull();
+    expect(parseBtwSpawnRequest({ ...valid, forkFrom: 1 })).toBeNull();
   });
 });

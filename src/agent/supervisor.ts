@@ -2140,6 +2140,7 @@ export class SessionSupervisor {
           command.askRelay,
           command.dcgExemptRules
         );
+        if (command.forkFrom) this.injectForkTranscript(command.identity, command.forkFrom);
         return;
       case 'spawn-child':
         await this.spawnTypedChild(
@@ -5671,6 +5672,43 @@ export class SessionSupervisor {
   /** 渲染层口径的完整记录：compaction 之前的历史 + pi 当前上下文 */
   private transcript(managed: ManagedSession): unknown[] {
     return buildSessionDisplayMessages(managed.session, managed.session.messages as unknown[]);
+  }
+
+  /**
+   * 复盘旁路分叉注入：把源会话最近一次请求的消息快照写进新会话的 transcript 与 agent state，
+   * 之后复盘会话的首条 prompt 就是源会话请求前缀的续写，命中同一份提示缓存。
+   * 源会话不在、还没有任何请求留底、或换过模型时静默降级（调用方退回文本快照）。
+   */
+  private injectForkTranscript(identity: SessionIdentity, forkFrom: string): void {
+    const managed = this.sessions.get(identity.sessionId);
+    if (!managed || !isSameGeneration(managed.identity, identity)) return;
+    const source = this.sessions.get(forkFrom);
+    const base = source ? forkBaseOf(source) : undefined;
+    if (!source || !base) return;
+    // 模型必须与被分叉会话一致，否则请求前缀不同，注入了也吃不到缓存，反而污染上下文
+    const model = managed.session.model;
+    if (!model || model.id !== base.model.id || model.provider !== base.model.provider) return;
+    const reply = base.reply;
+    const settled =
+      reply?.stopReason === 'stop' && !reply.content.some((part) => part.type === 'toolCall');
+    const messages = settled ? [...base.messages, reply] : [...base.messages];
+    if (messages.length === 0) return;
+    try {
+      for (const message of messages) {
+        managed.session.sessionManager.appendMessage(message);
+      }
+      managed.session.agent.state.messages = [...messages];
+      managed.forkBase = {
+        model: base.model,
+        messages: [...messages],
+        ...(base.options ? { options: base.options } : {}),
+        stream: base.stream,
+      };
+      this.reconcileMessages(managed, this.transcript(managed));
+      managed.turnStartIndex = managed.messages.length;
+    } catch {
+      // 注入失败不阻断旁路：会话仍是空起步的普通旁路
+    }
   }
 
   private reconcileMessages(managed: ManagedSession, rawMessages: unknown[]): void {

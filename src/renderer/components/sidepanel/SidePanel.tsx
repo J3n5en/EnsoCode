@@ -254,10 +254,12 @@ function addBtwPanel(
   });
 }
 
-function BtwPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
-  const { conversationId } = props.params;
+function BtwPanel(
+  props: IDockviewPanelProps<{ conversationId?: string; projectId?: string; learn?: boolean }>
+) {
+  const { conversationId, learn } = props.params;
   if (!conversationId) return null;
-  return <BtwView conversationId={conversationId} panelApi={props.api} />;
+  return <BtwView conversationId={conversationId} panelApi={props.api} learn={learn === true} />;
 }
 
 function addBrowserPanel(
