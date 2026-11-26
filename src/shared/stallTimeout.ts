@@ -84,6 +84,25 @@ export function stallHeartbeatAt(
 
 export type StallWatchAction = 'abort' | 'retry' | 'give-up' | 'none';
 
+/**
+ * 睡眠期间墙钟照走但定时器停跑：醒来拿跨睡眠的 Date.now() 差值判静默必误报。
+ * 把运行中会话的心跳重置到唤醒时刻，给一个完整超时窗口重新计时；真卡住的会话
+ * 窗口过后照常中止。toolDeadlineAt 不动：仍在未来的 deadline 本来就会经 max
+ * 继续作为心跳，已过期的无需续命。
+ */
+export function shiftHeartbeatsAfterResume<T extends { status?: string; lastOutputAt?: number }>(
+  conversations: Record<string, T>,
+  now: number
+): Record<string, { lastOutputAt: number }> {
+  const shifted: Record<string, { lastOutputAt: number }> = {};
+  for (const [id, conversation] of Object.entries(conversations)) {
+    if (conversation.status !== 'running') continue;
+    if (!conversation.lastOutputAt) continue;
+    shifted[id] = { lastOutputAt: now };
+  }
+  return shifted;
+}
+
 export function nextStallWatchAction(input: {
   shouldAbort: boolean;
   status: string;

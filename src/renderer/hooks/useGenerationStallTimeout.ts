@@ -1,11 +1,12 @@
 import {
   hasLiveGenerationWork,
   nextStallWatchAction,
+  shiftHeartbeatsAfterResume,
   shouldAbortStalledGeneration,
   stallHeartbeatAt,
   stallLiveWorkFlags,
 } from '@shared/stallTimeout';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { isLeaderRenderer } from '@/lib/rendererRole';
@@ -15,7 +16,14 @@ import { useSettingsStore } from '@/stores/settings';
 export function useGenerationStallTimeout(): void {
   const minutes = useSettingsStore((state) => state.generationStallTimeoutMin);
   const { t } = useI18n();
+  const resumeSubscribed = useRef(false);
   useEffect(() => {
+    if (!resumeSubscribed.current) {
+      resumeSubscribed.current = true;
+      window.electronAPI.app.onSystemResumed(() => {
+        resetGenerationHeartbeatsAfterResume();
+      });
+    }
     if (minutes <= 0) return;
     const aborting = new Set<string>();
     const pendingRetry = new Set<string>();
@@ -90,4 +98,20 @@ function stallWarningToast(
   return sessionTitle
     ? { type: 'warning' as const, title: sessionTitle, description: message }
     : { type: 'warning' as const, title: message };
+}
+
+/** 唤醒重置：运行中会话的 lastOutputAt 平推到唤醒时刻，重新计一个完整超时窗口 */
+function resetGenerationHeartbeatsAfterResume(): void {
+  const now = Date.now();
+  useSessionsStore.setState((state) => {
+    const shifted = shiftHeartbeatsAfterResume(state.conversations, now);
+    if (Object.keys(shifted).length === 0) return state;
+    const conversations = { ...state.conversations };
+    for (const [id, heartbeat] of Object.entries(shifted)) {
+      const current = conversations[id];
+      if (!current) continue;
+      conversations[id] = { ...current, ...heartbeat };
+    }
+    return { ...state, conversations };
+  });
 }

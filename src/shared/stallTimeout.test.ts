@@ -3,6 +3,7 @@ import {
   hasLiveGenerationWork,
   MAX_STALL_RETRIES,
   nextStallWatchAction,
+  shiftHeartbeatsAfterResume,
   shouldAbortStalledGeneration,
   stallHeartbeatAt,
   stallLiveWorkFlags,
@@ -229,5 +230,33 @@ describe('stallHeartbeatAt', () => {
         { kid: { status: 'running', lastOutputAt: 2_000, toolDeadlineAt: { t: 700_000 } } }
       )
     ).toBe(700_000);
+  });
+});
+
+describe('shiftHeartbeatsAfterResume', () => {
+  // 真实场景：用户睡前有会话在跑，机器睡了一夜；醒来 lastOutputAt 是 8 小时前，
+  // 看门狗第一轮 tick 就会误判卡死。唤醒时把心跳重置到唤醒时刻重新计时
+  it('运行中会话的心跳重置到唤醒时刻', () => {
+    const now = 1_000_000;
+    const shifted = shiftHeartbeatsAfterResume(
+      {
+        a: { status: 'running', lastOutputAt: now - 8 * 60 * 60 * 1000 },
+      },
+      now
+    );
+    expect(shifted.a).toEqual({ lastOutputAt: now });
+  });
+
+  it('非 running 或无心跳的会话不动', () => {
+    const now = 1_000_000;
+    const shifted = shiftHeartbeatsAfterResume(
+      {
+        idle: { status: 'idle', lastOutputAt: 1 },
+        noBeat: { status: 'running' },
+      },
+      now
+    );
+    expect(shifted.idle).toBeUndefined();
+    expect(shifted.noBeat).toBeUndefined();
   });
 });

@@ -202,6 +202,7 @@ import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
 import {
   configurePairSessionHost,
   handlePairHeadlessAgentEvent,
+  resetStallBeatsForSystemResume,
 } from '../services/pairSessionHost';
 import { planReminderWake, reminderResumeFromAuthority } from '../services/reminderWake';
 import { remoteCandidates } from '../services/remoteModels';
@@ -2285,7 +2286,13 @@ export function registerAgentHandlers(): void {
     },
   });
   setInterval(() => humanTimeouts.check(), 1000).unref();
-  powerMonitor.on('resume', () => humanTimeouts.check());
+  powerMonitor.on('resume', () => {
+    humanTimeouts.check();
+    // 睡眠期间墙钟照走但定时器停跑：watchdog 拿跨睡眠时长判静默必误报，
+    // headless 与渲染器两侧看门狗各自重置心跳重新计时
+    resetStallBeatsForSystemResume();
+    broadcastToRenderers(IPC_CHANNELS.SYSTEM_RESUMED);
+  });
 
   setAgentEventListener((incomingEvent) => {
     // 换代（Main 不退）：会话不算失败、不进会话广播；只有子代理服务按断点把被打断的 Run 接着跑
