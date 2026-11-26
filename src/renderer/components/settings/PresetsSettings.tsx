@@ -613,7 +613,7 @@ function PluginPresetOverlayField({
   return (
     <Field className="w-full">
       <FieldLabel>{t('Overlay plugin preset')}</FieldLabel>
-      <div className="max-h-40 overflow-y-auto rounded-md border border-border/60 p-1.5">
+      <div className="max-h-40 overflow-y-auto p-1.5">
         {pluginPresets.map((item) => (
           <label
             key={item.id}
