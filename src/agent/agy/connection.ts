@@ -1,3 +1,9 @@
+import {
+  AGY_PROTOCOL_ERROR_MESSAGE,
+  AGY_SIGNED_OUT_MESSAGE,
+  classifyStdoutLine,
+} from '@shared/agy/stdout';
+
 export class AgyRpcError extends Error {
   readonly code: number;
   readonly data?: unknown;
@@ -26,12 +32,17 @@ export interface JsonRpcConnection {
   close(): void;
 }
 
+export type StdoutFault = 'signed-out' | 'protocol-error';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** 换行分隔的 JSON-RPC 2.0。ACP 的 agy 进程用这个帧，不引 SDK。 */
-export function createJsonRpcConnection(write: (line: string) => void): JsonRpcConnection {
+export function createJsonRpcConnection(
+  write: (line: string) => void,
+  options?: { onFault?: (fault: StdoutFault) => void }
+): JsonRpcConnection {
   let buffer = '';
   let nextId = 1;
   let closed = false;
@@ -89,6 +100,18 @@ export function createJsonRpcConnection(write: (line: string) => void): JsonRpcC
     waiter?.resolve(message.result);
   };
 
+  const fault = (kind: StdoutFault) => {
+    if (closed) return;
+    closed = true;
+    const error =
+      kind === 'signed-out'
+        ? new AgyRpcError(-32000, AGY_SIGNED_OUT_MESSAGE)
+        : new AgyRpcError(-32603, AGY_PROTOCOL_ERROR_MESSAGE);
+    for (const waiter of pending.values()) waiter.reject(error);
+    pending.clear();
+    options?.onFault?.(kind);
+  };
+
   return {
     request(method, params, signal) {
       if (signal?.aborted) return Promise.reject(abortError());
@@ -127,11 +150,12 @@ export function createJsonRpcConnection(write: (line: string) => void): JsonRpcC
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
         if (line) {
-          try {
-            handle(JSON.parse(line));
-          } catch {
-            // 半行或杂讯不打断后续帧
+          const parsed = classifyStdoutLine(line);
+          if (parsed.kind === 'signed-out' || parsed.kind === 'protocol-error') {
+            fault(parsed.kind);
+            return;
           }
+          if (parsed.kind === 'json') handle(parsed.value);
         }
         newline = buffer.indexOf('\n');
       }

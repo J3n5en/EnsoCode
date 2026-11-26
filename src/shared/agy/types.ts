@@ -102,6 +102,7 @@ export interface AgyToolCard {
   title?: string;
   status: AgyToolStatus;
   args: Record<string, unknown>;
+  output?: string;
 }
 
 export interface AgyPlanItem {
@@ -119,7 +120,14 @@ export interface TranslatorState {
 export type TranslatorEffect =
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
-  | { type: 'tool'; id: string; name: string; status: AgyToolStatus; args: Record<string, unknown> }
+  | {
+      type: 'tool';
+      id: string;
+      name: string;
+      status: AgyToolStatus;
+      args: Record<string, unknown>;
+      output?: string;
+    }
   | { type: 'plan'; items: AgyPlanItem[] };
 
 export type PiStopReason = 'stop' | 'length' | 'error' | 'aborted';

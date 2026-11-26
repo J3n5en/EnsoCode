@@ -1,4 +1,4 @@
-import { toolNameFromUpdate } from './tools';
+import { cardArgs, toolNameFromUpdate } from './tools';
 import type {
   AgyPlanItem,
   AgyToolCard,
@@ -52,6 +52,19 @@ function readPath(update: Record<string, unknown>): string | undefined {
 
 function argsOf(update: Record<string, unknown>): Record<string, unknown> {
   return record(update.rawInput) ?? {};
+}
+
+function outputText(update: Record<string, unknown>): string | undefined {
+  if (typeof update.rawOutput === 'string') return update.rawOutput;
+  if (update.rawOutput !== undefined || !Array.isArray(update.content)) return undefined;
+  const texts: string[] = [];
+  for (const entry of update.content) {
+    const block = record(entry);
+    if (block?.type !== 'content') continue;
+    const content = record(block.content);
+    if (content?.type === 'text' && typeof content.text === 'string') texts.push(content.text);
+  }
+  return texts.length > 0 ? texts.join('\n') : undefined;
 }
 
 function repairStatus(
@@ -124,12 +137,22 @@ export function reduceAgyUpdate(
       id,
       name: resolvedName,
       status,
-      args: argsOf(recordUpdate),
+      args: cardArgs(resolvedName, argsOf(recordUpdate)),
+      ...(outputText(recordUpdate) !== undefined ? { output: outputText(recordUpdate) } : {}),
       ...(typeof recordUpdate.title === 'string' ? { title: recordUpdate.title } : {}),
     };
     return {
       state: upsertTool(state, card),
-      effects: [{ type: 'tool', id, name, status, args: card.args }],
+      effects: [
+        {
+          type: 'tool',
+          id,
+          name: resolvedName,
+          status,
+          args: card.args,
+          ...(card.output !== undefined ? { output: card.output } : {}),
+        },
+      ],
     };
   }
   if (kind === 'plan' && Array.isArray(recordUpdate.entries)) {

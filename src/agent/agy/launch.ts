@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 export function agyCommandArgs(skipPermissions: boolean): string[] {
@@ -25,4 +26,14 @@ export function resolveAgyBinary(input: {
   if (!input.home) return undefined;
   const fallback = path.join(input.home, '.local', 'bin', 'agy');
   return input.exists(fallback) ? fallback : undefined;
+}
+
+export function agyOnPath(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, 'agy');
+    if (existsSync(candidate)) return candidate;
+    if (process.platform === 'win32' && existsSync(`${candidate}.exe`)) return `${candidate}.exe`;
+  }
+  return undefined;
 }

@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { killProcessTree } from '../killTree';
 import { createJsonRpcConnection, type JsonRpcConnection } from './connection';
+import { stopProcessGroup } from './processGroup';
 
 export interface AgyProcess {
   rpc: JsonRpcConnection;
@@ -19,34 +19,44 @@ export function startAgyProcess(options: {
     detached: true,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  const rpc = createJsonRpcConnection((line) => {
-    child.stdin?.write(line);
-  });
+  let stopping = false;
+  let rpc: JsonRpcConnection;
+  const stop = () => {
+    if (stopping) return Promise.resolve();
+    stopping = true;
+    rpc?.close();
+    try {
+      child.stdin?.end();
+    } catch {
+      // 管道已关
+    }
+    return stopOwned(child);
+  };
+  rpc = createJsonRpcConnection(
+    (line) => {
+      child.stdin?.write(line);
+    },
+    {
+      onFault: () => {
+        void stop();
+      },
+    }
+  );
   child.stdout?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string) => rpc.push(chunk));
-  const closed = () => rpc.close();
-  child.once('exit', closed);
-  child.once('error', closed);
-  return { rpc, kill: () => stopChild(child, rpc) };
+  child.once('exit', () => rpc.close());
+  child.once('error', () => rpc.close());
+  return { rpc, kill: stop };
 }
 
-function stopChild(child: ChildProcess, rpc: JsonRpcConnection): Promise<void> {
-  rpc.close();
-  try {
-    child.stdin?.end();
-  } catch {
-    // 管道已关
+function stopOwned(child: ChildProcess): Promise<void> {
+  if (process.platform === 'win32') {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // 已经退出
+    }
+    return Promise.resolve();
   }
-  killProcessTree(child, 'SIGTERM');
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      killProcessTree(child, 'SIGKILL');
-      resolve();
-    }, 1000);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
+  return stopProcessGroup(child.pid).then(() => undefined);
 }

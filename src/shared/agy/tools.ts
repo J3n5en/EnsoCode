@@ -14,6 +14,50 @@ export function projectToolName(raw: string): string {
   return raw;
 }
 
+/** 卡片参数只留可读字段。MCP 名 `mcp_<server>_<tool>` 原样保留。 */
+export function cardArgs(name: string, rawInput: unknown): Record<string, unknown> {
+  const raw =
+    rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+      ? (rawInput as Record<string, unknown>)
+      : {};
+  if (name === 'run_command' || name === 'bash') {
+    return pick(raw, { command: ['CommandLine', 'command'] });
+  }
+  if (name === 'write_file') return pick(raw, { path: ['Path', 'path'], content: ['Content'] });
+  if (name === 'edit_file') {
+    return pick(raw, {
+      path: ['Path', 'path'],
+      oldText: ['Target'],
+      newText: ['Replacement'],
+    });
+  }
+  if (name === 'search_web') return pick(raw, { query: ['query'] });
+  if (name === 'read' || name === 'read_file') {
+    return pick(raw, {
+      path: ['Path', 'absolute_path', 'path'],
+      startLine: ['StartLine'],
+      endLine: ['EndLine'],
+    });
+  }
+  return raw;
+}
+
+function pick(
+  raw: Record<string, unknown>,
+  fields: Record<string, readonly string[]>
+): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  for (const [key, sources] of Object.entries(fields)) {
+    for (const source of sources) {
+      if (raw[source] !== undefined) {
+        args[key] = raw[source];
+        break;
+      }
+    }
+  }
+  return args;
+}
+
 export function toolNameFromUpdate(update: { title?: string; rawInput?: unknown }): string {
   const raw = update.rawInput;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {

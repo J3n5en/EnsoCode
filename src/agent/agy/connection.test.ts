@@ -1,3 +1,4 @@
+import { AGY_SIGNED_OUT_MESSAGE } from '@shared/agy/stdout';
 import { describe, expect, it } from 'vitest';
 import { AgyRpcError, createJsonRpcConnection } from './connection';
 
@@ -48,5 +49,22 @@ describe('createJsonRpcConnection', () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(leftWrite).toHaveLength(1);
+  });
+
+  it('kills a login banner as signed-out without keeping the URL', async () => {
+    const faults: string[] = [];
+    const conn = createJsonRpcConnection(() => {}, {
+      onFault: (fault) => faults.push(fault),
+    });
+    const pending = conn.request('initialize', {});
+    conn.push(
+      'Open the following link to authenticate: https://accounts.google.com/o/oauth2?secret=1\n'
+    );
+    await expect(pending).rejects.toMatchObject({
+      code: -32000,
+      message: AGY_SIGNED_OUT_MESSAGE,
+    });
+    expect(faults).toEqual(['signed-out']);
+    expect(JSON.stringify(faults) + AGY_SIGNED_OUT_MESSAGE).not.toContain('accounts.google.com');
   });
 });

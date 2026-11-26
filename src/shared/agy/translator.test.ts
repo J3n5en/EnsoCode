@@ -72,4 +72,29 @@ describe('reduceAgyUpdate', () => {
     expect(stopFromPrompt('refusal')).toBe('error');
     expect(stopFromPrompt('cancelled')).toBe('aborted');
   });
+
+  it('uses content text when a tool update has no rawOutput, and maps native inputs', () => {
+    const command = reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'cmd-1',
+      title: 'Running run_command',
+      status: 'in_progress',
+      rawInput: { CommandLine: 'ls' },
+    });
+    const updated = reduceAgyUpdate(command.state, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'cmd-1',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'ok' } }],
+    });
+    expect(command.state.tools[0]).toMatchObject({ name: 'run_command', args: { command: 'ls' } });
+    expect(updated.state.tools[0]?.output).toBe('ok');
+    const mcp = reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'mcp-1',
+      rawInput: { name: 'mcp_t3-code_search', query: 'x' },
+      status: 'completed',
+    });
+    expect(mcp.state.tools[0]?.name).toBe('mcp_t3-code_search');
+  });
 });

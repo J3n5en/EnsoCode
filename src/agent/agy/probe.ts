@@ -67,6 +67,9 @@ export async function probeAgyAuth(options: {
       return { status: 'unknown' };
     }
   } catch (error) {
+    if (error instanceof AgyRpcError && isSignedOutError(error.code, error.message)) {
+      return { status: 'signed-out', version: '' };
+    }
     if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
       return { status: 'unknown' };
     }
