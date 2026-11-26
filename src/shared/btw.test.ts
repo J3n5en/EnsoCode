@@ -322,7 +322,8 @@ describe('buildLearnFirstMessage', () => {
   it('fork 模式说明对话记录就在上文，非 fork 模式附上快照', () => {
     const forked = buildLearnFirstMessage({ forked: true, snapshot: 'User: x' });
     expect(forked).toMatch(/上面的对话|以上对话|这段对话/);
-    expect(forked).not.toContain('User: x');
+    // 分叉未命中时快照是兜底记录，必须随消息带上
+    expect(forked).toContain('User: x');
     const fallback = buildLearnFirstMessage({ forked: false, snapshot: 'User: x' });
     expect(fallback).toContain('User: x');
   });

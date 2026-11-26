@@ -466,6 +466,8 @@ interface ForkBase {
   messages: Message[];
   options?: SimpleStreamOptions;
   stream: StreamFn;
+  /** 请求发出时会话的选择模型（虚拟模型为虚拟 id）；换过模型则前缀不同，fork 静默降级 */
+  selection: { provider: string; id: string };
   /** 这次请求的回复；正常收尾（无工具调用）时接在前缀后面 */
   reply?: AssistantMessage;
 }
@@ -4148,6 +4150,11 @@ export class SessionSupervisor {
               messages: [...context.messages],
               options,
               stream: (m, c, o) => stream.call(session.agent, m, c, o),
+              // 选择模型：虚拟模型（Auto）路由后 model 是物理成员，
+              // 「换没换模型」只能按选择判定，否则虚拟选择永远对不上物理快照
+              selection: session.model
+                ? { provider: session.model.provider, id: session.model.id }
+                : { provider: model.provider, id: model.id },
             };
           return runWithRequestBodyObserver(
             (usage) => {
@@ -5687,7 +5694,8 @@ export class SessionSupervisor {
     if (!source || !base) return;
     // 模型必须与被分叉会话一致，否则请求前缀不同，注入了也吃不到缓存，反而污染上下文
     const model = managed.session.model;
-    if (!model || model.id !== base.model.id || model.provider !== base.model.provider) return;
+    if (!model || model.id !== base.selection.id || model.provider !== base.selection.provider)
+      return;
     const reply = base.reply;
     const settled =
       reply?.stopReason === 'stop' && !reply.content.some((part) => part.type === 'toolCall');
@@ -5703,6 +5711,7 @@ export class SessionSupervisor {
         messages: [...messages],
         ...(base.options ? { options: base.options } : {}),
         stream: base.stream,
+        selection: base.selection,
       };
       this.reconcileMessages(managed, this.transcript(managed));
       managed.turnStartIndex = managed.messages.length;
@@ -7387,7 +7396,8 @@ function stillQueued<T extends { text: string }>(
 function forkBaseOf(parent: ManagedSession): ForkBase | undefined {
   const base = parent.forkBase;
   const model = parent.session.model;
-  if (!base || model?.id !== base.model.id || model.provider !== base.model.provider) return;
+  if (!base || model?.id !== base.selection.id || model.provider !== base.selection.provider)
+    return;
   return base;
 }
 
