@@ -38,6 +38,12 @@ const BACKGROUND_RECEIPT_NOTE =
   'If the user asks for progress, say it is still running. Do not duplicate its work on the same files or topics. ' +
   'agentId and runId are internal ids — do not mention them to the user.';
 
+/** 脚本内嵌套 spawn 的句柄纪律：不 await 就拿不到 agentId，子代理变孤儿 */
+const CODEMODE_SPAWN_GUIDELINE =
+  'When spawning from inside a codemode script (`tools.subagent`), await every spawn and keep the returned agentId/runId: ' +
+  'a spawn promise the script never awaits ends with the script and its receipt is lost, leaving an orphan agent you cannot manage. ' +
+  'The harness echoes the handles of every nested spawn in the codemode result as a safety net, but awaiting is the only way the script itself can use them.';
+
 /**
  * schema 校验前归一化：漏传 operation 但带 description 与 prompt 视为 spawn，
  * 其余缺失或非法 operation 抛可读错误；超限的 timeoutMs 截到上限，不报错
@@ -273,6 +279,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       `wait defaults to ${AGENT_WAIT_DEFAULT_MS / 1000} seconds and is capped at ${AGENT_WAIT_MAX_MS / 60_000} minutes. A timeout or a user interruption is not a failure and never stops the Run; the receipt lists each pending Run's progress. Use stop or dismiss explicitly to end a Run.`,
       'Use send delivery=auto to steer a running Run or start an idle coworker Run; delivery=next queues a new coworker Run.',
       'Dismiss a coworker as soon as you no longer need it; an idle coworker keeps its session open until dismissed.',
+      CODEMODE_SPAWN_GUIDELINE,
       'gate.commandRef is a Main-authorized command id, not shell text or argv.',
       'Unknown gate ids fail the run and nothing is executed.',
       ...(modelNames.length > 0

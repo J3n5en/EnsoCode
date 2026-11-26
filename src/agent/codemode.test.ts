@@ -8,6 +8,7 @@ import {
   CODEMODE_MAX_TIMEOUT_MS,
   CodemodeHost,
   codemodeToolSnapshot,
+  extractAgentReceipt,
   looksLikeShellCommand,
   nestedToolCallParent,
   preflightCodemodeScript,
@@ -307,8 +308,15 @@ describe('CodemodeHost', () => {
     expect(blocked('await tools.read({path:"a"}); await tools.todo({todos:[]});')).toMatchObject({
       error: expect.stringContaining('"todo"'),
     });
-    expect(blocked('await tools["task_output"]({taskId:"x"})')).toMatchObject({
-      error: expect.stringContaining('"task_output"'),
+    expect(blocked('await tools["ask_user"]({question:"x"})')).toMatchObject({
+      error: expect.stringContaining('"ask_user"'),
+    });
+    // subagent/task_* 已解禁：脚本内可调用，预检不再拦截
+    expect(blocked('await tools.subagent({operation:"spawn",description:"d",prompt:"p"})')).toEqual(
+      { code: 'await tools.subagent({operation:"spawn",description:"d",prompt:"p"})' }
+    );
+    expect(blocked('await tools["task_output"]({taskId:"x"})')).toEqual({
+      code: 'await tools["task_output"]({taskId:"x"})',
     });
     expect(blocked('const sleep = (ms) => new Promise((r) => setTimeout(r, ms));')).toMatchObject({
       error: expect.stringContaining('setTimeout'),
@@ -336,9 +344,17 @@ describe('CodemodeHost', () => {
       await emit('tool_call', {
         toolName: 'codemode',
         toolCallId: 'c',
-        input: { code: 'await tools.subagent({})' },
+        input: { code: 'await tools.todo({})' },
       })
-    ).toMatchObject({ block: true, reason: expect.stringContaining('"subagent"') });
+    ).toMatchObject({ block: true, reason: expect.stringContaining('"todo"') });
+    // subagent 不再拦截
+    expect(
+      await emit('tool_call', {
+        toolName: 'codemode',
+        toolCallId: 'c',
+        input: { code: 'await tools.subagent({operation:"spawn",description:"d",prompt:"p"})' },
+      })
+    ).toBeUndefined();
     const input = { code: 'return await tools.describeTool("read");' };
     expect(
       await emit('tool_call', { toolName: 'codemode', toolCallId: 'c', input })
@@ -384,14 +400,16 @@ describe('CodemodeHost', () => {
       await emit('before_agent_start', { systemPromptOptions: { sections } });
       return sections.codemode_forbidden_tools;
     };
-    const text = await sectionOf(['read', 'todo', 'subagent']);
-    expect(text).toContain('`subagent`, `todo`');
+    const text = await sectionOf(['read', 'todo', 'subagent', 'ask_user']);
+    expect(text).toContain('`ask_user`, `todo`');
     expect(text).not.toContain('`read`');
+    // subagent 已解禁，不再进禁用段
+    expect(text).not.toContain('`subagent`');
     expect(text).not.toContain('submit_plan');
     expect(await sectionOf(['read'])).toBeUndefined();
   });
 
-  it('嵌套调用禁止编排类工具，并按父调用限次；父调用结束清零', async () => {
+  it('嵌套调用禁止交互类工具，并按父调用限次；父调用结束清零', async () => {
     const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
     const nested = (toolName: string, n: number) =>
       emit('tool_call', {
@@ -400,9 +418,12 @@ describe('CodemodeHost', () => {
         parentToolCallId: 'p',
         input: {},
       });
-    expect(await nested('subagent', 1)).toMatchObject({ block: true });
+    expect(await nested('todo', 1)).toMatchObject({ block: true });
     // send_image 的结果只认会话里直接的 send_image 工具结果，脚本里调用发不出图
     expect(await nested('send_image', 1)).toMatchObject({ block: true });
+    // 编排类工具（subagent/task_*）不再拦截
+    expect(await nested('subagent', 1)).toBeUndefined();
+    expect(await nested('task_output', 1)).toBeUndefined();
     expect(await nested('read', 2)).toBeUndefined();
     for (let i = 3; i <= CODEMODE_MAX_NESTED_CALLS + 1; i++) await nested('read', i);
     expect(await nested('read', 999)).toMatchObject({ block: true });
@@ -410,6 +431,116 @@ describe('CodemodeHost', () => {
     expect(await nested('read', 1000)).toBeUndefined();
     expect(
       await emit('tool_call', { toolName: 'read', toolCallId: 'x', input: {} })
+    ).toBeUndefined();
+  });
+
+  it('脚本内嵌套 spawn 的句柄随父结果 echo，脚本失败也 echo', async () => {
+    const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    const spawnReceipt = {
+      type: 'text',
+      text: JSON.stringify({
+        agentId: 'agent-1',
+        runId: 'run-1',
+        mode: 'coworker',
+        status: 'running',
+      }),
+    };
+    // 嵌套 subagent spawn（先 tool_call 记账，再 tool_result）
+    await emit('tool_call', {
+      toolName: 'subagent',
+      toolCallId: 'p/1',
+      parentToolCallId: 'p',
+      input: { operation: 'spawn', description: 'd', prompt: 'x' },
+    });
+    await emit('tool_result', {
+      toolName: 'subagent',
+      toolCallId: 'p/1',
+      parentToolCallId: 'p',
+      input: { operation: 'spawn', description: 'd', prompt: 'x' },
+      content: [spawnReceipt],
+    });
+    const output = { type: 'text', text: 'Script completed' };
+    const parent = (await emit('tool_result', {
+      toolName: 'codemode',
+      toolCallId: 'p',
+      content: [output],
+      details: { calls: [] },
+    })) as { content: { type: string; text?: string }[] };
+    const echoed = parent.content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n');
+    expect(echoed).toContain('agentId agent-1');
+    expect(echoed).toContain('runId run-1');
+    // 只 echo 一次：同 id 再来不再有
+    expect(
+      await emit('tool_result', { toolName: 'codemode', toolCallId: 'p', content: [], details: {} })
+    ).toBeUndefined();
+  });
+
+  it('嵌套 spawn 之外的 subagent 操作不 echo 句柄；二级嵌套不记账', async () => {
+    const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    const receipt = {
+      type: 'text',
+      text: JSON.stringify({ agentId: 'agent-1', runId: 'run-1', status: 'running' }),
+    };
+    // send 操作不 echo（agentId 是脚本自己传进去的，不是新句柄）
+    await emit('tool_call', {
+      toolName: 'subagent',
+      toolCallId: 'p/1',
+      parentToolCallId: 'p',
+      input: { operation: 'send', agentId: 'agent-1', message: 'm' },
+    });
+    await emit('tool_result', {
+      toolName: 'subagent',
+      toolCallId: 'p/1',
+      parentToolCallId: 'p',
+      input: { operation: 'send', agentId: 'agent-1', message: 'm' },
+      content: [receipt],
+    });
+    // 二级嵌套（脚本内的脚本）：parent 是嵌套 id，不记账
+    await emit('tool_call', {
+      toolName: 'subagent',
+      toolCallId: 'p/2/1',
+      parentToolCallId: 'p/2',
+      input: { operation: 'spawn', description: 'd', prompt: 'x' },
+    });
+    await emit('tool_result', {
+      toolName: 'subagent',
+      toolCallId: 'p/2/1',
+      parentToolCallId: 'p/2',
+      input: { operation: 'spawn', description: 'd', prompt: 'x' },
+      content: [receipt],
+    });
+    expect(
+      await emit('tool_result', {
+        toolName: 'codemode',
+        toolCallId: 'p',
+        content: [{ type: 'text', text: 'done' }],
+        details: {},
+      })
+    ).toBeUndefined();
+  });
+
+  it('extractAgentReceipt 只认 spawn 回执形状', () => {
+    const spawnContent = [
+      { type: 'text', text: JSON.stringify({ agentId: 'a', runId: 'r', status: 'running' }) },
+    ];
+    expect(extractAgentReceipt('subagent', { operation: 'spawn' }, spawnContent)).toEqual({
+      operation: 'spawn',
+      agentId: 'a',
+      runId: 'r',
+    });
+    // 非 subagent、非 spawn、坏 JSON、缺字段都不算
+    expect(extractAgentReceipt('read', { operation: 'spawn' }, spawnContent)).toBeUndefined();
+    expect(extractAgentReceipt('subagent', { operation: 'send' }, spawnContent)).toBeUndefined();
+    expect(
+      extractAgentReceipt('subagent', { operation: 'spawn' }, [{ type: 'text', text: 'oops' }])
+    ).toBeUndefined();
+    expect(
+      extractAgentReceipt('subagent', { operation: 'spawn' }, [
+        { type: 'text', text: JSON.stringify({ runs: [] }) },
+      ])
     ).toBeUndefined();
   });
 
