@@ -28,7 +28,7 @@ import { parseWebSearchChain } from '@shared/webSearchChain';
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 18;
+export const SETTINGS_VERSION = 19;
 
 /** 已移除的语音输入字段：旧 settings.json 里还有就忽略，不进 store */
 const REMOVED_VOICE_FIELDS = [
@@ -241,6 +241,25 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     const { autoRestartWhenIdle, ...rest } = state;
     state = { ...rest, autoRestartForUpdate: resolveAutoRestartMode(state) };
     void autoRestartWhenIdle;
+  }
+  if (version < 19 && Array.isArray(state.presets)) {
+    // 叠加插件预设从单选改多选：旧单值 pluginPresetId 并入 pluginPresetIds 数组首元素后清除
+    state = {
+      ...state,
+      presets: state.presets.map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+        const preset = entry as Record<string, unknown>;
+        if (typeof preset.pluginPresetId !== 'string') return preset;
+        const { pluginPresetId, ...rest } = preset;
+        const existing = Array.isArray(rest.pluginPresetIds)
+          ? rest.pluginPresetIds.filter((id): id is string => typeof id === 'string')
+          : [];
+        const pluginPresetIds = existing.includes(pluginPresetId)
+          ? existing
+          : [pluginPresetId, ...existing];
+        return { ...rest, pluginPresetIds };
+      }),
+    };
   }
   return state;
 }

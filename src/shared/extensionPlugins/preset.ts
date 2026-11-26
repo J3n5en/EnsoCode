@@ -29,16 +29,27 @@ export function isPluginPresetId(id: string): boolean {
 export function presetOverlay(
   presetId: string | undefined,
   resolve: (id?: string) => Preset | undefined
-): { preset?: Preset; pluginPresetId?: string; required: boolean } {
-  if (presetId && isPluginPresetId(presetId)) return { pluginPresetId: presetId, required: true };
+): { preset?: Preset; pluginPresetIds?: string[]; required: boolean } {
+  if (presetId && isPluginPresetId(presetId))
+    return { pluginPresetIds: [presetId], required: true };
   const preset = resolve(presetId);
-  const pluginPresetId =
-    preset?.pluginPresetId && isPluginPresetId(preset.pluginPresetId)
-      ? preset.pluginPresetId
-      : undefined;
+  const pluginPresetIds = presetOverlayIds(preset);
   return {
     ...(preset ? { preset } : {}),
-    ...(pluginPresetId ? { pluginPresetId } : {}),
+    ...(pluginPresetIds.length > 0 ? { pluginPresetIds } : {}),
     required: false,
   };
+}
+
+/** 自建预设上叠加的插件预设 id 列表：pluginPresetIds 有序数组为准，旧单值字段并入数组首元素；非法 id 滤除 */
+export function presetOverlayIds(preset: Preset | undefined): string[] {
+  if (!preset) return [];
+  const ids: string[] = [];
+  if (typeof preset.pluginPresetId === 'string' && isPluginPresetId(preset.pluginPresetId)) {
+    ids.push(preset.pluginPresetId);
+  }
+  for (const id of preset.pluginPresetIds ?? []) {
+    if (typeof id === 'string' && isPluginPresetId(id) && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
 }

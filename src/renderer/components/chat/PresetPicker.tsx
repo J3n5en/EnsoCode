@@ -1,4 +1,4 @@
-import { isPluginPresetId } from '@shared/extensionPlugins/preset';
+import { isPluginPresetId, presetOverlayIds } from '@shared/extensionPlugins/preset';
 import { DEFAULT_PRESET_ID } from '@shared/types/assets';
 import { Check, ChevronDown, Layers } from 'lucide-react';
 import { useState } from 'react';
@@ -65,8 +65,9 @@ export function PresetPicker({ presetId, onSelect, onModel, disabled }: PresetPi
               type="button"
               onClick={() => {
                 onSelect(option.id);
-                const overlay = presets.find((preset) => preset.id === option.id)?.pluginPresetId;
-                const model = pluginPresetModel(overlay ?? option.id, pluginPresets);
+                const preset = presets.find((item) => item.id === option.id);
+                const overlays = presetOverlayIds(preset);
+                const model = pluginPresetModel(overlays.at(-1) ?? option.id, pluginPresets);
                 if (model) onModel?.(model);
                 setOpen(false);
               }}

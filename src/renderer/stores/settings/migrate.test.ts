@@ -599,4 +599,42 @@ describe('设置持久化迁移', () => {
     expect(migrateSettings(null, 0)).toBeNull();
     expect(migrateSettings('broken', 0)).toBe('broken');
   });
+
+  it('v18 → v19 预设的 pluginPresetId 字符串迁为 pluginPresetIds 数组', () => {
+    const state = {
+      presets: [
+        {
+          id: 'p1',
+          name: 'P',
+          skillIds: [],
+          mcpServerIds: [],
+          pluginPresetId: 'plugin:enso.pstack:poteto',
+        },
+        {
+          id: 'p2',
+          name: 'Q',
+          skillIds: [],
+          mcpServerIds: [],
+          pluginPresetId: 'plugin:enso.pstack:poteto',
+          pluginPresetIds: ['plugin:example.demo:review'],
+        },
+      ],
+    };
+    const migrated = migrateSettings(state, 18) as typeof state;
+    expect(migrated.presets[0]).toEqual({
+      id: 'p1',
+      name: 'P',
+      skillIds: [],
+      mcpServerIds: [],
+      pluginPresetIds: ['plugin:enso.pstack:poteto'],
+    });
+    // 已有数组时旧单值并入首元素（旧字段是更早的权威），仅清除旧字段
+    expect(migrated.presets[1]).toEqual({
+      id: 'p2',
+      name: 'Q',
+      skillIds: [],
+      mcpServerIds: [],
+      pluginPresetIds: ['plugin:enso.pstack:poteto', 'plugin:example.demo:review'],
+    });
+  });
 });

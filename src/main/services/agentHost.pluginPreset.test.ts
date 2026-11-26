@@ -2,6 +2,8 @@ import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { describe, expect, it } from 'vitest';
 import {
   applyPluginPresetOverrides,
+  mergePluginPresetKits,
+  mergePluginPresetOverrides,
   mergePresetPromptKit,
   pluginPresetInstruction,
   pluginSkillPathsForMenu,
@@ -130,6 +132,84 @@ describe('mergePresetPromptKit', () => {
   });
 });
 
+describe('mergePluginPresetKits', () => {
+  it('空数组等价于无叠加', () => {
+    expect(mergePluginPresetKits([])).toEqual({});
+  });
+
+  it('单个保持原样', () => {
+    expect(mergePluginPresetKits([{ systemPrompt: 'role', systemPromptAppend: 'tail' }])).toEqual({
+      systemPrompt: 'role',
+      systemPromptAppend: 'tail',
+    });
+  });
+
+  it('多个：尾段按序拼接；角色/加强/推脱补发后者覆盖前者', () => {
+    expect(
+      mergePluginPresetKits([
+        {
+          systemPrompt: 'role-a',
+          systemPromptAppend: 'tail-a',
+          systemPromptBoost: 'boost-a',
+          refusalRetryPrompt: 'retry-a',
+        },
+        { systemPromptAppend: 'tail-b', systemPromptBoost: 'boost-b' },
+        { systemPromptAppend: 'tail-c' },
+      ])
+    ).toEqual({
+      systemPrompt: 'role-a',
+      systemPromptAppend: 'tail-a\n\ntail-b\n\ntail-c',
+      systemPromptBoost: 'boost-b',
+      refusalRetryPrompt: 'retry-a',
+    });
+  });
+});
+
+describe('mergePluginPresetOverrides', () => {
+  it('空数组返回 undefined', () => {
+    expect(mergePluginPresetOverrides([])).toBeUndefined();
+  });
+
+  it('模型/思考档后者覆盖前者，审批取最严，禁用工具并集', () => {
+    expect(
+      mergePluginPresetOverrides([
+        {
+          model: { providerId: 'p', modelId: 'a' },
+          thinkingLevel: 'low',
+          approvalMode: 'auto-edits',
+          disabledTools: ['bash'],
+        },
+        {
+          model: { providerId: 'p', modelId: 'b' },
+          approvalMode: 'supervised',
+          disabledTools: ['bash', 'web'],
+        },
+      ])
+    ).toEqual({
+      model: { providerId: 'p', modelId: 'b' },
+      thinkingLevel: 'low',
+      approvalMode: 'supervised',
+      disabledTools: ['bash', 'web'],
+    });
+  });
+});
+
+describe('pluginPresetInstruction 多插件', () => {
+  it('指令按序拼接（后者在前者之后）', () => {
+    const merged = [
+      { path: '/a.md', content: 'inst-a' },
+      { path: '/b.md', content: 'inst-b' },
+    ].reduce<{ path: string; content: string } | undefined>(
+      (acc, cur) =>
+        acc
+          ? { path: `${acc.path}+${cur.path}`, content: `${acc.content}\n\n${cur.content}` }
+          : cur,
+      undefined
+    );
+    expect(merged?.content).toBe('inst-a\n\ninst-b');
+  });
+});
+
 describe('presetOverlay', () => {
   const user = {
     id: 'u',
@@ -141,7 +221,7 @@ describe('presetOverlay', () => {
 
   it('直接选插件预设：插件预设本身，无自建预设', () => {
     expect(presetOverlay('plugin:enso.pstack:poteto', () => user)).toEqual({
-      pluginPresetId: 'plugin:enso.pstack:poteto',
+      pluginPresetIds: ['plugin:enso.pstack:poteto'],
       required: true,
     });
   });
@@ -149,7 +229,7 @@ describe('presetOverlay', () => {
   it('自建预设叠加插件预设：可选叠加，失效时不阻断', () => {
     expect(presetOverlay('u', () => user)).toEqual({
       preset: user,
-      pluginPresetId: 'plugin:enso.pstack:poteto',
+      pluginPresetIds: ['plugin:enso.pstack:poteto'],
       required: false,
     });
   });
