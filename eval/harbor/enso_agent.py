@@ -132,8 +132,26 @@ class EnsoCodeAgent(BaseInstalledAgent):
             result = await self.exec_as_agent(environment, command=command, env=self._connection_env())
             self._stdout = getattr(result, "stdout", None)
         finally:
+            # 会话正文 jsonl 在容器内 $ENSO_DATA_DIR/agent/sessions（默认 ~/.enso-server/agent/sessions），
+            # 不回收的话无法分析 agent 决策过程。best-effort：复制失败不影响 verdict。
+            await self._collect_session_logs(environment, logs)
             # 日志目录未挂载时此刻还没下载回来；context 一旦非空 Harbor 就不再调 populate_context_post_run
             self._apply_usage(context)
+
+    async def _collect_session_logs(self, environment: BaseEnvironment, logs: str) -> None:
+        quoted_logs = shlex.quote(logs)
+        script = (
+            "set -u; "
+            'src="${ENSO_DATA_DIR:-$HOME/.enso-server}/agent/sessions"; '
+            '[ -d "$src" ] || exit 0; '
+            f'dest={quoted_logs}/sessions; '
+            'mkdir -p "$dest" 2>/dev/null || exit 0; '
+            'cp -a "$src"/. "$dest"/ 2>/dev/null || true'
+        )
+        try:
+            await self.exec_as_root(environment, command=script, timeout_sec=60)
+        except Exception as error:  # noqa: BLE001 - 日志回收失败不能掩盖 agent 结果
+            self.logger.warning("session log collection failed: %s", error)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         self._apply_usage(context, final=True)
