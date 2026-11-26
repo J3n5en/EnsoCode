@@ -1,7 +1,13 @@
 import { projectDisplayName } from '@shared/projectName';
+import { useRef } from 'react';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
 import { ProjectIcon } from '@/components/chat/ProjectIcon';
-import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from '@/components/ui/preview-card';
+import {
+  createPreviewCardHandle,
+  PreviewCard,
+  PreviewCardPopup,
+  PreviewCardTrigger,
+} from '@/components/ui/preview-card';
 import { useI18n } from '@/i18n';
 import type { CollapsedActiveProject, CollapsedProjectSession } from './collapsedActiveProjects';
 
@@ -68,54 +74,95 @@ export function CollapsedActiveProjectRail({
         const sessions = sessionsByProject[entry.projectId] ?? [];
         const activeCount = sessions.length;
         return (
-          <PreviewCard key={entry.projectId}>
-            <PreviewCardTrigger
-              delay={250}
-              closeDelay={200}
-              render={
-                <button
-                  type="button"
-                  data-enso="collapsed-active-project"
-                  data-project-id={entry.projectId}
-                  title={label}
-                  aria-label={label}
-                  onClick={() => onOpen(entry)}
-                  className="relative flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-foreground/5"
-                />
-              }
-            >
-              <ProjectIcon
-                projectId={entry.projectId}
-                displayName={name}
-                size={COLLAPSED_ACTIVE_ICON_SIZE}
-              />
-              {activeCount > 1 ? (
-                <span
-                  data-enso="collapsed-session-badge"
-                  className="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-0.5 font-semibold text-[10px] text-white leading-none tabular-nums ring-2 ring-background"
-                >
-                  {activeCount > 9 ? '9+' : activeCount}
-                </span>
-              ) : (
-                <span
-                  data-enso="collapsed-running-dot"
-                  className="pointer-events-none absolute top-0.5 right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-background"
-                />
-              )}
-            </PreviewCardTrigger>
-            {activeCount > 1 && (
-              <PreviewCardPopup
-                align="start"
-                side="right"
-                sideOffset={8}
-                className="w-[240px] flex-col p-0 text-[12.5px]"
-              >
-                <HoverSessions sessions={sessions} onOpenSession={onOpenSession} />
-              </PreviewCardPopup>
-            )}
-          </PreviewCard>
+          <CollapsedProjectPreviewCard
+            key={entry.projectId}
+            entry={entry}
+            label={label}
+            name={name}
+            sessions={sessions}
+            activeCount={activeCount}
+            onOpen={onOpen}
+            onOpenSession={onOpenSession}
+          />
         );
       })}
     </div>
+  );
+}
+
+function CollapsedProjectPreviewCard({
+  entry,
+  label,
+  name,
+  sessions,
+  activeCount,
+  onOpen,
+  onOpenSession,
+}: {
+  entry: CollapsedActiveProject;
+  label: string;
+  name: string;
+  sessions: readonly CollapsedProjectSession[];
+  activeCount: number;
+  onOpen: (entry: CollapsedActiveProject) => void;
+  onOpenSession: (session: CollapsedProjectSession) => void;
+}) {
+  // 点击浮层里的会话行后 hover 仍停在浮层上，浮层不会自行关闭，必须显式 close
+  const handleRef = useRef<ReturnType<typeof createPreviewCardHandle> | null>(null);
+  if (handleRef.current === null) handleRef.current = createPreviewCardHandle();
+  const handle = handleRef.current;
+  return (
+    <PreviewCard handle={handle}>
+      <PreviewCardTrigger
+        delay={250}
+        closeDelay={200}
+        render={
+          <button
+            type="button"
+            data-enso="collapsed-active-project"
+            data-project-id={entry.projectId}
+            title={label}
+            aria-label={label}
+            onClick={() => onOpen(entry)}
+            className="relative flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-foreground/5"
+          />
+        }
+      >
+        <ProjectIcon
+          projectId={entry.projectId}
+          displayName={name}
+          size={COLLAPSED_ACTIVE_ICON_SIZE}
+        />
+        {activeCount > 1 ? (
+          <span
+            data-enso="collapsed-session-badge"
+            className="pointer-events-none absolute top-0 right-0 flex min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-[3px] text-center font-medium text-[9px] text-white leading-3.5 tabular-nums ring-1 ring-background"
+          >
+            {activeCount > 9 ? '9+' : activeCount}
+          </span>
+        ) : (
+          <span
+            data-enso="collapsed-running-dot"
+            className="pointer-events-none absolute top-0.5 right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-background"
+          />
+        )}
+      </PreviewCardTrigger>
+      {activeCount > 1 && (
+        <PreviewCardPopup
+          align="start"
+          side="right"
+          sideOffset={8}
+          className="w-[240px] flex-col p-0 text-[12.5px]"
+        >
+          <HoverSessions
+            sessions={sessions}
+            onOpenSession={(session) => {
+              handle.close();
+              onOpenSession(session);
+            }}
+          />
+        </PreviewCardPopup>
+      )}
+    </PreviewCard>
   );
 }

@@ -5,6 +5,7 @@ import { PreviewCard as PreviewCardPrimitive } from '@base-ui/react/preview-card
 import { cn } from '@/lib/utils';
 
 const PreviewCard = PreviewCardPrimitive.Root;
+const createPreviewCardHandle = PreviewCardPrimitive.createHandle;
 
 function PreviewCardTrigger({ ...props }: PreviewCardPrimitive.Trigger.Props) {
   return <PreviewCardPrimitive.Trigger data-slot="preview-card-trigger" {...props} />;
@@ -47,6 +48,7 @@ function PreviewCardPopup({
 }
 
 export {
+  createPreviewCardHandle,
   PreviewCard,
   PreviewCard as HoverCard,
   PreviewCardPopup,
