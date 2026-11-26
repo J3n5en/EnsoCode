@@ -44,6 +44,7 @@ function fakeAgy(turn: Turn, onClose?: () => void): AgySession {
     resumed: false,
     ensoTools: [],
     turn,
+    steer: () => false,
     close: async () => onClose?.(),
   };
 }

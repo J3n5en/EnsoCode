@@ -2,9 +2,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { probeAgyAuth } from './probe';
-import { type AgySession, openAgySession } from './session';
+import { type AgySession, type AgyTurnInput, openAgySession } from './session';
 
 const fakePath = fileURLToPath(new URL('./fixtures/fakeAgy.mjs', import.meta.url));
 const preamble = 'You are a coding assistant running inside pi';
@@ -250,5 +250,126 @@ describe('agy session against the fake CLI', () => {
     expect(JSON.parse(opened ?? '{}').params.mcpServers).toEqual([]);
     expect(issued).toBe(0);
     expect(session.ensoTools).toEqual([]);
+  });
+});
+
+describe('agy session mid-turn steer and background work', () => {
+  async function open(env: Record<string, string>) {
+    const dir = tempDir();
+    const log = path.join(dir, 'log');
+    const session = await openAgySession({
+      command: process.execPath,
+      args: [fakePath],
+      cwd: dir,
+      env: { ...process.env, FAKE_AGY_LOG: log, ...env },
+      clientVersion: '0.3.14',
+      readRoots: [dir],
+      timeoutMs: 8_000,
+    });
+    openSessions.push(session);
+    const prompts = () =>
+      readFileSync(log, 'utf8')
+        .split('\n')
+        .filter((line) => line.includes('"method":"session/prompt"'))
+        .map((line) => JSON.parse(line).params.prompt as Array<{ text?: string }>);
+    const logged = () => readFileSync(log, 'utf8');
+    return { session, dir, prompts, logged };
+  }
+
+  const input = (dir: string, messages: AgyTurnInput['messages'], extra = {}): AgyTurnInput => ({
+    messages,
+    planMode: false,
+    approvalMode: 'full',
+    workspaceRoot: dir,
+    modelId: 'default',
+    thinkingLevel: 'high',
+    modelLabel: 'default',
+    ask: async () => 'allow',
+    ...extra,
+  });
+
+  it('sends a steer as a raw second prompt, splits the answers at the usage_update, never resends it', async () => {
+    const { session, dir, prompts } = await open({ FAKE_AGY_SCRIPT: 'steer' });
+    const steer = { role: 'user', content: [{ type: 'text', text: 'Stop. Reply steered' }] };
+    const firstEvents: unknown[] = [];
+    let steered = false;
+    const first = await session.turn(
+      input(dir, [{ role: 'user', content: 'Tell a story' }], {
+        onEvent: (event: unknown) => {
+          firstEvents.push(event);
+          if (!steered) steered = session.steer([steer]);
+        },
+      })
+    );
+    expect(steered).toBe(true);
+    expect(first.stopReason).toBe('stop');
+    expect(first.text).toBe('Once upon a time.');
+    expect(first.usage.totalTokens).toBe(0);
+
+    const secondEvents: unknown[] = [];
+    const second = await session.turn(
+      input(
+        dir,
+        [
+          { role: 'user', content: 'Tell a story' },
+          { role: 'assistant', content: [{ type: 'text', text: 'Once upon a time.' }] },
+          steer,
+        ],
+        { onEvent: (event: unknown) => secondEvents.push(event) }
+      )
+    );
+    expect(second.text).toBe('steered');
+    expect(second.usage).toMatchObject({ input: 50, output: 40, totalTokens: 90 });
+    expect(secondEvents).toEqual([{ type: 'text', delta: 'steered' }]);
+    const sent = prompts();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual([{ type: 'text', text: 'Stop. Reply steered' }]);
+    expect(session.phase().phase).toBe('session-ready');
+  });
+
+  it('does not steer when no turn is running', async () => {
+    const { session } = await open({ FAKE_AGY_SCRIPT: 'steer' });
+    expect(session.steer([{ role: 'user', content: 'late' }])).toBe(false);
+  });
+
+  it('keeps the turn open past end_turn while a background command runs, and takes its follow-up reply', async () => {
+    const { session, dir } = await open({ FAKE_AGY_SCRIPT: 'background' });
+    const statuses: string[] = [];
+    const result = await session.turn(
+      input(dir, [{ role: 'user', content: 'wait for it' }], {
+        onEvent: (event: { type: string; status?: string }) => {
+          if (event.type === 'tool' && event.status) statuses.push(event.status);
+        },
+      })
+    );
+    expect(result.text).toBe('Starting.It printed done.');
+    expect(statuses).toEqual(['in_progress', 'completed']);
+    expect(result.tools[0]).toMatchObject({ id: 'bg-1', status: 'completed', output: 'done\n' });
+  }, 15_000);
+
+  it('ends at end_turn when the running command is a daemon', async () => {
+    const { session, dir } = await open({ FAKE_AGY_SCRIPT: 'background', FAKE_AGY_DAEMON: '1' });
+    const result = await session.turn(input(dir, [{ role: 'user', content: 'serve' }]));
+    expect(result.text).toBe('Starting.');
+    expect(result.tools[0]).toMatchObject({ id: 'bg-1', status: 'in_progress' });
+  });
+
+  it('sends session/cancel for a held turn only when the user stops it', async () => {
+    const { session, dir, logged } = await open({
+      FAKE_AGY_SCRIPT: 'background',
+      FAKE_AGY_BACKGROUND_MS: '5000',
+    });
+    const controller = new AbortController();
+    const pending = session.turn(
+      input(dir, [{ role: 'user', content: 'wait' }], { signal: controller.signal })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(logged()).not.toContain('"method":"session/cancel"');
+    const started = Date.now();
+    controller.abort();
+    const result = await pending;
+    expect(result.stopReason).toBe('aborted');
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await vi.waitFor(() => expect(logged()).toContain('"method":"session/cancel"'));
   });
 });

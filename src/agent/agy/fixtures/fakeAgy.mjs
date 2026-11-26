@@ -6,14 +6,34 @@ const version = process.env.FAKE_AGY_VERSION || '1.5.18';
 const signedOut = process.env.FAKE_AGY_SIGNED_OUT === '1';
 /** 设了就把权限请求换成 agy 对我们 Host MCP 工具发的那种：`mcp_enso_<值>` */
 const mcpPermission = process.env.FAKE_AGY_MCP_PERMISSION;
+/**
+ * 按 agy 1.5.18 线上记下的顺序回放：
+ * - `steer`：第一个 prompt 流到一半等第二个 prompt；第二个一到，第一个 23ms 内返回 end_turn（无 usage），
+ *   剩余文字照流、usage_update，再流第二个的回答、usage_update，第二个返回 end_turn 和整轮 usage。
+ * - `background`：起一个后台命令（`FAKE_AGY_DAEMON=1` 时 IsDaemon），prompt 先 end_turn；
+ *   命令跑完后 agy 不等新 prompt 自己接着回复，以 usage_update 收口。
+ */
+const script = process.env.FAKE_AGY_SCRIPT;
 
 function log(entry) {
   if (!logPath) return;
   appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
 }
 
+let batched = null;
+
 function send(message) {
-  process.stdout.write(`${JSON.stringify(message)}\n`);
+  const line = `${JSON.stringify(message)}\n`;
+  if (batched) batched.push(line);
+  else process.stdout.write(line);
+}
+
+function batch(write) {
+  batched = [];
+  write();
+  const lines = batched.join('');
+  batched = null;
+  process.stdout.write(lines);
 }
 
 let nextId = 1;
@@ -44,6 +64,96 @@ function update(sessionId, body) {
     method: 'session/update',
     params: { sessionId, update: body },
   });
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const say = (sessionId, text) =>
+  update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
+const usageUpdate = (sessionId, used) =>
+  update(sessionId, { sessionUpdate: 'usage_update', used, size: 1048576 });
+const fullUsage = { inputTokens: 3, cachedReadTokens: 2, outputTokens: 4, totalTokens: 9 };
+
+let steerWaiter = null;
+let cancelled = false;
+
+async function steerPrompt(id, params) {
+  const sessionId = params.sessionId;
+  if (steerWaiter) {
+    const first = steerWaiter;
+    steerWaiter = null;
+    first(id);
+    return;
+  }
+  promptId = id;
+  usageUpdate(sessionId, 0);
+  say(sessionId, 'Once upon');
+  const second = await new Promise((resolve) => {
+    steerWaiter = resolve;
+    setTimeout(() => resolve(null), 3_000);
+  });
+  if (second === null) {
+    steerWaiter = null;
+    say(sessionId, ' the end.');
+    usageUpdate(sessionId, 10);
+    promptId = null;
+    respond(id, { stopReason: 'end_turn', usage: fullUsage });
+    return;
+  }
+  await sleep(20);
+  // 答复和随后的剩余文字、usage_update 放进同一次写：读端会在一块 stdout 里同时收到
+  batch(() => {
+    respond(id, { stopReason: 'end_turn' });
+    say(sessionId, ' a time.');
+    usageUpdate(sessionId, 10);
+  });
+  promptId = second;
+  await sleep(30);
+  say(sessionId, 'steered');
+  usageUpdate(sessionId, 12);
+  await sleep(10);
+  promptId = null;
+  respond(second, {
+    stopReason: 'end_turn',
+    usage: { inputTokens: 30, cachedReadTokens: 20, outputTokens: 40, totalTokens: 90 },
+  });
+}
+
+async function backgroundPrompt(id, params) {
+  const sessionId = params.sessionId;
+  cancelled = false;
+  promptId = id;
+  say(sessionId, 'Starting.');
+  const rawInput = {
+    CommandLine: 'sleep 1 && echo done',
+    toolSummary: 'Wait',
+    ...(process.env.FAKE_AGY_DAEMON === '1' ? { IsDaemon: true } : {}),
+  };
+  update(sessionId, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'bg-1',
+    name: 'run_command',
+    kind: 'execute',
+    title: rawInput.CommandLine,
+    status: 'in_progress',
+    rawInput,
+  });
+  usageUpdate(sessionId, 5);
+  promptId = null;
+  respond(id, { stopReason: 'end_turn', usage: fullUsage });
+  await sleep(Number(process.env.FAKE_AGY_BACKGROUND_MS || 300));
+  if (cancelled) return;
+  update(sessionId, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'bg-1',
+    name: 'run_command',
+    kind: 'execute',
+    status: 'completed',
+    rawInput,
+    rawOutput: { output: 'done\n', exit_code: 0 },
+  });
+  await sleep(20);
+  say(sessionId, 'It printed done.');
+  usageUpdate(sessionId, 8);
 }
 
 const sessionResult = {
@@ -220,6 +330,7 @@ function handle(message) {
   }
   if (method === 'session/cancel') {
     generation += 1;
+    cancelled = true;
     if (promptId !== null) {
       const current = promptId;
       promptId = null;
@@ -228,6 +339,14 @@ function handle(message) {
     return;
   }
   if (method === 'session/prompt') {
+    if (script === 'steer') {
+      void steerPrompt(id, params ?? {});
+      return;
+    }
+    if (script === 'background') {
+      void backgroundPrompt(id, params ?? {});
+      return;
+    }
     void handlePrompt(id, params ?? {});
     return;
   }

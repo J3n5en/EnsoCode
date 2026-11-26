@@ -71,6 +71,22 @@ function lastUser(messages: readonly PromptMessage[]): PromptMessage | undefined
   return undefined;
 }
 
+/** 一条消息的用户文字（图片之外的 text 块） */
+export function userText(message: PromptMessage | undefined): string {
+  return textOf(message?.content);
+}
+
+/** 上下文末尾、最后一条 assistant / toolResult 之后的 user 消息文字：pi 在这个边界送进来的那几条 */
+export function trailingUserTexts(messages: readonly PromptMessage[]): string[] {
+  const texts: string[] = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'assistant' || message?.role === 'toolResult') break;
+    if (message?.role === 'user') texts.unshift(userText(message));
+  }
+  return texts;
+}
+
 /**
  * ACP prompt 只含本轮用户文字和图片。pi 的 system、历史、注入消息一律不读进输出。
  */
