@@ -74,8 +74,10 @@ export interface Preset {
   refusalRetry?: boolean;
   /** 推脱补发正文 */
   refusalRetryPromptId?: string;
-  /** 叠加的插件预设（plugin:<插件 id>:<预设 id>）：再加载其提示词、skill 与覆盖项 */
+  /** 叠加的插件预设（兼容旧单值；新数据看 pluginPresetIds） */
   pluginPresetId?: string;
+  /** 叠加的插件预设列表（plugin:<插件 id>:<预设 id>，有序）：再加载它们的提示词、skill 与覆盖项 */
+  pluginPresetIds?: string[];
 }
 
 export const DEFAULT_PRESET_ID = 'default';

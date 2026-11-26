@@ -186,6 +186,7 @@ const PRESET_KEYS = [
   'refusalRetry',
   'refusalRetryPromptId',
   'pluginPresetId',
+  'pluginPresetIds',
 ];
 const AGENT_TYPE_KEYS = [
   'id',
@@ -665,6 +666,14 @@ function validatePreset(raw: unknown): RecordValue {
     !isPluginPresetId(stringField(entry, 'pluginPresetId', 'preset'))
   ) {
     throw new Error('Invalid preset pluginPresetId');
+  }
+  if (entry.pluginPresetIds !== undefined) {
+    if (!Array.isArray(entry.pluginPresetIds)) throw new Error('Invalid preset pluginPresetIds');
+    for (const id of entry.pluginPresetIds) {
+      if (typeof id !== 'string' || !isPluginPresetId(id)) {
+        throw new Error('Invalid preset pluginPresetIds');
+      }
+    }
   }
   if (entry.refusalRetry !== undefined && typeof entry.refusalRetry !== 'boolean') {
     throw new Error('Invalid preset refusalRetry');

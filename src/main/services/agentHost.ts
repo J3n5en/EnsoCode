@@ -1699,12 +1699,25 @@ export function spawnSession(
   /** 只有秘书会话按勾选圈定插件；undefined 表示普通会话照旧拿全部已启用插件 */
   const secretaryPluginIds = secretary ? (secretary.pluginIds ?? []) : undefined;
   const overlay = bot || secretary ? undefined : presetOverlay(request.presetId, resolvePreset);
-  const overlayResult = extensionPlugins?.presetForSpawn(overlay?.pluginPresetId);
-  if (overlayResult && !overlayResult.ok && overlay?.required) {
-    return { ok: false, error: overlayResult.error };
+  const overlayIds = overlay?.pluginPresetIds ?? [];
+  const overlayResults = overlayIds.map((id) => extensionPlugins?.presetForSpawn(id));
+  const overlayFailed = overlayResults.find((result): result is { ok: false; error: string } =>
+    Boolean(result && !result.ok)
+  );
+  if (overlay?.required && (overlayFailed || overlayResults.some((result) => !result))) {
+    return {
+      ok: false,
+      error: overlayFailed?.error ?? '插件预设不可用，请重新选择或恢复默认。',
+    };
   }
   // 自建预设叠加的插件预设失效（插件停用/卸载）时退回只用自建预设
-  const pluginPreset = overlayResult?.ok ? overlayResult : undefined;
+  const pluginKits = overlayResults.flatMap((result) => (result?.ok ? [result] : []));
+  const mergedPluginKit = pluginKits.length > 0 ? mergePluginPresetKits(pluginKits) : undefined;
+  const pluginInstruction = pluginKits.length > 0 ? mergePluginInstructions(pluginKits) : undefined;
+  const pluginPreset =
+    mergedPluginKit || pluginInstruction
+      ? { ...mergedPluginKit, ...(pluginInstruction ? { instruction: pluginInstruction } : {}) }
+      : undefined;
   const preset: Preset | undefined = secretary
     ? { id: 'secretary', name: 'secretary', skillIds: [], mcpServerIds: [] }
     : bot
@@ -1729,21 +1742,29 @@ export function spawnSession(
         );
   const state = readSettingsState();
   // Enso 插件：顺序在预设之后；Bot 会话不合并
-  const activePluginPreset = pluginPreset ? overlay?.pluginPresetId : undefined;
+  const activePluginPresets = pluginPreset ? overlayIds : [];
+  // 无插件预设也要按 undefined 调一次：秘书按勾选 id 圈定 / 普通会话拿不受预设圈定的部分
+  const pluginPresetScopes = activePluginPresets.length > 0 ? activePluginPresets : [undefined];
   const skillPaths = [
     ...enabledSkillPaths(preset),
-    ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
+    ...dedupePaths(
+      pluginPresetScopes.flatMap(
+        (id) => extensionPlugins?.skillPathsForSpawn(id, secretaryPluginIds) ?? []
+      )
+    ),
     ...secretarySkillPaths(secretary),
   ];
   // 秘书不挂插件的 MCP 与 workflow：插件进程与凭据不该为它拉起，workflow 也不在它的能力里
   const workflowPresetFiles = secretary
     ? []
-    : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
+    : dedupePaths(
+        pluginPresetScopes.flatMap((id) => extensionPlugins?.workflowPathsForSpawn(id) ?? [])
+      );
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of secretary
     ? []
-    : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])) {
+    : pluginPresetScopes.flatMap((id) => extensionPlugins?.mcpServersForSpawn(id) ?? [])) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
   }
@@ -1759,7 +1780,13 @@ export function spawnSession(
           authenticatedAccountKeys,
           subagentModels.length > 0,
           // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
-          bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
+          bot
+            ? []
+            : mergePluginAgentTypes(
+                pluginPresetScopes.map(
+                  (id) => extensionPlugins?.agentTypesForSpawn({ activePresetId: id }) ?? []
+                )
+              )
         );
   // 当前平台不能操作桌面时禁用 computer，避免模型反复调用必失败的工具
   const extraDisabledTools = [
@@ -1801,7 +1828,7 @@ export function spawnSession(
     thinkingLevel: request.thinkingLevel,
     approvalMode: request.approvalMode,
     disabledTools,
-    preset: pluginPreset ? readPluginPresetOverrides(pluginPreset) : undefined,
+    preset: mergePluginPresetOverrides(pluginKits.map((kit) => readPluginPresetOverrides(kit))),
     resolveModel: (model) => {
       const next = resolveModelSelection(
         model.providerId,
@@ -1942,17 +1969,19 @@ export function pluginSkillPathsForMenu(
     } | null;
   }
 ): string[] {
-  const active = activePluginPresetForMenu(presetId, deps.resolve, deps.extension);
-  return deps.extension?.skillPathsForSpawn(active) ?? [];
+  const active = activePluginPresetsForMenu(presetId, deps.resolve, deps.extension);
+  if (!deps.extension) return [];
+  if (active.length === 0) return deps.extension.skillPathsForSpawn(undefined);
+  return [...new Set(active.flatMap((id) => deps.extension!.skillPathsForSpawn(id)))];
 }
 
-function activePluginPresetForMenu(
+function activePluginPresetsForMenu(
   presetId: string | undefined,
   resolve: (id?: string) => Preset | undefined,
   extension: { presetForSpawn(id?: string): { ok: boolean } | undefined } | null
-): string | undefined {
-  const { pluginPresetId } = presetOverlay(presetId, resolve);
-  return extension?.presetForSpawn(pluginPresetId)?.ok ? pluginPresetId : undefined;
+): string[] {
+  const { pluginPresetIds } = presetOverlay(presetId, resolve);
+  return (pluginPresetIds ?? []).filter((id) => extension?.presetForSpawn(id)?.ok);
 }
 
 export function menuPluginSkillPaths(presetId: string | undefined): string[] {
@@ -1965,9 +1994,9 @@ export function menuPluginSkillPaths(presetId: string | undefined): string[] {
 /** 侧栏列 workflow 预设时的插件文件，与 spawn 同口径按生效的插件预设圈定 */
 export function menuPluginWorkflowPaths(presetId: string | undefined): string[] {
   const extension = getExtensionPlugins();
-  return extension.workflowPathsForSpawn(
-    activePluginPresetForMenu(presetId, resolvePreset, extension)
-  );
+  const active = activePluginPresetsForMenu(presetId, resolvePreset, extension);
+  if (active.length === 0) return extension.workflowPathsForSpawn(undefined);
+  return [...new Set(active.flatMap((id) => extension.workflowPathsForSpawn(id)))];
 }
 
 interface PresetPromptKit {
@@ -1993,6 +2022,84 @@ export function mergePresetPromptKit(
     ...pick('systemPromptBoost'),
     ...pick('refusalRetryPrompt'),
   };
+}
+
+/** 多个插件预设的指令按勾选顺序拼接成一份；都没有则 undefined（沿用全局指令） */
+function mergePluginInstructions(
+  kits: readonly { instruction?: { path: string; content: string } }[]
+): { path: string; content: string } | undefined {
+  const present = kits.flatMap((kit) => (kit.instruction ? [kit.instruction] : []));
+  if (present.length === 0) return undefined;
+  if (present.length === 1) return present[0];
+  return {
+    path: present.map((item) => item.path).join(' + '),
+    content: present.map((item) => item.content).join('\n\n'),
+  };
+}
+
+/** 路径并集去重，保持先出现顺序 */
+function dedupePaths(paths: readonly string[]): string[] {
+  return [...new Set(paths)];
+}
+
+/** 多个插件预设的子代理类型并集：同名（trim + 小写）后者覆盖前者，与勾选顺序一致 */
+function mergePluginAgentTypes(
+  groups: readonly (readonly NativePluginAgentDef[])[]
+): NativePluginAgentDef[] {
+  const ordered: NativePluginAgentDef[] = [];
+  const indexByName = new Map<string, number>();
+  for (const def of groups.flat()) {
+    const key = def.name.trim().toLowerCase();
+    const existing = indexByName.get(key);
+    if (existing === undefined) {
+      indexByName.set(key, ordered.length);
+      ordered.push(def);
+    } else {
+      ordered[existing] = def;
+    }
+  }
+  return ordered;
+}
+
+/** 多个插件预设的提示词合并：尾段按勾选顺序全部拼接；角色/加强/推脱补发后者覆盖前者 */
+export function mergePluginPresetKits(
+  kits: readonly Omit<PresetPromptKit, never>[]
+): PresetPromptKit {
+  const merged: PresetPromptKit = {};
+  const tails: string[] = [];
+  for (const kit of kits) {
+    if (kit.systemPrompt) merged.systemPrompt = kit.systemPrompt;
+    if (kit.systemPromptAppend) tails.push(kit.systemPromptAppend);
+    if (kit.systemPromptBoost) merged.systemPromptBoost = kit.systemPromptBoost;
+    if (kit.refusalRetryPrompt) merged.refusalRetryPrompt = kit.refusalRetryPrompt;
+  }
+  if (tails.length > 0) merged.systemPromptAppend = tails.join('\n\n');
+  return merged;
+}
+
+/** 多个插件预设的单值覆盖合并：模型/思考档后者覆盖前者，审批取最严，禁用工具并集 */
+export function mergePluginPresetOverrides(
+  list: readonly (PluginPresetSpawnOverrides | undefined)[]
+): PluginPresetSpawnOverrides | undefined {
+  let merged: PluginPresetSpawnOverrides | undefined;
+  for (const item of list) {
+    if (!item) continue;
+    const disabledTools = [
+      ...new Set([...(merged?.disabledTools ?? []), ...(item.disabledTools ?? [])]),
+    ];
+    const approvalMode = stricterPresetApproval(merged?.approvalMode, item.approvalMode);
+    merged = {
+      ...(item.model ? { model: item.model } : merged?.model ? { model: merged.model } : {}),
+      ...(item.thinkingLevel
+        ? { thinkingLevel: item.thinkingLevel }
+        : merged?.thinkingLevel
+          ? { thinkingLevel: merged.thinkingLevel }
+          : {}),
+      ...(approvalMode ? { approvalMode } : {}),
+      ...(disabledTools.length > 0 ? { disabledTools } : {}),
+    };
+  }
+  return merged;
 }
 
 export function applyPluginPresetOverrides<T>(input: {
@@ -2042,6 +2149,16 @@ function stricterApprovalMode(
   if (!preset) return current;
   if (!current) return preset;
   return APPROVAL_RANK[preset] > APPROVAL_RANK[current] ? preset : current;
+}
+
+/** 两个插件预设级审批（只可能是 supervised/auto-edits）取更严 */
+function stricterPresetApproval(
+  current: Extract<ApprovalMode, 'supervised' | 'auto-edits'> | undefined,
+  next: Extract<ApprovalMode, 'supervised' | 'auto-edits'> | undefined
+): Extract<ApprovalMode, 'supervised' | 'auto-edits'> | undefined {
+  if (!next) return current;
+  if (!current) return next;
+  return APPROVAL_RANK[next] > APPROVAL_RANK[current] ? next : current;
 }
 
 function readPluginPresetOverrides(preset: object): PluginPresetSpawnOverrides | undefined {

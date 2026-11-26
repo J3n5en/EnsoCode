@@ -1,3 +1,4 @@
+import { presetOverlayIds } from '@shared/extensionPlugins/preset';
 import type { PresetImportDraft } from '@shared/presetImport';
 import type { InstructionEntry, Preset } from '@shared/types';
 import { ChevronDown, Eye, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -16,18 +17,10 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useScrollChain } from '@/hooks/useScrollChain';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { Z_INDEX } from '@/lib/z-index';
 import { type PluginPresetOption, useEnabledPluginPresets } from '@/plugins/usePluginPresets';
 import { useSettingsStore } from '@/stores/settings';
 import { SettingsButton, SettingsPage, SettingsSection } from './kit';
@@ -152,14 +145,14 @@ export function PresetsSettings() {
               <div className="min-w-0 flex-1">
                 <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
                   <span className="max-w-full truncate">{preset.name}</span>
-                  {preset.pluginPresetId && (
-                    <Badge variant="outline">
+                  {presetOverlayIds(preset ?? undefined).map((overlayId) => (
+                    <Badge key={overlayId} variant="outline">
                       {`+ ${
-                        pluginPresets.find((item) => item.id === preset.pluginPresetId)?.name ??
+                        pluginPresets.find((item) => item.id === overlayId)?.name ??
                         t('Unavailable plugin preset')
                       }`}
                     </Badge>
-                  )}
+                  ))}
                   {preset.systemPromptId && <Badge variant="outline">{t('Custom role')}</Badge>}
                   {preset.systemPromptTailId && <Badge variant="outline">{t('Tail')}</Badge>}
                   {preset.boostPromptId && <Badge variant="outline">{t('Boost')}</Badge>}
@@ -255,8 +248,8 @@ export function PresetEditDialog({
   const [instructionId, setInstructionId] = React.useState<string | undefined>(
     preset?.instructionId
   );
-  const [pluginPresetId, setPluginPresetId] = React.useState<string | undefined>(
-    preset?.pluginPresetId
+  const [pluginPresetIds, setPluginPresetIds] = React.useState<string[]>(() =>
+    presetOverlayIds(preset ?? undefined)
   );
   const [customPrompt, setCustomPrompt] = React.useState(
     Boolean(preset?.systemPromptId) || Boolean(draft?.role)
@@ -284,7 +277,7 @@ export function PresetEditDialog({
   const promptsFailed = prompts.some((item) => item.error);
   // 折叠后仍要能看出里面配了什么；有读取错误则强制展开，否则保存按钮变灰却找不到原因。
   const advancedSummary = [
-    pluginPresetId && t('Overlay plugin preset'),
+    pluginPresetIds.length > 0 && t('Overlay plugin preset'),
     customPrompt && t('Custom role'),
     customTail && t('Tail'),
     customBoost && t('Boost'),
@@ -359,7 +352,8 @@ export function PresetEditDialog({
         boostPromptId,
         refusalRetry: refusalRetry || undefined,
         refusalRetryPromptId,
-        pluginPresetId,
+        pluginPresetIds: pluginPresetIds.length > 0 ? pluginPresetIds : undefined,
+        pluginPresetId: pluginPresetIds[0],
       };
       if (preset) updatePreset(preset.id, payload);
       else addPreset(payload);
@@ -489,9 +483,9 @@ export function PresetEditDialog({
             <CollapsibleContent>
               <div className="space-y-4 py-3">
                 <PluginPresetOverlayField
-                  value={pluginPresetId}
+                  value={pluginPresetIds}
                   disabled={saving}
-                  onChange={setPluginPresetId}
+                  onChange={setPluginPresetIds}
                 />
                 <Field className="w-full">
                   <FieldLabel>{t('Role description')}</FieldLabel>
@@ -591,51 +585,68 @@ export function PresetEditDialog({
   );
 }
 
-const NO_PLUGIN_PRESET = 'none';
-
-/** 自建预设叠加一个插件预设：本预设的 skill/MCP/指令照旧，再加载插件预设的提示词、skill 与覆盖项 */
+/** 自建预设叠加多个插件预设：复选框列表，勾选顺序即叠加顺序 */
 function PluginPresetOverlayField({
   value,
   disabled,
   onChange,
 }: {
-  value: string | undefined;
+  value: string[];
   disabled: boolean;
-  onChange: (id: string | undefined) => void;
+  onChange: (ids: string[]) => void;
 }) {
   const { t } = useI18n();
   const pluginPresets: PluginPresetOption[] = useEnabledPluginPresets();
-  if (pluginPresets.length === 0 && !value) return null;
-  const items: Record<string, string> = {
-    [NO_PLUGIN_PRESET]: t('No overlay'),
-    ...Object.fromEntries(pluginPresets.map((item) => [item.id, item.name])),
+  const knownIds = new Set(pluginPresets.map((item) => item.id));
+  const missing = value.filter((id) => !knownIds.has(id));
+  if (pluginPresets.length === 0 && missing.length === 0) return null;
+  const toggle = (id: string) => {
+    if (value.includes(id)) onChange(value.filter((item) => item !== id));
+    else onChange([...value, id]);
   };
-  if (value && !items[value]) items[value] = t('Unavailable plugin preset');
+  const describe = (item: PluginPresetOption) =>
+    t('{{skills}} skills · {{mcp}} MCP · {{instruction}} instruction', {
+      skills: item.skills,
+      mcp: item.mcpServers,
+      instruction: item.instruction ? 1 : 0,
+    });
   return (
     <Field className="w-full">
       <FieldLabel>{t('Overlay plugin preset')}</FieldLabel>
-      <Select
-        items={items}
-        value={value ?? NO_PLUGIN_PRESET}
-        disabled={disabled}
-        onValueChange={(next) =>
-          onChange(typeof next === 'string' && next !== NO_PLUGIN_PRESET ? next : undefined)
-        }
-      >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-          {Object.entries(items).map(([id, label]) => (
-            <SelectItem key={id} value={id}>
-              {label}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
+      <div className="max-h-40 overflow-y-auto p-1.5">
+        {pluginPresets.map((item) => (
+          <label
+            key={item.id}
+            className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted"
+          >
+            <Checkbox
+              checked={value.includes(item.id)}
+              disabled={disabled}
+              onCheckedChange={() => toggle(item.id)}
+            />
+            <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
+            <Badge variant="secondary" className="shrink-0 text-[11px]">
+              {item.pluginName}
+            </Badge>
+            <span className="shrink-0 text-[11px] text-muted-foreground">{describe(item)}</span>
+          </label>
+        ))}
+        {missing.map((id) => (
+          <label
+            key={id}
+            className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted"
+          >
+            <Checkbox checked disabled={disabled} onCheckedChange={() => toggle(id)} />
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {t('Unavailable plugin preset')}
+            </span>
+            <span className="shrink-0 truncate text-[11px] text-muted-foreground">{id}</span>
+          </label>
+        ))}
+      </div>
       <p className="text-xs text-muted-foreground">
         {t(
-          "Also loads the plugin preset's prompts, skills and overrides. Tails are joined (this preset first); the plugin's role, boost and refusal retry win. Ignored while the plugin is disabled."
+          "Also loads the plugin presets' prompts, skills and overrides. Checked order decides: tails and instructions join in order (this preset first); role, boost, refusal retry and model use the last checked that has one; approval takes the strictest. Ignored while the plugin is disabled."
         )}
       </p>
     </Field>

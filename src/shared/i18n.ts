@@ -2750,6 +2750,8 @@ export const zhTranslations: Record<string, string> = {
   'Unavailable plugin preset': '插件预设不可用',
   "Also loads the plugin preset's prompts, skills and overrides. Tails are joined (this preset first); the plugin's role, boost and refusal retry win. Ignored while the plugin is disabled.":
     '额外加载插件预设的提示词、skill 和覆盖项。两边的尾段依次拼接（本预设在前），角色、加强段和推脱补发以插件为准。插件停用时忽略。',
+  "Also loads the plugin presets' prompts, skills and overrides. Checked order decides: tails and instructions join in order (this preset first); role, boost, refusal retry and model use the last checked that has one; approval takes the strictest. Ignored while the plugin is disabled.":
+    '额外加载所勾选插件预设的提示词、skill 和覆盖项。按勾选顺序叠加：尾段与指令依次拼接（本预设在前）；角色、加强段、推脱补发和模型以最后一个声明了的插件为准；审批取最严。插件停用时忽略。',
   Default: '默认',
   None: '不注入',
   'Injection bundles of skills, MCP servers and instruction files, chosen per conversation':

@@ -102,8 +102,9 @@ export function ChatView() {
     (state) => state.conversations[chrome?.parentId ?? '']?.coworkerIds
   );
   const pluginPresetId =
-    presetOverlay(chrome?.presetId, (id) => presets.find((preset) => preset.id === id))
-      .pluginPresetId ?? null;
+    presetOverlay(chrome?.presetId, (id) =>
+      presets.find((preset) => preset.id === id)
+    ).pluginPresetIds?.at(-1) ?? null;
   const memberName = useMemberName(chrome?.displayedParentId ? chrome.agentType : undefined);
   const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
   const enabledProviders = useUsableProviders();
