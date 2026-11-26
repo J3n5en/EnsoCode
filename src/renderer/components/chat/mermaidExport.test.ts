@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   exportMermaidPng,
+  exportMermaidSvg,
   MAX_CANVAS_SIDE,
   mermaidExportFileName,
   normalizeSvgMarkup,
@@ -144,5 +145,68 @@ describe('exportMermaidPng', () => {
       download: vi.fn(),
     });
     expect(result).toEqual({ kind: 'failed' });
+  });
+});
+
+describe('exportMermaidSvg', () => {
+  const live = `<svg ${SVG_NS} viewBox="0 0 100 50"><foreignObject>live</foreignObject></svg>`;
+  const clean = `<svg ${SVG_NS} viewBox="0 0 100 50"><text>rerendered</text></svg>`;
+
+  it('重渲染产物无 foreignObject 时下载重渲染内容', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => live,
+      rerender: async () => clean,
+      download,
+    });
+    expect(result).toEqual({ kind: 'svg', source: 'rerender' });
+    expect(download).toHaveBeenCalledOnce();
+    const [blob, name] = download.mock.calls[0];
+    expect(name).toMatch(/\.svg$/);
+    const text = await (blob as Blob).text();
+    expect(text).toContain('<text>rerendered</text>');
+    expect(text).not.toMatch(/<foreignObject\b/i);
+  });
+
+  it('重渲染产物含 foreignObject 时下载 live 内容', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => live,
+      rerender: async () =>
+        `<svg ${SVG_NS} viewBox="0 0 10 10"><foreignObject>bad</foreignObject></svg>`,
+      download,
+    });
+    expect(result).toEqual({ kind: 'svg', source: 'live' });
+    const text = await (download.mock.calls[0][0] as Blob).text();
+    expect(text).toContain('<foreignObject>live</foreignObject>');
+    expect(text).not.toContain('bad');
+  });
+
+  it('重渲染抛错时回退 live', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => live,
+      rerender: async () => {
+        throw new Error('render failed');
+      },
+      download,
+    });
+    expect(result).toEqual({ kind: 'svg', source: 'live' });
+    expect(await (download.mock.calls[0][0] as Blob).text()).toContain(
+      '<foreignObject>live</foreignObject>'
+    );
+  });
+
+  it('重渲染抛错且 live 为空时返回 failed 且不下载', async () => {
+    const download = vi.fn();
+    const result = await exportMermaidSvg({
+      currentSvg: () => null,
+      rerender: async () => {
+        throw new Error('render failed');
+      },
+      download,
+    });
+    expect(result).toEqual({ kind: 'failed' });
+    expect(download).not.toHaveBeenCalled();
   });
 });

@@ -136,6 +136,8 @@ export type PngExportResult =
   | { kind: 'svg'; reason: 'rerender-failed' | 'too-large' | 'draw-failed' }
   | { kind: 'failed' };
 
+export type SvgExportResult = { kind: 'svg'; source: 'rerender' | 'live' } | { kind: 'failed' };
+
 export interface PngExportDeps {
   /** 当前预览中的 SVG（已序列化） */
   currentSvg: () => string | null;
@@ -177,5 +179,42 @@ export async function exportMermaidPng(deps: PngExportDeps): Promise<PngExportRe
     return { kind: 'png' };
   } catch {
     return fallback('draw-failed');
+  }
+}
+
+export interface SvgExportDeps {
+  /** 以 htmlLabels:false 重新渲染，避免 foreignObject */
+  rerender: () => Promise<string>;
+  /** 当前预览中的 SVG（已序列化）；重渲染失败或仍含 foreignObject 时使用 */
+  currentSvg: () => string | null;
+  download: (data: Blob | string, fileName: string) => void;
+}
+
+/** 优先导出无 foreignObject 的重渲染；失败则回退当前预览，绝不抛出 */
+export async function exportMermaidSvg(deps: SvgExportDeps): Promise<SvgExportResult> {
+  const live = (): SvgExportResult => {
+    try {
+      const svg = deps.currentSvg();
+      if (!svg) return { kind: 'failed' };
+      deps.download(svgBlob(svg), mermaidExportFileName('svg'));
+      return { kind: 'svg', source: 'live' };
+    } catch {
+      return { kind: 'failed' };
+    }
+  };
+
+  let markup: string;
+  try {
+    markup = await deps.rerender();
+  } catch {
+    return live();
+  }
+  if (/<foreignObject\b/i.test(markup)) return live();
+
+  try {
+    deps.download(svgBlob(markup), mermaidExportFileName('svg'));
+    return { kind: 'svg', source: 'rerender' };
+  } catch {
+    return live();
   }
 }

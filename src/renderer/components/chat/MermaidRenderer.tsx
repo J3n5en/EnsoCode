@@ -9,10 +9,9 @@ import { Z_INDEX } from '@/lib/z-index';
 import {
   downloadFile,
   exportMermaidPng,
-  mermaidExportFileName,
+  exportMermaidSvg,
   rasterizeSvg,
   serializeSvgElement,
-  svgBlob,
   svgMarkupToXml,
 } from './mermaidExport';
 import {
@@ -221,15 +220,20 @@ export function MermaidRenderer({
     if (!hasDraggedRef.current) handleExitFullscreen();
   }, [handleExitFullscreen]);
 
-  const handleExportSvg = useCallback(() => {
-    try {
-      const svgEl = containerRef.current?.querySelector('svg');
-      if (!svgEl) throw new Error('No svg');
-      downloadFile(svgBlob(serializeSvgElement(svgEl)), mermaidExportFileName('svg'));
-    } catch {
+  const handleExportSvg = useCallback(async () => {
+    const result = await exportMermaidSvg({
+      currentSvg: () => {
+        const svgEl = containerRef.current?.querySelector('svg');
+        return svgEl ? serializeSvgElement(svgEl) : null;
+      },
+      rerender: async () =>
+        svgMarkupToXml(await renderMermaidSvg(code, mermaidTheme, { htmlLabels: false })),
+      download: downloadFile,
+    });
+    if (result.kind === 'failed') {
       addToast({ type: 'error', title: t('Export failed') });
     }
-  }, [t]);
+  }, [code, mermaidTheme, t]);
 
   const handleExportPng = useCallback(async () => {
     const result = await exportMermaidPng({
