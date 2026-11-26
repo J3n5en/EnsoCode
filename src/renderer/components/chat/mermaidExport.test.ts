@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import {
+  absolutizeEmTextPositions,
   exportMermaidPng,
   exportMermaidSvg,
   inlinePresentationAttrs,
   MAX_CANVAS_SIDE,
+  materializeMarkers,
   mermaidExportFileName,
   normalizeSvgMarkup,
   pngExportScale,
@@ -311,5 +313,61 @@ describe('resolveContextPaints', () => {
     expect(svg.querySelector('#b')?.getAttribute('marker-end')).toBe('url(#arrow-1)');
     expect(svg.querySelector('#arrow-1 path')?.getAttribute('fill')).toBe('rgb(0, 0, 255)');
     expect(new XMLSerializer().serializeToString(svg)).not.toContain('context-stroke');
+  });
+});
+
+describe('absolutizeEmTextPositions', () => {
+  it('把 tspan 的 em y/dy 折成绝对 px，并写回父 text', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><g transform="translate(390,8)"><text y="-10.1" font-size="16"><tspan x="0" y="-0.1em" dy="1.1em">订单仓</tspan></text></g></svg>`
+    );
+    absolutizeEmTextPositions(svg);
+    const text = svg.querySelector('text');
+    const tspan = svg.querySelector('tspan');
+    expect(text?.getAttribute('y')).toBe('16');
+    expect(tspan?.getAttribute('x')).toBe('0');
+    expect(tspan?.getAttribute('y')).toBe('16');
+    expect(tspan?.hasAttribute('dy')).toBe(false);
+    const once = new XMLSerializer().serializeToString(svg);
+    absolutizeEmTextPositions(svg);
+    expect(new XMLSerializer().serializeToString(svg)).toBe(once);
+  });
+
+  it('没有 em、也没有 dy 的 px 坐标保持原样', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><text y="12" font-size="16"><tspan x="4" y="12">Hi</tspan></text></svg>`
+    );
+    const before = new XMLSerializer().serializeToString(svg);
+    absolutizeEmTextPositions(svg);
+    expect(new XMLSerializer().serializeToString(svg)).toBe(before);
+    expect(svg.querySelector('text')?.getAttribute('y')).toBe('12');
+    expect(svg.querySelector('tspan')?.getAttribute('y')).toBe('12');
+    expect(svg.querySelector('tspan')?.hasAttribute('dy')).toBe(false);
+  });
+});
+
+describe('materializeMarkers', () => {
+  it('按端点方向把 marker 烘焙成填充三角，并去掉 marker-end', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs><path id="edge" d="M0 0 L100 0" marker-end="url(#arrow)" stroke="rgb(51, 51, 51)"/></svg>`
+    );
+    materializeMarkers(svg, () => ({ x: 100, y: 0, dx: 1, dy: 0 }));
+    const edge = svg.querySelector('#edge');
+    expect(edge?.hasAttribute('marker-end')).toBe(false);
+    const arrows = [...svg.querySelectorAll('path')].filter(
+      (el) => el.id !== 'edge' && !el.closest('marker')
+    );
+    expect(arrows).toHaveLength(1);
+    expect(arrows[0].getAttribute('fill')).toBe('rgb(51, 51, 51)');
+    expect(arrows[0].getAttribute('d')).toBe('M 96 -4 L 104 0 L 96 4 z');
+  });
+
+  it('实体化后序列化结果不再包含 marker-end', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs><path id="edge" d="M0 0 L40 0" marker-end="url(&quot;#arrow&quot;)" stroke="#333"/></svg>`
+    );
+    materializeMarkers(svg, () => ({ x: 40, y: 0, dx: 1, dy: 0 }));
+    expect(svg.querySelector('#edge')?.hasAttribute('marker-end')).toBe(false);
+    expect(new XMLSerializer().serializeToString(svg)).not.toContain('marker-end=');
   });
 });

@@ -7,10 +7,12 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import {
+  absolutizeEmTextPositions,
   downloadFile,
   exportMermaidPng,
   exportMermaidSvg,
   inlinePresentationAttrs,
+  materializeMarkers,
   PRESENTATION_PROPS,
   rasterizeSvg,
   removeSvgStyleElements,
@@ -66,11 +68,37 @@ function readComputedPresentation(el: Element): Record<string, string> {
   return out;
 }
 
+function readMarkerPlacement(el: Element, which: 'start' | 'end') {
+  const geom = el as SVGGeometryElement;
+  if (typeof geom.getTotalLength !== 'function' || typeof geom.getPointAtLength !== 'function')
+    return null;
+  let len = 0;
+  try {
+    len = geom.getTotalLength();
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(len) || len <= 0) return null;
+  const eps = Math.min(1, len);
+  const tipAt = which === 'end' ? len : 0;
+  const sideAt = which === 'end' ? Math.max(0, len - eps) : Math.min(len, eps);
+  const tip = geom.getPointAtLength(tipAt);
+  const side = geom.getPointAtLength(sideAt);
+  const dx = which === 'end' ? tip.x - side.x : side.x - tip.x;
+  const dy = which === 'end' ? tip.y - side.y : side.y - tip.y;
+  const mag = Math.hypot(dx, dy);
+  if (!Number.isFinite(tip.x) || !Number.isFinite(tip.y)) return null;
+  if (mag < 1e-6) return { x: tip.x, y: tip.y, dx: 1, dy: 0 };
+  return { x: tip.x, y: tip.y, dx: dx / mag, dy: dy / mag };
+}
+
 /** 离屏 SVG 挂进文档后才能算出 <style> 里的颜色；算完再摘掉样式表，文件才能脱离浏览器 */
 function inlineOffscreenSvg(svg: Element): void {
   svg.getBoundingClientRect();
   inlinePresentationAttrs(svg, readComputedPresentation);
   resolveContextPaints(svg, readComputedPresentation);
+  absolutizeEmTextPositions(svg);
+  materializeMarkers(svg, readMarkerPlacement);
   removeSvgStyleElements(svg);
 }
 
