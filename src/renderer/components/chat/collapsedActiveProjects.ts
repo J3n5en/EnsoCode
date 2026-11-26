@@ -138,8 +138,9 @@ export function collapsedActiveProjects(
 }
 
 /**
- * 折叠 rail 浮层的行数据：该项目**活跃中**的未归档会话（含 coworker 子会话，后者有 parentId），
- * 最近活跃在前；已删除/不存在的 parent 不挡行——打开逻辑自己会回退直接选会话。
+ * 折叠 rail 浮层的行数据：该项目**活跃中**的未归档**根**会话（不含 coworker / 子代理子会话），
+ * 最近活跃在前。子代理会话是内部实现细节，用户应从父会话的子代理面板进入，
+ * 不该在 rail 浮层里直接选；角标也只用这份列表的长度，口径一致。
  *
  * 「活跃中」与侧栏 Active 分组同口径：running / waiting / unread / 未读失败 / 续跑 goal /
  * 排队 / 等提醒，以及 activeRetention 窗口内有过消息或续期的会话。已 idle 且超窗的会话不进列表,
@@ -158,7 +159,10 @@ export function collapsedProjectSessions(
   const cutoff = retention && retention.ms > 0 ? retention.now - retention.ms : undefined;
   return Object.entries(conversations)
     .flatMap(([id, conversation]) =>
-      conversation && conversation.projectId === projectId && conversation.archived !== true
+      conversation &&
+      conversation.projectId === projectId &&
+      conversation.archived !== true &&
+      !conversation.parentId
         ? [[id, conversation] as const]
         : []
     )
@@ -202,6 +206,23 @@ export function collapsedProjectSessions(
     })
     .map(({ conversation: _conversation, ...row }) => row)
     .sort((left, right) => right.activity - left.activity);
+}
+
+/**
+ * rail 项目头像点击的轮询索引：state 按 projectId 记着上次打开到第几个，
+ * 每次点击前进一格，越过末尾回到 0。count 为 0 时返回 -1 且不写状态。
+ * 列表长度变化时索引对 count 取模自然收敛，不需要额外的失效逻辑。
+ */
+export function nextRoundRobinIndex(
+  state: Map<string, number>,
+  projectId: string,
+  count: number
+): number {
+  if (count <= 0) return -1;
+  const previous = state.get(projectId);
+  const next = previous === undefined ? 0 : (previous + 1) % count;
+  state.set(projectId, next);
+  return next;
 }
 
 /** 与全局搜索 openHit 相同：子会话先选父，再选 tab。 */

@@ -86,6 +86,7 @@ import {
   type CollapsedProjectSession,
   collapsedActiveProjects,
   collapsedProjectSessions,
+  nextRoundRobinIndex,
   openCollapsedActiveProject,
 } from '@/components/chat/collapsedActiveProjects';
 import { insertComposerMention } from '@/components/chat/composerMentionBridge';
@@ -327,16 +328,9 @@ export function Sidebar({
     [selectConversationInStore]
   );
   const selectTab = useSessionsStore((state) => state.selectTab);
-  const openCollapsedProject = useCallback(
-    (entry: CollapsedActiveProject) => {
-      openCollapsedActiveProject(entry, {
-        conversations,
-        selectConversation,
-        selectTab,
-      });
-    },
-    [conversations, selectConversation, selectTab]
-  );
+  // rail 头像点击的轮询游标：内存态即可，刷新/重启后重新从最新一条开始，无需持久化。
+  // 键是 projectId；值是上次打开的行在 collapsedProjectSessions 排序后的下标。
+  const roundRobinCursorRef = useRef(new Map<string, number>());
   const openCollapsedSession = useCallback(
     (session: CollapsedProjectSession) => {
       openCollapsedActiveProject(
@@ -873,6 +867,37 @@ export function Sidebar({
     }
     return map;
   })();
+  // rail 头像点击 = 轮询打开该项目活跃会话列表的下一条（顺序与 popover 同源），
+  // 无需 hover 即可在项目内快速切换；列表为空时退回 entry 指向的会话。
+  // activeRetention 每次渲染都是新对象，useCallback 没有收益；直接普通函数
+  const openCollapsedProject = (entry: CollapsedActiveProject) => {
+    const sessions = collapsedProjectSessions(entry.projectId, conversations, {
+      pendingReminderIds,
+      activeRetention,
+    });
+    const index = nextRoundRobinIndex(
+      roundRobinCursorRef.current,
+      entry.projectId,
+      sessions.length
+    );
+    const target = index >= 0 ? sessions[index] : undefined;
+    if (target) {
+      openCollapsedActiveProject(
+        {
+          projectId: entry.projectId,
+          conversationId: target.conversationId,
+          title: target.title,
+        },
+        { conversations, selectConversation, selectTab }
+      );
+      return;
+    }
+    openCollapsedActiveProject(entry, {
+      conversations,
+      selectConversation,
+      selectTab,
+    });
+  };
   const activeHoverTitle = (id: string) => {
     const projectName = hoverProjectName(projects, conversations[id].projectId);
     const remaining = activeRetentionRemainingMs(
