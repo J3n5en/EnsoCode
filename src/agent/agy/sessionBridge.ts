@@ -12,7 +12,7 @@ import type { ApprovalGate } from '../approval';
 import { type HostMcpResult, type HostMcpTool, issueHostMcp } from './hostMcp';
 import { closeAgySession } from './registry';
 import { openBoundAgySession } from './runtimeHost';
-import type { AgyHostMcp, AgyTurnResult } from './session';
+import type { AgyHostMcp, AgySession, AgyTurnResult } from './session';
 import { readAgySessionId, writeAgySessionId } from './sessionStore';
 
 type SessionEvent = { type: string; [key: string]: unknown };
@@ -57,18 +57,16 @@ export function attachAgyBridgeToSession(
     resumable?: boolean;
   }
 ): AgySessionBridge {
-  const listeners = new Set<SessionListener>();
-  const origSubscribe = session.subscribe.bind(session);
-  const origPrompt = session.prompt.bind(session);
-  const origSteer = session.steer.bind(session);
-  const origDispose = session.dispose.bind(session);
   const tools = new Map<string, Card>();
   const storeFile = `${options.sessionDir}/agy-sessions.json`;
   const resumable = options.resumable !== false;
   let turn: AgyTurnHooks | undefined;
+  /** 最近一次打开的 agy 会话：插话要发给它。换模型 / dispose 时 registry 会关掉它，steer 随之返回 false */
+  let live: AgySession | undefined;
 
+  // 合成的工具事件走 pi 自己的出口：桥可能在监听者之后才挂上（会话中途切到 agy）
   const emit: SessionListener = (event) => {
-    for (const listener of listeners) listener(event);
+    (session as unknown as { _emit?: SessionListener })._emit?.call(session, event);
   };
 
   /** agy 经 Host MCP 调本会话的 Enso 工具：走会话自己的工具管线（参数校验、tool_call 钩子、审批包装）。 */
@@ -136,6 +134,31 @@ export function attachAgyBridgeToSession(
     };
   };
 
+  /**
+   * 第一次真的跑 agy 时才挂：其他模型的会话（和 supervisor 测试里的假会话）的 steer / dispose 原样不动。
+   * 插话的唯一入队点是 agent.steer（session.steer、streamingBehavior: 'steer'、Enso 的可撤回插话都经这里）：
+   * 先照常进 pi 的队列，pi 在本段回复收尾后把它作为 user 消息送进上下文；agy 正在流时同时原样发给 agy。
+   */
+  let hooked = false;
+  const hookAgySession = () => {
+    if (hooked) return;
+    hooked = true;
+    const agent = session.agent as { steer?: (message: unknown) => void } | undefined;
+    const steer = agent?.steer;
+    if (agent && typeof steer === 'function') {
+      agent.steer = (message: unknown) => {
+        steer.call(agent, message);
+        const row = message as PromptMessage | undefined;
+        if (row?.role === 'user') live?.steer([row]);
+      };
+    }
+    const dispose = session.dispose.bind(session);
+    session.dispose = (() => {
+      void closeAgySession(options.ensoSessionId);
+      dispose();
+    }) as AgentSession['dispose'];
+  };
+
   const bridge: AgySessionBridge = {
     async runTurn(input) {
       const runtime = await openBoundAgySession({
@@ -146,6 +169,8 @@ export function attachAgyBridgeToSession(
         resumeSessionId: resumable ? readAgySessionId(storeFile, options.ensoSessionId) : undefined,
         hostMcp: hostMcpFor(hostMcpTools(session.agent.state.tools)),
       });
+      live = runtime;
+      hookAgySession();
       turn = input;
       const result = await runtime
         .turn({
@@ -182,28 +207,17 @@ export function attachAgyBridgeToSession(
 
   // pi 在监听者之后、agent-loop 找 toolCall 之前落盘 message_end：在这里把 agy 已执行的工具拆成
   // 「assistant(toolCall) + toolResult」写在最终回复之前，最终回复不留 toolCall，pi 不会再执行。
-  origSubscribe(((event: SessionEvent) => {
+  session.subscribe(((event: SessionEvent) => {
     if (event.type === 'message_end') settleAgyTools(session, event.message, tools);
   }) as Parameters<AgentSession['subscribe']>[0]);
 
-  session.subscribe = ((listener: SessionListener) => {
-    listeners.add(listener);
-    const unsub = origSubscribe(listener as Parameters<AgentSession['subscribe']>[0]);
-    return () => {
-      listeners.delete(listener);
-      unsub();
-    };
-  }) as AgentSession['subscribe'];
-
-  session.prompt = (async (text, promptOptions) => {
-    await boundBridge.run(bridge, () => origPrompt(text, promptOptions));
-  }) as AgentSession['prompt'];
-  session.steer = (async (text, images, steerOptions) =>
-    boundBridge.run(bridge, () => origSteer(text, images, steerOptions))) as AgentSession['steer'];
-  session.dispose = (() => {
-    void closeAgySession(options.ensoSessionId);
-    origDispose();
-  }) as AgentSession['dispose'];
+  // pi 的每次模型请求都经 agent.streamFunction（prompt、continue、重试、compaction）：在这里绑上桥
+  const agent = session.agent as { streamFunction?: (...args: unknown[]) => unknown } | undefined;
+  const stream = agent?.streamFunction;
+  if (agent && typeof stream === 'function') {
+    agent.streamFunction = (...args: unknown[]) =>
+      boundBridge.run(bridge, () => stream.apply(agent, args));
+  }
   return bridge;
 }
 

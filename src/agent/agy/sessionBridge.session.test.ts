@@ -18,6 +18,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApprovalGate } from '../approval';
+import { batchSteering, steerActiveSession } from '../sessionAdapter';
 import { createTodoTool } from '../todo';
 import { type AcpHttpMcpServer, closeHostMcp } from './hostMcp';
 import { registerAgyProvider, streamAgy } from './provider';
@@ -428,6 +429,66 @@ it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with i
   dispose();
   await vi.waitFor(() => expect(revoked).toBe(true));
 });
+
+const fakeCli = fileURLToPath(new URL('./fixtures/fakeAgy.mjs', import.meta.url));
+
+function useFakeCli(env: Record<string, string>) {
+  setAgySessionOpener((options) =>
+    openAgySession({
+      ...options,
+      command: process.execPath,
+      args: [fakeCli],
+      env: { ...process.env, ...env },
+      timeoutMs: 8_000,
+    })
+  );
+}
+
+it('splits a mid-turn steer into its own user message and answer, as pi expects', async () => {
+  useFakeCli({ FAKE_AGY_SCRIPT: 'steer' });
+  const { session, manager } = await setup('enso-steer');
+  batchSteering(session);
+  let steered: Promise<unknown> | undefined;
+  session.subscribe((event) => {
+    if (steered || event.type !== 'message_update') return;
+    if (event.assistantMessageEvent.type !== 'text_delta') return;
+    steered = steerActiveSession(session, 'Stop. Reply steered', undefined, () => {});
+  });
+  await session.prompt('Tell a story');
+  await session.waitForIdle();
+  expect(await steered).toBe('queued');
+
+  const file = manager.getSessionFile();
+  if (!file) throw new Error('no session file');
+  const expected = ['user', 'assistant[text:Once upon a time.]', 'user', 'assistant[text:steered]'];
+  expect(shape(persisted(file))).toEqual(expected);
+  expect(shape(session.messages.filter((m) => (m as Row).role !== 'system'))).toEqual(expected);
+  const rows = persisted(file) as Array<Row & { usage?: { totalTokens: number } }>;
+  expect(JSON.stringify(rows[2]?.content)).toContain('Stop. Reply steered');
+  expect(rows[3]?.usage?.totalTokens).toBe(90);
+});
+
+it('keeps the turn open for a background command and lands its follow-up in the same turn', async () => {
+  useFakeCli({ FAKE_AGY_SCRIPT: 'background' });
+  const { session, manager } = await setup('enso-background');
+  const ends: string[] = [];
+  session.subscribe((event) => {
+    if (event.type === 'tool_execution_end') ends.push(String(event.toolCallId));
+  });
+  await session.prompt('run it in the background');
+  await session.waitForIdle();
+  expect(ends).toEqual(['bg-1']);
+  const file = manager.getSessionFile();
+  if (!file) throw new Error('no session file');
+  const rows = persisted(file);
+  expect(shape(rows)).toEqual([
+    'user',
+    'assistant[text:Starting.,toolCall:bg-1]',
+    'toolResult:bg-1',
+    'assistant[text:It printed done.]',
+  ]);
+  expect(rows[2]).toMatchObject({ isError: false, content: [{ type: 'text', text: 'done\n' }] });
+}, 15_000);
 
 it('reopens agy with resume when the Enso tool set changes, so it lists the new tools', async () => {
   const opened: Array<{ tools: readonly string[]; resume?: string }> = [];
