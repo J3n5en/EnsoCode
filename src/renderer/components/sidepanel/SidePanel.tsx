@@ -626,8 +626,16 @@ function NewTabMenu({
   // 都被窗口裁掉、点击落空），resize 才触发重算。等动画结束再弹，
   // 与手动点 + 的测量条件一致——那条路径从不裁。
   const layoutAnimating = useLayoutAnimationStore((s) => s.active);
+  // 每次提交后核对触发按钮是否仍在 document 上（脱离文档不会触发 React 重渲染，只能主动查）；
+  // layout effect 里 setState 在绘制前同步重渲染，残留实例来不及露出弹层
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [anchorLive, setAnchorLive] = useState(false);
+  useLayoutEffect(() => {
+    const live = triggerRef.current?.isConnected ?? false;
+    setAnchorLive((prev) => (prev === live ? prev : live));
+  });
   // 一次性弹出：信号在就受控撑开；用户点类型/点别处/Esc 关闭时清掉信号，此后回到用户点 + 的非受控用法
-  const prompted = newTabAutoPopOpen({ promptAt, layoutAnimating });
+  const prompted = newTabAutoPopOpen({ promptAt, layoutAnimating, anchorLive });
   return (
     <Menu
       key={prompted ? `prompt-${promptAt}` : 'idle'}
@@ -637,6 +645,7 @@ function NewTabMenu({
       }}
     >
       <MenuTrigger
+        ref={triggerRef}
         className={cn(
           'flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground',
           compact

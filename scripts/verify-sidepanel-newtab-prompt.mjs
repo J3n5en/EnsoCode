@@ -673,7 +673,7 @@ async function main() {
         if (side.open && side.asideW > 200 && hit) return { side, menu, hit };
         return null;
       },
-      { timeout: 4_000, interval: 80, label: '空态展开并弹出新建菜单' }
+      { timeout: 8_000, interval: 80, label: '空态展开并弹出新建菜单' }
     ).catch(async (error) => {
       const evidence = await dump(cdp, '菜单未弹出');
       throw new Error(`${error.message} ${JSON.stringify(evidence)}`);
@@ -732,6 +732,69 @@ async function main() {
       throw new Error(`再展开后出现 ${reopenedMenu.length} 个弹层 ${JSON.stringify(reopenedMenu)}`);
     }
     checks.push({ name: '再展开重弹且弹层唯一', pass: true });
+
+    // 快速连点展开按钮（真实鼠标，同一坐标；菜单开着时点击会先落在弹层 backdrop 上）：
+    // 任何节奏下停稳后都只能是「开着 = 恰好一个锚在面板内的弹层」或「收着 = 没有弹层」，
+    // 不能出现双弹层或漂到左上角的孤儿弹层。
+    const stressPoint = await togglePoint(cdp);
+    if (!stressPoint) throw new Error('找不到展开/收起右侧栏按钮');
+    const stress = [];
+    for (const gap of [40, 90, 150, 220, 320]) {
+      for (const clicks of [2, 3, 4, 5]) {
+        for (let i = 0; i < clicks; i += 1) {
+          await clickAt(cdp, stressPoint);
+          await sleep(gap);
+        }
+        await sleep(1_200);
+        const side = await readSide(cdp);
+        const menu = await readMenu(cdp);
+        const row = { gap, clicks, open: side.open, menus: menu.map((m) => [m.x, m.y, m.w, m.h]) };
+        stress.push(row);
+        const anchored = (m) => m.x >= 200 && m.y >= 0 && m.w > 20 && m.h > 20;
+        const bad = side.open
+          ? menu.length > 1 || (menu.length === 1 && !anchored(menu[0]))
+          : menu.length !== 0;
+        if (bad) {
+          await shoot(cdp, '/tmp/sidepanel-newtab-stress-fail.png').catch(() => {});
+          throw new Error(
+            `快速连点后弹层异常 ${JSON.stringify(row)} 全部=${JSON.stringify(stress)}`
+          );
+        }
+      }
+    }
+    log(`快速连点 ${stress.length} 轮 ${JSON.stringify(stress)}`);
+    checks.push({
+      name: '快速连点展开按钮不出现双弹层/孤儿弹层',
+      pass: true,
+      rounds: stress.length,
+    });
+    // 收回到「开着 + 菜单弹出」，供下面点选菜单项
+    {
+      const side = await readSide(cdp);
+      if (side.open) {
+        await cdp.eval(
+          `(() => { window.__stores.sidePanel.getState().toggleOpen(); return true; })()`
+        );
+        await waitFor(async () => (!(await readSide(cdp)).open ? true : null), {
+          timeout: 4_000,
+          interval: 80,
+          label: '连点后收起',
+        });
+        await sleep(400);
+      }
+      await cdp.eval(
+        `(() => { window.__stores.sidePanel.getState().toggleOpen(); return true; })()`
+      );
+      await waitFor(
+        async () => {
+          const s = await readSide(cdp);
+          const m = await readMenu(cdp);
+          return s.open && m.length === 1 && menuOnScreen(m) ? true : null;
+        },
+        { timeout: 4_000, interval: 80, label: '连点后重新展开弹菜单' }
+      );
+      await sleep(300);
+    }
 
     const item = await firstMenuItemPoint(cdp);
     if (!item) throw new Error(`找不到可点的 menu item ${JSON.stringify(promptMenu)}`);
@@ -816,6 +879,103 @@ async function main() {
     }
     checks.push({ name: '有 tab 时展开不弹菜单', pass: true });
     assert.equal(quietMenu.length, 0);
+
+    // 真实用法：开过 tab 再全部关掉 —— dockview 留下一个空 group（组内水印 + 组头 actions），
+    // 与「从没开过 tab」的根水印是两套 DOM。在这个状态下再做展开 + 快速连点。
+    const closedTab = await cdp.eval(`(() => {
+      const btns = [...document.querySelectorAll('[data-side-tab] button:not([aria-label])')];
+      btns.forEach((b) => b.click());
+      return btns.length;
+    })()`);
+    await waitFor(async () => ((await readSide(cdp)).panelCount === 0 ? true : null), {
+      timeout: 4_000,
+      interval: 80,
+      label: '关掉全部 tab',
+    });
+    await sleep(400);
+    const residue = await cdp.eval(`(() => ({
+      groups: document.querySelectorAll('.enso-side-dock .dv-groupview').length,
+      watermarks: document.querySelectorAll('.enso-side-dock .dv-watermark-container, .enso-side-dock .dv-groupview .dv-content-container > *').length,
+      plus: [...document.querySelectorAll('button[aria-label]')].filter((b) => /new tab|新建标签页/i.test(b.getAttribute('aria-label') || '')).map((b) => {
+        const r = b.getBoundingClientRect();
+        return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
+      }),
+    }))()`);
+    log(`关 tab=${closedTab} 残留结构 ${JSON.stringify(residue)}`);
+    for (const round of [0, 1]) {
+      const side = await readSide(cdp);
+      if (side.open) {
+        await clickToggle(cdp);
+        await sleep(500);
+      }
+      await clickToggle(cdp);
+      await sleep(1_200);
+      const menu = await readMenu(cdp);
+      log(`空 group 展开#${round} menus=${JSON.stringify(menu.map((m) => [m.x, m.y, m.w, m.h]))}`);
+      if (menu.length !== 1 || menu[0].x < 200) {
+        await shoot(cdp, '/tmp/sidepanel-newtab-emptygroup-fail.png').catch(() => {});
+        const owners =
+          await cdp.eval(`(() => [...document.querySelectorAll('[data-slot="menu-popup"]')].map((popup) => {
+          const key = Object.keys(popup).find((k) => k.startsWith('__reactFiber$'));
+          let f = key ? popup[key] : null;
+          const chain = [];
+          let menuFiber = null;
+          while (f) {
+            const name = typeof f.type === 'function' ? f.type.displayName || f.type.name : null;
+            if (name && chain.length < 40) chain.push(name);
+            if (name === 'NewTabMenu' && !menuFiber) menuFiber = f;
+            f = f.return;
+          }
+          let trigger = null;
+          if (menuFiber) {
+            const stack = [menuFiber.child];
+            while (stack.length) {
+              const n = stack.shift();
+              if (!n) continue;
+              if (n.stateNode instanceof HTMLElement && n.stateNode.tagName === 'BUTTON') { trigger = n.stateNode; break; }
+              stack.push(n.child, n.sibling);
+            }
+          }
+          const anc = [];
+          for (let el = trigger; el && anc.length < 12; el = el.parentElement) anc.push(el.tagName + '.' + String(el.className).slice(0, 40));
+          return {
+            chain: chain.filter((n) => /Watermark|HeaderActions|GroupRight|NewTabMenu|Dock|Portal|ReactPart/i.test(n)),
+            trigConnected: trigger ? trigger.isConnected : null,
+            trigRect: trigger ? JSON.stringify(trigger.getBoundingClientRect()) : null,
+            anc,
+          };
+        }))()`);
+        throw new Error(
+          `空 group 展开后弹层异常 ${JSON.stringify(menu)} 结构=${JSON.stringify(residue)} owners=${JSON.stringify(owners)}`
+        );
+      }
+    }
+    const gstress = [];
+    for (const gap of [40, 90, 150, 220]) {
+      for (const clicks of [2, 3, 4, 5]) {
+        for (let i = 0; i < clicks; i += 1) {
+          await clickAt(cdp, stressPoint);
+          await sleep(gap);
+        }
+        await sleep(1_200);
+        const side = await readSide(cdp);
+        const menu = await readMenu(cdp);
+        const row = { gap, clicks, open: side.open, menus: menu.map((m) => [m.x, m.y, m.w, m.h]) };
+        gstress.push(row);
+        const anchored = (m) => m.x >= 200 && m.y >= 0 && m.w > 20 && m.h > 20;
+        const bad = side.open
+          ? menu.length > 1 || (menu.length === 1 && !anchored(menu[0]))
+          : menu.length !== 0;
+        if (bad) {
+          await shoot(cdp, '/tmp/sidepanel-newtab-emptygroup-fail.png').catch(() => {});
+          throw new Error(
+            `空 group 快速连点后弹层异常 ${JSON.stringify(row)} 全部=${JSON.stringify(gstress)}`
+          );
+        }
+      }
+    }
+    log(`空 group 快速连点 ${gstress.length} 轮 ${JSON.stringify(gstress)}`);
+    checks.push({ name: '关光 tab 后（空 group）展开/快速连点弹层唯一', pass: true });
     log(JSON.stringify({ checks, shots: SHOTS }, null, 2));
     log('PASS');
   } finally {
@@ -850,10 +1010,10 @@ process.on('unhandledRejection', (error) => {
 });
 
 setTimeout(() => {
-  console.error('内部超时 240s');
+  console.error('内部超时 420s');
   if (devLogTail) console.error(devLogTail);
   void finish(124);
-}, 240_000);
+}, 420_000);
 
 main()
   .then(() => finish(0))
