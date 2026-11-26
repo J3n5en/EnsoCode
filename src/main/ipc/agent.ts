@@ -1172,6 +1172,7 @@ function spawnRequestKeys(): readonly (keyof AgentSpawnRequest)[] {
     'autoRejectApprovals',
     'askRelay',
     'planMode',
+    'systemPromptAppend',
   ] as const;
   // 少登记字段时这里编译失败，而不是等到真机上整条请求被拒
   const missing: Exclude<keyof AgentSpawnRequest, (typeof keys)[number]> extends never
@@ -1209,7 +1210,8 @@ function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
       typeof request.autoRejectApprovals !== 'boolean') ||
     (request.askRelay !== undefined &&
       (!asRecord(request.askRelay) || !isNonEmptyString(asRecord(request.askRelay)?.name))) ||
-    (request.planMode !== undefined && typeof request.planMode !== 'boolean')
+    (request.planMode !== undefined && typeof request.planMode !== 'boolean') ||
+    (request.systemPromptAppend !== undefined && typeof request.systemPromptAppend !== 'string')
   ) {
     return null;
   }

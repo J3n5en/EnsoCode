@@ -107,6 +107,13 @@ class EnsoCodeAgent(BaseInstalledAgent):
         goal = self._model_connection_kwargs.get("goal")
         timeout = self._model_connection_kwargs.get("timeout_ms")
         mode = self._model_connection_kwargs.get("mode")
+        # 优先取 --ae 注入的容器 env（self._extra_env 优先于 os.environ），允许 host 侧 env 兜底
+        append_system_prompt = self._model_connection_kwargs.get("append_system_prompt") or self._get_env(
+            "ENSO_APPEND_SYSTEM_PROMPT"
+        )
+        extra: list[str] = []
+        if isinstance(append_system_prompt, str) and append_system_prompt.strip():
+            extra = ["--append-system-prompt", append_system_prompt]
         command = build_run_command(
             prompt_file=prompt_file,
             usage_log=usage_log,
@@ -119,13 +126,32 @@ class EnsoCodeAgent(BaseInstalledAgent):
             mode=mode if isinstance(mode, str) and mode else "full",
             timeout_ms=timeout if isinstance(timeout, int) else None,
             goal=goal if isinstance(goal, str) and goal else None,
+            extra=extra or None,
         )
         try:
             result = await self.exec_as_agent(environment, command=command, env=self._connection_env())
             self._stdout = getattr(result, "stdout", None)
         finally:
+            # 会话正文 jsonl 在容器内 $ENSO_DATA_DIR/agent/sessions（默认 ~/.enso-server/agent/sessions），
+            # 不回收的话无法分析 agent 决策过程。best-effort：复制失败不影响 verdict。
+            await self._collect_session_logs(environment, logs)
             # 日志目录未挂载时此刻还没下载回来；context 一旦非空 Harbor 就不再调 populate_context_post_run
             self._apply_usage(context)
+
+    async def _collect_session_logs(self, environment: BaseEnvironment, logs: str) -> None:
+        quoted_logs = shlex.quote(logs)
+        script = (
+            "set -u; "
+            'src="${ENSO_DATA_DIR:-$HOME/.enso-server}/agent/sessions"; '
+            '[ -d "$src" ] || exit 0; '
+            f'dest={quoted_logs}/sessions; '
+            'mkdir -p "$dest" 2>/dev/null || exit 0; '
+            'cp -a "$src"/. "$dest"/ 2>/dev/null || true'
+        )
+        try:
+            await self.exec_as_root(environment, command=script, timeout_sec=60)
+        except Exception as error:  # noqa: BLE001 - 日志回收失败不能掩盖 agent 结果
+            self.logger.warning("session log collection failed: %s", error)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         self._apply_usage(context, final=True)

@@ -69,6 +69,29 @@ describe('parseRunArgs', () => {
     expect(parseRunArgs(['--help'])).toEqual({ ok: false, error: '', help: true });
   });
 
+  it('parses --append-system-prompt from flag and env, flag wins', () => {
+    const bare = parseRunArgs(['--prompt', 'x'], {});
+    expect(bare.ok && bare.args.systemPromptAppend).toBeUndefined();
+
+    const fromEnv = parseRunArgs(['--prompt', 'x'], { ENSO_APPEND_SYSTEM_PROMPT: 'from-env' });
+    expect(fromEnv.ok && fromEnv.args.systemPromptAppend).toBe('from-env');
+
+    const fromFlag = parseRunArgs(['--prompt', 'x', '--append-system-prompt', 'from-flag'], {
+      ENSO_APPEND_SYSTEM_PROMPT: 'from-env',
+    });
+    expect(fromFlag.ok && fromFlag.args.systemPromptAppend).toBe('from-flag');
+  });
+
+  it('rejects an empty --append-system-prompt', () => {
+    expect(parseRunArgs(['--prompt', 'x', '--append-system-prompt', '  ']).ok).toBe(false);
+  });
+
+  it('threads --append-system-prompt through build_run_command-style extra args', () => {
+    // execute.ts 透传到 spawnSession 的冒烟验证在 e2e；这里只保证解析结果形状正确
+    const parsed = parseRunArgs(['--prompt', 'x', '--append-system-prompt', 'verify edges']);
+    expect(parsed.ok && parsed.args.systemPromptAppend).toBe('verify edges');
+  });
+
   it('canonicalizes tool lists and keeps an explicit deny over --allow-tools', () => {
     expect(parseToolList('Bash(git *), Web, imagegen')).toEqual([
       'bash',

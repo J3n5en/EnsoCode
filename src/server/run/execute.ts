@@ -445,6 +445,7 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
           autoRejectApprovals: true,
           ...(resumeFile ? { resumeFile } : {}),
           ...(thinkingLevel ? { reasoningEnabled: true, thinkingLevel } : {}),
+          ...(args.systemPromptAppend ? { systemPromptAppend: args.systemPromptAppend } : {}),
         },
         new Set(),
         undefined,
