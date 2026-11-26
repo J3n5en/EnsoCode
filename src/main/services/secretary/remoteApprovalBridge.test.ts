@@ -86,6 +86,7 @@ describe('remoteTier', () => {
       'git push origin main',
       'git -C repo push',
       'cd app && git push',
+      'GIT PUSH origin',
       'rm -rf build',
       'npm publish',
     ]) {

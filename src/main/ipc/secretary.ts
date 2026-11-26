@@ -774,6 +774,7 @@ export function registerSecretaryHandlers(): void {
   setSecretaryDriverObserver((event, changes) => {
     driver?.observe(event);
     for (const instance of hosts.values()) instance.onAgentEvent(event, changes);
+    contacts?.observeAgentEvent(event);
     // 改了名字或人设的会话等本轮跑完再释放，免得打断正在跑的一轮
     if (event.type === 'turn-completed' || event.type === 'turn-failed') {
       const sessionId = 'identity' in event && event.identity ? event.identity.sessionId : null;

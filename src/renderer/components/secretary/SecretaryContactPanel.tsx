@@ -444,7 +444,7 @@ function ChannelBody({
         hint={
           telegram
             ? t(
-                'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals are never handled from Telegram.'
+                'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals have their own switch below.'
               )
             : caps.buttons
               ? t('Off by default. Approvals are never handled from the phone.')
@@ -456,6 +456,18 @@ function ChannelBody({
         disabled={busy}
         onChange={(value) => onPrefs({ cardConfirm: value })}
       />
+      {telegram && (
+        <PrefRow
+          dataEnso="secretary-contact-approval-remote"
+          label={t('Approve from Telegram')}
+          hint={t(
+            'Off by default. Approval cards from every conversation go to your private chat only. When on, file edits and ordinary commands get Approve and Deny buttons; high-risk actions (git push, deletes, publishing, secrets, MCP tools) still need the computer.'
+          )}
+          checked={prefs.approvalRemote}
+          disabled={busy}
+          onChange={(value) => onPrefs({ approvalRemote: value })}
+        />
+      )}
       <PrefRow
         dataEnso="secretary-contact-mirror"
         label={t('Mirror every reply')}

@@ -67,8 +67,11 @@ export const zhTranslations: Record<string, string> = {
   Unbind: '解绑',
   'Change bot': '更换 bot',
   'Allow confirming cards from Telegram': '允许从 Telegram 确认卡片',
-  'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals are never handled from Telegram.':
-    '默认打开：手机上的一个按钮就能确认设置、技能、工具、接管与清理卡片——这些卡片能改秘书的可见项目、接管范围，装 skill 和工具，也能清理分支与会话。审批无论如何都不能从 Telegram 处理。',
+  'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals have their own switch below.':
+    '默认打开：手机上的一个按钮就能确认设置、技能、工具、接管与清理卡片——这些卡片能改秘书的可见项目、接管范围，装 skill 和工具，也能清理分支与会话。审批由下面单独的开关管。',
+  'Approve from Telegram': '允许从 Telegram 审批',
+  'Off by default. Approval cards from every conversation go to your private chat only. When on, file edits and ordinary commands get Approve and Deny buttons; high-risk actions (git push, deletes, publishing, secrets, MCP tools) still need the computer.':
+    '默认关闭。所有会话的审批卡只发到你的私聊。打开后，改文件和普通命令带「批准」「拒绝」按钮；高危操作（git push、删除、发布、密钥、MCP 工具）仍然只能在电脑上审批。',
   'No system keychain available: the bot token is stored unencrypted on this machine.':
     '系统钥匙串不可用：bot token 会以明文存在这台机器上。',
   'Bot verified': 'bot 已校验',

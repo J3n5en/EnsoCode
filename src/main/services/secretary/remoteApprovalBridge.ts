@@ -61,7 +61,7 @@ const SUMMARY_MAX_CHARS = 400;
 /** 已收尾的卡留着回答「已在别处处理」，超过这个数从最早的开始丢 */
 const SETTLED_KEEP = 200;
 /** 底线分类器只拦强推/删分支；普通 git push 也是对外发布，远程一律不批。宁可误拦 */
-const GIT_PUSH = /\bgit\b.*\bpush\b/s;
+const GIT_PUSH = /\bgit\b.*\bpush\b/is;
 
 /** callback_data 限 64 字节：requestId 哈希成 16 位十六进制 */
 export function remoteApprovalKey(requestId: string): string {

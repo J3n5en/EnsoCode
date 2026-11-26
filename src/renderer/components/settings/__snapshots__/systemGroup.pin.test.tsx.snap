@@ -59,6 +59,20 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 打开 Bot 
     "effects": [
       {
         "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"approvalRemote":true}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [
           "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"memory":true}},"s1")",
           "electronAPI.secretary.contactState("s1")",
         ],
@@ -437,6 +451,20 @@ exports[`秘书 / 连接 / 系统组设置迁移前后行为一致 > 每个控�
     "current": "",
     "effects": [],
     "kind": "input",
+    "row": "contacts.channels",
+  },
+  {
+    "current": "false",
+    "effects": [
+      {
+        "api": [
+          "electronAPI.secretary.contactSettings({"channelId":"telegram","prefs":{"approvalRemote":true}},"s1")",
+          "electronAPI.secretary.contactState("s1")",
+        ],
+        "store": {},
+      },
+    ],
+    "kind": "switch",
     "row": "contacts.channels",
   },
   {

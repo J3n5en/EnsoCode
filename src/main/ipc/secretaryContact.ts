@@ -7,6 +7,7 @@ import {
   findRouteConflict,
 } from '@shared/secretary/contact';
 import { projectReadableMessages } from '@shared/secretary/transcript';
+import type { RendererAgentEvent } from '@shared/types/agent';
 import type { DemandThreadSource } from '@shared/types/demandThreads';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import type {
@@ -14,6 +15,7 @@ import type {
   SecretaryContactState,
   SecretaryProfile,
 } from '@shared/types/secretary';
+import { respondApproval } from '../services/agentHost';
 import {
   getExtensionPlugins,
   setPluginContactBridge,
@@ -49,6 +51,7 @@ import {
 } from '../services/secretary/dispatch';
 import { FollowingStore, setPhoneTurnChatProbe } from '../services/secretary/following';
 import { getSecretaryImageStore } from '../services/secretary/inboundImages';
+import { RemoteApprovalBridge } from '../services/secretary/remoteApprovalBridge';
 import { listSchedules, schedulePortsFor } from '../services/secretary/schedules';
 import {
   resolveSecretaryRequest,
@@ -64,7 +67,7 @@ import {
   readSessionHistoryFile,
   resumeRootFromMain,
 } from './agent';
-import { readSettingsState } from './settings';
+import { readPersistedConversation, readSettingsState } from './settings';
 
 let replyOrigin:
   | ((
@@ -113,6 +116,8 @@ export interface SecretaryContacts {
   start(): Promise<void>;
   stop(): Promise<void>;
   register(): void;
+  /** 全部会话的 agent 事件：审批进远程审批桥，由它发卡与收尾 */
+  observeAgentEvent(event: RendererAgentEvent): void;
 }
 
 function isEditor(webContentsId: number): boolean {
@@ -144,7 +149,14 @@ function readFlag(
   return typeof value === 'boolean' ? value : null;
 }
 
-const PREF_KEYS = ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const;
+const PREF_KEYS = [
+  'enabled',
+  'push',
+  'cardConfirm',
+  'approvalRemote',
+  'syncMirror',
+  'memory',
+] as const;
 
 /** 渠道卡片上的开关：{ channelId, prefs: { enabled?, push?, ... } } */
 function readChannelPrefs(
@@ -290,6 +302,16 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
     },
   });
   const services = new Map<string, ContactService>();
+  // 进程里只有一座桥：审批状态只在这里，每个秘书的联系方式服务各收一张卡，先按先赢
+  const remoteApprovals = new RemoteApprovalBridge({
+    respondApproval: (identity, requestId, decision) =>
+      respondApproval(identity, requestId, decision),
+    sinks: () => [...services.values()],
+    sessionTitle: (sessionId) => {
+      const title = readPersistedConversation(sessionId)?.title;
+      return typeof title === 'string' && title.trim() ? title.trim() : undefined;
+    },
+  });
   replyOrigin = async (source, text, secretaryId) => {
     const channelId =
       source.channel === 'tg' || source.channel === 'telegram'
@@ -408,6 +430,8 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       answerAsk: (conversationId, requestId, answer) =>
         answerAskAsUserFromMain(conversationId, requestId, answer),
       resolveProposal: (proposalId, action) => deps.resolveProposal(proposalId, action),
+      resolveRemoteApproval: (key, action, options) =>
+        remoteApprovals.resolve(key, action, options),
       openInApp: (target) => deps.openInApp(target),
       // 手机关注的任务：派发与定时写、这里读与取消，重启后还在
       following: new FollowingStore(ctx.dir),
@@ -486,6 +510,8 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
 
   const contacts: SecretaryContacts = {
     service: (secretaryId) => services.get(secretaryId),
+
+    observeAgentEvent: (event) => remoteApprovals.observe(event),
 
     async add(ctx) {
       if (services.has(ctx.id)) return;
