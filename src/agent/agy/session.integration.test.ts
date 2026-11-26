@@ -199,6 +199,21 @@ describe('agy session against the fake CLI', () => {
       },
     });
     expect(session.ensoTools).toEqual(['todo']);
+    await session.turn({
+      messages: [{ role: 'user', content: 'again' }],
+      planMode: false,
+      approvalMode: 'supervised',
+      workspaceRoot: dir,
+      modelId: 'default',
+      thinkingLevel: 'off',
+      modelLabel: 'default',
+      ask: async () => 'deny',
+    });
+    const prompts = readFileSync(log, 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"method":"session/prompt"'));
+    expect(prompts[0]).toContain('mcp_enso_todo');
+    expect(prompts.at(-1)).not.toContain('mcp_enso_todo');
     const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
     const opened = lines.find((line) => line.includes('"method":"session/new"'));
     expect(JSON.parse(opened ?? '{}').params.mcpServers).toEqual([server]);

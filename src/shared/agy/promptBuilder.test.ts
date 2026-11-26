@@ -98,4 +98,39 @@ describe('buildAgyPrompt', () => {
     expect(text).toContain('do not edit files');
     expect(text).not.toContain('interaction mode: Default');
   });
+
+  it('explains the Enso tools only when Host MCP carries them, by the names agy shows', () => {
+    const textOf = (ensoTools: string[]) => {
+      const blocks = buildAgyPrompt({
+        messages: [
+          { role: 'system', content: `${PREAMBLE}\n<skills>s</skills>\n<rules>r</rules>` },
+          { role: 'user', content: 'go' },
+        ],
+        interactionMode: 'default',
+        includeInstructions: true,
+        includeRuntimeInfo: false,
+        modelLabel: 'm',
+        ensoTools,
+      });
+      return blocks[0]?.type === 'text' ? blocks[0].text : '';
+    };
+    const without = textOf([]);
+    expect(without).not.toContain('mcp_enso_');
+    expect(without).not.toContain('`enso` MCP server');
+
+    const full = textOf(['ask_user', 'todo', 'subagent', 'remind_me']);
+    expect(full).toContain('`enso` MCP server');
+    for (const name of ['ask_user', 'todo', 'subagent', 'remind_me']) {
+      expect(full).toContain(`mcp_enso_${name}`);
+    }
+    expect(full.indexOf('mcp_enso_todo')).toBeLessThan(full.indexOf('<user_request>'));
+    expect(full).not.toContain(PREAMBLE);
+    expect(full).not.toContain('<skills>');
+    expect(full).not.toContain('<rules>');
+
+    const todoOnly = textOf(['todo']);
+    expect(todoOnly).toContain('mcp_enso_todo');
+    expect(todoOnly).not.toContain('mcp_enso_ask_user');
+    expect(todoOnly).not.toContain('mcp_enso_subagent');
+  });
 });

@@ -191,6 +191,7 @@ export async function openAgySession(options: {
           includeInstructions: flags.includeInstructions,
           includeRuntimeInfo: flags.includeRuntimeInfo,
           modelLabel: input.modelLabel,
+          ensoTools,
         });
         active = {
           signal: input.signal,
