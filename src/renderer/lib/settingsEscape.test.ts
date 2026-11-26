@@ -64,4 +64,33 @@ describe('设置页 Esc 返回工作区', () => {
     acquireOverlayGuard();
     expect(escapeBlockedBeforeHandlers(dom('<main></main>'))).toBe(true);
   });
+
+  it('toast（aria-modal=false 的 role=dialog）不抢 Esc', () => {
+    // base-ui Toast.Root 渲染 role=dialog + aria-modal=false，从不响应 Esc；
+    // 装完插件的成功提示若在列，Esc 会被吞到 toast 消失为止
+    expect(
+      escapeBlockedBeforeHandlers(
+        dom('<div data-slot="toast-viewport"><div role="dialog" aria-modal="false"></div></div>')
+      )
+    ).toBe(false);
+  });
+
+  it('已关闭还在退场动画里的弹层不抢 Esc', () => {
+    // base-ui 的 open 翻 false 后 Esc 处理立刻短路，但节点要等 transitionend 才卸载；
+    // 后台窗口动画不结束节点就一直挂着，不能让它永久吞掉 Esc
+    expect(escapeBlockedBeforeHandlers(dom('<div role="dialog" data-closed=""></div>'))).toBe(
+      false
+    );
+    expect(escapeBlockedBeforeHandlers(dom('<div role="dialog" data-ending-style=""></div>'))).toBe(
+      false
+    );
+    expect(escapeBlockedBeforeHandlers(dom('<div data-enso-float="" data-closed=""></div>'))).toBe(
+      false
+    );
+    // 正在进场的弹层仍然算
+    expect(
+      escapeBlockedBeforeHandlers(dom('<div role="dialog" data-starting-style=""></div>'))
+    ).toBe(true);
+    expect(escapeBlockedBeforeHandlers(dom('<div role="dialog" data-open=""></div>'))).toBe(true);
+  });
 });
