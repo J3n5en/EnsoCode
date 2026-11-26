@@ -4,7 +4,7 @@ import {
   conversationHasRunningChild,
   userAskCount,
 } from '@shared/conversationDotTone';
-import { lastActiveAt } from '@/stores/sessions/pinned';
+import { lastActiveAt, retentionAnchor, staysActive } from '@/stores/sessions/pinned';
 
 /** 折叠栏要点开的项目。进行中只认 running / spawning / 子任务仍在跑，不含未读和待回答。 */
 export interface CollapsedActiveProject {
@@ -54,6 +54,7 @@ interface ActivityConversation {
   title?: string;
   createdAt: number;
   lastActiveAt?: number;
+  activeRenewedAt?: number;
   messages?: { timestamp?: number }[];
   status?: string;
   spawning?: boolean;
@@ -65,6 +66,7 @@ interface ActivityConversation {
   coworkerIds?: readonly string[];
   subagents?: readonly { status: string }[];
   backgroundTasks?: readonly { status: string }[];
+  goal?: { status: string };
 }
 
 function activityAt(conversation: ActivityConversation): number {
@@ -136,15 +138,24 @@ export function collapsedActiveProjects(
 }
 
 /**
- * 折叠 rail 浮层的行数据：该项目全部未归档会话（含 coworker 子会话，后者有 parentId），
+ * 折叠 rail 浮层的行数据：该项目**活跃中**的未归档会话（含 coworker 子会话，后者有 parentId），
  * 最近活跃在前；已删除/不存在的 parent 不挡行——打开逻辑自己会回退直接选会话。
+ *
+ * 「活跃中」与侧栏 Active 分组同口径：running / waiting / unread / 未读失败 / 续跑 goal /
+ * 排队 / 等提醒，以及 activeRetention 窗口内有过消息或续期的会话。已 idle 且超窗的会话不进列表,
+ * 自然也不参与角标计数。
  */
 export function collapsedProjectSessions(
   projectId: string,
   conversations: Readonly<Record<string, ActivityConversation | undefined>>,
-  options?: { pendingReminderIds?: ReadonlySet<string>; now?: number }
+  options?: {
+    pendingReminderIds?: ReadonlySet<string>;
+    activeRetention?: { now: number; ms: number };
+  }
 ): CollapsedProjectSession[] {
   const pendingReminderIds = options?.pendingReminderIds ?? new Set<string>();
+  const retention = options?.activeRetention;
+  const cutoff = retention && retention.ms > 0 ? retention.now - retention.ms : undefined;
   return Object.entries(conversations)
     .flatMap(([id, conversation]) =>
       conversation && conversation.projectId === projectId && conversation.archived !== true
@@ -153,29 +164,43 @@ export function collapsedProjectSessions(
     )
     .map(([conversationId, conversation]) => {
       const parentId = conversation.parentId;
+      const hasReminder = pendingReminderIds.has(conversationId);
+      const tone = sessionTone({
+        ...conversation,
+        hasRunningChild:
+          conversation.hasRunningChild === true ||
+          conversationHasRunningChild(
+            {
+              status: conversation.status ?? 'idle',
+              spawning: conversation.spawning,
+              subagents: conversation.subagents,
+              coworkerIds: conversation.coworkerIds,
+              backgroundTasks: conversation.backgroundTasks,
+            },
+            conversations
+          ),
+        hasPendingReminder: hasReminder,
+      });
       return {
         conversationId,
         ...(parentId && conversations[parentId] ? { parentId } : {}),
         title: conversation.title ?? '',
-        tone: sessionTone({
-          ...conversation,
-          hasRunningChild:
-            conversation.hasRunningChild === true ||
-            conversationHasRunningChild(
-              {
-                status: conversation.status ?? 'idle',
-                spawning: conversation.spawning,
-                subagents: conversation.subagents,
-                coworkerIds: conversation.coworkerIds,
-                backgroundTasks: conversation.backgroundTasks,
-              },
-              conversations
-            ),
-          hasPendingReminder: pendingReminderIds.has(conversationId),
-        }),
+        tone,
         activity: activityAt(conversation),
+        conversation,
       };
     })
+    .filter(({ tone, conversation }) => {
+      if (staysActive(tone, conversation)) return true;
+      if (cutoff === undefined) return false;
+      const anchor = retentionAnchor({
+        messages: conversation.messages ?? [],
+        lastActiveAt: conversation.lastActiveAt,
+        activeRenewedAt: conversation.activeRenewedAt,
+      });
+      return anchor !== undefined && anchor >= cutoff;
+    })
+    .map(({ conversation: _conversation, ...row }) => row)
     .sort((left, right) => right.activity - left.activity);
 }
 

@@ -26,7 +26,7 @@ const conv = (
 });
 
 describe('collapsedProjectSessions', () => {
-  it('列出项目全部未归档会话，最近活跃在前，并算出状态 tone', () => {
+  it('只列活跃中的会话（running/waiting/unread），idle 且超窗的不进列表', () => {
     const sessions = collapsedProjectSessions('p1', {
       running: conv('p1', 1, 50, { title: 'live', status: 'running' }),
       idle: conv('p1', 2, 10, { title: 'quiet', status: 'idle' }),
@@ -39,13 +39,39 @@ describe('collapsedProjectSessions', () => {
       archivedOne: conv('p1', 5, 90, { title: 'gone', status: 'running', archived: true }),
       other: conv('p2', 6, 99, { title: 'not mine', status: 'running' }),
     });
-    expect(sessions.map((row) => row.conversationId)).toEqual([
-      'running',
-      'unreadOne',
-      'waiting',
-      'idle',
-    ]);
-    expect(sessions.map((row) => row.tone)).toEqual(['running', 'unread', 'waiting', 'idle']);
+    expect(sessions.map((row) => row.conversationId)).toEqual(['running', 'unreadOne', 'waiting']);
+    expect(sessions.map((row) => row.tone)).toEqual(['running', 'unread', 'waiting']);
+  });
+
+  it('idle 但落在 activeRetention 窗口内的也算活跃（含 activeRenewedAt 续期）', () => {
+    const now = 1_000_000;
+    const retention = { now, ms: 60_000 };
+    const sessions = collapsedProjectSessions(
+      'p1',
+      {
+        recentMsg: conv('p1', 1, now - 30_000, { title: 'recent', status: 'idle' }),
+        oldMsg: conv('p1', 2, now - 120_000, { title: 'old', status: 'idle' }),
+        renewed: conv('p1', 3, now - 120_000, {
+          title: 'renewed',
+          status: 'idle',
+          activeRenewedAt: now - 10_000,
+        }),
+      },
+      { activeRetention: retention }
+    );
+    expect(sessions.map((row) => row.conversationId).sort()).toEqual(['recentMsg', 'renewed']);
+  });
+
+  it('retention.ms 为 0 时 idle 一律不进列表，即便刚刚活跃过', () => {
+    const now = 1_000_000;
+    const sessions = collapsedProjectSessions(
+      'p1',
+      {
+        recentMsg: conv('p1', 1, now - 5_000, { title: 'recent', status: 'idle' }),
+      },
+      { activeRetention: { now, ms: 0 } }
+    );
+    expect(sessions).toEqual([]);
   });
 
   it('coworker 子会话带 parentId；排队失败 tone 为 failed；未读只在不运行时出现', () => {

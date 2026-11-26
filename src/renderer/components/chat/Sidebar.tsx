@@ -860,7 +860,7 @@ export function Sidebar({
     activeRetention,
     pendingReminderIds
   );
-  // 折叠 rail 悬停浮层：各进行中项目的全部未归档会话（含 tone），最近活跃在前
+  // 折叠 rail 悬停浮层：各进行中项目的活跃未归档会话（含 tone），最近活跃在前
   // pendingReminderIds 每次渲染重建，useMemo 没有收益；仅折叠且有进行中项目时才计算
   const collapsedSessionsByProject: Record<string, readonly CollapsedProjectSession[]> = (() => {
     if (!collapsed || collapsedRunningProjects.length === 0) return {};
@@ -868,6 +868,7 @@ export function Sidebar({
     for (const entry of collapsedRunningProjects) {
       map[entry.projectId] = collapsedProjectSessions(entry.projectId, conversations, {
         pendingReminderIds,
+        activeRetention,
       });
     }
     return map;
