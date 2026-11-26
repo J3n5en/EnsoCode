@@ -58,7 +58,13 @@ function pick(
   return args;
 }
 
-export function toolNameFromUpdate(update: { title?: string; rawInput?: unknown }): string {
+export function toolNameFromUpdate(update: {
+  name?: string;
+  title?: string;
+  rawInput?: unknown;
+}): string {
+  // agy 1.5.x 在 update 上直接给工具名；title 是给人看的摘要
+  if (update.name) return projectToolName(update.name);
   const raw = update.rawInput;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const record = raw as Record<string, unknown>;

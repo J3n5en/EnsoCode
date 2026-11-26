@@ -99,12 +99,18 @@ async function handlePrompt(id, params) {
     content: { type: 'text', text: 'thinking' },
   });
   const readPath = process.env.FAKE_AGY_READ;
+  const target = readPath || '/tmp/a.ts';
+  // agy 1.5.18：update 上带 name / args / kind，title 是给人看的
   update(sessionId, {
     sessionUpdate: 'tool_call',
     toolCallId: 'read-1',
-    title: 'Running client_view_file',
+    name: 'read_file',
+    args: { Path: target },
     status: 'in_progress',
-    rawInput: { name: 'client_view_file', absolute_path: readPath || '/tmp/a.ts' },
+    kind: 'read',
+    title: 'File a.ts',
+    locations: [{ path: target }],
+    rawInput: { Path: target },
   });
   if (readPath) {
     try {
@@ -118,24 +124,30 @@ async function handlePrompt(id, params) {
   update(sessionId, {
     sessionUpdate: 'tool_call_update',
     toolCallId: 'read-1',
-    title: 'Running client_view_file',
+    name: 'read_file',
     status: 'failed',
+    kind: 'read',
+    title: 'File a.ts',
+    rawInput: { Path: target },
     rawOutput: 'step error',
   });
   try {
     const permission = await request('session/request_permission', {
       sessionId,
       toolCall: {
+        sessionUpdate: 'tool_call',
         toolCallId: 'cmd-1',
-        title: 'run tests',
+        name: 'run_command',
+        args: { CommandLine: 'ls', toolSummary: 'List' },
+        title: 'ls',
         kind: 'execute',
         status: 'pending',
-        rawInput: { command: 'ls' },
+        rawInput: { CommandLine: 'ls', toolSummary: 'List' },
       },
+      // agy 1.5.18 只给这两项
       options: [
-        { optionId: 'once', name: 'Allow', kind: 'allow_once' },
-        { optionId: 'always', name: 'Always', kind: 'allow_always' },
-        { optionId: 'no', name: 'Deny', kind: 'reject_once' },
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
       ],
     });
     log({ method: 'session/request_permission', result: permission });
@@ -185,6 +197,12 @@ function handle(message) {
     return;
   }
   if (method === 'session/set_config_option' || method === 'session/set_mode') {
+    const configId = method === 'session/set_mode' ? 'mode' : params?.configId;
+    const value = method === 'session/set_mode' ? params?.modeId : params?.value;
+    for (const option of sessionResult.configOptions) {
+      if (option.id === configId) option.currentValue = value;
+    }
+    if (configId === 'mode') sessionResult.modes.currentModeId = value;
     respond(id, { configOptions: sessionResult.configOptions });
     return;
   }

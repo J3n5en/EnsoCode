@@ -99,9 +99,12 @@ export async function openAgySession(options: {
     phase = transitionAgySession(phase, { type: 'fail', message });
   };
 
+  let setupState: SetupState | undefined;
   proc.rpc.setNotificationHandler((method, params) => {
-    if (method !== 'session/update' || !active) return;
+    if (method !== 'session/update') return;
     const update = record(params)?.update;
+    if (setupState) noteConfigUpdate(setupState, update);
+    if (!active) return;
     const reduced = reduceAgyUpdate(active.state, update, active.served);
     active.state = reduced.state;
     for (const effect of reduced.effects) active.onEvent?.(effect);
@@ -135,11 +138,12 @@ export async function openAgySession(options: {
       configOptions: setup.configOptions,
       modes: setup.modes,
     });
-    const setupState = {
+    setupState = {
       ...setup,
       version: parsedInit.version,
       canAppendSystemPrompt: parsedInit.canAppendSystemPrompt,
     };
+    const state: SetupState = setupState;
 
     return {
       phase: () => phase,
@@ -172,7 +176,7 @@ export async function openAgySession(options: {
         const onAbort = () => proc.rpc.notify('session/cancel', { sessionId });
         input.signal?.addEventListener('abort', onAbort, { once: true });
         try {
-          await alignSession(proc.rpc, sessionId, setupState, input);
+          await alignSession(proc.rpc, sessionId, state, input);
           if (input.signal?.aborted) {
             onAbort();
             return emptyTurn(sessionId, 'aborted');
@@ -265,33 +269,56 @@ async function openProtocolSession(
   }
 }
 
+type SetupState = NonNullable<ReturnType<typeof parseSessionSetup>> & {
+  version: string;
+  canAppendSystemPrompt: boolean;
+};
+
+/** set_config_option 的答复和 config_option_update 都带全量 configOptions：记下来，下一轮不重发。 */
+function noteConfigOptions(setup: SetupState, value: unknown) {
+  const parsed = parseSessionSetup({
+    sessionId: setup.sessionId,
+    configOptions: record(value)?.configOptions,
+  });
+  if (parsed && parsed.configOptions.length > 0) setup.configOptions = parsed.configOptions;
+}
+
+function noteConfigUpdate(setup: SetupState, update: unknown) {
+  const row = record(update);
+  if (row?.sessionUpdate === 'config_option_update') noteConfigOptions(setup, row);
+  if (row?.sessionUpdate === 'current_mode_update' && typeof row.currentModeId === 'string') {
+    setup.currentModeId = row.currentModeId;
+  }
+}
+
 async function alignSession(
   rpc: ReturnType<typeof startAgyProcess>['rpc'],
   sessionId: string,
-  setup: NonNullable<ReturnType<typeof parseSessionSetup>> & { version: string },
+  setup: SetupState,
   input: AgyTurnInput
 ) {
+  const setOption = async (configId: string, value: string) => {
+    noteConfigOptions(
+      setup,
+      await rpc.request('session/set_config_option', { sessionId, configId, value })
+    );
+  };
   const model = modelToSet(input.modelId, modelsFromSessionResult(setup));
-  if (model && model !== configValue(setup.configOptions, 'model')) {
-    await rpc.request('session/set_config_option', { sessionId, configId: 'model', value: model });
-  }
+  if (model && model !== configValue(setup.configOptions, 'model')) await setOption('model', model);
   const thinking = nearestThinking(input.thinkingLevel, thinkingValues(setup.configOptions));
   if (thinking && thinking !== configValue(setup.configOptions, 'thought_level')) {
-    await rpc.request('session/set_config_option', {
-      sessionId,
-      configId: 'thought_level',
-      value: thinking,
-    });
+    await setOption('thought_level', thinking);
   }
   const mode = sessionModeFor(input.planMode);
-  const current = setup.currentModeId ?? configValue(setup.configOptions, 'mode') ?? 'default';
+  const current = configValue(setup.configOptions, 'mode') ?? setup.currentModeId ?? 'default';
   if (current === mode) return;
   try {
-    await rpc.request('session/set_mode', { sessionId, modeId: mode });
+    noteConfigOptions(setup, await rpc.request('session/set_mode', { sessionId, modeId: mode }));
   } catch (error) {
     if (!(error instanceof AgyRpcError) || error.code !== -32601) throw error;
-    await rpc.request('session/set_config_option', { sessionId, configId: 'mode', value: mode });
+    await setOption('mode', mode);
   }
+  setup.currentModeId = mode;
 }
 
 function instructionFlags(

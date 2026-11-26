@@ -1,3 +1,4 @@
+import { isEnsoMcpCardName } from './hostTools';
 import { cardArgs, toolNameFromUpdate } from './tools';
 import type {
   AgyPlanItem,
@@ -51,12 +52,16 @@ function readPath(update: Record<string, unknown>): string | undefined {
 }
 
 function argsOf(update: Record<string, unknown>): Record<string, unknown> {
-  return record(update.rawInput) ?? {};
+  const { toolSummary: _summary, ...args } = record(update.rawInput) ?? record(update.args) ?? {};
+  return args;
 }
 
+/** agy 1.5.18 的 rawOutput 是 `{ output, exit_code }`；旧形状是字符串，再退到 content 文字。 */
 function outputText(update: Record<string, unknown>): string | undefined {
   if (typeof update.rawOutput === 'string') return update.rawOutput;
-  if (update.rawOutput !== undefined || !Array.isArray(update.content)) return undefined;
+  const raw = record(update.rawOutput);
+  if (typeof raw?.output === 'string') return raw.output;
+  if (!Array.isArray(update.content)) return undefined;
   const texts: string[] = [];
   for (const entry of update.content) {
     const block = record(entry);
@@ -121,9 +126,12 @@ export function reduceAgyUpdate(
     const id = typeof recordUpdate.toolCallId === 'string' ? recordUpdate.toolCallId : '';
     if (!id) return { state, effects: [] };
     const name = toolNameFromUpdate({
+      name: typeof recordUpdate.name === 'string' ? recordUpdate.name : undefined,
       title: typeof recordUpdate.title === 'string' ? recordUpdate.title : undefined,
       rawInput: recordUpdate.rawInput,
     });
+    // 我们自己的 Host MCP 工具由 Enso 画卡，agy 这一侧的卡丢掉
+    if (isEnsoMcpCardName(name)) return { state, effects: [] };
     const previous = state.tools.find((tool) => tool.id === id);
     const resolvedName = name === 'tool' && previous ? previous.name : name;
     const status = repairStatus(

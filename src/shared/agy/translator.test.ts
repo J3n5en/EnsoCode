@@ -97,4 +97,65 @@ describe('reduceAgyUpdate', () => {
     });
     expect(mcp.state.tools[0]?.name).toBe('mcp_t3-code_search');
   });
+
+  // agy 1.5.18 的真实形状：update 上带 name / args，title 是给人看的，rawOutput 是对象
+  it('reads the tool name and output agy 1.5.18 sends', () => {
+    const path = '/private/tmp/w/note.txt';
+    const read = reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call_1',
+      name: 'read_file',
+      args: { Path: path },
+      status: 'in_progress',
+      kind: 'read',
+      title: 'File note.txt',
+      locations: [{ path }],
+      rawInput: { Path: path },
+    });
+    expect(read.effects[0]).toMatchObject({ name: 'read_file', args: { path } });
+    const started = reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call_2',
+      name: 'run_command',
+      status: 'in_progress',
+      kind: 'execute',
+      title: 'echo ok',
+      rawInput: { CommandLine: 'echo ok', WaitMsBeforeAsync: 5000, toolSummary: 'Echo' },
+    });
+    const done = reduceAgyUpdate(started.state, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'call_2',
+      name: 'run_command',
+      status: 'completed',
+      kind: 'execute',
+      title: 'echo ok',
+      rawInput: { CommandLine: 'echo ok', WaitMsBeforeAsync: 5000, toolSummary: 'Echo' },
+      rawOutput: { output: 'Command exited with code 0.\n\nCommand output:\nok\r\n', exit_code: 0 },
+      content: [{ type: 'content', content: { type: 'text', text: 'from content' } }],
+    });
+    expect(started.effects[0]).toMatchObject({ name: 'run_command', args: { command: 'echo ok' } });
+    expect(done.state.tools[0]).toMatchObject({ name: 'run_command', status: 'completed' });
+    expect(done.state.tools[0]?.output).toContain('Command output:\nok');
+  });
+
+  it('drops the agy-side card of an Enso host MCP tool', () => {
+    const update = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call_3',
+      name: 'mcp_enso_ask_user',
+      status: 'in_progress',
+      kind: 'other',
+      title: 'Run mcp_enso_ask_user',
+      rawInput: { question: 'why', toolSummary: 'Ask' },
+    };
+    const reduced = reduceAgyUpdate(emptyTranslatorState(), update);
+    expect(reduced.effects).toEqual([]);
+    expect(reduced.state.tools).toEqual([]);
+    const other = reduceAgyUpdate(emptyTranslatorState(), {
+      ...update,
+      name: 'mcp_github_list',
+      title: 'Run mcp_github_list',
+    });
+    expect(other.effects[0]).toMatchObject({ name: 'mcp_github_list' });
+  });
 });

@@ -80,7 +80,7 @@ describe('agy session against the fake CLI', () => {
     expect(transcript).not.toContain('<skills>');
     expect(transcript).not.toContain('injected custom message');
     expect(transcript).toContain('fix it');
-    expect(transcript).toContain('"optionId":"once"');
+    expect(transcript).toContain('"optionId":"allow"');
     expect(transcript).toContain('file body');
 
     const controller = new AbortController();
@@ -101,6 +101,39 @@ describe('agy session against the fake CLI', () => {
     });
     expect(cancelled.stopReason).toBe('aborted');
     expect(readFileSync(log, 'utf8')).toContain('"method":"session/cancel"');
+  });
+
+  it('sets the thinking level once, not on every turn', async () => {
+    const dir = tempDir();
+    const log = path.join(dir, 'log');
+    const session = await openAgySession({
+      command: process.execPath,
+      args: [fakePath],
+      cwd: dir,
+      env: { ...process.env, FAKE_AGY_LOG: log },
+      clientVersion: '0.3.14',
+      readRoots: [dir],
+      timeoutMs: 8_000,
+    });
+    openSessions.push(session);
+    const turn = (text: string) =>
+      session.turn({
+        messages: [{ role: 'user', content: text }],
+        planMode: false,
+        approvalMode: 'full',
+        workspaceRoot: dir,
+        modelId: 'default',
+        thinkingLevel: 'off',
+        modelLabel: 'default',
+        ask: async () => 'allow',
+      });
+    await turn('one');
+    await turn('two');
+    const sets = readFileSync(log, 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"method":"session/set_config_option"'));
+    expect(sets).toHaveLength(1);
+    expect(sets[0]).toContain('"value":"low"');
   });
 
   it('resumes a saved session id and reports signed-out without authenticate', async () => {
