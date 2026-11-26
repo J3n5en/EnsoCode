@@ -1,6 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
+import { getModel } from '@earendil-works/pi-ai/compat';
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -47,7 +51,44 @@ function result(text: string): AgyTurnResult {
   };
 }
 
-async function setup(ensoSessionId = 'enso-1') {
+interface SetupOptions {
+  /** 先用 pi 内置模型开会话，之后再切到 agy */
+  startOn?: 'agy' | 'other';
+  plans?: AssistantMessage[];
+}
+
+const other = getModel('openai', 'gpt-4o-mini');
+if (!other) throw new Error('Test model is not available in the bundled Pi catalog.');
+
+function reply(content: AssistantMessage['content']): AssistantMessage {
+  return {
+    role: 'assistant',
+    content,
+    api: other!.api,
+    provider: other!.provider,
+    model: other!.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: content.some((part) => part.type === 'toolCall') ? 'toolUse' : 'stop',
+    timestamp: Date.now(),
+  };
+}
+
+const lookup = {
+  name: 'lookup',
+  label: 'lookup',
+  description: 'lookup',
+  parameters: { type: 'object', properties: {} },
+  execute: async () => ({ content: [{ type: 'text', text: 'lookup-OUTPUT' }], details: undefined }),
+} as unknown as ToolDefinition;
+
+async function setup(ensoSessionId = 'enso-1', options: SetupOptions = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'agy-bridge-'));
   const cwd = path.join(root, 'workspace');
   const agentDir = path.join(root, 'agent');
@@ -60,12 +101,19 @@ async function setup(ensoSessionId = 'enso-1') {
   });
   registerAgyProvider(runtime, []);
   vi.spyOn(runtime, 'hasConfiguredAuth').mockReturnValue(true);
-  vi.spyOn(runtime, 'streamSimple').mockImplementation(
-    (model, context, options) =>
-      streamAgy(model as never, context as never, options as never) as never
-  );
-  const model = runtime.getModel(AGY_PROVIDER_ID, 'default');
-  if (!model) throw new Error('agy model missing');
+  const plans = [...(options.plans ?? [])];
+  vi.spyOn(runtime, 'streamSimple').mockImplementation((model, context, streamOptions) => {
+    if (model.provider === AGY_PROVIDER_ID) {
+      return streamAgy(model as never, context as never, streamOptions as never) as never;
+    }
+    const stream = createAssistantMessageEventStream();
+    const message = plans.shift() ?? reply([{ type: 'text', text: 'unexpected' }]);
+    stream.push({ type: 'done', reason: message.stopReason as 'stop', message });
+    return stream;
+  });
+  const agyModel = runtime.getModel(AGY_PROVIDER_ID, 'default');
+  if (!agyModel) throw new Error('agy model missing');
+  const model = options.startOn === 'other' ? other : agyModel;
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -92,7 +140,7 @@ async function setup(ensoSessionId = 'enso-1') {
       compaction: { enabled: false },
     }),
     noTools: 'builtin',
-    customTools: [],
+    customTools: [lookup],
   });
   attachAgyBridgeToSession(session, {
     ensoSessionId,
@@ -117,7 +165,7 @@ async function setup(ensoSessionId = 'enso-1') {
     dispose();
     rmSync(root, { recursive: true, force: true });
   });
-  return { session, manager, dispose };
+  return { session, manager, dispose, agyModel };
 }
 
 function readTurn(input: AgyTurnInput): Promise<AgyTurnResult> {
@@ -244,4 +292,33 @@ it('leaves tool calls of other providers to pi', async () => {
   (session as unknown as { _emit(event: unknown): void })._emit({ type: 'message_end', message });
   expect(message.content).toHaveLength(1);
   expect(session.messages.length).toBe(before);
+});
+
+it('leaves a session on another model alone, then runs agy after a mid-session switch', async () => {
+  setAgySessionOpener(async () => fakeAgy(readTurn));
+  const { session, manager, agyModel } = await setup('enso-switch', {
+    startOn: 'other',
+    plans: [
+      reply([{ type: 'toolCall', id: 't1', name: 'lookup', arguments: {} }]),
+      reply([{ type: 'text', text: 'ok' }]),
+    ],
+  });
+  await session.prompt('first');
+  await session.waitForIdle();
+  await session.setModel(agyModel);
+  await session.prompt('read a.ts');
+  await session.waitForIdle();
+  const file = manager.getSessionFile();
+  if (!file) throw new Error('no session file');
+  expect(shape(persisted(file))).toEqual([
+    'user',
+    'assistant[toolCall:t1]',
+    'toolResult:t1',
+    'assistant[text:ok]',
+    'user',
+    'assistant[text:Reading.,toolCall:read-1]',
+    'toolResult:read-1',
+    'assistant[text:Done.]',
+  ]);
+  expect(JSON.stringify(persisted(file)[2])).toContain('lookup-OUTPUT');
 });
