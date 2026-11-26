@@ -76,12 +76,7 @@ import { useOpenFolderRequests } from '@/hooks/useOpenFolderRequests';
 import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewport';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
-import {
-  effectiveKeybindings,
-  eventToBinding,
-  isEventInSidePanel,
-  menuAlreadyHandled,
-} from '@/lib/keybindings';
+import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
 import { bindMainSettingsRequests } from '@/lib/mainSettingsRequests';
 import { easeOutLayout, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
@@ -400,7 +395,6 @@ export default function App() {
       }
       if (pressed === bindings['toggle-sidebar']) {
         e.preventDefault();
-        if (menuAlreadyHandled(e, pressed)) return;
         toggleSidebar();
       } else if (pressed === bindings['open-secretary']) {
         if (useSettingsStore.getState().secretaryEnabled) {

@@ -33,7 +33,7 @@ describe('macAppMenuTemplate', () => {
     ]);
   });
 
-  it('View 菜单有显示/隐藏侧边栏，加速键 ⌘B，点击通知本机主界面切换', () => {
+  it('View 菜单有显示/隐藏侧边栏，点击通知本机主界面切换；不带加速键（⌘B 由渲染层统一处理）', () => {
     const view = macAppMenuTemplate('zh').find((menu) => menu.label === 'View');
     const items = view?.submenu as {
       label?: string;
@@ -44,7 +44,7 @@ describe('macAppMenuTemplate', () => {
     }[];
     const sidebar = items.find((item) => item.label === '显示/隐藏侧边栏');
     expect(sidebar).toBeDefined();
-    expect(sidebar?.accelerator).toBe('CmdOrCtrl+B');
+    expect(sidebar?.accelerator).toBeUndefined();
     expect(items.indexOf(sidebar ?? {})).toBe(0);
     expect(items[1]).toEqual({ type: 'separator' });
     // 其余仍是 Electron 默认 viewMenu 的条目，只是展开成显式模板
