@@ -170,7 +170,11 @@ export function buildLearnPrompt(): string {
  */
 export function buildLearnFirstMessage(input: { forked: boolean; snapshot: string }): string {
   if (input.forked) {
-    return '以上这段对话就是你要复盘的对象（如果上文没有任何对话记录，说明分叉失败，直接告诉用户无法复盘、建议重试，然后结束）。现在开始：先通读，找出用户纠正信号，然后按流程复盘。';
+    const snapshot = input.snapshot.trim();
+    const fallback = snapshot
+      ? `如果上文没有任何对话记录（分叉未命中），则改用这份文本快照复盘（可能有截断）：\n\n<conversation>\n${snapshot}\n</conversation>`
+      : '如果上文也没有任何对话记录，直接告诉用户无法复盘（对话为空），然后结束。';
+    return `以上这段对话就是你要复盘的对象。${fallback}。现在开始：先通读，找出用户纠正信号，然后按流程复盘。`;
   }
   const snapshot = input.snapshot.trim();
   if (!snapshot) {
