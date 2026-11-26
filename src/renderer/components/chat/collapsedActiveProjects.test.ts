@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collapsedActiveProjects, openCollapsedActiveProject } from './collapsedActiveProjects';
+import {
+  collapsedActiveProjects,
+  collapsedProjectSessions,
+  openCollapsedActiveProject,
+} from './collapsedActiveProjects';
 
 const projects = [
   { id: 'p1', kind: 'local' as const, name: 'Alpha' },
@@ -19,6 +23,64 @@ const conv = (
   title: extra?.title as string | undefined,
   messages: [{ timestamp: lastActive }],
   ...extra,
+});
+
+describe('collapsedProjectSessions', () => {
+  it('列出项目全部未归档会话，最近活跃在前，并算出状态 tone', () => {
+    const sessions = collapsedProjectSessions('p1', {
+      running: conv('p1', 1, 50, { title: 'live', status: 'running' }),
+      idle: conv('p1', 2, 10, { title: 'quiet', status: 'idle' }),
+      waiting: conv('p1', 3, 30, {
+        title: 'asked',
+        status: 'idle',
+        pendingAsks: [{ requestId: 'a1' }],
+      }),
+      unreadOne: conv('p1', 4, 40, { title: 'done', status: 'idle', unread: true }),
+      archivedOne: conv('p1', 5, 90, { title: 'gone', status: 'running', archived: true }),
+      other: conv('p2', 6, 99, { title: 'not mine', status: 'running' }),
+    });
+    expect(sessions.map((row) => row.conversationId)).toEqual([
+      'running',
+      'unreadOne',
+      'waiting',
+      'idle',
+    ]);
+    expect(sessions.map((row) => row.tone)).toEqual(['running', 'unread', 'waiting', 'idle']);
+  });
+
+  it('coworker 子会话带 parentId；排队失败 tone 为 failed；未读只在不运行时出现', () => {
+    const sessions = collapsedProjectSessions('p1', {
+      parent: conv('p1', 1, 10, { title: 'parent', status: 'idle' }),
+      child: conv('p1', 2, 60, {
+        title: 'child',
+        status: 'running',
+        parentId: 'parent',
+      }),
+      broken: conv('p1', 3, 20, {
+        title: 'broken',
+        status: 'idle',
+        queued: true,
+        queueFailed: 'spawn failed',
+      }),
+    });
+    const child = sessions.find((row) => row.conversationId === 'child');
+    expect(child?.parentId).toBe('parent');
+    const broken = sessions.find((row) => row.conversationId === 'broken');
+    expect(broken?.tone).toBe('failed');
+  });
+
+  it('queued 会话 tone 为 queued；带提醒的空闲会话 tone 为 reminder', () => {
+    const sessions = collapsedProjectSessions(
+      'p1',
+      {
+        q: conv('p1', 1, 30, { title: 'q', status: 'idle', queued: true }),
+        r: conv('p1', 2, 20, { title: 'r', status: 'idle' }),
+      },
+      { pendingReminderIds: new Set(['r']) }
+    );
+    expect(sessions.find((row) => row.conversationId === 'q')?.tone).toBe('queued');
+    expect(sessions.find((row) => row.conversationId === 'r')?.tone).toBe('reminder');
+  });
 });
 
 describe('collapsedActiveProjects', () => {

@@ -83,7 +83,9 @@ import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { matchesQuery } from '@/components/chat/chatSearch';
 import {
   type CollapsedActiveProject,
+  type CollapsedProjectSession,
   collapsedActiveProjects,
+  collapsedProjectSessions,
   openCollapsedActiveProject,
 } from '@/components/chat/collapsedActiveProjects';
 import { insertComposerMention } from '@/components/chat/composerMentionBridge';
@@ -332,6 +334,20 @@ export function Sidebar({
         selectConversation,
         selectTab,
       });
+    },
+    [conversations, selectConversation, selectTab]
+  );
+  const openCollapsedSession = useCallback(
+    (session: CollapsedProjectSession) => {
+      openCollapsedActiveProject(
+        {
+          projectId: '',
+          conversationId: session.conversationId,
+          ...(session.parentId ? { parentId: session.parentId } : {}),
+          title: session.title,
+        },
+        { conversations, selectConversation, selectTab }
+      );
     },
     [conversations, selectConversation, selectTab]
   );
@@ -844,6 +860,18 @@ export function Sidebar({
     activeRetention,
     pendingReminderIds
   );
+  // 折叠 rail 悬停浮层：各进行中项目的全部未归档会话（含 tone），最近活跃在前
+  // pendingReminderIds 每次渲染重建，useMemo 没有收益；仅折叠且有进行中项目时才计算
+  const collapsedSessionsByProject: Record<string, readonly CollapsedProjectSession[]> = (() => {
+    if (!collapsed || collapsedRunningProjects.length === 0) return {};
+    const map: Record<string, readonly CollapsedProjectSession[]> = {};
+    for (const entry of collapsedRunningProjects) {
+      map[entry.projectId] = collapsedProjectSessions(entry.projectId, conversations, {
+        pendingReminderIds,
+      });
+    }
+    return map;
+  })();
   const activeHoverTitle = (id: string) => {
     const projectName = hoverProjectName(projects, conversations[id].projectId);
     const remaining = activeRetentionRemainingMs(
@@ -1152,7 +1180,9 @@ export function Sidebar({
           <CollapsedActiveProjectRail
             entries={collapsedRunningProjects}
             projects={projects}
+            sessionsByProject={collapsedSessionsByProject}
             onOpen={openCollapsedProject}
+            onOpenSession={openCollapsedSession}
           />
           <div className="flex-1" />
           {phoneEntry === 'devices' && <PhoneDeviceChip compact />}
