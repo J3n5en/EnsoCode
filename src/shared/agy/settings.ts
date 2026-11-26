@@ -13,8 +13,11 @@ export function parseAgySettings(value: unknown): AgySettings {
   };
 }
 
+/** 与 worker 的 agyCatalog 一致：默认项（不设模型、用 agy 自己的默认）始终在，探测到的模型排在后面 */
 export function agySettingsProvider(models: readonly AgyModelOption[]): ModelProvider {
-  const list = models.length > 0 ? models : [{ id: AGY_DEFAULT_MODEL_ID, name: AGY_PROVIDER_NAME }];
+  const list = models.some((model) => model.id === AGY_DEFAULT_MODEL_ID)
+    ? models
+    : [{ id: AGY_DEFAULT_MODEL_ID, name: AGY_PROVIDER_NAME }, ...models];
   return {
     id: AGY_PROVIDER_ID,
     name: AGY_PROVIDER_NAME,
