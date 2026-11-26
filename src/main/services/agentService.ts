@@ -205,6 +205,8 @@ interface RunRecord {
     attempt: number;
     lastError: string;
   };
+  /** 已进入等待时给父会话发过通知：探测失败重进等待不再重复通知 */
+  upstreamWaitNotified?: boolean;
   /** 本次 retry 由上游健康闸门自动唤醒，非手动 resume */
   upstreamResuming?: boolean;
 }
@@ -1029,6 +1031,7 @@ export class AgentService implements AgentServiceContract {
             ...(classified.resetAt !== undefined ? { resetAt: classified.resetAt } : {}),
           });
           if (decision.action === 'wait') {
+            const firstWait = !active.upstreamWaitNotified;
             active.upstreamWaiting = {
               provider: decision.waiter.provider,
               errorKind: decision.waiter.errorKind,
@@ -1038,11 +1041,23 @@ export class AgentService implements AgentServiceContract {
             };
             active.upstreamResuming = false;
             this.pushProgress(active.context.owner.ownerId);
+            // 首次进入等待立刻让父会话知情：否则它会傻等一个短期不会来的完成通知。
+            // 非紧急：不是终态，不需要马上打断父会话手头的工作
+            if (firstWait) {
+              active.upstreamWaitNotified = true;
+              this.notifyUpstreamWait(agent, active);
+            }
             return;
           }
           active.upstreamWaiting = undefined;
           active.upstreamResuming = false;
-          this.settleRun(agent, active, 'failed', event.error, true);
+          this.settleRun(
+            agent,
+            active,
+            'failed',
+            this.exhaustedErrorText(event.error, decision.attempt),
+            true
+          );
           return;
         }
         // 只有可恢复的中断才停放：瞬态/配额错误、应用退出打断；400 / 鉴权 / IP 封禁照旧关闭
@@ -1758,6 +1773,36 @@ export class AgentService implements AgentServiceContract {
     this.options.upstreamRecovery?.cancel(run.agentId);
   }
 
+  /** 首次进入上游等待的通知：父会话知情后可以继续别的工作，不必等也不必轮询 */
+  private notifyUpstreamWait(agent: AgentRecord, run: RunRecord): void {
+    if (!run.upstreamWaiting) return;
+    const title = agent.title;
+    const kind =
+      run.upstreamWaiting.errorKind === 'quota'
+        ? 'upstream quota exhaustion (insufficient quota / usage limit)'
+        : 'a transient upstream error';
+    this.options.notify?.(
+      run.context,
+      [
+        `Subagent "${title}" (agentId ${run.agentId}, runId ${run.runId}) hit ${kind} and cannot continue right now:`,
+        run.upstreamWaiting.lastError,
+        '',
+        'It is NOT finished and NOT failed: it is waiting for the upstream to recover and will resume automatically — no completion notification will arrive until then. ' +
+          'Do not wait or poll for it: continue other work. If recovery keeps failing you will get a failure notification; if it succeeds you will get the completion notification. ' +
+          'To give up on it instead, use subagent stop with its runId.',
+      ].join('\n'),
+      false
+    );
+  }
+
+  /** 自动恢复窗口耗尽后的失败文案：说清不是第一次失败，是自动重试已经放弃 */
+  private exhaustedErrorText(error: string, attempts: number): string {
+    return (
+      `${error}\n\n` +
+      `Automatic recovery gave up after ${attempts} attempts over the retry window: the upstream quota/transient error did not clear in time.`
+    );
+  }
+
   private finishRun(run: RunRecord, status: AgentRunStatus, error?: string): void {
     if (TERMINAL_RUN_STATUSES.has(run.status)) return;
     this.clearUpstreamWait(run);
@@ -1927,6 +1972,16 @@ export class AgentService implements AgentServiceContract {
       elapsedMs: Math.max(0, this.now() - (run.startedAt ?? run.createdAt)),
       ...(run.activity ? { activity: run.activity } : {}),
       ...(text ? { text } : {}),
+      ...(run.upstreamWaiting
+        ? {
+            upstreamWaiting: {
+              provider: run.upstreamWaiting.provider,
+              errorKind: run.upstreamWaiting.errorKind,
+              nextAt: run.upstreamWaiting.nextAt,
+              lastError: run.upstreamWaiting.lastError,
+            },
+          }
+        : {}),
     };
   }
 

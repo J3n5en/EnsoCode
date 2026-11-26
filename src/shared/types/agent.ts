@@ -738,6 +738,14 @@ export interface AgentRunProgress {
   activity?: AgentRunActivity;
   /** 最近一条回复的末尾（仅界面预览；给模型的回执不带） */
   text?: string;
+  /** 因上游瞬态/配额故障正在等待自动恢复：Run 没收口，恢复后会自动续跑 */
+  upstreamWaiting?: {
+    provider: string;
+    errorKind: 'transient' | 'quota';
+    /** 下一次自动探测的时间（epoch ms） */
+    nextAt: number;
+    lastError: string;
+  };
 }
 
 export type AgentRunActivity =
