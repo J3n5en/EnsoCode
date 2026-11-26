@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { getModel } from '@earendil-works/pi-ai/compat';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
@@ -17,11 +18,13 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApprovalGate } from '../approval';
+import { createTodoTool } from '../todo';
 import { type AcpHttpMcpServer, closeHostMcp } from './hostMcp';
 import { registerAgyProvider, streamAgy } from './provider';
 import { closeAllAgySessions } from './registry';
 import { setAgySessionOpener } from './runtimeHost';
 import type { AgyHostMcp, AgySession, AgyTurnInput, AgyTurnResult } from './session';
+import { openAgySession } from './session';
 import { attachAgyBridgeToSession } from './sessionBridge';
 
 const cleanups: Array<() => void> = [];
@@ -61,6 +64,7 @@ interface SetupOptions {
   startOn?: 'agy' | 'other';
   plans?: AssistantMessage[];
   tools?: ToolDefinition[];
+  gate?: ApprovalGate;
 }
 
 const other = getModel('openai', 'gpt-4o-mini');
@@ -153,11 +157,13 @@ async function setup(ensoSessionId = 'enso-1', options: SetupOptions = {}) {
     cwd,
     sessionDir,
     clientVersion: '0.0.0',
-    gate: new ApprovalGate(
-      'full',
-      () => {},
-      () => {}
-    ),
+    gate:
+      options.gate ??
+      new ApprovalGate(
+        'full',
+        () => {},
+        () => {}
+      ),
     planActive: () => false,
     readRoots: () => [cwd],
   });
@@ -447,3 +453,60 @@ it('reopens agy with resume when the Enso tool set changes, so it lists the new 
     { tools: ['lookup'], resume: 'agy-1' },
   ]);
 });
+
+// 真机：AGY_LIVE=1 pnpm vitest run src/agent/agy/sessionBridge.session.test.ts -t live
+// 一条 prompt。supervised + 无人值守自动拒绝：只有我们自己的 MCP 工具会被放行。
+it.runIf(process.env.AGY_LIVE === '1')(
+  'live: agy calls the Enso todo tool over Host MCP, one Enso card, consistent jsonl',
+  async () => {
+    const out = process.env.AGY_LIVE_OUT || path.join(tmpdir(), 'agy-live');
+    mkdirSync(out, { recursive: true });
+    const wire = path.join(out, 'wire-bridge-todo.jsonl');
+    writeFileSync(wire, '');
+    const tap = fileURLToPath(new URL('./fixtures/wireTap.mjs', import.meta.url));
+    setAgySessionOpener((options) =>
+      openAgySession({
+        ...options,
+        command: process.execPath,
+        args: [tap, wire, options.command, ...options.args],
+        timeoutMs: 90_000,
+      })
+    );
+    const gate = new ApprovalGate(
+      'supervised',
+      () => {},
+      () => {},
+      { autoReject: true }
+    );
+    const { session, manager } = await setup('enso-live-todo', {
+      tools: [createTodoTool()],
+      gate,
+    });
+    const events: Array<{ type: string; toolName?: unknown; toolCallId?: unknown }> = [];
+    session.subscribe((event) => {
+      if (event.type.startsWith('tool_execution'))
+        events.push(event as unknown as (typeof events)[number]);
+    });
+    await session.prompt(
+      'Use the todo tool once to record exactly two items: "write tests" (in_progress) and "ship" (pending). Then reply with the single word: done'
+    );
+    await session.waitForIdle();
+    const file = manager.getSessionFile();
+    if (!file) throw new Error('no session file');
+    const rows = persisted(file);
+    writeFileSync(
+      path.join(out, 'bridge-todo.json'),
+      `${JSON.stringify({ events, shape: shape(rows), rows }, null, 2)}\n`
+    );
+    const starts = events.filter((event) => event.type === 'tool_execution_start');
+    expect(starts.map((event) => event.toolName)).toEqual(['todo']);
+    expect(JSON.stringify(rows)).not.toContain('mcp_enso_');
+    const result = rows.find((row) => (row as Row).role === 'toolResult') as
+      | (Row & { toolName?: string; details?: { todos?: unknown[] } })
+      | undefined;
+    expect(result?.toolName).toBe('todo');
+    expect(result?.details?.todos).toHaveLength(2);
+    expect(rows.filter((row) => (row as Row).role === 'toolResult')).toHaveLength(1);
+  },
+  300_000
+);
