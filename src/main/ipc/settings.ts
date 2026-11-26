@@ -113,6 +113,7 @@ export const SETTINGS_STATE_FIELDS = [
   'autoCollapseTurns',
   'quoteSelectionButton',
   'learnButtonEnabled',
+  'composerToolbar',
   'collapseCompletedActivity',
   'collapseLiveActivity',
   'liveActivityFoldDelaySec',

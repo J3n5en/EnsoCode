@@ -64,6 +64,13 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
       'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running',
   },
   {
+    id: 'appearance.composerToolbar',
+    category: 'appearance',
+    title: 'Composer toolbar buttons',
+    description:
+      'Pin buttons with the pin icon in the composer More menu; drag the handles there to reorder. Unpinned buttons fold into the More menu',
+  },
+  {
     id: 'appearance.enable-custom-background',
     category: 'appearance',
     title: 'Enable custom background image',

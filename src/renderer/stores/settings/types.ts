@@ -1,5 +1,6 @@
 import type { ChatTypography } from '@shared/chatTypography';
 import type { CompactStrategy } from '@shared/compactStrategy';
+import type { ComposerToolbarSettings } from '@shared/composerToolbar';
 import type {
   DefaultModelNotice,
   DefaultModelRef,
@@ -248,6 +249,8 @@ export interface SettingsState {
   quoteSelectionButton: boolean;
   /** composer 工具行显示「复盘」按钮，点击开旁路复盘会话；缺省 true */
   learnButtonEnabled: boolean;
+  /** composer 工具行按钮的 pin/排序；默认 preset/分支/权限/模型 pin 在外面，其余折叠进「更多」popover */
+  composerToolbar: ComposerToolbarSettings;
   /** 回答完成后把连续的思考与工具调用折成一行过程摘要 */
   collapseCompletedActivity: boolean;
   /** 这一轮还在跑时，工具和思考都结束后再把尾段折成一行；缺省关 */
@@ -473,6 +476,7 @@ export interface SettingsState {
   setAutoCollapseTurns: (value: boolean) => void;
   setQuoteSelectionButton: (value: boolean) => void;
   setLearnButtonEnabled: (value: boolean) => void;
+  setComposerToolbar: (value: ComposerToolbarSettings) => void;
   setCollapseCompletedActivity: (value: boolean) => void;
   setCollapseLiveActivity: (value: boolean) => void;
   setLiveActivityFoldDelaySec: (value: number) => void;

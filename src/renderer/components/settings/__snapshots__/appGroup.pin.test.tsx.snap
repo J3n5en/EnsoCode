@@ -2171,6 +2171,7 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "appearance.collapseCompletedActivity",
   "appearance.collapseLiveActivity",
   "appearance.compactReadOnlyTools",
+  "appearance.composerToolbar",
   "appearance.enable-custom-background",
   "appearance.expandLiveEdits",
   "appearance.expandLiveReasoning",

@@ -354,6 +354,13 @@ export function ConversationSettings({ revealRowId }: { revealRowId?: string | n
           checked={learnButtonEnabled}
           onChange={setLearnButtonEnabled}
         />
+        <SettingsRow
+          rowId="appearance.composerToolbar"
+          label={t('Composer toolbar buttons')}
+          description={t(
+            'Pin buttons with the pin icon in the composer More menu; drag the handles there to reorder. Unpinned buttons fold into the More menu'
+          )}
+        />
         <Toggle
           rowId="appearance.collapseCompletedActivity"
           label={t('Collapse activity after reply')}
