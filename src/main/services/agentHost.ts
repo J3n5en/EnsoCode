@@ -3549,6 +3549,8 @@ export function customProvidersForWorker(): WorkerCustomProvider[] {
     const provider = item as Partial<ModelProvider>;
     if (provider.oauthAccountKey) continue;
     if (typeof provider.id !== 'string' || provider.id.length === 0) continue;
+    // agy cli 是 worker 内置 provider，设置里的条目只给选择器用，不能当自定义 API 供应商注册
+    if (provider.id === AGY_PROVIDER_ID) continue;
     if (typeof provider.name !== 'string') continue;
     if (
       typeof provider.api !== 'string' ||
