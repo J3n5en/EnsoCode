@@ -3532,6 +3532,7 @@ export const zhTranslations: Record<string, string> = {
   'Waiting on a background task': '等后台任务',
   'Waiting for reminder': '等提醒',
   'Waiting for reminder · {{time}}': '等提醒 · {{time}}',
+  'Waiting for reminder ×{{count}}': '等提醒 ×{{count}}',
   'due now': '即将到点',
   '<1m': '不足 1 分钟',
   'in {{minutes}}m': '{{minutes}} 分钟后',

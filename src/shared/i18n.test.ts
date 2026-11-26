@@ -191,6 +191,8 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Child ready profile or model mismatch.',
   // SecretaryRunningList.BADGE_STYLE + sessionFeed 等提醒文案
   'Waiting for reminder',
+  'Waiting for reminder · {{time}}',
+  'Waiting for reminder ×{{count}}',
 ] as const;
 
 describe('normalizeLocale', () => {
