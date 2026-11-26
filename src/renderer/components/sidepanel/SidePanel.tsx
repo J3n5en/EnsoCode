@@ -841,6 +841,13 @@ function Watermark(props: IWatermarkPanelProps) {
       ? s.newTabMenuPrompt.at
       : null
   );
+  // dock 隐藏（切会话/收起面板）时整个水印不渲染：
+  // 菜单弹层走 Portal 挂在 body 上，display:none 的容器关不住它——
+  // 锚点 rect 归零后弹层漂到视口左上角、高度也不再受裁剪限制，
+  // 再开第二个菜单就是用户看到的「一大一小双 popover」。卸载即关。
+  const isActiveConversation = useSessionsStore((s) => s.activeId === conversationId);
+  const panelShown = useSidePanelShown(conversationId);
+  if (!isActiveConversation || !panelShown) return null;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="enso-side-dock-header flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
