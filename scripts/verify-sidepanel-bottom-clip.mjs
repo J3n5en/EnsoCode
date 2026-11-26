@@ -693,6 +693,19 @@ async function main() {
       { timeout: 3_000, interval: 80, label: '点选后出现 terminal tab' }
     );
     await sleep(400);
+    // 顶栏行右上角的 + / 全屏 / 收起平时收纳成「…」：像真实用户一样先 hover「…」把按钮组展开
+    const dots = await cdp.eval(`(() => {
+      const group = [...document.querySelectorAll('[data-side-actions]')].find((node) => node.isConnected && node.getBoundingClientRect().width > 0);
+      const buttons = group ? [...group.querySelectorAll('button')] : [];
+      const toggle = buttons[buttons.length - 1];
+      if (!toggle) return null;
+      const rect = toggle.getBoundingClientRect();
+      return rect.width > 0 ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;
+    })()`);
+    if (dots) {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dots.x, y: dots.y });
+      await sleep(250);
+    }
     // 点 dock 头部的 compact「+」按钮（aria-label New tab / 新建标签页）
     const plusPoint = await cdp.eval(`(() => {
       const buttons = [...document.querySelectorAll('.enso-side-dock button, [data-enso="side-panel"] button')];
@@ -708,6 +721,12 @@ async function main() {
     })()`);
     if (!plusPoint) throw new Error('找不到 compact + 按钮');
     log(`compact + 按钮 @${JSON.stringify(plusPoint)}`);
+    if (dots) {
+      // 光标从「…」沿按钮组平移到 +，途中不离开按钮组
+      for (let x = dots.x; x >= plusPoint.x; x -= 4) {
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y: plusPoint.y });
+      }
+    }
     await clickAt(cdp, plusPoint);
     await waitFor(
       async () => {
