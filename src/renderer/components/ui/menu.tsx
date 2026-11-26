@@ -63,7 +63,9 @@ function MenuPopup({
           data-slot="menu-popup"
           {...props}
         >
-          <div className="max-h-(--available-height) w-full overflow-y-auto p-1.5">{children}</div>
+          <div className="max-h-[min(var(--available-height,100vh),calc(100vh-16px))] w-full overflow-y-auto p-1.5">
+            {children}
+          </div>
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>

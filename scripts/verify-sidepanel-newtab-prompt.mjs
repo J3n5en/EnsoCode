@@ -690,6 +690,49 @@ async function main() {
     }
     checks.push({ name: '空态展开弹出菜单且至少 4 项', pass: true, items: promptHit.items.length });
 
+    // 回归断言（#607 后续 bug）：弹层只能有一个，且锚定在水印按钮附近而非漂到屏幕左上
+    if (promptMenu.length !== 1) {
+      throw new Error(`展开后出现 ${promptMenu.length} 个弹层 ${JSON.stringify(promptMenu)}`);
+    }
+    if (promptHit.x < 200) {
+      throw new Error(`弹层漂到左侧 x=${promptHit.x} ${JSON.stringify(promptMenu)}`);
+    }
+    checks.push({ name: '展开后弹层唯一且锚定在面板内', pass: true });
+
+    // 菜单开着直接收起面板（快捷键路径，无 backdrop 点击）：弹层必须关掉，不能残留漂移
+    await cdp.eval(`(() => { window.__stores.sidePanel.getState().toggleOpen(); return true; })()`);
+    await waitFor(
+      async () => {
+        const side = await readSide(cdp);
+        return !side.open ? side : null;
+      },
+      { timeout: 4_000, interval: 80, label: '菜单开着时收起面板' }
+    );
+    await sleep(500);
+    const collapsedMenu = await readMenu(cdp);
+    if (collapsedMenu.length !== 0) {
+      throw new Error(`收起面板后弹层残留 ${JSON.stringify(collapsedMenu)}`);
+    }
+    checks.push({ name: '菜单开着收起面板弹层关闭', pass: true });
+
+    // 再展开：prompt 重写，重弹且仍然只有一个
+    await cdp.eval(`(() => { window.__stores.sidePanel.getState().toggleOpen(); return true; })()`);
+    await waitFor(
+      async () => {
+        const side = await readSide(cdp);
+        const menu = await readMenu(cdp);
+        if (side.open && menuOnScreen(menu)) return { side, menu };
+        return null;
+      },
+      { timeout: 4_000, interval: 80, label: '再展开重弹菜单' }
+    );
+    await sleep(300);
+    const reopenedMenu = await readMenu(cdp);
+    if (reopenedMenu.length !== 1) {
+      throw new Error(`再展开后出现 ${reopenedMenu.length} 个弹层 ${JSON.stringify(reopenedMenu)}`);
+    }
+    checks.push({ name: '再展开重弹且弹层唯一', pass: true });
+
     const item = await firstMenuItemPoint(cdp);
     if (!item) throw new Error(`找不到可点的 menu item ${JSON.stringify(promptMenu)}`);
     log(`点击菜单首项 ${item.label} @${Math.round(item.x)},${Math.round(item.y)}`);
