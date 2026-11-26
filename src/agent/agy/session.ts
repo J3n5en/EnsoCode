@@ -18,6 +18,7 @@ import type {
 } from '@shared/agy/types';
 import type { ApprovalMode } from '@shared/types/agentConstants';
 import { AgyRpcError } from './connection';
+import type { AcpHttpMcpServer, HostMcpGrant } from './hostMcp';
 import { startAgyProcess } from './process';
 import {
   configValue,
@@ -57,8 +58,16 @@ export interface AgySession {
   phase(): AgySessionPhase;
   sessionId(): string | undefined;
   resumed: boolean;
+  /** 挂到 Host MCP 上的 Enso 工具名；agy 不支持 HTTP MCP 或没有可挂的工具时为空 */
+  ensoTools: readonly string[];
   turn(input: AgyTurnInput): Promise<AgyTurnResult>;
   close(): Promise<void>;
+}
+
+/** 会话打开时的 Host MCP：要挂的工具名快照，和发 bearer 的入口（只在 agy 接得住时才调用）。 */
+export interface AgyHostMcp {
+  tools: readonly string[];
+  issue(): Promise<HostMcpGrant>;
 }
 
 interface ActiveTurn {
@@ -79,6 +88,7 @@ export async function openAgySession(options: {
   clientVersion: string;
   readRoots: readonly string[];
   resumeSessionId?: string;
+  hostMcp?: AgyHostMcp;
   timeoutMs?: number;
 }): Promise<AgySession> {
   const cwd = realpathSync(options.cwd);
@@ -93,6 +103,8 @@ export async function openAgySession(options: {
   let sentMode: AgyInteractionMode | undefined;
   let sentRuntime: string | undefined;
   let resumed = false;
+  let grant: HostMcpGrant | undefined;
+  let ensoTools: readonly string[] = [];
   const timeout = options.timeoutMs ?? 15_000;
 
   const fail = (message: string) => {
@@ -112,7 +124,7 @@ export async function openAgySession(options: {
   proc.rpc.setRequestHandler(async (method, params) => {
     if (method === 'fs/read_text_file') return readAllowed(params, options.readRoots, active);
     if (method === 'session/request_permission' || method === 'request_permission') {
-      return answerPermission(params, active);
+      return answerPermission(params, active, ensoTools);
     }
     throw new AgyRpcError(-32601, method);
   });
@@ -125,8 +137,23 @@ export async function openAgySession(options: {
     );
     const parsedInit = parseInitialize(init);
     if (!parsedInit) throw new Error('agy initialize returned no version');
-    phase = transitionAgySession(phase, { type: 'initialized', ...parsedInit });
-    const opened = await openProtocolSession(proc.rpc, cwd, options.resumeSessionId, timeout);
+    phase = transitionAgySession(phase, {
+      type: 'initialized',
+      version: parsedInit.version,
+      canAppendSystemPrompt: parsedInit.canAppendSystemPrompt,
+    });
+    const hostMcp = options.hostMcp;
+    if (parsedInit.httpMcp && hostMcp && hostMcp.tools.length > 0) {
+      grant = await hostMcp.issue();
+      ensoTools = [...hostMcp.tools];
+    }
+    const opened = await openProtocolSession(
+      proc.rpc,
+      cwd,
+      options.resumeSessionId,
+      timeout,
+      grant ? [grant.server] : []
+    );
     resumed = opened.resumed;
     const setup = parseSessionSetup(opened.result);
     if (!setup) throw new Error('agy session returned no sessionId');
@@ -152,6 +179,7 @@ export async function openAgySession(options: {
           ? phase.sessionId
           : undefined,
       resumed,
+      ensoTools,
       async turn(input) {
         if (phase.phase !== 'session-ready') throw new Error(`agy session is ${phase.phase}`);
         const sessionId = phase.sessionId;
@@ -215,11 +243,13 @@ export async function openAgySession(options: {
         }
       },
       close: async () => {
+        grant?.revoke();
         phase = transitionAgySession(phase, { type: 'close' });
         await proc.kill();
       },
     };
   } catch (error) {
+    grant?.revoke();
     fail(error instanceof Error ? error.message : String(error));
     await proc.kill();
     throw error;
@@ -241,13 +271,14 @@ async function openProtocolSession(
   rpc: ReturnType<typeof startAgyProcess>['rpc'],
   cwd: string,
   resumeSessionId: string | undefined,
-  timeoutMs: number
+  timeoutMs: number,
+  mcpServers: AcpHttpMcpServer[]
 ) {
   const signal = AbortSignal.timeout(timeoutMs);
   if (!resumeSessionId) {
     return {
       resumed: false,
-      result: await rpc.request('session/new', { cwd, mcpServers: [] }, signal),
+      result: await rpc.request('session/new', { cwd, mcpServers }, signal),
     };
   }
   try {
@@ -255,7 +286,7 @@ async function openProtocolSession(
       resumed: true,
       result: await rpc.request(
         'session/resume',
-        { sessionId: resumeSessionId, cwd, mcpServers: [] },
+        { sessionId: resumeSessionId, cwd, mcpServers },
         signal
       ),
     };
@@ -264,7 +295,7 @@ async function openProtocolSession(
       throw error;
     return {
       resumed: false,
-      result: await rpc.request('session/new', { cwd, mcpServers: [] }, signal),
+      result: await rpc.request('session/new', { cwd, mcpServers }, signal),
     };
   }
 }
@@ -365,13 +396,18 @@ function sliceText(text: string, line: number | undefined, limit: number | undef
   return lines.slice(start, end).join('\n');
 }
 
-async function answerPermission(params: unknown, active: ActiveTurn | undefined) {
+async function answerPermission(
+  params: unknown,
+  active: ActiveTurn | undefined,
+  ensoTools: readonly string[]
+) {
   const request = parsePermissionRequest(params);
   if (!request || !active) return wire({ outcome: 'cancelled' });
   const decided = decidePermission({
     approvalMode: active.approvalMode,
     request,
     workspaceRoot: active.workspaceRoot,
+    ensoTools,
   });
   if (decided.kind === 'selected') return wire({ outcome: 'selected', optionId: decided.optionId });
   const signal = active.signal ?? new AbortController().signal;

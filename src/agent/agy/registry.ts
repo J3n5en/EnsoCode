@@ -14,8 +14,11 @@ export function agySessionFor(
 ): Promise<AgySession> {
   const existing = sessions.get(ensoSessionId);
   if (existing?.key === configKey) return existing.session;
-  if (existing) void existing.session.then((session) => session.close()).catch(() => {});
-  const session = open().catch((error: unknown) => {
+  // 换配置先关旧进程再开新的：新进程会 resume 同一个 agy sessionId，两个进程不能同时占着它
+  const closed = existing
+    ? existing.session.then((session) => session.close()).catch(() => {})
+    : Promise.resolve();
+  const session = closed.then(open).catch((error: unknown) => {
     if (sessions.get(ensoSessionId)?.session === session) sessions.delete(ensoSessionId);
     throw error;
   });

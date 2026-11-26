@@ -1,19 +1,26 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import { type AgentToolResult, runToolCall } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage, JsonObject, ToolCall } from '@earendil-works/pi-ai';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
-import { AGY_API_ID } from '@shared/agy/constants';
+import { AGY_API_ID, AGY_PROVIDER_ID } from '@shared/agy/constants';
+import { hostMcpTools, mcpContent } from '@shared/agy/hostTools';
 import type { AgyToolCard, PromptMessage, TranslatorEffect } from '@shared/agy/types';
 import { emptyUsage } from '@shared/providers/piProviderTypes';
 import type { ApprovalMode } from '@shared/types/agentConstants';
 import type { ApprovalGate } from '../approval';
+import { type HostMcpResult, type HostMcpTool, issueHostMcp } from './hostMcp';
 import { closeAgySession } from './registry';
 import { openBoundAgySession } from './runtimeHost';
-import type { AgyTurnResult } from './session';
+import type { AgyHostMcp, AgyTurnResult } from './session';
 import { readAgySessionId, writeAgySessionId } from './sessionStore';
 
 type SessionEvent = { type: string; [key: string]: unknown };
 type SessionListener = (event: SessionEvent) => void;
 type Part = { type: string; id?: string; [key: string]: unknown };
 type AssistantLike = { role: string; content: Part[]; [key: string]: unknown };
+/** 工具卡。Enso 自己经 Host MCP 执行的那些带上真实结果（含 details），落盘时原样写进 toolResult。 */
+type Card = AgyToolCard & { result?: AgentToolResult<unknown>; isError?: boolean };
 
 export interface AgyTurnHooks {
   messages: readonly PromptMessage[];
@@ -55,12 +62,78 @@ export function attachAgyBridgeToSession(
   const origPrompt = session.prompt.bind(session);
   const origSteer = session.steer.bind(session);
   const origDispose = session.dispose.bind(session);
-  const tools = new Map<string, AgyToolCard>();
+  const tools = new Map<string, Card>();
   const storeFile = `${options.sessionDir}/agy-sessions.json`;
   const resumable = options.resumable !== false;
+  let turn: AgyTurnHooks | undefined;
 
   const emit: SessionListener = (event) => {
     for (const listener of listeners) listener(event);
+  };
+
+  /** agy 经 Host MCP 调本会话的 Enso 工具：走会话自己的工具管线（参数校验、tool_call 钩子、审批包装）。 */
+  const callEnsoTool = async (
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal
+  ): Promise<HostMcpResult> => {
+    const hooks = turn;
+    if (!hooks)
+      return { content: [{ type: 'text', text: 'No EnsoCode turn is running.' }], isError: true };
+    const id = `enso_${randomUUID()}`;
+    tools.set(id, { id, name, status: 'in_progress', args });
+    hooks.onTool({ id, name, args });
+    emit({ type: 'tool_execution_start', toolCallId: id, toolName: name, args });
+    // MCP 的 arguments 来自 JSON 解析，本来就是 JSON 值
+    const toolCall: ToolCall = { type: 'toolCall', id, name, arguments: args as JsonObject };
+    const outcome = await runToolCall(toolCall, {
+      tools: session.agent.state.tools,
+      assistantMessage: issuingMessage(toolCall),
+      context: { messages: session.agent.state.messages, tools: session.agent.state.tools },
+      beforeToolCall: session.agent.beforeToolCall,
+      afterToolCall: session.agent.afterToolCall,
+      signal: hooks.signal ? AbortSignal.any([signal, hooks.signal]) : signal,
+      onUpdate: (partialResult) =>
+        emit({
+          type: 'tool_execution_update',
+          toolCallId: id,
+          toolName: name,
+          args,
+          partialResult,
+        }),
+    });
+    const card = tools.get(id);
+    if (card) {
+      card.status = outcome.isError ? 'failed' : 'completed';
+      card.result = outcome.result;
+      card.isError = outcome.isError;
+    }
+    emit({
+      type: 'tool_execution_end',
+      toolCallId: id,
+      toolName: name,
+      result: outcome.result,
+      isError: outcome.isError,
+    });
+    return { content: mcpContent(outcome.result.content), isError: outcome.isError };
+  };
+
+  const hostMcpFor = (exposed: HostMcpTool[]): AgyHostMcp => {
+    const names = exposed.map((tool) => tool.name);
+    return {
+      tools: names,
+      issue: () =>
+        issueHostMcp({
+          tools: () => exposed,
+          call: (name, args, signal) =>
+            names.includes(name)
+              ? callEnsoTool(name, args, signal)
+              : Promise.resolve({
+                  content: [{ type: 'text', text: `Unknown tool ${name}` }],
+                  isError: true,
+                }),
+        }),
+    };
   };
 
   const bridge: AgySessionBridge = {
@@ -71,31 +144,37 @@ export function attachAgyBridgeToSession(
         readRoots: options.readRoots(),
         clientVersion: options.clientVersion,
         resumeSessionId: resumable ? readAgySessionId(storeFile, options.ensoSessionId) : undefined,
+        hostMcp: hostMcpFor(hostMcpTools(session.agent.state.tools)),
       });
-      const result = await runtime.turn({
-        messages: input.messages,
-        planMode: options.planActive(),
-        approvalMode: options.gate.mode as ApprovalMode,
-        workspaceRoot: options.cwd,
-        modelId: input.modelId,
-        thinkingLevel: session.thinkingLevel,
-        modelLabel: input.modelLabel,
-        signal: input.signal,
-        ask: async (request, signal) => {
-          const answer = await options.gate.ask(
-            request.toolCall.title || request.toolCall.kind || 'agy',
-            request.toolCall.kind === 'execute' ? 'command' : 'file-edit',
-            request.toolCall.title || request.toolCall.toolCallId,
-            signal,
-            request.toolCall.toolCallId
-          );
-          if (answer === 'allow' || answer === 'deny' || answer === 'revise') return answer;
-          if (answer === 'timeout' || answer === 'no-approver' || answer === 'block')
-            return 'block';
-          return 'cancel';
-        },
-        onEvent: (event) => noteTool(event, tools, emit, input),
-      });
+      turn = input;
+      const result = await runtime
+        .turn({
+          messages: input.messages,
+          planMode: options.planActive(),
+          approvalMode: options.gate.mode as ApprovalMode,
+          workspaceRoot: options.cwd,
+          modelId: input.modelId,
+          thinkingLevel: session.thinkingLevel,
+          modelLabel: input.modelLabel,
+          signal: input.signal,
+          ask: async (request, signal) => {
+            const answer = await options.gate.ask(
+              request.toolCall.title || request.toolCall.kind || 'agy',
+              request.toolCall.kind === 'execute' ? 'command' : 'file-edit',
+              request.toolCall.title || request.toolCall.toolCallId,
+              signal,
+              request.toolCall.toolCallId
+            );
+            if (answer === 'allow' || answer === 'deny' || answer === 'revise') return answer;
+            if (answer === 'timeout' || answer === 'no-approver' || answer === 'block')
+              return 'block';
+            return 'cancel';
+          },
+          onEvent: (event) => noteTool(event, tools, emit, input),
+        })
+        .finally(() => {
+          turn = undefined;
+        });
       if (resumable) writeAgySessionId(storeFile, options.ensoSessionId, result.sessionId);
       return result;
     },
@@ -130,7 +209,7 @@ export function attachAgyBridgeToSession(
 
 function noteTool(
   event: TranslatorEffect,
-  tools: Map<string, AgyToolCard>,
+  tools: Map<string, Card>,
   emit: SessionListener,
   input: AgyTurnHooks
 ) {
@@ -190,20 +269,31 @@ function isFinal(status: AgyToolCard['status']): boolean {
   return status === 'completed' || status === 'failed';
 }
 
-function toolResultContent(tool: AgyToolCard) {
+function toolResultContent(tool: Card) {
+  if (tool.result) return { ...tool.result, isError: tool.isError === true };
   const isError = tool.status !== 'completed';
   return { content: [{ type: 'text', text: tool.output ?? tool.status }], isError };
+}
+
+/** runToolCall 要一条「发起这次调用的 assistant」交给钩子；agy 的调用没有，就合成一条。 */
+function issuingMessage(toolCall: ToolCall): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [toolCall],
+    api: AGY_API_ID,
+    provider: AGY_PROVIDER_ID,
+    model: 'agy',
+    usage: emptyUsage(),
+    stopReason: 'toolUse',
+    timestamp: Date.now(),
+  } as AssistantMessage;
 }
 
 /**
  * 把最终 assistant 里的 toolCall 段拆出去：每段「文字… toolCall…」成一条 toolUse assistant，
  * 紧跟各自的 toolResult，插在最终回复前面（内存和会话文件同序）；最终回复只留最后一段文字。
  */
-function settleAgyTools(
-  session: AgentSession,
-  message: unknown,
-  tools: Map<string, AgyToolCard>
-): void {
+function settleAgyTools(session: AgentSession, message: unknown, tools: Map<string, Card>): void {
   const final = message as AssistantLike | undefined;
   if (final?.role !== 'assistant' || final.api !== AGY_API_ID || !Array.isArray(final.content))
     return;
@@ -224,7 +314,7 @@ function settleAgyTools(
     for (const part of segment) {
       if (part.type !== 'toolCall' || !part.id) continue;
       const tool = tools.get(part.id);
-      const fallback: AgyToolCard = {
+      const fallback: Card = {
         id: part.id,
         name: String(part.name ?? 'tool'),
         status: 'pending',
@@ -236,6 +326,7 @@ function settleAgyTools(
         toolCallId: part.id,
         toolName: tool?.name ?? fallback.name,
         content: body.content,
+        ...('details' in body && body.details !== undefined ? { details: body.details } : {}),
         isError: body.isError,
         timestamp: Date.now(),
       });

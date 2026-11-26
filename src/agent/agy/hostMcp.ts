@@ -33,14 +33,17 @@ export interface AcpHttpMcpServer {
   headers: Array<{ name: string; value: string }>;
 }
 
+export interface HostMcpGrant {
+  server: AcpHttpMcpServer;
+  revoke(): void;
+}
+
 const contexts = new Map<string, HostMcpContext>();
 let listening: Promise<number> | undefined;
 let httpServer: HttpServer | undefined;
 
 /** 发一个 bearer token。revoke 后这个 token 的请求一律 401。 */
-export async function issueHostMcp(
-  context: HostMcpContext
-): Promise<{ server: AcpHttpMcpServer; revoke(): void }> {
+export async function issueHostMcp(context: HostMcpContext): Promise<HostMcpGrant> {
   const port = await ensureListening();
   const token = randomBytes(32).toString('base64url');
   contexts.set(token, context);

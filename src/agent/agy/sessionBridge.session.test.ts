@@ -12,19 +12,23 @@ import {
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApprovalGate } from '../approval';
+import { type AcpHttpMcpServer, closeHostMcp } from './hostMcp';
 import { registerAgyProvider, streamAgy } from './provider';
 import { closeAllAgySessions } from './registry';
 import { setAgySessionOpener } from './runtimeHost';
-import type { AgySession, AgyTurnInput, AgyTurnResult } from './session';
+import type { AgyHostMcp, AgySession, AgyTurnInput, AgyTurnResult } from './session';
 import { attachAgyBridgeToSession } from './sessionBridge';
 
 const cleanups: Array<() => void> = [];
 afterEach(async () => {
   setAgySessionOpener(undefined);
   await closeAllAgySessions();
+  await closeHostMcp();
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
 
@@ -35,6 +39,7 @@ function fakeAgy(turn: Turn, onClose?: () => void): AgySession {
     phase: () => ({ phase: 'closed' }),
     sessionId: () => 'agy-1',
     resumed: false,
+    ensoTools: [],
     turn,
     close: async () => onClose?.(),
   };
@@ -55,6 +60,7 @@ interface SetupOptions {
   /** 先用 pi 内置模型开会话，之后再切到 agy */
   startOn?: 'agy' | 'other';
   plans?: AssistantMessage[];
+  tools?: ToolDefinition[];
 }
 
 const other = getModel('openai', 'gpt-4o-mini');
@@ -140,7 +146,7 @@ async function setup(ensoSessionId = 'enso-1', options: SetupOptions = {}) {
       compaction: { enabled: false },
     }),
     noTools: 'builtin',
-    customTools: [lookup],
+    customTools: options.tools ?? [lookup],
   });
   attachAgyBridgeToSession(session, {
     ensoSessionId,
@@ -321,4 +327,123 @@ it('leaves a session on another model alone, then runs agy after a mid-session s
     'assistant[text:Done.]',
   ]);
   expect(JSON.stringify(persisted(file)[2])).toContain('lookup-OUTPUT');
+});
+
+const noteCalls: unknown[] = [];
+const note = {
+  name: 'note',
+  label: 'note',
+  description: 'Keep a note for the user.',
+  parameters: {
+    type: 'object',
+    properties: { text: { type: 'string' } },
+    required: ['text'],
+  },
+  execute: async (_id: string, params: { text: string }) => {
+    noteCalls.push(params);
+    return {
+      content: [{ type: 'text', text: `noted ${params.text}` }],
+      details: { kept: params.text },
+    };
+  },
+} as unknown as ToolDefinition;
+
+async function mcpClient(server: AcpHttpMcpServer) {
+  const client = new Client({ name: 'fake-agy', version: '1.0.0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: {
+        headers: Object.fromEntries(server.headers.map((header) => [header.name, header.value])),
+      },
+    })
+  );
+  return client;
+}
+
+it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with its details', async () => {
+  noteCalls.length = 0;
+  const offered: AgyHostMcp[] = [];
+  const listed: string[] = [];
+  const called: unknown[] = [];
+  let revoked = false;
+  setAgySessionOpener(async (options) => {
+    const hostMcp = options.hostMcp;
+    if (!hostMcp) throw new Error('no host MCP offered');
+    offered.push(hostMcp);
+    const grant = await hostMcp.issue();
+    return {
+      ...fakeAgy(async (input) => {
+        input.onEvent?.({ type: 'text', delta: 'Noting.' });
+        const client = await mcpClient(grant.server);
+        listed.push(...(await client.listTools()).tools.map((tool) => tool.name));
+        called.push(await client.callTool({ name: 'note', arguments: { text: 'milk' } }));
+        await client.close();
+        input.onEvent?.({ type: 'text', delta: 'Done.' });
+        return result('Noting.Done.');
+      }),
+      ensoTools: hostMcp.tools,
+      close: async () => {
+        grant.revoke();
+        revoked = true;
+      },
+    };
+  });
+  const { session, manager, dispose } = await setup('enso-mcp', { tools: [lookup, note] });
+  const cards: string[] = [];
+  session.subscribe((event) => {
+    if (event.type === 'tool_execution_start') cards.push(event.toolName);
+  });
+  await session.prompt('note milk');
+  await session.waitForIdle();
+
+  expect(offered[0]?.tools).toEqual(['lookup', 'note']);
+  expect(listed).toEqual(['lookup', 'note']);
+  expect(noteCalls).toEqual([{ text: 'milk' }]);
+  expect(called).toEqual([{ content: [{ type: 'text', text: 'noted milk' }] }]);
+  expect(cards).toEqual(['note']);
+  const file = manager.getSessionFile();
+  if (!file) throw new Error('no session file');
+  const rows = persisted(file) as Array<Row & { toolName?: string; details?: unknown }>;
+  expect(shape(rows)).toEqual([
+    'user',
+    expect.stringMatching(/^assistant\[text:Noting\.,toolCall:enso_[\w-]+\]$/),
+    expect.stringMatching(/^toolResult:enso_/),
+    'assistant[text:Done.]',
+  ]);
+  const toolCall = (rows[1]!.content as { type: string; name?: string; arguments?: unknown }[])[1];
+  expect(toolCall).toMatchObject({ name: 'note', arguments: { text: 'milk' } });
+  expect(rows[2]).toMatchObject({
+    toolName: 'note',
+    isError: false,
+    details: { kept: 'milk' },
+    content: [{ type: 'text', text: 'noted milk' }],
+  });
+  dispose();
+  await vi.waitFor(() => expect(revoked).toBe(true));
+});
+
+it('reopens agy with resume when the Enso tool set changes, so it lists the new tools', async () => {
+  const opened: Array<{ tools: readonly string[]; resume?: string }> = [];
+  let closed = 0;
+  setAgySessionOpener(async (options) => {
+    opened.push({ tools: options.hostMcp?.tools ?? [], resume: options.resumeSessionId });
+    return fakeAgy(
+      async () => result('ok'),
+      () => (closed += 1)
+    );
+  });
+  const { session } = await setup('enso-hotplug', { tools: [lookup, note] });
+  await session.prompt('one');
+  await session.waitForIdle();
+  await session.prompt('two');
+  await session.waitForIdle();
+  expect(opened).toHaveLength(1);
+  session.setActiveToolsByName(['lookup']);
+  await session.prompt('three');
+  await session.waitForIdle();
+  expect(closed).toBe(1);
+  expect(opened).toEqual([
+    { tools: ['lookup', 'note'], resume: undefined },
+    { tools: ['lookup'], resume: 'agy-1' },
+  ]);
 });

@@ -1,4 +1,8 @@
 import type { AgyConfigOption, AgyModeInfo, AgyPermissionRequest } from '@shared/agy/types';
+import { agyVersionAtLeast } from '@shared/agy/version';
+
+/** agy 1.5.18 不报 mcpCapabilities，但 session/new 里的 HTTP MCP 照样接（见计划文档 Live findings）。 */
+const HTTP_MCP_SINCE = '1.5.18';
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -8,7 +12,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 export function parseInitialize(
   result: unknown
-): { version: string; canAppendSystemPrompt: boolean } | undefined {
+): { version: string; canAppendSystemPrompt: boolean; httpMcp: boolean } | undefined {
   const root = record(result);
   const info = record(root?.agentInfo);
   const version = typeof info?.version === 'string' ? info.version : '';
@@ -16,7 +20,10 @@ export function parseInitialize(
   const capabilities = record(root?.agentCapabilities);
   const meta = record(record(capabilities?._meta)?.antigravity);
   const systemPrompt = record(meta?.systemPrompt);
-  return { version, canAppendSystemPrompt: systemPrompt?.append === true };
+  const httpMcp =
+    record(capabilities?.mcpCapabilities)?.http === true ||
+    agyVersionAtLeast(version, HTTP_MCP_SINCE);
+  return { version, canAppendSystemPrompt: systemPrompt?.append === true, httpMcp };
 }
 
 function selectOptions(value: unknown): AgyConfigOption['options'] {

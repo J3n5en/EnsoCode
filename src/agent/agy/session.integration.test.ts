@@ -163,4 +163,77 @@ describe('agy session against the fake CLI', () => {
     });
     expect(status).toEqual({ status: 'signed-out', version: '1.5.18' });
   });
+
+  it('offers the Enso Host MCP on agy 1.5.18, allows its own tool unasked, and revokes on close', async () => {
+    const dir = tempDir();
+    const log = path.join(dir, 'log');
+    let revoked = 0;
+    const server = {
+      type: 'http' as const,
+      name: 'enso',
+      url: 'http://127.0.0.1:1/mcp',
+      headers: [{ name: 'Authorization', value: 'Bearer t' }],
+    };
+    const session = await openAgySession({
+      command: process.execPath,
+      args: [fakePath],
+      cwd: dir,
+      env: { ...process.env, FAKE_AGY_LOG: log, FAKE_AGY_MCP_PERMISSION: 'todo' },
+      clientVersion: '0.3.14',
+      readRoots: [dir],
+      timeoutMs: 8_000,
+      hostMcp: { tools: ['todo'], issue: async () => ({ server, revoke: () => (revoked += 1) }) },
+    });
+    const asked: string[] = [];
+    await session.turn({
+      messages: [{ role: 'user', content: 'plan' }],
+      planMode: false,
+      approvalMode: 'supervised',
+      workspaceRoot: dir,
+      modelId: 'default',
+      thinkingLevel: 'off',
+      modelLabel: 'default',
+      ask: async (request) => {
+        asked.push(request.toolCall.toolCallId);
+        return 'deny';
+      },
+    });
+    expect(session.ensoTools).toEqual(['todo']);
+    const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+    const opened = lines.find((line) => line.includes('"method":"session/new"'));
+    expect(JSON.parse(opened ?? '{}').params.mcpServers).toEqual([server]);
+    expect(asked).toEqual([]);
+    expect(readFileSync(log, 'utf8')).toContain('"optionId":"allow"');
+    await session.close();
+    expect(revoked).toBe(1);
+  });
+
+  it('offers no MCP server to an agy that cannot take one', async () => {
+    const dir = tempDir();
+    const log = path.join(dir, 'log');
+    let issued = 0;
+    const session = await openAgySession({
+      command: process.execPath,
+      args: [fakePath],
+      cwd: dir,
+      env: { ...process.env, FAKE_AGY_LOG: log, FAKE_AGY_VERSION: '1.5.10' },
+      clientVersion: '0.3.14',
+      readRoots: [dir],
+      timeoutMs: 8_000,
+      hostMcp: {
+        tools: ['todo'],
+        issue: async () => {
+          issued += 1;
+          throw new Error('should not issue');
+        },
+      },
+    });
+    openSessions.push(session);
+    const opened = readFileSync(log, 'utf8')
+      .split('\n')
+      .find((line) => line.includes('"method":"session/new"'));
+    expect(JSON.parse(opened ?? '{}').params.mcpServers).toEqual([]);
+    expect(issued).toBe(0);
+    expect(session.ensoTools).toEqual([]);
+  });
 });
