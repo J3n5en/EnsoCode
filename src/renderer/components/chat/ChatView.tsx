@@ -89,6 +89,7 @@ export function ChatView() {
   const virtualModels = useSettingsStore((state) => state.virtualModels);
   const customAgentTypes = useSettingsStore((state) => state.agentTypes);
   const defaultModel = useSettingsStore((state) => state.defaultModel);
+  const learnButtonEnabled = useSettingsStore((state) => state.learnButtonEnabled);
   const projects = useSettingsStore((state) => state.projects);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const presets = useSettingsStore((state) => state.presets);
@@ -579,7 +580,9 @@ export function ChatView() {
                         useSessionsStore.getState().setThinking(chrome.id, level)
                       }
                     />
-                    {hasMessages && <LearnButton conversationId={chrome.id} />}
+                    {hasMessages && learnButtonEnabled && (
+                      <LearnButton conversationId={chrome.id} />
+                    )}
                   </>
                 )}
                 {chrome.displayedParentId && (

@@ -588,6 +588,19 @@ exports[`应用组设置迁移前后行为一致 > 展开所有折叠子项后�
     "row": "appearance.headerSessionTabs",
   },
   {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "learnButtonEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "appearance.learnButtonEnabled",
+  },
+  {
     "current": {
       "navRailSide": "left",
     },
@@ -1753,6 +1766,19 @@ exports[`应用组设置迁移前后行为一致 > 每个控件的当前值（�
     "row": "appearance.headerSessionTabs",
   },
   {
+    "current": "true",
+    "effects": [
+      {
+        "api": [],
+        "store": {
+          "learnButtonEnabled": false,
+        },
+      },
+    ],
+    "kind": "switch",
+    "row": "appearance.learnButtonEnabled",
+  },
+  {
     "current": {
       "navRailSide": "left",
     },
@@ -2150,6 +2176,7 @@ exports[`应用组设置迁移前后行为一致 > 深链行 id 一个不少 1`]
   "appearance.expandLiveReasoning",
   "appearance.fileOpening",
   "appearance.headerSessionTabs",
+  "appearance.learnButtonEnabled",
   "appearance.navRailSide",
   "appearance.openChangesOnFileEdit",
   "appearance.personalization",

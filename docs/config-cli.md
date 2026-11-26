@@ -101,6 +101,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `quoteSelectionButton`（布尔，默认 `true`）控制会话里选中文字时是否浮出「引用」按钮，只接受布尔值，热生效，无需重启。
 
+`learnButtonEnabled`（布尔，默认 `true`）控制会话 composer 工具行是否显示「复盘」按钮，只接受布尔值，热生效，无需重启。
+
 `gitCommitModel`（`{ providerId, modelId }` 或 `null`，默认 `null`）是 Git 提交面板「AI 生成」使用的模型，只存 id，热生效（下一次点击生成时读取），参与配置同步（导入时按 provider 映射到本机条目）。提示词正文不进 `settings.json`，见上表 `gitCommitPromptCustomized`。
 
 `pluginLoggingEnabled`（布尔，缺省 `false`）控制是否记录插件控制台输出与运行日志。关闭时不采集、不进缓冲、不写盘，启动失败和崩溃等错误状态仍然显示。只接受布尔值，热生效，无需重启插件或应用，不参与配置同步。

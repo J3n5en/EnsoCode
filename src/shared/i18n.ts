@@ -750,6 +750,9 @@ export const zhTranslations: Record<string, string> = {
   'Quote button on text selection': '选中文字时显示「引用」按钮',
   'Show a floating Quote button when you select text in the conversation; click it to put the selection into the input box as a quote':
     '在会话里选中文字时浮出「引用」按钮，点击把选中内容作为引用块放进输入框',
+  'Learn button in composer': '输入框工具行显示「复盘」按钮',
+  'Show a Learn button in the composer toolbar once the conversation has messages; it opens a side-by-side session that reviews this conversation and distills lessons':
+    '会话有消息后，在输入框工具行显示「复盘」按钮；点击开一个旁路会话复盘这段对话并沉淀经验教训',
   Quote: '引用',
   'Quote into the input box': '引用到输入框继续对话',
   'Quote · {{count}} lines': '引用 · {{count}} 行',
