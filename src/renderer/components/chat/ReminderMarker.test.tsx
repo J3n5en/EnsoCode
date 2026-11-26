@@ -59,4 +59,32 @@ describe('ReminderMarker 侧栏等提醒标记', () => {
     });
     expect(container.querySelector('[data-enso="sidebar-reminder-waiting"]')).toBeNull();
   });
+
+  it('默认态文字折叠为零宽、仅 hover 展开，多提醒时标注总数', () => {
+    const dueAt = new Date(2026, 4, 1, 14, 23, 0).getTime();
+    useSessionRemindersStore.getState().replace('45b1a6d7', [
+      { id: 'r00000001', dueAt, label: '第一条' },
+      { id: 'r00000002', dueAt: dueAt + 600_000, label: '第二条' },
+    ]);
+
+    act(() => {
+      root.render(<ReminderMarker conversationId="45b1a6d7" running={false} />);
+    });
+
+    const marker = container.querySelector('[data-enso="sidebar-reminder-waiting"]');
+    expect(marker).toBeTruthy();
+    // 多条时文字是「等提醒 ×2」
+    expect(marker?.textContent).toContain('Waiting for reminder ×2');
+    expect(marker?.textContent).not.toContain('14:23');
+
+    // 默认态：文字容器折叠为零宽，只在行 hover 时展开
+    const label = container.querySelector('[data-enso="sidebar-reminder-label"]');
+    expect(label).toBeTruthy();
+    expect(label?.className).toContain('max-w-0');
+    expect(label?.className).toContain('group-hover:max-w-');
+    expect(label?.className).toContain('transition-');
+    // 文字本身不换行，展开时不折行
+    expect(label?.className).toContain('whitespace-nowrap');
+    expect(label?.className).toContain('overflow-hidden');
+  });
 });

@@ -11,6 +11,7 @@ import { installThemeStyles } from './lib/themeStyles';
 import { useBotsStore } from './stores/bots';
 import { useRemoteNodesStore } from './stores/remoteNodes';
 import { useSecretaryStore } from './stores/secretary';
+import { useSessionRemindersStore } from './stores/sessionReminders';
 import { useSessionsStore } from './stores/sessions';
 import { useSettingsStore } from './stores/settings';
 import { useSidePanelStore } from './stores/sidePanel';
@@ -30,6 +31,7 @@ if (import.meta.env.DEV) {
     bots: useBotsStore,
     restartOverlay: useRestartOverlayStore,
     secretary: useSecretaryStore,
+    sessionReminders: useSessionRemindersStore,
     appView: useAppViewStore,
     settingsView: { open: openSettings, close: closeSettings },
   };
