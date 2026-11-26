@@ -154,6 +154,22 @@ export function projectConversationIds(
   );
 }
 
+/** 该项目有侧栏会话且全部已归档。从无会话、或仍有未归档会话，都是 false。 */
+export function projectHasOnlyArchivedConversations(
+  order: readonly string[],
+  conversations: Conversations,
+  projectId: string
+): boolean {
+  let hasArchived = false;
+  for (const id of order) {
+    const conversation = sidebarRoot(id, conversations);
+    if (conversation?.projectId !== projectId) continue;
+    if (conversation.archived !== true) return false;
+    hasArchived = true;
+  }
+  return hasArchived;
+}
+
 function sidebarTone(
   conversation: SidebarConversation,
   conversations: Conversations,

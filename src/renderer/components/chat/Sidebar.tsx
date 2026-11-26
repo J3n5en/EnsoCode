@@ -203,6 +203,7 @@ import {
   headerSessionTabIds,
   pinnedConversationIds,
   projectConversationIds,
+  projectHasOnlyArchivedConversations,
   RECENT_PROJECT_WINDOW_DAYS,
   recentProjects,
   SIDEBAR_TICK_MS,
@@ -1631,6 +1632,11 @@ export function Sidebar({
                   conversations,
                   project.id
                 );
+                const onlyArchived = projectHasOnlyArchivedConversations(
+                  order,
+                  conversations,
+                  project.id
+                );
                 const folded = collapsedProjects[project.id] === true;
                 const revealedExtra = revealedExtras[project.id] ?? 0;
                 const shownCount = shownConversationCount(
@@ -1930,8 +1936,16 @@ export function Sidebar({
                                           </div>
                                         )}
                                         {projectConversations.length === 0 && (
-                                          <p className="py-1.5 pl-8 text-xs text-subtle-foreground">
-                                            {t('No conversations yet')}
+                                          <p
+                                            className={
+                                              onlyArchived
+                                                ? 'py-1.5 pl-8 text-xs text-muted-foreground'
+                                                : 'py-1.5 pl-8 text-xs text-subtle-foreground'
+                                            }
+                                          >
+                                            {onlyArchived
+                                              ? t('All conversations in this project are archived')
+                                              : t('No conversations yet')}
                                           </p>
                                         )}
                                       </div>

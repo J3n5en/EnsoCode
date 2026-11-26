@@ -8,6 +8,7 @@ import {
   headerSessionTabIds,
   pinnedConversationIds,
   projectConversationIds,
+  projectHasOnlyArchivedConversations,
   sortProjectsByActivity,
   staleArchivedConversationIds,
   waitingConversationCount,
@@ -245,6 +246,31 @@ describe('projectConversationIds', () => {
       'a',
       'd',
     ]);
+  });
+});
+
+describe('projectHasOnlyArchivedConversations', () => {
+  it('全部归档时为 true', () => {
+    const onlyArchived = {
+      a: conv('p1', 1, 50, { archived: true }),
+      b: conv('p1', 2, 20, { archived: true }),
+    };
+    expect(projectHasOnlyArchivedConversations(['a', 'b'], onlyArchived, 'p1')).toBe(true);
+  });
+
+  it('有未归档会话时为 false', () => {
+    const mixed = {
+      a: conv('p1', 1, 50, { archived: true }),
+      b: conv('p1', 2, 20),
+    };
+    expect(projectHasOnlyArchivedConversations(['a', 'b'], mixed, 'p1')).toBe(false);
+  });
+
+  it('从无会话时为 false', () => {
+    expect(projectHasOnlyArchivedConversations([], {}, 'p1')).toBe(false);
+    expect(
+      projectHasOnlyArchivedConversations(['c'], { c: conv('p2', 3, 30, { archived: true }) }, 'p1')
+    ).toBe(false);
   });
 });
 
