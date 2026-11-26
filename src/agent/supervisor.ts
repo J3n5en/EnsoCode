@@ -3495,21 +3495,20 @@ export class SessionSupervisor {
               cwd
             )
           : undefined;
-        if (isAgyModel(subModel)) {
-          // 每个子会话一个 agy 会话：匿名子会话用 pi 自己的会话 id，dispose 时关掉
-          const childId = childIdentity?.sessionId ?? childSessionId ?? session.sessionId;
-          const temp = sessionTempDir(childId, { cwd });
-          attachAgyBridgeToSession(session, {
-            ensoSessionId: childId,
-            resumable: !ephemeral,
-            cwd,
-            sessionDir: this.options.sessionDir,
-            clientVersion: appVersion,
-            gate: childGate,
-            planActive: () => false,
-            readRoots: () => [cwd, ...(temp ? [temp] : [])],
-          });
-        }
+        // 每个子会话一个 agy 会话：匿名子会话用 pi 自己的会话 id，dispose 时关掉。
+        // 不看起始模型：桥对其他模型是空操作，会话中途切到 agy 也接得上
+        const agyChildId = childIdentity?.sessionId ?? childSessionId ?? session.sessionId;
+        const agyChildTemp = sessionTempDir(agyChildId, { cwd });
+        attachAgyBridgeToSession(session, {
+          ensoSessionId: agyChildId,
+          resumable: !ephemeral,
+          cwd,
+          sessionDir: this.options.sessionDir,
+          clientVersion: appVersion,
+          gate: childGate,
+          planActive: () => false,
+          readRoots: () => [cwd, ...(agyChildTemp ? [agyChildTemp] : [])],
+        });
         if (childIdentity) {
           const childServers = typed
             ? selectedMcp
@@ -3962,18 +3961,17 @@ export class SessionSupervisor {
       },
       () => this.emitPlanState(managed)
     );
-    if (isAgyModel(piModel)) {
-      const temp = sessionTempDir(sessionId, { cwd });
-      attachAgyBridgeToSession(session, {
-        ensoSessionId: sessionId,
-        cwd,
-        sessionDir: this.options.sessionDir,
-        clientVersion: appVersion,
-        gate,
-        planActive: () => plan.state().active,
-        readRoots: () => [cwd, ...(temp ? [temp] : [])],
-      });
-    }
+    // 不看起始模型：桥对其他模型是空操作，会话中途切到 agy 也接得上
+    const agyTemp = sessionTempDir(sessionId, { cwd });
+    attachAgyBridgeToSession(session, {
+      ensoSessionId: sessionId,
+      cwd,
+      sessionDir: this.options.sessionDir,
+      clientVersion: appVersion,
+      gate,
+      planActive: () => plan.state().active,
+      readRoots: () => [cwd, ...(agyTemp ? [agyTemp] : [])],
+    });
     // 关掉 plan 时先退出 plan 模式，再撤掉控制器：工具门不再限制，set-plan-mode 不再生效
     const setPlanEnabled = (enabled: boolean) => {
       if (enabled === (managed.plan !== undefined)) return;
