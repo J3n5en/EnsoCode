@@ -58,9 +58,10 @@ function restartMenuItem(locale: Locale, actions: AppMenuActions): MenuItemConst
  * Electron 默认 appMenu 用 app.name（package.json name = enso-code）拼 About/Hide/Quit。
  * 不能改 app.name：macOS safeStorage 钥匙串条目按 app.name 命名，改了会解不开已存凭据。
  *
- * 侧栏项加速键固定 ⌘B：菜单点击与加速键都发 WINDOW_TOGGLE_SIDEBAR，
- * 渲染层按键处理看到菜单已处理就跳过，同一次按键不会切换两次。
- * 用户把 toggle-sidebar 改绑后菜单仍显示 ⌘B，那是菜单项自己的加速键，不再经过渲染层。
+ * 侧栏项不带加速键：⌘B 由渲染层统一处理（可改绑、跨平台一致），
+ * 菜单项只作鼠标入口，点击发 WINDOW_TOGGLE_SIDEBAR。
+ * 曾挂 accelerator='CmdOrCtrl+B'：macOS 菜单吞键后 click 与渲染层 keydown 双路径
+ * 难以协调（#338 的 guard 误杀键盘路径），单路径后这个矛盾不存在。
  */
 export function macAppMenuTemplate(
   locale: Locale = 'en',
@@ -93,7 +94,6 @@ export function macAppMenuTemplate(
       submenu: [
         {
           label: translate(locale, 'Show or hide sidebar'),
-          accelerator: 'CmdOrCtrl+B',
           click: () => sendToLocalMain(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR),
         },
         { type: 'separator' },
