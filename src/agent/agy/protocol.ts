@@ -128,6 +128,7 @@ export function parsePermissionRequest(params: unknown): AgyPermissionRequest | 
   return {
     toolCall: {
       toolCallId,
+      ...(typeof toolCall?.name === 'string' ? { name: toolCall.name } : {}),
       ...(typeof toolCall?.title === 'string' ? { title: toolCall.title } : {}),
       ...(typeof toolCall?.kind === 'string' ? { kind: toolCall.kind } : {}),
       ...(toolCall?.rawInput !== undefined ? { rawInput: toolCall.rawInput } : {}),

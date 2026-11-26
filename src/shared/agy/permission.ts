@@ -8,6 +8,8 @@ import type {
 } from './types';
 
 const EDIT_KINDS = new Set(['edit', 'delete', 'move']);
+const ENSO_MCP_TITLE = /^Run mcp_enso_(?<tool>[A-Za-z0-9_-]+)\??$/;
+const ENSO_MCP_NAME = /^mcp_enso_(?<tool>[A-Za-z0-9_-]+)$/;
 
 function optionByKind(
   options: readonly AgyPermissionOption[],
@@ -60,12 +62,29 @@ function selectAllow(
   return once?.optionId ?? always?.optionId;
 }
 
-/** 审批档位到 agy 答复。问人的档位不在这里选 option。 */
+/** agy 调我们 Host MCP 上的哪个工具：卡片名 `mcp_enso_<tool>` 或 title `Run mcp_enso_<tool>`。 */
+function ensoMcpTool(request: AgyPermissionRequest): string | undefined {
+  const { name, title, rawInput } = request.toolCall;
+  if (typeof record(rawInput)?.CommandLine === 'string') return undefined;
+  if (name) return ENSO_MCP_NAME.exec(name)?.groups?.tool;
+  return ENSO_MCP_TITLE.exec(title?.trim() ?? '')?.groups?.tool;
+}
+
+/**
+ * 审批档位到 agy 答复。问人的档位不在这里选 option。
+ * `ensoTools` 是本会话挂到 Host MCP 上的工具：Enso 执行时自己审批，所以 agy 这一层任何档位都放行。
+ */
 export function decidePermission(input: {
   approvalMode: ApprovalMode;
   request: AgyPermissionRequest;
   workspaceRoot: string;
+  ensoTools?: readonly string[];
 }): PermissionAction {
+  const own = ensoMcpTool(input.request);
+  if (own && input.ensoTools?.includes(own)) {
+    const optionId = optionByKind(input.request.options, 'allow_once')?.optionId;
+    if (optionId) return { kind: 'selected', optionId };
+  }
   if (input.approvalMode === 'full') {
     const optionId = selectAllow(input.request.options, false);
     return optionId ? { kind: 'selected', optionId } : { kind: 'ask' };

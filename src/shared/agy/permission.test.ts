@@ -105,3 +105,80 @@ describe('decidePermission', () => {
     expect(sessionModeFor(false)).toBe('default');
   });
 });
+
+describe('Enso Host MCP tools', () => {
+  // agy 1.5.18 线上形状：name / title 指向 mcp_enso_<tool>，只给 allow / deny
+  const own = {
+    toolCall: {
+      toolCallId: 'm1',
+      name: 'mcp_enso_todo',
+      title: 'Run mcp_enso_todo',
+      kind: 'other',
+      rawInput: { todos: [] },
+    },
+    options: [
+      { optionId: 'allow', kind: 'allow_once', name: 'Allow' },
+      { optionId: 'deny', kind: 'reject_once', name: 'Deny' },
+    ],
+  };
+  const modes = ['supervised', 'assistant', 'auto-edits', 'full'] as const;
+
+  it('allows our own exposed tools once in every approval mode', () => {
+    for (const approvalMode of modes) {
+      expect(
+        decidePermission({
+          approvalMode,
+          request: own,
+          workspaceRoot: '/work',
+          ensoTools: ['todo'],
+        })
+      ).toEqual({ kind: 'selected', optionId: 'allow' });
+    }
+  });
+
+  it('recognizes the title alone, with or without a trailing question mark', () => {
+    const { name: _name, ...toolCall } = own.toolCall;
+    for (const title of ['Run mcp_enso_todo', 'Run mcp_enso_todo?']) {
+      expect(
+        decidePermission({
+          approvalMode: 'supervised',
+          request: { ...own, toolCall: { ...toolCall, title } },
+          workspaceRoot: '/work',
+          ensoTools: ['todo'],
+        })
+      ).toEqual({ kind: 'selected', optionId: 'allow' });
+    }
+  });
+
+  it('asks for tools we did not expose, other servers, and commands', () => {
+    const asks = [
+      { ensoTools: [] as string[], request: own },
+      { ensoTools: undefined, request: own },
+      {
+        ensoTools: ['todo'],
+        request: {
+          ...own,
+          toolCall: { ...own.toolCall, name: 'mcp_other_todo', title: 'Run mcp_other_todo' },
+        },
+      },
+      {
+        ensoTools: ['todo'],
+        request: {
+          ...own,
+          toolCall: {
+            ...own.toolCall,
+            name: 'run_command',
+            title: 'Run mcp_enso_todo',
+            kind: 'execute',
+            rawInput: { CommandLine: 'mcp_enso_todo' },
+          },
+        },
+      },
+    ];
+    for (const { ensoTools, request } of asks) {
+      expect(
+        decidePermission({ approvalMode: 'supervised', request, workspaceRoot: '/work', ensoTools })
+      ).toEqual({ kind: 'ask' });
+    }
+  });
+});

@@ -71,6 +71,7 @@ export interface AgyPermissionOption {
 export interface AgyPermissionRequest {
   toolCall: {
     toolCallId: string;
+    name?: string;
     title?: string;
     kind?: string;
     rawInput?: unknown;
