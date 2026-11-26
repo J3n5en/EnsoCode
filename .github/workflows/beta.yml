@@ -117,6 +117,207 @@ jobs:
       release-artifacts: true
     secrets: inherit
 
+  # premium-relay：随 beta 验证通过自动部署阿里云 relay（Go 二进制 + 内嵌 phone/desk 前端）。
+  # 与 desktop 并行，不等桌面打包；部署失败不阻塞 beta 发布（release 只 needs desktop）。
+  # 服务器地址、账号、路径全部走 secrets，仓库内不出现字面量。
+  premium-relay:
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.skip != 'true'
+    # 部署是有副作用的外部操作：独立并发组且不取消进行中的部署，
+    # 避免部署到一半被打断留下半新半旧的进程。
+    concurrency:
+      group: premium-relay-deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PREMIUM_RELAY_HOST: ${{ secrets.PREMIUM_RELAY_HOST }}
+      PREMIUM_RELAY_USER: ${{ secrets.PREMIUM_RELAY_USER }}
+      PREMIUM_RELAY_SSH_KEY: ${{ secrets.PREMIUM_RELAY_SSH_KEY }}
+      PREMIUM_RELAY_KNOWN_HOSTS: ${{ secrets.PREMIUM_RELAY_KNOWN_HOSTS }}
+      PREMIUM_RELAY_PATH: ${{ secrets.PREMIUM_RELAY_PATH }}
+      PREMIUM_RELAY_PM2_NAME: ${{ secrets.PREMIUM_RELAY_PM2_NAME }}
+      PREMIUM_RELAY_PUBLIC_URL: ${{ secrets.PREMIUM_RELAY_PUBLIC_URL }}
+    steps:
+      - name: Skip when secrets are not configured
+        id: gate
+        run: |
+          if [ -z "$PREMIUM_RELAY_HOST" ] || [ -z "$PREMIUM_RELAY_SSH_KEY" ]; then
+            echo "::notice::premium-relay secrets 未配置，跳过部署"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        if: steps.gate.outputs.enabled == 'true'
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Go
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27'
+          cache-dependency-path: packages/relay-go/go.sum
+
+      - name: Get pnpm store directory
+        if: steps.gate.outputs.enabled == 'true'
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - name: Install dependencies
+        if: steps.gate.outputs.enabled == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # desk-bundle 来自 out/renderer（pnpm build），sync-frontend.sh 会一并内嵌
+      - name: Build renderer and embed phone PWA
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          pnpm build
+          ./packages/relay-go/sync-frontend.sh
+          test -f packages/relay-go/frontend/sw.js
+          test -d packages/relay-go/frontend/desk-bundle
+
+      # 版本号保持 dev（非 semver）：relay 的自动更新只对 semver 版本生效，
+      # 注入 beta 版本号会让服务器上的二进制被 GitHub Release 自动更新覆盖。
+      - name: Cross-compile linux amd64
+        id: build
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: packages/relay-go
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -trimpath -buildmode=exe -ldflags="-s -w" -o dist/enso-relay-linux-amd64 .
+          ls -lh dist/enso-relay-linux-amd64
+          SHELL_VERSION=$(grep -o "const SHELL_VERSION = '[0-9a-f]*'" frontend/sw.js | grep -o "[0-9a-f]\{16\}")
+          [ -n "$SHELL_VERSION" ] || { echo "::error::无法从 sw.js 提取 SHELL_VERSION"; exit 1; }
+          echo "SHELL_VERSION=$SHELL_VERSION" >> "$GITHUB_ENV"
+          echo "shell_version=$SHELL_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup SSH
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$PREMIUM_RELAY_SSH_KEY" > ~/.ssh/premium_relay_key
+          chmod 600 ~/.ssh/premium_relay_key
+          printf '%s\n' "$PREMIUM_RELAY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload binary
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          SSH="ssh -i ~/.ssh/premium_relay_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          $SSH "$PREMIUM_RELAY_USER@$PREMIUM_RELAY_HOST" "mkdir -p '$PREMIUM_RELAY_PATH'"
+          scp -i ~/.ssh/premium_relay_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            packages/relay-go/dist/enso-relay-linux-amd64 \
+            "$PREMIUM_RELAY_USER@$PREMIUM_RELAY_HOST:$PREMIUM_RELAY_PATH/enso-relay-linux-amd64.new"
+
+      # 远程脚本：备份 → 原子替换（mv，cp 覆盖运行中的二进制会 Text file busy）→ 重启 → 核对 → 失败回滚。
+      # 核对项：/healthz ok、/desk 200、sw.js SHELL_VERSION 与本地构建一致。
+      - name: Deploy, verify and rollback on failure
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          EXPECTED_SHELL_VERSION: ${{ steps.build.outputs.shell_version }}
+        run: |
+          # printf %q 做 shell 转义：值含空格/特殊字符时远程 shell 仍能正确还原
+          Q_PATH=$(printf '%q' "$PREMIUM_RELAY_PATH")
+          Q_PM2=$(printf '%q' "$PREMIUM_RELAY_PM2_NAME")
+          Q_URL=$(printf '%q' "$PREMIUM_RELAY_PUBLIC_URL")
+          Q_SWVER=$(printf '%q' "$EXPECTED_SHELL_VERSION")
+          ssh -i ~/.ssh/premium_relay_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$PREMIUM_RELAY_USER@$PREMIUM_RELAY_HOST" \
+            "RELAY_PATH=$Q_PATH PM2_NAME=$Q_PM2 PUBLIC_URL=$Q_URL EXPECTED_SHELL_VERSION=$Q_SWVER bash -s" <<'REMOTE_EOF'
+          set -euo pipefail
+          BIN="$RELAY_PATH/enso-relay-linux-amd64"
+          NEW="$BIN.new"
+          TS=$(date -u +%Y%m%d%H%M%S)
+          BAK="$BIN.bak-$TS"
+
+          verify() {
+            local tries=0
+            while [ $tries -lt 12 ]; do
+              local health desk swver
+              health=$(curl -fsS -m 5 "$PUBLIC_URL/healthz" 2>/dev/null || true)
+              desk=$(curl -fsS -m 5 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/desk" 2>/dev/null || true)
+              swver=$(curl -fsS -m 5 "$PUBLIC_URL/sw.js" 2>/dev/null | grep -o "const SHELL_VERSION = '[0-9a-f]*'" | grep -o '[0-9a-f]\{16\}' || true)
+              if echo "$health" | grep -q '"ok":true' && [ "$desk" = "200" ] && [ "$swver" = "$EXPECTED_SHELL_VERSION" ]; then
+                return 0
+              fi
+              tries=$((tries + 1))
+              sleep 5
+            done
+            echo "verify failed: health=$health desk=$desk swver=$swver expected=$EXPECTED_SHELL_VERSION" >&2
+            return 1
+          }
+
+          [ -f "$NEW" ] || { echo "uploaded binary missing: $NEW" >&2; exit 1; }
+          chmod +x "$NEW"
+
+          # 幂等收敛：sw.js 版本已一致说明同一构建已部署，跳过替换与重启
+          CUR_SWVER=$(curl -fsS -m 5 "$PUBLIC_URL/sw.js" 2>/dev/null | grep -o "const SHELL_VERSION = '[0-9a-f]*'" | grep -o '[0-9a-f]\{16\}' || true)
+          if [ "$CUR_SWVER" = "$EXPECTED_SHELL_VERSION" ]; then
+            echo "already at shell version $EXPECTED_SHELL_VERSION, skipping replace"
+            rm -f "$NEW"
+            exit 0
+          fi
+
+          if [ -f "$BIN" ]; then
+            cp "$BIN" "$BAK"
+          fi
+
+          mv "$NEW" "$BIN"
+          pm2 restart "$PM2_NAME" >/dev/null
+
+          if verify; then
+            echo "deploy verified: shell=$EXPECTED_SHELL_VERSION"
+            # 只保留最近 3 份备份
+            ls -1t "$BIN".bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+            exit 0
+          fi
+
+          echo "deploy verification failed, rolling back" >&2
+          LATEST_BAK=$(ls -1t "$BIN".bak-* 2>/dev/null | head -n 1 || true)
+          if [ -z "$LATEST_BAK" ]; then
+            echo "no backup available for rollback" >&2
+            exit 1
+          fi
+          mv "$BIN" "$BIN.failed-$TS" 2>/dev/null || true
+          cp "$LATEST_BAK" "$BIN"
+          chmod +x "$BIN"
+          pm2 restart "$PM2_NAME" >/dev/null
+
+          # 回滚后只核对服务恢复（旧二进制的 sw.js 版本本来就是旧的）
+          RB_HEALTH=$(curl -fsS -m 5 "$PUBLIC_URL/healthz" 2>/dev/null || true)
+          RB_DESK=$(curl -fsS -m 5 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/desk" 2>/dev/null || true)
+          if echo "$RB_HEALTH" | grep -q '"ok":true' && [ "$RB_DESK" = "200" ]; then
+            echo "rollback verified: service restored with $LATEST_BAK" >&2
+          else
+            echo "rollback verification failed: health=$RB_HEALTH desk=$RB_DESK" >&2
+          fi
+          exit 1
+          REMOTE_EOF
+
   release:
     needs: [prepare, desktop]
     concurrency:
