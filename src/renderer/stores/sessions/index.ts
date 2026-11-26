@@ -1498,10 +1498,16 @@ export const useSessionsStore = create<SessionsState>()(
             for (const session of event.sessions) {
               const id = session.identity.sessionId;
               // 补快照可能意味着 turn-completed 已错过（renderer 重载 / 正文脱节），排队消息与
-              // goal 一并泵；用户中断的轮次由 turn-completed 收口，这里不抢跑
+              // goal 一并泵；用户中断的轮次由 turn-completed 收口，这里不抢跑。
+              // 推迟到宏任务：同一轮就泵会让优雅重启恢复后队列在渲染一帧前就被消费，
+              // UI 上表现为「队列消息丢了」。延迟期间状态可能已变（用户中断、会话离开），
+              // 届时重读最新行重新判定，abortRequested / 非 leader 都不再泵。
               if (!isLeaderRenderer() || get().conversations[id]?.abortRequested) continue;
-              flushQueue(id);
-              continueGoal(id);
+              setTimeout(() => {
+                if (!isLeaderRenderer() || get().conversations[id]?.abortRequested) return;
+                flushQueue(id);
+                continueGoal(id);
+              }, 0);
             }
             if (event.sessionId) {
               const state = get();

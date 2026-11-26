@@ -714,6 +714,99 @@ describe('typed Agent child projection', () => {
     ).toHaveLength(0);
   });
 
+  it('partial snapshot 恢复不在同一轮泵队列：先让 UI 有一帧显示队列，宏任务后再投递', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          queuedMessages: [{ id: 'q1', text: 'after restart' }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+    const snapshot: RendererAgentEvent = {
+      type: 'snapshot',
+      partial: true,
+      sessionId: 'parent',
+      sessions: [
+        {
+          identity: { sessionId: 'parent', generation: 'pg1' },
+          status: 'idle',
+          messages: [],
+          commands: [],
+        },
+      ],
+    };
+
+    onAgentEvent?.(snapshot);
+    // 同一轮事件处理完不泵：队列还在内存里，UI 有机会渲染一帧队列指示
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'after restart' },
+    ]);
+
+    // 宏任务后泵出：消息按序投递、队列消费干净
+    await vi.waitFor(() =>
+      expect(agentPrompt).toHaveBeenCalledWith(
+        'parent',
+        'after restart',
+        undefined,
+        expect.any(String)
+      )
+    );
+    expect(
+      sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages
+    ).toHaveLength(0);
+  });
+
+  it('partial snapshot 延迟泵期间用户中断/会话离开空闲：不再泵', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          queuedMessages: [{ id: 'q1', text: 'after restart' }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+    const snapshot: RendererAgentEvent = {
+      type: 'snapshot',
+      partial: true,
+      sessionId: 'parent',
+      sessions: [
+        {
+          identity: { sessionId: 'parent', generation: 'pg1' },
+          status: 'idle',
+          messages: [],
+          commands: [],
+        },
+      ],
+    };
+
+    onAgentEvent?.(snapshot);
+    // 延迟泵还没跑，用户在间隙里中断（abortRequested 置上）
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, abortRequested: true },
+      },
+    }));
+    // 等过若干个宏任务：延迟泵不应再投
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'after restart' },
+    ]);
+  });
+
   describe('goal 续跑的无进展判定', () => {
     function seedGoal() {
       sessionsModule.useSessionsStore.setState((state) => ({
