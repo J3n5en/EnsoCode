@@ -1,11 +1,15 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import {
   exportMermaidPng,
   exportMermaidSvg,
+  inlinePresentationAttrs,
   MAX_CANVAS_SIDE,
   mermaidExportFileName,
   normalizeSvgMarkup,
   pngExportScale,
+  removeSvgStyleElements,
+  resolveContextPaints,
   svgViewBoxSize,
 } from './mermaidExport';
 
@@ -208,5 +212,104 @@ describe('exportMermaidSvg', () => {
     });
     expect(result).toEqual({ kind: 'failed' });
     expect(download).not.toHaveBeenCalled();
+  });
+});
+
+const SVG_XMLNS = 'http://www.w3.org/2000/svg';
+
+function parseSvg(markup: string): SVGSVGElement {
+  const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
+  const svg = doc.documentElement;
+  if (svg.localName !== 'svg') throw new Error(`not svg: ${svg.textContent ?? ''}`);
+  return svg as unknown as SVGSVGElement;
+}
+
+describe('inlinePresentationAttrs', () => {
+  it('把计算样式写成呈现属性，而不是 style', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="m"><path id="p"/></marker></defs><rect id="n"/></svg>`
+    );
+    inlinePresentationAttrs(svg, (el) => {
+      if (el.id === 'n' || el.id === 'p') {
+        return { fill: 'rgb(236, 236, 255)', stroke: '#9370DB', 'font-size': '16px' };
+      }
+      return {};
+    });
+    const rect = svg.querySelector('#n');
+    const head = svg.querySelector('#p');
+    expect(rect?.getAttribute('fill')).toBe('rgb(236, 236, 255)');
+    expect(rect?.getAttribute('stroke')).toBe('#9370DB');
+    expect(rect?.getAttribute('font-size')).toBe('16px');
+    expect(rect?.getAttribute('style')).toBeNull();
+    expect(head?.getAttribute('fill')).toBe('rgb(236, 236, 255)');
+    expect(new XMLSerializer().serializeToString(svg)).not.toContain('style=');
+  });
+
+  it('跳过等于初始值的 fill 与 stroke，非默认值仍写入', () => {
+    const svg = parseSvg(`<svg xmlns="${SVG_XMLNS}"><rect id="n"/></svg>`);
+    inlinePresentationAttrs(svg, () => ({
+      fill: 'rgb(0, 0, 0)',
+      stroke: 'none',
+      'stroke-width': '2px',
+    }));
+    const rect = svg.querySelector('#n');
+    expect(rect?.hasAttribute('fill')).toBe(false);
+    expect(rect?.hasAttribute('stroke')).toBe(false);
+    expect(rect?.getAttribute('stroke-width')).toBe('2px');
+  });
+});
+
+describe('resolveContextPaints', () => {
+  it('把 marker 上的 context-stroke 解析成引用元素的 stroke', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow"><path id="head" fill="context-stroke"/></marker></defs><path id="edge" marker-end="url(#arrow)"/></svg>`
+    );
+    resolveContextPaints(svg, (el) => (el.id === 'edge' ? { stroke: 'rgb(10, 20, 30)' } : {}));
+    expect(svg.querySelector('#head')?.getAttribute('fill')).toBe('rgb(10, 20, 30)');
+  });
+
+  it('没有引用元素时 context-stroke / context-fill 兜底为 #333333', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow"><path id="head" fill="context-stroke" stroke="context-fill"/></marker></defs></svg>`
+    );
+    resolveContextPaints(svg, () => ({}));
+    const head = svg.querySelector('#head');
+    expect(head?.getAttribute('fill')).toBe('#333333');
+    expect(head?.getAttribute('stroke')).toBe('#333333');
+  });
+
+  it('内联并解析后的序列化结果不含 context-stroke、context-fill 和 style 元素', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><style>path{fill:context-stroke;stroke:context-fill}</style><defs><marker id="arrow"><path id="head" fill="context-stroke" stroke="context-fill"/></marker></defs><path id="edge" marker-end="url(#arrow)"/></svg>`
+    );
+    const read = (el: Element): Record<string, string> => {
+      if (el.id === 'head') return { fill: 'context-stroke', stroke: 'context-fill' };
+      if (el.id === 'edge') return { stroke: '#333333', fill: 'none', 'marker-end': 'url(#arrow)' };
+      return {};
+    };
+    inlinePresentationAttrs(svg, read);
+    resolveContextPaints(svg, read);
+    removeSvgStyleElements(svg);
+    const xml = new XMLSerializer().serializeToString(svg);
+    expect(xml).not.toContain('context-stroke');
+    expect(xml).not.toContain('context-fill');
+    expect(xml).not.toMatch(/<style[\s>]/i);
+    expect(svg.querySelector('#head')?.getAttribute('fill')).toBe('#333333');
+  });
+
+  it('同一 marker 被不同颜色引用时按 stroke 拆成各自的箭头', () => {
+    const svg = parseSvg(
+      `<svg xmlns="${SVG_XMLNS}"><defs><marker id="arrow"><path id="head" fill="context-stroke"/></marker></defs><path id="a" marker-end="url(#arrow)"/><path id="b" marker-end="url(#arrow)"/></svg>`
+    );
+    resolveContextPaints(svg, (el) => {
+      if (el.id === 'a') return { stroke: 'rgb(255, 0, 0)' };
+      if (el.id === 'b') return { stroke: 'rgb(0, 0, 255)' };
+      return {};
+    });
+    expect(svg.querySelector('#head')?.getAttribute('fill')).toBe('rgb(255, 0, 0)');
+    expect(svg.querySelector('#a')?.getAttribute('marker-end')).toBe('url(#arrow)');
+    expect(svg.querySelector('#b')?.getAttribute('marker-end')).toBe('url(#arrow-1)');
+    expect(svg.querySelector('#arrow-1 path')?.getAttribute('fill')).toBe('rgb(0, 0, 255)');
+    expect(new XMLSerializer().serializeToString(svg)).not.toContain('context-stroke');
   });
 });

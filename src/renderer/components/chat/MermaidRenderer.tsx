@@ -10,9 +10,12 @@ import {
   downloadFile,
   exportMermaidPng,
   exportMermaidSvg,
+  inlinePresentationAttrs,
+  PRESENTATION_PROPS,
   rasterizeSvg,
+  removeSvgStyleElements,
+  resolveContextPaints,
   serializeSvgElement,
-  svgMarkupToXml,
 } from './mermaidExport';
 import {
   decorateMermaidSvg,
@@ -56,11 +59,27 @@ function withRenderLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+function readComputedPresentation(el: Element): Record<string, string> {
+  const style = getComputedStyle(el);
+  const out: Record<string, string> = {};
+  for (const prop of PRESENTATION_PROPS) out[prop] = style.getPropertyValue(prop).trim();
+  return out;
+}
+
+/** 离屏 SVG 挂进文档后才能算出 <style> 里的颜色；算完再摘掉样式表，文件才能脱离浏览器 */
+function inlineOffscreenSvg(svg: Element): void {
+  svg.getBoundingClientRect();
+  inlinePresentationAttrs(svg, readComputedPresentation);
+  resolveContextPaints(svg, readComputedPresentation);
+  removeSvgStyleElements(svg);
+}
+
 /** 挂到 document.body 再画，避免 flowchart htmlLabels 读 firstChild 时空指针 */
 async function renderMermaidSvg(
   code: string,
   theme: string,
-  extraConfig: Record<string, unknown> = {}
+  extraConfig: Record<string, unknown> = {},
+  inline = false
 ): Promise<string> {
   return withRenderLock(async () => {
     const mermaid = await getMermaid();
@@ -73,7 +92,13 @@ async function renderMermaidSvg(
     document.body.appendChild(host);
     try {
       const { svg } = await mermaid.render(id, code, host);
-      return decorateMermaidSvg(neutralizeMermaidLinks(svg));
+      const markup = decorateMermaidSvg(neutralizeMermaidLinks(svg));
+      if (!inline) return markup;
+      host.innerHTML = markup;
+      const svgEl = host.querySelector('svg');
+      if (!svgEl) throw new Error('No svg');
+      inlineOffscreenSvg(svgEl);
+      return serializeSvgElement(svgEl);
     } finally {
       host.remove();
       document.getElementById(id)?.remove();
@@ -226,8 +251,7 @@ export function MermaidRenderer({
         const svgEl = containerRef.current?.querySelector('svg');
         return svgEl ? serializeSvgElement(svgEl) : null;
       },
-      rerender: async () =>
-        svgMarkupToXml(await renderMermaidSvg(code, mermaidTheme, { htmlLabels: false })),
+      rerender: async () => renderMermaidSvg(code, mermaidTheme, { htmlLabels: false }, true),
       download: downloadFile,
     });
     if (result.kind === 'failed') {
@@ -241,8 +265,7 @@ export function MermaidRenderer({
         const svgEl = containerRef.current?.querySelector('svg');
         return svgEl ? serializeSvgElement(svgEl) : null;
       },
-      rerender: async () =>
-        svgMarkupToXml(await renderMermaidSvg(code, mermaidTheme, { htmlLabels: false })),
+      rerender: async () => renderMermaidSvg(code, mermaidTheme, { htmlLabels: false }, true),
       rasterize: (markup, width, height, scale) =>
         rasterizeSvg(markup, width, height, scale, PNG_BACKGROUND[mermaidTheme]),
       download: downloadFile,

@@ -99,6 +99,267 @@ export function svgMarkupToXml(markup: string): string {
   return serializeSvgElement(svg);
 }
 
+/** ImageIO / Quick Look 不吃 <style>，这些呈现属性必须写在元素上 */
+export const PRESENTATION_PROPS = [
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'stroke',
+  'stroke-width',
+  'stroke-opacity',
+  'stroke-dasharray',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'opacity',
+  'font-family',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'text-anchor',
+  'dominant-baseline',
+  'marker-start',
+  'marker-mid',
+  'marker-end',
+  'color',
+] as const;
+
+const MARKER_PAINT_PROPS = ['marker-start', 'marker-mid', 'marker-end'] as const;
+const CONTEXT_FALLBACK = '#333333';
+
+/** SVG/CSS 初始值。写进去只涨体积，ImageIO 缺省也是这些 */
+const DEFAULT_PRESENTATION: Record<string, readonly string[]> = {
+  fill: ['rgb(0, 0, 0)', 'rgba(0, 0, 0, 1)', '#000', '#000000', 'black'],
+  'fill-opacity': ['1'],
+  'fill-rule': ['nonzero'],
+  stroke: ['none'],
+  'stroke-width': ['1', '1px'],
+  'stroke-opacity': ['1'],
+  'stroke-dasharray': ['none', '0', '0px'],
+  'stroke-linecap': ['butt'],
+  'stroke-linejoin': ['miter'],
+  opacity: ['1'],
+  'font-weight': ['400', 'normal'],
+  'font-style': ['normal'],
+  'text-anchor': ['start'],
+  'dominant-baseline': ['auto'],
+  'marker-start': ['none'],
+  'marker-mid': ['none'],
+  'marker-end': ['none'],
+  color: ['rgb(0, 0, 0)', 'rgba(0, 0, 0, 1)', '#000', '#000000', 'black'],
+};
+
+export type PresentationReader = (el: Element) => Partial<Record<string, string>>;
+
+function canonPaint(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function isDefaultPresentation(prop: string, value: string): boolean {
+  const defaults = DEFAULT_PRESENTATION[prop];
+  return defaults?.some((item) => canonPaint(item) === canonPaint(value)) ?? false;
+}
+
+function hasContextPaint(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const lower = value.toLowerCase();
+  return lower.includes('context-stroke') || lower.includes('context-fill');
+}
+
+function replaceContext(value: string, stroke: string, fill: string): string {
+  return value.replace(/context-stroke/gi, stroke).replace(/context-fill/gi, fill);
+}
+
+/** getComputedStyle 会把 url(#id) 解析成绝对地址，导回文件后必须仍是片段引用 */
+function markerIdFromPaint(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const match = /url\(\s*["']?[^)"']*#([^)"']+)["']?\s*\)/i.exec(value);
+  return match?.[1] ?? null;
+}
+
+function presentationValue(
+  prop: string,
+  raw: string | undefined,
+  computed: Partial<Record<string, string>>
+): string | null {
+  if (raw == null) return null;
+  let value = raw.trim();
+  if (!value) return null;
+  if (canonPaint(value) === 'currentcolor') {
+    const color = computed.color?.trim();
+    if (color && canonPaint(color) !== 'currentcolor') value = color;
+  }
+  if (prop === 'marker-start' || prop === 'marker-mid' || prop === 'marker-end') {
+    const id = markerIdFromPaint(value);
+    if (id) value = `url(#${id})`;
+  }
+  if (isDefaultPresentation(prop, value)) return null;
+  return value;
+}
+
+function allElements(root: Element): Element[] {
+  return [root, ...root.querySelectorAll('*')];
+}
+
+function isSkippable(el: Element): boolean {
+  const name = el.localName;
+  return name === 'style' || name === 'script' || name === 'title' || name === 'desc';
+}
+
+export function inlinePresentationAttrs(root: Element, read: PresentationReader): void {
+  for (const el of allElements(root)) {
+    if (isSkippable(el)) continue;
+    const computed = read(el);
+    for (const prop of PRESENTATION_PROPS) {
+      const next = presentationValue(prop, computed[prop], computed);
+      if (next == null) continue;
+      el.setAttribute(prop, next);
+    }
+  }
+}
+
+export function removeSvgStyleElements(root: Element): void {
+  for (const el of root.querySelectorAll('style')) el.remove();
+}
+
+function referencedMarkerIds(el: Element, read: PresentationReader): string[] {
+  const computed = read(el);
+  const ids: string[] = [];
+  for (const attr of MARKER_PAINT_PROPS) {
+    const id = markerIdFromPaint(el.getAttribute(attr)) ?? markerIdFromPaint(computed[attr]);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function concretePaint(
+  el: Element,
+  read: PresentationReader,
+  kind: 'stroke' | 'fill'
+): string | null {
+  const computed = read(el);
+  for (const value of [el.getAttribute(kind), computed[kind]]) {
+    const paint = value?.trim();
+    if (paint && paint !== 'none' && !hasContextPaint(paint)) return paint;
+  }
+  return null;
+}
+
+function contextSubst(
+  user: Element | undefined,
+  read: PresentationReader
+): { stroke: string; fill: string } {
+  return {
+    stroke: (user && concretePaint(user, read, 'stroke')) || CONTEXT_FALLBACK,
+    fill: (user && concretePaint(user, read, 'fill')) || CONTEXT_FALLBACK,
+  };
+}
+
+function applyContextSubst(
+  el: Element,
+  read: PresentationReader,
+  stroke: string,
+  fill: string
+): void {
+  const computed = read(el);
+  for (const prop of ['fill', 'stroke'] as const) {
+    const attr = el.getAttribute(prop);
+    const source = hasContextPaint(attr)
+      ? attr
+      : hasContextPaint(computed[prop])
+        ? computed[prop]
+        : null;
+    if (source) el.setAttribute(prop, replaceContext(source, stroke, fill));
+  }
+  const style = el.getAttribute('style');
+  if (hasContextPaint(style) && style)
+    el.setAttribute('style', replaceContext(style, stroke, fill));
+}
+
+function markerHasContext(marker: Element, read: PresentationReader): boolean {
+  for (const el of [marker, ...marker.querySelectorAll('*')]) {
+    if (hasContextPaint(el.getAttribute('fill')) || hasContextPaint(el.getAttribute('stroke')))
+      return true;
+    if (hasContextPaint(el.getAttribute('style'))) return true;
+    const computed = read(el);
+    if (hasContextPaint(computed.fill) || hasContextPaint(computed.stroke)) return true;
+  }
+  return false;
+}
+
+function suffixIds(el: Element, suffix: string): void {
+  if (el.hasAttribute('id')) el.setAttribute('id', `${el.getAttribute('id')}${suffix}`);
+  for (const child of el.querySelectorAll('[id]')) {
+    child.setAttribute('id', `${child.getAttribute('id')}${suffix}`);
+  }
+}
+
+function retargetMarker(user: Element, fromId: string, toId: string): void {
+  for (const attr of MARKER_PAINT_PROPS) {
+    const value = user.getAttribute(attr);
+    if (value && markerIdFromPaint(value) === fromId) user.setAttribute(attr, `url(#${toId})`);
+  }
+}
+
+function resolveMarker(marker: Element, users: readonly Element[], read: PresentationReader): void {
+  if (!markerHasContext(marker, read)) return;
+  const nodesOf = (node: Element) => [node, ...node.querySelectorAll('*')];
+  if (users.length === 0) {
+    const subst = contextSubst(undefined, read);
+    for (const el of nodesOf(marker)) applyContextSubst(el, read, subst.stroke, subst.fill);
+    return;
+  }
+
+  const groups = new Map<string, Element[]>();
+  for (const user of users) {
+    const subst = contextSubst(user, read);
+    const key = `${subst.stroke}\0${subst.fill}`;
+    const group = groups.get(key);
+    if (group) group.push(user);
+    else groups.set(key, [user]);
+  }
+
+  const originalId = marker.getAttribute('id') ?? '';
+  const template = marker.cloneNode(true) as Element;
+  let index = 0;
+  for (const group of groups.values()) {
+    const target = index === 0 ? marker : (template.cloneNode(true) as Element);
+    if (index > 0) {
+      const suffix = `-${index}`;
+      suffixIds(target, suffix);
+      marker.parentNode?.insertBefore(target, marker.nextSibling);
+      for (const user of group) retargetMarker(user, originalId, `${originalId}${suffix}`);
+    }
+    const subst = contextSubst(group[0], read);
+    for (const el of nodesOf(target)) applyContextSubst(el, read, subst.stroke, subst.fill);
+    index += 1;
+  }
+}
+
+/** marker 里的 context-stroke / context-fill 随引用它的图元上色；解析不到用 #333333 */
+export function resolveContextPaints(root: Element, read: PresentationReader): void {
+  const usersByMarker = new Map<string, Element[]>();
+  for (const el of allElements(root)) {
+    for (const id of referencedMarkerIds(el, read)) {
+      const users = usersByMarker.get(id);
+      if (users) {
+        if (!users.includes(el)) users.push(el);
+      } else {
+        usersByMarker.set(id, [el]);
+      }
+    }
+  }
+
+  for (const marker of [...root.querySelectorAll('marker')]) {
+    const id = marker.getAttribute('id');
+    resolveMarker(marker, id ? (usersByMarker.get(id) ?? []) : [], read);
+  }
+
+  for (const el of allElements(root)) {
+    if (el.localName === 'marker' || el.closest('marker')) continue;
+    applyContextSubst(el, read, CONTEXT_FALLBACK, CONTEXT_FALLBACK);
+  }
+}
+
 export function downloadFile(data: Blob | string, fileName: string): void {
   const url = typeof data === 'string' ? data : URL.createObjectURL(data);
   const link = document.createElement('a');
