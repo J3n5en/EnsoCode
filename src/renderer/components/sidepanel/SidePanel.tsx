@@ -67,7 +67,7 @@ import {
 import { releaseTerminal } from '@/lib/terminalInstances';
 import { cn } from '@/lib/utils';
 import { useSettingsOpen } from '@/stores/appView';
-import { setLayoutAnimating } from '@/stores/layoutAnimation';
+import { setLayoutAnimating, useLayoutAnimationStore } from '@/stores/layoutAnimation';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
@@ -95,6 +95,7 @@ import { restoreHostBrowserTabs } from './browserTabs';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { GlobalPluginLayer, GlobalPluginSlot } from './GlobalPluginLayer';
+import { newTabAutoPopOpen } from './newTabPromptGate';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
@@ -619,8 +620,14 @@ function NewTabMenu({
     secretaryPluginIds === undefined
       ? allPluginViews
       : secretaryPluginViews(allPluginViews, secretaryPluginIds ?? undefined);
+  // auto-pop 不得撞进展开动画：菜单挂载首帧 floating-ui 就以当时的锚点几何
+  // 定下位置与 --available-height，而动画中的宽度/垂直布局都还没到位。
+  // 实测一旦初始几何是动画中途值，位置就停留在那里不再修正（底部和右侧
+  // 都被窗口裁掉、点击落空），resize 才触发重算。等动画结束再弹，
+  // 与手动点 + 的测量条件一致——那条路径从不裁。
+  const layoutAnimating = useLayoutAnimationStore((s) => s.active);
   // 一次性弹出：信号在就受控撑开；用户点类型/点别处/Esc 关闭时清掉信号，此后回到用户点 + 的非受控用法
-  const prompted = promptAt != null;
+  const prompted = newTabAutoPopOpen({ promptAt, layoutAnimating });
   return (
     <Menu
       key={prompted ? `prompt-${promptAt}` : 'idle'}
