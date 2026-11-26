@@ -17,6 +17,7 @@ import {
   type PiStreamOptions,
   type PiTextContent,
   type PiThinkingContent,
+  type PiToolCall,
   type ProviderConfigInput,
 } from '@shared/providers/piProviderTypes';
 import { AgyRpcError } from './connection';
@@ -93,6 +94,7 @@ export function streamAgy(model: PiModel, context: PiContext, options?: PiStream
         signal: options?.signal,
         onText: (delta) => appendText(stream, output, delta),
         onThinking: (delta) => appendThinking(stream, output, delta),
+        onTool: (tool) => appendToolCall(stream, output, tool),
       });
       endBlocks(stream, output);
       output.usage = {
@@ -179,6 +181,24 @@ function appendThinking(
     delta,
     partial: output,
   });
+}
+
+/** agy 已执行的工具：toolCall 进正在流的消息让卡片实时出现；message_end 时由 bridge 拆出去。 */
+function appendToolCall(
+  stream: ReturnType<typeof createEventStream>,
+  output: PiAssistantMessage,
+  tool: { id: string; name: string; args: Record<string, unknown> }
+) {
+  const toolCall: PiToolCall = {
+    type: 'toolCall',
+    id: tool.id,
+    name: tool.name,
+    arguments: tool.args as PiToolCall['arguments'],
+  };
+  output.content.push(toolCall);
+  const contentIndex = output.content.length - 1;
+  stream.push({ type: 'toolcall_start', contentIndex, partial: output });
+  stream.push({ type: 'toolcall_end', contentIndex, toolCall, partial: output });
 }
 
 function endBlocks(stream: ReturnType<typeof createEventStream>, output: PiAssistantMessage) {
