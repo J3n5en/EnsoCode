@@ -13,6 +13,7 @@ import { mcpNamespaceName, oneLine } from './mcpNames';
 
 export const CODEMODE_TOOL_NAME = 'codemode';
 export const TOOL_SEARCH_TOOL_NAME = 'tool_search';
+export const SUBAGENT_TOOL_NAME = 'subagent';
 
 const OPTIONS_PREFIX = '// @options:';
 export const CODEMODE_DEFAULT_TIMEOUT_MS = 300_000;
@@ -25,13 +26,12 @@ const SECTION_MAX = 6000;
 /** 同 pi：每个 server 摘要上限 250 字符 */
 const DESCRIPTION_MAX = 250;
 
-/** 脚本内不可调用：编排/交互/会话控制类工具 */
+/** 脚本内不可调用：交互/会话控制类与输出投影不属于脚本的黑盒工具（编排类见各工具描述） */
 export const CODEMODE_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
   CODEMODE_TOOL_NAME,
   TOOL_SEARCH_TOOL_NAME,
   'submit_plan',
   'wait',
-  'subagent',
   'workflow',
   'coworker',
   'message_coworker',
@@ -45,9 +45,6 @@ export const CODEMODE_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
   'goal_wait',
   'ask_user',
   'todo',
-  'task_output',
-  'task_stop',
-  'task_settle',
   'computer',
   'send_image',
   'report_blocked',
@@ -66,10 +63,52 @@ export function looksLikeShellCommand(code: string): boolean {
   return SHELL_HEAD.test(trimmed);
 }
 
-export { isNestedToolCallId, nestedToolCallParent } from '@shared/toolCallId';
+import { isNestedToolCallId, nestedToolCallParent } from '@shared/toolCallId';
+
+export { isNestedToolCallId, nestedToolCallParent };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** spawn/send/resume 回执里的句柄：丢了它们子代理就成孤儿 */
+export interface NestedAgentReceipt {
+  operation: string;
+  agentId?: string;
+  runId?: string;
+}
+
+/** 从嵌套 subagent 结果文本（JSON 序列化的回执）提取句柄；非 spawn 回执返回 undefined */
+export function extractAgentReceipt(
+  toolName: string,
+  input: unknown,
+  content: unknown
+): NestedAgentReceipt | undefined {
+  if (toolName !== SUBAGENT_TOOL_NAME) return undefined;
+  if (!isRecord(input) || input.operation !== 'spawn') return undefined;
+  const text = (Array.isArray(content) ? content : [])
+    .map((part) =>
+      part && typeof part === 'object' && (part as { type?: unknown }).type === 'text'
+        ? ((part as { text?: unknown }).text as string)
+        : ''
+    )
+    .join('\n');
+  if (!text.trimStart().startsWith('{')) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  // spawn/send/resume 回执形状：{ agentId, runId, status|delivery }；wait/report/list 回执不在这个形状里
+  if (typeof record.agentId !== 'string' || typeof record.runId !== 'string') return undefined;
+  return {
+    operation: typeof record.delivery === 'string' ? 'send' : 'spawn',
+    agentId: record.agentId,
+    runId: record.runId,
+  };
+}
 
 /** 保证脚本有墙钟上限：缺省补默认值，超上限钳位；坏 options 原样交给 pi 报错 */
 export function withCodemodeTimeout(code: string): string {
@@ -103,8 +142,11 @@ export const CODEMODE_INPUTS_DOC =
   'The script reads it as `inputs.name` (a string). Do not declare your own `inputs`.';
 
 export const CODEMODE_FORBIDDEN_DOC =
-  '\n\nOrchestration, interaction and session-control tools cannot be called from codemode scripts via tools.*; ' +
-  'call them directly as top-level tools instead (see the codemode_forbidden_tools section).';
+  '\n\nInteraction and session-control tools cannot be called from codemode scripts via tools.*; ' +
+  'call them directly as top-level tools instead (see the codemode_forbidden_tools section). The todo tool stays forbidden because the todo list is a session-level projection a one-shot script cannot update coherently. ' +
+  'Orchestration tools (`subagent`, `task_output`, `task_stop`, `task_settle`) CAN be called from scripts — ' +
+  'but a spawn whose promise the script never awaits loses its agentId and becomes an unmanageable orphan: ' +
+  'always await every `tools.subagent({ operation: "spawn" })` and keep the returned agentId/runId.';
 
 const FORBIDDEN_SECTION_NAME = 'codemode_forbidden_tools';
 
@@ -277,6 +319,10 @@ export class CodemodeHost {
   private readonly nestedCounts = new Map<string, number>();
   private readonly generatedImages = new Map<string, string[]>();
   private readonly generatedImageAttachments = new Map<string, ImageContent[]>();
+  /** 脚本调用 id → 该脚本内嵌套 spawn 的回执句柄（脚本结束时随结果 echo 给模型） */
+  private readonly nestedSpawns = new Map<string, NestedAgentReceipt[]>();
+  /** 嵌套调用 id → 工具名（tool_call 记账）：二级嵌套（脚本内的脚本）不算直属句柄 */
+  private readonly nestedToolNames = new Map<string, string>();
 
   constructor(private readonly options: CodemodeHostOptions) {}
 
@@ -366,6 +412,7 @@ export class CodemodeHost {
           reason: `Tool "${event.toolName}" cannot be called from codemode scripts.`,
         };
       }
+      this.nestedToolNames.set(event.toolCallId, event.toolName);
       const count = (this.nestedCounts.get(parent) ?? 0) + 1;
       this.nestedCounts.set(parent, count);
       if (count > CODEMODE_MAX_NESTED_CALLS) {
@@ -379,6 +426,25 @@ export class CodemodeHost {
 
     pi.on('tool_result', (event) => {
       if (!event.parentToolCallId) this.nestedCounts.delete(event.toolCallId);
+      const nestedName = this.nestedToolNames.get(event.toolCallId);
+      this.nestedToolNames.delete(event.toolCallId);
+      // 脚本内嵌套 subagent spawn：回执句柄记下来，脚本结束时随父结果 echo。
+      // 脚本没 await 时嵌套结果只活在沙箱里，模型看不到 agentId，子代理会变孤儿——echo 是兜底。
+      // 只认直属：父调用本身也是嵌套 id（脚本内的脚本）时不重复记账，句柄归最外层脚本 echo。
+      if (
+        nestedName === SUBAGENT_TOOL_NAME &&
+        event.parentToolCallId &&
+        !isNestedToolCallId(event.parentToolCallId) &&
+        event.toolName === SUBAGENT_TOOL_NAME &&
+        !event.isError
+      ) {
+        const receipt = extractAgentReceipt(event.toolName, event.input, event.content);
+        if (receipt)
+          this.nestedSpawns.set(event.parentToolCallId, [
+            ...(this.nestedSpawns.get(event.parentToolCallId) ?? []),
+            receipt,
+          ]);
+      }
       if (event.parentToolCallId && event.toolName === 'ImageGen') {
         const images = event.content.filter((part): part is ImageContent => part.type === 'image');
         if (images.length)
@@ -398,31 +464,41 @@ export class CodemodeHost {
       if (event.toolName === CODEMODE_TOOL_NAME) {
         const paths = this.generatedImages.get(event.toolCallId);
         const images = this.generatedImageAttachments.get(event.toolCallId);
+        const spawns = this.nestedSpawns.get(event.toolCallId);
         this.generatedImages.delete(event.toolCallId);
         this.generatedImageAttachments.delete(event.toolCallId);
-        if (paths?.length || images?.length)
+        this.nestedSpawns.delete(event.toolCallId);
+        // spawn 句柄 echo：脚本有没有 await 都列出来。嵌套回执只在脚本文本里，
+        // 没 await 或没 return 的句柄模型看不到，不 echo 子代理就成无法管理的孤儿。
+        const spawnNote = spawns?.length
+          ? 'This script spawned subagent(s) with the following handles. A spawn the script did not await stays invisible in the script output — keep these ids, you are responsible for the agents:\n' +
+            spawns
+              .map((receipt) => `- agentId ${receipt.agentId}, runId ${receipt.runId}`)
+              .join('\n') +
+            '\nYou will be notified when each Run finishes; manage them with subagent list/report/stop/dismiss if needed.'
+          : undefined;
+        if (paths?.length || images?.length || spawnNote)
           return {
-            ...(images?.length
-              ? {
-                  content: [
-                    ...event.content,
-                    ...images.filter(
-                      (image, index) =>
-                        !event.content.some(
-                          (part) =>
-                            part.type === 'image' &&
-                            part.mimeType === image.mimeType &&
-                            part.data === image.data
-                        ) &&
-                        !images
-                          .slice(0, index)
-                          .some(
-                            (part) => part.mimeType === image.mimeType && part.data === image.data
-                          )
-                    ),
-                  ],
-                }
-              : {}),
+            content: [
+              ...(Array.isArray(event.content) ? event.content : []),
+              ...(images?.length
+                ? images.filter(
+                    (image, index) =>
+                      !event.content.some(
+                        (part) =>
+                          part.type === 'image' &&
+                          part.mimeType === image.mimeType &&
+                          part.data === image.data
+                      ) &&
+                      !images
+                        .slice(0, index)
+                        .some(
+                          (part) => part.mimeType === image.mimeType && part.data === image.data
+                        )
+                  )
+                : []),
+              ...(spawnNote ? [{ type: 'text' as const, text: spawnNote }] : []),
+            ],
             details: {
               ...(isRecord(event.details) ? event.details : {}),
               ...(paths?.length ? { generatedImages: [...new Set(paths)] } : {}),
