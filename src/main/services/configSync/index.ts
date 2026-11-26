@@ -20,6 +20,7 @@ import type {
   ConfigSyncMode,
   ConfigSyncOpenResult,
   ConfigSyncPreviewResult,
+  ConfigSyncSkippedModelReference,
   ConfigSyncSummary,
 } from '@shared/types';
 import { persistedSettingsState } from '@shared/types/builtinTools';
@@ -515,6 +516,12 @@ export async function exportConfigToPath(
       );
     }
     if (!options.includeSecrets) bundle = redactBundle(bundle);
+    const skippedModelReferences: ConfigSyncSkippedModelReference[] = [];
+    bundle = validateBundle(bundle, {
+      onDanglingRef(ref) {
+        skippedModelReferences.push(ref);
+      },
+    });
     const bytes = await encodeBundle(bundle, options.includeSecrets ? options.password : undefined);
     if (bytes.byteLength > MAX_PACKAGE_BYTES)
       return resultError('Configuration package is too large.');
@@ -541,9 +548,14 @@ export async function exportConfigToPath(
       if (fd !== null) closeSync(fd);
       rmSync(tempPath, { force: true });
     }
-    return collected.skippedInstructions.length
-      ? { ok: true, filePath, skippedInstructions: collected.skippedInstructions }
-      : { ok: true, filePath };
+    return {
+      ok: true,
+      filePath,
+      ...(collected.skippedInstructions.length
+        ? { skippedInstructions: collected.skippedInstructions }
+        : {}),
+      ...(skippedModelReferences.length ? { skippedModelReferences } : {}),
+    };
   } catch (error) {
     console.error('[configSync] export failed', error);
     if (error instanceof ExportError) return resultError(error.message);

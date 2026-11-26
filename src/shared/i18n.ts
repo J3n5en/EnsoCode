@@ -3129,6 +3129,19 @@ export const zhTranslations: Record<string, string> = {
     '所选文件是符号链接，请换一个位置保存。',
   'These instructions were skipped because their source files are missing or unreadable:':
     '以下指令的源文件已丢失或无法读取，未包含在配置包中：',
+  'These model references were skipped because their provider or model is not in this export:':
+    '以下模型引用指向的服务商或模型不在本次导出中，未写入配置包：',
+  'Subagent model': '子代理模型',
+  'Agent type model': '子代理类型的模型',
+  'Title summary model': '标题总结模型',
+  'Git commit model': 'Git Commit 模型',
+  'Image generation model': '生图模型',
+  'Memory distill model': '记忆蒸馏模型',
+  'Smart compact model': '智能压缩模型',
+  'Approval reviewer': '审批复核模型',
+  '{{label}} ({{providerId}} / {{modelId}})': '{{label}}（{{providerId}} / {{modelId}}）',
+  '{{label}} {{id}} ({{providerId}} / {{modelId}})':
+    '{{label}} {{id}}（{{providerId}} / {{modelId}}）',
   'Skill, instruction, and system prompt contents require an encrypted export.':
     '技能、指令和系统提示词正文需要使用加密导出。',
   'Invalid import request.': '导入请求无效。',
