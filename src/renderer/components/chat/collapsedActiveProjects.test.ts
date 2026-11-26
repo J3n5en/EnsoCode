@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   collapsedActiveProjects,
   collapsedProjectSessions,
+  nextRoundRobinIndex,
   openCollapsedActiveProject,
 } from './collapsedActiveProjects';
 
@@ -74,14 +75,9 @@ describe('collapsedProjectSessions', () => {
     expect(sessions).toEqual([]);
   });
 
-  it('coworker 子会话带 parentId；排队失败 tone 为 failed；未读只在不运行时出现', () => {
+  it('排队失败 tone 为 failed；未读只在不运行时出现', () => {
     const sessions = collapsedProjectSessions('p1', {
       parent: conv('p1', 1, 10, { title: 'parent', status: 'idle' }),
-      child: conv('p1', 2, 60, {
-        title: 'child',
-        status: 'running',
-        parentId: 'parent',
-      }),
       broken: conv('p1', 3, 20, {
         title: 'broken',
         status: 'idle',
@@ -89,10 +85,27 @@ describe('collapsedProjectSessions', () => {
         queueFailed: 'spawn failed',
       }),
     });
-    const child = sessions.find((row) => row.conversationId === 'child');
-    expect(child?.parentId).toBe('parent');
     const broken = sessions.find((row) => row.conversationId === 'broken');
     expect(broken?.tone).toBe('failed');
+  });
+
+  it('子代理/coworker 子会话（带 parentId）不进 rail 浮层列表，只留根会话', () => {
+    const sessions = collapsedProjectSessions('p1', {
+      root: conv('p1', 1, 50, { title: 'root', status: 'running' }),
+      echoWorker: conv('p1', 2, 60, {
+        title: 'echo-9a314f72',
+        status: 'running',
+        parentId: 'root',
+      }),
+      plainWorker: conv('p1', 3, 70, {
+        title: 'worker-9fc95506',
+        status: 'running',
+        parentId: 'root',
+      }),
+      otherRoot: conv('p1', 4, 40, { title: 'second root', status: 'running' }),
+    });
+    expect(sessions.map((row) => row.conversationId).sort()).toEqual(['otherRoot', 'root']);
+    expect(sessions.every((row) => row.parentId === undefined)).toBe(true);
   });
 
   it('queued 会话 tone 为 queued；带提醒的空闲会话 tone 为 reminder', () => {
@@ -217,5 +230,38 @@ describe('collapsedActiveProjects', () => {
     );
     expect(selectConversation).toHaveBeenCalledExactlyOnceWith('root');
     expect(selectTab).not.toHaveBeenCalled();
+  });
+});
+
+describe('nextRoundRobinIndex', () => {
+  it('首次点击打开最新（index 0），之后逐次 +1，到底回环', () => {
+    const state = new Map<string, number>();
+    expect(nextRoundRobinIndex(state, 'p1', 3)).toBe(0);
+    expect(nextRoundRobinIndex(state, 'p1', 3)).toBe(1);
+    expect(nextRoundRobinIndex(state, 'p1', 3)).toBe(2);
+    expect(nextRoundRobinIndex(state, 'p1', 3)).toBe(0);
+  });
+
+  it('列表变短时索引收敛到范围内', () => {
+    const state = new Map<string, number>();
+    nextRoundRobinIndex(state, 'p1', 3);
+    nextRoundRobinIndex(state, 'p1', 3);
+    // 上次在 index 1，现在列表只剩 2 条：前进到 2 % 2 = 0
+    expect(nextRoundRobinIndex(state, 'p1', 2)).toBe(0);
+    expect(nextRoundRobinIndex(state, 'p1', 2)).toBe(1);
+  });
+
+  it('空列表返回 -1 且不写状态', () => {
+    const state = new Map<string, number>();
+    expect(nextRoundRobinIndex(state, 'p1', 0)).toBe(-1);
+    expect(state.size).toBe(0);
+  });
+
+  it('各项目的轮询状态互相独立', () => {
+    const state = new Map<string, number>();
+    expect(nextRoundRobinIndex(state, 'p1', 2)).toBe(0);
+    expect(nextRoundRobinIndex(state, 'p2', 2)).toBe(0);
+    expect(nextRoundRobinIndex(state, 'p1', 2)).toBe(1);
+    expect(nextRoundRobinIndex(state, 'p2', 2)).toBe(1);
   });
 });
