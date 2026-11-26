@@ -8,6 +8,7 @@ import { syncOverlayGuard } from './lib/overlayGuard';
 import { installScrollbarActivity } from './lib/scrollbars';
 import { installThemeStateAttributes } from './lib/themeStateAttributes';
 import { installThemeStyles } from './lib/themeStyles';
+import { setPluginViews } from './plugins/viewBridge';
 import { useBotsStore } from './stores/bots';
 import { useRemoteNodesStore } from './stores/remoteNodes';
 import { useSecretaryStore } from './stores/secretary';
@@ -35,6 +36,8 @@ if (import.meta.env.DEV) {
     appView: useAppViewStore,
     settingsView: { open: openSettings, close: closeSettings },
   };
+  // dev-only:CDP 验证脚本注入假插件视图（长菜单复现用）
+  (window as unknown as Record<string, unknown>).__setPluginViews = setPluginViews;
 }
 
 // 新一代 renderer 起步即全量重推，清掉主进程里上一代留下的浮层闩锁
