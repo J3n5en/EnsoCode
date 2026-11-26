@@ -234,7 +234,7 @@ jobs:
             packages/relay-go/dist/enso-relay-linux-amd64 \
             "$PREMIUM_RELAY_USER@$PREMIUM_RELAY_HOST:$PREMIUM_RELAY_PATH/enso-relay-linux-amd64.new"
 
-      # 远程脚本：备份 → 原子替换（mv，cp 覆盖运行中的二进制会 Text file busy）→ 重启 → 核对 → 失败回滚。
+      # 远程脚本：备份 → 停止服务 → 原子替换（mv）→ 启动 → 核对 → 失败回滚。
       # 核对项：/healthz ok、/desk 200、sw.js SHELL_VERSION 与本地构建一致。
       - name: Deploy, verify and rollback on failure
         if: steps.gate.outputs.enabled == 'true'
@@ -287,10 +287,14 @@ jobs:
             cp "$BIN" "$BAK"
           fi
 
+          # 先停止服务再替换：systemctl restart 的 stop 是异步的，旧进程退出前其文件句柄仍持有二进制，
+          # 立即 start 会报 Text file busy。显式 stop 等待退出后再 mv 替换，然后 start。
+          systemctl stop "$SERVICE_NAME" 2>/dev/null || true
           mv "$NEW" "$BIN"
-          # systemctl restart 失败时不要让 set -e 直接终结脚本，走 verify → 回滚路径
-          if ! systemctl restart "$SERVICE_NAME"; then
-            echo "systemctl restart failed after replace" >&2
+          sync  # 确保 mv 后的文件系统元数据落盘
+          # systemctl start 失败时不要让 set -e 直接终结脚本，走 verify → 回滚路径
+          if ! systemctl start "$SERVICE_NAME"; then
+            echo "systemctl start failed after replace" >&2
           fi
 
           if verify; then
@@ -309,9 +313,11 @@ jobs:
           mv "$BIN" "$BIN.failed-$TS" 2>/dev/null || true
           cp "$LATEST_BAK" "$BIN"
           chmod +x "$BIN"
+          # 回滚前先确保服务停止（部署路径已 stop，但若 start 部分成功可能仍有进程）
+          systemctl stop "$SERVICE_NAME" 2>/dev/null || true
           # 回滚重启失败也要继续走到下面的健康核对，输出真实状态
-          if ! systemctl restart "$SERVICE_NAME"; then
-            echo "systemctl restart failed during rollback" >&2
+          if ! systemctl start "$SERVICE_NAME"; then
+            echo "systemctl start failed during rollback" >&2
           fi
 
           # 回滚后只核对服务恢复（旧二进制的 sw.js 版本本来就是旧的）
