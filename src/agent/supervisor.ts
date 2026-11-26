@@ -1619,7 +1619,6 @@ export class SessionSupervisor {
       releaseOauthPoolSession(managed.session.sessionId);
       managed.session.dispose();
     } catch {}
-    void closeAgySession(parentId);
     this.sessions.delete(parentId);
     this.mcpHotplug.delete(parentId);
     this.options.emit({
@@ -3497,10 +3496,12 @@ export class SessionSupervisor {
             )
           : undefined;
         if (isAgyModel(subModel)) {
-          const childId = childIdentity?.sessionId ?? `${sessionId}-child`;
+          // 每个子会话一个 agy 会话：匿名子会话用 pi 自己的会话 id，dispose 时关掉
+          const childId = childIdentity?.sessionId ?? childSessionId ?? session.sessionId;
           const temp = sessionTempDir(childId, { cwd });
           attachAgyBridgeToSession(session, {
             ensoSessionId: childId,
+            resumable: !ephemeral,
             cwd,
             sessionDir: this.options.sessionDir,
             clientVersion: appVersion,
@@ -4787,7 +4788,6 @@ export class SessionSupervisor {
         releaseOauthPoolSession(managed.session.sessionId);
         managed.session.dispose();
       } catch {}
-      void closeAgySession(coworkerId);
       this.sessions.delete(coworkerId);
       this.mcpHotplug.delete(coworkerId);
       this.settleRound(managed);

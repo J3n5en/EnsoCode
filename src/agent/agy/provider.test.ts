@@ -118,6 +118,7 @@ function fakeAgentSession(events: { type: string }[]): AgentSession {
       for await (const event of stream) events.push(event as { type: string });
     },
     async steer() {},
+    dispose() {},
   };
   return session as unknown as AgentSession;
 }

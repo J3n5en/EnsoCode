@@ -3,6 +3,7 @@ import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import type { AgyToolCard, PromptMessage, TranslatorEffect } from '@shared/agy/types';
 import type { ApprovalMode } from '@shared/types/agentConstants';
 import type { ApprovalGate } from '../approval';
+import { closeAgySession } from './registry';
 import { openBoundAgySession } from './runtimeHost';
 import type { AgyTurnResult } from './session';
 import { readAgySessionId, writeAgySessionId } from './sessionStore';
@@ -39,14 +40,18 @@ export function attachAgyBridgeToSession(
     gate: ApprovalGate;
     planActive: () => boolean;
     readRoots: () => readonly string[];
+    /** 临时会话（插件 agent.run 等）不记 agy sessionId，下次也不 resume */
+    resumable?: boolean;
   }
 ): AgySessionBridge {
   const listeners = new Set<SessionListener>();
   const origSubscribe = session.subscribe.bind(session);
   const origPrompt = session.prompt.bind(session);
   const origSteer = session.steer.bind(session);
+  const origDispose = session.dispose.bind(session);
   const tools: AgyToolCard[] = [];
   const storeFile = `${options.sessionDir}/agy-sessions.json`;
+  const resumable = options.resumable !== false;
 
   const emit: SessionListener = (event) => {
     for (const listener of listeners) listener(event);
@@ -60,7 +65,7 @@ export function attachAgyBridgeToSession(
         cwd: options.cwd,
         readRoots: options.readRoots(),
         clientVersion: options.clientVersion,
-        resumeSessionId: readAgySessionId(storeFile, options.ensoSessionId),
+        resumeSessionId: resumable ? readAgySessionId(storeFile, options.ensoSessionId) : undefined,
       });
       const result = await runtime.turn({
         messages: input.messages,
@@ -86,7 +91,7 @@ export function attachAgyBridgeToSession(
         },
         onEvent: (event) => noteTool(event, tools, emit, input),
       });
-      writeAgySessionId(storeFile, options.ensoSessionId, result.sessionId);
+      if (resumable) writeAgySessionId(storeFile, options.ensoSessionId, result.sessionId);
       return result;
     },
   };
@@ -109,6 +114,10 @@ export function attachAgyBridgeToSession(
   }) as AgentSession['prompt'];
   session.steer = (async (text, images, steerOptions) =>
     boundBridge.run(bridge, () => origSteer(text, images, steerOptions))) as AgentSession['steer'];
+  session.dispose = (() => {
+    void closeAgySession(options.ensoSessionId);
+    origDispose();
+  }) as AgentSession['dispose'];
   return bridge;
 }
 
