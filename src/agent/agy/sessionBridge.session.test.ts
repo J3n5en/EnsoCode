@@ -517,7 +517,90 @@ it('reopens agy with resume when the Enso tool set changes, so it lists the new 
 });
 
 // 真机：AGY_LIVE=1 pnpm vitest run src/agent/agy/sessionBridge.session.test.ts -t live
-// 一条 prompt。supervised + 无人值守自动拒绝：只有我们自己的 MCP 工具会被放行。
+function useLiveCli(name: string): { out: string; wire: string } {
+  const out = process.env.AGY_LIVE_OUT || path.join(tmpdir(), 'agy-live');
+  mkdirSync(out, { recursive: true });
+  const wire = path.join(out, `wire-${name}.jsonl`);
+  writeFileSync(wire, '');
+  const tap = fileURLToPath(new URL('./fixtures/wireTap.mjs', import.meta.url));
+  setAgySessionOpener((options) =>
+    openAgySession({
+      ...options,
+      command: process.execPath,
+      args: [tap, wire, options.command, ...options.args],
+      timeoutMs: 90_000,
+    })
+  );
+  return { out, wire };
+}
+
+// 真机：一条 prompt 加一条插话。插话走 Enso 的可撤回插话入口。
+it.runIf(process.env.AGY_LIVE === '1')(
+  'live steer: the steer lands as its own user message and answer in the jsonl',
+  async () => {
+    const { out } = useLiveCli('bridge-steer');
+    const { session, manager } = await setup('enso-live-steer');
+    batchSteering(session);
+    let steered: Promise<unknown> | undefined;
+    session.subscribe((event) => {
+      if (steered || event.type !== 'message_update') return;
+      if (event.assistantMessageEvent.type !== 'text_delta') return;
+      steered = steerActiveSession(
+        session,
+        'Stop the story. Reply with only the word: steered',
+        undefined,
+        () => {}
+      );
+    });
+    await session.prompt('Write a 250-word story about a lighthouse keeper.');
+    await session.waitForIdle();
+    const file = manager.getSessionFile();
+    if (!file) throw new Error('no session file');
+    const rows = persisted(file);
+    writeFileSync(
+      path.join(out, 'bridge-steer.json'),
+      `${JSON.stringify({ steered: await steered, shape: shape(rows), rows }, null, 2)}\n`
+    );
+    expect(await steered).toBe('queued');
+    expect(rows.map((row) => (row as Row).role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+    expect(JSON.stringify((rows[3] as Row).content).toLowerCase()).toContain('steered');
+  },
+  300_000
+);
+
+// 真机：一条 prompt，让 agy 把命令放到后台跑。
+it.runIf(process.env.AGY_LIVE === '1')(
+  'live background: a command agy runs in the background keeps the turn open until it reports',
+  async () => {
+    const { out } = useLiveCli('bridge-background');
+    const gate = new ApprovalGate(
+      'full',
+      () => {},
+      () => {}
+    );
+    const { session, manager } = await setup('enso-live-background', { gate });
+    const started = Date.now();
+    await session.prompt(
+      'Start the shell command `sleep 8 && echo bg-done` as a background command without waiting for it, reply "started", and after it finishes tell me its output.'
+    );
+    await session.waitForIdle();
+    const file = manager.getSessionFile();
+    if (!file) throw new Error('no session file');
+    const rows = persisted(file);
+    writeFileSync(
+      path.join(out, 'bridge-background.json'),
+      `${JSON.stringify({ ms: Date.now() - started, shape: shape(rows), rows }, null, 2)}\n`
+    );
+  },
+  300_000
+);
+
+// 真机：一条 prompt。supervised + 无人值守自动拒绝：只有我们自己的 MCP 工具会被放行。
 it.runIf(process.env.AGY_LIVE === '1')(
   'live: agy calls the Enso todo tool over Host MCP, one Enso card, consistent jsonl',
   async () => {
