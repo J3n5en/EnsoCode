@@ -59,13 +59,18 @@ function MenuPopup({
         style={{ zIndex: layer }}
       >
         <MenuPrimitive.Popup
-          className={cn(MENU_POPUP_CLASS, className)}
+          className={cn(
+            MENU_POPUP_CLASS,
+            // 高度上限必须落在 popup 的 border-box 上：只压内部滚动容器时，
+            // popup 底边会比 --available-height 多出上下 border，圆角和阴影
+            // 顶穿碰撞垫被窗口边缘裁平。overflow-hidden 让圆角裁住滚动内容。
+            'max-h-[min(var(--available-height,100vh),calc(100vh-16px))] overflow-hidden',
+            className
+          )}
           data-slot="menu-popup"
           {...props}
         >
-          <div className="max-h-[min(var(--available-height,100vh),calc(100vh-16px))] w-full overflow-y-auto p-1.5">
-            {children}
-          </div>
+          <div className="max-h-full w-full overflow-y-auto p-1.5">{children}</div>
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
@@ -285,11 +290,11 @@ function MenuSubPopup({
         style={{ zIndex: zIndex ?? Z_INDEX.MODAL_BACKDROP }}
       >
         <MenuPrimitive.Popup
-          className={cn(MENU_POPUP_CLASS, className)}
+          className={cn(MENU_POPUP_CLASS, 'max-h-(--available-height) overflow-hidden', className)}
           data-slot="menu-sub-content"
           {...props}
         >
-          <div className="max-h-(--available-height) w-full overflow-y-auto p-1.5">{children}</div>
+          <div className="max-h-full w-full overflow-y-auto p-1.5">{children}</div>
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
@@ -334,6 +339,7 @@ function TitleBarMenuPopup({
           className={cn(
             // 基础样式
             "relative flex not-[class*='w-']:min-w-32 rounded-md border bg-popover shadow-lg outline-none",
+            'max-h-(--available-height) overflow-hidden',
             // 优化动画：150ms，使用模拟 Spring 的 cubic-bezier 曲线
             'origin-(--transform-origin) transition-[scale,opacity] duration-150 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]',
             'has-data-starting-style:scale-95 has-data-starting-style:opacity-0',
@@ -348,7 +354,7 @@ function TitleBarMenuPopup({
           {...props}
         >
           <div
-            className="max-h-(--available-height) w-full overflow-y-auto p-1.5"
+            className="max-h-full w-full overflow-y-auto p-1.5"
             style={{ WebkitAppRegion: 'no-drag' } as ElectronCSSProperties}
           >
             {children}
