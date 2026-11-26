@@ -71,10 +71,17 @@ function relay(state: { deployed: string; online: boolean; calls: string[]; miss
 
 function boot(
   version: string | null,
-  env: { caches: FakeCaches; net: ReturnType<typeof relay>; posted: unknown[] }
+  env: {
+    caches: FakeCaches;
+    net: ReturnType<typeof relay>;
+    posted: unknown[];
+    notifications?: { title: string; data?: { pending?: boolean } }[];
+    badge?: number | null;
+  }
 ) {
   const source = version ? injectShellManifest(SOURCE, version, FILES) : SOURCE;
   const listeners: Record<string, ((e: unknown) => void)[]> = {};
+  const shown: { title: string; options: { data?: { pending?: boolean } } }[] = [];
   const self = {
     location: { origin: ORIGIN },
     addEventListener: (t: string, fn: (e: unknown) => void) => {
@@ -85,7 +92,22 @@ function boot(
       claim: async () => {},
       matchAll: async () => [{ postMessage: (m: unknown) => env.posted.push(m) }],
     },
-    registration: {},
+    registration: {
+      showNotification: async (title: string, options: { data?: { pending?: boolean } }) => {
+        shown.push({ title, options });
+        if (env.notifications) {
+          env.notifications.push({ title, data: options.data });
+        }
+      },
+      getNotifications: async () =>
+        (env.notifications ?? []).map((n) => ({ title: n.title, data: n.data })),
+      setAppBadge: async (n: number) => {
+        if (env) env.badge = n;
+      },
+      clearAppBadge: async () => {
+        if (env) env.badge = 0;
+      },
+    },
   };
   vm.runInNewContext(source, {
     self,
@@ -133,6 +155,12 @@ function boot(
       });
       return replies[0];
     },
+    push: async (payload: unknown) => {
+      await dispatch('push', {
+        data: { json: () => payload },
+      });
+      return shown[shown.length - 1];
+    },
   };
 }
 
@@ -141,6 +169,58 @@ function setup(deployed = V1) {
   const env = { caches: new FakeCaches(), net: relay(state), posted: [] as unknown[] };
   return { state, env };
 }
+
+describe('sw.js 推送角标', () => {
+  function pushEnv(notifications: { title: string; data?: { pending?: boolean } }[] = []) {
+    const state = { deployed: V1, online: true, calls: [] as string[], missing: [] as string[] };
+    const env = {
+      caches: new FakeCaches(),
+      net: relay(state),
+      posted: [] as unknown[],
+      notifications,
+      badge: null as number | null,
+    };
+    return env;
+  }
+
+  it('pending 字段为 true 的通知计入角标，false 不计', async () => {
+    const env = pushEnv();
+    const sw = boot(V1, env);
+    await sw.push({
+      title: '修复登录 · 需要审批',
+      body: 'bash · ls',
+      sessionId: 's1',
+      pending: true,
+    });
+    expect(env.badge).toBe(1);
+    await sw.push({ title: '修复登录 · 回复完成', body: 'done', sessionId: 's1', pending: false });
+    // 回复完成不计入，但上一条审批仍在 → 角标仍 1
+    expect(env.badge).toBe(1);
+  });
+
+  it('旧载荷无 pending 字段：退回标题匹配（含新格式「会话名 · 需要审批」）', async () => {
+    const env = pushEnv([
+      { title: '修复登录 · 需要审批' }, // 新格式标题但无 pending 数据
+      { title: '等待你的回答' }, // 旧格式精确标题
+    ]);
+    const sw = boot(V1, env);
+    // 推送一条完成通知触发角标重算
+    await sw.push({ title: 'x · 回复完成', body: '', sessionId: 's1', pending: false });
+    expect(env.badge).toBe(2);
+  });
+
+  it('通知点击数据带 sessionId，pending 写入 notification data', async () => {
+    const env = pushEnv();
+    const sw = boot(V1, env);
+    const shown = await sw.push({
+      title: 't · 需要审批',
+      body: 'b',
+      sessionId: 's9',
+      pending: true,
+    });
+    expect(shown?.options?.data).toEqual({ sessionId: 's9', pending: true });
+  });
+});
 
 describe('sw.js 页面壳预缓存', () => {
   it('开发模式（清单为空）不接管导航和 /assets', async () => {

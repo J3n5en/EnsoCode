@@ -2,8 +2,11 @@ import path from 'node:path';
 import type { PushSubscriptionJson } from '@enso/pair';
 import { app } from '@platform';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
+import { buildNotificationCopy, type NotificationLocale } from '@shared/notificationCopy';
+import { shouldSilenceTurn } from '@shared/secretary/silence';
 import type { ApprovalRequestInfo } from '@shared/types/agent';
 import webPush from 'web-push';
+import { readSettings } from '../ipc/settings';
 import { SecureJsonFile } from './secureFile';
 
 /**
@@ -16,18 +19,21 @@ export interface PushPayload {
   title: string;
   body: string;
   sessionId: string;
+  /** true 表示待处理项（审批/提问）：service worker 据它计角标，不再靠标题文字匹配 */
+  pending: boolean;
 }
 
-const PUSH_TITLES: Record<string, string> = {
-  'approval-request': '需要审批',
-  'ask-request': '等待你的回答',
-  'turn-completed': '回合已完成',
-  'turn-failed': '回合失败',
-};
+/** 推送语言跟随桌面设置，与系统通知一致 */
+function pushLocale(): NotificationLocale {
+  const state = (readSettings()?.['enso-settings'] as { state?: { language?: string } } | undefined)
+    ?.state;
+  return (state?.language ?? 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
 
 /**
  * 事件 → 推送载荷的纯映射。返回 null 表示该事件不值得推送。
- * 正文优先带要处理的内容（审批命令、提问原文），没有时退回会话标题。
+ * 文案与桌面系统通知共用 @shared/notificationCopy：标题带会话名，
+ * 回合完成正文带 assistant 摘要，失败正文带错误原文。
  */
 export function buildPushPayload(
   event: {
@@ -36,6 +42,9 @@ export function buildPushPayload(
     identity?: { sessionId?: string };
     request?: Partial<ApprovalRequestInfo>;
     ask?: { question?: string; relay?: unknown };
+    error?: string;
+    silent?: boolean;
+    digest?: { firstUserText?: string; userText?: string; assistantText?: string };
   },
   sessionTitle: string | undefined,
   notifyMainAgentOnly = true,
@@ -47,28 +56,23 @@ export function buildPushPayload(
   if (event.type === 'approval-request' && event.request?.phase === 'reviewing') return null;
   // 转给秘书的提问由秘书处理，不打扰真人
   if (event.type === 'ask-request' && event.ask?.relay) return null;
-  const title = PUSH_TITLES[event.type];
-  if (!title) return null;
+  // 与桌面一致：秘书标记静默、或纯系统注入的回合不打扰用户
+  if (
+    event.type === 'turn-completed' &&
+    (event.silent === true ||
+      (event.digest &&
+        shouldSilenceTurn(event.digest.userText ?? '', event.digest.assistantText ?? '')))
+  ) {
+    return null;
+  }
   const sessionId = event.identity?.sessionId ?? event.sessionId;
   if (!sessionId) return null;
   if (muted) return null;
-  return { title, body: pushBody(event, sessionTitle), sessionId };
-}
-
-const PUSH_BODY_MAX = 100;
-
-function pushBody(
-  event: { type: string; request?: Partial<ApprovalRequestInfo>; ask?: { question?: string } },
-  sessionTitle: string | undefined
-): string {
-  const detail =
-    event.type === 'approval-request'
-      ? event.request?.summary
-      : event.type === 'ask-request'
-        ? event.ask?.question
-        : undefined;
-  const text = (detail || sessionTitle || '会话').trim();
-  return text.length > PUSH_BODY_MAX ? text.slice(0, PUSH_BODY_MAX) : text;
+  const copy = buildNotificationCopy(event, sessionTitle, pushLocale(), {
+    turnDoneSummary: true,
+  });
+  if (!copy) return null;
+  return { title: copy.title, body: copy.body, sessionId, pending: copy.pending };
 }
 
 // ── 持久化（与 pairStore 同一套加密姿态）─────────────────────────

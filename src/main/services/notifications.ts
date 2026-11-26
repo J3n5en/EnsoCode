@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
+import { buildNotificationCopy, type NotificationLocale } from '@shared/notificationCopy';
 import { shouldSilenceTurn } from '@shared/secretary/silence';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { IPC_CHANNELS } from '@shared/types/ipc';
@@ -60,11 +61,6 @@ function conversationLabel(sessionId: string): string {
   if (parentId === sessionId) return '';
   const parent = conversations?.[parentId]?.title;
   return typeof parent === 'string' ? parent.trim() : '';
-}
-
-function eventTitle(sessionId: string, kind: string): string {
-  const name = conversationLabel(sessionId);
-  return name ? `${name} · ${kind}` : kind;
 }
 
 import { readNotifyMainAgentOnly } from './notifyPolicy';
@@ -232,23 +228,17 @@ export function maybeNotify(event: RendererAgentEvent): void {
 }
 
 function notificationContent(event: RendererAgentEvent): NotificationContent | null {
-  const t = texts();
+  const locale: NotificationLocale = texts() === TEXTS.zh ? 'zh' : 'en';
+  // 审批/提问/失败文案与手机推送共用一套构造（@shared/notificationCopy），
+  // 标题恒为「会话名 · 类型」；桌面失败走 status:failed，其余事件类型一致。
   switch (event.type) {
     case 'ask-request':
       // 转给秘书的提问不弹给用户：秘书会答，用户也可以在那个会话里自己答
       if (event.ask.relay) return null;
       // agent 在等答复才能继续,不提醒会静默卡住整个会话
-      return {
-        sessionId: event.identity.sessionId,
-        title: eventTitle(event.identity.sessionId, t.ask),
-        body: event.ask.question.slice(0, 100),
-      };
+      break;
     case 'approval-request':
-      return {
-        sessionId: event.identity.sessionId,
-        title: eventTitle(event.identity.sessionId, t.approval),
-        body: `${event.request.tool} · ${event.request.summary.slice(0, 80)}`,
-      };
+      break;
     case 'turn-completed':
       if (
         event.silent === true ||
@@ -256,19 +246,14 @@ function notificationContent(event: RendererAgentEvent): NotificationContent | n
       ) {
         return null;
       }
-      return {
-        sessionId: event.identity.sessionId,
-        title: eventTitle(event.identity.sessionId, t.turnDone),
-        body: t.turnDoneBody,
-      };
+      break;
     case 'status':
       if (event.status !== 'failed' || !event.error) return null;
-      return {
-        sessionId: event.identity.sessionId,
-        title: eventTitle(event.identity.sessionId, t.failed),
-        body: event.error.slice(0, 100),
-      };
+      break;
     default:
       return null;
   }
+  const copy = buildNotificationCopy(event, conversationLabel(event.identity.sessionId), locale);
+  if (!copy) return null;
+  return { sessionId: event.identity.sessionId, title: copy.title, body: copy.body };
 }
