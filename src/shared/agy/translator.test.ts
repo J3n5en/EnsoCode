@@ -1,5 +1,66 @@
 import { describe, expect, it } from 'vitest';
-import { emptyTranslatorState, reduceAgyUpdate, stopFromPrompt } from './translator';
+import { emptyTranslatorState, holdsTurn, reduceAgyUpdate, stopFromPrompt } from './translator';
+
+describe('background work after end_turn', () => {
+  const started = (toolCallId: string, extra: Record<string, unknown>) =>
+    reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'tool_call',
+      toolCallId,
+      status: 'in_progress',
+      ...extra,
+    }).state;
+
+  it('holds the turn for a running command, and lets go once it completes', () => {
+    const running = started('cmd-1', {
+      name: 'run_command',
+      kind: 'execute',
+      title: 'sleep 5 && echo done',
+      rawInput: { CommandLine: 'sleep 5 && echo done' },
+    });
+    expect(holdsTurn(running.tools)).toBe(true);
+    // 后续 update 不再带 kind / rawInput，判定沿用开始时的
+    const done = reduceAgyUpdate(running, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'cmd-1',
+      status: 'completed',
+    }).state;
+    expect(holdsTurn(done.tools)).toBe(false);
+  });
+
+  it('holds for a pending command and a running agy subagent', () => {
+    const pending = reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'cmd-2',
+      status: 'pending',
+      name: 'run_command',
+      kind: 'execute',
+      rawInput: { CommandLine: 'make' },
+    }).state;
+    expect(holdsTurn(pending.tools)).toBe(true);
+    expect(
+      holdsTurn(started('sub-1', { title: 'Running start_subagent', kind: 'other' }).tools)
+    ).toBe(true);
+  });
+
+  it('does not hold for a daemon, a scheduled wake, or another native tool', () => {
+    const daemon = started('cmd-3', {
+      name: 'run_command',
+      kind: 'execute',
+      rawInput: { CommandLine: 'pnpm dev', IsDaemon: true },
+    });
+    const schedule = started('wake-1', {
+      kind: 'other',
+      title: 'Run schedule',
+      rawInput: { DurationSeconds: 30, Prompt: 'Reply DONE.' },
+    });
+    const list = started('ls-1', {
+      kind: 'other',
+      title: 'Run list_dir',
+      rawInput: { DirectoryPath: '/w' },
+    });
+    expect(holdsTurn([...daemon.tools, ...schedule.tools, ...list.tools])).toBe(false);
+  });
+});
 
 describe('reduceAgyUpdate', () => {
   it('appends text and thinking, and projects native tool names', () => {

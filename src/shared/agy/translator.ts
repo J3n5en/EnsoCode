@@ -13,6 +13,30 @@ export function emptyTranslatorState(): TranslatorState {
   return { text: '', thinking: '', tools: [], plan: null };
 }
 
+const SUBAGENT_TOOLS = new Set(['start_subagent', 'invoke_subagent']);
+
+/**
+ * 这个工具会不会在 end_turn 之后继续跑（t3 antigravityCommandOutlivesPrompt、paseo deferTurnOnRunningTools）。
+ * daemon 命令可能永远不结束，定时唤醒（schedule）由 agy 自己另起回复，都不留住本轮。
+ * 只有带 kind / rawInput 的 update 才判定；后续只报状态的 update 沿用。
+ */
+function outlivesPrompt(update: Record<string, unknown>, name: string): boolean | undefined {
+  const raw = record(update.rawInput);
+  if (update.kind === undefined && !raw) return undefined;
+  if (name === 'schedule') return false;
+  if (SUBAGENT_TOOLS.has(name)) return true;
+  if (update.kind !== 'execute' && name !== 'run_command') return false;
+  return raw?.IsDaemon !== true;
+}
+
+/** end_turn 时这些工具还没跑完：本轮留着，等 agy 自己接着回复 */
+export function holdsTurn(tools: readonly AgyToolCard[]): boolean {
+  return tools.some(
+    (tool) =>
+      tool.background === true && (tool.status === 'in_progress' || tool.status === 'pending')
+  );
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -141,6 +165,7 @@ export function reduceAgyUpdate(
       servedReads,
       previous
     );
+    const background = previous?.background ?? outlivesPrompt(recordUpdate, resolvedName);
     const card: AgyToolCard = {
       id,
       name: resolvedName,
@@ -148,6 +173,7 @@ export function reduceAgyUpdate(
       args: cardArgs(resolvedName, argsOf(recordUpdate)),
       ...(outputText(recordUpdate) !== undefined ? { output: outputText(recordUpdate) } : {}),
       ...(typeof recordUpdate.title === 'string' ? { title: recordUpdate.title } : {}),
+      ...(background !== undefined ? { background } : {}),
     };
     return {
       state: upsertTool(state, card),

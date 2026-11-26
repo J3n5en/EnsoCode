@@ -104,6 +104,8 @@ export interface AgyToolCard {
   status: AgyToolStatus;
   args: Record<string, unknown>;
   output?: string;
+  /** agy 在 prompt 结束后还会接着跑、跑完自己回复的工具（非 daemon 命令、agy 子任务）。首次能判定时定下 */
+  background?: boolean;
 }
 
 export interface AgyPlanItem {
