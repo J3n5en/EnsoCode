@@ -169,6 +169,8 @@ export const IPC_CHANNELS = {
   /** 主窗口 → main：等待弹层上点「强制退出」 */
   APP_RESTART_FORCE: 'app:restart-force',
   APP_SET_BADGE_COUNT: 'app:set-badge-count',
+  /** main → 全部渲染器：系统从睡眠唤醒（桌面 powerMonitor resume；服务器无此事件） */
+  SYSTEM_RESUMED: 'system:resumed',
 
   // 拖放浮窗（实验，macOS）：浮窗 ⇄ Main ⇄ 主窗口
   DROP_SHELF_STATE: 'drop-shelf:state',

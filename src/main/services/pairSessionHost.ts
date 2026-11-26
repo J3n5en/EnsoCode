@@ -600,6 +600,22 @@ function stallTick(): void {
   }
 }
 
+/**
+ * 系统从睡眠唤醒：睡眠期间墙钟照走但定时器与会话心跳都停了，拿跨睡眠的
+ * Date.now() 差值判静默必然误报。把每个运行中会话的心跳重置为现在，给一个
+ * 完整的超时窗口重新计时；真卡住的会话会在窗口过后照常中止。
+ */
+export function resetStallBeatsForSystemResume(now: number = Date.now()): void {
+  for (const [sessionId, runtime] of runtimes) {
+    if (runtime.status !== 'running') continue;
+    const beat = beats.get(sessionId);
+    if (!beat) continue;
+    beat.at = now;
+    beat.deadline = undefined;
+    beats.set(sessionId, beat);
+  }
+}
+
 function writeTitle(sessionId: string, title: string): void {
   patchConversationsState((state) => {
     const current = state.conversations[sessionId];

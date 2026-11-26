@@ -651,6 +651,9 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   APP_RESTART_FORCE: excluded('Renderer-to-main force quit from the restart wait overlay.'),
   APP_SET_BADGE_COUNT: excluded('Renderer-to-main Dock badge count for waiting conversations.'),
+  SYSTEM_RESUMED: excluded(
+    'Main-to-renderer system wake broadcast; renderers reset stall heartbeats on it.'
+  ),
   DROP_SHELF_STATE: excluded('Main-to-shelf window visual state for the macOS drop shelf.'),
   DROP_SHELF_DROP: excluded('Drop shelf window hands dropped Finder paths to main.'),
   DROP_SHELF_PENDING: excluded('Main-to-renderer ping that drop shelf paths are waiting.'),

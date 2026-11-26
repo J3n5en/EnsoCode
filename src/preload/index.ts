@@ -410,6 +410,11 @@ const electronAPI = {
     setBadgeCount: (count: number): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_SET_BADGE_COUNT, count);
     },
+    onSystemResumed: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.SYSTEM_RESUMED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SYSTEM_RESUMED, listener);
+    },
   },
 
   settings: {

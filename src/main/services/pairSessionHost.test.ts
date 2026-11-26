@@ -30,6 +30,7 @@ import {
   handlePairHeadlessAgentEvent,
   headlessIdleBlocks,
   type PairSessionHostAgent,
+  resetStallBeatsForSystemResume,
   setPairHeadless,
 } from './pairSessionHost';
 
@@ -200,6 +201,30 @@ describe('headless stall watchdog', () => {
     }
     expect(agent.abort).toHaveBeenCalledTimes(4);
     expect(agent.retry).toHaveBeenCalledTimes(3);
+  });
+
+  // 真实场景：合上盖子过夜，定时器在睡眠期间不走，醒来的第一个 tick 距上次心跳
+  // 已过 8 小时；机器睡着不是会话卡住。Main 收到 powerMonitor resume 后重置心跳，
+  // 醒来的会话获得一个全新的超时窗口
+  it('系统唤醒重置心跳后，睡眠前的静默不立即触发中止', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(status('running'));
+    vi.advanceTimersByTime(30_000);
+    resetStallBeatsForSystemResume();
+    vi.advanceTimersByTime(59_000);
+    expect(agent.abort).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2_000);
+    expect(agent.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('唤醒重置不是永久豁免：之后静默满一个超时周期照常中止', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(status('running'));
+    resetStallBeatsForSystemResume();
+    vi.advanceTimersByTime(61_000);
+    expect(agent.abort).toHaveBeenCalledTimes(1);
   });
 });
 
