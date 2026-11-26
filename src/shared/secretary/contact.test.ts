@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  approvalButtonText,
+  approvalCallbackData,
+  approvalCallbackToast,
+  approvalSettledText,
   askCallbackData,
   bindCodeUsable,
   bindCommandCode,
@@ -21,8 +25,10 @@ import {
   formatCardWaitingMessage,
   formatFollowedScheduleMessage,
   formatMilestoneMessage,
+  formatRemoteApprovalMessage,
   isBoundChat,
   normalizeBotToken,
+  parseApprovalCallbackData,
   parseAskCallbackData,
   parseCardCallbackData,
   parseFollowCallback,
@@ -208,13 +214,10 @@ describe('手机上的消息格式', () => {
     expect(text).toContain('共 2 张');
   });
 
-  it('开关允许时改说点确认直接处理，审批永远只说在应用里处理', () => {
+  it('开关允许时改说点确认直接处理', () => {
     const text = formatCardWaitingMessage('zh', { count: 1, confirmable: true });
     expect(text).toContain('点「确认」直接处理');
-    expect(text).toContain('审批永远只能在应用里处理');
-    const approval = formatCardWaitingMessage('zh', { count: 1, approval: true });
-    expect(approval).toContain('审批只能在应用里处理');
-    expect(approval).not.toContain('点「确认」直接处理');
+    expect(text).not.toContain('审批');
   });
 
   it('文案与实际形态一致：有按钮就不在正文里重复裸链接', () => {
@@ -359,5 +362,81 @@ describe('多秘书路由', () => {
     expect(routeTarget(claims, 1, '-100', undefined)).toBe('a');
     expect(routeTarget(claims, 2, '-100', '8')).toBeNull();
     expect(routeTarget(claims, 1, '999', undefined)).toBeNull();
+  });
+});
+
+describe('远程审批卡', () => {
+  const KEY = '0123456789abcdef';
+
+  it('回调数据 appr:<a|d|o>:<16 位 key>，能原样解析回来且不超过 64 字节', () => {
+    expect(approvalCallbackData(KEY, 'allow')).toBe(`appr:a:${KEY}`);
+    expect(approvalCallbackData(KEY, 'deny')).toBe(`appr:d:${KEY}`);
+    expect(approvalCallbackData(KEY, 'open')).toBe(`appr:o:${KEY}`);
+    for (const action of ['allow', 'deny', 'open'] as const) {
+      const data = approvalCallbackData(KEY, action);
+      expect(Buffer.byteLength(data)).toBeLessThanOrEqual(64);
+      expect(parseApprovalCallbackData(data)).toEqual({ key: KEY, action });
+    }
+  });
+
+  it('坏数据一律不认', () => {
+    for (const data of [
+      'appr:x:0123456789abcdef',
+      'appr:a:0123456789ABCDEF',
+      'appr:a:0123',
+      'appr:a:0123456789abcdef0',
+      'card:c:0123456789abcdef',
+      '',
+    ]) {
+      expect(parseApprovalCallbackData(data)).toBeNull();
+    }
+  });
+
+  it('正文带会话、工具与摘要，按档位说清能不能在手机上批', () => {
+    const base = { title: '修登录', tool: 'bash', summary: 'pnpm test' };
+    const remote = formatRemoteApprovalMessage('zh', { ...base, mode: 'remote' });
+    expect(remote).toContain('修登录');
+    expect(remote).toContain('bash');
+    expect(remote).toContain('pnpm test');
+    expect(remote).toContain('点「批准」');
+    const desktop = formatRemoteApprovalMessage('zh', { ...base, mode: 'desktop' });
+    expect(desktop).toContain('必须在电脑上审批');
+    expect(desktop).not.toContain('点「批准」');
+    const off = formatRemoteApprovalMessage('zh', { ...base, mode: 'off' });
+    expect(off).toContain('远程审批没开');
+    expect(off).not.toContain('点「批准」');
+    const en = formatRemoteApprovalMessage('en', {
+      tool: 'write',
+      summary: 'a.ts',
+      mode: 'desktop',
+    });
+    expect(en).toContain('write');
+    expect(en).toContain('on the computer');
+    expect(en).not.toMatch(/[\u4e00-\u9fff]/u);
+  });
+
+  it('按钮、收尾与提示中英各一套', () => {
+    expect(approvalButtonText('zh', 'allow')).toBe('批准');
+    expect(approvalButtonText('zh', 'deny')).toBe('拒绝');
+    expect(approvalButtonText('en', 'allow')).toBe('Approve');
+    expect(approvalSettledText('zh', 'allowed', '修登录 · bash')).toBe('✅ 已批准：修登录 · bash');
+    expect(approvalSettledText('zh', 'denied', 'bash')).toBe('🚫 已拒绝：bash');
+    expect(approvalSettledText('zh', 'elsewhere', 'bash')).toBe('✅ 已在应用里处理：bash');
+    expect(approvalSettledText('zh', 'expired', 'bash')).toBe('⌛ 审批已失效：bash');
+    expect(approvalSettledText('en', 'allowed', 'bash')).toBe('✅ Approved: bash');
+    for (const outcome of [
+      'unknown',
+      'settled',
+      'desktop',
+      'disabled',
+      'failed',
+      'allowed',
+      'denied',
+      'open',
+    ] as const) {
+      expect(approvalCallbackToast('zh', outcome)).toMatch(/[\u4e00-\u9fff]/u);
+      expect(approvalCallbackToast('en', outcome)).not.toMatch(/[\u4e00-\u9fff]/u);
+    }
+    expect(approvalCallbackToast('zh', 'unknown')).toBe('这条审批已失效');
   });
 });

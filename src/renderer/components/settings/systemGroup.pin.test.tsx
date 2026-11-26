@@ -76,7 +76,14 @@ const CONTACT: SecretaryContactState = {
         images: true,
         files: true,
       },
-      prefs: { enabled: true, push: true, cardConfirm: true, syncMirror: false, memory: false },
+      prefs: {
+        enabled: true,
+        push: true,
+        cardConfirm: true,
+        approvalRemote: false,
+        syncMirror: false,
+        memory: false,
+      },
     },
   ],
   telegram: {

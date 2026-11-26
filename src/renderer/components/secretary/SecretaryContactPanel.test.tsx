@@ -38,7 +38,14 @@ function contactState(groups: SecretaryContactState['telegram']['groups']): Secr
         builtin: true,
         status: 'connected',
         caps,
-        prefs: { enabled: true, push: true, cardConfirm: true, syncMirror: false, memory: false },
+        prefs: {
+          enabled: true,
+          push: true,
+          cardConfirm: true,
+          approvalRemote: false,
+          syncMirror: false,
+          memory: false,
+        },
       },
     ],
     telegram: {

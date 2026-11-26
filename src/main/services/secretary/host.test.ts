@@ -80,8 +80,6 @@ interface Harness {
       replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
       silent: { conversationId: string; updates: number }[];
       turns: { conversationId: string; kind: 'start' | 'end' }[];
-      cards: { count: number; approval?: boolean; conversationId?: string }[];
-      approvalsResolved: string[];
       scheduleFired: { scheduleId: string; text: string }[];
     };
   };
@@ -122,8 +120,6 @@ function harness(
       replies: [],
       silent: [],
       turns: [],
-      cards: [],
-      approvalsResolved: [],
       scheduleFired: [],
     },
   };
@@ -205,12 +201,6 @@ function harness(
       },
       onTurnSilent: (conversationId, updates) => {
         state.contact.silent.push({ conversationId, updates });
-      },
-      onCardWaiting: (input) => {
-        state.contact.cards.push(input);
-      },
-      onApprovalResolved: (conversationId) => {
-        state.contact.approvalsResolved.push(conversationId);
       },
     },
     isSecretaryConversation: (conversationId) =>
@@ -2444,9 +2434,6 @@ describe('联系方式转发', () => {
 
     h.host.onAgentEvent(secretaryEvent('ask-resolved', { requestId: 'ask-9', by: 'user' }), []);
     expect(h.state.contact.resolved).toEqual([{ conversationId: 'sec-1', requestId: 'ask-9' }]);
-
-    h.host.onAgentEvent(secretaryEvent('approval-request', { request: { requestId: 'ap-1' } }), []);
-    expect(h.state.contact.cards).toEqual([{ count: 1, approval: true, conversationId: 'sec-1' }]);
 
     h.host.onAgentEvent(
       secretaryEvent('turn-completed', {

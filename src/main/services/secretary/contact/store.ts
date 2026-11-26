@@ -416,7 +416,14 @@ export function withTelegramGroupTitle(
 }
 
 const CHANNEL_ID = /^[a-z0-9][a-z0-9._:-]{0,95}$/u;
-const PREF_KEYS = ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const;
+const PREF_KEYS = [
+  'enabled',
+  'push',
+  'cardConfirm',
+  'approvalRemote',
+  'syncMirror',
+  'memory',
+] as const;
 
 function parseChannels(raw: unknown): ContactFile['channels'] {
   if (!isRecord(raw)) return {};
@@ -438,6 +445,7 @@ export function channelPrefs(file: ContactFile, id: string): SecretaryContactCha
       enabled: saved.enabled ?? true,
       push: saved.push ?? true,
       cardConfirm: file.allowCardConfirm,
+      approvalRemote: saved.approvalRemote ?? false,
       syncMirror: file.syncMirror,
       memory: file.allowMemory,
     };
@@ -446,6 +454,7 @@ export function channelPrefs(file: ContactFile, id: string): SecretaryContactCha
     enabled: saved.enabled ?? false,
     push: saved.push ?? true,
     cardConfirm: saved.cardConfirm ?? false,
+    approvalRemote: saved.approvalRemote ?? false,
     syncMirror: saved.syncMirror ?? false,
     memory: saved.memory ?? false,
   };

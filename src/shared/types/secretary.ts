@@ -1080,6 +1080,8 @@ export interface SecretaryContactChannelPrefs {
   push: boolean;
   /** 手机上直接确认卡片；审批永远不行 */
   cardConfirm: boolean;
+  /** 审批卡带批准/拒绝按钮（只限 Telegram 私聊、非高危）；关着只给回应用的入口 */
+  approvalRemote: boolean;
   /** 秘书每一轮回复都镜像过去 */
   syncMirror: boolean;
   /** 允许发记忆标题 */
