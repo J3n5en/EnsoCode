@@ -8,6 +8,7 @@ import {
   headerSessionTabIds,
   pinnedConversationIds,
   projectConversationIds,
+  projectHasOnlyArchivedConversations,
   sortProjectsByActivity,
   staleArchivedConversationIds,
   waitingConversationCount,
@@ -118,6 +119,19 @@ describe('sortProjectsByActivity', () => {
       projects[0],
     ]);
   });
+
+  it('全归档项目不计入活跃时间，排序与未计入归档时一致', () => {
+    const projects = [{ id: 'live' }, { id: 'archived-only' }, { id: 'empty' }];
+    const sessions = {
+      current: conv('live', 1, 10),
+      gone: conv('archived-only', 1, 999, { archived: true }),
+    };
+    expect(sortProjectsByActivity(projects, ['gone', 'current'], sessions)).toEqual([
+      projects[0],
+      projects[1],
+      projects[2],
+    ]);
+  });
 });
 
 describe('recentProjects', () => {
@@ -138,7 +152,7 @@ describe('recentProjects', () => {
     ).toEqual(['new', 'edge']);
   });
 
-  it('归档会话和会话置顶不能把过期项目留在最近', () => {
+  it('7 天内的归档会话计入最近，置顶不改变按活跃时间的顺序', () => {
     const projects = [{ id: 'old' }, { id: 'live' }];
     const sessions = {
       archived: conv('old', 1, now, { archived: true, pinned: true }),
@@ -149,7 +163,27 @@ describe('recentProjects', () => {
       pinned
         .recentProjects(projects, ['archived', 'stale', 'current'], sessions, now)
         .map((project) => project.id)
-    ).toEqual(['live']);
+    ).toEqual(['old', 'live']);
+  });
+
+  it('项目会话全部归档且活跃在 7 天内时，最近仍包含该项目', () => {
+    const projects = [{ id: 'archived-only' }, { id: 'empty' }];
+    const sessions = {
+      gone: conv('archived-only', 1, now - DAY, { archived: true }),
+    };
+    expect(
+      pinned.recentProjects(projects, ['gone'], sessions, now).map((project) => project.id)
+    ).toEqual(['archived-only']);
+  });
+
+  it('项目会话全部归档且活跃早于 7 天时，最近不包含该项目', () => {
+    const projects = [{ id: 'archived-old' }, { id: 'empty' }];
+    const sessions = {
+      gone: conv('archived-old', 1, now - 8 * DAY, { archived: true }),
+    };
+    expect(
+      pinned.recentProjects(projects, ['gone'], sessions, now).map((project) => project.id)
+    ).toEqual([]);
   });
 });
 
@@ -212,6 +246,31 @@ describe('projectConversationIds', () => {
       'a',
       'd',
     ]);
+  });
+});
+
+describe('projectHasOnlyArchivedConversations', () => {
+  it('全部归档时为 true', () => {
+    const onlyArchived = {
+      a: conv('p1', 1, 50, { archived: true }),
+      b: conv('p1', 2, 20, { archived: true }),
+    };
+    expect(projectHasOnlyArchivedConversations(['a', 'b'], onlyArchived, 'p1')).toBe(true);
+  });
+
+  it('有未归档会话时为 false', () => {
+    const mixed = {
+      a: conv('p1', 1, 50, { archived: true }),
+      b: conv('p1', 2, 20),
+    };
+    expect(projectHasOnlyArchivedConversations(['a', 'b'], mixed, 'p1')).toBe(false);
+  });
+
+  it('从无会话时为 false', () => {
+    expect(projectHasOnlyArchivedConversations([], {}, 'p1')).toBe(false);
+    expect(
+      projectHasOnlyArchivedConversations(['c'], { c: conv('p2', 3, 30, { archived: true }) }, 'p1')
+    ).toBe(false);
   });
 });
 

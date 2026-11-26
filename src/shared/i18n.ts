@@ -2632,6 +2632,7 @@ export const zhTranslations: Record<string, string> = {
   'Selected model is unavailable': '所选模型不可用',
   Clear: '清除',
   'No conversations yet': '暂无对话',
+  'All conversations in this project are archived': '该项目下的会话已全部归档',
   'Preparing session…': '正在读取历史…',
   'Loading earlier messages…': '加载更早的消息…',
   'Load earlier messages': '加载更早的消息',
