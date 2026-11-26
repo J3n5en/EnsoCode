@@ -41,6 +41,40 @@ describe('createJsonRpcConnection', () => {
     });
   });
 
+  it('settles an in-order request before the notifications that follow it on the wire', () => {
+    const conn = createJsonRpcConnection(() => {});
+    const seen: string[] = [];
+    conn.setNotificationHandler((_method, params) =>
+      seen.push(`note:${(params as { n: number }).n}`)
+    );
+    conn.requestInOrder('session/prompt', {}, (outcome) =>
+      seen.push(`settled:${JSON.stringify(outcome)}`)
+    );
+    // 同一块 stdout 里：先是 prompt 的答复，再是两条 update
+    conn.push(
+      [
+        '{"jsonrpc":"2.0","method":"session/update","params":{"n":1}}',
+        '{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}',
+        '{"jsonrpc":"2.0","method":"session/update","params":{"n":2}}',
+        '',
+      ].join('\n')
+    );
+    expect(seen).toEqual(['note:1', 'settled:{"result":{"stopReason":"end_turn"}}', 'note:2']);
+  });
+
+  it('settles an in-order request with the error, or when the connection closes', () => {
+    const conn = createJsonRpcConnection(() => {});
+    const seen: unknown[] = [];
+    conn.requestInOrder('a', {}, (outcome) => seen.push(outcome));
+    conn.requestInOrder('b', {}, (outcome) => seen.push(outcome));
+    conn.push('{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"boom"}}\n');
+    conn.close();
+    expect(seen).toEqual([
+      { error: expect.objectContaining({ code: -32603, message: 'boom' }) },
+      { error: expect.objectContaining({ message: 'connection closed' }) },
+    ]);
+  });
+
   it('rejects an aborted request without sending a second call', async () => {
     const { left, right, leftWrite } = pair();
     right.setRequestHandler(() => new Promise(() => {}));

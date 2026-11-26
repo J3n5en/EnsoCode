@@ -25,6 +25,11 @@ interface Pending {
 
 export interface JsonRpcConnection {
   request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown>;
+  /**
+   * 发请求，答复到达时在读到它的那一刻同步回调：和前后的 notification 保持线上顺序。
+   * `request()` 的 Promise 要等微任务，同一块 stdout 里排在答复后面的 update 会先被处理。
+   */
+  requestInOrder(method: string, params: unknown, settle: (outcome: RpcOutcome) => void): void;
   notify(method: string, params: unknown): void;
   setRequestHandler(handler: (method: string, params: unknown) => Promise<unknown> | unknown): void;
   setNotificationHandler(handler: (method: string, params: unknown) => void): void;
@@ -33,6 +38,8 @@ export interface JsonRpcConnection {
 }
 
 export type StdoutFault = 'signed-out' | 'protocol-error';
+
+export type RpcOutcome = { result: unknown } | { error: unknown };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -133,6 +140,19 @@ export function createJsonRpcConnection(
         signal?.addEventListener('abort', onAbort, { once: true });
         send({ jsonrpc: '2.0', id, method, params });
       });
+    },
+    requestInOrder(method, params, settle) {
+      if (closed) {
+        settle({ error: new AgyRpcError(-32000, 'connection closed') });
+        return;
+      }
+      const id = nextId;
+      nextId += 1;
+      pending.set(id, {
+        resolve: (result) => settle({ result }),
+        reject: (error) => settle({ error }),
+      });
+      send({ jsonrpc: '2.0', id, method, params });
     },
     notify(method, params) {
       send({ jsonrpc: '2.0', method, params });
