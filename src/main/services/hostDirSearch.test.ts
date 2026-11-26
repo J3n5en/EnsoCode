@@ -136,4 +136,14 @@ describe('searchHostDirs', () => {
     const missing = path.join(home, 'missing');
     expect(await searchHostDirs('zq', missing)).toMatchObject({ ok: false });
   });
+
+  it('does not match segments of the home directory itself', async () => {
+    const polluted = path.join(home, 'zqhome');
+    mkdirSync(path.join(polluted, 'deep', 'x', 'mydir'), { recursive: true });
+    mkdirSync(path.join(polluted, 'nested'));
+    const result = await searchHostDirs('zq', polluted);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.results.map((item) => item.displayPath)).toEqual([]);
+  });
 });

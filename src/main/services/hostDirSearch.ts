@@ -28,11 +28,11 @@ function displayPath(target: string, home: string): string {
   return target;
 }
 
-/** 0 段精确，1 段前缀，2 段包含，3 整路径包含；未命中返回 null */
+/** 0 段精确，1 段前缀，2 段包含，3 整路径包含；未命中返回 null。target 必须是相对 home 的路径，避免 home 自身段污染匹配 */
 function matchRank(target: string, query: string): number | null {
   const needle = query.toLowerCase().replaceAll('\\', '/');
   let best: number | null = null;
-  for (const segment of target.split(path.sep)) {
+  for (const segment of target.split('/')) {
     if (!segment) continue;
     const value = segment.toLowerCase();
     const rank =
@@ -40,7 +40,7 @@ function matchRank(target: string, query: string): number | null {
     if (rank !== null && (best === null || rank < best)) best = rank;
   }
   if (best !== null) return best;
-  return target.split(path.sep).join('/').toLowerCase().includes(needle) ? 3 : null;
+  return target.toLowerCase().includes(needle) ? 3 : null;
 }
 
 async function readEntries(dir: string): Promise<{ entries: Dirent[] } | { error: string }> {
@@ -88,7 +88,8 @@ export async function searchHostDirs(
       const full = path.join(current.dir, entry.name);
       if (full === library) continue;
       const depth = current.depth + 1;
-      const rank = matchRank(full, needle);
+      const relative = path.relative(root, full).split(path.sep).join('/');
+      const rank = matchRank(relative, needle);
       if (rank !== null) hits.push({ path: full, depth, rank });
       if (depth < MAX_DEPTH) queue.push({ dir: full, depth });
     }
