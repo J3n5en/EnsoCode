@@ -1,4 +1,4 @@
-import type { ComposerToolbarItemId } from '@shared/composerToolbar';
+import { type ComposerToolbarItemId, isSpacerKey } from '@shared/composerToolbar';
 import type { ReactNode } from 'react';
 import { useSettingsStore } from '@/stores/settings';
 import { ComposerToolbarOverflow } from './ComposerToolbarOverflow';
@@ -15,13 +15,20 @@ export function ComposerToolbarItems({
   const composerToolbar = useSettingsStore((state) => state.composerToolbar);
   return (
     <>
-      {composerToolbar.order
-        .filter((id) => composerToolbar.pinned.includes(id))
-        .map((id) => (
-          <span key={id} className="contents">
-            {items[id]}
+      {composerToolbar.order.map((entry) =>
+        isSpacerKey(entry) ? (
+          <span
+            key={entry}
+            className="min-w-2 flex-1"
+            aria-hidden
+            data-composer-toolbar-spacer=""
+          />
+        ) : composerToolbar.pinned.includes(entry) ? (
+          <span key={entry} className="contents">
+            {items[entry]}
           </span>
-        ))}
+        ) : null
+      )}
       <ComposerToolbarOverflow renderItem={(id) => items[id]} />
     </>
   );

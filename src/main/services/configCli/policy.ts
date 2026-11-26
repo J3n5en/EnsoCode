@@ -292,7 +292,7 @@ function validateField(field: string, value: unknown): string | null {
   if (field === 'learnButtonEnabled' && typeof value !== 'boolean')
     return 'learnButtonEnabled must be a boolean';
   if (field === 'composerToolbar' && !isStoredComposerToolbar(value))
-    return 'composerToolbar must be { order, pinned } arrays of known toolbar item ids';
+    return 'composerToolbar must be { order, pinned } arrays of known toolbar item ids; order may also contain up to 5 unique spacer keys';
   if (field === 'pluginLoggingEnabled' && typeof value !== 'boolean')
     return 'pluginLoggingEnabled must be a boolean';
   if (field === 'appLoggingEnabled' && typeof value !== 'boolean')
