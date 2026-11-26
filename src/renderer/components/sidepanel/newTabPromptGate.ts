@@ -16,3 +16,14 @@ export function newTabAutoPopOpen(input: {
 }): boolean {
   return input.promptAt != null && !input.layoutAnimating && input.anchorLive;
 }
+
+/** 顶栏右端「+ / 全屏 / 收起」平时收纳成一个「…」，hover 才展开。
+ *  新建菜单开着或 auto-pop 信号待弹时必须强制展开：+ 是弹层锚点，被藏起
+ *  （display:none）后 rect 归零，弹层就漂到窗口左上角；鼠标移进弹层时也已
+ *  离开按钮组，单靠 hover 撑不住。 */
+export function headerActionsPinned(input: {
+  menuOpen: boolean;
+  promptAt: number | null | undefined;
+}): boolean {
+  return input.menuOpen || input.promptAt != null;
+}

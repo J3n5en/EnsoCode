@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { newTabAutoPopOpen } from './newTabPromptGate';
+import { headerActionsPinned, newTabAutoPopOpen } from './newTabPromptGate';
+
+describe('顶栏按钮收纳成「…」时的强制展开', () => {
+  it('空闲：收起，只露「…」', () => {
+    expect(headerActionsPinned({ menuOpen: false, promptAt: null })).toBe(false);
+  });
+
+  it('新建菜单开着：保持展开，否则 + 被藏起、弹层锚点 rect 归零漂走', () => {
+    expect(headerActionsPinned({ menuOpen: true, promptAt: null })).toBe(true);
+  });
+
+  it('auto-pop 信号待弹（含动画中按住未弹）：提前展开，让 + 先就位再测量', () => {
+    expect(headerActionsPinned({ menuOpen: false, promptAt: 1 })).toBe(true);
+    expect(headerActionsPinned({ menuOpen: false, promptAt: undefined })).toBe(false);
+  });
+});
 
 describe('auto-pop 放行时机', () => {
   it('有信号且动画已停：弹出', () => {

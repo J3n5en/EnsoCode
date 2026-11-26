@@ -18,6 +18,7 @@ import {
   Maximize2,
   MessageCircle,
   Minimize2,
+  MoreHorizontal,
   PanelRight,
   Pin,
   Plus,
@@ -95,7 +96,7 @@ import { restoreHostBrowserTabs } from './browserTabs';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { GlobalPluginLayer, GlobalPluginSlot } from './GlobalPluginLayer';
-import { newTabAutoPopOpen } from './newTabPromptGate';
+import { headerActionsPinned, newTabAutoPopOpen } from './newTabPromptGate';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
@@ -597,6 +598,7 @@ function NewTabMenu({
   secretaryPluginIds,
   compact,
   promptAt,
+  onOpenChange,
 }: {
   /** 缺省 = 该会话不提供这个入口（秘书会话没有终端、文件、改动） */
   onNewTerminal?: () => void;
@@ -613,6 +615,8 @@ function NewTabMenu({
   compact?: boolean;
   /** 无 tab 展开的一次性信号时间戳；与 store 里一致时菜单初次即弹出 */
   promptAt?: number | null;
+  /** 菜单开合回报给外层（顶栏收纳按钮组据此保持展开） */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useI18n();
   const allPluginViews = usePluginViews();
@@ -641,6 +645,7 @@ function NewTabMenu({
       key={prompted ? `prompt-${promptAt}` : 'idle'}
       defaultOpen={prompted}
       onOpenChange={(next) => {
+        onOpenChange?.(next);
         if (!next) useSidePanelStore.getState().clearNewTabMenuPrompt();
       }}
     >
@@ -747,98 +752,136 @@ function SidePanelHeaderActions({
     handledFocus.current = focusProposal.at;
     addSecretaryPanel(containerApi, conversationId, projectId, secretaryName);
   }, [focusProposal, secretary, containerApi, conversationId, projectId, secretaryName]);
+  // 顶栏右端三个按钮（+ / 全屏 / 收起）平时收纳成一个「…」省出 tab 条空间：
+  // hover / 键盘聚焦时 + 和全屏从左侧展开，「…」变回收起图标；直接点「…」就是收起。
+  // 只在三个按钮齐全的位置（顶栏行 + 右上角组）收纳，其余位置照旧平铺。
+  const collapsible = titleRow && topRight;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pinned = headerActionsPinned({ menuOpen, promptAt: headerNewTabMenuPromptAt });
   return (
     <div className="flex h-full items-center gap-0.5">
-      <NewTabMenu
-        compact
-        promptAt={headerNewTabMenuPromptAt}
-        onNewTerminal={
-          secretary
-            ? undefined
-            : () => {
-                if (group) {
-                  containerApi.addPanel({
-                    id: crypto.randomUUID(),
-                    component: 'terminal',
-                    title: nextTerminalTitle(containerApi, t('Terminal')),
-                    params: { conversationId, projectId },
-                    position: { referenceGroup: group },
-                  });
-                  return;
-                }
-                addTerminalPanel(containerApi, conversationId, projectId, t('Terminal'));
-              }
-        }
-        onNewChanges={
-          secretary
-            ? undefined
-            : () => addChangesPanel(containerApi, conversationId, projectId, t('Changes'))
-        }
-        onNewFiles={
-          secretary
-            ? undefined
-            : () => addFilesPanel(containerApi, conversationId, projectId, t('Files'))
-        }
-        onNewBrowser={() => addBrowserPanel(containerApi, conversationId, projectId, t('Browser'))}
-        onNewBtw={
-          secretary
-            ? undefined
-            : () => {
-                if (group) {
-                  const count = containerApi.panels.filter((panel) =>
-                    panel.id.startsWith('btw:')
-                  ).length;
-                  containerApi.addPanel({
-                    id: `btw:${crypto.randomUUID()}`,
-                    component: 'btw',
-                    title: count === 0 ? t('Btw') : `${t('Btw')} ${count + 1}`,
-                    params: { conversationId, projectId },
-                    position: { referenceGroup: group },
-                  });
-                  return;
-                }
-                addBtwPanel(containerApi, conversationId, projectId, t('Btw'));
-              }
-        }
-        onNewWorkflow={
-          workflowAvailable && !secretary
-            ? () => addWorkflowPanel(containerApi, conversationId, projectId, t('Workflow'))
-            : undefined
-        }
-        onNewSecretary={
-          secretary
-            ? () => addSecretaryPanel(containerApi, conversationId, projectId, secretaryName)
-            : undefined
-        }
-        secretaryLabel={secretaryName}
-        onNewPluginView={(view) =>
-          addPluginViewPanel(containerApi, conversationId, projectId, view, group)
-        }
-        secretaryPluginIds={secretary ? secretaryPluginIds : undefined}
-      />
-      <button
-        type="button"
+      <div
+        data-side-actions
+        data-expanded={collapsible && pinned ? '' : undefined}
         className={cn(
-          'flex h-6 w-6 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-          isMobile && 'hidden'
+          'flex h-full items-center gap-0.5',
+          // 整组豁免拖窗：顶栏行是 drag 区，按钮间缝隙若可拖，Electron 会吞掉鼠标事件、hover 断档
+          collapsible && 'group/side-actions [-webkit-app-region:no-drag]'
         )}
-        onClick={toggleFullscreen}
-        aria-label={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
-        title={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
       >
-        {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-      </button>
-      {titleRow && topRight && (
-        <button
-          type="button"
-          className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
-          onClick={toggleOpen}
-          aria-label={t('Toggle side panel')}
-          title={t('Toggle side panel')}
+        <div
+          className={cn(
+            'flex items-center gap-0.5',
+            collapsible &&
+              'hidden group-focus-within/side-actions:flex group-hover/side-actions:flex group-data-[expanded]/side-actions:flex'
+          )}
         >
-          <PanelRight className="h-4 w-4" />
-        </button>
-      )}
+          <NewTabMenu
+            compact
+            promptAt={headerNewTabMenuPromptAt}
+            onOpenChange={setMenuOpen}
+            onNewTerminal={
+              secretary
+                ? undefined
+                : () => {
+                    if (group) {
+                      containerApi.addPanel({
+                        id: crypto.randomUUID(),
+                        component: 'terminal',
+                        title: nextTerminalTitle(containerApi, t('Terminal')),
+                        params: { conversationId, projectId },
+                        position: { referenceGroup: group },
+                      });
+                      return;
+                    }
+                    addTerminalPanel(containerApi, conversationId, projectId, t('Terminal'));
+                  }
+            }
+            onNewChanges={
+              secretary
+                ? undefined
+                : () => addChangesPanel(containerApi, conversationId, projectId, t('Changes'))
+            }
+            onNewFiles={
+              secretary
+                ? undefined
+                : () => addFilesPanel(containerApi, conversationId, projectId, t('Files'))
+            }
+            onNewBrowser={() =>
+              addBrowserPanel(containerApi, conversationId, projectId, t('Browser'))
+            }
+            onNewBtw={
+              secretary
+                ? undefined
+                : () => {
+                    if (group) {
+                      const count = containerApi.panels.filter((panel) =>
+                        panel.id.startsWith('btw:')
+                      ).length;
+                      containerApi.addPanel({
+                        id: `btw:${crypto.randomUUID()}`,
+                        component: 'btw',
+                        title: count === 0 ? t('Btw') : `${t('Btw')} ${count + 1}`,
+                        params: { conversationId, projectId },
+                        position: { referenceGroup: group },
+                      });
+                      return;
+                    }
+                    addBtwPanel(containerApi, conversationId, projectId, t('Btw'));
+                  }
+            }
+            onNewWorkflow={
+              workflowAvailable && !secretary
+                ? () => addWorkflowPanel(containerApi, conversationId, projectId, t('Workflow'))
+                : undefined
+            }
+            onNewSecretary={
+              secretary
+                ? () => addSecretaryPanel(containerApi, conversationId, projectId, secretaryName)
+                : undefined
+            }
+            secretaryLabel={secretaryName}
+            onNewPluginView={(view) =>
+              addPluginViewPanel(containerApi, conversationId, projectId, view, group)
+            }
+            secretaryPluginIds={secretary ? secretaryPluginIds : undefined}
+          />
+          <button
+            type="button"
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+              isMobile && 'hidden'
+            )}
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+            title={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+          >
+            {fullscreen ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </div>
+        {collapsible && (
+          <button
+            type="button"
+            className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+            onClick={toggleOpen}
+            aria-label={t('Toggle side panel')}
+            title={t('Toggle side panel')}
+          >
+            <MoreHorizontal
+              aria-hidden
+              className="h-4 w-4 group-focus-within/side-actions:hidden group-hover/side-actions:hidden group-data-[expanded]/side-actions:hidden"
+            />
+            <PanelRight
+              aria-hidden
+              className="hidden h-4 w-4 group-focus-within/side-actions:block group-hover/side-actions:block group-data-[expanded]/side-actions:block"
+            />
+          </button>
+        )}
+      </div>
       {titleRow && topRight && windows && (
         // 给 Windows 原生最小化/最大化/关闭让位（扣掉工作区 8px 右边距、tab 条右内边距与按钮间距）
         <span

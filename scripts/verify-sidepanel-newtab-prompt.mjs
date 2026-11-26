@@ -976,6 +976,105 @@ async function main() {
     }
     log(`空 group 快速连点 ${gstress.length} 轮 ${JSON.stringify(gstress)}`);
     checks.push({ name: '关光 tab 后（空 group）展开/快速连点弹层唯一', pass: true });
+
+    // 顶栏右端收纳：平时只露「…」（即收起按钮），hover 展开 + / 全屏，直接点「…」= 收起
+    const actionsExpr = `(() => {
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; };
+      const groups = [...document.querySelectorAll('[data-side-actions]')].filter((g) => {
+        const btns = g.querySelectorAll('button');
+        const last = btns[btns.length - 1];
+        return g.isConnected && last && last.getBoundingClientRect().width > 0;
+      });
+      const g = groups[0];
+      if (!g) return { found: false, count: 0 };
+      const btns = [...g.querySelectorAll('button')];
+      const toggle = btns[btns.length - 1];
+      const svgs = [...toggle.querySelectorAll('svg')].map((svg) => getComputedStyle(svg).display !== 'none');
+      return { found: true, count: groups.length, expanded: g.hasAttribute('data-expanded'), plus: box(btns[0]), fs: box(btns[1]), toggle: box(toggle), toggleLabel: toggle.getAttribute('aria-label'), dots: svgs[0], panelIcon: svgs[1] };
+    })()`;
+    const pressEscape = async () => {
+      for (const type of ['keyDown', 'keyUp']) {
+        await cdp.send('Input.dispatchKeyEvent', {
+          type,
+          key: 'Escape',
+          code: 'Escape',
+          windowsVirtualKeyCode: 27,
+        });
+      }
+    };
+    const moveTo = (x, y) => cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    const center = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+    if (!(await readSide(cdp)).open) {
+      await clickToggle(cdp);
+      await sleep(1_200);
+    }
+    await pressEscape();
+    await moveTo(300, 450);
+    await sleep(400);
+    const rest = await cdp.eval(actionsExpr);
+    log(`收纳-静止 ${JSON.stringify(rest)}`);
+    await shoot(cdp, '/tmp/sidepanel-actions-rest.png').catch(() => {});
+    if (!rest.found || rest.plus.w !== 0 || rest.fs.w !== 0 || !rest.dots || rest.panelIcon) {
+      throw new Error(`静止时应只露「…」 ${JSON.stringify(rest)}`);
+    }
+    await moveTo(center(rest.toggle).x, center(rest.toggle).y);
+    await sleep(250);
+    const hover = await cdp.eval(actionsExpr);
+    log(`收纳-hover ${JSON.stringify(hover)}`);
+    await shoot(cdp, '/tmp/sidepanel-actions-hover.png').catch(() => {});
+    if (hover.plus.w === 0 || hover.fs.w === 0 || hover.dots || !hover.panelIcon) {
+      throw new Error(`hover 后应展开 + / 全屏并换回收起图标 ${JSON.stringify(hover)}`);
+    }
+    if (Math.abs(hover.toggle.x - rest.toggle.x) > 1) {
+      throw new Error(`hover 展开把光标下的按钮挤走了 ${rest.toggle.x} → ${hover.toggle.x}`);
+    }
+    // 光标沿按钮组左移到 +（跨过按钮间缝隙）仍保持展开，点 + 弹菜单
+    for (let x = center(hover.toggle).x; x >= center(hover.plus).x; x -= 4)
+      await moveTo(x, center(hover.plus).y);
+    await sleep(150);
+    const onPlus = await cdp.eval(actionsExpr);
+    if (onPlus.plus.w === 0) throw new Error(`移到 + 途中按钮组收起了 ${JSON.stringify(onPlus)}`);
+    await clickAt(cdp, center(onPlus.plus));
+    await sleep(400);
+    const userMenu = await readMenu(cdp);
+    if (userMenu.length !== 1 || !menuOnScreen(userMenu)) {
+      throw new Error(`hover 后点 + 菜单异常 ${JSON.stringify(userMenu)}`);
+    }
+    // 光标移进弹层（离开按钮组）：+ 是锚点，必须保持展开，弹层不能漂
+    await moveTo(userMenu[0].x + userMenu[0].w / 2, userMenu[0].y + userMenu[0].h / 2);
+    await sleep(400);
+    const inMenu = await cdp.eval(actionsExpr);
+    const menuAfter = await readMenu(cdp);
+    log(
+      `收纳-菜单开着 actions=${JSON.stringify(inMenu)} menu=${JSON.stringify(menuAfter.map((m) => [m.x, m.y]))}`
+    );
+    if (inMenu.plus.w === 0 || !inMenu.expanded)
+      throw new Error(`菜单开着时按钮组收起了 ${JSON.stringify(inMenu)}`);
+    if (
+      menuAfter.length !== 1 ||
+      menuAfter[0].x !== userMenu[0].x ||
+      menuAfter[0].y !== userMenu[0].y
+    ) {
+      throw new Error(
+        `光标移进弹层后弹层漂移 ${JSON.stringify(userMenu)} → ${JSON.stringify(menuAfter)}`
+      );
+    }
+    await pressEscape();
+    await moveTo(300, 450);
+    await sleep(400);
+    const closedAgain = await cdp.eval(actionsExpr);
+    if (closedAgain.plus.w !== 0 || (await readMenu(cdp)).length !== 0) {
+      throw new Error(`关菜单、移开光标后应收回「…」 ${JSON.stringify(closedAgain)}`);
+    }
+    // 直接点「…」= 收起侧栏
+    await clickAt(cdp, center(closedAgain.toggle));
+    await waitFor(async () => (!(await readSide(cdp)).open ? true : null), {
+      timeout: 3_000,
+      interval: 80,
+      label: '点「…」收起侧栏',
+    });
+    await shoot(cdp, '/tmp/sidepanel-actions-collapsed.png').catch(() => {});
+    checks.push({ name: '顶栏按钮收纳为「…」：hover 展开、菜单开着保持、点击即收起', pass: true });
     log(JSON.stringify({ checks, shots: SHOTS }, null, 2));
     log('PASS');
   } finally {
