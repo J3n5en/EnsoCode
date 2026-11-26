@@ -5,6 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceBadge } from './WorkspaceBadge';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/secretary/useSecretaryFace', () => ({
+  useSecretaryFace: (conversationId?: string) =>
+    conversationId === 'secretary-conv'
+      ? {
+          name: '爱酱',
+          color: '#6366F1',
+          image: 'local-image://secretary-avatar/avatar.png?v=5&h=a22fb6cf&s=default',
+        }
+      : null,
+}));
 vi.mock('@/components/ui/menu', () => {
   const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   // 挂载即视为打开菜单，触发 onOpenChange(true) 去拉应用列表
@@ -94,5 +104,29 @@ describe('WorkspaceBadge', () => {
     await render({ id: 'p1', name: 'demo', path: '/root/demo', alias: '线上' });
     expect(container.textContent).toContain('线上');
     expect(container.textContent).not.toContain('demo');
+  });
+
+  it('秘书项目显示所属秘书的头像与名字，而不是项目 fallback 的首字母', async () => {
+    setup(false);
+    openInApps.mockResolvedValue([]);
+    await act(async () => {
+      root.render(
+        <WorkspaceBadge
+          project={{ id: 'p-sec', name: 'Secretary', path: '/sec', kind: 'secretary' }}
+          conversationId="secretary-conv"
+          path="/sec"
+        >
+          <span />
+        </WorkspaceBadge>
+      );
+    });
+    await act(async () => {});
+    // 名字显示秘书名（爱酱），不是项目名 Secretary
+    expect(container.textContent).toContain('爱酱');
+    // 头像走秘书头像（data-image），不是项目 fallback（data-kind="fallback" 或首字母 S）
+    const face = container.querySelector('[data-enso="workspace-secretary-face"]');
+    expect(face).not.toBeNull();
+    // 项目 fallback 不应再出现
+    expect(container.querySelector('[data-enso="project-icon"][data-kind="fallback"]')).toBeNull();
   });
 });
