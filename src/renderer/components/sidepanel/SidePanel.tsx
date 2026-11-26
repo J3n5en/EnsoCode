@@ -722,6 +722,14 @@ function SidePanelHeaderActions({
   const topRight = useIsTopRightGroup(containerApi, group);
   const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   const windows = useWindowChromeKind() === 'windows';
+  // auto-pop 锚定在顶部 compact +（不是居中水印按钮）：
+  // 用户展开空面板想直接点类型，菜单贴着常驻的 + 出现一眼就能找；
+  // 顶栏几何在展开动画里几乎不动，也进一步远离当初测量撞上中途几何的场景。
+  const headerNewTabMenuPromptAt = useSidePanelStore((s) =>
+    conversationId && s.newTabMenuPrompt?.conversationId === conversationId
+      ? s.newTabMenuPrompt.at
+      : null
+  );
   // 深链或手机按钮要求定位某张卡时把秘书面板叫出来；同一个请求只处理一次
   const focusProposal = useSecretaryStore((s) => s.focusProposal);
   const handledFocus = useRef(0);
@@ -734,6 +742,7 @@ function SidePanelHeaderActions({
     <div className="flex h-full items-center gap-0.5">
       <NewTabMenu
         compact
+        promptAt={headerNewTabMenuPromptAt}
         onNewTerminal={
           secretary
             ? undefined
@@ -843,11 +852,6 @@ function Watermark(props: IWatermarkPanelProps) {
   const secretary = useSecretaryConversation(projectId);
   const secretaryPluginIds = useSecretaryPluginIds();
   const secretaryName = useSecretaryName();
-  const newTabMenuPromptAt = useSidePanelStore((s) =>
-    conversationId && s.newTabMenuPrompt?.conversationId === conversationId
-      ? s.newTabMenuPrompt.at
-      : null
-  );
   // dock 隐藏（切会话/收起面板）时整个水印不渲染：
   // 菜单弹层走 Portal 挂在 body 上，display:none 的容器关不住它——
   // 锚点 rect 归零后弹层漂到视口左上角、高度也不再受裁剪限制，
@@ -865,7 +869,6 @@ function Watermark(props: IWatermarkPanelProps) {
           {t('No tabs yet. Create one to get started.')}
         </p>
         <NewTabMenu
-          promptAt={newTabMenuPromptAt}
           onNewTerminal={
             secretary
               ? undefined
