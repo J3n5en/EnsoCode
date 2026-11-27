@@ -219,4 +219,61 @@ describe('reduceAgyUpdate', () => {
     });
     expect(other.effects[0]).toMatchObject({ name: 'mcp_github_list' });
   });
+
+  it('drops the card of an Enso tool agy proxies through call_mcp_tool, follow-ups included', () => {
+    const update = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call_4',
+      name: 'call_mcp_tool',
+      status: 'pending',
+      kind: 'other',
+      title: 'MCP Tool subagent',
+      rawInput: { ServerName: 'enso', ToolName: 'subagent', Arguments: { operation: 'spawn' } },
+    };
+    const started = reduceAgyUpdate(emptyTranslatorState(), update);
+    expect(started.effects).toEqual([]);
+    expect(started.state.tools).toEqual([]);
+    // 后续 update 只带 id 和状态
+    const done = reduceAgyUpdate(started.state, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'call_4',
+      status: 'completed',
+    });
+    expect(done.effects).toEqual([]);
+    expect(done.state.tools).toEqual([]);
+    // 无名、只有 title 的形状也认
+    const { name: _name, ...titled } = update;
+    expect(reduceAgyUpdate(emptyTranslatorState(), titled).effects).toEqual([]);
+  });
+
+  it('keeps proxied calls to other servers and look-alikes', () => {
+    const base = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call_5',
+      status: 'pending',
+      kind: 'other',
+    };
+    for (const update of [
+      {
+        ...base,
+        name: 'call_mcp_tool',
+        title: 'MCP Tool subagent',
+        rawInput: { ServerName: 'browse', ToolName: 'subagent' },
+      },
+      {
+        ...base,
+        name: 'call_mcp_tool',
+        title: 'MCP Tool create_issue',
+        rawInput: { ServerName: 'enso', ToolName: 'subagent' },
+      },
+      {
+        ...base,
+        name: 'mcp_github_create_issue',
+        title: 'Run mcp_github_create_issue',
+        rawInput: { ServerName: 'enso', ToolName: 'subagent' },
+      },
+    ]) {
+      expect(reduceAgyUpdate(emptyTranslatorState(), update).effects).toHaveLength(1);
+    }
+  });
 });

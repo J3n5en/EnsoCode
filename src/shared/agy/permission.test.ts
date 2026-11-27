@@ -181,4 +181,69 @@ describe('Enso Host MCP tools', () => {
       ).toEqual({ kind: 'ask' });
     }
   });
+
+  // agy 把预算外的 MCP 工具经 call_mcp_tool 转调：title `MCP Tool <tool>`，rawInput 写明服务器和工具（同 t3）
+  const proxied = (title: string, rawInput?: Record<string, unknown>, name?: string) => ({
+    toolCall: {
+      toolCallId: 'p1',
+      ...(name ? { name } : {}),
+      title,
+      kind: 'other',
+      ...(rawInput ? { rawInput } : {}),
+    },
+    options: own.options,
+  });
+
+  it('allows an exposed Enso tool proxied through call_mcp_tool in every approval mode', () => {
+    for (const approvalMode of modes) {
+      for (const request of [
+        proxied('MCP Tool subagent', { ServerName: 'enso', ToolName: 'subagent', Arguments: {} }),
+        proxied('MCP Tool subagent?', { ServerName: 'enso', ToolName: 'subagent' }),
+        proxied('MCP Tool subagent', { ServerName: 'enso', ToolName: 'subagent' }, 'call_mcp_tool'),
+      ]) {
+        expect(
+          decidePermission({
+            approvalMode,
+            request,
+            workspaceRoot: '/work',
+            ensoTools: ['subagent'],
+          })
+        ).toEqual({ kind: 'selected', optionId: 'allow' });
+      }
+    }
+  });
+
+  it('asks for proxied calls to other servers, unexposed tools and look-alikes', () => {
+    for (const request of [
+      proxied('MCP Tool subagent', { ServerName: 'other', ToolName: 'subagent' }),
+      proxied('MCP Tool subagent'),
+      // 没挂出去的工具
+      proxied('MCP Tool workflow', { ServerName: 'enso', ToolName: 'workflow' }),
+      // call_mcp_tool 的 title 就是它调的工具
+      proxied('MCP Tool create_issue', { ServerName: 'enso', ToolName: 'subagent' }),
+      // 直接调用的工具，rawInput 是它自己的参数，叫什么都不算
+      proxied('Run mcp_github_create_issue', { ServerName: 'enso', ToolName: 'subagent' }),
+      proxied(
+        'Run mcp_github_create_issue',
+        { ServerName: 'enso', ToolName: 'subagent' },
+        'mcp_github_create_issue'
+      ),
+      proxied('Running create_issue', { ServerName: 'enso', ToolName: 'subagent' }),
+      proxied('MCP Tool subagent', { ServerName: 'enso', ToolName: 'subagent' }, 'run_command'),
+      proxied('MCP Tool subagent', {
+        ServerName: 'enso',
+        ToolName: 'subagent',
+        CommandLine: 'MCP Tool subagent',
+      }),
+    ]) {
+      expect(
+        decidePermission({
+          approvalMode: 'supervised',
+          request,
+          workspaceRoot: '/work',
+          ensoTools: ['subagent'],
+        })
+      ).toEqual({ kind: 'ask' });
+    }
+  });
 });

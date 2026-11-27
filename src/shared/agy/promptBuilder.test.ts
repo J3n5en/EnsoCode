@@ -174,6 +174,32 @@ describe('buildAgyPrompt', () => {
     }
   });
 
+  it('lists the core tools by name and points to search / call for the lazy rest', () => {
+    const textOf = (ensoTools: string[]) => {
+      const blocks = buildAgyPrompt({
+        messages: [{ role: 'user', content: 'go' }],
+        interactionMode: 'default',
+        includeInstructions: true,
+        includeRuntimeInfo: false,
+        modelLabel: 'm',
+        ensoTools,
+      });
+      return blocks[0]?.type === 'text' ? blocks[0].text : '';
+    };
+    const text = textOf(['subagent', 'todo', 'enso_tool_search', 'enso_tool_call']);
+    expect(text).toContain(
+      'EnsoCode tools come from the `enso` MCP server: `mcp_enso_subagent`, `mcp_enso_todo`.'
+    );
+    expect(text).toContain(
+      '- Other EnsoCode tools (plugins and MCP servers EnsoCode connects to) are not listed: find them with `mcp_enso_enso_tool_search` and call them with `mcp_enso_enso_tool_call`.'
+    );
+    expect(textOf(['subagent', 'todo'])).not.toContain('enso_tool_search');
+    // 只有懒加载工具
+    const lazyOnly = textOf(['enso_tool_search', 'enso_tool_call']);
+    expect(lazyOnly).toContain('EnsoCode tools come from the `enso` MCP server.');
+    expect(lazyOnly).toContain('`mcp_enso_enso_tool_search`');
+  });
+
   it('passes a one-off turn note prefixed to the user text through unchanged', () => {
     // 一次性提示（无人值守开关等）由 supervisor 前置到用户文字，原样随本轮发给 agy
     const note =

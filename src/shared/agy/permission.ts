@@ -1,4 +1,5 @@
 import type { ApprovalMode } from '../types/agentConstants';
+import { ensoProxiedTool } from './hostTools';
 import type {
   AgyPermissionOption,
   AgyPermissionRequest,
@@ -62,9 +63,13 @@ function selectAllow(
   return once?.optionId ?? always?.optionId;
 }
 
-/** agy 调我们 Host MCP 上的哪个工具：卡片名 `mcp_enso_<tool>` 或 title `Run mcp_enso_<tool>`。 */
+/**
+ * agy 调我们 Host MCP 上的哪个工具：卡片名 `mcp_enso_<tool>` 或 title `Run mcp_enso_<tool>`；
+ * 经 call_mcp_tool 转调时 title 是 `MCP Tool <tool>`，rawInput 指名 enso 和同名工具。
+ */
 function ensoMcpTool(request: AgyPermissionRequest): string | undefined {
   const { name, title, rawInput } = request.toolCall;
+  if (/^MCP Tool /.test(title?.trim() ?? '')) return ensoProxiedTool(request.toolCall);
   if (typeof record(rawInput)?.CommandLine === 'string') return undefined;
   if (name) return ENSO_MCP_NAME.exec(name)?.groups?.tool;
   return ENSO_MCP_TITLE.exec(title?.trim() ?? '')?.groups?.tool;
