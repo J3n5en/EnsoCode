@@ -11,6 +11,7 @@ import {
   dcgAsset,
   dcgStatus,
   installDcg,
+  resolveInstalledDcg,
   uninstallDcg,
 } from './dcgBinary';
 
@@ -25,16 +26,88 @@ afterEach(() => {
 });
 
 describe('dcgAsset', () => {
-  it('按平台选固定版本的发布包，Windows ARM 走 x64 包，不支持的平台返回 null', () => {
+  it('按平台选固定版本的发布包，Windows ARM 有原生包，不支持的平台返回 null', () => {
     expect(dcgAsset('darwin', 'arm64')).toMatchObject({
       url: `https://github.com/Dicklesworthstone/destructive_command_guard/releases/download/v${DCG_VERSION}/dcg-aarch64-apple-darwin.tar.xz`,
       binary: 'dcg',
     });
     expect(dcgAsset('linux', 'x64')?.url).toMatch(/dcg-x86_64-unknown-linux-musl\.tar\.xz$/);
     expect(dcgAsset('win32', 'arm64')).toMatchObject({ binary: 'dcg.exe' });
-    expect(dcgAsset('win32', 'arm64')?.url).toMatch(/dcg-x86_64-pc-windows-msvc\.zip$/);
+    expect(dcgAsset('win32', 'arm64')?.url).toMatch(/dcg-aarch64-pc-windows-msvc\.zip$/);
+    // 校验值取自上游 release 实算（2025-12 复核两次一致）
+    expect(dcgAsset('win32', 'arm64')?.sha256).toBe(
+      '84d3672201810d05bbaa4e3988eb2abfccb183de8c2cf204fcda0b620c1c3bae'
+    );
+    expect(dcgAsset('win32', 'x64')?.url).toMatch(/dcg-x86_64-pc-windows-msvc\.zip$/);
     expect(dcgAsset('linux', 'ia32')).toBeNull();
     expect(dcgAsset('darwin', 'x64')?.sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('resolveInstalledDcg', () => {
+  const plant = (root: string, version: string, binary = 'dcg') => {
+    const dir = path.join(root, 'dcg', version);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, binary), '#!/bin/sh\n');
+  };
+
+  it('没有安装时返回 null', () => {
+    expect(resolveInstalledDcg(tempRoot(), 'darwin')).toBeNull();
+  });
+
+  it('目标版本存在时直接命中', () => {
+    const root = tempRoot();
+    plant(root, DCG_VERSION);
+    expect(resolveInstalledDcg(root, 'darwin')).toEqual({
+      path: path.join(root, 'dcg', DCG_VERSION, 'dcg'),
+      version: DCG_VERSION,
+    });
+  });
+
+  it('目标版本缺失时回退到最高 semver 版本，老用户升级后旧二进制继续生效', () => {
+    const root = tempRoot();
+    plant(root, '0.15.1');
+    plant(root, '0.16.0');
+    const resolved = resolveInstalledDcg(root, 'darwin');
+    expect(resolved?.version).toBe('0.16.0');
+    expect(resolved?.path).toBe(path.join(root, 'dcg', '0.16.0', 'dcg'));
+  });
+
+  it('忽略 .tmp-*、非 semver 目录、目录里缺二进制的版本', () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'dcg', '.tmp-abc'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'dcg', '.tmp-abc', 'dcg'), 'x');
+    fs.mkdirSync(path.join(root, 'dcg', 'notes'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'dcg', 'notes', 'dcg'), 'x');
+    fs.mkdirSync(path.join(root, 'dcg', '0.99.0'), { recursive: true });
+    plant(root, '0.16.0');
+    expect(resolveInstalledDcg(root, 'darwin')?.version).toBe('0.16.0');
+  });
+
+  it('win32 下找 dcg.exe', () => {
+    const root = tempRoot();
+    plant(root, '0.16.0', 'dcg.exe');
+    expect(resolveInstalledDcg(root, 'win32')).toEqual({
+      path: path.join(root, 'dcg', '0.16.0', 'dcg.exe'),
+      version: '0.16.0',
+    });
+  });
+
+  it('dcgStatus 报告实际落盘版本与目标内置版本', () => {
+    const root = tempRoot();
+    expect(dcgStatus(root, 'darwin', 'arm64')).toEqual({
+      supported: true,
+      installed: false,
+      installedVersion: null,
+      version: DCG_VERSION,
+    });
+    plant(root, '0.16.0');
+    expect(dcgStatus(root, 'darwin', 'arm64')).toEqual({
+      supported: true,
+      installed: true,
+      installedVersion: '0.16.0',
+      version: DCG_VERSION,
+    });
   });
 });
 
@@ -55,15 +128,31 @@ describe('installDcg', () => {
     expect(dcgStatus(root, 'darwin', 'arm64')).toEqual({
       supported: true,
       installed: false,
+      installedVersion: null,
       version: DCG_VERSION,
     });
     const binary = await installDcg({ root, asset, fetch: okFetch, extract });
     expect(binary).toBe(path.join(root, 'dcg', DCG_VERSION, 'dcg'));
     expect(fs.existsSync(binary)).toBe(true);
     expect(dcgStatus(root, 'darwin', 'arm64').installed).toBe(true);
+    expect(dcgStatus(root, 'darwin', 'arm64').installedVersion).toBe(DCG_VERSION);
     expect(fs.readdirSync(path.join(root, 'dcg'))).toEqual([DCG_VERSION]);
     await uninstallDcg(root);
     expect(fs.existsSync(path.join(root, 'dcg'))).toBe(false);
+  });
+
+  it('升级时只清理 semver 版本目录，保留无关目录和文件', async () => {
+    const root = tempRoot();
+    const base = path.join(root, 'dcg');
+    fs.mkdirSync(path.join(base, '0.16.0'), { recursive: true });
+    fs.writeFileSync(path.join(base, '0.16.0', 'dcg'), 'old');
+    fs.mkdirSync(path.join(base, 'notes'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'notes', 'keep.txt'), 'keep');
+    fs.writeFileSync(path.join(base, 'stray.txt'), 'keep');
+    await installDcg({ root, asset, fetch: okFetch, extract });
+    expect(fs.existsSync(path.join(base, '0.16.0'))).toBe(false);
+    expect(fs.existsSync(path.join(base, 'notes', 'keep.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(base, 'stray.txt'))).toBe(true);
   });
 
   it('校验和不符、HTTP 失败、包内缺二进制都不留下安装', async () => {

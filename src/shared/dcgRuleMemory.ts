@@ -16,10 +16,23 @@ export const NON_EXEMPTIBLE_DCG_RULES: ReadonlySet<string> = new Set([
   'core.filesystem:find-delete-root-home',
   'core.filesystem:credential-file-write',
   'core.filesystem:fork-bomb',
+  // 0.17.2 复核：摧毁备份还原点、格式化/清空磁盘、整域进程杀伤不允许记忆豁免
+  'core.filesystem:cp-sensitive-then-delete',
+  'core.filesystem:ln-symlink-sensitive-then-delete',
+  'core.filesystem:rsync-sensitive-then-delete',
+  'core.filesystem:rsync-delete-sensitive-dest',
+  'core.filesystem:format-volume',
+  'core.filesystem:clear-disk',
+  'core.filesystem:vssadmin-delete-shadows',
+  'core.filesystem:wmic-shadowcopy-delete',
+  'core.filesystem:wmi-shadowcopy-delete',
   'heredoc.posix:pipeline-consumer',
   'system.disk:dd-device',
   'system.disk:mkfs',
   'system.disk:diskutil-erase',
+  'system.processes:kill-every-process',
+  'system.processes:launchctl-bootout-domain',
+  'system.processes:interpreter-signals-everything',
 ]);
 
 const RULE_ID = /^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/;

@@ -35,8 +35,12 @@ const ASSETS: Record<string, { file: string; sha256: string }> = {
     file: 'dcg-x86_64-pc-windows-msvc.zip',
     sha256: '42a042874ec44f5fe895cd64ea930fd14c50fe0a0ba4a8e02692dfaf36c6218d',
   },
+  // 0.17.2 起 Windows ARM 有原生包；sha256 取自上游 release 文件实算复核
+  'win32-arm64': {
+    file: 'dcg-aarch64-pc-windows-msvc.zip',
+    sha256: '84d3672201810d05bbaa4e3988eb2abfccb183de8c2cf204fcda0b620c1c3bae',
+  },
 };
-ASSETS['win32-arm64'] = ASSETS['win32-x64'];
 
 export interface DcgAsset {
   url: string;
@@ -58,13 +62,44 @@ const baseDir = (root: string) => path.join(root, 'dcg');
 
 export const dcgRoot = (): string => app.getPath('userData');
 
-function binaryPath(root: string, platform: string): string {
-  return path.join(baseDir(root), DCG_VERSION, platform === 'win32' ? 'dcg.exe' : 'dcg');
+const binaryName = (platform: string) => (platform === 'win32' ? 'dcg.exe' : 'dcg');
+
+const STRICT_VERSION = /^\d+\.\d+\.\d+$/;
+
+/**
+ * 实际可用的 dcg 二进制：优先内置目标版本；不存在时回退到 userData/dcg 下
+ * 最高 semver 版本的旧二进制——升级 EnsoCode 后老用户已装的旧版继续防护，而不是静默失效。
+ */
+export function resolveInstalledDcg(
+  root: string,
+  platform: string = process.platform
+): { path: string; version: string } | null {
+  const base = baseDir(root);
+  const binary = binaryName(platform);
+  const target = path.join(base, DCG_VERSION, binary);
+  if (fs.existsSync(target)) return { path: target, version: DCG_VERSION };
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(base, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const candidates = entries
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        STRICT_VERSION.test(entry.name) &&
+        !entry.name.startsWith('.tmp-') &&
+        fs.existsSync(path.join(base, entry.name, binary))
+    )
+    .map((entry) => entry.name)
+    .sort((a, b) => compareDcgVersions(a, b) ?? 0);
+  const best = candidates.at(-1);
+  return best ? { path: path.join(base, best, binary), version: best } : null;
 }
 
 export function installedDcgPath(root: string, platform: string = process.platform): string | null {
-  const file = binaryPath(root, platform);
-  return fs.existsSync(file) ? file : null;
+  return resolveInstalledDcg(root, platform)?.path ?? null;
 }
 
 export function dcgStatus(
@@ -72,9 +107,11 @@ export function dcgStatus(
   platform: string = process.platform,
   arch: string = process.arch
 ): DcgStatus {
+  const installed = resolveInstalledDcg(root, platform);
   return {
     supported: dcgAsset(platform, arch) !== null,
-    installed: installedDcgPath(root, platform) !== null,
+    installed: installed !== null,
+    installedVersion: installed?.version ?? null,
     version: DCG_VERSION,
   };
 }
@@ -113,8 +150,9 @@ export async function installDcg(opts: {
     if (!fs.existsSync(extracted)) throw new Error(`dcg archive missing ${asset.binary}`);
     fs.chmodSync(extracted, 0o755);
     const dest = path.join(base, DCG_VERSION);
+    // 只清理 semver 版本目录；无关目录和文件（notes、杀软隔离残留等）不动
     for (const entry of fs.readdirSync(base)) {
-      if (!entry.startsWith('.tmp-'))
+      if (STRICT_VERSION.test(entry))
         fs.rmSync(path.join(base, entry), { recursive: true, force: true });
     }
     fs.mkdirSync(dest);

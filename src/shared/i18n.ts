@@ -644,6 +644,14 @@ export const zhTranslations: Record<string, string> = {
     '执行 bash 和 PowerShell 命令前先用 dcg 检查。命中 git reset --hard、递归删除等危险命令时，即使在完全放行模式下也必须由你确认。新会话生效。',
   'Not available on this platform': '当前平台不可用',
   'Installed v{{version}}': '已安装 v{{version}}',
+  'Installed v{{installed}} (v{{version}} available)':
+    '已安装 v{{installed}}（可升级到 v{{version}}）',
+  'Upgrade to v{{version}}': '升级到 v{{version}}',
+  'Upgrading…': '正在升级…',
+  'Block mass process kills (system.processes)': '拦截批量杀进程（system.processes）',
+  'Also check commands like pkill, killall and kill -1 that signal processes by pattern. New conversations only. Requires dcg v0.17.2 or later.':
+    '同时检查 pkill、killall、kill -1 等按模式批量向进程发信号的命令。仅新会话生效。需要 dcg v0.17.2 或更高版本。',
+  'Upgrade dcg to v0.17.2 or later to enable this.': '将 dcg 升级到 v0.17.2 或更高版本后可开启。',
   'Not installed': '未安装',
   Install: '安装',
   Uninstall: '卸载',

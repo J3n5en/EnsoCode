@@ -77,6 +77,7 @@ export const SETTINGS_DATA_COVERAGE = {
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
   ),
   dcgEnabled: excluded('dcg command guard depends on a device-local binary.'),
+  dcgProcessGuard: excluded('dcg command guard depends on a device-local binary.'),
   botModeEnabled: excluded('Experimental Bot mode toggle; device-local, not an Enso capability.'),
   scratchSessionsEnabled: excluded(
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
@@ -262,6 +263,7 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
   ),
   setDcgEnabled: excluded('dcg command guard depends on a device-local binary.'),
+  setDcgProcessGuard: excluded('dcg command guard depends on a device-local binary.'),
   setMemoryEmbeddingModel: excluded('Memory embedding model choice is a desktop preference.'),
   setMemoryEmbeddingAutoDownload: excluded('Memory model download policy is a device preference.'),
   setMemoryModelIdleMinutes: excluded('Memory model idle unloading policy is a device preference.'),

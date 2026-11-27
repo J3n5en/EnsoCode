@@ -78,6 +78,19 @@ const EDIT_MODE_LABEL: Record<EditMode, string> = {
   apply_patch: 'Apply patch (default)',
 };
 
+/** dcg 版本都是严格 x.y.z；非法或不等长都按「不满足」处理（返回 -1） */
+function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(v.trim());
+    return match ? match.slice(1).map(Number) : null;
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (!left || !right) return -1;
+  for (let i = 0; i < 3; i += 1) if (left[i] !== right[i]) return left[i] - right[i];
+  return 0;
+}
+
 const TOOL_ICON: Record<string, LucideIcon> = {
   subagent: Users,
   workflow: Workflow,
@@ -617,14 +630,24 @@ function DcgGuardRow() {
   const { t, locale } = useI18n();
   const enabled = useSettingsStore((state) => state.dcgEnabled);
   const setEnabled = useSettingsStore((state) => state.setDcgEnabled);
+  const processGuard = useSettingsStore((state) => state.dcgProcessGuard);
+  const setProcessGuard = useSettingsStore((state) => state.setDcgProcessGuard);
   const [status, setStatus] = useState<DcgStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmClearExemptions, setConfirmClearExemptions] = useState(false);
   const [update, setUpdate] = useState<DcgUpdateCheck | 'checking' | null>(null);
   const [cleared, setCleared] = useState<boolean | null>(null);
   const [exemptions, setExemptions] = useState<DcgRuleExemption[]>([]);
+  const refreshExemptions = async () => {
+    try {
+      setExemptions(await window.electronAPI.dcg.listExemptions());
+    } catch {
+      /* 读不到就保持旧列表，不阻断主流程 */
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     void window.electronAPI.dcg.status().then((next) => {
@@ -640,17 +663,31 @@ function DcgGuardRow() {
       cancelled = true;
     };
   }, []);
-  const run = async (action: 'install' | 'uninstall') => {
+  const run = async (action: 'install' | 'uninstall' | 'upgrade') => {
     setConfirmOpen(false);
     setBusy(true);
+    if (action === 'upgrade') setUpgrading(true);
     setError(null);
-    const result = await window.electronAPI.dcg[action]();
+    const result = await window.electronAPI.dcg[action === 'upgrade' ? 'install' : action]();
     setStatus(result.status);
     if (!result.ok) setError(result.error ?? t('Operation failed'));
-    else setEnabled(action === 'install');
+    else {
+      if (action !== 'uninstall') setEnabled(true);
+      // 生效版本可能已变：按新版本重新拉豁免，避免展示旧版本的过时列表
+      await refreshExemptions();
+    }
     setBusy(false);
+    setUpgrading(false);
   };
   const installed = status?.installed === true;
+  // 升级前旧版兜底在跑：提示可升级到内置目标版本
+  const upgradeAvailable =
+    installed && status?.installedVersion != null && status.installedVersion !== status.version;
+  // system.processes pack 只有 0.17.2+ 二进制认识；旧版传了会静默放行，干脆禁用开关
+  const processGuardSupported =
+    installed &&
+    status?.installedVersion != null &&
+    compareVersions(status.installedVersion, '0.17.2') >= 0;
   // 只在用户点击时请求 GitHub，不在加载时自动检查
   const checkUpdate = async () => {
     setUpdate('checking');
@@ -717,15 +754,31 @@ function DcgGuardRow() {
             ? t('Loading…')
             : !status.supported
               ? t('Not available on this platform')
-              : installed
-                ? t('Installed v{{version}}', { version: status.version })
-                : t('Not installed')}
+              : upgradeAvailable
+                ? t('Installed v{{installed}} (v{{version}} available)', {
+                    installed: status?.installedVersion ?? '',
+                    version: status?.version ?? '',
+                  })
+                : installed
+                  ? t('Installed v{{version}}', {
+                      version: status?.installedVersion ?? status.version,
+                    })
+                  : t('Not installed')}
         </span>
         {status?.supported &&
           (installed ? (
-            <SettingsButton disabled={busy} onClick={() => void run('uninstall')}>
-              {t('Uninstall')}
-            </SettingsButton>
+            <>
+              {upgradeAvailable && (
+                <SettingsButton disabled={busy} onClick={() => void run('upgrade')}>
+                  {upgrading
+                    ? t('Upgrading…')
+                    : t('Upgrade to v{{version}}', { version: status?.version ?? '' })}
+                </SettingsButton>
+              )}
+              <SettingsButton disabled={busy} onClick={() => void run('uninstall')}>
+                {t('Uninstall')}
+              </SettingsButton>
+            </>
           ) : (
             <SettingsButton disabled={busy} onClick={() => setConfirmOpen(true)}>
               {busy ? t('Installing…') : t('Install')}
@@ -743,6 +796,28 @@ function DcgGuardRow() {
           </SettingsButton>
         )}
       </div>
+      {installed && (
+        <>
+          <SettingsSubRow
+            rowId="tools.dcgProcessGuard"
+            label={t('Block mass process kills (system.processes)')}
+            description={t(
+              'Also check commands like pkill, killall and kill -1 that signal processes by pattern. New conversations only. Requires dcg v0.17.2 or later.'
+            )}
+          >
+            <SettingsSwitch
+              checked={processGuard && processGuardSupported}
+              disabled={!processGuardSupported}
+              onCheckedChange={setProcessGuard}
+            />
+          </SettingsSubRow>
+          {!processGuardSupported && (
+            <p className="px-4 py-2.5 pl-10 text-muted-foreground text-xs max-sm:pr-3 max-sm:pl-7">
+              {t('Upgrade dcg to v0.17.2 or later to enable this.')}
+            </p>
+          )}
+        </>
+      )}
       {installed && (
         <div className="px-4 py-2.5 pl-10 text-xs max-sm:pr-3 max-sm:pl-7">
           <p className="font-medium">
