@@ -1478,6 +1478,115 @@ describe('model picker 打开时滚到当前渠道', () => {
   });
 });
 
+describe('model picker 打开时滚到选中的模型', () => {
+  const manyModels: ModelProvider[] = [
+    {
+      ...providers[0],
+      id: 'relay',
+      name: 'Relay',
+      baseUrl: 'https://relay.example.test/v1',
+      models: Array.from({ length: 6 }, (_, index) => ({
+        id: `m${index}`,
+        label: `Model ${index}`,
+      })),
+    },
+  ];
+
+  const ROW = 30;
+  const LIST_HEIGHT = 60;
+  const openDetails = { cancel() {}, allowPropagation() {} };
+  const layoutProps = ['scrollTop', 'clientHeight', 'scrollHeight', 'offsetTop', 'offsetHeight'];
+  let scrollWrites: Array<{ el: HTMLElement; value: number }>;
+  let proto: object;
+  let doc: Document;
+  let root: Root;
+
+  const modelList = () =>
+    doc.querySelector('[data-model-picker="model-list"]') as HTMLElement | null;
+  const row = (index: number) => modelList()?.children[index] as HTMLElement | undefined;
+  /** 左栏自己也会滚；这里只看模型列表那一次写入 */
+  const modelWrites = () => scrollWrites.filter((write) => write.el === modelList());
+
+  async function mount(props: Partial<Parameters<typeof ModelPicker>[0]>) {
+    await act(async () => {
+      root.render(createElement(ModelPicker, { ...commonProps, ...props }));
+    });
+  }
+
+  async function setOpen(next: boolean) {
+    await act(async () => {
+      harness.menuOnOpenChange?.(next, openDetails);
+    });
+  }
+
+  beforeEach(() => {
+    harness.deferPopup = true;
+    scrollWrites = [];
+    const dom = parseHTML('<html><body><div id="root"></div></body></html>');
+    Object.assign(dom.window, {
+      electronAPI: { providers: { listOauth: () => Promise.resolve([]) } },
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    doc = dom.document as unknown as Document;
+    proto = dom.window.HTMLElement.prototype;
+    const scrollTops = new WeakMap<object, number>();
+    Object.defineProperties(proto, {
+      scrollTop: {
+        configurable: true,
+        get(this: HTMLElement) {
+          return scrollTops.get(this) ?? 0;
+        },
+        set(this: HTMLElement, value: number) {
+          scrollTops.set(this, value);
+          scrollWrites.push({ el: this, value });
+        },
+      },
+      clientHeight: { configurable: true, get: () => LIST_HEIGHT },
+      scrollHeight: {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.children.length * ROW + 12;
+        },
+      },
+      offsetHeight: { configurable: true, get: () => ROW },
+      offsetTop: {
+        configurable: true,
+        get(this: HTMLElement) {
+          return 6 + Array.from(this.parentElement?.children ?? []).indexOf(this) * ROW;
+        },
+      },
+    });
+    root = createRoot(dom.document.getElementById('root') as unknown as HTMLElement);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    for (const key of layoutProps) delete (proto as Record<string, unknown>)[key];
+    vi.unstubAllGlobals();
+  });
+
+  it('选中的模型在可视区外时滚到中间', async () => {
+    await mount({ providers: manyModels, providerId: 'relay', modelId: 'm5' });
+    await setOpen(true);
+    const list = modelList();
+    expect(list).not.toBeNull();
+    const target = row(5) as HTMLElement;
+    expect(target.offsetTop).toBeGreaterThan(LIST_HEIGHT);
+    expect(modelWrites()).toEqual([
+      { el: list, value: centeredScrollTop(list as HTMLElement, target) },
+    ]);
+  });
+
+  it('选中的模型本来就在可视区里时不滚动', async () => {
+    await mount({ providers: manyModels, providerId: 'relay', modelId: 'm0' });
+    await setOpen(true);
+    expect(modelList()).not.toBeNull();
+    expect(modelWrites()).toEqual([]);
+  });
+});
+
 describe('ModelPicker 窄屏 compact 触发器', () => {
   const auto: VirtualModelEntry = {
     id: 'auto',
