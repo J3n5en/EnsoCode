@@ -452,6 +452,8 @@ export const SETTINGS_ACTION_COVERAGE = {
   addSubagentModel: surfaces('providers.subagent-models.add'),
   updateSubagentModel: surfaces('providers.subagent-models.update'),
   removeSubagentModel: surfaces('providers.subagent-models.remove'),
+  setSubagentModels: surfaces('providers.subagent-models.add'),
+  moveSubagentModel: surfaces('providers.subagent-models.update'),
   addVirtualModel: excluded('virtual model routing is configured in the settings UI only'),
   updateVirtualModel: excluded('virtual model routing is configured in the settings UI only'),
   removeVirtualModel: excluded('virtual model routing is configured in the settings UI only'),

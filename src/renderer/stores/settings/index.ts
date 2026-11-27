@@ -900,6 +900,24 @@ export const useSettingsStore = create<SettingsState>()(
           subagentModels: state.subagentModels.filter((entry) => entry.id !== id),
         })),
 
+      setSubagentModels: (subagentModels) => set({ subagentModels }),
+
+      moveSubagentModel: (id, direction) =>
+        set((state) => {
+          const list = state.subagentModels;
+          const from = list.findIndex((entry) => entry.id === id);
+          if (from < 0) return state;
+          const enabled = list[from].enabled !== false;
+          const step = direction === 'up' ? -1 : 1;
+          let to = from + step;
+          while (to >= 0 && to < list.length && (list[to].enabled !== false) !== enabled)
+            to += step;
+          if (to < 0 || to >= list.length) return state;
+          const next = [...list];
+          [next[from], next[to]] = [next[to], next[from]];
+          return { subagentModels: next };
+        }),
+
       addVirtualModel: (entry) => {
         const created = { ...entry, id: crypto.randomUUID() };
         set((state) => ({ virtualModels: [...state.virtualModels, created] }));
