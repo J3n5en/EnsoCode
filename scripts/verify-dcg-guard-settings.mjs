@@ -457,33 +457,21 @@ async function main() {
   }
   artDir = mkdtempSync('/tmp/enso-dcg-verify-');
 
-  await shootState(
-    'upgrade',
-    { dcgEnabled: true },
-    '0.16.0',
-    DCG016,
-    {
-      upgradeText: true,
-      upgradeButton: true,
-      processGuard: true,
-      needUpgrade: true,
-      installed016: true,
-    }
-  );
+  await shootState('upgrade', { dcgEnabled: true }, '0.16.0', DCG016, {
+    upgradeText: true,
+    upgradeButton: true,
+    processGuard: true,
+    needUpgrade: true,
+    installed016: true,
+  });
 
-  await shootState(
-    'latest',
-    { dcgEnabled: true, dcgProcessGuard: true },
-    '0.17.2',
-    DCG017,
-    {
-      upgradeText: false,
-      upgradeButton: false,
-      processGuard: true,
-      needUpgrade: false,
-      installed017: true,
-    }
-  );
+  await shootState('latest', { dcgEnabled: true, dcgProcessGuard: true }, '0.17.2', DCG017, {
+    upgradeText: false,
+    upgradeButton: false,
+    processGuard: true,
+    needUpgrade: false,
+    installed017: true,
+  });
 
   log('PASS');
 }
