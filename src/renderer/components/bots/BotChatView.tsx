@@ -8,10 +8,12 @@ import { APPROVAL_MODE_META } from '@/components/chat/ApprovalModePicker';
 import { AskBar } from '@/components/chat/AskBar';
 import { CHAT_COL } from '@/components/chat/MessageTimeline';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
+import { sidePanelCoversMain } from '@/components/sidepanel/sidePanelCover';
 import { sidePanelWidthTransition } from '@/components/sidepanel/sidePanelWidthAnim';
 import { addToast } from '@/components/ui/toast';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
+import { easeOutLayout } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { useBotsStore } from '@/stores/bots';
 import { activeDelegations, delegationLiveTarget, pendingOwners } from '@/stores/bots/delegations';
@@ -92,6 +94,7 @@ export function BotChatView({ chat, group = chat }: { chat: BotChat; group?: Bot
   }, []);
   const width = isMobile ? workspaceW : resolveSidePanelWidth(panelWidth, workspaceW);
   const targetW = panelOpen ? width : 0;
+  const sideCoversMain = sidePanelCoversMain({ open: panelOpen, isMobile });
   const resizePanel = useCallback((deltaX: number) => {
     const parent = asideRef.current?.parentElement;
     if (parent) useBotsStore.getState().nudgePanelWidth(-deltaX, parent.clientWidth);
@@ -260,7 +263,19 @@ export function BotChatView({ chat, group = chat }: { chat: BotChat; group?: Bot
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <div
+        data-side-covering={sideCoversMain || undefined}
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
+        // 窄屏右侧面板开壁纸时为透明底，盖住聊天区时藏掉被盖正文避免叠字
+        style={
+          sideCoversMain
+            ? {
+                visibility: 'hidden',
+                transition: `visibility 0s ${easeOutLayout.duration}s`,
+              }
+            : undefined
+        }
+      >
         <header className="@container flex h-[52px] shrink-0 items-center gap-2.5 border-b px-4">
           {direct ? (
             <BotAvatar bot={direct} busy={summary.running} />

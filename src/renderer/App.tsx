@@ -56,6 +56,7 @@ import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
 import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
 import { SettingsView } from '@/components/settings/SettingsView';
+import { sidePanelCoversMain } from '@/components/sidepanel/sidePanelCover';
 import {
   AlertDialog,
   AlertDialogClose,
@@ -592,6 +593,11 @@ export default function App() {
   const titleRowPanel =
     desktopShell && (chromeKind === 'mac' || chromeKind === 'windows' || chromeKind === 'web');
   const sideInTitleRow = titleRowPanel && sideOpen && !isMobile && !botModeActive;
+  const sideCoversMain = sidePanelCoversMain({
+    open: sideOpen,
+    fullscreen: sideFullscreen,
+    isMobile,
+  });
   // Bot 模式开启时顶栏居中是 Bot 切换器，标签会与之重叠，整体让位
   const headerSessionTabs =
     headerSessionTabsEnabled &&
@@ -781,7 +787,7 @@ export default function App() {
                     {drawerOpen && (
                       <motion.div
                         key="drawer-backdrop"
-                        className="fixed inset-0 bg-black/40"
+                        className="fixed inset-0 bg-black/40 backdrop-blur-[2px]"
                         style={{ zIndex: Z_INDEX.MOBILE_DRAWER }}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -791,7 +797,8 @@ export default function App() {
                     )}
                   </AnimatePresence>
                   <motion.div
-                    className="fixed inset-y-0 left-0 flex bg-background shadow-xl"
+                    data-enso="mobile-drawer"
+                    className="fixed inset-y-0 left-0 flex border-r bg-popover text-popover-foreground shadow-xl backdrop-blur-md"
                     style={{ zIndex: Z_INDEX.MOBILE_DRAWER }}
                     initial={false}
                     animate={{ x: drawerOpen ? 0 : '-105%' }}
@@ -838,15 +845,16 @@ export default function App() {
               >
                 <div
                   data-enso="main"
+                  data-side-covering={sideCoversMain || undefined}
                   className={cn(
                     'relative flex min-h-0 min-w-0 flex-1 flex-col bg-background',
                     desktopShell && 'overflow-hidden rounded-[10px] shadow-surface',
                     // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
                     sideInTitleRow && 'rounded-r-none'
                   )}
-                  // 全屏面板开壁纸时是半透明的，铺开后把被盖住的对话藏掉，否则会透上来
+                  // 全屏或窄屏右侧面板开壁纸时是透明的，铺开后把被盖住的对话藏掉，否则会透上来
                   style={
-                    sideOpen && sideFullscreen
+                    sideCoversMain
                       ? {
                           visibility: 'hidden',
                           transition: `visibility 0s ${easeOutLayout.duration}s`,
