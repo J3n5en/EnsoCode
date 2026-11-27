@@ -178,7 +178,8 @@ function BlurControl({
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
-        className="w-full min-w-0 max-w-full"
+        // field-sizing-content 下 rows 不生效：空态高度和纵向拖拽挂在内层 textarea（见 #648）
+        className="w-full min-w-0 max-w-full [&_textarea]:min-h-24 [&_textarea]:resize-y"
       />
     );
   }
@@ -214,7 +215,7 @@ function BlurRow({
 }) {
   const { status, mark } = useSavedFlash();
   return (
-    <SettingsRow label={label} status={status}>
+    <SettingsRow label={label} status={status} layout={multiline ? 'stack' : 'row'}>
       <BlurControl
         value={value}
         multiline={multiline}

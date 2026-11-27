@@ -273,16 +273,15 @@ function TriggerItemRow({
         description={t(
           'Trusted rule shown outside untrusted event payload so the secretary knows how to react.'
         )}
+        layout="stack"
       >
-        <div className="flex w-full max-w-md flex-col gap-1.5">
-          <Textarea
-            rows={2}
-            value={instruction}
-            placeholder={t('Optional handling rule for this trigger')}
-            onChange={(e) => setInstruction(e.target.value)}
-            onBlur={() => void handleSaveDetails()}
-          />
-        </div>
+        <Textarea
+          rows={2}
+          value={instruction}
+          placeholder={t('Optional handling rule for this trigger')}
+          onChange={(e) => setInstruction(e.target.value)}
+          onBlur={() => void handleSaveDetails()}
+        />
       </SettingsSubRow>
       <SettingsSubRow
         rowId="secretary.actions"
@@ -517,10 +516,10 @@ export function SecretaryTriggerSection({
             rowId="secretary.trigger-instruction-2"
             label={t('Trigger instruction')}
             description={t('Optional rule telling the secretary how to handle incoming events.')}
+            layout="stack"
           >
             <Textarea
               rows={2}
-              className="w-full max-w-md"
               placeholder={t('Optional handling rule for this trigger')}
               value={newInstruction}
               onChange={(e) => setNewInstruction(e.target.value)}

@@ -473,6 +473,28 @@ describe('设置 → 秘书：删除后切换', () => {
   });
 });
 
+describe('设置 → 秘书：人设', () => {
+  it('人设标签在上，空的多行文本框独占下方整行、默认约 4 行高且可纵向拖拽', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: profile(3), persona: '' });
+    await mount();
+    const label = [...container.querySelectorAll('label')].find(
+      (el) => el.textContent === 'Persona'
+    ) as HTMLLabelElement;
+    const row = label.closest('[data-slot="settings-row"]') as HTMLElement;
+    const textarea = row.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+    expect(label.getAttribute('for')).toBe(textarea.id);
+    const block = row.lastElementChild as HTMLElement;
+    expect(block.className.split(' ')).toEqual(expect.arrayContaining(['w-full', 'min-w-0']));
+    expect(block.contains(textarea)).toBe(true);
+    expect(block.contains(label)).toBe(false);
+    const control = textarea.closest('[data-slot="textarea-control"]') as HTMLElement;
+    expect(control.className.split(' ')).toEqual(
+      expect.arrayContaining(['[&_textarea]:min-h-24', '[&_textarea]:resize-y'])
+    );
+  });
+});
+
 describe('设置 → 秘书：技能分组', () => {
   it('全局技能为空时和秘书自有技能一样平铺一行提示，不套带框容器', async () => {
     api.getProfile.mockResolvedValue({ ok: true, profile: profile(3), persona: '' });
