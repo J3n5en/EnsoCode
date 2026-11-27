@@ -3,6 +3,7 @@ import { isSignedOutError } from '@shared/agy/catalog';
 import {
   AGY_API_ID,
   AGY_DEFAULT_MODEL_ID,
+  AGY_DEFAULT_MODEL_NAME,
   AGY_PLACEHOLDER_API_KEY,
   AGY_PROVIDER_ID,
   AGY_PROVIDER_NAME,
@@ -35,7 +36,7 @@ export function isAgyModel(model: { provider?: string; api?: string }): boolean 
 export function agyCatalog(models: readonly AgyModelOption[]): AgyModelOption[] {
   const list = models.filter((model) => model.id);
   if (list.some((model) => model.id === AGY_DEFAULT_MODEL_ID)) return list;
-  return [{ id: AGY_DEFAULT_MODEL_ID, name: AGY_PROVIDER_NAME }, ...list];
+  return [{ id: AGY_DEFAULT_MODEL_ID, name: AGY_DEFAULT_MODEL_NAME }, ...list];
 }
 
 export function agyProviderConfig(models: readonly AgyModelOption[] = []): ProviderConfigInput {

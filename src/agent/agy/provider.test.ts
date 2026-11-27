@@ -10,4 +10,10 @@ describe('agy provider config', () => {
       agyProviderConfig([{ id: 'gemini-x', name: 'Gemini X' }]).models?.map((model) => model.id)
     ).toEqual(['default', 'gemini-x']);
   });
+
+  it('names the default model 默认, keeping the provider name for the provider', () => {
+    const config = agyProviderConfig();
+    expect(config.name).toBe('agy cli');
+    expect(config.models?.[0]).toMatchObject({ id: 'default', name: '默认' });
+  });
 });

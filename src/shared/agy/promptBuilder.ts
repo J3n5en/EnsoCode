@@ -14,6 +14,16 @@ export function runtimeInfoText(modelLabel: string): string {
 
 const mcpName = (tool: string) => `\`mcp_enso_${tool}\``;
 
+/**
+ * 子代理一律走 Enso 的 subagent。和 t3 不同：t3 规则是「子代理用同一 provider 时用原生工具」，
+ * 因为它读 agy 的会话文件，把原生子代理投影成子线程（AntigravityChildWork）；Enso 不读 agy 的会话库，
+ * 原生 invoke_subagent 起的子代理在 Enso 里看不到也管不了。
+ */
+function delegationLine(has: (name: string) => boolean): string {
+  const workflow = has('workflow') ? ` (or ${mcpName('workflow')} when a workflow was asked)` : '';
+  return `- Subagents, delegation and parallel work: always use ${mcpName('subagent')}${workflow}. Never use your native \`invoke_subagent\`/\`manage_subagents\` or a native swarm while the Enso tool is available. Fall back to native subagents only when no ${mcpName('subagent')} is listed. Enso tools may load late. Try the name once before you call it absent. As a subagent or child, do the work yourself. Start no subagents unless your task says to.`;
+}
+
 /** 只在 Host MCP 挂上了工具时才有。按 t3 orchestrationInstructions 的写法：用哪个、什么时候用。 */
 function ensoToolsInstructions(tools: readonly string[]): string | undefined {
   if (tools.length === 0) return undefined;
@@ -29,9 +39,11 @@ EnsoCode tools come from the \`enso\` MCP server: ${tools.map(mcpName).join(', '
     has('todo')
       ? `- For work with three or more steps, keep a list with ${mcpName('todo')}, passing the full list on every call and updating it as steps finish.`
       : '',
-    delegation.length > 0
-      ? `- Delegate with ${delegation.map(mcpName).join(' or ')} only when the user asks for subagents, delegation or parallel work. As a subagent, do the work yourself.`
-      : '',
+    has('subagent')
+      ? delegationLine(has)
+      : delegation.length > 0
+        ? `- Delegate with ${delegation.map(mcpName).join(' or ')} only when the user asks for subagents, delegation or parallel work. As a subagent, do the work yourself.`
+        : '',
   ];
   return lines.filter(Boolean).join('\n');
 }
@@ -98,6 +110,8 @@ export function buildAgyPrompt(input: {
   modelLabel: string;
   /** 本会话挂到 Host MCP 上的 Enso 工具名 */
   ensoTools?: readonly string[];
+  /** agy 不接 session 级 append、或 append 中途变了时，随指令一起发的 EnsoCode 系统提示词段 */
+  systemAppend?: string;
 }): AgyContentBlock[] {
   const user = lastUser(input.messages);
   const text = textOf(user?.content);
@@ -113,6 +127,7 @@ export function buildAgyPrompt(input: {
     const instructions = [
       input.interactionMode === 'plan' ? PLAN_INSTRUCTIONS : DEFAULT_INSTRUCTIONS,
       ensoToolsInstructions(input.ensoTools ?? []),
+      input.systemAppend?.trim(),
     ]
       .filter(Boolean)
       .join('\n\n');

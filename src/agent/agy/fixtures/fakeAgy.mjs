@@ -6,6 +6,10 @@ const version = process.env.FAKE_AGY_VERSION || '1.5.18';
 const signedOut = process.env.FAKE_AGY_SIGNED_OUT === '1';
 /** 设了就把权限请求换成 agy 对我们 Host MCP 工具发的那种：`mcp_enso_<值>` */
 const mcpPermission = process.env.FAKE_AGY_MCP_PERMISSION;
+/** `1`：initialize 不通告 `_meta.antigravity.systemPrompt.append` */
+const noAppend = process.env.FAKE_AGY_NO_APPEND === '1';
+/** `1`：session/resume 回一个非登录类错误，让客户端退回 session/new */
+const resumeFails = process.env.FAKE_AGY_RESUME_FAIL === '1';
 /**
  * 按 agy 1.5.18 线上记下的顺序回放：
  * - `steer`：第一个 prompt 流到一半等第二个 prompt；第二个一到，第一个 23ms 内返回 end_turn（无 usage），
@@ -302,7 +306,7 @@ function handle(message) {
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: { image: true },
-        _meta: { antigravity: { systemPrompt: { append: true } } },
+        ...(noAppend ? {} : { _meta: { antigravity: { systemPrompt: { append: true } } } }),
       },
     });
     return;
@@ -310,6 +314,10 @@ function handle(message) {
   if (method === 'session/new' || method === 'session/resume') {
     if (signedOut) {
       fail(id, -32000, 'not signed in');
+      return;
+    }
+    if (method === 'session/resume' && resumeFails) {
+      fail(id, -32602, 'unknown session');
       return;
     }
     respond(id, {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { getModel } from '@earendil-works/pi-ai/compat';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { InlineExtension, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -16,10 +16,16 @@ import {
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalGate } from '../approval';
+import {
+  appendSystemPromptExtension,
+  SUBAGENT_CONTRACT_PROMPT,
+  tailSystemPromptSection,
+} from '../childContract';
 import { batchSteering, steerActiveSession } from '../sessionAdapter';
 import { createTodoTool } from '../todo';
+import { VIZ_GUIDANCE_PROMPT, WORKSPACE_POLICY_PROMPT } from '../workspacePolicy';
 import { type AcpHttpMcpServer, closeHostMcp } from './hostMcp';
 import { registerAgyProvider, streamAgy } from './provider';
 import { closeAllAgySessions } from './registry';
@@ -74,6 +80,10 @@ interface SetupOptions {
   plans?: AssistantMessage[];
   tools?: ToolDefinition[];
   gate?: ApprovalGate;
+  /** 照 supervisor 那样挂的系统提示词扩展 */
+  extensions?: InlineExtension[];
+  /** 用 pi 默认的开头角色段（含 "running inside pi"）而不是自定义提示词，并读工作区的 AGENTS.md */
+  piPrompt?: { agentsMd: string };
 }
 
 const other = getModel('openai', 'gpt-4o-mini');
@@ -113,6 +123,7 @@ async function setup(ensoSessionId = 'enso-1', options: SetupOptions = {}) {
   const agentDir = path.join(root, 'agent');
   mkdirSync(cwd, { recursive: true });
   mkdirSync(agentDir, { recursive: true });
+  if (options.piPrompt) writeFileSync(path.join(cwd, 'AGENTS.md'), options.piPrompt.agentsMd);
   const runtime = await ModelRuntime.create({
     authPath: path.join(agentDir, 'auth.json'),
     modelsPath: path.join(agentDir, 'models.json'),
@@ -140,8 +151,9 @@ async function setup(ensoSessionId = 'enso-1', options: SetupOptions = {}) {
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    noContextFiles: true,
-    systemPrompt: 'agy bridge test',
+    noContextFiles: !options.piPrompt,
+    ...(options.piPrompt ? {} : { systemPrompt: 'agy bridge test' }),
+    ...(options.extensions ? { extensionFactories: options.extensions } : {}),
   });
   await resourceLoader.reload();
   const sessionDir = path.join(root, 'sessions');
@@ -662,3 +674,63 @@ it.runIf(process.env.AGY_LIVE === '1')(
   },
   300_000
 );
+
+describe('Enso system append handed to agy', () => {
+  const ensoExtensions = (child: boolean): InlineExtension[] => [
+    appendSystemPromptExtension('workspace-policy', WORKSPACE_POLICY_PROMPT),
+    appendSystemPromptExtension('viz-guidance', VIZ_GUIDANCE_PROMPT),
+    ...(child ? [appendSystemPromptExtension('subagent-contract', SUBAGENT_CONTRACT_PROMPT)] : []),
+    tailSystemPromptSection('preset_tail', 'PRESET-TAIL-MARKER'),
+  ];
+
+  async function appendFor(child: boolean) {
+    const atOpen: Array<string | undefined> = [];
+    const atTurn: Array<string | undefined> = [];
+    setAgySessionOpener(async (options) => {
+      atOpen.push(options.systemAppend);
+      return fakeAgy(async (input) => {
+        atTurn.push(input.systemAppend);
+        return result('ok');
+      });
+    });
+    const { session } = await setup(child ? 'enso-child' : 'enso-top', {
+      extensions: ensoExtensions(child),
+      piPrompt: { agentsMd: 'AGENTS-MD-MARKER' },
+    });
+    await session.prompt('draw a chart');
+    await session.waitForIdle();
+    // pi 那边确实带着这些段，agy 这边才有得剔
+    expect(session.systemPrompt).toContain('running inside pi');
+    expect(session.systemPrompt).toContain('AGENTS-MD-MARKER');
+    expect(session.systemPrompt).toContain('<tools>');
+    expect(atOpen).toHaveLength(1);
+    expect(atTurn).toEqual(atOpen);
+    return atOpen[0] ?? '';
+  }
+
+  it('carries workspace policy, html-viz guidance and preset tail, nothing of pi', async () => {
+    const text = await appendFor(false);
+    expect(text).toContain('# Working in the workspace');
+    expect(text).toContain('```html-viz');
+    expect(text).toContain('<preset_tail>\nPRESET-TAIL-MARKER\n</preset_tail>');
+    expect(text).not.toContain('Delegated agent contract');
+    for (const banned of [
+      'running inside pi',
+      '<skills>',
+      '<rules>',
+      '<tools>',
+      '<project_context>',
+      'AGENTS-MD-MARKER',
+      '<cwd>',
+    ]) {
+      expect(text).not.toContain(banned);
+    }
+  });
+
+  it('adds the subagent contract only for a child session', async () => {
+    const text = await appendFor(true);
+    expect(text).toContain('# Delegated agent contract');
+    expect(text).toContain('```html-viz');
+    expect(text).not.toContain('running inside pi');
+  });
+});
