@@ -130,6 +130,18 @@ export function centeredScrollTop(
   return Math.min(max, Math.max(0, Math.round(target)));
 }
 
+/** 打开选择器时把第 index 行（选中的模型）滚进可视区；本来就整行可见时不动 */
+export function scrollModelIntoList(list: HTMLElement | null, index: number): boolean {
+  const item = index >= 0 ? (list?.children[index] as HTMLElement | undefined) : undefined;
+  if (!list || !item) return false;
+  const visible =
+    item.offsetTop >= list.scrollTop &&
+    item.offsetTop + item.offsetHeight <= list.scrollTop + list.clientHeight;
+  if (visible) return false;
+  list.scrollTop = centeredScrollTop(list, item);
+  return true;
+}
+
 export function resolveActiveWorkbenchView(options: {
   groups: readonly ProviderGroup[];
   selectableVirtualModels: readonly VirtualModelEntry[];
@@ -685,6 +697,17 @@ function ProviderSubmenuList({
       .map((entry) => entry.model);
   }, [showFilter, filter, enabledModels]);
 
+  // 弹层每次打开都会重新挂载这一栏：挂载时把选中的模型滚出来，之后的滚动与重渲染都不再拽回
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const selectedIndexRef = useRef(-1);
+  selectedIndexRef.current =
+    provider.id === selectedProviderId
+      ? visibleModels.findIndex((model) => model.id === selectedModelId)
+      : -1;
+  useLayoutEffect(() => {
+    scrollModelIntoList(listRef.current, selectedIndexRef.current);
+  }, []);
+
   return (
     <>
       {showFilter && (
@@ -701,7 +724,11 @@ function ProviderSubmenuList({
           </span>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={listRef}
+        data-model-picker="model-list"
+        className="relative min-h-0 flex-1 overflow-y-auto"
+      >
         {visibleModels.map((model) => {
           const key = pinnedModelKey(provider.id, model.id);
           return (
