@@ -83,6 +83,9 @@ export function aggregateSessionChanges(input: {
     );
     const lastWrite = [...tools].reverse().find((tool) => tool.writeContent != null)?.writeContent;
     const firstFileChange = tools.find((tool) => tool.fileChange)?.fileChange;
+    const changes = tools.flatMap((tool) => (tool.fileChange ? [tool.fileChange] : []));
+    // 全新文件的基线就是空文件；截断只让预览变短，不该把这类路径判成基线不可知
+    const addsOnly = changes.length > 0 && changes.every((change) => change.type === 'add');
     const lastOperation = [...tools]
       .reverse()
       .find((tool) => tool.fileChange || tool.writeContent != null || tool.edits?.length);
@@ -94,18 +97,20 @@ export function aggregateSessionChanges(input: {
     const hasSnapshot = Object.hasOwn(snapshots, path);
     const snapshot = snapshots[path];
 
-    if (!hasSnapshot && firstFileChange?.truncated === true) {
+    if (!hasSnapshot && firstFileChange?.truncated === true && !addsOnly) {
       snapshots[path] = null;
       incompletePaths.add(path);
       continue;
     }
-    if (hasSnapshot && snapshot === null) {
+    if (hasSnapshot && snapshot === null && !addsOnly) {
       incompletePaths.add(path);
       continue;
     }
 
     let oldText: string | null =
-      typeof snapshot === 'string' ? snapshot : (exactChanges[0]?.oldText ?? null);
+      typeof snapshot === 'string'
+        ? snapshot
+        : (exactChanges[0]?.oldText ?? (addsOnly ? '' : null));
     const newText: string | null = typeof current === 'string' ? current : fallbackNew;
 
     if (oldText == null) {
@@ -120,6 +125,8 @@ export function aggregateSessionChanges(input: {
       incompletePaths.add(path);
     }
     if (oldText == null || newText == null) continue;
+    // 旧的 null 标记在能算出完整基线后要撤掉，否则恢复出来的差异旁边仍挂着不完整提示
+    incompletePaths.delete(path);
     if (oldText === newText && exactChanges.length === 0) continue;
 
     snapshots[path] = oldText;
