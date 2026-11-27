@@ -282,9 +282,11 @@ async function handlePrompt(id, params) {
   }
   if (token !== generation) return;
   promptId = null;
+  // FAKE_AGY_INPUT_TOKENS：报一个大的上下文占用，好让 pi 的阈值压缩真的跑完
+  const inputTokens = Number(process.env.FAKE_AGY_INPUT_TOKENS || 3);
   respond(id, {
     stopReason: 'end_turn',
-    usage: { inputTokens: 3, cachedReadTokens: 2, outputTokens: 4, totalTokens: 9 },
+    usage: { inputTokens, cachedReadTokens: 2, outputTokens: 4, totalTokens: inputTokens + 6 },
   });
 }
 

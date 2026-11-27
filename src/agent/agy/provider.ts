@@ -86,7 +86,12 @@ export function streamAgy(model: PiModel, context: PiContext, options?: PiStream
   void (async () => {
     try {
       const bridge = getAgyBridge();
-      if (!bridge) throw new Error('agy session bridge is not attached');
+      // 只有会话的 agent 循环请求绑了桥；压缩、摘要和会话外的 complete 都到不了 agy
+      if (!bridge) {
+        throw new Error(
+          'agy only serves chat turns of an attached session; compaction and summary requests are not sent to agy'
+        );
+      }
       stream.push({ type: 'start', partial: output });
       const result = await bridge.runTurn({
         messages: context.messages,
