@@ -1378,13 +1378,21 @@ describe('插件远程会话能力', () => {
     for (const bad of [
       [{ data: png, mimeType: 'text/html' }],
       [{ data: '不是base64', mimeType: 'image/png' }],
-      Array.from({ length: 5 }, () => images[0]),
+      Array.from({ length: 11 }, () => images[0]),
       'x',
     ])
       await expect(
         gate.handle('a.b', 'session.inject', { text: 'hi', images: bad }, agentCall())
       ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
     expect(inject).toHaveBeenCalledTimes(1);
+    for (const count of [9, 10]) {
+      const many = Array.from({ length: count }, () => images[0]);
+      now += 10_000;
+      await expect(
+        gate.handle('a.b', 'session.inject', { text: 'hi', images: many }, agentCall())
+      ).resolves.toBeNull();
+      expect(inject).toHaveBeenLastCalledWith('a.b', expect.objectContaining({ images: many }));
+    }
   });
 
   it('session.abort 中止会话，跨会话同样受授权约束', async () => {

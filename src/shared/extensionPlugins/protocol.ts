@@ -8,7 +8,7 @@ export const PLUGIN_INJECT_MAX_CHARS = 32 * 1024;
 export const PLUGIN_INJECT_WIRE_MAX_CHARS = PLUGIN_INJECT_MAX_CHARS + 4 * 1024;
 export const PLUGIN_PROGRESS_MAX_CHARS = 16 * 1024;
 /** 注入消息可附带的图片：数量与单张 base64 长度上限 */
-export const PLUGIN_INJECT_MAX_IMAGES = 4;
+export const PLUGIN_INJECT_MAX_IMAGES = 10;
 export const PLUGIN_INJECT_IMAGE_MAX_CHARS = 7 * 1024 * 1024;
 const PLUGIN_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 

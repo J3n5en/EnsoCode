@@ -16,6 +16,7 @@ import {
   PLUGIN_AGENT_RUN_ID,
   PLUGIN_AGENT_SYSTEM_MAX_CHARS,
   PLUGIN_INJECT_MAX_CHARS,
+  PLUGIN_INJECT_MAX_IMAGES,
   type PluginArtifactInfo,
   type PluginHostApi,
   type PluginHostCapabilities,
@@ -847,7 +848,10 @@ export class PluginHostGate {
           throw pluginError('INVALID_ARGS', 'text 不合法或超过 32K 字符');
         const images = parsePluginInjectImages(a.images);
         if (!images)
-          throw pluginError('INVALID_ARGS', 'images 不合法：最多 4 张 png/jpeg/webp/gif 的 base64');
+          throw pluginError(
+            'INVALID_ARGS',
+            `images 不合法：最多 ${PLUGIN_INJECT_MAX_IMAGES} 张 png/jpeg/webp/gif 的 base64`
+          );
         // nextTurn 只排队不触发，和 triggerTurn 互相矛盾；要触发一轮就得走 followUp
         const deliverAs = a.deliverAs ?? (a.triggerTurn === true ? 'followUp' : 'nextTurn');
         if (deliverAs !== 'steer' && deliverAs !== 'followUp' && deliverAs !== 'nextTurn')

@@ -378,7 +378,7 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `deliverAs`：`nextTurn`（缺省，并入下一轮）、`steer`（插入正在进行的回复）、`followUp`（当前回复结束后排队）。
 - `triggerTurn: true` 时会话空闲也会立即开始一轮。
 - 文本不超过 32K 字符。
-- `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 4 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
+- `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 10 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
 
 `session.abort(sessionId?)` 中止会话正在进行的一轮，权限与目标会话规则同 `session.inject`（不计入频率限制）。会话没在运行返回 `ABORT_FAILED`。
 
