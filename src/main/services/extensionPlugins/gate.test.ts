@@ -1470,6 +1470,69 @@ describe('插件远程会话能力', () => {
       code: 'PERMISSION_DENIED',
     });
   });
+
+  it('session.answerAsk 替用户回答提问：权限与跨会话授权同注入，校验 requestId 与 answer', async () => {
+    const answerAsk = vi.fn(
+      (_sessionId: string, requestId: string): { ok: true } | { ok: false; error: string } =>
+        requestId === 'gone' ? { ok: false, error: '提问已收尾' } : { ok: true }
+    );
+    deps.answerAsk = answerAsk;
+    deps.manifest = () => manifest({ permissions: [] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.answerAsk', { requestId: 'q1', answer: '是' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.answerAsk', { requestId: 'q1', answer: '是' }, agentCall())
+    ).resolves.toEqual({ ok: true });
+    expect(answerAsk).toHaveBeenLastCalledWith('s1', 'q1', '是');
+    await expect(
+      gate.handle('a.b', 'session.answerAsk', { requestId: 'gone', answer: '是' }, agentCall())
+    ).resolves.toEqual({ ok: false, error: '提问已收尾' });
+    await expect(
+      gate.handle(
+        'a.b',
+        'session.answerAsk',
+        { sessionId: 'other', requestId: 'q1', answer: '是' },
+        agentCall()
+      )
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    for (const bad of [
+      { answer: '是' },
+      { requestId: '', answer: '是' },
+      { requestId: 'q'.repeat(129), answer: '是' },
+      { requestId: 'q1' },
+      { requestId: 'q1', answer: '' },
+      { requestId: 'q1', answer: 'a'.repeat(16 * 1024 + 1) },
+    ])
+      await expect(gate.handle('a.b', 'session.answerAsk', bad, agentCall())).rejects.toMatchObject(
+        { code: 'INVALID_ARGS' }
+      );
+    await expect(
+      gate.handle(
+        'a.b',
+        'session.answerAsk',
+        { requestId: 'q'.repeat(128), answer: 'a'.repeat(16 * 1024) },
+        agentCall()
+      )
+    ).resolves.toEqual({ ok: true });
+
+    // 常驻进程：凭跨会话授权指明会话
+    deps.crossSessionInject = () => true;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle(
+        'a.b',
+        'session.answerAsk',
+        { sessionId: 'other', requestId: 'q1', answer: '否' },
+        undefined
+      )
+    ).resolves.toEqual({ ok: true });
+    expect(answerAsk).toHaveBeenLastCalledWith('other', 'q1', '否');
+  });
 });
 
 describe('常驻进程里的会话操作', () => {

@@ -303,6 +303,8 @@ export const PLUGIN_HOST_APIS = [
   'threads.list',
   /** 中止会话当前一轮；args { sessionId? }，权限同 session.inject */
   'session.abort',
+  /** 替用户回答会话里的提问；args { sessionId?, requestId, answer }，权限同 session.inject，返回 { ok, error? } */
+  'session.answerAsk',
   /** 调用其他插件导出的方法；args { pluginId, name, args } */
   'plugin.call',
   'ui.clipboard',

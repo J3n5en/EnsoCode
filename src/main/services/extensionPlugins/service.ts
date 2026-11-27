@@ -1474,11 +1474,14 @@ export class ExtensionPluginService {
     secretaryPluginIds?: readonly string[];
   }): Promise<void> {
     const audience = input.secretaryPluginIds;
+    // 提问带会话正文：只给看得见这个会话的插件
+    const visibleOnly = input.event === 'ask_request' || input.event === 'ask_resolved';
     const targets = this.enabled().filter(
       (entry) =>
         (!audience ||
           audience.includes(entry.id) ||
           entry.manifest.permissions.includes('session.readAll')) &&
+        (!visibleOnly || this.gate.canSeeSession(entry.id, input.sessionId)) &&
         entry.manifest.contributes.events.some(
           (sub) => sub.event === input.event && (!input.agent || sub.mode === 'observe')
         )

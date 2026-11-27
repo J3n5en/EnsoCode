@@ -1483,6 +1483,69 @@ describe('插件运行期收敛', () => {
     ]);
   });
 
+  it('ask_request / ask_resolved 只投给订阅了且看得见这个会话的插件', async () => {
+    const visible = ['s'];
+    const svc = create({
+      root: temp('ask-events-'),
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      fork: () => new InProcessChild() as never,
+      gate: {
+        ...gate,
+        sessions: {
+          list: () => [],
+          listAll: () => visible.map((id) => ({ id, title: '', updatedAt: 0, state: 'idle' })),
+        },
+      },
+    });
+    const plugins = [
+      ['example.reader', ['session.readAll'], ['ask_request', 'ask_resolved']],
+      ['example.blind', [], ['ask_request', 'ask_resolved']],
+      ['example.deaf', ['session.readAll'], ['session_status']],
+    ] as const;
+    for (const [id, extra, events] of plugins) {
+      await stageCommit(svc, {
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          resident: true,
+          permissions: ['agent.observe', 'process.background', ...extra],
+          contributes: { events: events.map((event) => ({ event })) },
+        }),
+        'main.mjs': `export function activate(enso) {
+          for (const name of ${JSON.stringify(events)})
+            enso.events.on(name, (data) => { globalThis.__ensoObs.hits.push('${id}:' + name + ':' + data.sessionId + ':' + (data.relayed ?? data.by)); });
+        }`,
+      });
+      await svc.setEnabled(id, true);
+    }
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'ask_request',
+      data: { sessionId: 's', requestId: 'q', question: '?', relayed: true },
+    });
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'ask_resolved',
+      data: { sessionId: 's', requestId: 'q', by: 'user', answer: '是' },
+    });
+    await svc.dispatchEvent({
+      sessionId: 'hidden',
+      projectRoot: null,
+      event: 'ask_request',
+      data: { sessionId: 'hidden', requestId: 'q', question: '?', relayed: false },
+    });
+    await vi.waitFor(() => expect(obs().hits).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(obs().hits).toEqual([
+      'example.reader:ask_request:s:true',
+      'example.reader:ask_resolved:s:user',
+    ]);
+  });
+
   it('更新常驻插件时等旧进程真正退出再拉起新进程', async () => {
     const dir = temp('resident-swap-');
     const events: string[] = [];

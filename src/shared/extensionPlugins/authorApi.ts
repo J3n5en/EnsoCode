@@ -29,7 +29,12 @@ import type {
   EventClaimCandidate,
   EventClaimView,
 } from '../types/eventClaims';
-import type { ToolCallPayload, ToolResultPayload } from './events';
+import type {
+  AskRequestPayload,
+  AskResolvedPayload,
+  ToolCallPayload,
+  ToolResultPayload,
+} from './events';
 import type { ExtensionPluginManifest } from './manifest';
 import type { PluginHostApi, PluginHostCapabilities } from './protocol';
 
@@ -59,6 +64,8 @@ const checks = [
   true as Assert<Equals<EnsoMcpTool, McpToolInfo>>,
   true as Assert<Equals<EnsoEventData['tool_call'], ToolCallPayload>>,
   true as Assert<Equals<EnsoEventData['tool_result'], ToolResultPayload>>,
+  true as Assert<Equals<EnsoEventData['ask_request'], AskRequestPayload>>,
+  true as Assert<Equals<EnsoEventData['ask_resolved'], AskResolvedPayload>>,
   true as Assert<Equals<PublicManifest, ExtensionPluginManifest>>,
   true as Assert<Equals<AuthorKeys, ParsedKeys>>,
 ];

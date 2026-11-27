@@ -66,6 +66,8 @@ const SENSITIVE_REQUEST_HEADERS = new Set([
 const MAX_MCP_ARGS_BYTES = 64 * 1024;
 const MAX_CALL_DEPTH = 3;
 const MAX_CLIPBOARD_BYTES = 1024 * 1024;
+/** session.answerAsk 的回答上限（字符） */
+const MAX_ASK_ANSWER_CHARS = 16 * 1024;
 const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
@@ -269,6 +271,12 @@ export interface GateDeps {
   /** 取消本插件的代理；没有这个代理返回 false */
   agentCancel?(pluginId: string, runId: string): boolean;
   abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
+  /** 替用户回答会话里的提问：与在应用里亲手答同一条路径，谁先答算谁的 */
+  answerAsk?(
+    sessionId: string,
+    requestId: string,
+    answer: string
+  ): { ok: true } | { ok: false; error: string };
   claims?: {
     claim(input: {
       key: string;
@@ -964,6 +972,21 @@ export class PluginHostGate {
         if (!result.ok) throw pluginError('ABORT_FAILED', result.error);
         this.deps.claims?.releaseSession?.(sessionId);
         return null;
+      }
+      case 'session.answerAsk': {
+        permit('agent.inject');
+        const sessionId = this.targetSession(pluginId, a, optionalInvocation());
+        if (typeof a.requestId !== 'string' || a.requestId.length === 0 || a.requestId.length > 128)
+          throw pluginError('INVALID_ARGS', 'requestId 不合法');
+        if (
+          typeof a.answer !== 'string' ||
+          a.answer.length === 0 ||
+          a.answer.length > MAX_ASK_ANSWER_CHARS
+        )
+          throw pluginError('INVALID_ARGS', 'answer 不合法或超过 16K 字符');
+        if (!this.deps.answerAsk) throw pluginError('UNSUPPORTED', '当前环境不能回答提问');
+        const result = this.deps.answerAsk(sessionId, a.requestId, a.answer);
+        return result.ok ? { ok: true } : { ok: false, error: result.error };
       }
       case 'claims.claim':
       case 'claims.renew':

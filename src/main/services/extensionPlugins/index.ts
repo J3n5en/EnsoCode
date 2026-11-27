@@ -81,6 +81,15 @@ export function setPluginSessionResume(resume: PluginSessionResume | null): void
   sessionResume = resume;
 }
 
+/** 替用户回答提问由持有会话的 agent IPC 注入 */
+export type PluginAskAnswerer = NonNullable<GateDeps['answerAsk']>;
+
+let askAnswerer: PluginAskAnswerer | null = null;
+
+export function setPluginAskAnswerer(answerer: PluginAskAnswerer | null): void {
+  askAnswerer = answerer;
+}
+
 /**
  * 先让窗口拉起会话；窗口里没有它（如没打开的秘书会话）就退到 Main 侧恢复。
  * Main 不接手的会话照报窗口的原因。
@@ -234,6 +243,10 @@ export function getExtensionPlugins(): ExtensionPluginService {
         return true;
       },
       sessionMuted: (sessionId) => isSessionMuted(sessionId),
+      answerAsk: (sessionId, requestId, answer) =>
+        askAnswerer
+          ? askAnswerer(sessionId, requestId, answer)
+          : { ok: false, error: '当前环境不能回答提问' },
       viewEvent: (pluginId, name, data) => {
         broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, { pluginId, name, data });
       },

@@ -114,7 +114,7 @@
 | `mcp.call` | 有 `mcp.tools` | 调用用户已配置的 MCP 服务里、清单列出的工具 |
 | `agent.observe` | 有通知型 `events` | 收到会话事件 |
 | `agent.intercept` | 有拦截型 `events` | 拦截并改写工具调用、工具结果和用户输入 |
-| `agent.inject` | 要向会话发消息 | `enso.session.inject` / `enso.session.abort`：向会话发送消息（可带图片）、触发或中止该会话的执行。默认只能发到发起调用的会话；用户单独允许后可发到任意运行中的会话 |
+| `agent.inject` | 要向会话发消息 | `enso.session.inject` / `enso.session.abort` / `enso.session.answerAsk`：向会话发送消息（可带图片）、触发或中止该会话的执行。默认只能发到发起调用的会话；用户单独允许后可发到任意运行中的会话 |
 | `agent.injectTrusted` | 投递的是用户自己定的任务 | `enso.session.inject` 带 `trusted: true` 时，普通会话里不包不可信包裹，见「向会话发消息」。要和 `agent.inject` 一起声明 |
 | `process.background` | `resident` 或有 `schedules` | 常驻进程、定时任务 |
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
@@ -245,6 +245,7 @@ export async function activate(enso) {
 | `artifacts.write(input)` | 见「产出文件」 |
 | `session.inject(input)` | 见「向会话发消息」 |
 | `session.abort(sessionId?)` | 见「向会话发消息」 |
+| `session.answerAsk({ sessionId?, requestId, answer })` | 见「向会话发消息」 |
 | `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null`。再加 `includeSecretary: true` 会纳入在用秘书的主会话，这些项带 `kind: 'secretary'`，`projectName` 是秘书名，没有标题时 `title` 也是秘书名；缺省不含秘书会话 |
 | `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在含秘书会话的全局列表）里，否则 `NOT_FOUND` |
 | `session.onTurnEnd(listener)` | 需要 `session.read` 或 `session.readAll`。主会话一轮结束时回调 `listener({ sessionId })`，返回取消订阅函数，见「回合结束」 |
@@ -295,6 +296,7 @@ export async function activate(enso) {
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
 | `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
 | `session_status` | 主会话的汇总状态或挂起的提问 / 审批数变化时，所有项目的会话都会发 | `{ sessionId, state, previous, pendingAsks, pendingApprovals }`，见「会话状态」 | 否 |
+| `ask_request` / `ask_resolved` | 主会话向用户提问 / 提问收尾（答复、秘书代答、超时或取消）；只发给看得见这个会话的插件（`session.readAll`，或 `session.read` 且同项目），Bot 会话与子会话不发 | `ask_request`：`{ sessionId, requestId, question, options?, recommended?, expiresAt?, relayed }`，`relayed` 表示已转给秘书；`ask_resolved`：`{ sessionId, requestId, by?, answer? }`，`by` 为 `user` / `relay` / `timeout`，缺省表示取消 | 否 |
 | `model_select` | 会话切换模型时（手动切换、循环切换、恢复会话） | `{ provider, modelId, previous?: { provider, modelId }, source }`，`source` 是 `set` / `cycle` / `restore` | 否 |
 | `before_agent_start` | 每轮回复开始前（用户消息，或插件消息触发的一轮），只在主会话 | `{ prompt, kind }`：`kind` 为 `user` 时 `prompt` 是用户消息正文（最多 64K 字符），为 `custom` 时是空串 | 返回 `{ append }` 把文本追加到本轮 system prompt 末尾；多个插件按 id 顺序用空行拼接，合计最多 16K 字符。只能追加，不能拦下，所以不接受 `failClosed` |
 
@@ -383,6 +385,8 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 10 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
 
 `session.abort(sessionId?)` 中止会话正在进行的一轮，权限与目标会话规则同 `session.inject`（不计入频率限制）。会话没在运行返回 `ABORT_FAILED`。
+
+`session.answerAsk({ sessionId?, requestId, answer })` 替用户回答会话里的提问（`requestId` 取自 `ask_request`，不超过 128 字符；`answer` 不超过 16K 字符），权限与目标会话规则同 `session.inject`。和用户在桌面端、手机上答同一条路径，谁先答算谁的；返回 `{ ok: true }`，提问已收尾或会话不在时返回 `{ ok: false, error }`。
 
 ### 只读代理
 

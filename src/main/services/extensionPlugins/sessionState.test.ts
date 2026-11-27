@@ -1,12 +1,69 @@
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { SessionStateTracker, turnEndSessionId } from './sessionState';
+import { pluginAskEvent, SessionStateTracker, turnEndSessionId } from './sessionState';
 
 const root = { sessionId: 'r', generation: 'g' };
 const child = { sessionId: 'r::cw-1', generation: 'c', parent: root };
 let seq = 0;
 const ev = (event: Record<string, unknown>) =>
   ({ seq: ++seq, identity: root, ...event }) as unknown as RendererAgentEvent;
+
+describe('pluginAskEvent', () => {
+  const notBot = () => false;
+  const ask = {
+    requestId: 'q1',
+    question: '部署吗？',
+    options: ['是', '否'],
+    recommended: '是',
+    expiresAt: 99,
+    relatesTo: { conversationId: 'x' },
+  };
+
+  it('主会话提问映射成 ask_request，relayed 按是否转给秘书', () => {
+    expect(pluginAskEvent(ev({ type: 'ask-request', ask }), notBot)).toEqual({
+      sessionId: 'r',
+      event: 'ask_request',
+      data: {
+        sessionId: 'r',
+        requestId: 'q1',
+        question: '部署吗？',
+        options: ['是', '否'],
+        recommended: '是',
+        expiresAt: 99,
+        relayed: false,
+      },
+    });
+    expect(
+      pluginAskEvent(
+        ev({ type: 'ask-request', ask: { requestId: 'q2', question: '?', relay: { name: '秘' } } }),
+        notBot
+      )?.data
+    ).toEqual({ sessionId: 'r', requestId: 'q2', question: '?', relayed: true });
+  });
+
+  it('收尾映射成 ask_resolved，带 by 与 answer；取消时两者都没有', () => {
+    expect(
+      pluginAskEvent(
+        ev({ type: 'ask-resolved', requestId: 'q1', by: 'relay', answer: '是', name: '秘' }),
+        notBot
+      )
+    ).toEqual({
+      sessionId: 'r',
+      event: 'ask_resolved',
+      data: { sessionId: 'r', requestId: 'q1', by: 'relay', answer: '是' },
+    });
+    expect(pluginAskEvent(ev({ type: 'ask-resolved', requestId: 'q1' }), notBot)?.data).toEqual({
+      sessionId: 'r',
+      requestId: 'q1',
+    });
+  });
+
+  it('子会话、Bot 会话与其他事件不发', () => {
+    expect(pluginAskEvent(ev({ type: 'ask-request', ask, identity: child }), notBot)).toBeNull();
+    expect(pluginAskEvent(ev({ type: 'ask-request', ask }), (id) => id === 'r')).toBeNull();
+    expect(pluginAskEvent(ev({ type: 'turn-completed', turnId: 't' }), notBot)).toBeNull();
+  });
+});
 
 describe('SessionStateTracker', () => {
   it('回合结束：主会话完成、失败、中止各算一次；子会话与其他事件不算', () => {

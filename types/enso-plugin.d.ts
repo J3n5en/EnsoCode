@@ -3,6 +3,8 @@
 import type * as React from 'react';
 import type { PluginSlotName } from '../src/renderer/plugins/registry';
 import type {
+  AskRequestPayload,
+  AskResolvedPayload,
   BeforeAgentStartPayload,
   ContextUsagePayload,
   InputPayload,
@@ -405,6 +407,12 @@ export interface EnsoHostApi {
   'threads.routePrEvent': (event: EnsoDemandPrEventInput) => Promise<EnsoDemandPrRouteResult>;
   'threads.list': (filter?: EnsoDemandThreadFilter) => Promise<EnsoDemandThreadView[]>;
   'session.abort': (sessionId?: string) => Promise<void>;
+  /** 替用户回答提问，需 `agent.inject`，跨会话授权同 `session.inject`；与桌面端同路径，谁先答算谁的 */
+  'session.answerAsk': (input: {
+    sessionId?: string;
+    requestId: string;
+    answer: string;
+  }) => Promise<{ ok: true } | { ok: false; error: string }>;
   'plugin.call': (pluginId: string, name: string, args?: unknown) => Promise<unknown>;
   'ui.clipboard': (text: string) => Promise<void>;
   'ui.openExternal': (url: string) => Promise<void>;
@@ -492,6 +500,10 @@ export interface EnsoEventData {
   model_select: ModelSelectPayload;
   /** 拦截时返回 `{ append }` 追加到本轮 system prompt；只在主会话触发 */
   before_agent_start: BeforeAgentStartPayload;
+  /** Enso 派发：看得见的主会话向用户提问；relayed 表示已转给秘书 */
+  ask_request: AskRequestPayload;
+  /** Enso 派发：提问收尾；by 缺省表示取消 */
+  ask_resolved: AskResolvedPayload;
 }
 
 export type EnsoToolResult = string | Pick<PluginToolResult, 'content' | 'details'>;
@@ -571,6 +583,7 @@ export interface EnsoMain {
   session: {
     inject: EnsoHostApi['session.inject'];
     abort: EnsoHostApi['session.abort'];
+    answerAsk: EnsoHostApi['session.answerAsk'];
     list: EnsoHostApi['session.list'];
     status: EnsoHostApi['session.status'];
     focus: EnsoHostApi['session.focus'];

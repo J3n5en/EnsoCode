@@ -511,6 +511,7 @@ export function runPluginHost(
         inject: (input: unknown) => hostCall('session.inject', input ?? {}),
         abort: (sessionId?: string) =>
           hostCall('session.abort', sessionId === undefined ? {} : { sessionId }),
+        answerAsk: (input: unknown) => hostCall('session.answerAsk', input ?? {}),
         list: (options?: unknown) => hostCall('session.list', options ?? {}),
         status: (sessionId?: string) =>
           hostCall('session.status', sessionId === undefined ? {} : { sessionId }),

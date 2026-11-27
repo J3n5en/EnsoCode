@@ -179,11 +179,16 @@ import {
   getExtensionPlugins,
   peekExtensionPlugins,
   pluginOwnerBindings,
+  setPluginAskAnswerer,
   setPluginSessionDirectory,
   setPluginSessionResume,
 } from '../services/extensionPlugins';
 import { resolvePluginInjectDelivery } from '../services/extensionPlugins/injectTrust';
-import { SessionStateTracker, turnEndSessionId } from '../services/extensionPlugins/sessionState';
+import {
+  pluginAskEvent,
+  SessionStateTracker,
+  turnEndSessionId,
+} from '../services/extensionPlugins/sessionState';
 import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
 import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/externalFileReveal';
 import { searchFiles } from '../services/fileSearch';
@@ -586,6 +591,21 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   }
   publishPluginSessionStatus(changes);
   publishPluginTurnEnd(event);
+  publishPluginAsk(event);
+}
+
+/** 主会话的提问与收尾推给订阅了且看得见该会话的插件（可见性由 service 判） */
+function publishPluginAsk(event: RendererAgentEvent): void {
+  const ask = pluginAskEvent(event, (id) => Boolean(sourceAuthority?.conversation(id)?.bot));
+  if (!ask) return;
+  void getExtensionPlugins()
+    .dispatchEvent({ ...ask, projectRoot: pluginProjectRoot(ask.sessionId) })
+    .catch((error: unknown) => {
+      console.warn(
+        `[plugins] ${ask.event} failed:`,
+        error instanceof Error ? error.message : error
+      );
+    });
 }
 
 /** 主会话一轮结束（完成、失败、中止各只发一次）时通知订阅了 onTurnEnd 的插件进程 */
@@ -2062,6 +2082,11 @@ export function registerAgentHandlers(): void {
   setPluginSessionResume(async (sessionId) =>
     isSecretaryConversation(sessionId) ? resumeRootFromMain(sessionId) : null
   );
+  // 插件替用户回答提问：与桌面端、手机端同一条路径，谁先答算谁的
+  setPluginAskAnswerer((sessionId, requestId, answer) => {
+    const result = answerAskAsUserFromMain(sessionId, requestId, answer);
+    return result.ok ? { ok: true } : { ok: false, error: result.error ?? '回答失败' };
+  });
   wirePairAgentBridge();
   wirePairSessionHost();
   configureMemoryDistill({ complete: distillCompletion });
