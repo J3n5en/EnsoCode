@@ -300,6 +300,58 @@ describe('ExtensionPluginService', () => {
     expect(service.eventPlanForSpawn(['example.gone'])).toBeNull();
   });
 
+  it('秘书会话的事件计划：拦截只算勾选的插件，readAll 插件的观察事件与任一插件的注入也算', async () => {
+    const plugin = (id: string, permissions: string[], events: unknown[]) =>
+      install({
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          permissions,
+          contributes: { events },
+        }),
+        'main.mjs': 'export function activate() {}',
+      });
+    await plugin(
+      'example.picked',
+      ['agent.observe', 'agent.intercept'],
+      [
+        { event: 'session_start', mode: 'observe' },
+        { event: 'input', mode: 'intercept' },
+      ]
+    );
+    await plugin(
+      'example.reader',
+      ['agent.observe', 'agent.intercept', 'session.readAll'],
+      [
+        { event: 'agent_end', mode: 'observe' },
+        { event: 'tool_call', mode: 'observe' },
+        { event: 'tool_result', mode: 'intercept' },
+      ]
+    );
+    await plugin(
+      'example.other',
+      ['agent.observe'],
+      [{ event: 'before_compact', mode: 'observe' }]
+    );
+    for (const id of ['example.picked', 'example.reader', 'example.other'])
+      await service.setEnabled(id, true);
+
+    expect(service.eventPlanForSpawn(['example.picked'])).toEqual({
+      observe: ['agent_end', 'session_start', 'tool_call'],
+      intercept: [{ event: 'input' }],
+      inject: false,
+    });
+    expect(service.eventPlanForSpawn([])).toEqual({
+      observe: ['agent_end', 'tool_call'],
+      intercept: [],
+      inject: false,
+    });
+
+    await plugin('example.injector', ['agent.inject'], []);
+    await service.setEnabled('example.injector', true);
+    expect(service.eventPlanForSpawn([])?.inject).toBe(true);
+  });
+
   it('调用插件工具：会话 id 由 Main 传入', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     await service.setEnabled('example.demo', true);
@@ -1176,6 +1228,38 @@ describe('ExtensionPluginService', () => {
       await service.uninstall('example.demo');
       expect(existsSync(join(root, 'config', 'example.demo.json'))).toBe(false);
     });
+
+    it('插件进程在用户手势里经 config.set 改配置；落盘同设置页，密钥不回显', async () => {
+      const writesConfig = `export function activate(enso) {
+        enso.commands.register('save', async () => { await enso.config.set({ baseUrl: 'https://z', token: 'sk-2' }); });
+        enso.tools.register('lookup', async () => JSON.stringify(await enso.config.set({ baseUrl: 'https://t' })));
+      }`;
+      const parsed = JSON.parse(configManifest());
+      const withCommand = JSON.stringify({
+        ...parsed,
+        contributes: { ...parsed.contributes, commands: [{ id: 'save', title: 'Save' }] },
+      });
+      await install({ 'enso-plugin.json': withCommand, 'main.mjs': writesConfig });
+      await service.setEnabled('example.demo', true);
+      const call = { pluginId: 'example.demo', sessionId: 's1', projectRoot: null } as const;
+      await service.callUi({ ...call, method: 'command.run', payload: { id: 'save' } });
+      expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://z', token: 'sk-2' });
+      const view = service.configView('example.demo');
+      const token = view.ok ? view.fields.find((f) => f.key === 'token') : undefined;
+      expect(token).toMatchObject({ set: true });
+      expect(token).not.toHaveProperty('value');
+      expect(statSync(join(root, 'config', 'example.demo.json')).mode & 0o777).toBe(0o600);
+      // 代理工具调用不是用户手势：拒绝，配置不变
+      await expect(
+        service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: {},
+          sessionId: 's1',
+          projectRoot: null,
+        })
+      ).rejects.toThrow('用户操作');
+      expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://z', token: 'sk-2' });
+    });
   });
 });
 
@@ -1353,6 +1437,166 @@ describe('插件运行期收敛', () => {
     });
     await vi.waitFor(() => expect(obs().hits).toEqual(['startup']));
     expect(residentForks).toBe(before + 1);
+  });
+
+  it('秘书会话的事件只投给勾选的插件与 session.readAll 插件', async () => {
+    const svc = bootService(temp('secretary-audience-'), () => new InProcessChild());
+    for (const [id, permissions] of [
+      ['example.picked', ['agent.observe', 'process.background']],
+      ['example.reader', ['agent.observe', 'process.background', 'session.readAll']],
+      ['example.other', ['agent.observe', 'process.background']],
+    ] as const) {
+      await stageCommit(svc, {
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          resident: true,
+          permissions,
+          contributes: { events: [{ event: 'agent_end', mode: 'observe' }] },
+        }),
+        'main.mjs': `export function activate(enso) {
+          enso.events.on('agent_end', (data) => { globalThis.__ensoObs.hits.push('${id}:' + data.text); });
+        }`,
+      });
+      await svc.setEnabled(id, true);
+    }
+    await svc.dispatchEvent({
+      sessionId: 'sec',
+      projectRoot: null,
+      event: 'agent_end',
+      data: { text: 'secretary' },
+      secretaryPluginIds: ['example.picked'],
+    });
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'agent_end',
+      data: { text: 'normal' },
+    });
+    await vi.waitFor(() => expect(obs().hits).toHaveLength(5));
+    expect([...obs().hits].sort()).toEqual([
+      'example.other:normal',
+      'example.picked:normal',
+      'example.picked:secretary',
+      'example.reader:normal',
+      'example.reader:secretary',
+    ]);
+  });
+
+  it('秘书会话的拦截只询问勾选的插件，session.readAll 也不例外', async () => {
+    const svc = bootService(temp('secretary-intercept-'), () => new InProcessChild());
+    for (const [id, permissions] of [
+      ['example.picked', ['agent.intercept']],
+      ['example.reader', ['agent.intercept', 'session.readAll']],
+      ['example.other', ['agent.intercept']],
+    ] as const) {
+      await stageCommit(svc, {
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          permissions,
+          contributes: { events: [{ event: 'tool_call', mode: 'intercept' }] },
+        }),
+        'main.mjs': `export function activate(enso) {
+          enso.events.on('tool_call', (data) => ({ input: { ...data.input, '${id}': 1 } }));
+        }`,
+      });
+      await svc.setEnabled(id, true);
+    }
+    const payload = { toolCallId: '1', toolName: 'bash', input: {} };
+    const agent = {
+      kind: 'subagent' as const,
+      sessionId: 'sec::cw-scout',
+      name: 'Scout-1',
+      agentType: 'Scout',
+    };
+    await expect(
+      svc.intercept({
+        sessionId: 'sec',
+        projectRoot: null,
+        event: 'tool_call',
+        payload,
+        secretaryPluginIds: ['example.picked'],
+      })
+    ).resolves.toEqual({ input: { 'example.picked': 1 } });
+    await expect(
+      svc.intercept({
+        sessionId: 'sec',
+        projectRoot: null,
+        event: 'tool_call',
+        payload,
+        agent,
+        secretaryPluginIds: ['example.picked'],
+      })
+    ).resolves.toEqual({ input: { 'example.picked': 1 } });
+    await expect(
+      svc.intercept({ sessionId: 's', projectRoot: null, event: 'tool_call', payload })
+    ).resolves.toEqual({
+      input: { 'example.other': 1, 'example.picked': 1, 'example.reader': 1 },
+    });
+  });
+
+  it('ask_request / ask_resolved 只投给订阅了且看得见这个会话的插件', async () => {
+    const visible = ['s'];
+    const svc = create({
+      root: temp('ask-events-'),
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      fork: () => new InProcessChild() as never,
+      gate: {
+        ...gate,
+        sessions: {
+          list: () => [],
+          listAll: () => visible.map((id) => ({ id, title: '', updatedAt: 0, state: 'idle' })),
+        },
+      },
+    });
+    const plugins = [
+      ['example.reader', ['session.readAll'], ['ask_request', 'ask_resolved']],
+      ['example.blind', [], ['ask_request', 'ask_resolved']],
+      ['example.deaf', ['session.readAll'], ['session_status']],
+    ] as const;
+    for (const [id, extra, events] of plugins) {
+      await stageCommit(svc, {
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          resident: true,
+          permissions: ['agent.observe', 'process.background', ...extra],
+          contributes: { events: events.map((event) => ({ event })) },
+        }),
+        'main.mjs': `export function activate(enso) {
+          for (const name of ${JSON.stringify(events)})
+            enso.events.on(name, (data) => { globalThis.__ensoObs.hits.push('${id}:' + name + ':' + data.sessionId + ':' + (data.relayed ?? data.by)); });
+        }`,
+      });
+      await svc.setEnabled(id, true);
+    }
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'ask_request',
+      data: { sessionId: 's', requestId: 'q', question: '?', relayed: true },
+    });
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'ask_resolved',
+      data: { sessionId: 's', requestId: 'q', by: 'user', answer: '是' },
+    });
+    await svc.dispatchEvent({
+      sessionId: 'hidden',
+      projectRoot: null,
+      event: 'ask_request',
+      data: { sessionId: 'hidden', requestId: 'q', question: '?', relayed: false },
+    });
+    await vi.waitFor(() => expect(obs().hits).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(obs().hits).toEqual([
+      'example.reader:ask_request:s:true',
+      'example.reader:ask_resolved:s:user',
+    ]);
   });
 
   it('更新常驻插件时等旧进程真正退出再拉起新进程', async () => {

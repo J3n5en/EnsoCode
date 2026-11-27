@@ -8,7 +8,7 @@ export const PLUGIN_INJECT_MAX_CHARS = 32 * 1024;
 export const PLUGIN_INJECT_WIRE_MAX_CHARS = PLUGIN_INJECT_MAX_CHARS + 4 * 1024;
 export const PLUGIN_PROGRESS_MAX_CHARS = 16 * 1024;
 /** 注入消息可附带的图片：数量与单张 base64 长度上限 */
-export const PLUGIN_INJECT_MAX_IMAGES = 4;
+export const PLUGIN_INJECT_MAX_IMAGES = 10;
 export const PLUGIN_INJECT_IMAGE_MAX_CHARS = 7 * 1024 * 1024;
 const PLUGIN_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
@@ -275,6 +275,8 @@ export const PLUGIN_HOST_APIS = [
   'composer.insertText',
   'composer.replaceDraft',
   'config.get',
+  /** 改本插件的配置，需用户手势；args 即 patch：清单声明的键 → 基本类型值，null 清除；返回 { ok: true } */
+  'config.set',
   'mcp.tools',
   'mcp.call',
   /** 工具执行中上报进度；args { text } */
@@ -301,6 +303,8 @@ export const PLUGIN_HOST_APIS = [
   'threads.list',
   /** 中止会话当前一轮；args { sessionId? }，权限同 session.inject */
   'session.abort',
+  /** 替用户回答会话里的提问；args { sessionId?, requestId, answer }，权限同 session.inject，返回 { ok, error? } */
+  'session.answerAsk',
   /** 调用其他插件导出的方法；args { pluginId, name, args } */
   'plugin.call',
   'ui.clipboard',
@@ -316,7 +320,7 @@ export const PLUGIN_HOST_APIS = [
   'contact.inbound',
   /** 渠道状态；args { channelId, status, detail?, peers? } */
   'contact.setStatus',
-  /** 列出会话及其状态；args { scope? }：缺省同项目，'all' 为所有项目（需 session.readAll）；返回 { current, sessions } */
+  /** 列出会话及其状态；args { scope?, includeSecretary? }：缺省同项目，'all' 为所有项目（需 session.readAll，includeSecretary 再含秘书会话）；返回 { current, sessions } */
   'session.list',
   /** 会话汇总状态；args { sessionId? } 缺省发起会话，返回 { sessionId, state, pendingAsks, pendingApprovals } */
   'session.status',

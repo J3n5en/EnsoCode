@@ -14,11 +14,17 @@ export const PLUGIN_EVENTS = [
   'session_status',
   'model_select',
   'before_agent_start',
+  'ask_request',
+  'ask_resolved',
 ] as const;
 export type PluginEventName = (typeof PLUGIN_EVENTS)[number];
 
 /** 由 Main 汇总派发、不经 worker 的事件；worker 发来的同名事件一律拒收 */
-export const HOST_PLUGIN_EVENTS = ['session_status'] as const satisfies readonly PluginEventName[];
+export const HOST_PLUGIN_EVENTS = [
+  'session_status',
+  'ask_request',
+  'ask_resolved',
+] as const satisfies readonly PluginEventName[];
 export const isHostPluginEvent = (event: string): boolean =>
   (HOST_PLUGIN_EVENTS as readonly string[]).includes(event);
 
@@ -36,6 +42,25 @@ export interface PluginSessionStatus {
 
 export interface SessionStatusPayload extends PluginSessionStatus {
   previous: PluginSessionState;
+}
+
+/** 主会话向用户提问；relayed 表示已转给秘书代问（用户仍可直接答） */
+export interface AskRequestPayload {
+  sessionId: string;
+  requestId: string;
+  question: string;
+  options?: string[];
+  recommended?: string;
+  expiresAt?: number;
+  relayed?: boolean;
+}
+
+/** 提问收尾；by 缺省表示取消（中止或撤销），不是回答 */
+export interface AskResolvedPayload {
+  sessionId: string;
+  requestId: string;
+  by?: 'user' | 'relay' | 'timeout';
+  answer?: string;
 }
 
 /** agent_end 携带的本轮最终回复正文上限（字符） */

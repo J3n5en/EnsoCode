@@ -16,6 +16,7 @@ import {
   PLUGIN_AGENT_RUN_ID,
   PLUGIN_AGENT_SYSTEM_MAX_CHARS,
   PLUGIN_INJECT_MAX_CHARS,
+  PLUGIN_INJECT_MAX_IMAGES,
   type PluginArtifactInfo,
   type PluginHostApi,
   type PluginHostCapabilities,
@@ -65,6 +66,8 @@ const SENSITIVE_REQUEST_HEADERS = new Set([
 const MAX_MCP_ARGS_BYTES = 64 * 1024;
 const MAX_CALL_DEPTH = 3;
 const MAX_CLIPBOARD_BYTES = 1024 * 1024;
+/** session.answerAsk 的回答上限（字符） */
+const MAX_ASK_ANSWER_CHARS = 16 * 1024;
 const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
@@ -180,6 +183,8 @@ export interface PluginSessionInfo {
   /** 仅跨项目列表（scope: 'all'）带项目标识；名称为项目目录名 */
   projectId?: string;
   projectName?: string;
+  /** 仅 includeSecretary 列出的秘书会话带 'secretary'；projectName 为秘书名 */
+  kind?: 'normal' | 'secretary';
 }
 
 /** 草稿请求的目标：会话 + 发起手势的窗口（webContents id），草稿只回写到发起窗口 */
@@ -215,6 +220,11 @@ export interface GateDeps {
   ): Promise<unknown>;
   /** 插件自己的配置值（含密钥）；只交给插件进程，不进渲染层 */
   config(pluginId: string): Record<string, string | number | boolean>;
+  /** 写插件自己的配置；与设置页同路径落盘，键已按清单校验 */
+  setConfig?(
+    pluginId: string,
+    patch: Record<string, string | number | boolean | null>
+  ): Promise<{ ok: boolean; error?: string }>;
   mcpTools(target: McpTarget, signal: AbortSignal): Promise<McpToolInfo[]>;
   mcpCall(
     target: McpTarget,
@@ -261,6 +271,12 @@ export interface GateDeps {
   /** 取消本插件的代理；没有这个代理返回 false */
   agentCancel?(pluginId: string, runId: string): boolean;
   abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
+  /** 替用户回答会话里的提问：与在应用里亲手答同一条路径，谁先答算谁的 */
+  answerAsk?(
+    sessionId: string,
+    requestId: string,
+    answer: string
+  ): { ok: true } | { ok: false; error: string };
   claims?: {
     claim(input: {
       key: string;
@@ -348,8 +364,8 @@ export interface GateDeps {
   sessions?: {
     /** 与 sessionId 同项目的主会话；按最近活动排序 */
     list(sessionId: string): PluginSessionInfo[];
-    /** 所有项目的主会话 */
-    listAll?(): PluginSessionInfo[];
+    /** 所有项目的主会话；includeSecretary 时含在用秘书的主会话 */
+    listAll?(options?: { includeSecretary?: boolean }): PluginSessionInfo[];
     status?(sessionId: string): PluginSessionStatus;
   };
   sessionUi?(
@@ -446,6 +462,25 @@ export class InvocationTable {
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** 非空、键都在清单 configuration 里、值是基本类型或 null；否则 null */
+function parseConfigPatch(
+  value: unknown,
+  manifest: ExtensionPluginManifest
+): Record<string, string | number | boolean | null> | null {
+  if (!isRecord(value)) return null;
+  const keys = new Set(manifest.contributes.configuration.map((field) => field.key));
+  const entries = Object.entries(value);
+  if (entries.length === 0) return null;
+  const patch: Record<string, string | number | boolean | null> = {};
+  for (const [key, v] of entries) {
+    if (!keys.has(key)) return null;
+    if (v !== null && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean')
+      return null;
+    patch[key] = v;
+  }
+  return patch;
+}
 const within = (parent: string, child: string) => {
   const rel = relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -539,7 +574,7 @@ export class PluginHostGate {
     if (!manifest || !sessions) return false;
     if (
       manifest.permissions.includes('session.readAll') &&
-      (sessions.listAll?.() ?? []).some((s) => s.id === sessionId)
+      (sessions.listAll?.({ includeSecretary: true }) ?? []).some((s) => s.id === sessionId)
     )
       return true;
     if (!manifest.permissions.includes('session.read')) return false;
@@ -758,6 +793,15 @@ export class PluginHostGate {
       }
       case 'config.get':
         return this.deps.config(pluginId);
+      case 'config.set': {
+        gestured('修改插件配置');
+        const patch = parseConfigPatch(args, manifest);
+        if (!patch) throw pluginError('INVALID_ARGS', '配置须是清单声明过的键与基本类型值');
+        if (!this.deps.setConfig) throw pluginError('UNSUPPORTED', '当前环境不能修改配置');
+        const result = await this.deps.setConfig(pluginId, patch);
+        if (!result.ok) throw pluginError('PLUGIN_ERROR', result.error ?? '保存配置失败');
+        return { ok: true };
+      }
       case 'mcp.tools': {
         permit('mcp.call');
         const inv = invocation();
@@ -814,7 +858,10 @@ export class PluginHostGate {
           throw pluginError('INVALID_ARGS', 'text 不合法或超过 32K 字符');
         const images = parsePluginInjectImages(a.images);
         if (!images)
-          throw pluginError('INVALID_ARGS', 'images 不合法：最多 4 张 png/jpeg/webp/gif 的 base64');
+          throw pluginError(
+            'INVALID_ARGS',
+            `images 不合法：最多 ${PLUGIN_INJECT_MAX_IMAGES} 张 png/jpeg/webp/gif 的 base64`
+          );
         // nextTurn 只排队不触发，和 triggerTurn 互相矛盾；要触发一轮就得走 followUp
         const deliverAs = a.deliverAs ?? (a.triggerTurn === true ? 'followUp' : 'nextTurn');
         if (deliverAs !== 'steer' && deliverAs !== 'followUp' && deliverAs !== 'nextTurn')
@@ -925,6 +972,21 @@ export class PluginHostGate {
         if (!result.ok) throw pluginError('ABORT_FAILED', result.error);
         this.deps.claims?.releaseSession?.(sessionId);
         return null;
+      }
+      case 'session.answerAsk': {
+        permit('agent.inject');
+        const sessionId = this.targetSession(pluginId, a, optionalInvocation());
+        if (typeof a.requestId !== 'string' || a.requestId.length === 0 || a.requestId.length > 128)
+          throw pluginError('INVALID_ARGS', 'requestId 不合法');
+        if (
+          typeof a.answer !== 'string' ||
+          a.answer.length === 0 ||
+          a.answer.length > MAX_ASK_ANSWER_CHARS
+        )
+          throw pluginError('INVALID_ARGS', 'answer 不合法或超过 16K 字符');
+        if (!this.deps.answerAsk) throw pluginError('UNSUPPORTED', '当前环境不能回答提问');
+        const result = this.deps.answerAsk(sessionId, a.requestId, a.answer);
+        return result.ok ? { ok: true } : { ok: false, error: result.error };
       }
       case 'claims.claim':
       case 'claims.renew':
@@ -1087,13 +1149,17 @@ export class PluginHostGate {
           }
         );
       case 'session.list': {
+        if (a.includeSecretary !== undefined && typeof a.includeSecretary !== 'boolean')
+          throw pluginError('INVALID_ARGS', 'includeSecretary 必须是布尔值');
         if (a.scope === 'all') {
           permit('session.readAll');
           if (!this.deps.sessions?.listAll)
             throw pluginError('UNSUPPORTED', '当前环境不能列出会话');
           return {
             current: optionalInvocation()?.sessionId ?? null,
-            sessions: this.deps.sessions.listAll(),
+            sessions: this.deps.sessions.listAll(
+              a.includeSecretary === true ? { includeSecretary: true } : undefined
+            ),
           };
         }
         if (a.scope !== undefined && a.scope !== 'project')
@@ -1121,7 +1187,7 @@ export class PluginHostGate {
             manifest.permissions.includes('session.read') &&
             sessions.list(current).some((s) => s.id === target)) ||
           (manifest.permissions.includes('session.readAll') &&
-            (sessions.listAll?.() ?? []).some((s) => s.id === target));
+            (sessions.listAll?.({ includeSecretary: true }) ?? []).some((s) => s.id === target));
         if (!visible) throw pluginError('NOT_FOUND', '没有这个会话');
         return sessions.status(target);
       }

@@ -62,19 +62,36 @@ export function listProjectSessions(
   );
 }
 
-/** 所有在用项目的主会话；不含 Bot 工作区与秘书项目 */
+/**
+ * 所有在用项目的主会话；不含 Bot 工作区。秘书项目只在 includeSecretary 时纳入，
+ * 且只认 secretaryName 认得的在用秘书：项目名与缺省标题都用秘书名。
+ */
 export function listAllSessions(
-  input: SessionSource & { projects: readonly ProjectAuthority[] }
+  input: SessionSource & {
+    projects: readonly ProjectAuthority[];
+    includeSecretary?: boolean;
+    secretaryName?: (projectId: string) => string | null;
+  }
 ): PluginSessionInfo[] {
   const projects = new Map(
     input.projects
-      .filter((p) => p.state === 'active' && p.kind !== 'bot-home' && p.kind !== 'secretary')
+      .filter(
+        (p) =>
+          p.state === 'active' &&
+          p.kind !== 'bot-home' &&
+          (p.kind !== 'secretary' || input.includeSecretary === true)
+      )
       .map((p) => [p.projectId, p])
   );
   return newestFirst(
     input.conversations.flatMap((c) => {
       const project = projects.get(c.projectId);
-      return project && listable(c) ? [toInfo(input, c, project)] : [];
+      if (!project || !listable(c)) return [];
+      const info = toInfo(input, c, project);
+      if (project.kind !== 'secretary') return [info];
+      const name = input.secretaryName?.(project.projectId);
+      if (!name) return [];
+      return [{ ...info, title: info.title || name, projectName: name, kind: 'secretary' }];
     })
   );
 }

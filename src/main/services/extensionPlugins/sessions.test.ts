@@ -96,4 +96,82 @@ describe('listAllSessions', () => {
       { id: 'a', title: '', updatedAt: 5, state: 'idle', projectId: 'p1', projectName: 'alpha' },
     ]);
   });
+
+  describe('秘书会话', () => {
+    const projects = [
+      { projectId: 'p1', canonicalPath: '/w/alpha', state: 'active' as const, version: 1 },
+      {
+        projectId: 's1',
+        canonicalPath: '/data/secretary/members/s1/workspace',
+        kind: 'secretary' as const,
+        state: 'active' as const,
+        version: 1,
+      },
+      {
+        projectId: 's2',
+        canonicalPath: '/data/secretary/members/s2/workspace',
+        kind: 'secretary' as const,
+        state: 'active' as const,
+        version: 1,
+      },
+    ];
+    const rows: Record<string, Record<string, unknown>> = {
+      a: { title: '普通', lastActiveAt: 1 },
+      home: { lastActiveAt: 3 },
+      named: { title: '巡检', lastActiveAt: 2 },
+    };
+    const input = {
+      conversations: [
+        conv('a', 'p1'),
+        conv('home', 's1'),
+        conv('named', 's1'),
+        conv('bot', 's1', { bot: { botId: 'x' } }),
+        // s2 是已删除的秘书：名字查不到就不列
+        conv('gone', 's2'),
+      ],
+      projects,
+      persisted: (id: string) => rows[id] ?? null,
+      running: () => false,
+      state: () => 'idle' as const,
+      secretaryName: (projectId: string) => (projectId === 's1' ? '小秘' : null),
+    };
+
+    it('缺省不含秘书会话', () => {
+      expect(listAllSessions(input).map((s) => s.id)).toEqual(['a']);
+      expect(listAllSessions({ ...input, includeSecretary: false }).map((s) => s.id)).toEqual([
+        'a',
+      ]);
+    });
+
+    it('includeSecretary 时纳入在用秘书的主会话：标 kind，项目名是秘书名，无标题用秘书名', () => {
+      expect(listAllSessions({ ...input, includeSecretary: true })).toEqual([
+        {
+          id: 'home',
+          title: '小秘',
+          updatedAt: 3,
+          state: 'idle',
+          projectId: 's1',
+          projectName: '小秘',
+          kind: 'secretary',
+        },
+        {
+          id: 'named',
+          title: '巡检',
+          updatedAt: 2,
+          state: 'idle',
+          projectId: 's1',
+          projectName: '小秘',
+          kind: 'secretary',
+        },
+        {
+          id: 'a',
+          title: '普通',
+          updatedAt: 1,
+          state: 'idle',
+          projectId: 'p1',
+          projectName: 'alpha',
+        },
+      ]);
+    });
+  });
 });

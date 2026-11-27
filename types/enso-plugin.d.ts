@@ -3,6 +3,8 @@
 import type * as React from 'react';
 import type { PluginSlotName } from '../src/renderer/plugins/registry';
 import type {
+  AskRequestPayload,
+  AskResolvedPayload,
   BeforeAgentStartPayload,
   ContextUsagePayload,
   InputPayload,
@@ -80,6 +82,8 @@ export interface EnsoSessionInfo {
   /** 仅 `list({ scope: 'all' })` 带；projectName 为项目目录名 */
   projectId?: string;
   projectName?: string;
+  /** 仅 `list({ scope: 'all', includeSecretary: true })` 列出的秘书会话带 `'secretary'`；其 projectName 为秘书名 */
+  kind?: 'normal' | 'secretary';
 }
 
 export type EnsoSessionStatus = PluginSessionStatus;
@@ -376,6 +380,8 @@ export interface EnsoHostApi {
     expect?: EnsoDraftExpect;
   }) => Promise<EnsoDraftRev>;
   'config.get': () => Promise<Record<string, string | number | boolean>>;
+  /** 只能在用户手势触发的调用里用；键须在清单 `configuration` 里声明，null 清除；落盘同设置页 */
+  'config.set': (patch: Record<string, string | number | boolean | null>) => Promise<{ ok: true }>;
   'mcp.tools': () => Promise<EnsoMcpTool[]>;
   'mcp.call': (
     server: string,
@@ -401,6 +407,12 @@ export interface EnsoHostApi {
   'threads.routePrEvent': (event: EnsoDemandPrEventInput) => Promise<EnsoDemandPrRouteResult>;
   'threads.list': (filter?: EnsoDemandThreadFilter) => Promise<EnsoDemandThreadView[]>;
   'session.abort': (sessionId?: string) => Promise<void>;
+  /** 替用户回答提问，需 `agent.inject`，跨会话授权同 `session.inject`；与桌面端同路径，谁先答算谁的 */
+  'session.answerAsk': (input: {
+    sessionId?: string;
+    requestId: string;
+    answer: string;
+  }) => Promise<{ ok: true } | { ok: false; error: string }>;
   'plugin.call': (pluginId: string, name: string, args?: unknown) => Promise<unknown>;
   'ui.clipboard': (text: string) => Promise<void>;
   'ui.openExternal': (url: string) => Promise<void>;
@@ -413,8 +425,14 @@ export interface EnsoHostApi {
   'contact.setStatus': (channelId: string, status: EnsoContactStatus) => Promise<void>;
   'session.list': {
     (options?: { scope?: 'project' }): Promise<{ current: string; sessions: EnsoSessionInfo[] }>;
-    /** 所有项目的会话，需 `session.readAll`；不在宿主发起的调用里时 current 为 null */
-    (options: { scope: 'all' }): Promise<{ current: string | null; sessions: EnsoSessionInfo[] }>;
+    /**
+     * 所有项目的会话，需 `session.readAll`；不在宿主发起的调用里时 current 为 null。
+     * includeSecretary 为 true 时含在用秘书的会话（`kind: 'secretary'`），缺省不含。
+     */
+    (options: {
+      scope: 'all';
+      includeSecretary?: boolean;
+    }): Promise<{ current: string | null; sessions: EnsoSessionInfo[] }>;
   };
   /** 缺省发起会话；别的会话须在可见列表里 */
   'session.status': (sessionId?: string) => Promise<EnsoSessionStatus>;
@@ -470,7 +488,8 @@ export interface EnsoEventData {
   session_start: { reason: string };
   session_end: { reason: string };
   agent_start: Record<string, never>;
-  agent_end: { text: string };
+  /** silent：秘书本轮调用了 silence_turn（静默回合），外部通道不必回传 */
+  agent_end: { text: string; silent?: true };
   before_compact: { reason: string };
   after_compact: { reason: string };
   tool_call: ToolCallPayload;
@@ -481,6 +500,10 @@ export interface EnsoEventData {
   model_select: ModelSelectPayload;
   /** 拦截时返回 `{ append }` 追加到本轮 system prompt；只在主会话触发 */
   before_agent_start: BeforeAgentStartPayload;
+  /** Enso 派发：看得见的主会话向用户提问；relayed 表示已转给秘书 */
+  ask_request: AskRequestPayload;
+  /** Enso 派发：提问收尾；by 缺省表示取消 */
+  ask_resolved: AskResolvedPayload;
 }
 
 export type EnsoToolResult = string | Pick<PluginToolResult, 'content' | 'details'>;
@@ -560,6 +583,7 @@ export interface EnsoMain {
   session: {
     inject: EnsoHostApi['session.inject'];
     abort: EnsoHostApi['session.abort'];
+    answerAsk: EnsoHostApi['session.answerAsk'];
     list: EnsoHostApi['session.list'];
     status: EnsoHostApi['session.status'];
     focus: EnsoHostApi['session.focus'];
@@ -612,7 +636,7 @@ export interface EnsoMain {
     insertText: EnsoHostApi['composer.insertText'];
     replaceDraft: EnsoHostApi['composer.replaceDraft'];
   };
-  config: { get: EnsoHostApi['config.get'] };
+  config: { get: EnsoHostApi['config.get']; set: EnsoHostApi['config.set'] };
   mcp: { tools: EnsoHostApi['mcp.tools']; call: EnsoHostApi['mcp.call'] };
 }
 

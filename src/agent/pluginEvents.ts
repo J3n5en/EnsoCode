@@ -24,6 +24,7 @@ import {
   type PluginInjectSender,
 } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
+import { turnCalledSilenceTurn } from '@shared/secretary/silence';
 import type { ContextOccupancy, PluginInterceptRequest, TokenUsage } from '@shared/types/agent';
 
 /** Main 等待 before_compact 最多 10 秒，本地再留余量后照常压缩 */
@@ -335,7 +336,11 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
       }
       if (observe.has('agent_end')) {
         pi.on('agent_end', (event) => {
-          invoker.notify('agent_end', { text: lastAssistantText(event.messages) });
+          // 秘书调了 silence_turn 的静默回合：外部通道据此不回传
+          invoker.notify('agent_end', {
+            text: lastAssistantText(event.messages),
+            ...(turnCalledSilenceTurn(event.messages) ? { silent: true } : {}),
+          });
         });
       }
       if (observe.has('before_compact')) {

@@ -2810,7 +2810,8 @@ const isPluginObserveData = (event: string, data: unknown): boolean => {
   if (event === 'agent_start') return hasExactKeys(data, []);
   if (event === 'agent_end')
     return (
-      hasOnlyKeys(data, ['text']) &&
+      hasOnlyKeys(data, ['text', 'silent']) &&
+      (data.silent === undefined || data.silent === true) &&
       (data.text === undefined ||
         (typeof data.text === 'string' && data.text.length <= AGENT_END_TEXT_MAX))
     );

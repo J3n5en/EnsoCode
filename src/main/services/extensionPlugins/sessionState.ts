@@ -1,4 +1,6 @@
 import type {
+  AskRequestPayload,
+  AskResolvedPayload,
   PluginSessionState,
   PluginSessionStatus,
   SessionStatusPayload,
@@ -23,6 +25,48 @@ const rootOf = (sessionId: string) => {
 export function turnEndSessionId(event: RendererAgentEvent): string | null {
   if (event.type !== 'turn-completed' && event.type !== 'turn-failed') return null;
   return 'parent' in event.identity ? null : event.identity.sessionId;
+}
+
+export type PluginAskEvent =
+  | { sessionId: string; event: 'ask_request'; data: AskRequestPayload }
+  | { sessionId: string; event: 'ask_resolved'; data: AskResolvedPayload };
+
+/** 主会话（非 Bot）的提问与收尾，转成插件宿主事件；其余返回 null */
+export function pluginAskEvent(
+  event: RendererAgentEvent,
+  isBot: (sessionId: string) => boolean
+): PluginAskEvent | null {
+  if (event.type !== 'ask-request' && event.type !== 'ask-resolved') return null;
+  if ('parent' in event.identity) return null;
+  const sessionId = event.identity.sessionId;
+  if (isBot(sessionId)) return null;
+  if (event.type === 'ask-resolved') {
+    const { requestId, by, answer } = event;
+    return {
+      sessionId,
+      event: 'ask_resolved',
+      data: {
+        sessionId,
+        requestId,
+        ...(by ? { by } : {}),
+        ...(answer !== undefined ? { answer } : {}),
+      },
+    };
+  }
+  const { requestId, question, options, recommended, expiresAt, relay } = event.ask;
+  return {
+    sessionId,
+    event: 'ask_request',
+    data: {
+      sessionId,
+      requestId,
+      question,
+      ...(options ? { options } : {}),
+      ...(recommended !== undefined ? { recommended } : {}),
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+      relayed: Boolean(relay),
+    },
+  };
 }
 
 /** 从 Main 的会话事件流汇总每个主会话的状态，供插件查询与 session_status 推送 */

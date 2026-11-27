@@ -114,7 +114,7 @@
 | `mcp.call` | 有 `mcp.tools` | 调用用户已配置的 MCP 服务里、清单列出的工具 |
 | `agent.observe` | 有通知型 `events` | 收到会话事件 |
 | `agent.intercept` | 有拦截型 `events` | 拦截并改写工具调用、工具结果和用户输入 |
-| `agent.inject` | 要向会话发消息 | `enso.session.inject` / `enso.session.abort`：向会话发送消息（可带图片）、触发或中止该会话的执行。默认只能发到发起调用的会话；用户单独允许后可发到任意运行中的会话 |
+| `agent.inject` | 要向会话发消息 | `enso.session.inject` / `enso.session.abort` / `enso.session.answerAsk`：向会话发送消息（可带图片）、触发或中止该会话的执行。默认只能发到发起调用的会话；用户单独允许后可发到任意运行中的会话 |
 | `agent.injectTrusted` | 投递的是用户自己定的任务 | `enso.session.inject` 带 `trusted: true` 时，普通会话里不包不可信包裹，见「向会话发消息」。要和 `agent.inject` 一起声明 |
 | `process.background` | `resident` 或有 `schedules` | 常驻进程、定时任务 |
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
@@ -245,8 +245,9 @@ export async function activate(enso) {
 | `artifacts.write(input)` | 见「产出文件」 |
 | `session.inject(input)` | 见「向会话发消息」 |
 | `session.abort(sessionId?)` | 见「向会话发消息」 |
-| `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null` |
-| `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在全局列表）里，否则 `NOT_FOUND` |
+| `session.answerAsk({ sessionId?, requestId, answer })` | 见「向会话发消息」 |
+| `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null`。再加 `includeSecretary: true` 会纳入在用秘书的主会话，这些项带 `kind: 'secretary'`，`projectName` 是秘书名，没有标题时 `title` 也是秘书名；缺省不含秘书会话 |
+| `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在含秘书会话的全局列表）里，否则 `NOT_FOUND` |
 | `session.onTurnEnd(listener)` | 需要 `session.read` 或 `session.readAll`。主会话一轮结束时回调 `listener({ sessionId })`，返回取消订阅函数，见「回合结束」 |
 | `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
 | `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
@@ -263,6 +264,7 @@ export async function activate(enso) {
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
+| `config.set(patch)` | 改本插件的配置，只能在用户手势触发的调用里用（如命令、侧栏操作）。键须在 `configuration` 里声明，值为字符串、数字、布尔或 `null`（清除）；校验与落盘同设置页，返回 `{ ok: true }`，不合法报 `INVALID_ARGS` / `PLUGIN_ERROR` |
 | `mcp.tools()` / `mcp.call(server, tool, args?)` | 见下 |
 
 每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`agent`（来自子会话时的来源，主会话和非会话调用为 `null`，见「子代理与 coworker」）、`invocationId`、`signal`（调用被取消或超时时 abort）和 `progress(text)`（只在工具调用里有效，见下）。
@@ -286,7 +288,7 @@ export async function activate(enso) {
 | 事件 | 时机 | `data` | 可拦截 |
 | --- | --- | --- | --- |
 | `session_start` / `session_end` | 会话开始 / 结束 | `{ reason }` | 否 |
-| `agent_start` / `agent_end` | 一轮回复开始 / 结束 | `agent_start`：`{}`；`agent_end`：`{ text }`，本轮最后一条助手回复的文字部分（不含思考与工具调用，最多 64K 字符，没有文字时为空串） | 否 |
+| `agent_start` / `agent_end` | 一轮回复开始 / 结束 | `agent_start`：`{}`；`agent_end`：`{ text }`，本轮最后一条助手回复的文字部分（不含思考与工具调用，最多 64K 字符，没有文字时为空串）；秘书本轮调用了 `silence_turn`（静默回合）时多带 `silent: true` | 否 |
 | `before_compact` | 上下文压缩前 | `{ reason }` | 否。主会话只等已经在运行的插件（含常驻）处理完，最多 10 秒，然后照常压缩；没在运行的非常驻插件直接跳过，不会为此拉起进程。子会话里只通知、不等待 |
 | `after_compact` | 压缩后 | `{ reason }` | 否 |
 | `tool_call` | 工具执行前 | `{ toolCallId, toolName, input }` | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
@@ -294,12 +296,15 @@ export async function activate(enso) {
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
 | `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
 | `session_status` | 主会话的汇总状态或挂起的提问 / 审批数变化时，所有项目的会话都会发 | `{ sessionId, state, previous, pendingAsks, pendingApprovals }`，见「会话状态」 | 否 |
+| `ask_request` / `ask_resolved` | 主会话向用户提问 / 提问收尾（答复、秘书代答、超时或取消）；只发给看得见这个会话的插件（`session.readAll`，或 `session.read` 且同项目），Bot 会话与子会话不发 | `ask_request`：`{ sessionId, requestId, question, options?, recommended?, expiresAt?, relayed }`，`relayed` 表示已转给秘书；`ask_resolved`：`{ sessionId, requestId, by?, answer? }`，`by` 为 `user` / `relay` / `timeout`，缺省表示取消 | 否 |
 | `model_select` | 会话切换模型时（手动切换、循环切换、恢复会话） | `{ provider, modelId, previous?: { provider, modelId }, source }`，`source` 是 `set` / `cycle` / `restore` | 否 |
 | `before_agent_start` | 每轮回复开始前（用户消息，或插件消息触发的一轮），只在主会话 | `{ prompt, kind }`：`kind` 为 `user` 时 `prompt` 是用户消息正文（最多 64K 字符），为 `custom` 时是空串 | 返回 `{ append }` 把文本追加到本轮 system prompt 末尾；多个插件按 id 顺序用空行拼接，合计最多 16K 字符。只能追加，不能拦下，所以不接受 `failClosed` |
 
 要在派子代理之前检查或改写，拦截 `tool_call` 并写 `tools: ['subagent']`；要在消息发出前改写或吞掉，用 `input`。
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。插件进程没在运行、且不是常驻时，通知直接丢掉，不会为此拉起进程。主会话的 `before_compact` 也一样：只等已经在运行的插件，不会为了等待去拉起非常驻插件。
+
+秘书会话的事件只发给秘书勾选的插件和有 `session.readAll` 的插件；后者只收通知型订阅，拦截仍只来自勾选的插件。
 
 通知按「插件 + 事件 + 会话」分开投递；子代理或 coworker 再按子会话身份（种类、子会话 id、名字）分开，所以一个会话的 `session_end` 不会盖掉另一个会话或子代理的。`context_usage` 和 `tool_result` 这类高频通知，同一条队列上如果上一条还在处理，后来的只保留最新一条。`session_start` / `session_end`、`agent_start` / `agent_end`、`before_compact` / `after_compact`，以及通知型的 `tool_call`、`input`，不合并，按到达顺序排队，每条队列最多 32 条，满了丢掉最旧的。
 
@@ -344,7 +349,7 @@ export function activate(enso) {
 ```
 
 - 权限：`session.read` 或 `session.readAll`。没有时订阅失败，原因写进插件日志，回调不会触发。
-- 范围：有 `session.readAll` 时收所有项目的主会话；只有 `session.read` 时，只收与本插件被调用过（工具、命令、事件等发起会话）或成功注入过消息的会话同项目的主会话。常驻进程刚启动、还没碰过任何会话时收不到。子会话和 Bot 会话不发。
+- 范围：有 `session.readAll` 时收所有项目的主会话（含在用秘书的会话）；只有 `session.read` 时，只收与本插件被调用过（工具、命令、事件等发起会话）或成功注入过消息的会话同项目的主会话。常驻进程刚启动、还没碰过任何会话时收不到。子会话和 Bot 会话不发。
 - 返回的函数取消这一次注册；全部取消后宿主不再推送。插件进程退出、插件被停用或卸载后订阅随之失效，进程重新拉起后需在 `activate` 里重新订阅。会话被删除后不再用它判定范围。
 - 回调抛错或返回的 Promise 失败只写插件日志，不影响其他回调。
 
@@ -377,9 +382,11 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `deliverAs`：`nextTurn`（缺省，并入下一轮）、`steer`（插入正在进行的回复）、`followUp`（当前回复结束后排队）。
 - `triggerTurn: true` 时会话空闲也会立即开始一轮。
 - 文本不超过 32K 字符。
-- `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 4 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
+- `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 10 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
 
 `session.abort(sessionId?)` 中止会话正在进行的一轮，权限与目标会话规则同 `session.inject`（不计入频率限制）。会话没在运行返回 `ABORT_FAILED`。
+
+`session.answerAsk({ sessionId?, requestId, answer })` 替用户回答会话里的提问（`requestId` 取自 `ask_request`，不超过 128 字符；`answer` 不超过 16K 字符），权限与目标会话规则同 `session.inject`。和用户在桌面端、手机上答同一条路径，谁先答算谁的；返回 `{ ok: true }`，提问已收尾或会话不在时返回 `{ ok: false, error }`。
 
 ### 只读代理
 

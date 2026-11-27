@@ -511,6 +511,7 @@ export function runPluginHost(
         inject: (input: unknown) => hostCall('session.inject', input ?? {}),
         abort: (sessionId?: string) =>
           hostCall('session.abort', sessionId === undefined ? {} : { sessionId }),
+        answerAsk: (input: unknown) => hostCall('session.answerAsk', input ?? {}),
         list: (options?: unknown) => hostCall('session.list', options ?? {}),
         status: (sessionId?: string) =>
           hostCall('session.status', sessionId === undefined ? {} : { sessionId }),
@@ -603,7 +604,10 @@ export function runPluginHost(
         insertText: (input: unknown) => hostCall('composer.insertText', input),
         replaceDraft: (input: unknown) => hostCall('composer.replaceDraft', input),
       },
-      config: { get: () => hostCall('config.get', {}) },
+      config: {
+        get: () => hostCall('config.get', {}),
+        set: (patch: unknown) => hostCall('config.set', patch ?? {}),
+      },
       mcp: {
         tools: () => hostCall('mcp.tools', {}),
         call: (server: string, tool: string, args?: unknown) =>

@@ -373,6 +373,8 @@ describe('插件工具协议', () => {
     expect(event('agent_end', { text: 1 })).toBeNull();
     expect(event('agent_end', { text: 'a'.repeat(64 * 1024 + 1) })).toBeNull();
     expect(event('agent_end', { text: '', extra: 1 })).toBeNull();
+    expect(event('agent_end', { text: '', silent: true })).not.toBeNull();
+    expect(event('agent_end', { text: '', silent: false })).toBeNull();
     expect(event('agent_start', { text: 'x' })).toBeNull();
   });
 

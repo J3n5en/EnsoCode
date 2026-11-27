@@ -667,6 +667,68 @@ describe('PluginHostGate', () => {
     expect(deps.config).toHaveBeenCalledWith('a.b');
   });
 
+  describe('config.set', () => {
+    const field = (key: string, secret = false) => ({
+      key,
+      title: key,
+      description: '',
+      secret,
+      type: 'string' as const,
+    });
+    beforeEach(() => {
+      deps.manifest = (id) =>
+        id === 'a.b'
+          ? manifest({
+              contributes: {
+                ...manifest().contributes,
+                configuration: [field('chatId'), field('token', true)],
+              },
+            })
+          : null;
+      deps.setConfig = vi.fn(async () => ({ ok: true }));
+      gate = new PluginHostGate(deps);
+    });
+
+    it('只能在用户手势里改，成功返回 { ok: true } 并按插件落盘', async () => {
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: '42' }, agentCall())
+      ).rejects.toMatchObject({ code: 'GESTURE_REQUIRED' });
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: '42' }, undefined)
+      ).rejects.toMatchObject({ code: 'NO_INVOCATION' });
+      expect(deps.setConfig).not.toHaveBeenCalled();
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: '42', token: null }, uiCall())
+      ).resolves.toEqual({ ok: true });
+      expect(deps.setConfig).toHaveBeenCalledWith('a.b', { chatId: '42', token: null });
+    });
+
+    it('空 patch、非对象、未声明的键、非法值类型一律拒绝', async () => {
+      const bad = [
+        {},
+        null,
+        'x',
+        ['chatId'],
+        { other: '1' },
+        { chatId: { a: 1 } },
+        { chatId: [1] },
+      ];
+      for (const patch of bad)
+        await expect(gate.handle('a.b', 'config.set', patch, uiCall())).rejects.toMatchObject({
+          code: 'INVALID_ARGS',
+        });
+      expect(deps.setConfig).not.toHaveBeenCalled();
+    });
+
+    it('落盘失败报 PLUGIN_ERROR', async () => {
+      deps.setConfig = vi.fn(async () => ({ ok: false, error: '配置项 chatId 需要数字' }));
+      gate = new PluginHostGate(deps);
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: 'x' }, uiCall())
+      ).rejects.toMatchObject({ code: 'PLUGIN_ERROR' });
+    });
+  });
+
   describe('宿主 MCP', () => {
     const mcpManifest = () =>
       manifest({ permissions: ['mcp.call'], mcp: { tools: ['enhance_prompt'] } });
@@ -980,6 +1042,60 @@ describe('PluginHostGate', () => {
     gate = new PluginHostGate(deps);
     expect(gate.canSeeSession('a.b', 'x9')).toBe(true);
     expect(gate.canSeeSession('a.b', 'ghost')).toBe(false);
+  });
+
+  it('秘书会话：只有 session.readAll 的插件用 includeSecretary 列得到、看得见、查得到状态', async () => {
+    const info = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: id,
+      updatedAt: 1,
+      state: 'idle' as const,
+      ...extra,
+    });
+    const normal = [info('s1', { projectId: 'p1', projectName: 'a' })];
+    const secretary = info('sec', { projectId: 'sp', projectName: '小秘', kind: 'secretary' });
+    const listAll = vi.fn((options?: { includeSecretary?: boolean }) =>
+      options?.includeSecretary ? [...normal, secretary] : normal
+    );
+    const status = vi.fn((sessionId: string) => ({
+      sessionId,
+      state: 'idle' as const,
+      pendingAsks: 0,
+      pendingApprovals: 0,
+    }));
+    deps.sessions = { list: vi.fn(() => [info('s1')]), listAll, status };
+
+    deps.manifest = () => manifest({ permissions: ['session.readAll'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all' }, agentCall())
+    ).resolves.toEqual({ current: 's1', sessions: normal });
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all', includeSecretary: true }, agentCall())
+    ).resolves.toEqual({ current: 's1', sessions: [...normal, secretary] });
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all', includeSecretary: 'yes' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    expect(gate.canSeeSession('a.b', 'sec')).toBe(true);
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'sec' }, agentCall())
+    ).resolves.toMatchObject({ sessionId: 'sec' });
+
+    // 只有 session.read：includeSecretary 无效，秘书会话不可见
+    deps.manifest = () => manifest({ permissions: ['session.read'] });
+    gate = new PluginHostGate(deps);
+    const project = (await gate.handle(
+      'a.b',
+      'session.list',
+      { includeSecretary: true },
+      agentCall()
+    )) as { sessions: { id: string }[] };
+    expect(project.sessions.map((s) => s.id)).toEqual(['s1']);
+    gate.noteSession('a.b', 's1');
+    expect(gate.canSeeSession('a.b', 'sec')).toBe(false);
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'sec' }, agentCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('远端窗口发起的调用不能动宿主桌面的剪贴板和外链', async () => {
@@ -1316,13 +1432,21 @@ describe('插件远程会话能力', () => {
     for (const bad of [
       [{ data: png, mimeType: 'text/html' }],
       [{ data: '不是base64', mimeType: 'image/png' }],
-      Array.from({ length: 5 }, () => images[0]),
+      Array.from({ length: 11 }, () => images[0]),
       'x',
     ])
       await expect(
         gate.handle('a.b', 'session.inject', { text: 'hi', images: bad }, agentCall())
       ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
     expect(inject).toHaveBeenCalledTimes(1);
+    for (const count of [9, 10]) {
+      const many = Array.from({ length: count }, () => images[0]);
+      now += 10_000;
+      await expect(
+        gate.handle('a.b', 'session.inject', { text: 'hi', images: many }, agentCall())
+      ).resolves.toBeNull();
+      expect(inject).toHaveBeenLastCalledWith('a.b', expect.objectContaining({ images: many }));
+    }
   });
 
   it('session.abort 中止会话，跨会话同样受授权约束', async () => {
@@ -1345,6 +1469,69 @@ describe('插件远程会话能力', () => {
     await expect(gate.handle('a.b', 'session.abort', {}, agentCall())).rejects.toMatchObject({
       code: 'PERMISSION_DENIED',
     });
+  });
+
+  it('session.answerAsk 替用户回答提问：权限与跨会话授权同注入，校验 requestId 与 answer', async () => {
+    const answerAsk = vi.fn(
+      (_sessionId: string, requestId: string): { ok: true } | { ok: false; error: string } =>
+        requestId === 'gone' ? { ok: false, error: '提问已收尾' } : { ok: true }
+    );
+    deps.answerAsk = answerAsk;
+    deps.manifest = () => manifest({ permissions: [] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.answerAsk', { requestId: 'q1', answer: '是' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.answerAsk', { requestId: 'q1', answer: '是' }, agentCall())
+    ).resolves.toEqual({ ok: true });
+    expect(answerAsk).toHaveBeenLastCalledWith('s1', 'q1', '是');
+    await expect(
+      gate.handle('a.b', 'session.answerAsk', { requestId: 'gone', answer: '是' }, agentCall())
+    ).resolves.toEqual({ ok: false, error: '提问已收尾' });
+    await expect(
+      gate.handle(
+        'a.b',
+        'session.answerAsk',
+        { sessionId: 'other', requestId: 'q1', answer: '是' },
+        agentCall()
+      )
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    for (const bad of [
+      { answer: '是' },
+      { requestId: '', answer: '是' },
+      { requestId: 'q'.repeat(129), answer: '是' },
+      { requestId: 'q1' },
+      { requestId: 'q1', answer: '' },
+      { requestId: 'q1', answer: 'a'.repeat(16 * 1024 + 1) },
+    ])
+      await expect(gate.handle('a.b', 'session.answerAsk', bad, agentCall())).rejects.toMatchObject(
+        { code: 'INVALID_ARGS' }
+      );
+    await expect(
+      gate.handle(
+        'a.b',
+        'session.answerAsk',
+        { requestId: 'q'.repeat(128), answer: 'a'.repeat(16 * 1024) },
+        agentCall()
+      )
+    ).resolves.toEqual({ ok: true });
+
+    // 常驻进程：凭跨会话授权指明会话
+    deps.crossSessionInject = () => true;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle(
+        'a.b',
+        'session.answerAsk',
+        { sessionId: 'other', requestId: 'q1', answer: '否' },
+        undefined
+      )
+    ).resolves.toEqual({ ok: true });
+    expect(answerAsk).toHaveBeenLastCalledWith('other', 'q1', '否');
   });
 });
 

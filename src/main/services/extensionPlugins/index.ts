@@ -70,6 +70,43 @@ export function setPluginSessionDirectory(directory: PluginSessionDirectory | nu
   sessionDirectory = directory;
 }
 
+/** Main 侧恢复会话；不归 Main 恢复的会话返回 null */
+export type PluginSessionResume = (
+  sessionId: string
+) => Promise<{ ok: boolean; error?: string } | null>;
+
+let sessionResume: PluginSessionResume | null = null;
+
+export function setPluginSessionResume(resume: PluginSessionResume | null): void {
+  sessionResume = resume;
+}
+
+/** 替用户回答提问由持有会话的 agent IPC 注入 */
+export type PluginAskAnswerer = NonNullable<GateDeps['answerAsk']>;
+
+let askAnswerer: PluginAskAnswerer | null = null;
+
+export function setPluginAskAnswerer(answerer: PluginAskAnswerer | null): void {
+  askAnswerer = answerer;
+}
+
+/**
+ * 先让窗口拉起会话；窗口里没有它（如没打开的秘书会话）就退到 Main 侧恢复。
+ * Main 不接手的会话照报窗口的原因。
+ */
+export async function wakePluginSession(input: {
+  ensure: () => Promise<unknown>;
+  resume?: () => Promise<{ ok: boolean; error?: string } | null>;
+}): Promise<void> {
+  try {
+    await input.ensure();
+  } catch (error) {
+    const resumed = await input.resume?.();
+    if (!resumed) throw error;
+    if (!resumed.ok) throw new Error(resumed.error ?? '恢复会话失败');
+  }
+}
+
 /** 新建会话要等权威记录创建完成，比草稿操作慢 */
 const SESSION_UI_TIMEOUT_MS = 15_000;
 
@@ -206,6 +243,10 @@ export function getExtensionPlugins(): ExtensionPluginService {
         return true;
       },
       sessionMuted: (sessionId) => isSessionMuted(sessionId),
+      answerAsk: (sessionId, requestId, answer) =>
+        askAnswerer
+          ? askAnswerer(sessionId, requestId, answer)
+          : { ok: false, error: '当前环境不能回答提问' },
       viewEvent: (pluginId, name, data) => {
         broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, { pluginId, name, data });
       },
@@ -213,7 +254,7 @@ export function getExtensionPlugins(): ExtensionPluginService {
         getDraftBroker().request(target.origin, target.sessionId, op, payload),
       sessions: {
         list: (origin) => sessionDirectory?.list(origin) ?? [],
-        listAll: () => sessionDirectory?.listAll() ?? [],
+        listAll: (options) => sessionDirectory?.listAll(options) ?? [],
         status: (sessionId) =>
           sessionDirectory?.status(sessionId) ?? {
             sessionId,
@@ -238,15 +279,13 @@ export function getExtensionPlugins(): ExtensionPluginService {
       },
       // 发起窗口一定活着（它刚调用了插件），优先交给它。后台投递没有发起窗口时退到主窗口，
       // 服务器模式下本机主窗口恒为 null，再退到远端主界面
-      wakeSession: async (sessionId, origin) => {
+      wakeSession: (sessionId, origin) => {
         const target = origin ?? localMainContents()?.id ?? remoteLeaderId(false) ?? null;
-        await getDraftBroker().request(
-          target,
-          sessionId,
-          'ensureSession',
-          {},
-          SESSION_UI_TIMEOUT_MS
-        );
+        return wakePluginSession({
+          ensure: () =>
+            getDraftBroker().request(target, sessionId, 'ensureSession', {}, SESSION_UI_TIMEOUT_MS),
+          resume: async () => (sessionResume ? sessionResume(sessionId) : null),
+        });
       },
       mcpTools: (target, signal) => (mcpBridge ? mcpBridge.mcpTools(target, signal) : noMcp()),
       mcpCall: (target, server, tool, args, signal) =>
