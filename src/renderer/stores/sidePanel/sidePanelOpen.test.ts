@@ -353,6 +353,7 @@ describe('无 tab 展开时的新建菜单信号', () => {
       ...state,
       uiByConversation: {},
       layouts: {},
+      pinnedTabs: [],
       liveGlobalTabs: [],
       newTabMenuPrompt: null,
     }));
@@ -378,6 +379,27 @@ describe('无 tab 展开时的新建菜单信号', () => {
     useSidePanelStore.getState().toggleOpen();
     expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
     expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('存在固定标签的会话展开：不置信号，由固定标签恢复接管', () => {
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      pinnedTabs: ['files'],
+    }));
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('固定标签是脏值（非数组）时按没有处理，照常置信号', () => {
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      pinnedTabs: 'files' as unknown as PinnableSidePanelTab[],
+    }));
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
   });
 
   it('收起时不置信号', () => {
