@@ -1,6 +1,8 @@
+import { unescapeUntrusted } from './transcript';
+
 /** 聊天里系统注入的整块标签。不是通用 XML 解析器。 */
 const TAG =
-  'agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule|secretary-message';
+  'agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule|secretary-message|secretary-trigger';
 const BLOCK = new RegExp(`<(${TAG})>\\n?([\\s\\S]*?)\\n?</\\1>`, 'g');
 const INSTRUCTIONS = /\n(?=Work toward this goal autonomously\.|Continue working toward it\.)/;
 
@@ -9,6 +11,7 @@ export type InjectedSegment =
   | { kind: 'goal'; goal: string; instructions: string }
   | { kind: 'updates'; raw: string }
   | { kind: 'schedule'; raw: string }
+  | { kind: 'trigger'; raw: string }
   | { kind: 'notice'; tag: string; body: string };
 
 export function goalHeadline(goal: string): string {
@@ -44,6 +47,7 @@ export function splitInjectedBlocks(text: string): InjectedSegment[] | null {
     const body = match[2] ?? '';
     if (tag === 'goal-continuation') segments.push({ kind: 'goal', ...parseGoal(body) });
     else if (tag === 'secretary-schedule') segments.push({ kind: 'schedule', raw: match[0] });
+    else if (tag === 'secretary-trigger') segments.push({ kind: 'trigger', raw: match[0] });
     else if (tag === 'session-updates') segments.push({ kind: 'updates', raw: match[0] });
     else segments.push({ kind: 'notice', tag, body });
     cursor = index + match[0].length;
@@ -54,7 +58,7 @@ export function splitInjectedBlocks(text: string): InjectedSegment[] | null {
 }
 
 const WRAPPER_LINE =
-  /^<\/?(?:agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule|secretary-message)>$/;
+  /^<\/?(?:agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule|secretary-message|secretary-trigger)>$/;
 
 export interface FoldedInjected {
   summary: string;
@@ -102,6 +106,35 @@ export function scheduleFolds(raw: string): FoldedInjected[] {
     .split(/\n(?=- \[schedule\])/)
     .map((chunk) => scheduleText(chunk.replace(/^- \[schedule\][ \t]?/, '')))
     .filter((fold) => fold.body.length > 0);
+}
+
+/** 一条触发器块收成若干张卡片：标题取触发器名与来源，正文展开原始事件内容（去掉不可信外壳）。 */
+export function triggerFolds(raw: string): FoldedInjected[] {
+  const inner = stripInjectedWrapperLines(raw);
+  if (!inner) return [];
+  const chunks = inner.split(/\n(?=- \[trigger )/);
+  const folds: FoldedInjected[] = [];
+  for (const chunk of chunks) {
+    const head = /^- \[trigger [^\]]*name="([^"]*)"[^\]]*\](?: \(([^)\n]*)\))?/.exec(chunk);
+    const name = head?.[1]?.trim() ?? '';
+    const source = head?.[2]?.trim() ?? '';
+    const rest = head ? chunk.slice(head[0].length).trim() : chunk.trim();
+    const cleaned = rest
+      .replace(
+        /<untrusted-content source="[^"\n]*">([\s\S]*?)<\/untrusted-content>/g,
+        (_, innerText: string) => unescapeUntrusted(innerText)
+      )
+      .trim();
+    const summaryBase = [name, source].filter(Boolean).join(' · ');
+    const firstBodyLine = cleaned
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean);
+    const summary = clipLine(summaryBase || firstBodyLine || '');
+    const body = cleaned || summary;
+    if (body) folds.push({ summary, body });
+  }
+  return folds;
 }
 
 /** 解析不了的回传：去掉标签和列表标记，避免虚线框里只剩标签名。 */

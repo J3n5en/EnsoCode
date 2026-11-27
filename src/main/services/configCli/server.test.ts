@@ -624,6 +624,79 @@ describe('config CLI socket', () => {
     expect(JSON.parse(denied.stdout)).toMatchObject({ ok: false });
   });
 
+  it('enso trigger help 离线打印，且 CLI 可经控制 socket 路由 trigger 命令', async () => {
+    const offline = mkdtempSync(path.join(tmpdir(), 'enso-trigger-cli-offline-'));
+    const help = await runCli(['trigger', 'help'], offline);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain('enso trigger create');
+    expect(help.stdout).toContain('ws://127.0.0.1:<port>/v1/triggers/<triggerId>/ws');
+    rmSync(offline, { recursive: true, force: true });
+
+    const { startConfigCli } = await import('./server');
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-trigger-cli-live-'));
+    const seen: Record<string, unknown>[] = [];
+    const srv = await startConfigCli(dir, {
+      fields: [],
+      readState: () => ({}),
+      patch: () => ({ ok: true }),
+      reload: () => true,
+      applyProxy: async () => ({ ok: true }),
+      triggers: {
+        async handle(req) {
+          seen.push(req);
+          if (req.action === 'create') {
+            return {
+              ok: true,
+              trigger: {
+                id: 'trg-abc12345',
+                httpUrl: 'http://127.0.0.1:17654/v1/triggers/trg-abc12345',
+              },
+              token: 'tok-xyz',
+            };
+          }
+          return { ok: true, action: req.action };
+        },
+      },
+    });
+    try {
+      const created = await runCli(
+        [
+          'trigger',
+          'create',
+          '--secretary',
+          '瑞花',
+          '--name',
+          '微信售后群',
+          '--instruction',
+          '汇总工单',
+          '--coalesce-ms',
+          '2500',
+        ],
+        dir
+      );
+      expect(created.code).toBe(0);
+      expect(JSON.parse(created.stdout)).toMatchObject({ ok: true, token: 'tok-xyz' });
+      expect(seen[0]).toMatchObject({
+        cmd: 'trigger',
+        action: 'create',
+        secretary: '瑞花',
+        draft: { name: '微信售后群', instruction: '汇总工单', coalesceMs: 2500, enabled: true },
+      });
+
+      const tested = await runCli(['trigger', 'test', 'trg-abc12345', '--text', 'hello'], dir);
+      expect(tested.code).toBe(0);
+      expect(seen[1]).toMatchObject({
+        cmd: 'trigger',
+        action: 'test',
+        triggerId: 'trg-abc12345',
+        text: 'hello',
+      });
+    } finally {
+      srv.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('关闭后清理 socket 与 token', async () => {
     const { startConfigCli } = await import('./server');
     const dir = mkdtempSync(path.join(tmpdir(), 'enso-cli-close-'));

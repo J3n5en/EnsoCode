@@ -16,6 +16,7 @@ import {
   scheduleFolds,
   splitInjectedBlocks,
   stripInjectedWrapperLines,
+  triggerFolds,
   updatesFold,
 } from '@shared/secretary/injectedBlocks';
 import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
@@ -74,6 +75,7 @@ import {
   Undo2,
   UserRound,
   Workflow,
+  Zap,
 } from 'lucide-react';
 import {
   Fragment,
@@ -599,6 +601,28 @@ function InjectedSegments({
                     fold.summary
                       ? t('Scheduled: {{summary}}', { summary: fold.summary })
                       : t('Scheduled')
+                  }
+                  body={fold.body}
+                />
+              ))}
+            </Fragment>
+          );
+        }
+        if (segment.kind === 'trigger') {
+          const folds = triggerFolds(segment.raw);
+          const cards = folds.length > 0 ? folds : [{ summary: '', body: '' }];
+          return (
+            <Fragment key={key}>
+              {cards.map((fold, foldIndex) => (
+                <FoldedInjectedCard
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 同一条注入消息里的触发事件顺序即身份
+                  key={foldIndex}
+                  enso="secretary-trigger-card"
+                  icon={Zap}
+                  title={
+                    fold.summary
+                      ? t('Trigger: {{summary}}', { summary: fold.summary })
+                      : t('Trigger')
                   }
                   body={fold.body}
                 />

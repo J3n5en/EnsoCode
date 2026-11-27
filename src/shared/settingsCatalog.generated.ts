@@ -894,6 +894,25 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   { id: 'runtime.root', category: 'runtime', title: 'Runtime & sessions' },
   { id: 'runtime.sessions-worktrees', category: 'runtime', title: 'Sessions & worktrees' },
+  { id: 'secretary.actions', category: 'secretary', title: 'Actions' },
+  {
+    id: 'secretary.bearer-token',
+    category: 'secretary',
+    title: 'Bearer token',
+    description: 'Pass via Authorization: Bearer <token> or X-Enso-Token header.',
+  },
+  {
+    id: 'secretary.coalesce-window-seconds',
+    category: 'secretary',
+    title: 'Coalesce window (seconds)',
+    description: 'Combine consecutive events within this window into one wake-up (0 = immediate).',
+  },
+  {
+    id: 'secretary.coalesce-window-seconds-2',
+    category: 'secretary',
+    title: 'Coalesce window (seconds)',
+    description: 'Combine consecutive events within this window into one wake-up (0 = immediate).',
+  },
   { id: 'secretary.communication-style', category: 'secretary', title: 'Communication style' },
   { id: 'secretary.danger-zone', category: 'secretary', title: 'Danger zone' },
   {
@@ -910,6 +929,8 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description:
       'The most dispatched sessions the secretary may run at the same time. Dispatches beyond the limit wait in line and start on their own when a slot frees up.',
   },
+  { id: 'secretary.http-post-url', category: 'secretary', title: 'HTTP POST URL' },
+  { id: 'secretary.name', category: 'secretary', title: 'Name' },
   {
     id: 'secretary.plugins',
     category: 'secretary',
@@ -973,6 +994,28 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description:
       'Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call.',
   },
+  {
+    id: 'secretary.trigger-instruction',
+    category: 'secretary',
+    title: 'Trigger instruction',
+    description:
+      'Trusted rule shown outside untrusted event payload so the secretary knows how to react.',
+  },
+  {
+    id: 'secretary.trigger-instruction-2',
+    category: 'secretary',
+    title: 'Trigger instruction',
+    description: 'Optional rule telling the secretary how to handle incoming events.',
+  },
+  {
+    id: 'secretary.triggers',
+    category: 'secretary',
+    title: 'Local triggers',
+    description:
+      'Loopback-only (127.0.0.1) HTTP POST & WebSocket endpoints for local scripts and watchers to wake this secretary. Starts automatically only when at least one trigger is enabled.',
+  },
+  { id: 'secretary.triggers.server', category: 'secretary', title: 'Local listener port' },
+  { id: 'secretary.websocket-url', category: 'secretary', title: 'WebSocket URL' },
   { id: 'shortcuts.pluginCommands', category: 'shortcuts', title: 'Plugin commands' },
   {
     id: 'shortcuts.root',

@@ -92,6 +92,19 @@ it('解析不了的回传也不露出标签名', () => {
   expect(out).not.toContain('第二行');
 });
 
+it('本机触发器事件收成一行折叠卡片，不露出标签和不可信外壳', () => {
+  const out = html(
+    user(
+      '<secretary-trigger>\n- [trigger id=trg-abc12345 name="微信售后群"] (参半群)\nInstruction: 汇总异常\n<untrusted-content source="trigger:trg-abc12345">客户反馈快递破损</untrusted-content>\n</secretary-trigger>'
+    )
+  );
+  expect(out).toContain('data-enso="secretary-trigger-card"');
+  expect(out).toContain('data-open="false"');
+  expect(out).toContain('Trigger: 微信售后群 · 参半群');
+  expect(out).not.toContain('<secretary-trigger>');
+  expect(out).not.toContain('<untrusted-content');
+});
+
 const IMG = '/Users/u/Library/Application Support/enso-code/bot-chats/secretary-images/c/ab12.png';
 const image = { type: 'image' as const, data: 'eA==', mimeType: 'image/png' };
 

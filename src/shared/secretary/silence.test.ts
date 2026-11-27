@@ -24,6 +24,10 @@ describe('静默回传', () => {
       content: [{ type: 'toolCall', id: 't', name: 'silence_turn' }],
     };
     expect(shouldSilenceTurn(schedule, '', true)).toBe(true);
+    const trigger =
+      '<secretary-trigger>\n- [trigger id=trg-123456 name="微信群"]\n<untrusted-content source="trigger:trg-123456">闲聊</untrusted-content>\n</secretary-trigger>';
+    expect(shouldSilenceTurn(trigger, '', true)).toBe(true);
+    expect(isPureSessionUpdate(trigger)).toBe(true);
     expect(shouldSilenceTurn('帮我看看', '好', true)).toBe(false);
     expect(
       turnRequestedSilence([

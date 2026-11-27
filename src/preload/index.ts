@@ -285,6 +285,11 @@ import type {
   SecretaryTakeoverView,
   SecretaryTodoMutate,
   SecretaryToolDraft,
+  SecretaryTriggerCreateDraft,
+  SecretaryTriggerListResult,
+  SecretaryTriggerServerState,
+  SecretaryTriggerUpdatePatch,
+  SecretaryTriggerView,
   SecretaryUntrackedView,
 } from '@shared/types/secretary';
 import type {
@@ -768,6 +773,64 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
     },
+    /** 本机触发器列表与监听服务状态 */
+    listTriggers: (
+      secretaryId?: string
+    ): Promise<SecretaryTriggerListResult | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGERS_LIST, secretaryId),
+    onTriggersChanged: (
+      callback: (payload: { server: SecretaryTriggerServerState }) => void
+    ): (() => void) => {
+      const listener = (_event: unknown, payload: { server: SecretaryTriggerServerState }) =>
+        callback(payload);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_TRIGGERS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_TRIGGERS_CHANGED, listener);
+    },
+    createTrigger: (
+      draft: Partial<SecretaryTriggerCreateDraft> & { name: string },
+      secretaryId?: string
+    ): Promise<
+      | {
+          ok: true;
+          trigger: SecretaryTriggerView;
+          token: string;
+          server: SecretaryTriggerServerState;
+        }
+      | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_CREATE, draft, secretaryId),
+    updateTrigger: (
+      id: string,
+      patch: SecretaryTriggerUpdatePatch,
+      secretaryId?: string
+    ): Promise<
+      | { ok: true; trigger: SecretaryTriggerView; server: SecretaryTriggerServerState }
+      | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_UPDATE, { id, patch }, secretaryId),
+    removeTrigger: (
+      id: string,
+      secretaryId?: string
+    ): Promise<{ ok: true; server: SecretaryTriggerServerState } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_REMOVE, { id }, secretaryId),
+    rotateTriggerToken: (
+      id: string,
+      secretaryId?: string
+    ): Promise<{ ok: true; token: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_ROTATE_TOKEN, { id }, secretaryId),
+    revealTriggerToken: (
+      id: string,
+      secretaryId?: string
+    ): Promise<{ ok: true; token: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_REVEAL_TOKEN, { id }, secretaryId),
+    setTriggerServerPort: (
+      port: number
+    ): Promise<{ ok: true; server: SecretaryTriggerServerState } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_SET_PORT, { port }),
+    testTrigger: (
+      id: string,
+      text?: string,
+      secretaryId?: string
+    ): Promise<{ ok: true; deliveryKey: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRIGGER_TEST, { id, text }, secretaryId),
   },
 
   modelDirectory: {

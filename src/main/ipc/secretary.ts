@@ -146,6 +146,7 @@ import {
   spawnRootFromMain,
 } from './agent';
 import { createSecretaryContacts, type SecretaryContacts } from './secretaryContact';
+import { createSecretaryTriggers, type SecretaryTriggers } from './secretaryTriggers';
 import {
   patchConversationsState,
   readPersistedConversation,
@@ -364,6 +365,7 @@ export function getDispatchDriver(): DispatchDriver | null {
   return driver;
 }
 let contacts: SecretaryContacts | null = null;
+let triggers: SecretaryTriggers | null = null;
 /** 每个秘书一个回传宿主：各自的定时器、巡检、投递槽位与定时任务 */
 const hosts = new Map<string, SecretaryHost>();
 /** 各秘书宿主对冷启动续跑失败的订阅 */
@@ -770,6 +772,16 @@ export function registerSecretaryHandlers(): void {
     openInApp: (target) => openSecretaryTarget(target),
   });
   contacts.register();
+  triggers = createSecretaryTriggers({
+    onEnqueued: (secretaryId, deliverAt) => {
+      hosts.get(secretaryId)?.scheduleFlush(deliverAt);
+      broadcastState();
+    },
+  });
+  triggers.register();
+  app.once('before-quit', () => {
+    void triggers?.stop();
+  });
   // 同一次 observe 的结果既给驱动也给每个秘书的回传宿主，事件入口只调一次
   setSecretaryDriverObserver((event, changes) => {
     driver?.observe(event);
@@ -793,6 +805,7 @@ export function registerSecretaryHandlers(): void {
     queued.recover();
     for (const ctx of secretaryContexts()) await startSecretary(ctx);
     requestQueuedDrain();
+    await triggers?.start();
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_LIST, async (event) => {
@@ -851,6 +864,7 @@ export function registerSecretaryHandlers(): void {
         resumeFailureSubscriptions.delete(ctx.id);
         statePublishers.delete(ctx.id);
         await contacts?.remove(ctx.id, true);
+        await triggers?.onSecretaryRemoved(ctx.id);
       },
     });
     notifySecretariesChanged();

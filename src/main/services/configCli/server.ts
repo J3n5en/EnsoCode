@@ -5,6 +5,11 @@ import path from 'node:path';
 import { serveControlConnection } from '@shared/controlSocket';
 import { describeConfig, getConfig, listConfig, planSet } from './policy';
 
+/** 触发器 CLI 处理面：由 Main 注入运行中的 TriggerManager，供本机 AI/脚本直接配置 */
+export interface TriggerCliPort {
+  handle(request: Record<string, unknown>): Promise<unknown>;
+}
+
 /** 设置存储的最小读写面：生产接 ipc/settings，测试可替换 */
 export interface ConfigCliDeps {
   fields: readonly string[];
@@ -12,6 +17,7 @@ export interface ConfigCliDeps {
   patch(field: string, value: unknown): { ok: boolean; error?: string };
   reload(): boolean;
   applyProxy(mode: unknown, customUrl: unknown): Promise<{ ok: boolean; error?: string }>;
+  triggers?: TriggerCliPort;
 }
 
 export interface ConfigCliHandle {
@@ -52,7 +58,12 @@ export async function handleConfigRequest(
     return { ok: false, error: 'invalid json' };
   }
   if (!tokenMatches(token, request.token)) return { ok: false, error: 'unauthorized' };
-  if (request.cmd !== 'config') return { ok: false, error: 'only config commands are supported' };
+  if (request.cmd === 'trigger') {
+    if (!deps.triggers) return { ok: false, error: 'trigger cli unavailable' };
+    return deps.triggers.handle(request);
+  }
+  if (request.cmd !== 'config')
+    return { ok: false, error: 'only config and trigger commands are supported' };
   const state = deps.readState();
   switch (request.action) {
     case 'get':

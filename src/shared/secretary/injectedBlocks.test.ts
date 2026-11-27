@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scheduleFolds, splitInjectedBlocks, updatesFold } from './injectedBlocks';
+import { scheduleFolds, splitInjectedBlocks, triggerFolds, updatesFold } from './injectedBlocks';
 
 describe('scheduleFolds', () => {
   it('短名称后面的提示词作为一行人话，多行正文留给展开', () => {
@@ -49,5 +49,22 @@ describe('splitInjectedBlocks', () => {
         ?.filter((segment) => segment.kind !== 'text' || segment.text.trim())
         .map((segment) => segment.kind)
     ).toEqual(['schedule', 'updates']);
+  });
+
+  it('触发器块拆成 trigger 段并折叠为可读摘要，剥离不可信外壳', () => {
+    const raw =
+      '<secretary-trigger>\n' +
+      '- [trigger id=trg-abc12345 name="微信售后群"] (参半群)\n' +
+      '指令：汇总订单异常\n' +
+      '<untrusted-content source="trigger:trg-abc12345">客户反馈包装破损</untrusted-content>\n' +
+      '</secretary-trigger>';
+    const segments = splitInjectedBlocks(raw);
+    expect(segments?.map((segment) => segment.kind)).toEqual(['trigger']);
+    expect(triggerFolds(raw)).toEqual([
+      {
+        summary: '微信售后群 · 参半群',
+        body: '指令：汇总订单异常\n客户反馈包装破损',
+      },
+    ]);
   });
 });

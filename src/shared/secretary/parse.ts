@@ -789,6 +789,24 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
       ...(problem ? { problem } : {}),
     };
   }
+  if (value.kind === 'trigger') {
+    const triggerId = text(value.triggerId);
+    const triggerName = text(value.triggerName);
+    const payload = typeof value.payload === 'string' ? value.payload : '';
+    if (!triggerId || !triggerName || !payload) return undefined;
+    const instruction = text(value.instruction);
+    const source = text(value.source);
+    return {
+      ...base,
+      ...scope,
+      kind: 'trigger',
+      triggerId,
+      triggerName,
+      payload,
+      ...(instruction ? { instruction } : {}),
+      ...(source ? { source } : {}),
+    };
+  }
   return undefined;
 }
 

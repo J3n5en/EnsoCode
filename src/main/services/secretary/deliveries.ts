@@ -154,7 +154,7 @@ interface Group {
 }
 
 /** 要秘书动手的更新；结果回传没有会话时只更新工作台 */
-const WAKES_SECRETARY: ReadonlySet<string> = new Set(['schedule', 'peer-message']);
+const WAKES_SECRETARY: ReadonlySet<string> = new Set(['schedule', 'peer-message', 'trigger']);
 
 function dueKeys(ports: DeliveryPorts, now: number): Set<string> {
   const file = ports.file();

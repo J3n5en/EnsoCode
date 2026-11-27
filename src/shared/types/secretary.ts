@@ -482,6 +482,15 @@ export type SecretaryUpdate = {
       hop: number;
       origins: string[];
     }
+  /** 本机触发器推来的外部事件：instruction 是用户预设说明，payload 与 source 按不可信内容包裹 */
+  | {
+      kind: 'trigger';
+      triggerId: string;
+      triggerName: string;
+      instruction?: string;
+      source?: string;
+      payload: string;
+    }
 );
 
 /** 右侧动态的一条历史：压掉、合并和静默处理的更新都留在这里 */
@@ -603,6 +612,65 @@ export interface SecretarySummary {
   order: number;
 }
 
+/** 本机触发器持久化条目（存 triggers.json，不含 token 密钥） */
+export interface SecretaryTrigger {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** 用户预设的处理指令，注入时位于 <untrusted-content> 外层 */
+  instruction?: string;
+  /** 同一触发器短时间连续事件的合并窗口（毫秒，0 表示立即投递） */
+  coalesceMs: number;
+  /** 可选：固定投递到某条秘书会话；缺省投到最近活跃会话 */
+  secretaryConversationId?: string;
+  createdAt: number;
+  updatedAt: number;
+  lastFiredAt?: number;
+  fireCount: number;
+}
+
+/** 界面展示的触发器视图（不含 token 明文；token 只在创建/重置/显式复制时由 Main 返回） */
+export interface SecretaryTriggerView extends SecretaryTrigger {
+  httpUrl: string;
+  wsUrl: string;
+}
+
+export interface SecretaryTriggerCreateDraft {
+  name: string;
+  enabled: boolean;
+  instruction?: string;
+  coalesceMs: number;
+  secretaryConversationId?: string;
+}
+
+export interface SecretaryTriggerUpdatePatch {
+  name?: string;
+  enabled?: boolean;
+  instruction?: string | null;
+  coalesceMs?: number;
+  secretaryConversationId?: string | null;
+}
+
+export type SecretaryTriggerServerStatus = 'stopped' | 'listening' | 'error';
+
+/** 全局本机触发服务状态：只在有至少 1 条启用触发器且秘书开启时监听 127.0.0.1 */
+export interface SecretaryTriggerServerState {
+  host: '127.0.0.1';
+  /** 当前实际监听端口；未启动时为 configuredPort */
+  port: number;
+  configuredPort: number;
+  status: SecretaryTriggerServerStatus;
+  error?: string;
+  /** 当前所有秘书合计已启用的触发器数量 */
+  activeCount: number;
+}
+
+export interface SecretaryTriggerListResult {
+  ok: true;
+  server: SecretaryTriggerServerState;
+  triggers: SecretaryTriggerView[];
+}
+
 /** 删除秘书前的提醒：列出它正在管的东西，二次确认后才删 */
 export interface SecretaryDeletePreview {
   secretaryId: string;
@@ -610,6 +678,7 @@ export interface SecretaryDeletePreview {
   sessions: { conversationId: string; title: string; projectName: string; takeover: boolean }[];
   todos: { id: string; text: string }[];
   schedules: { id: string; name: string }[];
+  triggers?: { id: string; name: string }[];
   contacts: string[];
   memories: number;
 }

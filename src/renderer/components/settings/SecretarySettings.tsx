@@ -31,6 +31,7 @@ import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
 import { SecretaryDeleteDialog } from '@/components/secretary/SecretaryDeleteDialog';
 import { SecretaryProfileForm } from '@/components/secretary/SecretaryProfileForm';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
+import { SecretaryTriggerSection } from '@/components/secretary/SecretaryTriggerSection';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -1167,6 +1168,8 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
           </div>
         )}
       </SettingsSection>
+
+      <SecretaryTriggerSection secretaryId={secretaryId} locale={locale} />
 
       <SettingsSection
         title={t('Reset the secretary and start over')}

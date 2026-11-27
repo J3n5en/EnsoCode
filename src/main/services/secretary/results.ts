@@ -231,12 +231,16 @@ function formatLine(update: SecretaryUpdate): string {
 export function formatSessionUpdates(batch: readonly SecretaryUpdate[]): string {
   const blocks: string[] = [];
   const results = batch.filter(
-    (update) => update.kind !== 'schedule' && update.kind !== 'peer-message'
+    (update) =>
+      update.kind !== 'schedule' && update.kind !== 'peer-message' && update.kind !== 'trigger'
   );
   const schedules = batch.filter((update) => update.kind === 'schedule');
   const peers = batch.filter(
     (update): update is Extract<SecretaryUpdate, { kind: 'peer-message' }> =>
       update.kind === 'peer-message'
+  );
+  const triggers = batch.filter(
+    (update): update is Extract<SecretaryUpdate, { kind: 'trigger' }> => update.kind === 'trigger'
   );
   if (results.length > 0)
     blocks.push(`<session-updates>\n${results.map(formatLine).join('\n')}\n</session-updates>`);
@@ -253,6 +257,24 @@ export function formatSessionUpdates(batch: readonly SecretaryUpdate[]): string 
             `- [from ${update.fromName} secretaryId=${update.fromSecretaryId} chain=${update.chain} hop=${update.hop}]\n${wrapUntrusted(`secretary:${update.fromSecretaryId}`, redactSecrets(update.text))}`
         )
         .join('\n')}\n</secretary-message>`
+    );
+  // 本机触发器推来的外部事件：用户预设指令在外层，外部载荷脱敏后包成不可信内容
+  if (triggers.length > 0)
+    blocks.push(
+      `<secretary-trigger>\n${triggers
+        .map((update) => {
+          const safeName = update.triggerName.replace(/["\r\n]/gu, ' ').trim() || update.triggerId;
+          const sourceLabel = update.source ? ` (${update.source})` : '';
+          const head = `- [trigger id=${update.triggerId} name="${safeName}"]${sourceLabel}`;
+          const sourceAttr = update.source
+            ? `trigger:${update.triggerId} source=${update.source}`
+            : `trigger:${update.triggerId}`;
+          const lines = [head];
+          if (update.instruction) lines.push(`Instruction: ${update.instruction}`);
+          lines.push(wrapUntrusted(sourceAttr, redactSecrets(update.payload)));
+          return lines.join('\n');
+        })
+        .join('\n')}\n</secretary-trigger>`
     );
   return blocks.join('\n');
 }
