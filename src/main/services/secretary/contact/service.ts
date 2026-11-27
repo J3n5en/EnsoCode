@@ -66,7 +66,7 @@ import {
   recapEmptyText,
   recapUsageText,
 } from '@shared/secretary/recap';
-import { htmlToPlain } from '@shared/secretary/telegramHtml';
+import { escapeHtml, htmlToPlain, markdownToTelegramChunks } from '@shared/secretary/telegramHtml';
 import type { AskAnswerBy, AskRequestInfo } from '@shared/types/agent';
 import type {
   SecretaryAuditEntry,
@@ -203,6 +203,8 @@ export interface SecretaryContactPort {
   onTurnStart(conversationId: string): void;
   /** 回合收尾（完成 / 出错 / 被停）：立刻停掉续发 */
   onTurnEnd(conversationId: string): void;
+  /** 回合里新调用了一个工具：打开「显示处理过程」的渠道原地刷新进度 */
+  onToolCall?(conversationId: string, toolName: string): void;
   /**
    * 秘书这一轮的正文。delivery 表示这一轮是系统回传注入的（派出会话的结果），
    * 不是用户亲手发的；turnId 用来保证同一轮只回推一次。
@@ -372,6 +374,13 @@ const MAX_CARD_BUTTONS = 4;
 
 /** 「正在输入…」大多只亮约 5 秒：4 秒续一次，留出网络抖动 */
 const TYPING_REFRESH_MS = 4_000;
+/** 处理中占位的进度编辑节流：Telegram 编辑太频繁会被限流 */
+const PROGRESS_EDIT_MS = 3_000;
+/**
+ * 回合收尾（status 不再 running）先于 turn-completed 到达：等这么久还没有回复或静默，
+ * 就当这一轮中止了，删掉占位
+ */
+const PROGRESS_SETTLE_MS = 5_000;
 
 /** 推过一次就结束关注的里程碑：完成与失败；「需要你」这类还在等，继续跟 */
 const FOLLOW_END_KINDS: ReadonlySet<SecretaryResultKind> = new Set(['goal-complete', 'failed']);
@@ -432,6 +441,8 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
     peers: Peer[];
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
+  /** 打开「显示处理过程」时这一轮发出的处理中占位：轮末换成回复，静默或中止时删掉 */
+  private readonly progress = new Map<string, TurnProgress>();
   /** /feed 的翻页游标：按钮上只带短编号，重启后按钮失效即可 */
   private readonly feedCursors = new Map<string, FeedCursor>();
   private feedSeq = 1;
@@ -645,6 +656,7 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
 
   async stop(): Promise<void> {
     this.stopTyping();
+    for (const conversationId of [...this.progress.keys()]) this.takeProgress(conversationId);
     await this.telegram.stop();
   }
 
@@ -889,6 +901,7 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
       'cardConfirm',
       'approvalRemote',
       'syncMirror',
+      'showProgress',
       'memory',
     ] as const) {
       if (typeof patch[key] === 'boolean') clean[key] = patch[key];
@@ -908,6 +921,7 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
     if (!caps) {
       delete clean.cardConfirm;
       delete clean.syncMirror;
+      delete clean.showProgress;
     }
     this.store.save(withChannelPrefs(this.store.file(), channelId, clean));
     const detail = Object.entries(clean)
@@ -915,6 +929,8 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
       .join(' ');
     if (detail) this.audit('contact_settings', true, detail);
     if (clean.syncMirror === false || clean.enabled === false) this.stopTyping();
+    // 关掉「显示处理过程」：这个渠道立刻不再亮「正在输入…」；进度编辑在编辑时按开关跳过
+    else if (clean.showProgress === false) this.stopTypingFor(channelId);
     if (clean.memory !== undefined) this.syncMenu(channelId);
     if (clean.enabled !== undefined && channelId === TELEGRAM_CHANNEL_ID) {
       void this.syncTelegramRunning();
@@ -1444,30 +1460,65 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
   }
 
   /**
-   * 回合开始：这一轮的回复会发给谁（手机发起的那个人、打开镜像的渠道）就对谁点亮「正在输入…」。
+   * 回合开始：这一轮的回复会发给谁（手机发起的那个人、打开镜像的渠道），其中打开了
+   * 「显示处理过程」的渠道点亮「正在输入…」，能改旧消息的再发一条处理中占位。
    * 渠道没有正在输入就跳过；已有循环在跑时不重复起。
    */
   onTurnStart(conversationId: string): void {
-    if (this.typingLoop) return;
     const peers = uniquePeers([
       ...(this.awaitingReply.get(conversationId)?.values() ?? []),
       ...this.mirrorTargets(),
-    ]).filter((peer) => this.active(peer.channelId) && this.capsOf(peer.channelId)?.typing);
-    if (peers.length === 0) return;
+    ]).filter((peer) => this.active(peer.channelId) && this.prefsOf(peer.channelId).showProgress);
+    this.startPlaceholders(conversationId, peers);
+    if (this.typingLoop) return;
+    const typing = peers.filter((peer) => this.capsOf(peer.channelId)?.typing);
+    if (typing.length === 0) return;
     const timer = setTimeout(() => this.refreshTyping(), TYPING_REFRESH_MS);
-    this.typingLoop = { conversationId, peers, timer };
+    this.typingLoop = { conversationId, peers: typing, timer };
     void this.sendTyping();
   }
 
-  /** 回合收尾：完成、出错、被停都走这里，回复发出后不再续发 */
+  /**
+   * 回合收尾：完成、出错、被停都走这里，回复发出后不再续发。
+   * 占位先留着等回复或静默来收；一直没等到（中止、出错）就到点删掉。
+   */
   onTurnEnd(conversationId: string): void {
+    const progress = this.progress.get(conversationId);
+    if (progress && !progress.ended) {
+      progress.ended = true;
+      if (progress.editTimer) clearTimeout(progress.editTimer);
+      progress.editTimer = null;
+      progress.settleTimer = setTimeout(
+        () => this.dropPlaceholders(this.takeProgress(conversationId)),
+        PROGRESS_SETTLE_MS
+      );
+    }
     if (this.typingLoop?.conversationId !== conversationId) return;
     this.stopTyping();
+  }
+
+  /** 回合里新调用了一个工具：节流后把占位原地改成「第 N 步：工具名」 */
+  onToolCall(conversationId: string, toolName: string): void {
+    const progress = this.progress.get(conversationId);
+    if (!progress || progress.ended) return;
+    progress.steps += 1;
+    progress.tool = toolName;
+    if (progress.editTimer) return;
+    const wait = progress.editedAt + PROGRESS_EDIT_MS - this.ports.now();
+    if (wait <= 0) {
+      this.queueProgressEdit(progress);
+      return;
+    }
+    progress.editTimer = setTimeout(() => {
+      progress.editTimer = null;
+      this.queueProgressEdit(progress);
+    }, wait);
   }
 
   /**
    * 秘书这一轮的正文：回给发起这一轮的联系人、手机任务链上的联系人、打开镜像的渠道。
    * 同一轮只推一次；链上的任务都收口后这条链就断掉，应用里自己聊的不再误推。
+   * 发过处理中占位的联系人原地换成回复；没收到回复的占位删掉。
    */
   onTurnReply(
     conversationId: string,
@@ -1475,6 +1526,20 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
     options?: { delivery?: boolean; turnId?: string }
   ): void {
     this.onTurnEnd(conversationId);
+    const progress = this.takeProgress(conversationId);
+    try {
+      this.relayReply(conversationId, text, progress, options);
+    } finally {
+      this.dropPlaceholders(progress);
+    }
+  }
+
+  private relayReply(
+    conversationId: string,
+    text: string,
+    progress: TurnProgress | null,
+    options?: { delivery?: boolean; turnId?: string }
+  ): void {
     const fromPhone = [...(this.awaitingReply.get(conversationId)?.values() ?? [])];
     this.awaitingReply.delete(conversationId);
     const chained =
@@ -1495,12 +1560,12 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
       ? `${body}\n\n${formatNeedsAppConfirmLine(this.ports.lang())}`
       : body;
     for (const peer of origin) {
-      void this.post(peer, 'sendText', { text: payload }).then((sent) => {
+      void this.replyTo(peer, payload, progress).then((sent) => {
         this.audit('contact_reply', sent.ok, sent.ok ? undefined : sent.error);
       });
     }
     for (const peer of mirror) {
-      void this.post(peer, 'sendText', { text: payload }).then((sent) => {
+      void this.replyTo(peer, payload, progress).then((sent) => {
         this.audit('contact_mirror', sent.ok, sent.ok ? undefined : sent.error);
       });
     }
@@ -1508,6 +1573,7 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
 
   onTurnSilent(conversationId: string): void {
     this.onTurnEnd(conversationId);
+    this.dropPlaceholders(this.takeProgress(conversationId));
     // 手机发起的回合一定会回话，静默只可能来自系统回传；这里只负责清掉未决状态
     this.awaitingReply.delete(conversationId);
     this.prunePhoneChain(conversationId);
@@ -2394,6 +2460,135 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
     clearTimeout(loop.timer);
   }
 
+  /** 只停一个渠道的「正在输入…」：别的渠道照常续发 */
+  private stopTypingFor(channelId: string): void {
+    const loop = this.typingLoop;
+    if (!loop) return;
+    loop.peers = loop.peers.filter((peer) => peer.channelId !== channelId);
+    if (loop.peers.length === 0) this.stopTyping();
+  }
+
+  // ---------- 处理中占位 ----------
+
+  /** 能原地改、能删、认 HTML 的渠道才发占位：否则轮末换不掉也删不掉 */
+  private canPlaceholder(channelId: string): boolean {
+    const channel = this.active(channelId);
+    if (!channel?.edit || !channel.deleteMessage) return false;
+    const caps = channel.caps();
+    return caps.edit && caps.format === 'html';
+  }
+
+  private startPlaceholders(conversationId: string, peers: Peer[]): void {
+    const current = this.progress.get(conversationId);
+    if (current && !current.ended) return;
+    // 上一轮收尾了却没等到回复：旧占位删掉，这一轮重新发
+    if (current) this.dropPlaceholders(this.takeProgress(conversationId));
+    const targets = peers.filter((peer) => this.canPlaceholder(peer.channelId));
+    if (targets.length === 0) return;
+    const text = progressText(this.ports.lang(), 0);
+    const placeholders = new Map<string, Placeholder>();
+    for (const peer of targets) {
+      const messageId = this.post(peer, 'sendText', { text })
+        .then((sent) => (sent.ok ? sent.messageId : undefined))
+        .catch(() => undefined);
+      placeholders.set(peerKey(peer), { peer, messageId });
+    }
+    this.progress.set(conversationId, {
+      placeholders,
+      steps: 0,
+      editedAt: this.ports.now(),
+      editTimer: null,
+      settleTimer: null,
+      ended: false,
+      queue: Promise.resolve(),
+    });
+  }
+
+  /** 这一轮的占位交给调用方收尾：从表里摘掉，定时器全停 */
+  private takeProgress(conversationId: string): TurnProgress | null {
+    const progress = this.progress.get(conversationId);
+    if (!progress) return null;
+    this.progress.delete(conversationId);
+    progress.ended = true;
+    if (progress.editTimer) clearTimeout(progress.editTimer);
+    if (progress.settleTimer) clearTimeout(progress.settleTimer);
+    progress.editTimer = null;
+    progress.settleTimer = null;
+    return progress;
+  }
+
+  /** 进度编辑排进队列；执行时渠道已关掉「显示处理过程」或回合已收尾就跳过 */
+  private queueProgressEdit(progress: TurnProgress): void {
+    progress.editedAt = this.ports.now();
+    const text = escapeHtml(progressText(this.ports.lang(), progress.steps, progress.tool));
+    progress.queue = progress.queue.then(async () => {
+      for (const { peer, messageId } of progress.placeholders.values()) {
+        if (progress.ended || !this.prefsOf(peer.channelId).showProgress) continue;
+        const id = await messageId;
+        const channel = this.active(peer.channelId);
+        if (!id || !channel?.edit) continue;
+        const result = await channel.edit(peer.peerId, id, { text, format: 'html' });
+        if (!result.ok) this.audit('contact_progress', false, result.error);
+      }
+    });
+  }
+
+  /**
+   * 回复一个联系人：有占位就原地换成第一片，其余分片接着发；
+   * 改不动就删掉占位再整条重发，手机上不留「⏳」。
+   */
+  private async replyTo(
+    peer: Peer,
+    payload: string,
+    progress: TurnProgress | null
+  ): Promise<ChannelSend> {
+    const key = peerKey(peer);
+    const placeholder = progress?.placeholders.get(key);
+    if (!progress || !placeholder) return this.post(peer, 'sendText', { text: payload });
+    // 同步摘掉：轮末统一删的只剩没收到回复的那些
+    progress.placeholders.delete(key);
+    await progress.queue;
+    const id = await placeholder.messageId;
+    const channel = this.active(peer.channelId);
+    if (id && channel?.edit) {
+      const [first, ...rest] = markdownToTelegramChunks(payload, channel.caps().maxChars);
+      const edited = first
+        ? await channel.edit(peer.peerId, id, { text: first.html, format: 'html' })
+        : null;
+      if (edited?.ok) {
+        this.audit('contact_outbound', true, describe(payload));
+        let sent: ChannelSend = { ok: true, messageId: id };
+        for (const chunk of rest) {
+          sent = await this.post(peer, 'sendText', { text: chunk.html, format: 'html' });
+          if (!sent.ok) break;
+        }
+        return sent;
+      }
+      await this.deletePlaceholder(peer, id);
+    }
+    return this.post(peer, 'sendText', { text: payload });
+  }
+
+  /** 没换成回复的占位一律删掉；删不掉只记审计 */
+  private dropPlaceholders(progress: TurnProgress | null): void {
+    if (!progress || progress.placeholders.size === 0) return;
+    const entries = [...progress.placeholders.values()];
+    progress.placeholders.clear();
+    void progress.queue.then(async () => {
+      for (const { peer, messageId } of entries) {
+        const id = await messageId;
+        if (id) await this.deletePlaceholder(peer, id);
+      }
+    });
+  }
+
+  private async deletePlaceholder(peer: Peer, messageId: string): Promise<void> {
+    const channel = this.registry.get(peer.channelId)?.channel;
+    if (!channel?.deleteMessage) return;
+    const result = await channel.deleteMessage(peer.peerId, messageId);
+    if (!result.ok) this.audit('contact_progress', false, `delete ${result.error}`);
+  }
+
   private audit(op: string, ok: boolean, detail?: string, conversationId?: string): void {
     this.ports.audit({
       at: this.ports.now(),
@@ -2403,6 +2598,31 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
       ...(detail ? { detail } : {}),
     });
   }
+}
+
+interface Placeholder {
+  peer: Peer;
+  /** 占位发出去后的消息 id；发不出去就是 undefined */
+  messageId: Promise<string | undefined>;
+}
+
+interface TurnProgress {
+  /** peerKey → 占位 */
+  placeholders: Map<string, Placeholder>;
+  steps: number;
+  tool?: string;
+  editedAt: number;
+  editTimer: ReturnType<typeof setTimeout> | null;
+  settleTimer: ReturnType<typeof setTimeout> | null;
+  ended: boolean;
+  /** 占位上的编辑排成一队：最终回复一定落在最后一次进度编辑之后 */
+  queue: Promise<void>;
+}
+
+function progressText(lang: ContactLang, steps: number, tool?: string): string {
+  if (lang === 'zh')
+    return steps > 0 && tool ? `⏳ 处理中…（第 ${steps} 步：${tool}）` : '⏳ 处理中…';
+  return steps > 0 && tool ? `⏳ Working… (step ${steps}: ${tool})` : '⏳ Working…';
 }
 
 function mediaKindLabel(lang: ContactLang, kind: ContactMediaInput['kind']): string {

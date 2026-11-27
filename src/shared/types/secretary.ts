@@ -1153,6 +1153,8 @@ export interface SecretaryContactChannelPrefs {
   approvalRemote: boolean;
   /** 秘书每一轮回复都镜像过去 */
   syncMirror: boolean;
+  /** 显示处理过程：「正在输入…」、处理中占位与工具步骤，回复就绪时原地替换；关着只发最终回复 */
+  showProgress: boolean;
   /** 允许发记忆标题 */
   memory: boolean;
 }

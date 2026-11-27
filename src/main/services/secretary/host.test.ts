@@ -80,6 +80,7 @@ interface Harness {
       replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
       silent: { conversationId: string }[];
       turns: { conversationId: string; kind: 'start' | 'end' }[];
+      tools: { conversationId: string; name: string }[];
       scheduleFired: { scheduleId: string; text: string }[];
     };
   };
@@ -120,6 +121,7 @@ function harness(
       replies: [],
       silent: [],
       turns: [],
+      tools: [],
       scheduleFired: [],
     },
   };
@@ -198,6 +200,9 @@ function harness(
       },
       onTurnEnd: (conversationId) => {
         state.contact.turns.push({ conversationId, kind: 'end' });
+      },
+      onToolCall: (conversationId, name) => {
+        state.contact.tools.push({ conversationId, name });
       },
       onTurnSilent: (conversationId) => {
         state.contact.silent.push({ conversationId });
@@ -2544,6 +2549,43 @@ describe('联系方式转发', () => {
     expect(h.state.contact.turns.filter((turn) => turn.kind === 'start')).toEqual([
       { conversationId: 'sec-1', kind: 'start' },
     ]);
+  });
+
+  it('助手新调用的工具按 id 只报一次：流式重复 upsert 不重复计步，下一轮重新计', () => {
+    const h = harness({ secretaryIds: ['sec-1'] });
+    const assistant = (content: unknown[]) =>
+      h.host.onAgentEvent(
+        {
+          type: 'message-upsert',
+          identity: { sessionId: 'sec-1', generation: 'g1' },
+          seq: 1,
+          index: 1,
+          message: { role: 'assistant', content },
+        } as unknown as RendererAgentEvent,
+        []
+      );
+    const call = (id: string, name: string) => ({ type: 'toolCall', id, name });
+
+    assistant([{ type: 'text', text: '我看看' }, call('t1', 'read')]);
+    assistant([{ type: 'text', text: '我看看' }, call('t1', 'read')]);
+    assistant([call('t1', 'read'), call('t2', 'bash')]);
+    assistant([call('t3', '   ')]);
+    expect(h.state.contact.tools).toEqual([
+      { conversationId: 'sec-1', name: 'read' },
+      { conversationId: 'sec-1', name: 'bash' },
+    ]);
+
+    h.host.onAgentEvent(
+      {
+        type: 'status',
+        identity: { sessionId: 'sec-1', generation: 'g1' },
+        seq: 2,
+        status: 'idle',
+      } as unknown as RendererAgentEvent,
+      []
+    );
+    assistant([call('t1', 'read')]);
+    expect(h.state.contact.tools).toHaveLength(3);
   });
 });
 

@@ -155,6 +155,7 @@ const PREF_KEYS = [
   'cardConfirm',
   'approvalRemote',
   'syncMirror',
+  'showProgress',
   'memory',
 ] as const;
 

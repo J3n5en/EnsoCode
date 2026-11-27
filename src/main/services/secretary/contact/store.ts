@@ -422,6 +422,7 @@ const PREF_KEYS = [
   'cardConfirm',
   'approvalRemote',
   'syncMirror',
+  'showProgress',
   'memory',
 ] as const;
 
@@ -447,6 +448,7 @@ export function channelPrefs(file: ContactFile, id: string): SecretaryContactCha
       cardConfirm: file.allowCardConfirm,
       approvalRemote: saved.approvalRemote ?? false,
       syncMirror: file.syncMirror,
+      showProgress: saved.showProgress ?? false,
       memory: file.allowMemory,
     };
   }
@@ -456,6 +458,7 @@ export function channelPrefs(file: ContactFile, id: string): SecretaryContactCha
     cardConfirm: saved.cardConfirm ?? false,
     approvalRemote: saved.approvalRemote ?? false,
     syncMirror: saved.syncMirror ?? false,
+    showProgress: saved.showProgress ?? false,
     memory: saved.memory ?? false,
   };
 }

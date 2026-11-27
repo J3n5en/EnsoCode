@@ -102,6 +102,8 @@ export interface ContactChannel {
   settle(peerId: string, messageId: string, text: string): Promise<ChannelSettle>;
   /** 原地重画（翻页、关注列表）；只在 caps.edit 时调用 */
   edit?(peerId: string, messageId: string, message: ChannelMessage): Promise<ChannelResult>;
+  /** 删掉自己发的一条（处理中占位）；只在 caps.edit 时调用 */
+  deleteMessage?(peerId: string, messageId: string): Promise<ChannelResult>;
   /** 「正在输入…」；只在 caps.typing 时调用 */
   typing(peerId: string, topicId?: string): Promise<ChannelResult>;
   /** 发图片；只在 caps.images 时调用 */

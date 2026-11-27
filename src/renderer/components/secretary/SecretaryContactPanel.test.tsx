@@ -44,6 +44,7 @@ function contactState(groups: SecretaryContactState['telegram']['groups']): Secr
           cardConfirm: true,
           approvalRemote: false,
           syncMirror: false,
+          showProgress: false,
           memory: false,
         },
       },
