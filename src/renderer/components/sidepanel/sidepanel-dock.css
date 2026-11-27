@@ -128,3 +128,26 @@
 .dv-tab.dv-tab-dragging {
   background: transparent !important;
 }
+
+/* 触屏（手机/iPad PWA）没有 hover：group-hover 包在 @media (hover: hover) 里永不命中，
+   overlay 的 × 一直 pointer-events:none；globals.css 的窄屏触屏规则还会把它强制显形，看得见点不着。
+   这里改成激活 tab 常显可点的 ×，只为它留右侧空间；其余 overlay（含 pin/unpin）不显示。
+   选择器权重须高过 globals.css 的 .opacity-0[class*="group-hover"]。 */
+@media (pointer: coarse) {
+  .enso-side-dock [data-side-tab] [data-side-tab-overlay] {
+    display: none;
+  }
+  .enso-side-dock [data-side-tab][data-active] {
+    padding-right: 1.5rem;
+  }
+  .enso-side-dock [data-side-tab][data-active] [data-side-tab-overlay] {
+    display: flex;
+  }
+  .enso-side-dock [data-side-tab][data-active] [data-side-tab-overlay] > :not(:last-child) {
+    display: none;
+  }
+  .enso-side-dock [data-side-tab][data-active] [data-side-tab-overlay] > :last-child {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

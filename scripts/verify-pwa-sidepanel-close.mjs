@@ -307,7 +307,14 @@ async function startServer() {
   delete env.ELECTRON_RUN_AS_NODE;
   const server = spawn(
     process.execPath,
-    [path.join(ROOT, 'out/server/index.js'), 'start', '--web-host', '127.0.0.1', '--web-port', String(webPort)],
+    [
+      path.join(ROOT, 'out/server/index.js'),
+      'start',
+      '--web-host',
+      '127.0.0.1',
+      '--web-port',
+      String(webPort),
+    ],
     { env, stdio: ['ignore', serverLog, serverLog], cwd: ROOT }
   );
   children.push(server);
@@ -323,7 +330,10 @@ async function startServer() {
     { label: 'enso-server web' }
   );
   const invite = await new Promise((resolve, reject) => {
-    const pair = spawn(process.execPath, [path.join(ROOT, 'out/server/index.js'), 'pair'], { env, cwd: ROOT });
+    const pair = spawn(process.execPath, [path.join(ROOT, 'out/server/index.js'), 'pair'], {
+      env,
+      cwd: ROOT,
+    });
     children.push(pair);
     let buf = '';
     const timer = setTimeout(() => reject(new Error('pair invite timeout')), 20_000);

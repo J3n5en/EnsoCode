@@ -62,10 +62,9 @@ function coarseDisplay(rules: Rule[], className: string): string | undefined {
     .find(Boolean);
 }
 
-const classOf = (markup: string, marker: string) =>
-  markup.match(new RegExp(`<[^>]*${marker}[^>]*class="([^"]*)"|<[^>]*class="([^"]*)"[^>]*${marker}`))
-    ?.slice(1)
-    .find(Boolean) ?? '';
+/** lucide 图标把自己的名字写进 class，按它取整串类名 */
+const classOf = (markup: string, icon: string) =>
+  markup.match(new RegExp(`class="([^"]*\\b${icon}\\b[^"]*)"`))?.[1] ?? '';
 
 describe('宽屏触屏：顶栏行收纳不依赖 hover', () => {
   it('+ 与全屏所在的收纳组在触屏常显', async () => {
