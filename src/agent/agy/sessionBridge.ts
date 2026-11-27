@@ -1,10 +1,16 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { type AgentToolResult, runToolCall } from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, JsonObject, ToolCall } from '@earendil-works/pi-ai';
+import {
+  type AssistantMessage,
+  getCurrentSystemPrompt,
+  type JsonObject,
+  type ToolCall,
+} from '@earendil-works/pi-ai';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { AGY_API_ID, AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { hostMcpTools, mcpContent } from '@shared/agy/hostTools';
+import { ensoSystemAppend } from '@shared/agy/systemAppend';
 import type { AgyToolCard, PromptMessage, TranslatorEffect } from '@shared/agy/types';
 import { emptyUsage } from '@shared/providers/piProviderTypes';
 import type { ApprovalMode } from '@shared/types/agentConstants';
@@ -161,6 +167,8 @@ export function attachAgyBridgeToSession(
 
   const bridge: AgySessionBridge = {
     async runTurn(input) {
+      // pi 这一轮的系统提示词（含 Enso 扩展追加的段）在上下文的 system 消息里；只取 Enso 自有段
+      const systemAppend = ensoSystemAppend(getCurrentSystemPrompt(input.messages));
       const runtime = await openBoundAgySession({
         ensoSessionId: options.ensoSessionId,
         cwd: options.cwd,
@@ -168,6 +176,7 @@ export function attachAgyBridgeToSession(
         clientVersion: options.clientVersion,
         resumeSessionId: resumable ? readAgySessionId(storeFile, options.ensoSessionId) : undefined,
         hostMcp: hostMcpFor(hostMcpTools(session.agent.state.tools)),
+        systemAppend,
       });
       live = runtime;
       hookAgySession();
@@ -181,6 +190,7 @@ export function attachAgyBridgeToSession(
           modelId: input.modelId,
           thinkingLevel: session.thinkingLevel,
           modelLabel: input.modelLabel,
+          systemAppend,
           signal: input.signal,
           ask: async (request, signal) => {
             const answer = await options.gate.ask(

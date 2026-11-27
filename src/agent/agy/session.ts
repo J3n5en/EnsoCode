@@ -60,6 +60,8 @@ export interface AgyTurnInput {
   thinkingLevel: string;
   modelLabel: string;
   compressed?: boolean;
+  /** 本轮 pi 系统提示词里的 EnsoCode 自有段（见 ensoSystemAppend）；和 agy 已有的不同时随指令重发 */
+  systemAppend?: string;
   signal?: AbortSignal;
   ask: (request: AgyPermissionRequest, signal: AbortSignal) => Promise<UserPermissionDecision>;
   onEvent?: (event: TranslatorEffect) => void;
@@ -134,6 +136,8 @@ export async function openAgySession(options: {
   readRoots: readonly string[];
   resumeSessionId?: string;
   hostMcp?: AgyHostMcp;
+  /** EnsoCode 自有系统提示词段：agy 通告能 append 时放进 session/new、session/resume 的 _meta */
+  systemAppend?: string;
   timeoutMs?: number;
 }): Promise<AgySession> {
   const cwd = realpathSync(options.cwd);
@@ -148,6 +152,10 @@ export async function openAgySession(options: {
   const served: string[] = [];
   let sentMode: AgyInteractionMode | undefined;
   let sentRuntime: string | undefined;
+  /** agy 这个会话已经拿到的 append：session 级 _meta 或某轮指令里发过的 */
+  let sentAppend: string | undefined;
+  /** session 级 _meta 里的 append：agy 压缩上下文也不丢 */
+  let metaAppend: string | undefined;
   let resumed = false;
   let grant: HostMcpGrant | undefined;
   let ensoTools: readonly string[] = [];
@@ -296,14 +304,24 @@ export async function openAgySession(options: {
       grant = await hostMcp.issue();
       ensoTools = [...hostMcp.tools];
     }
+    const append = options.systemAppend?.trim() ?? '';
+    const meta =
+      parsedInit.canAppendSystemPrompt && append
+        ? { antigravity: { systemPrompt: { append } } }
+        : undefined;
     const opened = await openProtocolSession(
       proc.rpc,
       cwd,
       options.resumeSessionId,
       timeout,
-      grant ? [grant.server] : []
+      grant ? [grant.server] : [],
+      meta
     );
     resumed = opened.resumed;
+    if (meta) {
+      sentAppend = append;
+      metaAppend = append;
+    }
     const setup = parseSessionSetup(opened.result);
     if (!setup) throw new Error('agy session returned no sessionId');
     phase = transitionAgySession(phase, {
@@ -373,7 +391,7 @@ export async function openAgySession(options: {
         release(orphans);
         if (phase.phase !== 'session-ready') throw new Error(`agy session is ${phase.phase}`);
         phase = transitionAgySession(phase, { type: 'prompt-started' });
-        const flags = instructionFlags(input, sentMode, sentRuntime);
+        const flags = instructionFlags(input, sentMode, sentRuntime, sentAppend, metaAppend);
         const blocks = buildAgyPrompt({
           messages: input.messages,
           interactionMode: flags.mode,
@@ -381,6 +399,7 @@ export async function openAgySession(options: {
           includeRuntimeInfo: flags.includeRuntimeInfo,
           modelLabel: input.modelLabel,
           ensoTools,
+          ...(flags.includeAppend ? { systemAppend: flags.append } : {}),
         });
         try {
           await alignSession(proc.rpc, sessionId, state, input);
@@ -400,6 +419,7 @@ export async function openAgySession(options: {
           if (slashCommand(input.messages)) return;
           if (flags.includeInstructions) sentMode = flags.mode;
           if (flags.includeRuntimeInfo) sentRuntime = flags.runtime;
+          if (flags.includeAppend) sentAppend = flags.append;
         });
       },
       steer(messages) {
@@ -490,13 +510,15 @@ async function openProtocolSession(
   cwd: string,
   resumeSessionId: string | undefined,
   timeoutMs: number,
-  mcpServers: AcpHttpMcpServer[]
+  mcpServers: AcpHttpMcpServer[],
+  meta: Record<string, unknown> | undefined
 ) {
   const signal = AbortSignal.timeout(timeoutMs);
+  const extra = meta ? { _meta: meta } : {};
   if (!resumeSessionId) {
     return {
       resumed: false,
-      result: await rpc.request('session/new', { cwd, mcpServers }, signal),
+      result: await rpc.request('session/new', { cwd, mcpServers, ...extra }, signal),
     };
   }
   try {
@@ -504,7 +526,7 @@ async function openProtocolSession(
       resumed: true,
       result: await rpc.request(
         'session/resume',
-        { sessionId: resumeSessionId, cwd, mcpServers },
+        { sessionId: resumeSessionId, cwd, mcpServers, ...extra },
         signal
       ),
     };
@@ -513,7 +535,7 @@ async function openProtocolSession(
       throw error;
     return {
       resumed: false,
-      result: await rpc.request('session/new', { cwd, mcpServers }, signal),
+      result: await rpc.request('session/new', { cwd, mcpServers, ...extra }, signal),
     };
   }
 }
@@ -573,14 +595,24 @@ async function alignSession(
 function instructionFlags(
   input: AgyTurnInput,
   sentMode: AgyInteractionMode | undefined,
-  sentRuntime: string | undefined
+  sentRuntime: string | undefined,
+  sentAppend: string | undefined,
+  metaAppend: string | undefined
 ) {
   const mode: AgyInteractionMode = input.planMode ? 'plan' : 'default';
   const runtime = runtimeInfoText(input.modelLabel);
+  const append = input.systemAppend?.trim() ?? '';
+  // 能 append 的 agy 在 session 级就有了；没给过或中途变了（预设、插件尾段），随下一轮指令发一次。
+  // 只在指令里发过的，上下文压缩后要重发
+  const includeAppend =
+    append !== '' &&
+    (append !== sentAppend || (input.compressed === true && append !== metaAppend));
   return {
     mode,
     runtime,
-    includeInstructions: input.compressed === true || sentMode !== mode,
+    append,
+    includeAppend,
+    includeInstructions: input.compressed === true || sentMode !== mode || includeAppend,
     includeRuntimeInfo: input.compressed === true || sentRuntime !== runtime,
   };
 }

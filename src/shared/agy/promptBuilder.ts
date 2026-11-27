@@ -98,6 +98,8 @@ export function buildAgyPrompt(input: {
   modelLabel: string;
   /** 本会话挂到 Host MCP 上的 Enso 工具名 */
   ensoTools?: readonly string[];
+  /** agy 不接 session 级 append、或 append 中途变了时，随指令一起发的 EnsoCode 系统提示词段 */
+  systemAppend?: string;
 }): AgyContentBlock[] {
   const user = lastUser(input.messages);
   const text = textOf(user?.content);
@@ -113,6 +115,7 @@ export function buildAgyPrompt(input: {
     const instructions = [
       input.interactionMode === 'plan' ? PLAN_INSTRUCTIONS : DEFAULT_INSTRUCTIONS,
       ensoToolsInstructions(input.ensoTools ?? []),
+      input.systemAppend?.trim(),
     ]
       .filter(Boolean)
       .join('\n\n');

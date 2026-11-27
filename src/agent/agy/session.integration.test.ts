@@ -253,6 +253,131 @@ describe('agy session against the fake CLI', () => {
   });
 });
 
+describe('agy session carries the Enso system append', () => {
+  const APPEND = '# Rich visualizations\n- reply with an ```html-viz fenced block';
+
+  async function open(env: Record<string, string>, extra: { resumeSessionId?: string } = {}) {
+    const dir = tempDir();
+    const log = path.join(dir, 'log');
+    const session = await openAgySession({
+      command: process.execPath,
+      args: [fakePath],
+      cwd: dir,
+      env: { ...process.env, FAKE_AGY_LOG: log, ...env },
+      clientVersion: '0.3.14',
+      readRoots: [dir],
+      timeoutMs: 8_000,
+      systemAppend: APPEND,
+      ...extra,
+    });
+    openSessions.push(session);
+    const lines = () =>
+      readFileSync(log, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { method: string; params?: Record<string, unknown> });
+    const opened = (method: string) => lines().filter((line) => line.method === method);
+    // 假 CLI 对 session/prompt 记两行（收到时、开始回答时）：相邻重复只算一次
+    const prompts = () =>
+      opened('session/prompt')
+        .map((line) =>
+          ((line.params?.prompt ?? []) as Array<{ text?: string }>)
+            .map((block) => block.text ?? '')
+            .join('\n')
+        )
+        .filter((text, index, all) => index === 0 || all[index - 1] !== text);
+    const turn = (text: string, systemAppend: string | undefined = APPEND) =>
+      session.turn({
+        messages: [{ role: 'user', content: text }],
+        planMode: false,
+        approvalMode: 'full',
+        workspaceRoot: dir,
+        modelId: 'default',
+        thinkingLevel: 'off',
+        modelLabel: 'default',
+        ask: async () => 'allow',
+        systemAppend,
+      });
+    return { session, opened, prompts, turn };
+  }
+
+  const metaOf = (params: Record<string, unknown> | undefined) => params?._meta;
+  const appendMeta = { antigravity: { systemPrompt: { append: APPEND } } };
+
+  it('sends it as session/new _meta when agy can append, and not again in the prompt', async () => {
+    const { opened, prompts, turn } = await open({});
+    expect(metaOf(opened('session/new')[0]?.params)).toEqual(appendMeta);
+    await turn('one');
+    await turn('two');
+    expect(prompts()[0]).toContain('<enso_instructions>');
+    for (const prompt of prompts()) expect(prompt).not.toContain('html-viz');
+  });
+
+  it('sends it on session/resume', async () => {
+    const { session, opened } = await open({}, { resumeSessionId: 'saved' });
+    expect(session.resumed).toBe(true);
+    expect(metaOf(opened('session/resume')[0]?.params)).toEqual(appendMeta);
+    expect(opened('session/new')).toHaveLength(0);
+  });
+
+  it('sends it on the session/new fallback when resume fails', async () => {
+    const { session, opened } = await open(
+      { FAKE_AGY_RESUME_FAIL: '1' },
+      { resumeSessionId: 'gone' }
+    );
+    expect(session.resumed).toBe(false);
+    expect(opened('session/resume')).toHaveLength(1);
+    expect(metaOf(opened('session/new')[0]?.params)).toEqual(appendMeta);
+  });
+
+  it('falls back to the first prompt instructions when agy cannot append', async () => {
+    const { opened, prompts, turn } = await open({ FAKE_AGY_NO_APPEND: '1' });
+    expect(metaOf(opened('session/new')[0]?.params)).toBeUndefined();
+    await turn('one');
+    await turn('two');
+    const [first, second] = prompts();
+    const start = first?.indexOf('<enso_instructions>') ?? -1;
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(first?.indexOf('html-viz')).toBeGreaterThan(start);
+    expect(first?.indexOf('html-viz')).toBeLessThan(first?.indexOf('</enso_instructions>') ?? -1);
+    expect(second).not.toContain('html-viz');
+    expect(second).not.toContain('<enso_instructions>');
+  });
+
+  it('sends no _meta when there is nothing to append', async () => {
+    const dir = tempDir();
+    const log = path.join(dir, 'log');
+    const session = await openAgySession({
+      command: process.execPath,
+      args: [fakePath],
+      cwd: dir,
+      env: { ...process.env, FAKE_AGY_LOG: log },
+      clientVersion: '0.3.14',
+      readRoots: [dir],
+      timeoutMs: 8_000,
+      systemAppend: '',
+    });
+    openSessions.push(session);
+    const opened = readFileSync(log, 'utf8')
+      .split('\n')
+      .find((line) => line.includes('"method":"session/new"'));
+    expect(JSON.parse(opened ?? '{}').params._meta).toBeUndefined();
+  });
+
+  it('resends a changed append once inside the next prompt instructions, without reopening', async () => {
+    const { opened, prompts, turn } = await open({});
+    await turn('one');
+    const changed = `${APPEND}\n\n<preset_tail>\nnew tail\n</preset_tail>`;
+    await turn('two', changed);
+    await turn('three', changed);
+    const [, second, third] = prompts();
+    expect(second).toContain('<enso_instructions>');
+    expect(second).toContain('new tail');
+    expect(third).not.toContain('new tail');
+    expect(opened('session/new')).toHaveLength(1);
+  });
+});
+
 describe('agy session mid-turn steer and background work', () => {
   async function open(env: Record<string, string>) {
     const dir = tempDir();
