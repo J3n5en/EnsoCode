@@ -530,7 +530,7 @@ export function SettingsContent({
             {activeCategory === 'conversation' && <ConversationSettings revealRowId={flashRowId} />}
             {activeCategory === 'terminal' && <TerminalSettings />}
             {activeCategory === 'runtime' && <RuntimeSettings />}
-            {activeCategory === 'providers' && <ProvidersSettings />}
+            {activeCategory === 'providers' && <ProvidersSettings revealRowId={flashRowId} />}
             {activeCategory === 'skills' && <SkillsSettings />}
             {activeCategory === 'plugins' && (
               <EnsoPluginsSettings

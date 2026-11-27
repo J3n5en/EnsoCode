@@ -121,7 +121,7 @@ function ProviderFetchFailure({
   );
 }
 
-export function ProvidersSettings() {
+export function ProvidersSettings({ revealRowId }: { revealRowId?: string | null } = {}) {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
   const materializedProviders = useMaterializedProviders();
@@ -306,7 +306,6 @@ export function ProvidersSettings() {
         <TitleSummaryPicker />
         <ApprovalReviewerPicker />
       </SettingsSection>
-      <GitCommitSettings />
       <VirtualModelsSettings />
       <SubagentModelsSettings />
 
@@ -506,6 +505,7 @@ export function ProvidersSettings() {
           })
         )}
       </SettingsSection>
+      <GitCommitSettings revealRowId={revealRowId} />
 
       <LocalImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <ProviderSetupWizard open={setupOpen} onOpenChange={setSetupOpen} />
