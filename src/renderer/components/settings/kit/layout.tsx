@@ -225,6 +225,8 @@ export interface SettingsRowProps {
   leading?: React.ReactNode;
   indent?: boolean;
   interactive?: boolean;
+  /** stack：标签一行在上，控件独占下方整行（多行文本框用，免得被收缩宽度压成窄条） */
+  layout?: 'row' | 'stack';
   children?: React.ReactNode;
 }
 
@@ -236,6 +238,7 @@ export function SettingsRow({
   leading,
   indent = false,
   interactive = false,
+  layout = 'row',
   children,
 }: SettingsRowProps) {
   const base = React.useId();
@@ -250,45 +253,65 @@ export function SettingsRow({
     [base, description, markSaved]
   );
   const trailing = status || children;
+  const head = (
+    <div className="flex min-w-[min(100%,12rem)] flex-1 items-center gap-2">
+      {leading}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <label
+            id={context.labelId}
+            htmlFor={context.controlId}
+            className={cn('block text-[13px] leading-5', !indent && 'font-medium')}
+          >
+            {label}
+          </label>
+          {saved && <SettingsSaved />}
+        </div>
+        {description && (
+          // div：说明里可能放额度条这类块级内容
+          <div
+            id={context.descriptionId}
+            className="mt-0.5 text-[12px] text-muted-foreground leading-[18px]"
+          >
+            {description}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+  const stack = layout === 'stack';
   return (
     <RowContext.Provider value={context}>
       <div
         data-slot="settings-row"
         data-settings-row={rowId}
         className={cn(
-          'flex flex-wrap items-center gap-x-6 gap-y-2 transition-colors duration-150',
+          'flex gap-x-6 gap-y-2 transition-colors duration-150',
+          stack ? 'flex-col' : 'flex-wrap items-center',
           indent
             ? 'min-h-[44px] py-2.5 pl-10 pr-4 max-sm:pl-7 max-sm:pr-3'
             : 'min-h-(--settings-row-min) px-4 py-3 max-sm:px-3',
           interactive && 'hover:bg-accent/35'
         )}
       >
-        <div className="flex min-w-[min(100%,12rem)] flex-1 items-center gap-2">
-          {leading}
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <label
-                id={context.labelId}
-                htmlFor={context.controlId}
-                className={cn('block text-[13px] leading-5', !indent && 'font-medium')}
-              >
-                {label}
-              </label>
-              {saved && <SettingsSaved />}
+        {stack ? (
+          <>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              {head}
+              {status && (
+                <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+                  {status}
+                </div>
+              )}
             </div>
-            {description && (
-              // div：说明里可能放额度条这类块级内容
-              <div
-                id={context.descriptionId}
-                className="mt-0.5 text-[12px] text-muted-foreground leading-[18px]"
-              >
-                {description}
-              </div>
-            )}
-          </div>
-        </div>
-        {trailing && (
-          <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+            {children && <div className="w-full min-w-0">{children}</div>}
+          </>
+        ) : (
+          head
+        )}
+        {!stack && trailing && (
+          // 收缩宽度的控件区里放 field-sizing-content 的多行文本框会被压成窄条：有文本框就换到整行
+          <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 has-[[data-slot=textarea-control]]:ml-0 has-[[data-slot=textarea-control]]:w-full">
             {status}
             {children}
           </div>
