@@ -120,6 +120,24 @@ export const IPC_CHANNELS = {
   SECRETARY_OVERVIEW: 'secretary:overview',
   /** main → 主界面 renderer：深链 enso://secretary 要求选中某个会话，可再定位到某张确认卡 */
   SECRETARY_OPEN_CONVERSATION: 'secretary:open-conversation',
+  /** 列出某个秘书的本机触发器及全局本地监听服务状态 */
+  SECRETARY_TRIGGERS_LIST: 'secretary:triggers-list',
+  /** main → renderer：本机触发器或监听服务状态变化通知 */
+  SECRETARY_TRIGGERS_CHANGED: 'secretary:triggers-changed',
+  /** 新建触发器（返回一次性 token 明文） */
+  SECRETARY_TRIGGER_CREATE: 'secretary:trigger-create',
+  /** 更新触发器配置或启停开关 */
+  SECRETARY_TRIGGER_UPDATE: 'secretary:trigger-update',
+  /** 删除触发器及其加密 token */
+  SECRETARY_TRIGGER_REMOVE: 'secretary:trigger-remove',
+  /** 重置触发器 token（返回新 token 明文） */
+  SECRETARY_TRIGGER_ROTATE_TOKEN: 'secretary:trigger-rotate-token',
+  /** 用户显式查看/复制触发器 token */
+  SECRETARY_TRIGGER_REVEAL_TOKEN: 'secretary:trigger-reveal-token',
+  /** 修改本机触发监听端口（127.0.0.1） */
+  SECRETARY_TRIGGER_SET_PORT: 'secretary:trigger-set-port',
+  /** 发送一条测试触发事件以验证唤醒链路 */
+  SECRETARY_TRIGGER_TEST: 'secretary:trigger-test',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

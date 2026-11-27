@@ -4663,6 +4663,47 @@ export const zhTranslations: Record<string, string> = {
   'Delete SSH connection?': '删除 SSH 连接？',
   Metric: '指标',
   'Add project ({{shortcut}})': '添加项目（{{shortcut}}）',
+  'Local triggers': '本机触发器',
+  'Local triggers ({{n}})': '本机触发器（{{n}}）',
+  'Loopback-only (127.0.0.1) HTTP POST & WebSocket endpoints for local scripts and watchers to wake this secretary. Starts automatically only when at least one trigger is enabled.':
+    '仅限本机（127.0.0.1）的 HTTP POST 与 WebSocket 入口，供本地脚本和监听程序实时唤醒当前秘书。仅在有启用中的触发器时自动监听。',
+  'New trigger': '新建触发器',
+  'Create trigger': '创建触发器',
+  'Local listener port': '本机监听端口',
+  'Listening on 127.0.0.1:{{port}} ({{n}} active)':
+    '正在监听 127.0.0.1:{{port}}（已启用 {{n}} 条）',
+  'Starts automatically on 127.0.0.1 when any trigger is enabled.':
+    '启用任意一条触发器时自动在 127.0.0.1 上启动监听。',
+  'Listen failed': '监听失败',
+  'Port must be 0 (random) or between 1024 and 65535.': '端口必须为 0（随机）或 1024–65535。',
+  'Trigger name is required.': '请填写触发器名称。',
+  'Coalesce window must be between 0 and 60 seconds.': '合并窗口需在 0 到 60 秒之间。',
+  'e.g. WeChat after-sales watcher': '例如：微信售后群监听',
+  'Coalesce {{s}}s': '合并 {{s}} 秒',
+  'Immediate delivery': '立即投递',
+  'Fired {{n}} times · Last {{time}}': '已触发 {{n}} 次 · 最近 {{time}}',
+  'Never fired': '尚未触发',
+  'No local triggers yet.': '还没有本机触发器。',
+  'HTTP POST URL': 'HTTP POST 地址',
+  'WebSocket URL': 'WebSocket 地址',
+  'Bearer token': '认证 Token',
+  'Pass via Authorization: Bearer <token> or X-Enso-Token header.':
+    '通过 Authorization: Bearer <token> 或 X-Enso-Token 请求头携带。',
+  'Copy token': '复制 Token',
+  Rotate: '重置',
+  'Coalesce window (seconds)': '合并窗口（秒）',
+  'Combine consecutive events within this window into one wake-up (0 = immediate).':
+    '将窗口内连续到达的事件合并为一次唤醒（填 0 表示立即投递）。',
+  'Trigger instruction': '预设处理说明',
+  'Trusted rule shown outside untrusted event payload so the secretary knows how to react.':
+    '位于不可信事件正文之外的用户规则，告诉秘书收到事件后应该怎么处理。',
+  'Optional rule telling the secretary how to handle incoming events.':
+    '可选：告诉秘书收到该触发器事件后如何处理。',
+  'Optional handling rule for this trigger': '可选：填写收到事件后的处理说明',
+  'Send test event': '发送测试事件',
+  'Test event queued': '测试事件已入队',
+  'Trigger: {{summary}}': '触发：{{summary}}',
+  Trigger: '触发',
 };
 
 export function normalizeLocale(input?: string): Locale {

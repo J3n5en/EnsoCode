@@ -27,6 +27,11 @@ const rendererServer = rendererDevServer();
 
 export default defineConfig({
   main: {
+    // ws 打进产物后，可选的 bufferutil / utf-8-validate 被换成空对象，关掉防止首个入站帧崩溃
+    define: {
+      'process.env.WS_NO_BUFFER_UTIL': '"1"',
+      'process.env.WS_NO_UTF_8_VALIDATE': '"1"',
+    },
     build: {
       // Agent utilityProcess 走 `?modulePath` isolated build；Main 保持官方单入口，
       // 避免手工 multi-input 把无 export 的启动入口 tree-shake 成 0B facade。

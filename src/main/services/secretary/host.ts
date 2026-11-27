@@ -204,6 +204,8 @@ export interface SecretaryHost {
   tick(now?: number): void;
   /** 立刻投递 outbox：用户刚点了确认，别等下一分钟的 tick */
   flushNow(now?: number): void;
+  /** 按指定时间点排一次投递（触发器防抖合并用）；不传或已到期时立即投递 */
+  scheduleFlush(at?: number, now?: number): void;
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
   /** 冷启动没能按恢复清单接着跑这个会话：照常报失败 */
   onRestartResumeFailed(conversationId: string, error: string, now?: number): void;
@@ -1714,6 +1716,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
     flushNow(now = ports.now()) {
       if (!ports.enabled()) return;
+      flush(now);
+    },
+
+    scheduleFlush(at?: number, now = ports.now()) {
+      if (!ports.enabled()) return;
+      if (at !== undefined && at > now) {
+        armCoalesce(at, now);
+        return;
+      }
       flush(now);
     },
 

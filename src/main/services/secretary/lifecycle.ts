@@ -18,6 +18,7 @@ import {
 } from './secretaries';
 import { SecretaryStore } from './store';
 import { forgetSecretaryHandlers } from './tools';
+import { TriggerStore } from './triggers/store';
 
 /** default 秘书的目录就是 userData/secretary 本身：删它只删属于它的文件，全局文件留着 */
 const DEFAULT_OWNED_FILES = [
@@ -27,6 +28,8 @@ const DEFAULT_OWNED_FILES = [
   'dispatch.json',
   'todos.json',
   'schedules.json',
+  'triggers.json',
+  'trigger-tokens.bin',
   'audit.jsonl',
   'audit.1.jsonl',
   'daily.jsonl',
@@ -82,6 +85,9 @@ export async function deletePreview(
       .filter((todo) => todo.doneAt === undefined)
       .map((todo) => ({ id: todo.id, text: todo.text })),
     schedules: store.schedules().map((schedule) => ({ id: schedule.id, name: schedule.name })),
+    triggers: new TriggerStore(ctx.dir)
+      .list()
+      .map((trigger) => ({ id: trigger.id, name: trigger.name })),
     contacts: contact?.bindings() ?? [],
     memories: await memoryCount(ctx.projectId),
   };

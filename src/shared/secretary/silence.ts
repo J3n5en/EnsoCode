@@ -19,11 +19,13 @@ export function messageText(message: { content?: unknown }): string {
 
 /** 去掉回传包裹后没有别的正文：这是系统注入，不是用户打的字 */
 export function isPureSessionUpdate(text: string): boolean {
-  if (!/<session-updates>|<secretary-schedule>|<secretary-message>/.test(text)) return false;
+  if (!/<session-updates>|<secretary-schedule>|<secretary-message>|<secretary-trigger>/.test(text))
+    return false;
   const stripped = text
     .replace(/<session-updates>[\s\S]*?<\/session-updates>/g, '')
     .replace(/<secretary-schedule>[\s\S]*?<\/secretary-schedule>/g, '')
     .replace(/<secretary-message>[\s\S]*?<\/secretary-message>/g, '')
+    .replace(/<secretary-trigger>[\s\S]*?<\/secretary-trigger>/g, '')
     .trim();
   return stripped.length === 0;
 }

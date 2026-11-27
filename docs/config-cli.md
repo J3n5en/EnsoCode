@@ -123,7 +123,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 - **只监听本机**：macOS 和 Linux 使用 Unix domain socket `<userData>/cli/cli.sock`，目录权限 0700，socket 权限 0600；Windows 使用按 userData 区分的命名管道 `\\.\pipe\enso-code-cli-<hash>`。不开任何 TCP 端口。
 - **token**：每次启动生成 32 字节随机 token，写入 `<userData>/cli-token`（0600）。每个请求都必须带 token，Main 用常量时间比较，校验失败一律返回 `unauthorized`。
-- **只做 config**：socket 只接受 `cmd: "config"` 的 get、set、list、reload、schema（只读，不含值），不提供插件安装、会话读写或执行命令。
+- **只做 config 与 trigger**：socket 只接受 `cmd: "config"`（get/set/list/reload/schema）和 `cmd: "trigger"`（秘书本机触发器管理），不提供插件安装、会话读写或执行命令。
 - **密钥不出 Main**：所有读路径都会递归脱敏，密钥类键名的值替换为 `***`。
 - **请求上限**：单个连接超过 1 MiB 会被断开。
 - **退出清理**：应用退出（`before-quit`）时关闭监听，并删除 socket 文件和 `cli-token`。
@@ -138,3 +138,25 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 4. **取值校验**：有枚举或格式约束的字段，在 `validateField` 中补校验。
 5. **单测**：在 `src/main/services/configCli/server.test.ts` 补一条断言，新字段可被 `set` 并生效，或按上述规则被拒（`schema` 中对应 `writable` / `secret` / `requiresRestart` 正确）。
 6. **文档**：本文黑名单表或「热生效与需重启」列表随之更新。
+
+## 秘书本机触发器（`enso trigger`）
+
+让本机脚本、监听程序或编码会话 AI 直接为指定秘书创建、配置并测试仅限 `127.0.0.1` 的 HTTP POST + WebSocket 唤醒通道，不需要手动点设置页：
+
+```bash
+enso trigger help                                         # 离线打印用法与 HTTP/WS 协议
+enso trigger list [--secretary <id|name>]                 # 列出触发器与本机监听状态（不含 token）
+enso trigger create --name "微信售后群" \
+  [--secretary 瑞花] \
+  [--instruction "收到售后消息后核对订单并汇总"] \
+  [--coalesce-ms 3000]                                    # 创建并自动启监听，返回 URL 与一次性 token
+enso trigger update <triggerId> --enabled false           # 启停、改名、改说明或改合并窗口
+enso trigger rotate-token <triggerId>                     # 重置并返回新 token
+enso trigger remove <triggerId>                           # 删除触发器与加密 token
+enso trigger port 17654                                   # 修改 127.0.0.1 监听端口（1024-65535 或 0）
+enso trigger test <triggerId> [--text "测试"]              # 立刻入队一条测试事件验证唤醒
+```
+
+- `--secretary` 支持填秘书 id（如 `default`）或名字（如 `瑞花`，大小写不敏感）；本机只有一个秘书时可省略。
+- 创建触发器后即可通过 `POST http://127.0.0.1:<port>/v1/triggers/<id>`（带 `Authorization: Bearer <token>`）或 `ws://127.0.0.1:<port>/v1/triggers/<id>/ws` 推送事件，自动走秘书 `outbox` 队列完成 `eventId` 幂等去重、防抖合并与失败重投。
+- 秘书自身也在工具白名单中拥有 `trigger_list`、`trigger_create`、`trigger_update`、`trigger_remove`、`trigger_rotate_token`、`trigger_test`（同事消息降权回合禁止写操作），可直接由用户在对话中指挥配置。

@@ -83,6 +83,7 @@ export function SecretaryDeleteDialog({
     preview.sessions.length +
       preview.todos.length +
       preview.schedules.length +
+      (preview.triggers?.length ?? 0) +
       preview.contacts.length +
       preview.memories ===
       0;
@@ -125,6 +126,10 @@ export function SecretaryDeleteDialog({
             <PreviewList
               title={t('Schedules ({{n}})', { n: preview.schedules.length })}
               items={preview.schedules.map((schedule) => schedule.name)}
+            />
+            <PreviewList
+              title={t('Local triggers ({{n}})', { n: preview.triggers?.length ?? 0 })}
+              items={(preview.triggers ?? []).map((trigger) => trigger.name)}
             />
             <PreviewList
               title={t('Contact bindings ({{n}})', { n: preview.contacts.length })}

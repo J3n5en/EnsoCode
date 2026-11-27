@@ -13,6 +13,7 @@ import { scheduleHandlersFor } from './schedules';
 import { type SecretaryContext, secretaryContext } from './secretaries';
 import { skillHandlersFor } from './skills';
 import { SecretaryStore } from './store';
+import { createSecretaryTriggerHandlers } from './triggers/tools';
 
 export type SecretaryOpResult = { ok: true; result: unknown } | { ok: false; error: string };
 
@@ -48,6 +49,7 @@ export function secretaryHandlersFor(
     ...cleanupHandlersFor(ctx, profile),
     ...createSecretaryDispatchHandlers(profile ? { ...dispatchPorts, profile } : dispatchPorts),
     ...scheduleHandlersFor(ctx),
+    ...createSecretaryTriggerHandlers(ctx, { restricted: profile !== undefined }),
     ...githubOpsHandlersFor(ctx, profile),
     ...profileHandlersFor(ctx),
     ...skillHandlersFor(ctx),
