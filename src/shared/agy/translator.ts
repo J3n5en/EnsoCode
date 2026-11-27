@@ -1,6 +1,7 @@
 import { ensoProxiedTool, isEnsoMcpCardName } from './hostTools';
 import { cardArgs, toolNameFromUpdate } from './tools';
 import type {
+  AgyContextUsage,
   AgyPlanItem,
   AgyToolCard,
   AgyToolStatus,
@@ -209,7 +210,19 @@ export function reduceAgyUpdate(
     }
     return { state: { ...state, plan: items }, effects: [{ type: 'plan', items }] };
   }
+  if (kind === 'usage_update') {
+    const context = contextOf(recordUpdate);
+    return { state: context ? { ...state, context } : state, effects: [] };
+  }
   return { state, effects: [] };
+}
+
+/** usage_update 的 used 是 agy 当前上下文占用，size 是它的窗口；坏值不记 */
+function contextOf(update: Record<string, unknown>): AgyContextUsage | undefined {
+  const { used, size } = update;
+  if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) return undefined;
+  const validSize = typeof size === 'number' && Number.isFinite(size) && size > 0;
+  return validSize ? { used, size } : { used };
 }
 
 /** agy `stopReason` → pi。end_turn 正常，max_tokens 中断，取消单独标，其余失败。 */

@@ -61,7 +61,14 @@ describe('agy session against the fake CLI', () => {
 
     expect(result.text).toBe('Hello from agy');
     expect(result.thinking).toBe('thinking');
-    expect(result.usage).toMatchObject({ input: 5, cacheRead: 2, output: 4 });
+    // 上下文占用取 usage_update.used，不取 PromptResponse.usage 的整轮累加
+    expect(result.usage).toEqual({
+      input: 7,
+      output: 4,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 7,
+    });
     expect(events).toEqual(
       expect.arrayContaining([
         { type: 'text', delta: 'Hello from agy' },
@@ -429,7 +436,8 @@ describe('agy session mid-turn steer and background work', () => {
     expect(steered).toBe(true);
     expect(first.stopReason).toBe('stop');
     expect(first.text).toBe('Once upon a time.');
-    expect(first.usage.totalTokens).toBe(0);
+    // 被插话的段没有 PromptResponse.usage，但以 usage_update(10) 收口
+    expect(first.usage).toMatchObject({ input: 10, output: 0, totalTokens: 10 });
 
     const secondEvents: unknown[] = [];
     const second = await session.turn(
@@ -444,7 +452,7 @@ describe('agy session mid-turn steer and background work', () => {
       )
     );
     expect(second.text).toBe('steered');
-    expect(second.usage).toMatchObject({ input: 50, output: 40, totalTokens: 90 });
+    expect(second.usage).toMatchObject({ input: 12, cacheRead: 0, output: 40, totalTokens: 12 });
     expect(secondEvents).toEqual([{ type: 'text', delta: 'steered' }]);
     const sent = prompts();
     expect(sent).toHaveLength(2);
@@ -455,6 +463,21 @@ describe('agy session mid-turn steer and background work', () => {
   it('does not steer when no turn is running', async () => {
     const { session } = await open({ FAKE_AGY_SCRIPT: 'steer' });
     expect(session.steer([{ role: 'user', content: 'late' }])).toBe(false);
+  });
+
+  it('reports the context agy is at, not the sum of its model calls in the turn', async () => {
+    const { session, dir } = await open({
+      FAKE_AGY_INPUT_TOKENS: '5357142',
+      FAKE_AGY_CONTEXT_USED: '30000',
+    });
+    const result = await session.turn(input(dir, [{ role: 'user', content: 'big task' }]));
+    expect(result.usage).toEqual({
+      input: 30_000,
+      output: 4,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 30_000,
+    });
   });
 
   it('keeps the turn open past end_turn while a background command runs, and takes its follow-up reply', async () => {

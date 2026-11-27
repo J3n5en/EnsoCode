@@ -282,7 +282,9 @@ async function handlePrompt(id, params) {
   }
   if (token !== generation) return;
   promptId = null;
-  // FAKE_AGY_INPUT_TOKENS：报一个大的上下文占用，好让 pi 的阈值压缩真的跑完
+  // agy 每段回复以 usage_update 收口：used 是当前上下文占用（FAKE_AGY_CONTEXT_USED）
+  usageUpdate(sessionId, Number(process.env.FAKE_AGY_CONTEXT_USED || 7));
+  // FAKE_AGY_INPUT_TOKENS：PromptResponse.usage 是整轮内部多次模型调用的累加，可以远超窗口
   const inputTokens = Number(process.env.FAKE_AGY_INPUT_TOKENS || 3);
   respond(id, {
     stopReason: 'end_turn',

@@ -63,6 +63,35 @@ describe('background work after end_turn', () => {
 });
 
 describe('reduceAgyUpdate', () => {
+  it('keeps the context size from the latest usage_update, and ignores malformed ones', () => {
+    const first = reduceAgyUpdate(emptyTranslatorState(), {
+      sessionUpdate: 'usage_update',
+      used: 30_000,
+      size: 1_048_576,
+    });
+    expect(first.effects).toEqual([]);
+    expect(first.state.context).toEqual({ used: 30_000, size: 1_048_576 });
+    const later = reduceAgyUpdate(first.state, {
+      sessionUpdate: 'usage_update',
+      used: 31_000,
+      size: 250_000,
+    });
+    expect(later.state.context).toEqual({ used: 31_000, size: 250_000 });
+    for (const bad of [
+      { sessionUpdate: 'usage_update' },
+      { sessionUpdate: 'usage_update', used: '5', size: 10 },
+      { sessionUpdate: 'usage_update', used: -1, size: 10 },
+      { sessionUpdate: 'usage_update', used: Number.NaN },
+    ]) {
+      expect(reduceAgyUpdate(later.state, bad).state.context).toEqual(later.state.context);
+    }
+    // size 缺省时仍记 used
+    expect(
+      reduceAgyUpdate(emptyTranslatorState(), { sessionUpdate: 'usage_update', used: 12 }).state
+        .context
+    ).toEqual({ used: 12 });
+  });
+
   it('appends text and thinking, and projects native tool names', () => {
     let state = emptyTranslatorState();
     const text = reduceAgyUpdate(state, {

@@ -258,7 +258,29 @@ export function attachAgyBridgeToSession(
         ? boundBridge.run(bridge, () => stream.apply(agent, args))
         : stream.apply(agent, args);
   }
+  disableAutoCompactionForAgy(session);
   return bridge;
+}
+
+const guardedSettings = new WeakSet<object>();
+
+/**
+ * agy 自己管上下文，Enso 每轮只把最后一条 user 发给它：压 Enso 的记录对 agy 毫无作用，
+ * 只会多一条「已压缩」或一次失败提示。会话模型是 agy 时 pi 的自动压缩（阈值、溢出、截断重试、
+ * 发请求前的阈值检查）一律不跑；手动压缩不看 enabled，照常经 compactGuard 走本地摘要。
+ * 按模型判断：会话中途切走 agy，自动压缩随即恢复。
+ */
+function disableAutoCompactionForAgy(session: AgentSession): void {
+  const settings = session.settingsManager as AgentSession['settingsManager'] | undefined;
+  if (typeof settings?.getCompactionSettings !== 'function' || guardedSettings.has(settings)) {
+    return;
+  }
+  guardedSettings.add(settings);
+  const read = settings.getCompactionSettings.bind(settings);
+  settings.getCompactionSettings = ((model) => {
+    const value = read(model);
+    return model?.provider === AGY_PROVIDER_ID ? { ...value, enabled: false } : value;
+  }) as typeof settings.getCompactionSettings;
 }
 
 /**

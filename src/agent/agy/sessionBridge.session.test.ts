@@ -612,7 +612,8 @@ it('splits a mid-turn steer into its own user message and answer, as pi expects'
   expect(shape(session.messages.filter((m) => (m as Row).role !== 'system'))).toEqual(expected);
   const rows = persisted(file) as Array<Row & { usage?: { totalTokens: number } }>;
   expect(JSON.stringify(rows[2]?.content)).toContain('Stop. Reply steered');
-  expect(rows[3]?.usage?.totalTokens).toBe(90);
+  // 第二段以 usage_update(12) 收口：占用是 agy 当前上下文，不是 PromptResponse 的整轮累加 90
+  expect(rows[3]?.usage?.totalTokens).toBe(12);
 });
 
 it('keeps the turn open for a background command and lands its follow-up in the same turn', async () => {
