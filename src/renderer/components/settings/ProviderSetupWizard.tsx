@@ -1,6 +1,6 @@
 import { isClassifierOnlyProvider, mergeProviderDefinitions } from '@shared/providerCatalog';
 import type { OauthAccount, OauthProviderInfo } from '@shared/types';
-import { ArrowLeft, BadgeCheck, KeyRound, Puzzle } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, KeyRound, Puzzle, SquareTerminal } from 'lucide-react';
 import * as React from 'react';
 import { refreshOauthCredentialState } from '@/components/oauth/OauthCredentialBootstrap';
 import { OauthLoginStep } from '@/components/oauth/OauthLoginStep';
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import { AgyCliSettings } from './AgyCliSettings';
 import { autoProviderName, OauthProviderAccounts } from './OauthProvidersDialog';
 import { ProviderApiForm } from './ProviderApiForm';
 import { resolveProviderLogo } from './providerLogos';
@@ -28,13 +29,14 @@ interface ProviderSetupWizardProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type WizardStep = 'provider' | 'method' | 'oauth' | 'api-key';
+type WizardStep = 'provider' | 'method' | 'oauth' | 'api-key' | 'agy';
 
 const WIZARD_STEP_ORDER: Record<WizardStep, number> = {
   provider: 0,
   method: 1,
   oauth: 2,
   'api-key': 2,
+  agy: 1,
 };
 
 export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardProps) {
@@ -175,7 +177,7 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
 
   const back = () => {
     flow.reset();
-    if (step === 'method') {
+    if (step === 'method' || step === 'agy') {
       setStep('provider');
     } else {
       setStep('method');
@@ -200,9 +202,11 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
           <DialogDescription>
             {step === 'provider'
               ? t('Choose a provider first. You will select subscription or API Key next.')
-              : selected
-                ? t(selected.label)
-                : undefined}
+              : step === 'agy'
+                ? t('agy cli (experimental)')
+                : selected
+                  ? t(selected.label)
+                  : undefined}
           </DialogDescription>
         </DialogHeader>
 
@@ -281,7 +285,30 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                         </button>
                       );
                     })}
+                    <button
+                      type="button"
+                      className="flex min-w-0 items-center gap-3 rounded-md bg-muted/40 px-3 py-3 text-left transition-colors hover:bg-accent"
+                      onClick={() => setStep('agy')}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
+                        <SquareTerminal className="h-4 w-4 text-muted-foreground" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">
+                          {t('agy cli (experimental)')}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t('Uses the agy already signed in on this machine')}
+                        </span>
+                      </span>
+                    </button>
                   </div>
+                </DialogPanel>
+              )}
+
+              {page.step === 'agy' && (
+                <DialogPanel bare>
+                  <AgyCliSettings />
                 </DialogPanel>
               )}
 
@@ -377,6 +404,7 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
 
               {(page.step === 'provider' ||
                 page.step === 'method' ||
+                page.step === 'agy' ||
                 (page.step === 'oauth' &&
                   flow.state.phase !== 'running' &&
                   flow.state.phase !== 'error')) && (

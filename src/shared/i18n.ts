@@ -1063,7 +1063,8 @@ export const zhTranslations: Record<string, string> = {
   'Refresh model info': '刷新模型信息',
   'Refresh all models and info': '拉取全部模型与模型信息',
   'Refresh provider models': '刷新此服务商的模型',
-  'agy cli': 'agy cli',
+  'agy cli (experimental)': 'agy cli（实验）',
+  'Uses the agy already signed in on this machine': '使用本机已登录的 agy',
   'Runs sessions through the local agy acp command. EnsoCode does not sign in for you.':
     '会话通过本机 agy acp 运行。EnsoCode 不会替你登录。',
   'Binary path': '二进制路径',

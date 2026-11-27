@@ -53,7 +53,7 @@ export function AgyCliSettings() {
   return (
     <SettingsRow
       rowId="providers.agy-cli"
-      label={t('agy cli')}
+      label={t('agy cli (experimental)')}
       description={t(
         'Runs sessions through the local agy acp command. EnsoCode does not sign in for you.'
       )}

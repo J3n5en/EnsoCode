@@ -759,7 +759,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   {
     id: 'providers.agy-cli',
     category: 'providers',
-    title: 'agy cli',
+    title: 'agy cli (experimental)',
     description:
       'Runs sessions through the local agy acp command. EnsoCode does not sign in for you.',
   },
