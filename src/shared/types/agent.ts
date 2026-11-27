@@ -1922,6 +1922,19 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed';
 }
 
+/** 跨进程边界收窄 todo 清单：每项都得是 TodoItem，否则整份拒绝 */
+function isTodoList(value: unknown): value is TodoItem[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.content === 'string' &&
+        (item.status === 'pending' || item.status === 'in_progress' || item.status === 'completed')
+    )
+  );
+}
+
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
 export interface ProjectedCodemodeCall {
   name: string;
@@ -2341,6 +2354,8 @@ export type AgentWorkerEvent =
        * （agy / Cursor 在整段回复结束才落盘、pi 并行工具按源序补发），卡片先据此转完成 / 失败。
        */
       ended?: 'ok' | 'error';
+      /** 随 ended 带上：todo 工具 result.details 投影的清单，toolResult 落地前清单行 / 固定待办条据此显示 */
+      todos?: TodoItem[];
     }
   | { type: 'messages-truncated'; identity: SessionIdentity; seq: number; length: number }
   | {
@@ -5688,7 +5703,8 @@ const agentWorkerEventParsers = {
         typeof value.output === 'string' &&
         (value.startedAt === undefined || typeof value.startedAt === 'number') &&
         (value.deadlineAt === undefined || Number.isFinite(value.deadlineAt)) &&
-        (value.ended === undefined || value.ended === 'ok' || value.ended === 'error')
+        (value.ended === undefined || value.ended === 'ok' || value.ended === 'error') &&
+        (value.todos === undefined || (value.ended !== undefined && isTodoList(value.todos)))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }

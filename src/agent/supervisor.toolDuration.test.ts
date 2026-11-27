@@ -344,6 +344,48 @@ describe('SessionSupervisor tool duration', () => {
     await supervisor.shutdown();
   });
 
+  it('todo 收口时把 details 里的清单投影进收口事件：agy 经 Host MCP 调 todo、toolResult 轮末才落盘也能先画清单', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-tool-todos-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await vi.runAllTimersAsync();
+    await waitFor(events, 'parent-ready');
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    const ended = (id: string) =>
+      events.filter(
+        (event): event is Extract<AgentWorkerEvent, { type: 'tool-output' }> =>
+          event.type === 'tool-output' && event.toolCallId === id && event.ended !== undefined
+      );
+    const todos = [
+      { content: 'write tests', status: 'in_progress' },
+      { content: 'ship', status: 'pending' },
+    ];
+    const end = (toolCallId: string, toolName: string, details: unknown, isError = false) =>
+      parentSession.emit({
+        type: 'tool_execution_end',
+        toolCallId,
+        toolName,
+        result: { content: [{ type: 'text', text: 'Todos (0/2 done)' }], details },
+        isError,
+      });
+
+    end('enso_t1', 'todo', { todos: [...todos, { content: 'bad', status: 'done' }], extra: 1 });
+    end('enso_t2', 'todo', undefined);
+    end('r1', 'read_file', { todos });
+    end('enso_t3', 'todo', { todos: [] });
+
+    // 与 toolResult 投影同一白名单：脏项丢弃、多余字段不出 worker
+    expect(ended('enso_t1')).toEqual([expect.objectContaining({ ended: 'ok', todos })]);
+    expect(ended('enso_t2')[0]).not.toHaveProperty('todos');
+    expect(ended('r1')[0]).not.toHaveProperty('todos');
+    expect(ended('enso_t3')).toEqual([expect.objectContaining({ todos: [] })]);
+    await supervisor.shutdown();
+  });
+
   it('set-shell-limits 作用于 worker 级后台任务管理器：task_output 上限与前台让位都跟随设置', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

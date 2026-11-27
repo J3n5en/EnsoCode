@@ -141,8 +141,8 @@ function projectApplyPatchOutcome(
   };
 }
 
-/** todo 工具 toolResult.details 的清单快照（白名单校验，脏数据丢弃） */
-function projectTodos(value: unknown): TodoItem[] | null {
+/** todo 工具 toolResult.details 的清单快照（白名单校验，脏数据丢弃）；收口事件也用它 */
+export function projectTodos(value: unknown): TodoItem[] | null {
   if (!isRecord(value) || !Array.isArray(value.todos)) return null;
   const todos = value.todos.filter(
     (item): item is TodoItem =>

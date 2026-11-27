@@ -986,6 +986,48 @@ describe('buildTimeline 运行中工具的增量输出', () => {
     expect(rows[2]).toMatchObject({ state: 'running', output: 'still going' });
   });
 
+  it('todo 已收口但 toolResult 未落地（agy 轮末才落盘）：按收口清单渲染清单行，落盘后以 toolResult 为准', () => {
+    const live = [
+      { content: 'a', status: 'in_progress' as const },
+      { content: 'b', status: 'pending' as const },
+    ];
+    const call = {
+      type: 'toolCall' as const,
+      id: 'td1',
+      name: 'todo',
+      arguments: { todos: live },
+    };
+    const streaming: ProjectedMessage[] = [
+      user('列清单'),
+      { role: 'assistant', stopReason: 'pending', content: [call, { type: 'text', text: '在做' }] },
+    ];
+    const rows = buildTimeline(streaming, true, [], undefined, {
+      toolOutputs: { td1: 'Todos (0/2 done)' },
+      toolEnded: { td1: 'ok' },
+      toolTodos: { td1: live },
+    }).filter((item) => item.kind === 'tool');
+    expect(rows[0]).toMatchObject({ name: 'todo', state: 'ok', todos: live });
+    // 没有收口清单：仍是普通工具行
+    const plain = buildTimeline(streaming, true, [], undefined, {
+      toolEnded: { td1: 'ok' },
+    }).filter((item) => item.kind === 'tool');
+    expect(plain[0]).toMatchObject({ todos: null });
+    // toolResult 落地后以它为准，残留的收口清单不覆盖
+    const persisted = [{ content: 'a', status: 'completed' as const }];
+    const settled = buildTimeline(
+      [
+        user('列清单'),
+        { role: 'assistant', content: [call] },
+        { role: 'toolResult', toolCallId: 'td1', toolName: 'todo', todos: persisted, content: [] },
+      ],
+      false,
+      [],
+      undefined,
+      { toolTodos: { td1: live } }
+    ).filter((item) => item.kind === 'tool');
+    expect(settled[0]).toMatchObject({ todos: persisted });
+  });
+
   it('真实 toolResult 覆盖残留的增量快照', () => {
     const timeline = buildTimeline(
       [

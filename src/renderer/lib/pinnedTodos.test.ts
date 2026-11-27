@@ -51,4 +51,30 @@ describe('latestUnfinishedTodos', () => {
     const messages = [todoResult('t1', [pending('a')]), todoResult('t2', undefined)];
     expect(latestUnfinishedTodos(messages)?.id).toBe('t1');
   });
+
+  it('轮中已收口、toolResult 未落地的 todo（agy 轮末才落盘）按收口清单固定显示', () => {
+    const streaming: ProjectedMessage = {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'planning' },
+        { type: 'toolCall', id: 'live1', name: 'todo', arguments: {} },
+        { type: 'toolCall', id: 'live2', name: 'todo', arguments: {} },
+        { type: 'toolCall', id: 'r1', name: 'read', arguments: {} },
+      ],
+    };
+    const messages = [todoResult('t1', [pending('old')]), text('user'), streaming];
+    // 最后一次 todo 还在跑（没有收口清单）：沿用更早的收口清单
+    expect(
+      latestUnfinishedTodos(messages, { live1: [done('a'), pending('b')], r1: [pending('x')] })
+    ).toEqual({ id: 'live1', todos: [done('a'), pending('b')] });
+    expect(latestUnfinishedTodos(messages, { live2: [pending('c')] })).toEqual({
+      id: 'live2',
+      todos: [pending('c')],
+    });
+    // 最新收口清单已全部完成：不回退
+    expect(latestUnfinishedTodos(messages, { live2: [done('c')] })).toBeNull();
+    // 没有收口清单：行为与原来一致
+    expect(latestUnfinishedTodos(messages)?.id).toBe('t1');
+    expect(latestUnfinishedTodos(messages, {})?.id).toBe('t1');
+  });
 });

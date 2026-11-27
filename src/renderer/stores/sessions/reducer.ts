@@ -16,6 +16,7 @@ import {
   STALE_SESSION_ERROR,
   type SubagentInfo,
   shouldApplyDispatchMainEvent,
+  type TodoItem,
 } from '@shared/types/agent';
 import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import type { ConversationStatus, InterruptedTurnState } from './interrupted';
@@ -293,6 +294,8 @@ export interface SessionProjection {
   toolDeadlineAt?: Record<string, number>;
   /** 已收口但 toolResult 还没落地的工具（agy / Cursor 轮末才落盘）：卡片据此先转完成 / 失败；不持久化 */
   toolEnded?: Record<string, 'ok' | 'error'>;
+  /** 同 toolEnded：已收口 todo 的清单（toolResult 落地前清单行 / 固定待办条用它）；不持久化 */
+  toolTodos?: Record<string, TodoItem[]>;
   /** 当前权威消息对应的 worker 绝对起点；全量快照缺省 */
   historyBaseIndex?: number;
   /** 上滑翻页在途；不持久化 */
@@ -425,6 +428,7 @@ export function applyAgentEvent(
       toolStartedAt: continuingRun ? omitKeys(state.toolStartedAt ?? {}, completedTools) : {},
       toolDeadlineAt: continuingRun ? omitKeys(state.toolDeadlineAt ?? {}, completedTools) : {},
       toolEnded: continuingRun ? omitKeys(state.toolEnded ?? {}, completedTools) : {},
+      toolTodos: continuingRun ? omitKeys(state.toolTodos ?? {}, completedTools) : {},
       historyBaseIndex: keepPrefix ? localBase : snapBase > 0 ? snapBase : undefined,
       ...(snapshot.planState ? { planState: snapshot.planState } : {}),
     };
@@ -610,6 +614,10 @@ export function applyAgentEvent(
         settledId && current.toolEnded && settledId in current.toolEnded
           ? omitKeys(current.toolEnded, new Set([settledId]))
           : undefined;
+      const settledTodos =
+        settledId && current.toolTodos && settledId in current.toolTodos
+          ? omitKeys(current.toolTodos, new Set([settledId]))
+          : undefined;
       return {
         ...current,
         messages: [...authoritative, ...tail],
@@ -621,6 +629,7 @@ export function applyAgentEvent(
           : {}),
         ...(settledDeadline ? { toolDeadlineAt: settledDeadline } : {}),
         ...(settledEnded ? { toolEnded: settledEnded } : {}),
+        ...(settledTodos ? { toolTodos: settledTodos } : {}),
         lastOutputAt: hasOutput ? now : current.lastOutputAt,
         lastSeq: event.seq,
       };
@@ -755,6 +764,9 @@ export function applyAgentEvent(
         ...(event.ended
           ? { toolEnded: { ...current.toolEnded, [event.toolCallId]: event.ended } }
           : {}),
+        ...(event.ended && event.todos
+          ? { toolTodos: { ...current.toolTodos, [event.toolCallId]: event.todos } }
+          : {}),
         lastOutputAt:
           event.ended || (output.trim() && output !== current.toolOutputs[event.toolCallId])
             ? now
@@ -772,6 +784,7 @@ export function applyAgentEvent(
         toolStartedAt: {},
         toolDeadlineAt: {},
         toolEnded: {},
+        toolTodos: {},
         lastSeq: event.seq,
       };
     case 'messages-truncated': {
@@ -821,6 +834,7 @@ export function applyAgentEvent(
           toolStartedAt: {},
           toolDeadlineAt: {},
           toolEnded: {},
+          toolTodos: {},
           lastSeq: event.seq,
         };
       return {
@@ -833,6 +847,7 @@ export function applyAgentEvent(
         toolStartedAt: {},
         toolDeadlineAt: {},
         toolEnded: {},
+        toolTodos: {},
         lastSeq: event.seq,
       };
     case 'session-custom-entry':
