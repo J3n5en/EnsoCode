@@ -214,13 +214,14 @@ function TriggerItemRow({
         />
       }
     >
-      <SettingsSubRow label={t('HTTP POST URL')}>
+      <SettingsSubRow rowId="secretary.http-post-url" label={t('HTTP POST URL')}>
         <CopyableValue value={trigger.httpUrl} copyLabel={t('Copy')} copiedLabel={t('Copied')} />
       </SettingsSubRow>
-      <SettingsSubRow label={t('WebSocket URL')}>
+      <SettingsSubRow rowId="secretary.websocket-url" label={t('WebSocket URL')}>
         <CopyableValue value={trigger.wsUrl} copyLabel={t('Copy')} copiedLabel={t('Copied')} />
       </SettingsSubRow>
       <SettingsSubRow
+        rowId="secretary.bearer-token"
         label={t('Bearer token')}
         description={t('Pass via Authorization: Bearer <token> or X-Enso-Token header.')}
       >
@@ -247,6 +248,7 @@ function TriggerItemRow({
         </div>
       </SettingsSubRow>
       <SettingsSubRow
+        rowId="secretary.coalesce-window-seconds"
         label={t('Coalesce window (seconds)')}
         description={t(
           'Combine consecutive events within this window into one wake-up (0 = immediate).'
@@ -266,6 +268,7 @@ function TriggerItemRow({
         </div>
       </SettingsSubRow>
       <SettingsSubRow
+        rowId="secretary.trigger-instruction"
         label={t('Trigger instruction')}
         description={t(
           'Trusted rule shown outside untrusted event payload so the secretary knows how to react.'
@@ -282,6 +285,7 @@ function TriggerItemRow({
         </div>
       </SettingsSubRow>
       <SettingsSubRow
+        rowId="secretary.actions"
         label={t('Actions')}
         status={
           error ? (
@@ -335,7 +339,7 @@ export function SecretaryTriggerSection({
     const api = window.electronAPI?.secretary;
     if (!api?.listTriggers) return;
     const res = await api.listTriggers(secretaryId);
-    if (!res.ok) return;
+    if (!res?.ok) return;
     setServer(res.server);
     setTriggers(res.triggers);
     setPortInput(String(res.server.configuredPort));
@@ -483,7 +487,7 @@ export function SecretaryTriggerSection({
 
       {creating ? (
         <div data-slot="settings-sub-group" className="bg-muted/45 dark:bg-background/40">
-          <SettingsSubRow label={t('Name')}>
+          <SettingsSubRow rowId="secretary.name" label={t('Name')}>
             <Input
               size="sm"
               className="w-64"
@@ -493,6 +497,7 @@ export function SecretaryTriggerSection({
             />
           </SettingsSubRow>
           <SettingsSubRow
+            rowId="secretary.coalesce-window-seconds-2"
             label={t('Coalesce window (seconds)')}
             description={t(
               'Combine consecutive events within this window into one wake-up (0 = immediate).'
@@ -509,6 +514,7 @@ export function SecretaryTriggerSection({
             />
           </SettingsSubRow>
           <SettingsSubRow
+            rowId="secretary.trigger-instruction-2"
             label={t('Trigger instruction')}
             description={t('Optional rule telling the secretary how to handle incoming events.')}
           >
