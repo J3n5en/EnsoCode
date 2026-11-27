@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   acquireOverlayGuard,
+  acquireWorkbenchCover,
+  overlayGuardActive,
   releaseOverlayGuard,
+  releaseWorkbenchCover,
   resetOverlayGuard,
   setOverlayGuardSink,
   syncOverlayGuard,
@@ -61,6 +64,37 @@ describe('overlayGuard', () => {
     expect(events).toEqual([]);
     acquireOverlayGuard();
     releaseOverlayGuard();
+    releaseOverlayGuard();
+    expect(events).toEqual([true, false]);
+  });
+});
+
+describe('workbench cover', () => {
+  it('沉下 guest，但不算会吃 Esc 的模态浮层', () => {
+    acquireWorkbenchCover();
+    expect(events).toEqual([true]);
+    expect(overlayGuardActive()).toBe(false);
+    releaseWorkbenchCover();
+    expect(events).toEqual([true, false]);
+  });
+
+  it('遮盖期间弹窗开了又关：sink 保持 true 不闪动，模态判定随弹窗走', () => {
+    acquireWorkbenchCover();
+    acquireOverlayGuard();
+    expect(overlayGuardActive()).toBe(true);
+    releaseOverlayGuard();
+    expect(events).toEqual([true]);
+    expect(overlayGuardActive()).toBe(false);
+    releaseWorkbenchCover();
+    expect(events).toEqual([true, false]);
+  });
+
+  it('reset 同时清零遮盖计数', () => {
+    acquireWorkbenchCover();
+    resetOverlayGuard();
+    setOverlayGuardSink((active) => events.push(active));
+    events = [];
+    acquireOverlayGuard();
     releaseOverlayGuard();
     expect(events).toEqual([true, false]);
   });

@@ -1,6 +1,6 @@
 import { useLayoutEffect } from 'react';
 import { setWorkbenchCovered } from '@/stores/appView';
-import { acquireOverlayGuard, releaseOverlayGuard } from './overlayGuard';
+import { acquireWorkbenchCover, releaseWorkbenchCover } from './overlayGuard';
 
 /**
  * 设置页盖住工作区：标记 workbench 被盖住（原生视图与面板快捷键据此让位），
@@ -11,7 +11,7 @@ export function useWorkspaceCovered(covered: boolean): void {
   useLayoutEffect(() => {
     setWorkbenchCovered(covered);
     if (!covered) return;
-    acquireOverlayGuard();
-    return releaseOverlayGuard;
+    acquireWorkbenchCover();
+    return releaseWorkbenchCover;
   }, [covered]);
 }
