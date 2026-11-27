@@ -1,4 +1,4 @@
-import type { AgyAuthStatus } from '@shared/agy/types';
+import type { AgyAuthStatus, AgyModelOption } from '@shared/agy/types';
 import type { AppLogEntry, LogExportResult, LogSummaryLevel } from '@shared/appLog';
 import type { BotTemplateLibrary } from '@shared/bots/templateLibrary';
 import type {
@@ -1083,6 +1083,9 @@ const electronAPI = {
     /** refresh=true 才重新探测。设置页打开用缓存，重新检测传 true。不要在窗口聚焦时调用。 */
     authStatus: (refresh = false): Promise<AgyAuthStatus> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGY_AUTH_STATUS, refresh),
+    /** 只读 Main 缓存的模型清单，不启动 agy。启动时用它填 picker。 */
+    cachedModels: (): Promise<AgyModelOption[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGY_CACHED_MODELS),
   },
 
   assets: {

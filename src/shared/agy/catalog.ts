@@ -119,13 +119,7 @@ export function parseAgyAuthStatus(value: unknown): AgyAuthStatus {
   switch (row?.status) {
     case 'signed-in': {
       if (!version) break;
-      const models: AgyModelOption[] = [];
-      for (const entry of Array.isArray(row.models) ? row.models : []) {
-        const model = record(entry);
-        if (typeof model?.id !== 'string' || !model.id) continue;
-        models.push({ id: model.id, name: typeof model.name === 'string' ? model.name : model.id });
-      }
-      return { status: 'signed-in', version, models };
+      return { status: 'signed-in', version, models: parseAgyModels(row.models) };
     }
     case 'signed-out':
       return version ? { status: 'signed-out', version } : { status: 'unknown' };
@@ -135,4 +129,31 @@ export function parseAgyAuthStatus(value: unknown): AgyAuthStatus {
       return { status: 'not-installed' };
   }
   return { status: 'unknown' };
+}
+
+/** 模型清单（IPC 返回值、落盘缓存）按 unknown 收窄：不是数组当空，坏条目丢掉。 */
+export function parseAgyModels(value: unknown): AgyModelOption[] {
+  const models: AgyModelOption[] = [];
+  for (const entry of Array.isArray(value) ? value : []) {
+    const model = record(entry);
+    if (typeof model?.id !== 'string' || !model.id) continue;
+    models.push({
+      id: model.id,
+      name: typeof model.name === 'string' && model.name ? model.name : model.id,
+    });
+  }
+  return models;
+}
+
+/**
+ * picker 与 worker 共用的 agy 模型口径（「默认」由 agySettingsProvider 另补）。
+ * 登录探测用实时清单；状态未知（启动后未探测、探测超时）用上次登录探测落盘的清单；
+ * 明确未登录 / 未安装 / 版本过旧时不提供，存量会话引用的模型走现有「不可用模型」表现。
+ */
+export function offeredAgyModels(
+  status: AgyAuthStatus,
+  persisted: readonly AgyModelOption[]
+): AgyModelOption[] {
+  if (status.status === 'signed-in') return status.models;
+  return status.status === 'unknown' ? [...persisted] : [];
 }

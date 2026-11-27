@@ -9,7 +9,7 @@ import {
   useOauthCredentialStore,
 } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
-import { agyModelsFromStatus, useAgyAuthStore } from '../agyAuth';
+import { agyModelsFromState, useAgyAuthStore } from '../agyAuth';
 import { useModelDirectoryStore } from './index';
 
 /** 目录未就绪时与 settings.providers 同形透传；就绪后 OAuth models 按目录合成。 */
@@ -17,11 +17,13 @@ export function useMaterializedProviders(): ModelProvider[] {
   const providers = useSettingsStore((state) => state.providers);
   const snapshot = useModelDirectoryStore((state) => state.snapshot);
   const agyStatus = useAgyAuthStore((state) => state.status);
+  const agyCachedModels = useAgyAuthStore((state) => state.cachedModels);
   return useMemo(() => {
     const materialized = materializeProviders(providers, snapshot);
     if (materialized.some((provider) => provider.id === AGY_PROVIDER_ID)) return materialized;
-    return [...materialized, agySettingsProvider(agyModelsFromStatus(agyStatus))];
-  }, [providers, snapshot, agyStatus]);
+    const agyModels = agyModelsFromState({ status: agyStatus, cachedModels: agyCachedModels });
+    return [...materialized, agySettingsProvider(agyModels)];
+  }, [providers, snapshot, agyStatus, agyCachedModels]);
 }
 
 /** picker / 默认模型共用口径：先物化目录，再按 OAuth 凭证筛可用条目。 */
