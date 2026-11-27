@@ -1044,6 +1044,60 @@ describe('PluginHostGate', () => {
     expect(gate.canSeeSession('a.b', 'ghost')).toBe(false);
   });
 
+  it('秘书会话：只有 session.readAll 的插件用 includeSecretary 列得到、看得见、查得到状态', async () => {
+    const info = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: id,
+      updatedAt: 1,
+      state: 'idle' as const,
+      ...extra,
+    });
+    const normal = [info('s1', { projectId: 'p1', projectName: 'a' })];
+    const secretary = info('sec', { projectId: 'sp', projectName: '小秘', kind: 'secretary' });
+    const listAll = vi.fn((options?: { includeSecretary?: boolean }) =>
+      options?.includeSecretary ? [...normal, secretary] : normal
+    );
+    const status = vi.fn((sessionId: string) => ({
+      sessionId,
+      state: 'idle' as const,
+      pendingAsks: 0,
+      pendingApprovals: 0,
+    }));
+    deps.sessions = { list: vi.fn(() => [info('s1')]), listAll, status };
+
+    deps.manifest = () => manifest({ permissions: ['session.readAll'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all' }, agentCall())
+    ).resolves.toEqual({ current: 's1', sessions: normal });
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all', includeSecretary: true }, agentCall())
+    ).resolves.toEqual({ current: 's1', sessions: [...normal, secretary] });
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all', includeSecretary: 'yes' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    expect(gate.canSeeSession('a.b', 'sec')).toBe(true);
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'sec' }, agentCall())
+    ).resolves.toMatchObject({ sessionId: 'sec' });
+
+    // 只有 session.read：includeSecretary 无效，秘书会话不可见
+    deps.manifest = () => manifest({ permissions: ['session.read'] });
+    gate = new PluginHostGate(deps);
+    const project = (await gate.handle(
+      'a.b',
+      'session.list',
+      { includeSecretary: true },
+      agentCall()
+    )) as { sessions: { id: string }[] };
+    expect(project.sessions.map((s) => s.id)).toEqual(['s1']);
+    gate.noteSession('a.b', 's1');
+    expect(gate.canSeeSession('a.b', 'sec')).toBe(false);
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'sec' }, agentCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('远端窗口发起的调用不能动宿主桌面的剪贴板和外链', async () => {
     deps.clipboard = vi.fn();
     deps.openExternal = vi.fn(async () => undefined);

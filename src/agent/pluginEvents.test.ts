@@ -93,6 +93,23 @@ describe('插件事件扩展', () => {
     expect(event?.data.text.length).toBe(64 * 1024);
   });
 
+  it('本轮调用了 silence_turn 时 agent_end 标 silent', () => {
+    const { emit, handlers } = harness(plan({ observe: ['agent_end'] }));
+    handlers.get('agent_end')?.({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '<session-updates>x</session-updates>' }] },
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't', name: 'silence_turn', arguments: {} }],
+        },
+        { role: 'toolResult', toolName: 'silence_turn', content: [{ type: 'text', text: 'ok' }] },
+      ],
+    } as never);
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      { type: 'plugin-event', event: 'agent_end', data: { text: '', silent: true } },
+    ]);
+  });
+
   it('观察型 tool_result 的 content 超过 64K 字符时截断，拦截载荷不截断', async () => {
     const text = 'a'.repeat(70_000);
     const observed = harness(plan({ observe: ['tool_result'] }));

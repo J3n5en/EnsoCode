@@ -1117,19 +1117,26 @@ export class ExtensionPluginService {
     ]);
   }
 
-  /** 无订阅且没有 agent.inject 时不给会话下发事件计划 */
+  /**
+   * 无订阅且没有 agent.inject 时不给会话下发事件计划。
+   * 秘书会话（传 ids）的拦截只算勾选的插件；session.readAll 插件的观察事件与任一插件的注入照样算。
+   */
   eventPlanForSpawn(ids?: readonly string[]): PluginEventPlan | null {
     const observe = new Set<string>();
     const intercept: { event: string; tools?: string[] }[] = [];
     let inject = false;
-    for (const { manifest } of this.enabled(ids)) {
+    const picked = new Set(this.enabled(ids).map((entry) => entry.id));
+    for (const { id, manifest } of this.enabled()) {
       if (manifest.permissions.includes('agent.inject')) inject = true;
+      const reads = manifest.permissions.includes('session.readAll');
+      if (!picked.has(id) && !reads) continue;
       for (const sub of manifest.contributes.events) {
         if (isHostPluginEvent(sub.event)) continue;
         if (sub.mode === 'observe') {
           observe.add(sub.event);
           continue;
         }
+        if (!picked.has(id)) continue;
         const existing = intercept.find((item) => item.event === sub.event);
         if (!existing) {
           intercept.push({ event: sub.event, ...(sub.tools ? { tools: [...sub.tools] } : {}) });
@@ -1463,11 +1470,18 @@ export class ExtensionPluginService {
     data: unknown;
     /** 子会话事件：只投给通知型订阅，也不等 before_compact，避免并行子代理互相拖慢 */
     agent?: PluginAgentSource;
+    /** 秘书会话：只投给它勾选的插件与 session.readAll 插件 */
+    secretaryPluginIds?: readonly string[];
   }): Promise<void> {
-    const targets = this.enabled().filter((entry) =>
-      entry.manifest.contributes.events.some(
-        (sub) => sub.event === input.event && (!input.agent || sub.mode === 'observe')
-      )
+    const audience = input.secretaryPluginIds;
+    const targets = this.enabled().filter(
+      (entry) =>
+        (!audience ||
+          audience.includes(entry.id) ||
+          entry.manifest.permissions.includes('session.readAll')) &&
+        entry.manifest.contributes.events.some(
+          (sub) => sub.event === input.event && (!input.agent || sub.mode === 'observe')
+        )
     );
     const wait = input.event === 'before_compact' && !input.agent;
     if (!wait) {

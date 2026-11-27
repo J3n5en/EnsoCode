@@ -318,7 +318,7 @@ export const PLUGIN_HOST_APIS = [
   'contact.inbound',
   /** 渠道状态；args { channelId, status, detail?, peers? } */
   'contact.setStatus',
-  /** 列出会话及其状态；args { scope? }：缺省同项目，'all' 为所有项目（需 session.readAll）；返回 { current, sessions } */
+  /** 列出会话及其状态；args { scope?, includeSecretary? }：缺省同项目，'all' 为所有项目（需 session.readAll，includeSecretary 再含秘书会话）；返回 { current, sessions } */
   'session.list',
   /** 会话汇总状态；args { sessionId? } 缺省发起会话，返回 { sessionId, state, pendingAsks, pendingApprovals } */
   'session.status',

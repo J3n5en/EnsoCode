@@ -180,6 +180,7 @@ import {
   peekExtensionPlugins,
   pluginOwnerBindings,
   setPluginSessionDirectory,
+  setPluginSessionResume,
 } from '../services/extensionPlugins';
 import { resolvePluginInjectDelivery } from '../services/extensionPlugins/injectTrust';
 import { SessionStateTracker, turnEndSessionId } from '../services/extensionPlugins/sessionState';
@@ -591,23 +592,23 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
 function publishPluginTurnEnd(event: RendererAgentEvent): void {
   const sessionId = turnEndSessionId(event);
   if (!sessionId) return;
-  // 与其他插件事件一致：Bot 与秘书会话不发
-  if (sourceAuthority?.conversation(sessionId)?.bot || isSecretaryConversation(sessionId)) return;
+  // Bot 会话不发；秘书会话交给 canSeeSession（只有 session.readAll 看得见）
+  if (sourceAuthority?.conversation(sessionId)?.bot) return;
   peekExtensionPlugins()?.notifyTurnEnd(sessionId);
 }
 
 /** 主会话汇总状态变化时通知订阅了 session_status 的插件 */
 function publishPluginSessionStatus(changes: readonly SessionStatusPayload[]): void {
   for (const change of changes) {
-    // 与其他插件事件一致：Bot 与秘书会话不发
+    // 与其他插件事件一致：Bot 会话不发；秘书会话只发给它勾选的与 session.readAll 插件
     if (sourceAuthority?.conversation(change.sessionId)?.bot) continue;
-    if (isSecretaryConversation(change.sessionId)) continue;
     void getExtensionPlugins()
       .dispatchEvent({
         sessionId: change.sessionId,
         projectRoot: pluginProjectRoot(change.sessionId),
         event: 'session_status',
         data: change,
+        ...pluginSecretaryAudience(change.sessionId),
       })
       .catch((error: unknown) => {
         console.warn(
@@ -846,6 +847,24 @@ function secretaryProfileForTurn(sessionId: string): SecretaryProfile | null {
 function secretaryOfSession(sessionId: string): SecretaryContext | null {
   const id = secretaryIdOfConversation(sessionId);
   return id ? secretaryContext(id) : null;
+}
+
+/** 秘书会话的插件事件只给它勾选的插件（service 另加 session.readAll 插件）；普通会话不限 */
+function pluginSecretaryAudience(sessionId: string): { secretaryPluginIds?: string[] } {
+  if (!isSecretaryConversation(sessionId)) return {};
+  const ctx = secretaryOfSession(sessionId);
+  return {
+    secretaryPluginIds: (ctx && new SecretaryStore(ctx.dir).profile()?.pluginIds) || [],
+  };
+}
+
+/** 插件会话列表里秘书的展示名；秘书未启用或不是在用秘书的项目返回 null */
+function pluginSecretaryName(projectId: string): string | null {
+  if (!secretaryEnabled()) return null;
+  const id = secretaryIdOfProject(projectId);
+  const ctx = id ? secretaryContext(id) : null;
+  if (!ctx) return null;
+  return new SecretaryStore(ctx.dir).profile()?.name.trim() || ctx.id;
 }
 
 /**
@@ -2030,13 +2049,19 @@ export function registerAgentHandlers(): void {
   });
   setPluginSessionDirectory({
     list: (origin) => listProjectSessions({ ...sessionSource(), origin }),
-    listAll: () =>
+    listAll: (options) =>
       listAllSessions({
         ...sessionSource(),
         projects: sourceAuthority?.projection().projects ?? [],
+        includeSecretary: options?.includeSecretary === true,
+        secretaryName: pluginSecretaryName,
       }),
     status: (sessionId) => observedSessionStatus(sessionId),
   });
+  // 插件注入没打开的秘书会话：窗口里没有它，由 Main 按持久化记录恢复
+  setPluginSessionResume(async (sessionId) =>
+    isSecretaryConversation(sessionId) ? resumeRootFromMain(sessionId) : null
+  );
   wirePairAgentBridge();
   wirePairSessionHost();
   configureMemoryDistill({ complete: distillCompletion });
@@ -2733,6 +2758,7 @@ export function registerAgentHandlers(): void {
           event: workerEvent.event,
           data: workerEvent.data,
           ...(workerEvent.agent ? { agent: workerEvent.agent } : {}),
+          ...pluginSecretaryAudience(sessionId),
         })
         .catch((error: unknown) => {
           console.warn('[plugins] event failed:', error instanceof Error ? error.message : error);
@@ -2760,6 +2786,7 @@ export function registerAgentHandlers(): void {
               projectRoot,
               event,
               data: payload,
+              ...pluginSecretaryAudience(sessionId),
             })
           : service.intercept({
               sessionId,

@@ -181,6 +181,8 @@ export interface PluginSessionInfo {
   /** 仅跨项目列表（scope: 'all'）带项目标识；名称为项目目录名 */
   projectId?: string;
   projectName?: string;
+  /** 仅 includeSecretary 列出的秘书会话带 'secretary'；projectName 为秘书名 */
+  kind?: 'normal' | 'secretary';
 }
 
 /** 草稿请求的目标：会话 + 发起手势的窗口（webContents id），草稿只回写到发起窗口 */
@@ -354,8 +356,8 @@ export interface GateDeps {
   sessions?: {
     /** 与 sessionId 同项目的主会话；按最近活动排序 */
     list(sessionId: string): PluginSessionInfo[];
-    /** 所有项目的主会话 */
-    listAll?(): PluginSessionInfo[];
+    /** 所有项目的主会话；includeSecretary 时含在用秘书的主会话 */
+    listAll?(options?: { includeSecretary?: boolean }): PluginSessionInfo[];
     status?(sessionId: string): PluginSessionStatus;
   };
   sessionUi?(
@@ -564,7 +566,7 @@ export class PluginHostGate {
     if (!manifest || !sessions) return false;
     if (
       manifest.permissions.includes('session.readAll') &&
-      (sessions.listAll?.() ?? []).some((s) => s.id === sessionId)
+      (sessions.listAll?.({ includeSecretary: true }) ?? []).some((s) => s.id === sessionId)
     )
       return true;
     if (!manifest.permissions.includes('session.read')) return false;
@@ -1124,13 +1126,17 @@ export class PluginHostGate {
           }
         );
       case 'session.list': {
+        if (a.includeSecretary !== undefined && typeof a.includeSecretary !== 'boolean')
+          throw pluginError('INVALID_ARGS', 'includeSecretary 必须是布尔值');
         if (a.scope === 'all') {
           permit('session.readAll');
           if (!this.deps.sessions?.listAll)
             throw pluginError('UNSUPPORTED', '当前环境不能列出会话');
           return {
             current: optionalInvocation()?.sessionId ?? null,
-            sessions: this.deps.sessions.listAll(),
+            sessions: this.deps.sessions.listAll(
+              a.includeSecretary === true ? { includeSecretary: true } : undefined
+            ),
           };
         }
         if (a.scope !== undefined && a.scope !== 'project')
@@ -1158,7 +1164,7 @@ export class PluginHostGate {
             manifest.permissions.includes('session.read') &&
             sessions.list(current).some((s) => s.id === target)) ||
           (manifest.permissions.includes('session.readAll') &&
-            (sessions.listAll?.() ?? []).some((s) => s.id === target));
+            (sessions.listAll?.({ includeSecretary: true }) ?? []).some((s) => s.id === target));
         if (!visible) throw pluginError('NOT_FOUND', '没有这个会话');
         return sessions.status(target);
       }

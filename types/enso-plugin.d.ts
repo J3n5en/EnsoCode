@@ -80,6 +80,8 @@ export interface EnsoSessionInfo {
   /** 仅 `list({ scope: 'all' })` 带；projectName 为项目目录名 */
   projectId?: string;
   projectName?: string;
+  /** 仅 `list({ scope: 'all', includeSecretary: true })` 列出的秘书会话带 `'secretary'`；其 projectName 为秘书名 */
+  kind?: 'normal' | 'secretary';
 }
 
 export type EnsoSessionStatus = PluginSessionStatus;
@@ -415,8 +417,14 @@ export interface EnsoHostApi {
   'contact.setStatus': (channelId: string, status: EnsoContactStatus) => Promise<void>;
   'session.list': {
     (options?: { scope?: 'project' }): Promise<{ current: string; sessions: EnsoSessionInfo[] }>;
-    /** 所有项目的会话，需 `session.readAll`；不在宿主发起的调用里时 current 为 null */
-    (options: { scope: 'all' }): Promise<{ current: string | null; sessions: EnsoSessionInfo[] }>;
+    /**
+     * 所有项目的会话，需 `session.readAll`；不在宿主发起的调用里时 current 为 null。
+     * includeSecretary 为 true 时含在用秘书的会话（`kind: 'secretary'`），缺省不含。
+     */
+    (options: {
+      scope: 'all';
+      includeSecretary?: boolean;
+    }): Promise<{ current: string | null; sessions: EnsoSessionInfo[] }>;
   };
   /** 缺省发起会话；别的会话须在可见列表里 */
   'session.status': (sessionId?: string) => Promise<EnsoSessionStatus>;
@@ -472,7 +480,8 @@ export interface EnsoEventData {
   session_start: { reason: string };
   session_end: { reason: string };
   agent_start: Record<string, never>;
-  agent_end: { text: string };
+  /** silent：秘书本轮调用了 silence_turn（静默回合），外部通道不必回传 */
+  agent_end: { text: string; silent?: true };
   before_compact: { reason: string };
   after_compact: { reason: string };
   tool_call: ToolCallPayload;

@@ -245,8 +245,8 @@ export async function activate(enso) {
 | `artifacts.write(input)` | 见「产出文件」 |
 | `session.inject(input)` | 见「向会话发消息」 |
 | `session.abort(sessionId?)` | 见「向会话发消息」 |
-| `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null` |
-| `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在全局列表）里，否则 `NOT_FOUND` |
+| `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null`。再加 `includeSecretary: true` 会纳入在用秘书的主会话，这些项带 `kind: 'secretary'`，`projectName` 是秘书名，没有标题时 `title` 也是秘书名；缺省不含秘书会话 |
+| `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在含秘书会话的全局列表）里，否则 `NOT_FOUND` |
 | `session.onTurnEnd(listener)` | 需要 `session.read` 或 `session.readAll`。主会话一轮结束时回调 `listener({ sessionId })`，返回取消订阅函数，见「回合结束」 |
 | `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
 | `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
@@ -287,7 +287,7 @@ export async function activate(enso) {
 | 事件 | 时机 | `data` | 可拦截 |
 | --- | --- | --- | --- |
 | `session_start` / `session_end` | 会话开始 / 结束 | `{ reason }` | 否 |
-| `agent_start` / `agent_end` | 一轮回复开始 / 结束 | `agent_start`：`{}`；`agent_end`：`{ text }`，本轮最后一条助手回复的文字部分（不含思考与工具调用，最多 64K 字符，没有文字时为空串） | 否 |
+| `agent_start` / `agent_end` | 一轮回复开始 / 结束 | `agent_start`：`{}`；`agent_end`：`{ text }`，本轮最后一条助手回复的文字部分（不含思考与工具调用，最多 64K 字符，没有文字时为空串）；秘书本轮调用了 `silence_turn`（静默回合）时多带 `silent: true` | 否 |
 | `before_compact` | 上下文压缩前 | `{ reason }` | 否。主会话只等已经在运行的插件（含常驻）处理完，最多 10 秒，然后照常压缩；没在运行的非常驻插件直接跳过，不会为此拉起进程。子会话里只通知、不等待 |
 | `after_compact` | 压缩后 | `{ reason }` | 否 |
 | `tool_call` | 工具执行前 | `{ toolCallId, toolName, input }` | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
@@ -301,6 +301,8 @@ export async function activate(enso) {
 要在派子代理之前检查或改写，拦截 `tool_call` 并写 `tools: ['subagent']`；要在消息发出前改写或吞掉，用 `input`。
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。插件进程没在运行、且不是常驻时，通知直接丢掉，不会为此拉起进程。主会话的 `before_compact` 也一样：只等已经在运行的插件，不会为了等待去拉起非常驻插件。
+
+秘书会话的事件只发给秘书勾选的插件和有 `session.readAll` 的插件；后者只收通知型订阅，拦截仍只来自勾选的插件。
 
 通知按「插件 + 事件 + 会话」分开投递；子代理或 coworker 再按子会话身份（种类、子会话 id、名字）分开，所以一个会话的 `session_end` 不会盖掉另一个会话或子代理的。`context_usage` 和 `tool_result` 这类高频通知，同一条队列上如果上一条还在处理，后来的只保留最新一条。`session_start` / `session_end`、`agent_start` / `agent_end`、`before_compact` / `after_compact`，以及通知型的 `tool_call`、`input`，不合并，按到达顺序排队，每条队列最多 32 条，满了丢掉最旧的。
 
@@ -345,7 +347,7 @@ export function activate(enso) {
 ```
 
 - 权限：`session.read` 或 `session.readAll`。没有时订阅失败，原因写进插件日志，回调不会触发。
-- 范围：有 `session.readAll` 时收所有项目的主会话；只有 `session.read` 时，只收与本插件被调用过（工具、命令、事件等发起会话）或成功注入过消息的会话同项目的主会话。常驻进程刚启动、还没碰过任何会话时收不到。子会话和 Bot 会话不发。
+- 范围：有 `session.readAll` 时收所有项目的主会话（含在用秘书的会话）；只有 `session.read` 时，只收与本插件被调用过（工具、命令、事件等发起会话）或成功注入过消息的会话同项目的主会话。常驻进程刚启动、还没碰过任何会话时收不到。子会话和 Bot 会话不发。
 - 返回的函数取消这一次注册；全部取消后宿主不再推送。插件进程退出、插件被停用或卸载后订阅随之失效，进程重新拉起后需在 `activate` 里重新订阅。会话被删除后不再用它判定范围。
 - 回调抛错或返回的 Promise 失败只写插件日志，不影响其他回调。
 
