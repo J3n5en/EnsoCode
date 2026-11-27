@@ -151,8 +151,13 @@ export const useSidePanelStore = create<SidePanelState>()(
         const id = activeConversationId();
         if (!id) return;
         const open = !shownFor(get(), id);
-        // 无 tab 的会话从关到开：记下一次性信号，空态水印直接弹新建菜单，省一步点 +
-        const empty = open && Object.keys(get().layouts[id]?.panels ?? {}).length === 0;
+        // 无 tab 的会话从关到开：记下一次性信号，空态水印直接弹新建菜单，省一步点 +。
+        // 有固定标签时不弹：展开由固定标签恢复接管（激活第一个固定 tab），
+        // 新建菜单和恢复出来的面板同时出现，菜单悬空又抢焦点
+        const pinnedTabs = get().pinnedTabs;
+        const hasPinned = Array.isArray(pinnedTabs) && pinnedTabs.length > 0;
+        const empty =
+          open && !hasPinned && Object.keys(get().layouts[id]?.panels ?? {}).length === 0;
         set({
           uiByConversation: patchUi(get(), id, { open }),
           fullscreen: open ? get().fullscreen : false,

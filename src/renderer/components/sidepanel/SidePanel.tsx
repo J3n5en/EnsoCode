@@ -499,9 +499,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
       data-pinned={pinned || undefined}
       className={cn(
         'group/tab relative flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
-        active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50',
-        // pinned 的 pin 常显：预留右边距避开 overlay；非 pinned 时按钮 hover 浮出覆盖标题，不预留
-        pinned && !liveGlobal ? 'pr-7' : null
+        active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
       )}
     >
       {props.api.id === 'changes' ? (
@@ -551,22 +549,27 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
       {/* pin/× 移出布局流：平时不占位，悬停或键盘聚焦时在右侧渐变蒙版上浮出，覆盖标题尾部 */}
       <div
         className={cn(
-          'pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md pl-5',
-          // pinned 时 × 要落在常显 pin 的左侧，overlay 右缘让出 pin 的格子
-          pinned && !liveGlobal ? 'pr-6' : 'pr-1'
+          'pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md pl-5 pr-1',
+          // pinned 时 × 要落在常显 pin 的左侧：overlay 右缘整体让出 pin 的格子
+          //（pin 槽 = right-1 边距 + pin 按钮 18px），不用 pr 垫，避免蒙版盖住常显的 pin
+          pinned && !liveGlobal ? 'right-[18px]' : null
         )}
       >
-        <div
-          aria-hidden
-          className="absolute inset-0 rounded-r-md bg-linear-to-l from-muted/90 from-55% to-transparent opacity-0 transition-opacity duration-100 group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100"
-        />
+        {/* pinned 时 tab 已按 pin+× 宽度预留（sidepanel-dock.css），按钮下没有文字，
+           蒙版只会弄脏标题尾巴；非 pinned 才需要蒙版盖住被压的标题尾部 */}
+        {pinned && !liveGlobal ? null : (
+          <div
+            aria-hidden
+            className="absolute inset-0 rounded-r-md bg-linear-to-l from-muted/90 from-55% to-transparent opacity-0 transition-opacity duration-100 group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100"
+          />
+        )}
         {pinnableTab && !liveGlobal && !pinned ? (
           <button
             type="button"
             aria-label={t('Pin as default tab')}
             aria-pressed={false}
             title={t('Pin as default tab')}
-            className="relative rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-foreground group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
+            className="relative shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-foreground group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.preventDefault();
@@ -579,7 +582,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         ) : null}
         <button
           type="button"
-          className="relative rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-destructive group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
+          className="relative shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-destructive group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.preventDefault();
