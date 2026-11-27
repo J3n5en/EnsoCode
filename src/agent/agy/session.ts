@@ -59,7 +59,6 @@ export interface AgyTurnInput {
   modelId: string;
   thinkingLevel: string;
   modelLabel: string;
-  compressed?: boolean;
   /** 本轮 pi 系统提示词里的 EnsoCode 自有段（见 ensoSystemAppend）；和 agy 已有的不同时随指令重发 */
   systemAppend?: string;
   signal?: AbortSignal;
@@ -154,8 +153,6 @@ export async function openAgySession(options: {
   let sentRuntime: string | undefined;
   /** agy 这个会话已经拿到的 append：session 级 _meta 或某轮指令里发过的 */
   let sentAppend: string | undefined;
-  /** session 级 _meta 里的 append：agy 压缩上下文也不丢 */
-  let metaAppend: string | undefined;
   let resumed = false;
   let grant: HostMcpGrant | undefined;
   let ensoTools: readonly string[] = [];
@@ -318,10 +315,7 @@ export async function openAgySession(options: {
       meta
     );
     resumed = opened.resumed;
-    if (meta) {
-      sentAppend = append;
-      metaAppend = append;
-    }
+    if (meta) sentAppend = append;
     const setup = parseSessionSetup(opened.result);
     if (!setup) throw new Error('agy session returned no sessionId');
     phase = transitionAgySession(phase, {
@@ -391,7 +385,7 @@ export async function openAgySession(options: {
         release(orphans);
         if (phase.phase !== 'session-ready') throw new Error(`agy session is ${phase.phase}`);
         phase = transitionAgySession(phase, { type: 'prompt-started' });
-        const flags = instructionFlags(input, sentMode, sentRuntime, sentAppend, metaAppend);
+        const flags = instructionFlags(input, sentMode, sentRuntime, sentAppend);
         const blocks = buildAgyPrompt({
           messages: input.messages,
           interactionMode: flags.mode,
@@ -596,24 +590,20 @@ function instructionFlags(
   input: AgyTurnInput,
   sentMode: AgyInteractionMode | undefined,
   sentRuntime: string | undefined,
-  sentAppend: string | undefined,
-  metaAppend: string | undefined
+  sentAppend: string | undefined
 ) {
   const mode: AgyInteractionMode = input.planMode ? 'plan' : 'default';
   const runtime = runtimeInfoText(input.modelLabel);
   const append = input.systemAppend?.trim() ?? '';
-  // 能 append 的 agy 在 session 级就有了；没给过或中途变了（预设、插件尾段），随下一轮指令发一次。
-  // 只在指令里发过的，上下文压缩后要重发
-  const includeAppend =
-    append !== '' &&
-    (append !== sentAppend || (input.compressed === true && append !== metaAppend));
+  // 能 append 的 agy 在 session 级就有了；没给过或中途变了（预设、插件尾段），随下一轮指令发一次
+  const includeAppend = append !== '' && append !== sentAppend;
   return {
     mode,
     runtime,
     append,
     includeAppend,
-    includeInstructions: input.compressed === true || sentMode !== mode || includeAppend,
-    includeRuntimeInfo: input.compressed === true || sentRuntime !== runtime,
+    includeInstructions: sentMode !== mode || includeAppend,
+    includeRuntimeInfo: sentRuntime !== runtime,
   };
 }
 

@@ -435,4 +435,37 @@ describe('enso compact hook', () => {
     expect((await compactOnce('S'.repeat(4000)))?.compaction).toBeDefined();
     expect(takeCompactCancel(sessionManager)).toBeUndefined();
   });
+  it('摘要模型是 agy 时不调模型，直接交确定性摘要', async () => {
+    const branch = Array.from({ length: 3 }, (_, i) => ({
+      type: 'message',
+      message: { role: 'user', content: `Goal: ship checkout ${i}` },
+    }));
+    let calls = 0;
+    const result = (await hookFor({ mode: 'fast' })()?.(
+      {
+        reason: 'manual',
+        branchEntries: branch,
+        preparation: {
+          tokensBefore: 1000,
+          firstKeptEntryId: 'keep',
+          messagesToSummarize: [{ role: 'user', content: 'Goal: ship checkout' }],
+        },
+        signal: new AbortController().signal,
+      },
+      {
+        sessionManager: { getBranch: () => branch },
+        model: { id: 'default', provider: 'agy-cli', api: 'agy-acp' },
+        modelRegistry: {
+          find: () => undefined,
+          complete: async () => {
+            calls += 1;
+            throw new Error('agy only serves chat turns');
+          },
+        },
+      }
+    )) as Result;
+    expect(calls).toBe(0);
+    expect(result?.compaction?.summary).toContain('## Progress');
+    expect(result?.compaction?.summary).not.toContain('model summary unavailable');
+  });
 });

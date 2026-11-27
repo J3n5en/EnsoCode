@@ -248,14 +248,29 @@ export function attachAgyBridgeToSession(
     if (event.type === 'message_end') settleAgyTools(session, event.message, tools);
   }) as Parameters<AgentSession['subscribe']>[0]);
 
-  // pi 的每次模型请求都经 agent.streamFunction（prompt、continue、重试、compaction）：在这里绑上桥
+  // pi 的每次模型请求都经 agent.streamFunction：只给 agent 循环的对话请求（prompt、continue、重试）绑桥。
+  // 压缩、分支摘要、bug 报告摘要也走它，但 agy 自己管上下文，它们一律不进 agy（见 isAgentLoopRequest）
   const agent = session.agent as { streamFunction?: (...args: unknown[]) => unknown } | undefined;
   const stream = agent?.streamFunction;
   if (agent && typeof stream === 'function') {
     agent.streamFunction = (...args: unknown[]) =>
-      boundBridge.run(bridge, () => stream.apply(agent, args));
+      isAgentLoopRequest(args[2])
+        ? boundBridge.run(bridge, () => stream.apply(agent, args))
+        : stream.apply(agent, args);
   }
   return bridge;
+}
+
+/**
+ * agent 循环发请求时把整份 AgentLoopConfig 摊进 options，其中 `convertToLlm` 是必填项；
+ * pi 的摘要类调用（compaction / branch summary / bug report）只给新建的 SimpleStreamOptions。
+ */
+function isAgentLoopRequest(options: unknown): boolean {
+  return (
+    typeof options === 'object' &&
+    options !== null &&
+    typeof (options as { convertToLlm?: unknown }).convertToLlm === 'function'
+  );
 }
 
 function noteTool(

@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
   SessionBeforeCompactEvent,
 } from '@earendil-works/pi-coding-agent';
+import { AGY_API_ID, AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { directModelFor } from '../virtualModels';
 import { type EvictedItem, selectKeptBoundary } from './budget';
 import { recordCompactCancel } from './cancel';
@@ -192,6 +193,17 @@ export function createEnsoCompactHandler(options: EnsoCompactOptions = {}) {
       return;
     }
     const { facts, transcript, chunks } = prepared;
+    const finish = (drafted: string) => ({
+      compaction: {
+        summary: patchCompactSummary(drafted, facts, evicted),
+        firstKeptEntryId: keptId,
+        tokensBefore,
+      },
+    });
+    // agy 不接摘要请求（它自己管上下文）：不去试，直接本地确定性兜底
+    if (model.provider === AGY_PROVIDER_ID || model.api === AGY_API_ID) {
+      return finish(assembleFallback(facts, [], previousSummary));
+    }
     const preferSingle = estimateTextTokens(transcript) < singlePassMaxTokens;
     const calls = preferSingle ? 1 : chunks.length + 1;
 
@@ -216,13 +228,6 @@ export function createEnsoCompactHandler(options: EnsoCompactOptions = {}) {
         )
       );
     const maxTokens = MAX_TOKENS[mode];
-    const finish = (drafted: string) => ({
-      compaction: {
-        summary: patchCompactSummary(drafted, facts, evicted),
-        firstKeptEntryId: keptId,
-        tokensBefore,
-      },
-    });
     try {
       let drafted: string;
       if (preferSingle) {

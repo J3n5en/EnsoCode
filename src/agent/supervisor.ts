@@ -139,6 +139,7 @@ import type { WebSearchChainEntry } from '@shared/webSearchChain';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { version as appVersion } from '../../package.json';
 import { AgentControlInvoker } from './agentControl';
+import { agyCompactGuardExtension } from './agy/compactGuard';
 import { isAgyModel, registerAgyProvider } from './agy/provider';
 import { closeAgySession, closeAllAgySessions } from './agy/registry';
 import { attachAgyBridgeToSession } from './agy/sessionBridge';
@@ -827,7 +828,8 @@ function createSessionResourceLoader(options: {
                 options.compactRoute
               ),
             ]
-          : []),
+          : // 没有 Enso 压缩扩展时 pi 原生会拿会话模型总结；agy 会话换成本地摘要
+            [agyCompactGuardExtension]),
       ...(options.pluginEvents ? [createPluginEventsExtension(options.pluginEvents.invoker)] : []),
       skillChainExtension(() => loader.getSkills().skills),
       options.silentTurnRecovery,
