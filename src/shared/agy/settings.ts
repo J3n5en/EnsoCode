@@ -1,5 +1,10 @@
 import type { ModelProvider } from '../types/llm';
-import { AGY_DEFAULT_MODEL_ID, AGY_PROVIDER_ID, AGY_PROVIDER_NAME } from './constants';
+import {
+  AGY_DEFAULT_MODEL_ID,
+  AGY_DEFAULT_MODEL_NAME,
+  AGY_PROVIDER_ID,
+  AGY_PROVIDER_NAME,
+} from './constants';
 import type { AgyModelOption, AgySettings } from './types';
 
 export function parseAgySettings(value: unknown): AgySettings {
@@ -17,7 +22,7 @@ export function parseAgySettings(value: unknown): AgySettings {
 export function agySettingsProvider(models: readonly AgyModelOption[]): ModelProvider {
   const list = models.some((model) => model.id === AGY_DEFAULT_MODEL_ID)
     ? models
-    : [{ id: AGY_DEFAULT_MODEL_ID, name: AGY_PROVIDER_NAME }, ...models];
+    : [{ id: AGY_DEFAULT_MODEL_ID, name: AGY_DEFAULT_MODEL_NAME }, ...models];
   return {
     id: AGY_PROVIDER_ID,
     name: AGY_PROVIDER_NAME,

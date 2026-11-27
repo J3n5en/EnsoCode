@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { AGY_DEFAULT_MODEL_ID } from './constants';
+import { AGY_DEFAULT_MODEL_ID, AGY_DEFAULT_MODEL_NAME, AGY_PROVIDER_NAME } from './constants';
 import { agySettingsProvider } from './settings';
 
 describe('agySettingsProvider', () => {
   it('offers only the default model before agy has been probed', () => {
     expect(agySettingsProvider([]).models.map((model) => model.id)).toEqual([AGY_DEFAULT_MODEL_ID]);
+  });
+
+  it('labels the default model 默认 rather than the provider name', () => {
+    const provider = agySettingsProvider([]);
+    expect(provider.name).toBe(AGY_PROVIDER_NAME);
+    expect(provider.models[0]).toEqual({ id: 'default', label: AGY_DEFAULT_MODEL_NAME });
+    expect(AGY_DEFAULT_MODEL_NAME).toBe('默认');
   });
 
   it('keeps the default model next to the probed ones, as the worker catalog does', () => {
