@@ -2274,6 +2274,8 @@ export type AgentWorkerEvent =
       awaitingTasks?: true;
       /** 根会话还挂着自定提醒：在等自己定的时间点，goal 先不续跑 */
       awaitingReminder?: true;
+      /** 根会话还有没表态的在跑后台任务或没交付的完成通知：headless run 据此保持进程等唤醒 */
+      awaitingBackground?: true;
       /** 本轮实际使用的 provider id，供上游健康闸门判断恢复 */
       provider?: string;
     }
@@ -5433,6 +5435,7 @@ const agentWorkerEventParsers = {
         (value.continues === undefined || isNonEmptyString(value.continues)) &&
         (value.awaitingTasks === undefined || value.awaitingTasks === true) &&
         (value.awaitingReminder === undefined || value.awaitingReminder === true) &&
+        (value.awaitingBackground === undefined || value.awaitingBackground === true) &&
         (value.provider === undefined || isNonEmptyString(value.provider))
         ? (value as unknown as AgentWorkerEvent)
         : null;

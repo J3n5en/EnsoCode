@@ -12,6 +12,7 @@ interface Stub {
   url: string;
   requests: string[];
   hold: boolean;
+  mode: 'default' | 'wakeup' | 'wakeup-long' | 'reminder';
   close: () => Promise<void>;
 }
 
@@ -77,12 +78,93 @@ function goalEvents(): unknown[] {
   ];
 }
 
+function bashToolCallEvents(command: string, id: string): unknown[] {
+  const base = {
+    id: 'chatcmpl_bash',
+    object: 'chat.completion.chunk',
+    created: 1,
+    model: 'stub-model',
+  };
+  return [
+    {
+      ...base,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: 'assistant',
+            content: 'Starting it in the background.',
+            tool_calls: [
+              {
+                index: 0,
+                id,
+                type: 'function',
+                function: {
+                  name: 'bash',
+                  arguments: JSON.stringify({ command, background: true }),
+                },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      ...base,
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+    },
+  ];
+}
+
+function reminderToolCallEvents(id: string): unknown[] {
+  const base = {
+    id: 'chatcmpl_remind',
+    object: 'chat.completion.chunk',
+    created: 1,
+    model: 'stub-model',
+  };
+  return [
+    {
+      ...base,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: 'assistant',
+            content: 'Setting a reminder.',
+            tool_calls: [
+              {
+                index: 0,
+                id,
+                type: 'function',
+                function: {
+                  name: 'remind_me',
+                  arguments: JSON.stringify({ in: '30s', prompt: 'WAKE-ME-PING', label: 'ping' }),
+                },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      ...base,
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+    },
+  ];
+}
+
 async function startStub(): Promise<Stub> {
   const requests: string[] = [];
   const stub: Stub = {
     url: '',
     requests,
     hold: false,
+    mode: 'default',
     close: async () => undefined,
   };
   const server = createServer((req, res) => {
@@ -90,8 +172,16 @@ async function startStub(): Promise<Stub> {
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8');
-      requests.push(`${req.method} ${req.url} ${body.slice(0, 400)}`);
+      requests.push(`${req.method} ${req.url} ${body}`);
       if (stub.hold) return;
+      if (stub.mode === 'wakeup' || stub.mode === 'wakeup-long') {
+        writeCompletion(res, wakeupResponse(stub.mode, body));
+        return;
+      }
+      if (stub.mode === 'reminder') {
+        writeCompletion(res, reminderResponse(body));
+        return;
+      }
       const followUp = body.includes('Goal marked') || body.includes('call_goal');
       const goal = body.includes('ship the stub') && !followUp;
       writeCompletion(res, goal ? goalEvents() : textEvents('hello from stub'));
@@ -104,6 +194,39 @@ async function startStub(): Promise<Stub> {
   stub.close = () =>
     new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   return stub;
+}
+
+/**
+ * 唤醒验证的状态机：第一轮看到 START-BG 就起后台任务，本轮收口时任务还在跑；
+ * 进程若提前退出就永远等不到完成通知那一轮（CONSUMED-BG 永远不会出现）。
+ */
+function wakeupResponse(mode: 'wakeup' | 'wakeup-long', body: string): unknown[] {
+  const command =
+    mode === 'wakeup'
+      ? 'sleep 0.5; echo bg-finished > bgdone.txt'
+      : 'sleep 30; echo never > never.txt';
+  if (body.includes('START-BG') && !body.includes('call_bg')) {
+    return bashToolCallEvents(command, 'call_bg');
+  }
+  if (body.includes('reminder') || body.includes('wrap up')) {
+    // hold 上限到点后的强制收尾轮 / 后台完成通知轮：都是唤醒生效的证据
+    return textEvents('CONSUMED-BG');
+  }
+  if (body.includes('call_bg')) {
+    // 同一轮里 bash 工具结果回来：任务还在跑，agent 收尾等待唤醒
+    return textEvents('WAITING-BG');
+  }
+  return textEvents('CONSUMED-BG');
+}
+
+function reminderResponse(body: string): unknown[] {
+  if (body.includes('WAKE-ME-PING')) {
+    // 提醒到点被注入：是唤醒生效的证据
+    return textEvents('REMINDER-CONSUMED');
+  }
+  if (body.includes('call_remind')) return textEvents('REMINDER-SET');
+  if (body.includes('SET-REMINDER')) return reminderToolCallEvents('call_remind');
+  return textEvents('hello from stub');
 }
 
 function writeCompletion(res: ServerResponse, events: unknown[]): void {
@@ -410,6 +533,7 @@ describe.runIf(process.env.ENSO_RUN_E2E === '1').sequential('enso-server run', (
   it('appends --append-system-prompt to the system prompt sent to the model', async () => {
     const dir = workspace();
     const marker = 'EVAL-SENTINEL-7f3a9c';
+    const seen = stub.requests.length;
     const result = await runCli(
       [
         '--prompt',
@@ -429,9 +553,179 @@ describe.runIf(process.env.ENSO_RUN_E2E === '1').sequential('enso-server run', (
       {}
     );
     expect(result.code, result.stderr).toBe(0);
-    const requestBody = stub.requests.find((entry) => entry.includes('chat/completions'));
+    const requestBody = stub.requests
+      .slice(seen)
+      .find((entry) => entry.includes('chat/completions'));
     expect(requestBody).toBeTruthy();
     // system prompt 正文必须带着追加段到达模型端点
     expect(requestBody).toContain(marker);
-  });
+  }, 30_000);
+
+  const firstCompletionTools = (since: number): string[] => {
+    const entry = stub.requests
+      .slice(since)
+      .find((request) => request.includes('chat/completions'));
+    if (!entry) return [];
+    const at = entry.indexOf('chat/completions') + 'chat/completions'.length;
+    const json = entry.slice(at).trim();
+    try {
+      const body = JSON.parse(json) as {
+        tools?: Array<{ function?: { name?: string }; name?: string }>;
+      };
+      return (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
+    } catch {
+      return [];
+    }
+  };
+
+  it('no --goal：goal_complete 族工具不发给模型（假完成误导的来源）', async () => {
+    const dir = workspace();
+    const seen = stub.requests.length;
+    const result = await runCli(
+      [
+        '--prompt',
+        'Say hello',
+        '--cwd',
+        dir.work,
+        '--data-dir',
+        dir.data,
+        '--output-format',
+        'json',
+        '--timeout-ms',
+        '60000',
+        ...providerArgs(),
+      ],
+      {}
+    );
+    expect(result.code, result.stderr).toBe(0);
+    const tools = firstCompletionTools(seen);
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools).not.toContain('goal_complete');
+    expect(tools).not.toContain('goal_blocked');
+    expect(tools).not.toContain('goal_wait');
+  }, 30_000);
+
+  it('有 --goal：goal_complete 族工具照常发给模型', async () => {
+    const dir = workspace();
+    const seen = stub.requests.length;
+    const result = await runCli(
+      [
+        '--goal',
+        'ship the stub',
+        '--cwd',
+        dir.work,
+        '--data-dir',
+        dir.data,
+        '--output-format',
+        'json',
+        '--timeout-ms',
+        '60000',
+        ...providerArgs(),
+      ],
+      {}
+    );
+    expect(result.code, result.stderr).toBe(0);
+    expect(firstCompletionTools(seen)).toContain('goal_complete');
+  }, 30_000);
+
+  it('后台任务未完结时进程不退出；完成通知唤醒 agent 消费成果后才结束', async () => {
+    const dir = workspace();
+    stub.mode = 'wakeup';
+    try {
+      const result = await runCli(
+        [
+          '--prompt',
+          'START-BG in the background then report',
+          '--cwd',
+          dir.work,
+          '--data-dir',
+          dir.data,
+          '--output-format',
+          'json',
+          '--timeout-ms',
+          '60000',
+          ...providerArgs(),
+        ],
+        {}
+      );
+      expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
+      const parsed = JSON.parse(result.stdout) as {
+        exitReason: string;
+        finalMessage: string;
+        turns: number;
+      };
+      // 关键证据：agent 完成了第二轮（完成通知唤醒）并消费了后台成果，
+      // 否则进程在第一轮结束就已退出，CONSUMED-BG 根本不会出现
+      expect(parsed.finalMessage).toContain('CONSUMED-BG');
+      expect(parsed.turns).toBeGreaterThanOrEqual(2);
+      expect(existsSync(path.join(dir.work, 'bgdone.txt'))).toBe(true);
+    } finally {
+      stub.mode = 'default';
+    }
+  }, 30_000);
+
+  it('后台任务挂死不到完成：hold 上限强制收尾，退出码 3 而不是无限等', async () => {
+    const dir = workspace();
+    stub.mode = 'wakeup-long';
+    try {
+      const result = await runCli(
+        [
+          '--prompt',
+          'START-BG in the background then report',
+          '--cwd',
+          dir.work,
+          '--data-dir',
+          dir.data,
+          '--output-format',
+          'json',
+          '--hold-timeout-ms',
+          '3000',
+          '--timeout-ms',
+          '60000',
+          ...providerArgs(),
+        ],
+        {}
+      );
+      expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(3);
+      const parsed = JSON.parse(result.stdout) as { exitReason: string };
+      expect(parsed.exitReason).toBe('hold-expired');
+      // sleep 30 的任务被收割在 hold 上限语义内，进程不该活到 30s
+      expect(existsSync(path.join(dir.work, 'never.txt'))).toBe(false);
+    } finally {
+      stub.mode = 'default';
+    }
+  }, 30_000);
+
+  it('提醒未触发时进程不退出；到点唤醒 agent 消费提醒后才结束', async () => {
+    const dir = workspace();
+    stub.mode = 'reminder';
+    try {
+      const result = await runCli(
+        [
+          '--prompt',
+          'SET-REMINDER for me please',
+          '--cwd',
+          dir.work,
+          '--data-dir',
+          dir.data,
+          '--output-format',
+          'json',
+          '--timeout-ms',
+          '120000',
+          ...providerArgs(),
+        ],
+        {}
+      );
+      expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
+      const parsed = JSON.parse(result.stdout) as {
+        exitReason: string;
+        finalMessage: string;
+        turns: number;
+      };
+      expect(parsed.finalMessage).toContain('REMINDER-CONSUMED');
+      expect(parsed.turns).toBeGreaterThanOrEqual(2);
+    } finally {
+      stub.mode = 'default';
+    }
+  }, 120_000);
 });

@@ -1152,6 +1152,25 @@ describe('前台让位 / 截止 / 失败回执（真实进程）', () => {
     expect(notified[0]).toContain(`Background task ${taskId} finished (exit 0`);
   });
 
+  it('让位回执带 structuredContent：codemode 脚本读 bash() 结果能拿到 output（bash 声明了 outputSchema）', async () => {
+    const { manager, ended } = makeManager({ yieldDefaultMs: 80 });
+    const result = await shell(manager).execute(
+      't1',
+      { command: 'echo before-yield; sleep 0.2; echo after-yield' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    const structured = (result as { structuredContent?: Record<string, unknown> })
+      .structuredContent;
+    expect(structured).toBeDefined();
+    expect(structured?.output).toContain('before-yield');
+    expect(structured?.exit_code).toBeNull();
+    expect(structured?.background_task_id).toMatch(/^task-/);
+    const taskId = (result.details as { backgroundTaskId: string }).backgroundTaskId;
+    await until(() => ended.includes(taskId));
+  });
+
   it('显式 timeout 早于让位：到点杀进程，结果带 deadline 分类与下一步', async () => {
     const { manager, started } = makeManager();
     const result = await shell(manager).execute(

@@ -36,6 +36,7 @@ function runArgs(extra: Partial<RunArgs> = {}): RunArgs {
     modelId: 'stub-model',
     apiKey: 'key',
     baseUrl: 'http://127.0.0.1:9/v1',
+    holdTimeoutMs: 30 * 60_000,
     outputFormat: 'text',
     continue: false,
     disallowedTools: [],

@@ -17,6 +17,7 @@ import { THINKING_LEVELS } from '@shared/types/agentConstants';
 import {
   abortSession,
   agentDataDir,
+  fireSessionReminders,
   promptSession,
   releaseParentSession,
   setAgentEventListener,
@@ -223,6 +224,11 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
   let loggedCalls = 0;
   let stopTimer: ReturnType<typeof setTimeout> | undefined;
   let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  // 后台任务/提醒还没完时的持有：到点强制收尾一轮，这一轮仍走不脱就 hold-expired。
+  // 一轮真正开始（status running）算任务被消费/新工作开始，重置持有
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  let holdForced = false;
+  let holdPromptInFlight = false;
 
   const stderr = (line: string) => io.writeStderr(line.endsWith('\n') ? line : `${line}\n`);
   const emit = (records: StreamRecord[]) => {
@@ -264,6 +270,41 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
   // MCP OAuth token 等凭据要先解密进内存，worker 起会话时才带得上
   await readySecureStores();
   return await new Promise<number>((resolve) => {
+    const releaseHold = () => {
+      if (holdTimer) clearTimeout(holdTimer);
+      holdTimer = undefined;
+      holdForced = false;
+    };
+    /**
+     * 后台任务挂死（编译卡死、qemu 卡死）时完成通知永远不会来，agent 又已经按
+     * 「end your turn」交付：不强制戳破，run 会一直挂到 --timeout-ms（没给就无限）。
+     * 上限到点注入一轮强制收尾：agent 表态后若仍等后台工作，按 hold-expired 退出。
+     */
+    const holdExpiredText = () =>
+      `You have been waiting ${Math.round(args.holdTimeoutMs / 60_000)} minutes for background tasks ` +
+      'or reminders and will not wait any longer. Finish now in this turn: declare the outcome of ' +
+      'whatever is still running (task_output to check, task_stop what cannot finish) and report ' +
+      'your final result. Do not start new background work.';
+    const armHold = () => {
+      if (holdTimer) clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => {
+        holdTimer = undefined;
+        if (settled || holdPromptInFlight) return;
+        holdForced = true;
+        holdPromptInFlight = true;
+        stderr(`[enso-server] hold expired after ${args.holdTimeoutMs}ms — forcing a wrap-up turn`);
+        const sent = promptSession(identity, holdExpiredText(), undefined, randomUUID());
+        if (!sent.ok) {
+          stop({
+            code: 1,
+            status: 'error',
+            reason: 'prompt-rejected',
+            error: sent.error,
+          });
+        }
+      }, args.holdTimeoutMs);
+    };
+
     const cleanup = async () => {
       if (spawned) {
         abortSession(identity);
@@ -282,6 +323,7 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
       settled = true;
       if (startupTimer) clearTimeout(startupTimer);
       if (stopTimer) clearTimeout(stopTimer);
+      if (holdTimer) clearTimeout(holdTimer);
       emit(transcript.flushTurn());
       writeResult(next);
       void cleanup()
@@ -330,6 +372,12 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
           return;
         }
         if (event.type === 'worker-swapped') return;
+        // 提醒定时器活在 worker 里：到点由它请 Main 判定。GUI 下 Main 走 wakeForReminder
+        // 恢复冷会话；headless run 会话必然在 worker 里，直接回 reminders-fire 即成环
+        if (event.type === 'session-reminder-due') {
+          if (event.sessionId === sessionId) fireSessionReminders(sessionId);
+          return;
+        }
         const who = relate(event);
         if (!who) return;
         if (event.type === 'message-upsert') {
@@ -353,6 +401,9 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
               ...(event.error ? { error: event.error } : {}),
             },
           ]);
+          // 一轮真正开始 = 后台任务被消费/新工作开始：旧的持有翻篇。
+          // 强制收尾这一轮不翻篇——它正是持有的产物，翻篇就永远 hold-expired 不了
+          if (event.status === 'running' && !holdPromptInFlight) releaseHold();
           // 通用异常只发 status failed，之后不保证还有 turn-failed；不收口会一直挂到超时
           if (event.status === 'failed') {
             turns += 1;
@@ -401,6 +452,24 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
         }
         turns += 1;
         emit(transcript.flushTurn());
+        // 后台任务/提醒未完结：不退出，等完成通知或提醒触发的投递唤醒新一轮。
+        // 后台任务完成通知走 <agent-notification> 合成提示；提醒经 session-reminder-due
+        // 回环。上限保护：连续持有超过 --hold-timeout-ms 强制收尾一轮；这一轮若仍
+        // 走不脱（任务确实挂死），按 hold-expired 退出而不是无限等
+        const holding = event.awaitingReminder === true || event.awaitingBackground === true;
+        holdPromptInFlight = false;
+        if (holding) {
+          if (holdForced) {
+            stop({ code: 3, status: 'blocked', reason: 'hold-expired' });
+            return;
+          }
+          stderr(
+            `[enso-server] turn ${turns} completed, holding for background work/reminders (cap ${args.holdTimeoutMs}ms)`
+          );
+          armHold();
+          return;
+        }
+        releaseHold();
         if (!args.goal) {
           stop({ code: 0, status: 'success', reason: 'finished' });
           return;
@@ -450,7 +519,14 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
         new Set(),
         undefined,
         undefined,
-        { extraDisabledTools: disabledToolsForRun(args.disallowedTools, args.allowTools) }
+        {
+          extraDisabledTools: [
+            ...disabledToolsForRun(args.disallowedTools, args.allowTools),
+            // 无 --goal 的 run 没有 goal 状态机：goal_complete 会假成功误导模型
+            // （评测实测 sam-cell-seg），整组工具直接不发给模型；用户显式 allow 也不开
+            ...(args.goal ? [] : ['goal']),
+          ],
+        }
       );
       if (!spawnedCommand.ok) {
         const code = configFailure(spawnedCommand.error ?? '') ? 2 : 1;

@@ -5379,6 +5379,13 @@ export class SessionSupervisor {
     // 子代理 Run 真正收口：它的提醒没人再等；退出收尾打断的 Run 重启后接着跑，提醒留着
     if (!awaitingTasks && !quiet && sessionId.includes('::')) this.reminders.cancelAll(sessionId);
     const awaitingReminder = !sessionId.includes('::') && this.reminders.list(sessionId).length > 0;
+    // 根会话（无 Run 概念）也有未完的后台工作要交付：headless run 靠它保持进程等唤醒。
+    // 只给事实不给行为：GUI 常驻本来就等得到，是否据此不退出是 headless 消费者的事
+    const awaitingBackground =
+      !sessionId.includes('::') &&
+      !aborted &&
+      !budget &&
+      (this.bgTasks.undeclared(sessionId).length > 0 || managed.pendingTaskReminders.length > 0);
     managed.currentTurnId = undefined;
     managed.abortedTurnId = undefined;
     managed.turnAborted = false;
@@ -5413,6 +5420,7 @@ export class SessionSupervisor {
         ...(continues ? { continues } : {}),
         ...(awaitingTasks ? { awaitingTasks: true as const } : {}),
         ...(awaitingReminder ? { awaitingReminder: true as const } : {}),
+        ...(awaitingBackground ? { awaitingBackground: true as const } : {}),
         ...(managed.session.model?.provider ? { provider: managed.session.model.provider } : {}),
       });
     if (awaitingTasks) {
