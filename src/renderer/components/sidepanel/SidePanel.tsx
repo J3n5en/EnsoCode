@@ -103,6 +103,7 @@ import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibi
 import { isPluginPanelId, pinnableTabForId, planPinnedPanels } from './pinnedTabs';
 import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
+import { sidePanelCoversMain } from './sidePanelCover';
 import { liftsIntoTitleRow } from './sidePanelTitleRow';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { ShowEverywhereItem, SideTabTitle } from './sideTabScope';
@@ -1304,7 +1305,7 @@ export function SidePanel({
   const isMobile = useIsMobile();
   const settingsOpen = useSettingsOpen();
   const storeFullscreen = useSidePanelStore((s) => s.fullscreen);
-  const fullscreen = storeFullscreen || (isMobile && open);
+  const fullscreen = sidePanelCoversMain({ open, fullscreen: storeFullscreen, isMobile });
   useEffect(() => bindLiveGlobalTabs(), []);
   useEffect(() => {
     const stopReveal = window.electronAPI.browser.onReveal((event) => {
