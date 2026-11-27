@@ -37,7 +37,7 @@ export interface ContactFile {
   allowMemory: boolean;
   /**
    * 默认关闭：只发里程碑。打开后秘书会话里每一轮回复都镜像到手机，
-   * 静默回合只发一行摘要。解绑或换 bot 时自动关掉。
+   * 静默回合不打扰。解绑或换 bot 时自动关掉。
    */
   syncMirror: boolean;
   /** getUpdates 的游标：先落盘再处理，重启不重放已经产生过副作用的更新 */

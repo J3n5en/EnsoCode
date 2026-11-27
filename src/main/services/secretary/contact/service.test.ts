@@ -2294,7 +2294,7 @@ describe('/sync 镜像秘书会话', () => {
     h.api.push(privateMessage('/sync on'));
     await waitFor(() => h.service.state().telegram.syncMirror, 'on');
     h.api.sent.length = 0;
-    h.service.onTurnSilent('sec-1', 3);
+    h.service.onTurnSilent('sec-1');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.api.sent).toEqual([]);
   });
@@ -2302,7 +2302,7 @@ describe('/sync 镜像秘书会话', () => {
   it('同步关着时静默回合一条都不发', async () => {
     const h = harness();
     await bound(h);
-    h.service.onTurnSilent('sec-1', 3);
+    h.service.onTurnSilent('sec-1');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.api.sent).toEqual([]);
   });
@@ -2453,7 +2453,7 @@ describe('「正在输入…」', () => {
     vi.useFakeTimers();
     h.service.onTurnStart('sec-1');
     await vi.advanceTimersByTimeAsync(0);
-    h.service.onTurnSilent('sec-1', 3);
+    h.service.onTurnSilent('sec-1');
     await vi.advanceTimersByTimeAsync(20_000);
     expect(h.api.chatActions).toHaveLength(1);
     expect(h.api.sent).toEqual([]);
@@ -2731,9 +2731,9 @@ describe('手机关注的任务', () => {
     h.api.push(privateMessage('在吗'));
     await waitFor(() => h.world.delivered.length > 0, 'delivered');
     follow(h, 'session', 'c1', '修 onboarding 遮罩', 'sec-1');
-    h.service.onTurnSilent('sec-1', 3);
+    h.service.onTurnSilent('sec-1');
     h.following.remove('session:c1');
-    h.service.onTurnSilent('sec-1', 3);
+    h.service.onTurnSilent('sec-1');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.api.sent).toEqual([]);
   });

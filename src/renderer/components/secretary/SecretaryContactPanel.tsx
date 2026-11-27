@@ -1016,7 +1016,7 @@ export function SecretaryContactPanel({
                 </div>
                 <p className="mt-1 text-[11.5px] text-muted-foreground">
                   {t(
-                    'Every reply in the secretary conversation is sent to your phone, not just milestones. Silent turns arrive as a one-line summary. Telegram messages are not end-to-end encrypted and stay on Telegram servers. Send /sync off in Telegram to stop.'
+                    'Every reply in the secretary conversation is sent to your phone, not just milestones. Silent turns stay quiet. Telegram messages are not end-to-end encrypted and stay on Telegram servers. Send /sync off in Telegram to stop.'
                   )}
                 </p>
               </>
