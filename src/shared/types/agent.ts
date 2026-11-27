@@ -2336,6 +2336,11 @@ export type AgentWorkerEvent =
       startedAt?: number;
       /** 前台命令的超时截止 wall clock：无输出巡检在此之前不把静默当卡死 */
       deadlineAt?: number;
+      /**
+       * pi tool_execution_end 时带上：工具已收口（output 为结果正文）。toolResult 消息可能晚到
+       * （agy / Cursor 在整段回复结束才落盘、pi 并行工具按源序补发），卡片先据此转完成 / 失败。
+       */
+      ended?: 'ok' | 'error';
     }
   | { type: 'messages-truncated'; identity: SessionIdentity; seq: number; length: number }
   | {
@@ -5682,7 +5687,8 @@ const agentWorkerEventParsers = {
       return isNonEmptyString(value.toolCallId) &&
         typeof value.output === 'string' &&
         (value.startedAt === undefined || typeof value.startedAt === 'number') &&
-        (value.deadlineAt === undefined || Number.isFinite(value.deadlineAt))
+        (value.deadlineAt === undefined || Number.isFinite(value.deadlineAt)) &&
+        (value.ended === undefined || value.ended === 'ok' || value.ended === 'error')
         ? (value as unknown as AgentWorkerEvent)
         : null;
     }

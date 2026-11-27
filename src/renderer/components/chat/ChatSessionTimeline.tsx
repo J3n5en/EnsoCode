@@ -117,6 +117,7 @@ export function ChatSessionTimeline({
   const toolStartedAt = useSessionsStore(
     (state) => state.conversations[conversationId]?.toolStartedAt
   );
+  const toolEnded = useSessionsStore((state) => state.conversations[conversationId]?.toolEnded);
   const pendingApprovals = useSessionsStore(
     (state) => state.conversations[conversationId]?.pendingApprovals
   );
@@ -148,7 +149,11 @@ export function ChatSessionTimeline({
   /** 应用退出打断的一轮：正文里被吞掉的模型错误不再渲染，底部钉系统提示 */
   const interrupted = useSessionsStore((state) => state.conversations[conversationId]?.interrupted);
 
-  const cache = useRef<{ conversationId: string; items: TimelineItem[] }>({
+  const cache = useRef<{
+    conversationId: string;
+    items: TimelineItem[];
+    toolEnded?: Record<string, 'ok' | 'error'>;
+  }>({
     conversationId: '',
     items: [],
   });
@@ -156,12 +161,11 @@ export function ChatSessionTimeline({
     if (cache.current.conversationId !== conversationId) {
       cache.current = { conversationId, items: [] };
     }
-    const patched = patchStreamingTimeline(
-      cache.current.items,
-      messages,
-      running,
-      historyBaseIndex
-    );
+    // 正文还在流时工具收口了（agy 的工具与正文同在一条流式 assistant 里）：只补正文会漏掉卡片转完成
+    const patched =
+      cache.current.toolEnded === toolEnded
+        ? patchStreamingTimeline(cache.current.items, messages, running, historyBaseIndex)
+        : null;
     const items =
       patched ??
       buildTimeline(messages, running, customEntries, cwd, {
@@ -170,12 +174,14 @@ export function ChatSessionTimeline({
         compactionTokensAfter,
         historyBaseIndex,
         toolOutputs,
+        toolEnded,
         toolStartedAt,
         pendingApprovals,
         secretarySession,
         interrupted,
       });
     cache.current.items = items;
+    cache.current.toolEnded = toolEnded;
     return items;
   }, [
     compaction,
@@ -190,6 +196,7 @@ export function ChatSessionTimeline({
     pendingApprovals,
     running,
     secretarySession,
+    toolEnded,
     toolOutputs,
     toolStartedAt,
   ]);
