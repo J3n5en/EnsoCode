@@ -63,6 +63,10 @@ import type { SecretaryOpHandler } from './tools';
 const ctx = { secretaryConversationId: 'sec-1' };
 const NOW = 1_000;
 
+/** 与 dispatch.ts 里的 NO_GOAL_TRACTION_WARNING 同文：没带 goal 且会话没有活目标时的提醒 */
+const WARNING =
+  'this session has no active goal: it will stop after this turn, produce no goal-complete report and no patrol coverage, so it becomes invisible on your running list. Resend with the goal parameter if this is continued work that must finish.';
+
 /** 24 字节的 png 头（4x3）：只按文件头判格式，够用 */
 const PNG = Uint8Array.from([
   137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 4, 0, 0, 0, 3, 8, 6, 0, 0,
@@ -223,7 +227,10 @@ function harness(
     projects: options.projects ?? [localProject()],
     conversations: options.conversations ?? [rootConversation('c1')],
     statuses: new Map(Object.entries(options.statuses ?? {})),
-    rows: options.rows ?? {},
+    // 缺省给 c1 一个跑着的活目标：派发中的会话多数正按目标推进，不带目标的场景测试自己显式传 rows
+    rows: options.rows ?? {
+      c1: { id: 'c1', driver: 'main', goal: { text: '派发目标', status: 'active' } },
+    },
     createResult: options.createResult ?? { ok: true, conversationId: 'new-1' },
     changed: 0,
     baseFacts: {
@@ -907,7 +914,8 @@ describe('session_send', () => {
       await call(h.handlers.session_send, { conversationId: 'c1', message: '接着做' })
     ).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 完成后的会话没有目标：结果里带提醒，秘书该补 goal
+      result: { status: 'sent', warning: WARNING },
     });
     expect(h.file.dispatched.c1.lastState).toBe('running');
     expect(h.todos[0].doneAt).toBeUndefined();
@@ -1119,7 +1127,8 @@ describe('session_send', () => {
         conversationId: 'c1',
         message: '再改一处',
       });
-      expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+      // 终态之后没带 goal 地再发：结果里带提醒
+      expect(result).toEqual({ ok: true, result: { status: 'sent', warning: WARNING } });
       const record = h.file.dispatched.c1;
       expect(record.lastResult).toBeUndefined();
       expect(record).toMatchObject({ lastState: 'running', reopenedAt: NOW });
@@ -1234,6 +1243,117 @@ describe('session_send', () => {
     expect(result.error).toContain('mode');
     expect(h.queued).toEqual([]);
     expect(h.steers).toEqual([]);
+  });
+
+  describe('没带 goal 且会话没有活目标时的提醒', () => {
+    it('没有目标的会话：sent 结果里带 warning', async () => {
+      const h = harness({ file: dispatchedFile(), rows: { c1: { id: 'c1', driver: 'main' } } });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '再改一处',
+      });
+      expect(result).toEqual({
+        ok: true,
+        result: {
+          status: 'sent',
+          warning: WARNING,
+        },
+      });
+    });
+
+    it('steer 插话同样带 warning', async () => {
+      const h = harness({
+        file: dispatchedFile(),
+        rows: { c1: { id: 'c1', driver: 'main' } },
+        statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+      });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '顺手把这个也改了',
+      });
+      expect(result).toEqual({
+        ok: true,
+        result: {
+          status: 'steered',
+          warning: WARNING,
+        },
+      });
+    });
+
+    it('queue 排队同样带 warning', async () => {
+      const h = harness({
+        file: dispatchedFile(),
+        rows: { c1: { id: 'c1', driver: 'main' } },
+        statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+      });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '接着改',
+        mode: 'queue',
+      });
+      expect(result).toEqual({
+        ok: true,
+        result: {
+          status: 'queued',
+          warning: WARNING,
+        },
+      });
+    });
+
+    it('目标是 paused 或 blocked 时也算没有牵引：带 warning', async () => {
+      for (const status of ['paused', 'blocked']) {
+        const h = harness({
+          file: dispatchedFile(),
+          rows: { c1: { id: 'c1', driver: 'main', goal: { text: '旧目标', status } } },
+        });
+        const result = await call(h.handlers.session_send, {
+          conversationId: 'c1',
+          message: '继续',
+        });
+        expect(result, status).toEqual({
+          ok: true,
+          result: {
+            status: 'sent',
+            warning: WARNING,
+          },
+        });
+      }
+    });
+
+    it('目标是 active 或 waiting 时不带 warning', async () => {
+      for (const status of ['active', 'waiting']) {
+        const h = harness({
+          file: dispatchedFile(),
+          rows: { c1: { id: 'c1', driver: 'main', goal: { text: '目标', status } } },
+        });
+        const result = await call(h.handlers.session_send, {
+          conversationId: 'c1',
+          message: '继续',
+        });
+        expect(result, status).toEqual({ ok: true, result: { status: 'sent' } });
+      }
+    });
+
+    it('秘书自己带了 goal 时不带 warning', async () => {
+      const h = harness({ file: dispatchedFile(), rows: { c1: { id: 'c1', driver: 'main' } } });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '接着做',
+        goal: '把剩下的改完并推送',
+      });
+      expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    });
+
+    it('发送失败时不带 warning', async () => {
+      const h = harness({ file: dispatchedFile(), rows: { c1: { id: 'c1', driver: 'main' } } });
+      h.ports.alive = () => false;
+      h.ports.resume = async () => ({ ok: false, error: 'no session file' });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '继续',
+      });
+      expect(result).toEqual({ ok: false, error: 'no session file' });
+    });
   });
 });
 
@@ -2010,7 +2130,8 @@ describe('接管', () => {
 
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 接管/范围内的用户会话没有目标：结果里带提醒
+      result: { status: 'sent', warning: WARNING },
     });
     expect(h.audits.at(-1)).toMatchObject({
       op: 'session_send',
@@ -2160,7 +2281,8 @@ describe('接管范围', () => {
 
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 接管/范围内的用户会话没有目标：结果里带提醒
+      result: { status: 'sent', warning: WARNING },
     });
     expect(h.prompts).toEqual([{ conversationId: 'c1', text: '继续', deliveryId: 'id-1' }]);
     expect(h.file.dispatched.c1).toMatchObject({
@@ -2300,7 +2422,8 @@ describe('不再跟踪', () => {
     // 范围接管的会话被真正用过一次，才有记录可撤销
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 接管/范围内的用户会话没有目标：结果里带提醒
+      result: { status: 'sent', warning: WARNING },
     });
     expect(revokeTakeover(h.ports, 'c1')).toEqual({ ok: true });
     expect(h.file.dispatched).toEqual({});
@@ -2327,7 +2450,8 @@ describe('不再跟踪', () => {
     expect(h.file.untracked).toEqual([]);
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 接管/范围内的用户会话没有目标：结果里带提醒
+      result: { status: 'sent', warning: WARNING },
     });
   });
 
@@ -2342,7 +2466,8 @@ describe('不再跟踪', () => {
     expect(untrack(h.ports, 'c1')).toEqual({ ok: false, error: 'not-found' });
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 接管/范围内的用户会话没有目标：结果里带提醒
+      result: { status: 'sent', warning: WARNING },
     });
   });
 
@@ -2350,7 +2475,8 @@ describe('不再跟踪', () => {
     const h = untrackedHarness({ file: { ...dispatchedFile(), untracked: ['c1'] } });
     expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
-      result: { status: 'sent' },
+      // 接管/范围内的用户会话没有目标：结果里带提醒
+      result: { status: 'sent', warning: WARNING },
     });
   });
 });
@@ -4933,7 +5059,7 @@ describe('手动标完成写入 daily、新 goal 才解除锁定与停止清旧�
     // 不带新 goal 的 session_send：不撤下 manual 完成标记
     expect(
       await call(h.handlers.session_send, { conversationId: 'c1', message: '收到，不用改了' })
-    ).toEqual({ ok: true, result: { status: 'sent' } });
+    ).toEqual({ ok: true, result: { status: 'sent', warning: WARNING } });
     expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
 
     // 带新 goal 的 session_send：撤下 manual 完成标记并重新跟踪

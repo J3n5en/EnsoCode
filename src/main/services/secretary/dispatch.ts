@@ -395,6 +395,21 @@ const DENIALS = {
 
 export const NOT_OPERABLE_ERROR = DENIALS['not-operable'];
 
+/**
+ * 没带 goal 的追加发到没有活目标的会话：这一轮跑完就停，没有 goal-complete、巡检也不盯，
+ * 秘书的 running 列表里看不到它——活儿可能半途而废。只在结果里提醒，不改变行为。
+ */
+const NO_GOAL_TRACTION_WARNING =
+  'this session has no active goal: it will stop after this turn, produce no goal-complete report and no patrol coverage, so it becomes invisible on your running list. Resend with the goal parameter if this is continued work that must finish.';
+
+/** 会拉着会话继续跑的目标状态：active 在跑，waiting 在等外部条件后自动续跑 */
+function rowHasGoalTraction(row: Record<string, unknown> | undefined): boolean {
+  const goal = row?.goal;
+  if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return false;
+  const status = (goal as { status?: unknown }).status;
+  return status === 'active' || status === 'waiting';
+}
+
 /** 「不再跟踪」名单上限：只用于挡住范围权限，留最近的一批就够 */
 const UNTRACKED_LIMIT = 200;
 
@@ -1920,7 +1935,8 @@ export function createSecretaryDispatchHandlers(
       const profile = await profileOf(ports);
       const check = await checkOperate(ports, conversationId, profile);
       if (!check.ok) return deny(ports, ctx, 'session_send', check.code, conversationId);
-      if (queuedStartOf((await ports.rows())[conversationId]))
+      const targetRow = (await ports.rows())[conversationId];
+      if (queuedStartOf(targetRow))
         return deny(ports, ctx, 'session_send', 'session-queued', conversationId);
       const source = check.source;
       // 权限过了再读文件：图片全部校验通过才投递，任何一张不合法都在发出之前拒绝
@@ -1962,6 +1978,9 @@ export function createSecretaryDispatchHandlers(
           ports.saveDispatch(file);
         }
       }
+      // 没带 goal 而会话本身也没有活目标：跑完这一轮就没人牵引，提醒秘书而不是默默放行
+      const noGoalWarning =
+        goal || rowHasGoalTraction(targetRow) ? undefined : NO_GOAL_TRACTION_WARNING;
       const ownStatus = ports.ownStatus ? await ports.ownStatus(conversationId) : status;
       if (ownStatus.state === 'running') {
         // 插话复用用户自己的 steer 通道：pi 在当前工具调用结束后读到它，不等整轮结束
@@ -1988,7 +2007,13 @@ export function createSecretaryDispatchHandlers(
             detail: `steered (${source})${imageNote}`,
           });
           notifySecretaryChanged();
-          return { ok: true, result: { status: 'steered' } };
+          return {
+            ok: true,
+            result: {
+              status: 'steered',
+              ...(noGoalWarning ? { warning: noGoalWarning } : {}),
+            },
+          };
         }
         const body = await message();
         const queued = await ports.appendQueued(conversationId, {
@@ -2013,7 +2038,10 @@ export function createSecretaryDispatchHandlers(
           detail: `queued (${source})${imageNote}`,
         });
         notifySecretaryChanged();
-        return { ok: true, result: { status: 'queued' } };
+        return {
+          ok: true,
+          result: { status: 'queued', ...(noGoalWarning ? { warning: noGoalWarning } : {}) },
+        };
       }
       if (!(await ports.alive(conversationId))) {
         const resumed = await ports.resume(conversationId);
@@ -2049,7 +2077,10 @@ export function createSecretaryDispatchHandlers(
       });
       await noteDispatchResumed(ports, conversationId, { newGoal: Boolean(goal) });
       notifySecretaryChanged();
-      return { ok: true, result: { status: 'sent' } };
+      return {
+        ok: true,
+        result: { status: 'sent', ...(noGoalWarning ? { warning: noGoalWarning } : {}) },
+      };
     },
 
     async session_queue_list(params, ctx) {
