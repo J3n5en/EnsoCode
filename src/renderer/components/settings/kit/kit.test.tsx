@@ -4,6 +4,7 @@ import * as React from 'react';
 import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Textarea } from '@/components/ui/textarea';
 import {
   SettingsDangerAction,
   SettingsEmptyState,
@@ -17,6 +18,7 @@ import {
   SettingsSegmented,
   SettingsSubRow,
   SettingsSwitch,
+  useSettingsRowControl,
 } from '.';
 import { countBoxesInSource, findNestedBoxes } from './boxes';
 
@@ -101,6 +103,10 @@ const byText = (selector: string, text: string) => {
   expect(found, `${selector} ${text}`).not.toBeUndefined();
   return found as HTMLElement;
 };
+
+function RowTextarea() {
+  return <Textarea {...useSettingsRowControl()} />;
+}
 
 beforeEach(() => {
   MotionGlobalConfig.skipAnimations = true;
@@ -227,6 +233,52 @@ describe('SettingsRow', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain('Saved');
     await act(async () => vi.advanceTimersByTime(1500));
     expect(container.textContent).not.toContain('Saved');
+  });
+
+  it('layout="stack" 时标签、说明和状态在上，控件独占下方整行，仍与标签关联', async () => {
+    await render(
+      <SettingsSubRow
+        rowId="x.prompt"
+        label="Prompt"
+        description="Shown to the agent."
+        status={<span data-testid="status">ok</span>}
+        layout="stack"
+      >
+        <RowTextarea />
+      </SettingsSubRow>
+    );
+    const row = container.querySelector('[data-settings-row="x.prompt"]') as HTMLElement;
+    expect(row.getAttribute('data-slot')).toBe('settings-row');
+    const textarea = row.querySelector('textarea') as HTMLTextAreaElement;
+    const label = byText('label', 'Prompt');
+    expect(label.getAttribute('for')).toBe(textarea.id);
+    expect(textarea.getAttribute('aria-describedby')).toBeTruthy();
+    expect(doc.getElementById(textarea.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Shown to the agent.'
+    );
+    const block = row.lastElementChild as HTMLElement;
+    expect(block.className.split(' ')).toEqual(expect.arrayContaining(['w-full', 'min-w-0']));
+    expect(block.contains(textarea)).toBe(true);
+    expect(block.contains(label)).toBe(false);
+    const head = row.firstElementChild as HTMLElement;
+    expect(head.contains(label)).toBe(true);
+    expect(head.querySelector('[data-testid="status"]')).not.toBeNull();
+  });
+
+  it('默认横排时放进多行文本框，控件区换到整行而不是缩成窄条', async () => {
+    await render(
+      <SettingsRow label="Persona">
+        <Textarea />
+      </SettingsRow>
+    );
+    const trailing = container.querySelector('[data-slot="textarea-control"]')
+      ?.parentElement as HTMLElement;
+    expect(trailing.className.split(' ')).toEqual(
+      expect.arrayContaining([
+        'has-[[data-slot=textarea-control]]:w-full',
+        'has-[[data-slot=textarea-control]]:ml-0',
+      ])
+    );
   });
 });
 
