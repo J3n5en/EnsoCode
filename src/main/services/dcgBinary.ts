@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { app, net } from '@platform';
 import type { DcgStatus, DcgUpdateCheck } from '@shared/types/dcg';
 
-export const DCG_VERSION = '0.16.0';
+export const DCG_VERSION = '0.17.2';
 
 const RELEASE = `https://github.com/Dicklesworthstone/destructive_command_guard/releases/download/v${DCG_VERSION}`;
 
@@ -16,24 +16,24 @@ export const DCG_LATEST_RELEASE_API =
 const ASSETS: Record<string, { file: string; sha256: string }> = {
   'darwin-arm64': {
     file: 'dcg-aarch64-apple-darwin.tar.xz',
-    sha256: '06cd609b19b988d267ebfac3e6736e511ba42c7a1746f4ec2af5295a8b300fe0',
+    sha256: '4c3354600beea99096227b0ff75add73a3a33a7fc0a3de4aa04853502e3e9093',
   },
   'darwin-x64': {
     file: 'dcg-x86_64-apple-darwin.tar.xz',
-    sha256: 'f567c5fe4b3b5dbdf56c1621e5f80d7a8b4463de1cf70eb91b9b99955a623f63',
+    sha256: '8ba28fe673041daab8fbad0dfc12d0fc6269b624da97973ea51d24b76576753e',
   },
   'linux-arm64': {
     file: 'dcg-aarch64-unknown-linux-gnu.tar.xz',
-    sha256: 'ca4f2c4fee3aea774fac3e53a6a4cab1c7f9c6228f4bd9d6941de05fd5ac6308',
+    sha256: '1cd59892eb7c9541026979b18d1d64cd4c62f9c923b3eb7cd106f7505fe27620',
   },
   'linux-x64': {
     file: 'dcg-x86_64-unknown-linux-musl.tar.xz',
-    sha256: 'e7d860eba7f99cb5d5535b00942196aae3d6ca22ec049491d74c97aab556b642',
+    sha256: 'c393d4d56b8c481dea38456e4f8829b4bb563c6f6fb541457374ac4be9928db4',
   },
   // Windows ARM 靠系统 x64 模拟运行
   'win32-x64': {
     file: 'dcg-x86_64-pc-windows-msvc.zip',
-    sha256: '9b219ec37fedd73b2a1b6bb1bc3303bae991c12f2dd489b7ab15bb1b89a3822b',
+    sha256: '42a042874ec44f5fe895cd64ea930fd14c50fe0a0ba4a8e02692dfaf36c6218d',
   },
 };
 ASSETS['win32-arm64'] = ASSETS['win32-x64'];

@@ -1,6 +1,7 @@
 /**
  * dcg rule_id → 中文解释。rule_id 取自 dcg v0.16.0 二进制 `dcg pack info <pack> --json`
- * 与 `dcg --robot test` 实测输出，不要凭空添加。alt 只放确定不会造成数据丢失的替代，拿不准就不给。
+ * 与 `dcg --robot test` 实测输出、0.17.2 复核，不要凭空添加。alt 只放确定不会造成数据丢失的替代，拿不准就不给。
+ * 新版本删掉的规则会在这里查不到，界面回退成 dcg 英文原因，不会显示空。
  */
 export interface DcgRuleHint {
   zh: string;
