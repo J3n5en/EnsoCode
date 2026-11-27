@@ -834,7 +834,8 @@ function SystemPromptText({
   return (
     <Textarea
       aria-label={label ?? t('Role description')}
-      className="h-32 w-full resize-y font-mono text-xs leading-relaxed"
+      // 初始高度、纵向缩放与滚动必须挂在内层 textarea；挂在外层 textarea-control 会锁死边框和占位高度，拖大时文本会溢出压住下方控件。
+      className="w-full font-mono text-xs leading-relaxed [&_textarea]:field-sizing-fixed [&_textarea]:h-32 [&_textarea]:resize-y [&_textarea]:overflow-auto"
       value={content}
       readOnly={readOnly}
       spellCheck={false}
