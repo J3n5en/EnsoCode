@@ -924,6 +924,22 @@ function acceptsImageInput(model: AgentSession['model']): boolean {
   return model?.input?.includes('image') === true;
 }
 
+/** 工具结果 / 增量快照里的文字段拼接；没有 content 数组时为空串 */
+function toolResultText(result: unknown): string {
+  const parts = (result as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        typeof part === 'object' &&
+        part !== null &&
+        (part as { type?: string }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string'
+    )
+    .map((part) => part.text)
+    .join('');
+}
+
 function settingsModelRef(model: SpawnModelConfig): ModelRef {
   if (
     'settingsProviderId' in model &&
@@ -5228,17 +5244,8 @@ export class SessionSupervisor {
       case 'tool_execution_update': {
         if (event.parentToolCallId) return;
         // pi 已按 BASH_UPDATE_THROTTLE_MS 节流下发全量快照，这里只做投影，不再二次节流
-        const parts: unknown = event.partialResult?.content;
-        if (!Array.isArray(parts)) return;
-        const output = parts
-          .filter(
-            (part): part is { type: 'text'; text: string } =>
-              typeof part === 'object' &&
-              part !== null &&
-              (part as { type?: string }).type === 'text'
-          )
-          .map((part) => part.text)
-          .join('');
+        if (!Array.isArray(event.partialResult?.content)) return;
+        const output = toolResultText(event.partialResult);
         if (!output) return;
         this.options.emit({
           type: 'tool-output',
@@ -5258,6 +5265,15 @@ export class SessionSupervisor {
         if (start !== undefined) {
           managed.toolDurations.set(event.toolCallId, Date.now() - start);
         }
+        // toolResult 消息可能晚到（agy / Cursor 整段回复结束才落盘、pi 并行工具按源序补发）：先告诉界面它已收口
+        this.options.emit({
+          type: 'tool-output',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          toolCallId: event.toolCallId,
+          output: toolResultText(event.result),
+          ended: event.isError === true || event.result?.isError === true ? 'error' : 'ok',
+        });
         return;
       }
       case 'compaction_start':

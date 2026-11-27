@@ -291,6 +291,8 @@ export interface SessionProjection {
   toolStartedAt?: Record<string, number>;
   /** 运行中前台命令的超时截止 wall clock；工具收口 / 轮次收口即清空，不持久化 */
   toolDeadlineAt?: Record<string, number>;
+  /** 已收口但 toolResult 还没落地的工具（agy / Cursor 轮末才落盘）：卡片据此先转完成 / 失败；不持久化 */
+  toolEnded?: Record<string, 'ok' | 'error'>;
   /** 当前权威消息对应的 worker 绝对起点；全量快照缺省 */
   historyBaseIndex?: number;
   /** 上滑翻页在途；不持久化 */
@@ -422,6 +424,7 @@ export function applyAgentEvent(
       toolOutputs: continuingRun ? omitKeys(state.toolOutputs, completedTools) : {},
       toolStartedAt: continuingRun ? omitKeys(state.toolStartedAt ?? {}, completedTools) : {},
       toolDeadlineAt: continuingRun ? omitKeys(state.toolDeadlineAt ?? {}, completedTools) : {},
+      toolEnded: continuingRun ? omitKeys(state.toolEnded ?? {}, completedTools) : {},
       historyBaseIndex: keepPrefix ? localBase : snapBase > 0 ? snapBase : undefined,
       ...(snapshot.planState ? { planState: snapshot.planState } : {}),
     };
@@ -603,6 +606,10 @@ export function applyAgentEvent(
         settledId && current.toolDeadlineAt && settledId in current.toolDeadlineAt
           ? omitKeys(current.toolDeadlineAt, new Set([settledId]))
           : undefined;
+      const settledEnded =
+        settledId && current.toolEnded && settledId in current.toolEnded
+          ? omitKeys(current.toolEnded, new Set([settledId]))
+          : undefined;
       return {
         ...current,
         messages: [...authoritative, ...tail],
@@ -613,6 +620,7 @@ export function applyAgentEvent(
             }
           : {}),
         ...(settledDeadline ? { toolDeadlineAt: settledDeadline } : {}),
+        ...(settledEnded ? { toolEnded: settledEnded } : {}),
         lastOutputAt: hasOutput ? now : current.lastOutputAt,
         lastSeq: event.seq,
       };
@@ -729,9 +737,12 @@ export function applyAgentEvent(
       return { ...current, backgroundTasks: event.tasks, lastSeq: event.seq };
     case 'tool-output': {
       const startedAt = current.toolStartedAt?.[event.toolCallId] ?? event.startedAt;
+      // 收口事件没带正文时保留已有快照
+      const output =
+        event.ended && !event.output ? (current.toolOutputs[event.toolCallId] ?? '') : event.output;
       return {
         ...current,
-        toolOutputs: { ...current.toolOutputs, [event.toolCallId]: event.output },
+        toolOutputs: { ...current.toolOutputs, [event.toolCallId]: output },
         toolStartedAt:
           startedAt === undefined
             ? current.toolStartedAt
@@ -741,8 +752,11 @@ export function applyAgentEvent(
           : {
               toolDeadlineAt: { ...current.toolDeadlineAt, [event.toolCallId]: event.deadlineAt },
             }),
+        ...(event.ended
+          ? { toolEnded: { ...current.toolEnded, [event.toolCallId]: event.ended } }
+          : {}),
         lastOutputAt:
-          event.output.trim() && event.output !== current.toolOutputs[event.toolCallId]
+          event.ended || (output.trim() && output !== current.toolOutputs[event.toolCallId])
             ? now
             : current.lastOutputAt,
         lastSeq: event.seq,
@@ -757,6 +771,7 @@ export function applyAgentEvent(
         toolOutputs: {},
         toolStartedAt: {},
         toolDeadlineAt: {},
+        toolEnded: {},
         lastSeq: event.seq,
       };
     case 'messages-truncated': {
@@ -805,6 +820,7 @@ export function applyAgentEvent(
           toolOutputs: {},
           toolStartedAt: {},
           toolDeadlineAt: {},
+          toolEnded: {},
           lastSeq: event.seq,
         };
       return {
@@ -816,6 +832,7 @@ export function applyAgentEvent(
         toolOutputs: {},
         toolStartedAt: {},
         toolDeadlineAt: {},
+        toolEnded: {},
         lastSeq: event.seq,
       };
     case 'session-custom-entry':

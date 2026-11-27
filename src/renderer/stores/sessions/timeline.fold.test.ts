@@ -962,6 +962,30 @@ describe('buildTimeline 运行中工具的增量输出', () => {
     expect(timeline[1]).toMatchObject({ kind: 'tool', state: 'running', output: null });
   });
 
+  it('工具已收口但 toolResult 未落地（agy 轮末才落盘）：按 toolEnded 显示完成 / 失败', () => {
+    const streaming: ProjectedMessage[] = [
+      user('读两个文件'),
+      {
+        role: 'assistant',
+        stopReason: 'pending',
+        content: [
+          { type: 'toolCall', id: 'r1', name: 'read_file', arguments: { path: 'a.md' } },
+          { type: 'toolCall', id: 'r2', name: 'read_file', arguments: { path: 'b.md' } },
+          { type: 'toolCall', id: 'r3', name: 'run_command', arguments: { command: 'ls' } },
+          { type: 'text', text: '正在总结' },
+        ],
+      },
+    ];
+    const timeline = buildTimeline(streaming, true, [], undefined, {
+      toolOutputs: { r1: 'A body', r2: 'not found', r3: 'still going' },
+      toolEnded: { r1: 'ok', r2: 'error' },
+    });
+    const rows = timeline.filter((item) => item.kind === 'tool');
+    expect(rows[0]).toMatchObject({ state: 'ok', output: 'A body' });
+    expect(rows[1]).toMatchObject({ state: 'error', output: 'not found' });
+    expect(rows[2]).toMatchObject({ state: 'running', output: 'still going' });
+  });
+
   it('真实 toolResult 覆盖残留的增量快照', () => {
     const timeline = buildTimeline(
       [

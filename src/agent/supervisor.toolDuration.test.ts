@@ -294,6 +294,56 @@ describe('SessionSupervisor tool duration', () => {
     await supervisor.shutdown();
   });
 
+  it('tool_execution_end 即投影一次带 ended 的 tool-output：toolResult 晚到（agy 轮末落盘）时卡片也能先转完成', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-tool-ended-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await vi.runAllTimersAsync();
+    await waitFor(events, 'parent-ready');
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    const ended = (id: string) =>
+      events.filter(
+        (event): event is Extract<AgentWorkerEvent, { type: 'tool-output' }> =>
+          event.type === 'tool-output' && event.toolCallId === id && event.ended !== undefined
+      );
+
+    parentSession.emit({ type: 'tool_execution_start', toolCallId: 'r1', toolName: 'read_file' });
+    parentSession.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'r1',
+      toolName: 'read_file',
+      result: { content: [{ type: 'text', text: 'A body' }] },
+      isError: false,
+    });
+    parentSession.emit({ type: 'tool_execution_start', toolCallId: 'r2', toolName: 'read_file' });
+    parentSession.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'r2',
+      toolName: 'read_file',
+      result: { content: [{ type: 'text', text: 'not found' }], isError: true },
+      isError: true,
+    });
+    parentSession.emit({ type: 'tool_execution_end', toolCallId: 'r3', toolName: 'run_command' });
+    // codemode 嵌套调用不上时间线
+    parentSession.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'n1',
+      toolName: 'read',
+      parentToolCallId: 'r1',
+      isError: false,
+    });
+
+    expect(ended('r1')).toEqual([expect.objectContaining({ output: 'A body', ended: 'ok' })]);
+    expect(ended('r2')).toEqual([expect.objectContaining({ output: 'not found', ended: 'error' })]);
+    expect(ended('r3')).toEqual([expect.objectContaining({ output: '', ended: 'ok' })]);
+    expect(ended('n1')).toEqual([]);
+    await supervisor.shutdown();
+  });
+
   it('set-shell-limits 作用于 worker 级后台任务管理器：task_output 上限与前台让位都跟随设置', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

@@ -396,6 +396,16 @@ describe('tool-output 事件跨进程边界', () => {
     expect(parseAgentWorkerEvent({ ...event, output: 42 })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, identity: undefined })).toBeNull();
   });
+
+  it('可选 ended 只接受 ok / error', () => {
+    expect(parseAgentWorkerEvent({ ...event, ended: 'ok' })).toEqual({ ...event, ended: 'ok' });
+    expect(parseAgentWorkerEvent({ ...event, ended: 'error' })).toEqual({
+      ...event,
+      ended: 'error',
+    });
+    expect(parseAgentWorkerEvent({ ...event, ended: true })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, ended: 'OK' })).toBeNull();
+  });
 });
 
 describe('MCP 旁路事件收窄', () => {

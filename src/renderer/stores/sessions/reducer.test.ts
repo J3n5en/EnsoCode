@@ -1212,6 +1212,56 @@ describe('applyAgentEvent tool-output', () => {
     });
     expect(done.toolDeadlineAt).toEqual({});
   });
+
+  it('ended 记下工具收口结果（toolResult 尚未落地时卡片据此转完成），toolResult / 轮次收口清掉', () => {
+    const running = applyAgentEvent(base, 's1', toolOutput(1, 'partial', 1_000));
+    const ended = applyAgentEvent(running, 's1', {
+      ...toolOutput(2, 'file body'),
+      ended: 'ok',
+    } as RendererAgentEvent);
+    expect(ended.toolEnded).toEqual({ t1: 'ok' });
+    expect(ended.toolOutputs).toEqual({ t1: 'file body' });
+    // 收口事件没带正文时保留已有快照，不把可展开的输出抹成空
+    const emptyEnd = applyAgentEvent(running, 's1', {
+      ...toolOutput(2, ''),
+      ended: 'error',
+    } as RendererAgentEvent);
+    expect(emptyEnd.toolEnded).toEqual({ t1: 'error' });
+    expect(emptyEnd.toolOutputs).toEqual({ t1: 'partial' });
+    // 过期 seq 不生效
+    expect(
+      applyAgentEvent(ended, 's1', { ...toolOutput(1, 'x'), ended: 'error' } as RendererAgentEvent)
+        .toolEnded
+    ).toEqual({ t1: 'ok' });
+    const settled = applyAgentEvent(ended, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 3,
+      index: 0,
+      message: {
+        role: 'toolResult',
+        toolCallId: 't1',
+        toolName: 'read_file',
+        content: [{ type: 'text', text: 'file body' }],
+      },
+    });
+    expect(settled.toolEnded).toEqual({});
+    const completed = applyAgentEvent(ended, 's1', {
+      type: 'turn-completed',
+      identity: identity(),
+      seq: 3,
+      turnId: 'turn-1',
+    });
+    expect(completed.toolEnded).toEqual({});
+    const failed = applyAgentEvent(ended, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 3,
+      turnId: 'turn-1',
+      error: 'boom',
+    });
+    expect(failed.toolEnded).toEqual({});
+  });
 });
 
 describe('lastOutputAt stall heartbeat', () => {
