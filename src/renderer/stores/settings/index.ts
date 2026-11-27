@@ -13,9 +13,9 @@ import {
 } from '@shared/chatTypography';
 import { normalizeComposerToolbar } from '@shared/composerToolbar';
 import {
+  assessDefaultModel,
   type DefaultModelRef,
   oauthCredentialBlock,
-  sanitizeDefaultModel,
 } from '@shared/defaultModel';
 import {
   type FileOpenRule,
@@ -343,7 +343,31 @@ export const useDefaultModelRevalidationStore = create<DefaultModelRevalidationS
   latest: null,
 }));
 
+/** 上一次记过日志的「不可用」键；只在进入 / 离开不可用时记，快照反复重验不刷屏 */
+let loggedUnavailableKey: string | null = null;
+
+function logDefaultModelTransition(result: DefaultModelRevalidation): void {
+  if (result.status === 'unavailable') {
+    const model = `${result.defaultModel.providerId}/${result.defaultModel.modelId}`;
+    const key = `${model}:${result.reason}`;
+    if (key === loggedUnavailableKey) return;
+    loggedUnavailableKey = key;
+    console.warn(
+      `[default-model] unavailable: ${model} reason=${result.reason} (kept, not substituted)`
+    );
+    return;
+  }
+  if (result.status === 'unchanged' && loggedUnavailableKey !== null) {
+    const model = result.defaultModel
+      ? `${result.defaultModel.providerId}/${result.defaultModel.modelId}`
+      : 'none';
+    console.info(`[default-model] available again: ${model}`);
+    loggedUnavailableKey = null;
+  }
+}
+
 function publishDefaultModelRevalidation(result: DefaultModelRevalidation): void {
+  logDefaultModelTransition(result);
   useDefaultModelRevalidationStore.setState({ latest: result });
 }
 
@@ -659,15 +683,14 @@ export const useSettingsStore = create<SettingsState>()(
             status: 'stale',
             defaultModel,
             writeback: false,
-            notice: null,
           };
           publishDefaultModelRevalidation(stale);
           return stale;
         }
 
         // 目录未覆盖默认模型所属的 OAuth 分区时（升级首启无缓存 / 发现从未成功），
-        // 物化视图只剩稀疏覆盖行，sanitize 会把默认模型误判成 model-missing 并写没。
-        // 与 OAuth 凭证未就绪同等对待：defer 不写回；目录到达后由订阅重验（见
+        // 物化视图只剩稀疏覆盖行，会把默认模型误判成 model-missing。
+        // 与 OAuth 凭证未就绪同等对待：defer 不标记；目录到达后由订阅重验（见
         // OauthCredentialBootstrap）。分区存在但 0 个模型同样视为冷态——
         // 每个 OAuth 厂商的 catalog 都至少有一个模型，空分区只能是发现未就绪。
         // 虚拟默认模型解析其全部成员引用，任一 OAuth 成员分区冷态即 defer。
@@ -694,7 +717,6 @@ export const useSettingsStore = create<SettingsState>()(
               status: 'deferred',
               defaultModel,
               writeback: false,
-              notice: null,
               ...(blocked ?? {
                 reason: 'oauth-credentials-loading' as const,
                 suggestedAction: 'wait-for-oauth-credentials' as const,
@@ -705,7 +727,8 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
-        const sanitized = sanitizeDefaultModel({
+        // 只体检不改写：不可用的默认原样保留并标出原因，绝不替换成别的模型（用户的选择只由用户改）。
+        const assessed = assessDefaultModel({
           defaultModel,
           providers: materializeProviders(
             get().providers,
@@ -714,30 +737,11 @@ export const useSettingsStore = create<SettingsState>()(
           credentials: oauthCredentialContext(snapshot),
           virtualModels: get().virtualModels,
         });
-        if (sanitized.status === 'unchanged') {
-          const unchanged: DefaultModelRevalidation = {
-            ...sanitized,
-            writeback: false,
-          };
-          publishDefaultModelRevalidation(unchanged);
-          return unchanged;
-        }
-        if (sanitized.status === 'deferred-oauth-unavailable') {
-          const deferred: DefaultModelRevalidation = {
-            ...sanitized,
-            status: 'deferred',
-            writeback: false,
-          };
-          publishDefaultModelRevalidation(deferred);
-          return deferred;
-        }
-
-        const result: DefaultModelRevalidation = {
-          ...sanitized,
-          writeback: true,
-        };
+        const result: DefaultModelRevalidation =
+          assessed.status === 'deferred-oauth-unavailable'
+            ? { ...assessed, status: 'deferred', writeback: false }
+            : { ...assessed, writeback: false };
         publishDefaultModelRevalidation(result);
-        set({ defaultModel: result.defaultModel });
         return result;
       },
 

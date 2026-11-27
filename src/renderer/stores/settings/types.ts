@@ -2,8 +2,8 @@ import type { ChatTypography } from '@shared/chatTypography';
 import type { CompactStrategy } from '@shared/compactStrategy';
 import type { ComposerToolbarSettings } from '@shared/composerToolbar';
 import type {
-  DefaultModelNotice,
   DefaultModelRef,
+  DeterministicModelUnavailability,
   OauthCredentialBlock,
 } from '@shared/defaultModel';
 import type { ContextMenuOpen, FileOpenRule } from '@shared/fileOpening';
@@ -39,25 +39,23 @@ export type DefaultModelRevalidation =
       status: 'unchanged';
       defaultModel: DefaultModelRef | null;
       writeback: false;
-      notice: null;
     }
   | ({
       status: 'deferred';
       defaultModel: DefaultModelRef | null;
       writeback: false;
-      notice: null;
     } & OauthCredentialBlock)
   | {
       status: 'stale';
       defaultModel: DefaultModelRef | null;
       writeback: false;
-      notice: null;
     }
   | {
-      status: 'sanitized';
-      defaultModel: DefaultModelRef | null;
-      writeback: true;
-      notice: DefaultModelNotice;
+      /** 默认模型确定不可用：原样保留，只标记原因，从不替换或清空 */
+      status: 'unavailable';
+      defaultModel: DefaultModelRef;
+      reason: DeterministicModelUnavailability;
+      writeback: false;
     };
 
 export type Theme = 'light' | 'dark' | 'system' | 'sync-terminal';

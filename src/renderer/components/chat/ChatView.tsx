@@ -19,6 +19,7 @@ import { useMemberName } from '@/hooks/useMemberName';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
+import { unusableDefaultMessage } from '@/lib/unusableModel';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { usePendingReminder } from '@/stores/sessionReminders';
@@ -215,20 +216,25 @@ export function ChatView() {
   const modelBlockMessage =
     modelResolution.source !== 'none'
       ? null
-      : modelResolution.reason === 'oauth-credentials-error'
-        ? t(
-            'Subscription credentials could not be loaded. Choose an API-key model or retry the credential refresh.'
-          )
-        : modelResolution.reason === 'oauth-credentials-loading' ||
-            modelResolution.reason === 'oauth-credentials-unloaded'
-          ? t('Subscription credentials are loading. Choose an API-key model or wait, then retry.')
-          : enabledProviders.length > 0
+      : modelResolution.reason === 'no-usable-model' && modelResolution.unavailableDefault
+        ? // 默认模型配了但不可用：点名模型与原因，不悄悄换成别的模型
+          unusableDefaultMessage(modelResolution.unavailableDefault, providers, virtualModels, t)
+        : modelResolution.reason === 'oauth-credentials-error'
+          ? t(
+              'Subscription credentials could not be loaded. Choose an API-key model or retry the credential refresh.'
+            )
+          : modelResolution.reason === 'oauth-credentials-loading' ||
+              modelResolution.reason === 'oauth-credentials-unloaded'
             ? t(
-                'Choose a model for this conversation or set a project, group, or global default before sending.'
+                'Subscription credentials are loading. Choose an API-key model or wait, then retry.'
               )
-            : t(
-                'No usable model is available. Configure provider credentials and enable a model first.'
-              );
+            : enabledProviders.length > 0
+              ? t(
+                  'Choose a model for this conversation or set a project, group, or global default before sending.'
+                )
+              : t(
+                  'No usable model is available. Configure provider credentials and enable a model first.'
+                );
 
   const project = projects.find((p) => p.id === chrome?.projectId);
   const pickerId = chrome?.id;
@@ -624,6 +630,8 @@ export function ChatView() {
                 !chrome.displayedParentId &&
                 (!selectedProviderId || !effectiveModelId)
               ) {
+                // 没有可用模型就明确报错，不悄悄改用别的模型
+                if (modelBlockMessage) addToast({ type: 'error', title: modelBlockMessage });
                 return false;
               }
               // 秘书会话里用户点名的会话先授权（独立 IPC，不改提示词）；失败不阻断发送

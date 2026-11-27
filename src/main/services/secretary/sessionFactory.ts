@@ -2,9 +2,11 @@ import {
   type DefaultModelRef,
   defaultApprovalMode,
   type ModelCredentialContext,
+  NO_USABLE_MODEL_ERROR,
   resolveChatModel,
   resolveChatReasoning,
   scopedDefaultModels,
+  unusableModelError,
 } from '@shared/defaultModel';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { goalKickoffText } from '@shared/pair/headlessQueue';
@@ -71,12 +73,17 @@ export interface MainSessionDefaults {
   approvalMode: ApprovalMode;
 }
 
+/** 失败时 error 点名不可用的默认模型与原因（见 unusableModelError），调用方原样交回 */
+export type MainSessionDefaultsResult =
+  | { ok: true; value: MainSessionDefaults }
+  | { ok: false; error: string };
+
 export interface SessionFactoryPorts {
   project(id: string): ProjectAuthority | undefined;
   createConversation(projectId: string, projectVersion: number): ConversationAuthority | undefined;
   removeConversation(id: string): void;
-  /** null 表示当前没有可用模型 */
-  defaults(projectId: string): MainSessionDefaults | null;
+  /** model 是调用方显式指定的模型（已校验）；不给时按 项目 > 分组 > 全局 默认解析，不可用即报错 */
+  defaults(projectId: string, model?: DefaultModelRef): MainSessionDefaultsResult;
   createWorktree(
     conversationId: string,
     projectId: string,
@@ -192,8 +199,9 @@ export async function createSessionFromMain(
   if (project?.state !== 'active' || (project.kind ?? 'local') !== 'local') {
     return { ok: false, error: 'project is not an active local project' };
   }
-  const defaults = ports.defaults(request.projectId);
-  if (!defaults) return { ok: false, error: 'no usable model' };
+  const resolved = ports.defaults(request.projectId, request.model);
+  if (!resolved.ok) return resolved;
+  const defaults = resolved.value;
   const title = (request.title?.trim() || extractRepresentativeTitle(prompt)).slice(0, 80);
   if (!title) return { ok: false, error: 'empty title' };
   const goal = request.goal?.trim();
@@ -294,8 +302,9 @@ export async function createSecretaryConversationFromMain(
   if (project?.state !== 'active' || project.kind !== 'secretary') {
     return { ok: false, error: 'not an active secretary project' };
   }
-  const defaults = ports.defaults(request.projectId);
-  if (!defaults) return { ok: false, error: 'no usable model' };
+  const resolved = ports.defaults(request.projectId);
+  if (!resolved.ok) return resolved;
+  const defaults = resolved.value;
   const conversation = ports.createConversation(request.projectId, project.version);
   if (!conversation) return { ok: false, error: 'conversation authority unavailable' };
   const id = conversation.conversationId;
@@ -353,6 +362,8 @@ export interface MainSessionDefaultsInput {
   lastApprovalMode?: ApprovalMode | null;
   defaultPresetId: string;
   presets: readonly { id: string }[];
+  /** 调用方显式指定的模型：已在派发前校验，直接用，不再看默认模型 */
+  model?: DefaultModelRef;
 }
 
 type ScopedReasoningSource = {
@@ -361,17 +372,38 @@ type ScopedReasoningSource = {
   defaultThinkingLevel?: ThinkingLevel;
 };
 
-/** 与 renderer 的 newConversation 同口径：项目 > 分组 > 全局，预设只在存在时写 */
-export function mainSessionDefaults(input: MainSessionDefaultsInput): MainSessionDefaults | null {
+/**
+ * 与 renderer 的 newConversation 同口径：项目 > 分组 > 全局，预设只在存在时写。
+ * 默认模型不可用时报错点名模型与原因，绝不改用其他可用模型。
+ */
+export function mainSessionDefaults(input: MainSessionDefaultsInput): MainSessionDefaultsResult {
   const scoped = scopedDefaultModels(input.project, input.groups);
-  const model = resolveChatModel({
-    defaultModel: input.defaultModel,
-    ...scoped,
-    providers: input.providers,
-    credentials: input.credentials,
-    ...(input.virtualModels ? { virtualModels: input.virtualModels } : {}),
-  });
-  if (!model.providerId || !model.modelId) return null;
+  let model: DefaultModelRef;
+  if (input.model) {
+    model = input.model;
+  } else {
+    const resolution = resolveChatModel({
+      defaultModel: input.defaultModel,
+      ...scoped,
+      providers: input.providers,
+      credentials: input.credentials,
+      ...(input.virtualModels ? { virtualModels: input.virtualModels } : {}),
+    });
+    if (resolution.source === 'none') {
+      return {
+        ok: false,
+        error:
+          'unavailableDefault' in resolution && resolution.unavailableDefault
+            ? unusableModelError(
+                resolution.unavailableDefault,
+                input.providers,
+                input.virtualModels
+              )
+            : NO_USABLE_MODEL_ERROR,
+      };
+    }
+    model = { providerId: resolution.providerId, modelId: resolution.modelId };
+  }
   const reasoning = resolveChatReasoning({
     ...scoped,
     ...(input.defaultReasoningEnabled === undefined
@@ -387,16 +419,19 @@ export function mainSessionDefaults(input: MainSessionDefaultsInput): MainSessio
       ? wantedPresetId
       : undefined;
   return {
-    providerId: model.providerId,
-    modelId: model.modelId,
-    reasoningEnabled: reasoning.reasoningEnabled,
-    thinkingLevel: reasoning.thinkingLevel,
-    ...(presetId ? { presetId } : {}),
-    approvalMode: defaultApprovalMode(
-      input.approvalReviewer,
-      input.providers,
-      input.credentials,
-      input.lastApprovalMode
-    ),
+    ok: true,
+    value: {
+      providerId: model.providerId,
+      modelId: model.modelId,
+      reasoningEnabled: reasoning.reasoningEnabled,
+      thinkingLevel: reasoning.thinkingLevel,
+      ...(presetId ? { presetId } : {}),
+      approvalMode: defaultApprovalMode(
+        input.approvalReviewer,
+        input.providers,
+        input.credentials,
+        input.lastApprovalMode
+      ),
+    },
   };
 }

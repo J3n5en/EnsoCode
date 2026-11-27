@@ -1217,7 +1217,6 @@ export const zhTranslations: Record<string, string> = {
   'Click to retry': '点击重试',
   'Selected model is unavailable — falls back to the default model.':
     '所选模型已不可用——将回退到默认模型。',
-  'No default model': '未设置默认模型',
   'No usable models': '没有可用模型',
   'Image generation': '生图模型',
   'Default image generation model': '默认生图模型',
@@ -1228,7 +1227,21 @@ export const zhTranslations: Record<string, string> = {
   'No image generation models available': '没有可用的图像生成模型',
   'Enable a model and configure valid provider credentials first.':
     '请先启用模型并配置有效的服务商凭证。',
-  'Default model changed: {{previous}} → {{next}}': '默认模型已更改：{{previous}} → {{next}}',
+  'Unavailable: {{model}} · {{reason}}': '不可用：{{model}} · {{reason}}',
+  'New conversations will not switch to another model. Pick a usable default model or fix its provider.':
+    '新会话不会改用其他模型。请重新选择可用的默认模型，或修复它的服务商配置。',
+  'Project default model': '项目默认模型',
+  'Group default model': '分组默认模型',
+  '{{scope}} "{{model}}" is unavailable: {{reason}}. No other model will be used. Fix it in Settings or choose a model for this conversation.':
+    '{{scope}}「{{model}}」不可用：{{reason}}。不会改用其他模型；请到设置里修复，或为本会话手动选择模型。',
+  'no model is selected': '未选择模型',
+  'its provider no longer exists': '所属服务商已不存在',
+  'its provider is disabled': '所属服务商已停用',
+  'its provider only serves approval classifiers': '所属服务商只能用于代审分类',
+  "the model is not in its provider's model list": '该模型已不在服务商的模型列表中',
+  'the model is disabled': '该模型已停用',
+  'its provider has no API key': '所属服务商未配置 API Key',
+  'its subscription account is not signed in': '所属订阅账号未登录',
   'Subscription credentials are loading. API-key models remain available.':
     '正在加载订阅凭证，API Key 模型仍可使用。',
   'Subscription credentials could not be loaded: {{error}}': '无法加载订阅凭证：{{error}}',

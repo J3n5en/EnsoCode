@@ -1,3 +1,5 @@
+import { isNoUsableModelError } from '@shared/defaultModel';
+
 export type HomeConversationResult =
   | { ok: true; conversationId: string }
   | { ok: false; error: string };
@@ -8,13 +10,14 @@ export interface HomeConversationPorts {
   create(): Promise<HomeConversationResult>;
 }
 
-/** 配置问题：重试也一样，原因直接交回去 */
+/** 配置问题：重试也一样，原因直接交回去（没有可用模型的报错带模型与原因，按前缀认） */
 const PERMANENT_ERRORS = new Set([
-  'no usable model',
   'disabled',
   'secretary not found',
   'not an active secretary project',
 ]);
+const isPermanentError = (error: string): boolean =>
+  PERMANENT_ERRORS.has(error) || isNoUsableModelError(error);
 
 const starting = new Map<string, Promise<HomeConversationResult>>();
 
@@ -32,7 +35,7 @@ export function ensureHomeConversation(
     const existing = ports.existing();
     if (existing) return { ok: true, conversationId: existing };
     const first = await ports.create();
-    if (first.ok || PERMANENT_ERRORS.has(first.error)) return first;
+    if (first.ok || isPermanentError(first.error)) return first;
     return ports.create();
   })().finally(() => starting.delete(secretaryId));
   starting.set(secretaryId, run);

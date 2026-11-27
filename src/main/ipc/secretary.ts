@@ -212,7 +212,7 @@ function conversationPorts(): Omit<SessionFactoryPorts, 'defaults'> {
 function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactoryPorts {
   return {
     ...conversationPorts(),
-    defaults: (projectId) => mainSessionDefaultsFor(projectId, credentialKeys),
+    defaults: (projectId, model) => mainSessionDefaultsFor(projectId, credentialKeys, model),
   };
 }
 
