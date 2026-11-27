@@ -1541,6 +1541,8 @@ export class ExtensionPluginService {
      * 其余事件不询问插件直接放行。每次拦截从自己开始时计时，不占别的会话的预算。
      */
     agent?: PluginAgentSource;
+    /** 秘书会话：只询问它勾选的插件；拦截是能力，session.readAll 不放宽 */
+    secretaryPluginIds?: readonly string[];
   }): Promise<InterceptResult[E]> {
     const initial = initialInterceptState(input.event, input.payload);
     const child = input.agent !== undefined;
@@ -1552,14 +1554,17 @@ export class ExtensionPluginService {
     const breakerKey = child ? `${CHILD_BREAKER_PREFIX}${input.event}` : input.event;
     let targets: (Loaded & { id: string })[];
     try {
+      const audience = input.secretaryPluginIds;
       targets = this.enabled()
-        .filter((entry) =>
-          entry.manifest.contributes.events.some(
-            (sub) =>
-              sub.event === input.event &&
-              sub.mode === 'intercept' &&
-              interceptsTool(sub, input.payload)
-          )
+        .filter(
+          (entry) =>
+            (!audience || audience.includes(entry.id)) &&
+            entry.manifest.contributes.events.some(
+              (sub) =>
+                sub.event === input.event &&
+                sub.mode === 'intercept' &&
+                interceptsTool(sub, input.payload)
+            )
         )
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     } catch (error) {

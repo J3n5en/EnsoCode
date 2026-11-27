@@ -2819,6 +2819,7 @@ export function registerAgentHandlers(): void {
               event,
               payload,
               ...(agent ? { agent } : {}),
+              ...pluginSecretaryAudience(sessionId),
             });
       void Promise.resolve(task).then(
         (result) =>

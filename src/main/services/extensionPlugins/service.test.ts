@@ -1483,6 +1483,59 @@ describe('插件运行期收敛', () => {
     ]);
   });
 
+  it('秘书会话的拦截只询问勾选的插件，session.readAll 也不例外', async () => {
+    const svc = bootService(temp('secretary-intercept-'), () => new InProcessChild());
+    for (const [id, permissions] of [
+      ['example.picked', ['agent.intercept']],
+      ['example.reader', ['agent.intercept', 'session.readAll']],
+      ['example.other', ['agent.intercept']],
+    ] as const) {
+      await stageCommit(svc, {
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          permissions,
+          contributes: { events: [{ event: 'tool_call', mode: 'intercept' }] },
+        }),
+        'main.mjs': `export function activate(enso) {
+          enso.events.on('tool_call', (data) => ({ input: { ...data.input, '${id}': 1 } }));
+        }`,
+      });
+      await svc.setEnabled(id, true);
+    }
+    const payload = { toolCallId: '1', toolName: 'bash', input: {} };
+    const agent = {
+      kind: 'subagent' as const,
+      sessionId: 'sec::cw-scout',
+      name: 'Scout-1',
+      agentType: 'Scout',
+    };
+    await expect(
+      svc.intercept({
+        sessionId: 'sec',
+        projectRoot: null,
+        event: 'tool_call',
+        payload,
+        secretaryPluginIds: ['example.picked'],
+      })
+    ).resolves.toEqual({ input: { 'example.picked': 1 } });
+    await expect(
+      svc.intercept({
+        sessionId: 'sec',
+        projectRoot: null,
+        event: 'tool_call',
+        payload,
+        agent,
+        secretaryPluginIds: ['example.picked'],
+      })
+    ).resolves.toEqual({ input: { 'example.picked': 1 } });
+    await expect(
+      svc.intercept({ sessionId: 's', projectRoot: null, event: 'tool_call', payload })
+    ).resolves.toEqual({
+      input: { 'example.other': 1, 'example.picked': 1, 'example.reader': 1 },
+    });
+  });
+
   it('ask_request / ask_resolved 只投给订阅了且看得见这个会话的插件', async () => {
     const visible = ['s'];
     const svc = create({
