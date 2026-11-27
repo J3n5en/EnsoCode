@@ -1,4 +1,4 @@
-import { isEnsoMcpCardName } from './hostTools';
+import { ensoProxiedTool, isEnsoMcpCardName } from './hostTools';
 import { cardArgs, toolNameFromUpdate } from './tools';
 import type {
   AgyPlanItem,
@@ -154,8 +154,16 @@ export function reduceAgyUpdate(
       title: typeof recordUpdate.title === 'string' ? recordUpdate.title : undefined,
       rawInput: recordUpdate.rawInput,
     });
-    // 我们自己的 Host MCP 工具由 Enso 画卡，agy 这一侧的卡丢掉
-    if (isEnsoMcpCardName(name)) return { state, effects: [] };
+    // 我们自己的 Host MCP 工具（直调或经 call_mcp_tool 转调）由 Enso 画卡，agy 这一侧的卡丢掉
+    if (state.hidden?.includes(id)) return { state, effects: [] };
+    const proxied = ensoProxiedTool({
+      name: typeof recordUpdate.name === 'string' ? recordUpdate.name : undefined,
+      title: typeof recordUpdate.title === 'string' ? recordUpdate.title : undefined,
+      rawInput: recordUpdate.rawInput,
+    });
+    if (isEnsoMcpCardName(name) || proxied) {
+      return { state: { ...state, hidden: [...(state.hidden ?? []), id] }, effects: [] };
+    }
     const previous = state.tools.find((tool) => tool.id === id);
     const resolvedName = name === 'tool' && previous ? previous.name : name;
     const status = repairStatus(

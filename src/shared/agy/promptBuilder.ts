@@ -1,3 +1,4 @@
+import { ENSO_TOOL_CALL, ENSO_TOOL_SEARCH } from './hostTools';
 import type { AgyContentBlock, AgyInteractionMode, PromptMessage } from './types';
 
 const DEFAULT_INSTRUCTIONS = `## EnsoCode interaction mode: Default
@@ -24,15 +25,26 @@ function delegationLine(has: (name: string) => boolean): string {
   return `- Subagents, delegation and parallel work: always use ${mcpName('subagent')}${workflow}. Never use your native \`invoke_subagent\`/\`manage_subagents\` or a native swarm while the Enso tool is available. Fall back to native subagents only when no ${mcpName('subagent')} is listed. Enso tools may load late. Try the name once before you call it absent. As a subagent or child, do the work yourself. Start no subagents unless your task says to.`;
 }
 
-/** 只在 Host MCP 挂上了工具时才有。按 t3 orchestrationInstructions 的写法：用哪个、什么时候用。 */
+/**
+ * 只在 Host MCP 挂上了工具时才有。按 t3 orchestrationInstructions 的写法：用哪个、什么时候用。
+ * 只点名直挂的核心工具；懒加载的插件 / MCP 工具只给一句怎么查、怎么调。
+ */
 function ensoToolsInstructions(tools: readonly string[]): string | undefined {
   if (tools.length === 0) return undefined;
   const has = (name: string) => tools.includes(name);
   const delegation = ['subagent', 'workflow'].filter(has);
+  const listed = tools.filter((name) => name !== ENSO_TOOL_SEARCH && name !== ENSO_TOOL_CALL);
+  const source =
+    listed.length > 0
+      ? `EnsoCode tools come from the \`enso\` MCP server: ${listed.map(mcpName).join(', ')}.`
+      : 'EnsoCode tools come from the `enso` MCP server.';
   const lines = [
     `## EnsoCode tools
 
-EnsoCode tools come from the \`enso\` MCP server: ${tools.map(mcpName).join(', ')}. Ordinary coding work needs none of them; read, edit, search and run commands with your own tools.`,
+${source} Ordinary coding work needs none of them; read, edit, search and run commands with your own tools.`,
+    has(ENSO_TOOL_SEARCH) && has(ENSO_TOOL_CALL)
+      ? `- Other EnsoCode tools (plugins and MCP servers EnsoCode connects to) are not listed: find them with ${mcpName(ENSO_TOOL_SEARCH)} and call them with ${mcpName(ENSO_TOOL_CALL)}.`
+      : '',
     has('ask_user')
       ? `- When only the user can make a decision that blocks the work, ask with ${mcpName('ask_user')} instead of ending your reply with a question.`
       : '',

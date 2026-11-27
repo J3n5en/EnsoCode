@@ -118,6 +118,8 @@ export interface TranslatorState {
   thinking: string;
   tools: AgyToolCard[];
   plan: AgyPlanItem[] | null;
+  /** 丢掉的 agy 卡（我们自己 Host MCP 工具的那张）：后续只带 id 的 update 也丢 */
+  hidden?: string[];
 }
 
 export type TranslatorEffect =

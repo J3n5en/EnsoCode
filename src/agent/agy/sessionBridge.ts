@@ -9,13 +9,21 @@ import {
 } from '@earendil-works/pi-ai';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { AGY_API_ID, AGY_PROVIDER_ID } from '@shared/agy/constants';
-import { hostMcpTools, mcpContent } from '@shared/agy/hostTools';
+import {
+  type AgyHostToolSet,
+  agyHostTools,
+  ENSO_TOOL_CALL,
+  ENSO_TOOL_SEARCH,
+  lazyCallOf,
+  mcpContent,
+  searchLazyTools,
+} from '@shared/agy/hostTools';
 import { ensoSystemAppend } from '@shared/agy/systemAppend';
 import type { AgyToolCard, PromptMessage, TranslatorEffect } from '@shared/agy/types';
 import { emptyUsage } from '@shared/providers/piProviderTypes';
 import type { ApprovalMode } from '@shared/types/agentConstants';
 import type { ApprovalGate } from '../approval';
-import { type HostMcpResult, type HostMcpTool, issueHostMcp } from './hostMcp';
+import { type HostMcpResult, issueHostMcp } from './hostMcp';
 import { closeAgySession } from './registry';
 import { openBoundAgySession } from './runtimeHost';
 import type { AgyHostMcp, AgySession, AgyTurnResult } from './session';
@@ -122,21 +130,40 @@ export function attachAgyBridgeToSession(
     return { content: mcpContent(outcome.result.content), isError: outcome.isError };
   };
 
-  const hostMcpFor = (exposed: HostMcpTool[]): AgyHostMcp => {
-    const names = exposed.map((tool) => tool.name);
+  const failed = (text: string): Promise<HostMcpResult> =>
+    Promise.resolve({ content: [{ type: 'text', text }], isError: true });
+
+  /**
+   * agy 进程按直挂的工具名换（见 runtimeHost），懒加载的工具不进 key：每次查、调都按会话当下的工具表算，
+   * 插件工具增减不用换进程。enso_tool_call 只认当下的懒加载工具，执行仍走会话自己的工具管线，
+   * 卡片和落盘都是真实工具名和参数。
+   */
+  const hostMcpFor = (set: AgyHostToolSet): AgyHostMcp => {
+    const names = set.eager.map((tool) => tool.name);
+    const call = (name: string, args: Record<string, unknown>, signal: AbortSignal) => {
+      if (!names.includes(name)) return failed(`Unknown tool ${name}`);
+      if (name === ENSO_TOOL_SEARCH) {
+        const { lazy } = agyHostTools(session.agent.state.tools);
+        return Promise.resolve({
+          content: [{ type: 'text', text: searchLazyTools(lazy, args.query) }],
+        });
+      }
+      if (name !== ENSO_TOOL_CALL) return callEnsoTool(name, args, signal);
+      const target = lazyCallOf(args);
+      if ('error' in target) return failed(target.error);
+      const { lazy } = agyHostTools(session.agent.state.tools);
+      if (!lazy.some((tool) => tool.name === target.name)) {
+        return failed(
+          names.includes(target.name)
+            ? `${target.name} is listed directly: call it as mcp_enso_${target.name}, not through ${ENSO_TOOL_CALL}.`
+            : `No EnsoCode tool named ${target.name}. Find tools with ${ENSO_TOOL_SEARCH}.`
+        );
+      }
+      return callEnsoTool(target.name, target.arguments, signal);
+    };
     return {
       tools: names,
-      issue: () =>
-        issueHostMcp({
-          tools: () => exposed,
-          call: (name, args, signal) =>
-            names.includes(name)
-              ? callEnsoTool(name, args, signal)
-              : Promise.resolve({
-                  content: [{ type: 'text', text: `Unknown tool ${name}` }],
-                  isError: true,
-                }),
-        }),
+      issue: () => issueHostMcp({ tools: () => set.eager, call }),
     };
   };
 
@@ -175,7 +202,7 @@ export function attachAgyBridgeToSession(
         readRoots: options.readRoots(),
         clientVersion: options.clientVersion,
         resumeSessionId: resumable ? readAgySessionId(storeFile, options.ensoSessionId) : undefined,
-        hostMcp: hostMcpFor(hostMcpTools(session.agent.state.tools)),
+        hostMcp: hostMcpFor(agyHostTools(session.agent.state.tools)),
         systemAppend,
       });
       live = runtime;

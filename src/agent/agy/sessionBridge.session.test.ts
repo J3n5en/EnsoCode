@@ -375,6 +375,12 @@ const note = {
   },
 } as unknown as ToolDefinition;
 
+/** 同一个工具换个名字：核心工具名（直挂）或插件式名字（懒加载） */
+function named(tool: ToolDefinition, name: string): ToolDefinition {
+  return { ...tool, name, label: name } as ToolDefinition;
+}
+const todoNote = named(note, 'todo');
+
 async function mcpClient(server: AcpHttpMcpServer) {
   const client = new Client({ name: 'fake-agy', version: '1.0.0' });
   await client.connect(
@@ -403,7 +409,7 @@ it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with i
         input.onEvent?.({ type: 'text', delta: 'Noting.' });
         const client = await mcpClient(grant.server);
         listed.push(...(await client.listTools()).tools.map((tool) => tool.name));
-        called.push(await client.callTool({ name: 'note', arguments: { text: 'milk' } }));
+        called.push(await client.callTool({ name: 'todo', arguments: { text: 'milk' } }));
         await client.close();
         input.onEvent?.({ type: 'text', delta: 'Done.' });
         return result('Noting.Done.');
@@ -415,7 +421,7 @@ it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with i
       },
     };
   });
-  const { session, manager, dispose } = await setup('enso-mcp', { tools: [lookup, note] });
+  const { session, manager, dispose } = await setup('enso-mcp', { tools: [lookup, todoNote] });
   const cards: string[] = [];
   session.subscribe((event) => {
     if (event.type === 'tool_execution_start') cards.push(event.toolName);
@@ -423,11 +429,12 @@ it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with i
   await session.prompt('note milk');
   await session.waitForIdle();
 
-  expect(offered[0]?.tools).toEqual(['lookup', 'note']);
-  expect(listed).toEqual(['lookup', 'note']);
+  // lookup 不是核心工具：不直挂，经 enso_tool_search / enso_tool_call 才够得着
+  expect(offered[0]?.tools).toEqual(['todo', 'enso_tool_search', 'enso_tool_call']);
+  expect(listed).toEqual(['todo', 'enso_tool_search', 'enso_tool_call']);
   expect(noteCalls).toEqual([{ text: 'milk' }]);
   expect(called).toEqual([{ content: [{ type: 'text', text: 'noted milk' }] }]);
-  expect(cards).toEqual(['note']);
+  expect(cards).toEqual(['todo']);
   const file = manager.getSessionFile();
   if (!file) throw new Error('no session file');
   const rows = persisted(file) as Array<Row & { toolName?: string; details?: unknown }>;
@@ -438,15 +445,86 @@ it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with i
     'assistant[text:Done.]',
   ]);
   const toolCall = (rows[1]!.content as { type: string; name?: string; arguments?: unknown }[])[1];
-  expect(toolCall).toMatchObject({ name: 'note', arguments: { text: 'milk' } });
+  expect(toolCall).toMatchObject({ name: 'todo', arguments: { text: 'milk' } });
   expect(rows[2]).toMatchObject({
-    toolName: 'note',
+    toolName: 'todo',
     isError: false,
     details: { kept: 'milk' },
     content: [{ type: 'text', text: 'noted milk' }],
   });
   dispose();
   await vi.waitFor(() => expect(revoked).toBe(true));
+});
+
+it('reaches a lazy plugin tool through enso_tool_search and enso_tool_call, shown as the real tool', async () => {
+  noteCalls.length = 0;
+  const outputs: Record<string, unknown> = {};
+  setAgySessionOpener(async (options) => {
+    const hostMcp = options.hostMcp;
+    if (!hostMcp) throw new Error('no host MCP offered');
+    const grant = await hostMcp.issue();
+    return {
+      ...fakeAgy(async (input) => {
+        const client = await mcpClient(grant.server);
+        const call = (name: string, args: Record<string, unknown>) =>
+          client.callTool({ name, arguments: args });
+        outputs.list = await call('enso_tool_search', {});
+        outputs.search = await call('enso_tool_search', { query: 'note' });
+        outputs.called = await call('enso_tool_call', {
+          name: 'tg_note',
+          arguments: '{"text":"milk"}',
+        });
+        outputs.eagerName = await call('enso_tool_call', { name: 'todo', arguments: {} });
+        outputs.hidden = await call('enso_tool_call', { name: 'bash', arguments: {} });
+        outputs.lazyDirect = await call('tg_note', { text: 'x' });
+        await client.close();
+        input.onEvent?.({ type: 'text', delta: 'Done.' });
+        return result('Done.');
+      }),
+      ensoTools: hostMcp.tools,
+      close: async () => grant.revoke(),
+    };
+  });
+  const bash = named(lookup, 'bash');
+  const { session, manager } = await setup('enso-lazy', {
+    tools: [todoNote, named(note, 'tg_note'), bash],
+  });
+  const cards: Array<{ name: string; args: unknown }> = [];
+  session.subscribe((event) => {
+    if (event.type === 'tool_execution_start')
+      cards.push({ name: event.toolName, args: event.args });
+  });
+  await session.prompt('note milk via the plugin');
+  await session.waitForIdle();
+
+  const text = (value: unknown) =>
+    ((value as { content: { text: string }[] }).content ?? []).map((part) => part.text).join('');
+  expect(text(outputs.list)).toContain('- tg_note: Keep a note for the user.');
+  expect(text(outputs.list)).not.toContain('bash');
+  expect(JSON.parse(text(outputs.search))).toEqual([
+    {
+      name: 'tg_note',
+      description: 'Keep a note for the user.',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+    },
+  ]);
+  expect(outputs.called).toEqual({ content: [{ type: 'text', text: 'noted milk' }] });
+  expect(noteCalls).toEqual([{ text: 'milk' }]);
+  expect(outputs.eagerName).toMatchObject({ isError: true });
+  expect(text(outputs.eagerName)).toContain('call it as mcp_enso_todo');
+  expect(outputs.hidden).toMatchObject({ isError: true });
+  expect(outputs.lazyDirect).toMatchObject({ isError: true });
+  // 卡片只有真实工具，参数是解开后的对象
+  expect(cards).toEqual([{ name: 'tg_note', args: { text: 'milk' } }]);
+  const file = manager.getSessionFile();
+  if (!file) throw new Error('no session file');
+  const rows = persisted(file) as Array<Row & { toolName?: string; details?: unknown }>;
+  expect(JSON.stringify(rows)).not.toContain('enso_tool_call');
+  expect(JSON.stringify(rows)).not.toContain('enso_tool_search');
+  const toolCall = (rows[1]!.content as { type: string; name?: string; arguments?: unknown }[])[0];
+  expect(toolCall).toMatchObject({ name: 'tg_note', arguments: { text: 'milk' } });
+  expect(rows[2]).toMatchObject({ toolName: 'tg_note', details: { kept: 'milk' }, isError: false });
+  expect(rows.filter((row) => row.role === 'toolResult')).toHaveLength(1);
 });
 
 const fakeCli = fileURLToPath(new URL('./fixtures/fakeAgy.mjs', import.meta.url));
@@ -519,19 +597,54 @@ it('reopens agy with resume when the Enso tool set changes, so it lists the new 
       () => (closed += 1)
     );
   });
-  const { session } = await setup('enso-hotplug', { tools: [lookup, note] });
+  const { session } = await setup('enso-hotplug', {
+    tools: [named(lookup, 'ask_user'), todoNote],
+  });
   await session.prompt('one');
   await session.waitForIdle();
   await session.prompt('two');
   await session.waitForIdle();
   expect(opened).toHaveLength(1);
-  session.setActiveToolsByName(['lookup']);
+  session.setActiveToolsByName(['ask_user']);
   await session.prompt('three');
   await session.waitForIdle();
   expect(closed).toBe(1);
   expect(opened).toEqual([
-    { tools: ['lookup', 'note'], resume: undefined },
-    { tools: ['lookup'], resume: 'agy-1' },
+    { tools: ['ask_user', 'todo'], resume: undefined },
+    { tools: ['ask_user'], resume: 'agy-1' },
+  ]);
+});
+
+it('keys the agy process on what is listed directly: lazy tools and over-budget core do not reopen it', async () => {
+  const opened: Array<{ tools: readonly string[]; resume?: string }> = [];
+  let closed = 0;
+  setAgySessionOpener(async (options) => {
+    opened.push({ tools: options.hostMcp?.tools ?? [], resume: options.resumeSessionId });
+    return fakeAgy(
+      async () => result('ok'),
+      () => (closed += 1)
+    );
+  });
+  const big = (name: string, kb: number) =>
+    ({ ...lookup, name, label: name, description: 'x'.repeat(kb * 1000) }) as ToolDefinition;
+  const { session } = await setup('enso-budget', {
+    tools: [big('subagent', 20), big('workflow', 15), lookup, named(lookup, 'tg_plugin')],
+  });
+  await session.prompt('one');
+  await session.waitForIdle();
+  // 懒加载的插件工具关掉：直挂的没变，不换进程
+  session.setActiveToolsByName(['subagent', 'workflow', 'lookup']);
+  await session.prompt('two');
+  await session.waitForIdle();
+  expect(closed).toBe(0);
+  // subagent 关掉，腾出的预算让 workflow 直挂：换进程 resume
+  session.setActiveToolsByName(['workflow', 'lookup']);
+  await session.prompt('three');
+  await session.waitForIdle();
+  expect(closed).toBe(1);
+  expect(opened).toEqual([
+    { tools: ['subagent', 'enso_tool_search', 'enso_tool_call'], resume: undefined },
+    { tools: ['workflow', 'enso_tool_search', 'enso_tool_call'], resume: 'agy-1' },
   ]);
 });
 

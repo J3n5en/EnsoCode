@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { AGY_HOST_MCP_BUDGET_BYTES, agyHostTools, hostMcpToolBytes } from '@shared/agy/hostTools';
 import { childProfileShell, childProfileToolIds } from '@shared/childProfileTools';
 import { toolSchemaForModel } from '@shared/providers/antigravity';
 import { DEFAULT_PERSONA_PROMPT } from '@shared/systemPrompt';
@@ -685,6 +686,101 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         ...geminiSchemaIssues(toolSchemaForModel('gemini', tool.parameters), tool.name),
       ])
     ).toEqual([]);
+  });
+
+  it('agy 直挂的核心工具按真实定义量出来远在预算内，插件工具全走懒加载', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-agy-')),
+    });
+    // 接近真实主会话：几个子代理模型和类型、记忆与桌面都开着、挂着插件工具
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      exploreFoldEnabled: true,
+      memoryLanguage: 'zh',
+      pluginTools: ['tg_send_message', 'github_list', 'swarm_post', 'cron_create'].map((name) => ({
+        name,
+        description: `${name} plugin tool.`,
+        parameters: { type: 'object', properties: { text: { type: 'string' } } },
+        pluginId: 'enso.test',
+      })),
+      agentTypes: [
+        {
+          name: 'worker',
+          description: 'Implements a scoped change.',
+          systemPrompt: 'x',
+          tools: 'all',
+        },
+        {
+          name: 'scout',
+          description: 'Read-only exploration.',
+          systemPrompt: 'x',
+          tools: 'readonly',
+        },
+        { name: 'reviewer', description: 'Reviews a diff.', systemPrompt: 'x', tools: 'readonly' },
+      ],
+      subagentModels: [
+        { name: 'agy-cli/default', config: model, description: 'agy default' },
+        { name: 'xAI (Grok/X subscription) (grok@j3.do)/grok-4.7', config: model },
+        { name: 'Anthropic/claude-opus-4-6', config: model, description: 'Opus' },
+        { name: 'OpenAI/gpt-5.5', config: model, description: 'GPT' },
+      ],
+    });
+    await waitFor(events, 'parent-ready');
+    await supervisor.shutdown();
+    const tools: ToolDefinition[] = [];
+    const pi = {
+      registerTool: (tool: ToolDefinition) => tools.push(tool),
+      on: () => undefined,
+      getActiveTools: () => [],
+      getAllTools: () => tools,
+      appendEntry: () => undefined,
+      sendMessage: () => undefined,
+      getSettings: () => ({}),
+    };
+    for (const options of mocks.loaderOptions) {
+      const factories = (options.extensionFactories ?? []) as Array<{
+        factory?: (api: typeof pi) => void;
+      }>;
+      for (const extension of factories) extension.factory?.(pi);
+    }
+    for (const [options] of mocks.createAgentSession.mock.calls) {
+      tools.push(...((options as { customTools?: ToolDefinition[] }).customTools ?? []));
+    }
+    const { eager, lazy } = agyHostTools(tools);
+    const core = [
+      'subagent',
+      'workflow',
+      'ask_user',
+      'todo',
+      'goal_complete',
+      'goal_blocked',
+      'goal_wait',
+      'remind_me',
+      'reminder_list',
+      'reminder_cancel',
+      'memory_search',
+      'memory_capture',
+      'memory_crystallize',
+      'memory_delete',
+      'image_view',
+      'computer',
+    ];
+    expect(eager.map((tool) => tool.name).sort()).toEqual(
+      [...core, 'enso_tool_search', 'enso_tool_call'].sort()
+    );
+    expect(lazy.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['tg_send_message', 'github_list', 'swarm_post', 'cron_create'])
+    );
+    expect(lazy.map((tool) => tool.name)).not.toContain('recall');
+    const bytes = eager.reduce((sum, tool) => sum + hostMcpToolBytes(tool), 0);
+    // 实测 agy 能启用约 37 KB；核心加两个元工具要明显低于 30 KB 的安全网
+    expect(bytes).toBeLessThan(AGY_HOST_MCP_BUDGET_BYTES * 0.95);
   });
 
   it('内置工具热开关：禁用的只注册不激活，set-builtin-tools 增删激活集并联动 plan', async () => {
