@@ -7,6 +7,7 @@ import {
   classifierProviderFor,
   directMemberRef,
   findVirtualModel,
+  moveFallback,
   parseVirtualClassifier,
   parseVirtualModels,
   selectableVirtualModels,
@@ -233,6 +234,29 @@ describe('classifierProviderFor', () => {
     expect(classifierProviderFor({ baseUrl: 'https://opencode.ai/zen/v1' })).toBe('opencode');
     expect(classifierProviderFor({ baseUrl: 'https://evil-openrouter.ai.test' })).toBeUndefined();
     expect(classifierProviderFor({ baseUrl: 'not a url' })).toBeUndefined();
+  });
+});
+
+describe('备用模型的排序', () => {
+  const three = [
+    { providerId: 'a', modelId: 'one' },
+    { providerId: 'b', modelId: 'two' },
+    { providerId: 'c', modelId: 'three' },
+  ];
+
+  it('备用模型上移/下移只交换相邻两项，其余顺序不动', () => {
+    expect(moveFallback(three, 1, -1).map((ref) => ref.modelId)).toEqual(['two', 'one', 'three']);
+    expect(moveFallback(three, 1, 1).map((ref) => ref.modelId)).toEqual(['one', 'three', 'two']);
+    // 入参不被改写
+    expect(three.map((ref) => ref.modelId)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('首项上移、末项下移与越界索引都原样返回', () => {
+    expect(moveFallback(three, 0, -1)).toBe(three);
+    expect(moveFallback(three, 2, 1)).toBe(three);
+    expect(moveFallback(three, -1, 1)).toBe(three);
+    expect(moveFallback(three, 3, -1)).toBe(three);
+    expect(moveFallback([], 0, 1)).toEqual([]);
   });
 });
 

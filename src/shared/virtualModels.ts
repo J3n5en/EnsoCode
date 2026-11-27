@@ -65,6 +65,22 @@ function parseMemberRef(value: unknown): DefaultModelRef | null {
 export const sameModelRef = (a: DefaultModelRef, b: DefaultModelRef): boolean =>
   a.providerId === b.providerId && a.modelId === b.modelId;
 
+/** 备用模型列表里上移(-1)/下移(1)一项；越界或空列表原样返回同一引用 */
+export function moveFallback(
+  fallbacks: DefaultModelRef[],
+  index: number,
+  delta: -1 | 1
+): DefaultModelRef[] {
+  const target = index + delta;
+  if (index < 0 || index >= fallbacks.length || target < 0 || target >= fallbacks.length) {
+    return fallbacks;
+  }
+  const next = [...fallbacks];
+  next[index] = fallbacks[target] as DefaultModelRef;
+  next[target] = fallbacks[index] as DefaultModelRef;
+  return next;
+}
+
 export function parseVirtualClassifier(value: unknown): VirtualClassifierConfig | undefined {
   if (!isRecord(value)) return undefined;
   const source = value.source;
