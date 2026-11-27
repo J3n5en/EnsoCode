@@ -724,7 +724,11 @@ function ProviderSubmenuList({
           </span>
         </div>
       )}
-      <div ref={listRef} data-model-picker="model-list" className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={listRef}
+        data-model-picker="model-list"
+        className="relative min-h-0 flex-1 overflow-y-auto"
+      >
         {visibleModels.map((model) => {
           const key = pinnedModelKey(provider.id, model.id);
           return (

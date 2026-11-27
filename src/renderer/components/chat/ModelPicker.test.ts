@@ -1579,6 +1579,15 @@ describe('model picker 打开时滚到选中的模型', () => {
     ]);
   });
 
+  it('model-list 容器保持 relative，保证 item.offsetParent 为列表本身', async () => {
+    // centeredScrollTop 以 item.offsetTop 相对列表计算；容器没有 relative 时
+    // offsetParent 会越级指到弹层外层，把搜索栏/账号信息高度都算进去导致误滚。
+    // linkedom 的 fake 布局按 parentElement 算 offsetTop，漏检这一点，所以显式断言类名。
+    await mount({ providers: manyModels, providerId: 'relay', modelId: 'm5' });
+    await setOpen(true);
+    expect(modelList()?.className).toContain('relative');
+  });
+
   it('选中的模型本来就在可视区里时不滚动', async () => {
     await mount({ providers: manyModels, providerId: 'relay', modelId: 'm0' });
     await setOpen(true);
