@@ -57,17 +57,23 @@ interface NoChatModelBase {
 
 export type ChatModelSource = 'session' | 'project' | 'group' | 'default';
 
+/** 已配置但确定不可用的默认模型（项目 / 分组 / 全局），供报错点名模型与原因 */
+export interface UnavailableDefaultModel {
+  source: Exclude<ChatModelSource, 'session'>;
+  model: DefaultModelRef;
+  reason: DeterministicModelUnavailability;
+}
+
 export type ChatModelResolution =
   | (DefaultModelRef & {
       source: ChatModelSource;
       invalidDefault: boolean;
     })
-  | (NoChatModelBase & ({ reason: 'no-usable-model' } | OauthCredentialBlock));
-
-export interface DefaultModelNotice {
-  previous: DefaultModelRef;
-  next: DefaultModelRef | null;
-}
+  | (NoChatModelBase &
+      (
+        | { reason: 'no-usable-model'; unavailableDefault?: UnavailableDefaultModel }
+        | OauthCredentialBlock
+      ));
 
 export interface DefaultModelState {
   defaultModel: DefaultModelRef | null;
@@ -76,27 +82,31 @@ export interface DefaultModelState {
   virtualModels?: readonly VirtualModelEntry[];
 }
 
-export type SanitizeDefaultModelResult =
+/** 默认模型体检结果：只描述状态，从不给出替换模型 */
+export type DefaultModelAssessment =
   | {
       status: 'unchanged';
       defaultModel: DefaultModelRef | null;
-      notice: null;
     }
   | ({
       status: 'deferred-oauth-unavailable';
       defaultModel: DefaultModelRef;
-      notice: null;
     } & OauthCredentialBlock)
   | {
-      status: 'sanitized';
-      defaultModel: DefaultModelRef | null;
-      notice: DefaultModelNotice;
+      status: 'unavailable';
+      defaultModel: DefaultModelRef;
+      reason: DeterministicModelUnavailability;
     };
 
 const isOauthUnknown = (value: ModelUsability): value is OauthCredentialUnavailableReason =>
   value === 'oauth-credentials-unloaded' ||
   value === 'oauth-credentials-loading' ||
   value === 'oauth-credentials-error';
+
+const deterministicUnavailability = (
+  value: ModelUsability
+): DeterministicModelUnavailability | null =>
+  value === 'usable' || isOauthUnknown(value) ? null : value;
 
 export function oauthCredentialBlock(
   credentials: ModelCredentialContext
@@ -329,19 +339,44 @@ export function resolveChatModel(input: {
   }
 
   const blocked = isOauthUnknown(defaultUsability) ? oauthCredentialBlock(input.credentials) : null;
+  if (blocked) {
+    return {
+      providerId: null,
+      modelId: null,
+      source: 'none',
+      invalidDefault,
+      ...blocked,
+    };
+  }
+  // 点名第一个「配置了但确定不可用」的默认：用户要知道是哪个模型、为什么，而不是被悄悄换掉
+  let unavailableDefault: UnavailableDefaultModel | undefined;
+  for (const candidate of candidates) {
+    if (candidate.source === 'session' || !candidate.selection) continue;
+    const reason = deterministicUnavailability(
+      modelUsability(candidate.selection, input.providers, input.credentials, input.virtualModels)
+    );
+    if (reason) {
+      unavailableDefault = { source: candidate.source, model: candidate.selection, reason };
+      break;
+    }
+  }
   return {
     providerId: null,
     modelId: null,
     source: 'none',
     invalidDefault,
-    ...(blocked ?? { reason: 'no-usable-model' as const }),
+    reason: 'no-usable-model',
+    ...(unavailableDefault ? { unavailableDefault } : {}),
   };
 }
 
-/** 确定可用候选优先；只有没有可用项且确有 OAuth 未知候选时才 defer。 */
-export function sanitizeDefaultModel(state: DefaultModelState): SanitizeDefaultModelResult {
+/**
+ * 体检全局默认模型：可用 → unchanged；OAuth 未知 → defer；确定不可用 → unavailable 带原因。
+ * 从不替换、从不清空：用户选的默认只能由用户改，瞬时误判在数据就绪后自然恢复。
+ */
+export function assessDefaultModel(state: DefaultModelState): DefaultModelAssessment {
   if (!state.defaultModel) {
-    return { status: 'unchanged', defaultModel: null, notice: null };
+    return { status: 'unchanged', defaultModel: null };
   }
   const currentUsability = modelUsability(
     state.defaultModel,
@@ -350,52 +385,64 @@ export function sanitizeDefaultModel(state: DefaultModelState): SanitizeDefaultM
     state.virtualModels
   );
   if (currentUsability === 'usable') {
-    return { status: 'unchanged', defaultModel: state.defaultModel, notice: null };
+    return { status: 'unchanged', defaultModel: state.defaultModel };
   }
-  if (isOauthUnknown(currentUsability)) {
-    const blocked = oauthCredentialBlock(state.credentials);
-    if (blocked) {
-      return {
-        status: 'deferred-oauth-unavailable',
-        defaultModel: state.defaultModel,
-        notice: null,
-        ...blocked,
-      };
-    }
-  }
-
-  let unknownCandidate: OauthCredentialBlock | null = null;
-  for (const provider of state.providers) {
-    if (!provider.enabled) continue;
-    for (const model of provider.models) {
-      if (model.enabled === false) continue;
-      const candidate = { providerId: provider.id, modelId: model.id };
-      const usability = modelUsability(candidate, state.providers, state.credentials);
-      if (usability === 'usable') {
-        return {
-          status: 'sanitized',
-          defaultModel: candidate,
-          notice: { previous: state.defaultModel, next: candidate },
-        };
-      }
-      if (!unknownCandidate && isOauthUnknown(usability)) {
-        unknownCandidate = oauthCredentialBlock(state.credentials);
-      }
-    }
-  }
-  if (unknownCandidate) {
-    return {
-      status: 'deferred-oauth-unavailable',
-      defaultModel: state.defaultModel,
-      notice: null,
-      ...unknownCandidate,
-    };
-  }
-  return {
-    status: 'sanitized',
-    defaultModel: null,
-    notice: { previous: state.defaultModel, next: null },
+  const reason = deterministicUnavailability(currentUsability);
+  if (reason) return { status: 'unavailable', defaultModel: state.defaultModel, reason };
+  const blocked = oauthCredentialBlock(state.credentials) ?? {
+    reason: 'oauth-credentials-loading' as const,
+    suggestedAction: 'wait-for-oauth-credentials' as const,
   };
+  return { status: 'deferred-oauth-unavailable', defaultModel: state.defaultModel, ...blocked };
+}
+
+/** 建会话因没有可用模型失败时的错误前缀；Main 侧按前缀识别，不按整串比对 */
+export const NO_USABLE_MODEL_ERROR = 'no usable model';
+
+export function isNoUsableModelError(error: string | undefined): boolean {
+  return error === NO_USABLE_MODEL_ERROR || Boolean(error?.startsWith(`${NO_USABLE_MODEL_ERROR}:`));
+}
+
+const UNAVAILABLE_REASON_TEXT: Record<DeterministicModelUnavailability, string> = {
+  'missing-selection': 'no model is selected',
+  'provider-missing': 'its provider no longer exists',
+  'provider-disabled': 'its provider is disabled',
+  'classifier-only': 'its provider only serves approval classifiers',
+  'model-missing': "the model is not in its provider's model list",
+  'model-disabled': 'the model is disabled',
+  'api-key-missing': 'its provider has no API key',
+  'oauth-account-missing': 'its subscription account is not signed in',
+};
+
+/** 「服务商名 / 模型 id」；虚拟模型用虚拟模型名，找不到时退回原始 id */
+export function modelRefLabel(
+  ref: DefaultModelRef,
+  providers: readonly ModelProvider[],
+  virtualModels?: readonly VirtualModelEntry[]
+): string {
+  if (isVirtualRef(ref)) {
+    const entry = virtualModels ? findVirtualModel(virtualModels, ref) : undefined;
+    return `${entry?.name ?? ref.modelId} (virtual model)`;
+  }
+  const provider = providers.find((entry) => entry.id === ref.providerId);
+  return `${provider?.name ?? ref.providerId} / ${ref.modelId}`;
+}
+
+const SCOPE_TEXT: Record<UnavailableDefaultModel['source'], { name: string; fix: string }> = {
+  default: { name: 'the default model', fix: 'Settings → Models → Default model' },
+  project: { name: 'the project default model', fix: "the project's settings" },
+  group: { name: 'the project group default model', fix: "the project group's settings" },
+};
+
+/** 给秘书 / Main 调用方的报错：点名模型与原因，明说没有改用别的模型，并指向设置 */
+export function unusableModelError(
+  unavailable: UnavailableDefaultModel,
+  providers: readonly ModelProvider[],
+  virtualModels?: readonly VirtualModelEntry[]
+): string {
+  const scope = SCOPE_TEXT[unavailable.source];
+  const label = modelRefLabel(unavailable.model, providers, virtualModels);
+  return `${NO_USABLE_MODEL_ERROR}: ${scope.name} "${label}" is unavailable (${UNAVAILABLE_REASON_TEXT[unavailable.reason]}). No other model was used. Fix or re-pick it in ${scope.fix}.`;
 }
 
 import { AGY_PROVIDER_ID } from './agy/constants';

@@ -90,7 +90,6 @@ describe('settings default model actions', () => {
         status: 'stale',
         defaultModel: null,
         writeback: false,
-        notice: null,
       },
     });
     settingsModule.useSettingsStore.getState().setDefaultModel({
@@ -117,7 +116,7 @@ describe('settings default model actions', () => {
         defaultModel: { providerId: oauth.id, modelId: 'model' },
       });
       const result = settingsModule.useSettingsStore.getState().revalidateDefaultModel(snapshot);
-      expect(result).toMatchObject({ status: 'deferred', writeback: false, notice: null });
+      expect(result).toMatchObject({ status: 'deferred', writeback: false });
       expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual({
         providerId: oauth.id,
         modelId: 'model',
@@ -162,7 +161,6 @@ describe('settings default model actions', () => {
       status: 'unchanged',
       defaultModel: { providerId: oauth.id, modelId: 'model' },
       writeback: false,
-      notice: null,
     });
   });
 
@@ -257,7 +255,7 @@ describe('settings default model actions', () => {
     }
   );
 
-  it('ready logout falls back in provider order and publishes previous to next notice', () => {
+  it('ready logout：OAuth 默认原样保留、标记不可用，不换成别的服务商', () => {
     const oauth = provider('oauth', { apiKey: '', oauthAccountKey: 'anthropic' });
     const fallback = provider('fallback');
     setDirectory([{ key: 'anthropic', modelIds: ['model'] }]);
@@ -265,44 +263,104 @@ describe('settings default model actions', () => {
       status: 'ready',
       authenticatedAccountKeys: new Set(),
     });
+    const chosen = { providerId: oauth.id, modelId: 'model' };
     settingsModule.useSettingsStore.setState({
       providers: [oauth, fallback],
-      defaultModel: { providerId: oauth.id, modelId: 'model' },
+      defaultModel: chosen,
     });
 
     const result = settingsModule.useSettingsStore.getState().revalidateDefaultModel(snapshot);
     expect(result).toEqual({
-      status: 'sanitized',
-      defaultModel: { providerId: fallback.id, modelId: 'model' },
-      writeback: true,
-      notice: {
-        previous: { providerId: oauth.id, modelId: 'model' },
-        next: { providerId: fallback.id, modelId: 'model' },
-      },
+      status: 'unavailable',
+      defaultModel: chosen,
+      reason: 'oauth-account-missing',
+      writeback: false,
     });
-    expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual(result.defaultModel);
+    expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual(chosen);
     expect(settingsModule.useDefaultModelRevalidationStore.getState().latest).toEqual(result);
   });
 
-  it('ready with no candidate clears the default', () => {
-    const oauth = provider('oauth', { apiKey: '', oauthAccountKey: 'anthropic' });
-    setDirectory([{ key: 'anthropic', modelIds: ['model'] }]);
-    const snapshot = setSnapshot(1, {
-      status: 'ready',
-      authenticatedAccountKeys: new Set(),
-    });
-    settingsModule.useSettingsStore.setState({
-      providers: [oauth],
-      defaultModel: { providerId: oauth.id, modelId: 'model' },
-    });
+  it('(a) API-key 默认失效（magpie 无 key）：不写回、不落盘替换，只标记不可用', async () => {
+    const magpie = provider('magpie', { apiKey: '', models: [{ id: 'devin/swe-2-1' }] });
+    const max = provider('max', { models: [{ id: 'claude-fable-5' }] });
+    const chosen = { providerId: magpie.id, modelId: 'devin/swe-2-1' };
+    const snapshot = setSnapshot(1, { status: 'ready', authenticatedAccountKeys: new Set() });
+    settingsModule.useSettingsStore.setState({ providers: [magpie, max], defaultModel: chosen });
+    writeKey.mockClear();
 
+    const result = settingsModule.useSettingsStore.getState().revalidateDefaultModel(snapshot);
+    expect(result).toEqual({
+      status: 'unavailable',
+      defaultModel: chosen,
+      reason: 'api-key-missing',
+      writeback: false,
+    });
+    expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual(chosen);
+    await Promise.resolve();
+    const persistedDefaults = writeKey.mock.calls
+      .map((call) => call as unknown[])
+      .filter(([key]) => key === 'enso-settings')
+      .map(([, value]) => (value as { state: { defaultModel: unknown } }).state.defaultModel);
     expect(
-      settingsModule.useSettingsStore.getState().revalidateDefaultModel(snapshot)
-    ).toMatchObject({ status: 'sanitized', defaultModel: null, writeback: true });
-    expect(settingsModule.useSettingsStore.getState().defaultModel).toBeNull();
+      persistedDefaults.every((value) => JSON.stringify(value) === JSON.stringify(chosen))
+    ).toBe(true);
   });
 
-  it('revalidates a hydrated default when OAuth bootstrap became ready first', async () => {
+  it('(b) 凭证补上后同一默认自动恢复为 unchanged', () => {
+    const magpie = provider('magpie', { apiKey: '', models: [{ id: 'devin/swe-2-1' }] });
+    const chosen = { providerId: magpie.id, modelId: 'devin/swe-2-1' };
+    const snapshot = setSnapshot(1, { status: 'ready', authenticatedAccountKeys: new Set() });
+    settingsModule.useSettingsStore.setState({
+      providers: [magpie, provider('max')],
+      defaultModel: chosen,
+    });
+    expect(settingsModule.useSettingsStore.getState().revalidateDefaultModel(snapshot).status).toBe(
+      'unavailable'
+    );
+    settingsModule.useSettingsStore.getState().updateProvider(magpie.id, { apiKey: 'key-magpie' });
+    expect(settingsModule.useDefaultModelRevalidationStore.getState().latest).toEqual({
+      status: 'unchanged',
+      defaultModel: chosen,
+      writeback: false,
+    });
+    expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual(chosen);
+  });
+
+  it('进入不可用只记一次日志，反复快照不刷屏；恢复后再失效会再记', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const magpie = provider('magpie', { apiKey: '' });
+      const snapshot = setSnapshot(1, { status: 'ready', authenticatedAccountKeys: new Set() });
+      settingsModule.useSettingsStore.setState({
+        providers: [magpie],
+        defaultModel: { providerId: magpie.id, modelId: 'model' },
+      });
+      const store = settingsModule.useSettingsStore.getState();
+      store.revalidateDefaultModel(snapshot);
+      store.revalidateDefaultModel(snapshot);
+      setDirectory([{ key: 'other', modelIds: ['x'] }]);
+      store.revalidateDefaultModel(snapshot);
+      const unavailableLogs = () =>
+        warn.mock.calls.filter((call) => String(call[0]).includes('[default-model]'));
+      expect(unavailableLogs()).toHaveLength(1);
+      expect(unavailableLogs()[0]?.join(' ')).toContain('magpie/model');
+      expect(unavailableLogs()[0]?.join(' ')).toContain('api-key-missing');
+
+      store.updateProvider(magpie.id, { apiKey: 'key' });
+      expect(info.mock.calls.some((call) => String(call[0]).includes('[default-model]'))).toBe(
+        true
+      );
+      store.updateProvider(magpie.id, { enabled: false });
+      expect(unavailableLogs()).toHaveLength(2);
+      expect(unavailableLogs()[1]?.join(' ')).toContain('provider-disabled');
+    } finally {
+      warn.mockRestore();
+      info.mockRestore();
+    }
+  });
+
+  it('水合时 OAuth 已 ready 但账号缺失：保留水合出的默认，不改成 fallback', async () => {
     const oauth = provider('oauth', { apiKey: '', oauthAccountKey: 'anthropic' });
     const fallback = provider('fallback');
     setDirectory([{ key: 'anthropic', modelIds: ['model'] }]);
@@ -319,8 +377,12 @@ describe('settings default model actions', () => {
 
     await settingsModule.useSettingsStore.persist.rehydrate();
     expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual({
-      providerId: fallback.id,
+      providerId: oauth.id,
       modelId: 'model',
+    });
+    expect(settingsModule.useDefaultModelRevalidationStore.getState().latest).toMatchObject({
+      status: 'unavailable',
+      reason: 'oauth-account-missing',
     });
   });
 
@@ -336,7 +398,6 @@ describe('settings default model actions', () => {
       status: 'unchanged',
       defaultModel: { providerId: api.id, modelId: 'model' },
       writeback: false,
-      notice: null,
     });
   });
 
@@ -358,7 +419,7 @@ describe('settings default model actions', () => {
     });
   });
 
-  it('provider removal automatically revalidates with the current ready snapshot', () => {
+  it('删除默认所属服务商：默认原样保留并标记 provider-missing', () => {
     const removed = provider('removed');
     const fallback = provider('fallback');
     setSnapshot(1, { status: 'ready', authenticatedAccountKeys: new Set() });
@@ -369,8 +430,30 @@ describe('settings default model actions', () => {
 
     settingsModule.useSettingsStore.getState().removeProvider(removed.id);
     expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual({
-      providerId: fallback.id,
+      providerId: removed.id,
       modelId: 'model',
+    });
+    expect(settingsModule.useDefaultModelRevalidationStore.getState().latest).toMatchObject({
+      status: 'unavailable',
+      reason: 'provider-missing',
+    });
+  });
+
+  it('停用默认所属服务商：默认原样保留并标记 provider-disabled', () => {
+    const chosen = provider('chosen');
+    setSnapshot(1, { status: 'ready', authenticatedAccountKeys: new Set() });
+    settingsModule.useSettingsStore.setState({
+      providers: [chosen, provider('fallback')],
+      defaultModel: { providerId: chosen.id, modelId: 'model' },
+    });
+    settingsModule.useSettingsStore.getState().updateProvider(chosen.id, { enabled: false });
+    expect(settingsModule.useSettingsStore.getState().defaultModel).toEqual({
+      providerId: chosen.id,
+      modelId: 'model',
+    });
+    expect(settingsModule.useDefaultModelRevalidationStore.getState().latest).toMatchObject({
+      status: 'unavailable',
+      reason: 'provider-disabled',
     });
   });
 

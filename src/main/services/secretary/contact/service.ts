@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isNoUsableModelError, NO_USABLE_MODEL_ERROR } from '@shared/defaultModel';
 import { describeForwardedImages, type ForwardedImage } from '@shared/secretary/attachments';
 import {
   botCommands,
@@ -295,10 +296,14 @@ function describe(text: string): string {
 /** 消息没送进秘书会话：说清原因和下一步 */
 function undeliveredText(lang: ContactLang, error?: string): string {
   const zh = lang === 'zh';
-  if (error === 'no usable model' || error === 'no remembered model') {
-    return zh
+  if (isNoUsableModelError(error) || error === 'no remembered model') {
+    const text = zh
       ? '秘书还没配置可用的模型，这条消息没送到。在电脑上打开 设置 → 模型，添加或选一个默认模型后再发一次。'
       : "The secretary has no usable model yet, so this message wasn't delivered. On your computer, open Settings → Models, add or pick a default model, then send it again.";
+    // 默认模型配了但不可用：把点名模型与原因的那句也带上，用户才知道要修哪个
+    return error && error !== NO_USABLE_MODEL_ERROR && isNoUsableModelError(error)
+      ? `${text}\n${error}`
+      : text;
   }
   if (error === 'disabled') {
     return zh

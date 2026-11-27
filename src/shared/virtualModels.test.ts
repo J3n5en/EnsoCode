@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { modelUsability, resolveChatModel, sanitizeDefaultModel } from './defaultModel';
+import { assessDefaultModel, modelUsability, resolveChatModel } from './defaultModel';
 import type { ModelProvider } from './types';
 import {
   canBeVirtualMember,
@@ -162,21 +162,34 @@ describe('虚拟模型可用性', () => {
       })
     ).toMatchObject({ ...autoRef, source: 'default' });
     expect(
-      sanitizeDefaultModel({
+      assessDefaultModel({
         defaultModel: autoRef,
         providers,
         credentials: ready,
         virtualModels: [auto],
       }).status
     ).toBe('unchanged');
+    // 虚拟模型条目没了：只标记不可用，不换成 p1/strong
     expect(
-      sanitizeDefaultModel({
+      assessDefaultModel({
         defaultModel: autoRef,
         providers,
         credentials: ready,
         virtualModels: [],
       })
-    ).toMatchObject({ status: 'sanitized', defaultModel: { providerId: 'p1', modelId: 'strong' } });
+    ).toEqual({ status: 'unavailable', defaultModel: autoRef, reason: 'model-missing' });
+    // 主模型不可用：虚拟默认原样保留，原因取主模型的
+    const primaryDown = providers.map((entry) =>
+      entry.id === auto.primary.providerId ? { ...entry, enabled: false } : entry
+    );
+    expect(
+      assessDefaultModel({
+        defaultModel: autoRef,
+        providers: primaryDown,
+        credentials: ready,
+        virtualModels: [auto],
+      })
+    ).toEqual({ status: 'unavailable', defaultModel: autoRef, reason: 'provider-disabled' });
   });
 });
 

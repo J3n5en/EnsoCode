@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assessDefaultModel,
   defaultApprovalMode,
+  isNoUsableModelError,
   type ModelCredentialContext,
   modelUsability,
   resolveChatModel,
   resolveChatReasoning,
-  sanitizeDefaultModel,
+  unusableModelError,
 } from './defaultModel';
 import type { ModelProvider } from './types';
 
@@ -87,12 +89,11 @@ describe('modelUsability detailed reasons', () => {
   });
 });
 
-describe('sanitizeDefaultModel F14', () => {
-  it('确定失效 API default 在 OAuth error 下立即 fallback 到可用 API 模型', () => {
+describe('assessDefaultModel：不可用只标记，绝不替换', () => {
+  it('确定失效的 API 默认原样保留，只报 unavailable 与原因，即使另有可用模型', () => {
     const previous = { providerId: 'broken-api', modelId: 'old' };
-    const fallback = { providerId: 'fallback-api', modelId: 'next' };
     expect(
-      sanitizeDefaultModel({
+      assessDefaultModel({
         defaultModel: previous,
         providers: [
           provider('broken-api', ['old'], { apiKey: '' }),
@@ -101,47 +102,55 @@ describe('sanitizeDefaultModel F14', () => {
         ],
         credentials: oauthError,
       })
-    ).toEqual({
-      status: 'sanitized',
-      defaultModel: fallback,
-      notice: { previous, next: fallback },
-    });
+    ).toEqual({ status: 'unavailable', defaultModel: previous, reason: 'api-key-missing' });
   });
 
-  it('provider/model 确定失效同样不受无关 OAuth error 阻断 API fallback', () => {
-    const previous = { providerId: 'removed', modelId: 'old' };
+  it('provider 被删除 / 停用、模型被删除 / 停用都只标记，不换成第一个可用模型', () => {
+    const previous = { providerId: 'p', modelId: 'm' };
+    const other = provider('other', ['x']);
+    const cases: Array<[ModelProvider[], string]> = [
+      [[other], 'provider-missing'],
+      [[provider('p', ['m'], { enabled: false }), other], 'provider-disabled'],
+      [[provider('p', ['n']), other], 'model-missing'],
+      [[provider('p', [], { models: [{ id: 'm', enabled: false }] }), other], 'model-disabled'],
+    ];
+    for (const [providers, reason] of cases) {
+      expect(
+        assessDefaultModel({ defaultModel: previous, providers, credentials: ready() })
+      ).toEqual({ status: 'unavailable', defaultModel: previous, reason });
+    }
+  });
+
+  it('数据就绪后同一默认恢复为 unchanged（瞬时误判自愈）', () => {
+    const previous = { providerId: 'magpie', modelId: 'swe' };
+    const broken = [provider('magpie', ['swe'], { apiKey: '' }), provider('max', ['fable'])];
     expect(
-      sanitizeDefaultModel({
-        defaultModel: previous,
-        providers: [provider('api', ['m'])],
-        credentials: oauthError,
-      })
-    ).toMatchObject({
-      status: 'sanitized',
-      defaultModel: { providerId: 'api', modelId: 'm' },
-    });
-  });
-
-  it('无确定可用项但存在 OAuth unknown 候选才 defer，不误清空', () => {
-    const previous = { providerId: 'removed', modelId: 'old' };
+      assessDefaultModel({ defaultModel: previous, providers: broken, credentials: ready() }).status
+    ).toBe('unavailable');
     expect(
-      sanitizeDefaultModel({
+      assessDefaultModel({
         defaultModel: previous,
-        providers: [oauthProvider('unknown-oauth', 'anthropic', ['claude'])],
-        credentials: oauthError,
+        providers: [provider('magpie', ['swe']), provider('max', ['fable'])],
+        credentials: ready(),
       })
-    ).toMatchObject({
-      status: 'deferred-oauth-unavailable',
-      defaultModel: previous,
-      reason: 'oauth-credentials-error',
-    });
+    ).toEqual({ status: 'unchanged', defaultModel: previous });
   });
 
-  it('当前默认自身是结构有效 OAuth unknown 时先 defer', () => {
+  it('null 默认（首次引导）保持 unchanged', () => {
+    expect(
+      assessDefaultModel({
+        defaultModel: null,
+        providers: [provider('p', ['m'])],
+        credentials: ready(),
+      })
+    ).toEqual({ status: 'unchanged', defaultModel: null });
+  });
+
+  it('当前默认自身是结构有效 OAuth unknown 时 defer', () => {
     const oauth = oauthProvider('oauth', 'anthropic', ['claude']);
     const previous = { providerId: 'oauth', modelId: 'claude' };
     expect(
-      sanitizeDefaultModel({
+      assessDefaultModel({
         defaultModel: previous,
         providers: [oauth, provider('api', ['m'])],
         credentials: oauthError,
@@ -149,19 +158,68 @@ describe('sanitizeDefaultModel F14', () => {
     ).toMatchObject({ status: 'deferred-oauth-unavailable', defaultModel: previous });
   });
 
-  it('OAuth ready 后仍无候选才清空', () => {
+  it('OAuth ready 后账号未登录：标记 oauth-account-missing，不清空', () => {
     const previous = { providerId: 'oauth', modelId: 'claude' };
     expect(
-      sanitizeDefaultModel({
+      assessDefaultModel({
         defaultModel: previous,
-        providers: [oauthProvider('oauth', 'anthropic', ['claude'])],
+        providers: [oauthProvider('oauth', 'anthropic', ['claude']), provider('api', ['m'])],
         credentials: ready(),
       })
-    ).toEqual({
-      status: 'sanitized',
-      defaultModel: null,
-      notice: { previous, next: null },
+    ).toEqual({ status: 'unavailable', defaultModel: previous, reason: 'oauth-account-missing' });
+  });
+});
+
+describe('unusableModelError', () => {
+  it('点名模型与原因，并指向设置', () => {
+    const providers = [provider('magpie', ['devin/swe-2-1'], { name: 'Magpie', apiKey: '' })];
+    const resolution = resolveChatModel({
+      defaultModel: { providerId: 'magpie', modelId: 'devin/swe-2-1' },
+      providers: [...providers, provider('max', ['claude-fable-5'])],
+      credentials: ready(),
     });
+    expect(resolution).toMatchObject({
+      source: 'none',
+      reason: 'no-usable-model',
+      unavailableDefault: {
+        source: 'default',
+        model: { providerId: 'magpie', modelId: 'devin/swe-2-1' },
+        reason: 'api-key-missing',
+      },
+    });
+    if (resolution.source !== 'none' || !('unavailableDefault' in resolution)) {
+      throw new Error('expected unavailable default');
+    }
+    if (!resolution.unavailableDefault) throw new Error('expected unavailable default');
+    const error = unusableModelError(resolution.unavailableDefault, providers);
+    expect(error).toBe(
+      'no usable model: the default model "Magpie / devin/swe-2-1" is unavailable (its provider has no API key). No other model was used. Fix or re-pick it in Settings → Models → Default model.'
+    );
+    expect(isNoUsableModelError(error)).toBe(true);
+    expect(isNoUsableModelError('no usable model')).toBe(true);
+    expect(isNoUsableModelError('no usable models here')).toBe(false);
+  });
+
+  it('项目默认不可用时点名项目默认；虚拟模型用虚拟模型名', () => {
+    const error = unusableModelError(
+      {
+        source: 'project',
+        model: { providerId: 'enso-virtual', modelId: 'auto' },
+        reason: 'model-disabled',
+      },
+      [],
+      [
+        {
+          id: 'auto',
+          name: 'Auto',
+          enabled: false,
+          primary: { providerId: 'p', modelId: 'm' },
+          fallbacks: [],
+        },
+      ]
+    );
+    expect(error).toContain('the project default model "Auto (virtual model)" is unavailable');
+    expect(error).toContain('(the model is disabled)');
   });
 });
 
@@ -265,6 +323,44 @@ describe('resolveChatModel', () => {
         credentials: oauthError,
       })
     ).toMatchObject({ source: 'none', reason: 'oauth-credentials-error' });
+  });
+});
+
+describe('resolveChatModel 严格不替换', () => {
+  it('新会话：全局默认不可用时不挑第一个可用模型，返回 none 并带原因', () => {
+    const resolution = resolveChatModel({
+      defaultModel: { providerId: 'magpie', modelId: 'swe' },
+      providers: [provider('magpie', ['swe'], { enabled: false }), provider('max', ['fable'])],
+      credentials: ready(),
+    });
+    expect(resolution).toMatchObject({
+      providerId: null,
+      modelId: null,
+      source: 'none',
+      reason: 'no-usable-model',
+      unavailableDefault: { source: 'default', reason: 'provider-disabled' },
+    });
+  });
+
+  it('全局默认不可用但项目默认可用：照用项目默认，不阻断', () => {
+    expect(
+      resolveChatModel({
+        defaultModel: { providerId: 'gone', modelId: 'x' },
+        projectDefaultModel: { providerId: 'project', modelId: 'p' },
+        providers: [provider('project', ['p']), provider('other', ['o'])],
+        credentials: ready(),
+      })
+    ).toMatchObject({ source: 'project', providerId: 'project', modelId: 'p' });
+  });
+
+  it('没有任何默认（首次引导）时 none 不带 unavailableDefault', () => {
+    const resolution = resolveChatModel({
+      defaultModel: null,
+      providers: [provider('p', ['m'])],
+      credentials: ready(),
+    });
+    expect(resolution).toMatchObject({ source: 'none', reason: 'no-usable-model' });
+    expect(resolution).not.toHaveProperty('unavailableDefault');
   });
 });
 

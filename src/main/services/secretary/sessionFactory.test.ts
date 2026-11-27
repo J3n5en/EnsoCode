@@ -13,6 +13,7 @@ import {
   createSecretaryConversationFromMain,
   createSessionFromMain,
   type MainSessionDefaults,
+  type MainSessionDefaultsResult,
   mainSessionDefaults,
   type SessionFactoryPorts,
 } from './sessionFactory';
@@ -65,7 +66,7 @@ interface Harness {
 function harness(
   options: {
     project?: ProjectAuthority | null;
-    defaults?: MainSessionDefaults | null;
+    defaults?: MainSessionDefaultsResult;
     imageInput?: boolean;
   } = {}
 ): Harness {
@@ -100,7 +101,7 @@ function harness(
         log.push('removeConversation');
         state.removedConversations.push(id);
       },
-      defaults: () => (options.defaults === undefined ? DEFAULTS : options.defaults),
+      defaults: () => options.defaults ?? { ok: true, value: DEFAULTS },
       createWorktree: async (conversationId, projectId) => {
         log.push('createWorktree');
         return { ...WORKTREE, conversationId, projectId };
@@ -337,10 +338,51 @@ describe('createSessionFromMain', () => {
   });
 
   it('没有可用模型时不建权威', async () => {
-    const h = harness({ defaults: null });
+    const h = harness({ defaults: { ok: false, error: 'no usable model' } });
     const result = await createSessionFromMain(h.ports, REQUEST);
     expect(result).toEqual({ ok: false, error: 'no usable model' });
     expect(h.log).toEqual([]);
+  });
+
+  it('(d) 默认模型不可用：错误点名模型与原因原样交回秘书，不建任何东西', async () => {
+    const defaults = mainSessionDefaults({
+      project: null,
+      groups: [],
+      defaultModel: { providerId: 'magpie', modelId: 'devin/swe-2-1' },
+      providers: [
+        { ...provider('magpie', ['devin/swe-2-1']), name: 'Magpie', apiKey: '' },
+        provider('max', ['claude-fable-5']),
+      ],
+      credentials,
+      approvalReviewer: null,
+      defaultPresetId: 'default',
+      presets: [],
+    });
+    const h = harness({ defaults });
+    const result = await createSessionFromMain(h.ports, REQUEST);
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'no usable model: the default model "Magpie / devin/swe-2-1" is unavailable (its provider has no API key). No other model was used. Fix or re-pick it in Settings → Models → Default model.',
+    });
+    expect(h.log).toEqual([]);
+    expect(h.spawns).toEqual([]);
+  });
+
+  it('显式指定模型时把它交给 defaults，默认模型不可用也不阻断', async () => {
+    const seen: unknown[] = [];
+    const h = harness();
+    h.ports.defaults = (_projectId, model) => {
+      seen.push(model);
+      return { ok: true, value: { ...DEFAULTS, providerId: 'x', modelId: 'y' } };
+    };
+    const result = await createSessionFromMain(h.ports, {
+      ...REQUEST,
+      model: { providerId: 'explicit', modelId: 'e1' },
+    });
+    expect(result).toEqual({ ok: true, conversationId: 'conv-1' });
+    expect(seen).toEqual([{ providerId: 'explicit', modelId: 'e1' }]);
+    expect(h.spawns[0]).toMatchObject({ providerId: 'explicit', modelId: 'e1' });
   });
 
   it('空 prompt 被拒', async () => {
@@ -411,17 +453,20 @@ describe('mainSessionDefaults', () => {
       defaultThinkingLevel: input.defaultThinkingLevel,
     });
     expect(mainSessionDefaults(input)).toEqual({
-      providerId: model.providerId,
-      modelId: model.modelId,
-      reasoningEnabled: reasoning.reasoningEnabled,
-      thinkingLevel: reasoning.thinkingLevel,
-      approvalMode: defaultApprovalMode(
-        input.approvalReviewer,
-        providers,
-        credentials,
-        input.lastApprovalMode
-      ),
-      presetId: 'preset-a',
+      ok: true,
+      value: {
+        providerId: model.providerId,
+        modelId: model.modelId,
+        reasoningEnabled: reasoning.reasoningEnabled,
+        thinkingLevel: reasoning.thinkingLevel,
+        approvalMode: defaultApprovalMode(
+          input.approvalReviewer,
+          providers,
+          credentials,
+          input.lastApprovalMode
+        ),
+        presetId: 'preset-a',
+      },
     });
   });
 
@@ -437,26 +482,90 @@ describe('mainSessionDefaults', () => {
       presets: [{ id: 'preset-a' }],
     };
     expect(mainSessionDefaults({ ...base, defaultPresetId: 'default' })).not.toHaveProperty(
-      'presetId'
+      'value.presetId'
     );
     expect(mainSessionDefaults({ ...base, defaultPresetId: 'gone' })).not.toHaveProperty(
-      'presetId'
+      'value.presetId'
     );
   });
 
-  it('没有可用模型时返回 null', () => {
+  const bare = {
+    project: null,
+    groups: [],
+    credentials,
+    approvalReviewer: null,
+    defaultPresetId: 'default',
+    presets: [],
+  };
+
+  it('没有设默认模型（首次引导）：no usable model', () => {
+    expect(
+      mainSessionDefaults({ ...bare, defaultModel: null, providers: [provider('p', ['m1'])] })
+    ).toEqual({ ok: false, error: 'no usable model' });
+  });
+
+  it('默认模型的服务商被删 / 停用：点名模型与原因，绝不改用另一个可用模型', () => {
+    const removed = mainSessionDefaults({
+      ...bare,
+      defaultModel: { providerId: 'gone', modelId: 'm1' },
+      providers: [provider('other', ['o1'])],
+    });
+    expect(removed).toEqual({
+      ok: false,
+      error: expect.stringContaining('"gone / m1" is unavailable (its provider no longer exists)'),
+    });
+    const disabled = mainSessionDefaults({
+      ...bare,
+      defaultModel: { providerId: 'p', modelId: 'm1' },
+      providers: [{ ...provider('p', ['m1']), enabled: false }, provider('other', ['o1'])],
+    });
+    expect(disabled).toEqual({
+      ok: false,
+      error: expect.stringContaining('"p / m1" is unavailable (its provider is disabled)'),
+    });
+  });
+
+  it('虚拟默认模型的主模型不可用：点名虚拟模型，不回退', () => {
+    const result = mainSessionDefaults({
+      ...bare,
+      defaultModel: { providerId: 'enso-virtual', modelId: 'auto' },
+      providers: [{ ...provider('p', ['m1']), apiKey: '' }, provider('other', ['o1'])],
+      virtualModels: [
+        {
+          id: 'auto',
+          name: 'Auto',
+          enabled: true,
+          primary: { providerId: 'p', modelId: 'm1' },
+          fallbacks: [],
+        },
+      ],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining('"Auto (virtual model)" is unavailable'),
+    });
+  });
+
+  it('(e) 全局默认不可用但项目默认可用：照用项目默认', () => {
     expect(
       mainSessionDefaults({
-        project: null,
-        groups: [],
-        defaultModel: { providerId: 'p', modelId: 'm1' },
-        providers: [],
-        credentials,
-        approvalReviewer: null,
-        defaultPresetId: 'default',
-        presets: [],
+        ...bare,
+        project: { defaultModel: { providerId: 'proj', modelId: 'pm' } },
+        defaultModel: { providerId: 'gone', modelId: 'm1' },
+        providers: [provider('other', ['o1']), provider('proj', ['pm'])],
       })
-    ).toBeNull();
+    ).toMatchObject({ ok: true, value: { providerId: 'proj', modelId: 'pm' } });
+  });
+
+  it('显式模型：默认不可用也不阻断，直接用显式模型', () => {
+    expect(
+      mainSessionDefaults({
+        ...bare,
+        defaultModel: { providerId: 'gone', modelId: 'm1' },
+        providers: [provider('other', ['o1'])],
+        model: { providerId: 'other', modelId: 'o1' },
+      })
+    ).toMatchObject({ ok: true, value: { providerId: 'other', modelId: 'o1' } });
   });
 });
 
@@ -512,7 +621,7 @@ describe('createSecretaryConversationFromMain', () => {
   });
 
   it('没有可用模型：什么都不建，原因交回去', async () => {
-    const h = harness({ project: SECRETARY, defaults: null });
+    const h = harness({ project: SECRETARY, defaults: { ok: false, error: 'no usable model' } });
     await expect(
       createSecretaryConversationFromMain(h.ports, { projectId: 'sec-proj', title: '小幂' })
     ).resolves.toEqual({ ok: false, error: 'no usable model' });

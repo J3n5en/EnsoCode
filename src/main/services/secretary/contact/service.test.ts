@@ -2900,6 +2900,20 @@ describe('秘书会话被回收后的入站', () => {
     });
   });
 
+  it('默认模型不可用：回给手机的提示带上点名模型与原因的那句', async () => {
+    const error =
+      'no usable model: the default model "Magpie / devin/swe-2-1" is unavailable (its provider has no API key). No other model was used. Fix or re-pick it in Settings → Models → Default model.';
+    const h = harness();
+    h.world.conversationId = null;
+    h.world.startResult = { ok: false, error };
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.api.sent.length > 0, 'failure notice');
+    expect(h.world.delivered).toEqual([]);
+    expect(h.api.sent.at(-1)?.text).toContain('还没配置可用的模型');
+    expect(h.api.sent.at(-1)?.text).toContain('"Magpie / devin/swe-2-1" is unavailable');
+  });
+
   it.each(['/status', '/board', '/feed', '/todo', '/schedules', '/memory', '/help'])(
     '只读命令 %s 由 Main 直接回，不拉起秘书',
     async (command) => {

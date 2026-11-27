@@ -1,18 +1,11 @@
-import type { DefaultModelRef } from '@shared/defaultModel';
-import type { ModelProvider } from '@shared/types';
 import { CircleAlert } from 'lucide-react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { useI18n } from '@/i18n';
+import { modelSelectionLabel, unavailableReasonText } from '@/lib/unusableModel';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useDefaultModelRevalidationStore, useSettingsStore } from '@/stores/settings';
 import { SettingsRow, SettingsSwitch } from './kit';
-
-function selectionLabel(selection: DefaultModelRef, providers: readonly ModelProvider[]): string {
-  const provider = providers.find((entry) => entry.id === selection.providerId);
-  const model = provider?.models.find((entry) => entry.id === selection.modelId);
-  return `${provider?.name ?? selection.providerId} / ${model?.label ?? selection.modelId}`;
-}
 
 /** 设置页的全局默认模型入口；账号分组与模型菜单完全复用聊天区 ModelPicker。 */
 export function DefaultModelPicker() {
@@ -45,11 +38,18 @@ export function DefaultModelPicker() {
       ? snapshot.availability.error
       : null;
 
-  const notice = revalidation?.notice;
-  const noticeText = notice
-    ? t('Default model changed: {{previous}} → {{next}}', {
-        previous: selectionLabel(notice.previous, providers),
-        next: notice.next ? selectionLabel(notice.next, providers) : t('No default model'),
+  // 默认模型确定不可用：原样保留并醒目标出原因，不替换；只认与当前默认一致的体检结果
+  const unavailable =
+    revalidation?.status === 'unavailable' &&
+    defaultModel &&
+    revalidation.defaultModel.providerId === defaultModel.providerId &&
+    revalidation.defaultModel.modelId === defaultModel.modelId
+      ? revalidation
+      : null;
+  const unavailableText = unavailable
+    ? t('Unavailable: {{model}} · {{reason}}', {
+        model: modelSelectionLabel(unavailable.defaultModel, providers, virtualModels),
+        reason: unavailableReasonText(unavailable.reason, t),
       })
     : null;
 
@@ -60,7 +60,6 @@ export function DefaultModelPicker() {
       ? t('Subscription credentials could not be loaded: {{error}}', { error: credentialsError })
       : credentialsPending &&
         t('Subscription credentials are loading. API-key models remain available.'),
-    noticeText,
   ].filter((note): note is string => Boolean(note));
 
   return (
@@ -71,6 +70,23 @@ export function DefaultModelPicker() {
         description={
           <>
             {t('Used for new conversations.')}
+            {unavailableText && (
+              <span
+                role="alert"
+                data-testid="default-model-unavailable"
+                className="mt-1 flex items-start gap-1 font-medium text-destructive"
+              >
+                <CircleAlert className="mt-0.5 size-3 shrink-0" />
+                <span>
+                  {unavailableText}
+                  <span className="block font-normal">
+                    {t(
+                      'New conversations will not switch to another model. Pick a usable default model or fix its provider.'
+                    )}
+                  </span>
+                </span>
+              </span>
+            )}
             {notes.map((note) => (
               <span key={note} className="mt-1 flex items-start gap-1">
                 <CircleAlert className="mt-0.5 size-3 shrink-0" />

@@ -64,7 +64,6 @@ exports[`模型与服务商组设置迁移前后行为一致 > 关掉标题总�
       {
         "api": [],
         "store": {
-          "defaultModel": null,
           "providers": [
             {
               "api": "openai-completions",
@@ -515,7 +514,6 @@ exports[`模型与服务商组设置迁移前后行为一致 > 每个控件的�
       {
         "api": [],
         "store": {
-          "defaultModel": null,
           "providers": [
             {
               "api": "openai-completions",

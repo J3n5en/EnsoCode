@@ -85,4 +85,13 @@ describe('秘书自己的会话：用到时才建', () => {
     });
     expect(h.state.creates).toBe(1);
   });
+
+  it('默认模型不可用（带模型与原因的报错）同样不重试，原样交回', async () => {
+    const error =
+      'no usable model: the default model "Magpie / devin/swe-2-1" is unavailable (its provider has no API key). No other model was used. Fix or re-pick it in Settings → Models → Default model.';
+    const h = fake([{ ok: false, error }]);
+    h.release();
+    await expect(ensureHomeConversation('s1', h.ports)).resolves.toEqual({ ok: false, error });
+    expect(h.state.creates).toBe(1);
+  });
 });

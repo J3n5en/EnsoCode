@@ -7,7 +7,7 @@ import {
   readSettingsState,
   virtualModelsFromSettings,
 } from '../agentHost';
-import { type MainSessionDefaults, mainSessionDefaults } from './sessionFactory';
+import { type MainSessionDefaultsResult, mainSessionDefaults } from './sessionFactory';
 
 type ScopedSource = {
   id?: string;
@@ -38,18 +38,33 @@ function scopedSource(value: unknown): ScopedSource {
   };
 }
 
+/** 上次记过日志的报错；同一个不可用原因只记一次，恢复后清掉 */
+let loggedUnavailable: string | null = null;
+
+function logDefaultsTransition(result: MainSessionDefaultsResult): void {
+  if (result.ok) {
+    if (loggedUnavailable !== null) console.info('[default-model] main: usable again');
+    loggedUnavailable = null;
+    return;
+  }
+  if (result.error === loggedUnavailable) return;
+  loggedUnavailable = result.error;
+  console.warn(`[default-model] main: ${result.error}`);
+}
+
 /** Main 建会话（秘书派活）的默认值：与 renderer 的 newConversation 同口径 */
 export function mainSessionDefaultsFor(
   projectId: string,
-  authenticatedAccountKeys: ReadonlySet<string>
-): MainSessionDefaults | null {
+  authenticatedAccountKeys: ReadonlySet<string>,
+  model?: DefaultModelRef
+): MainSessionDefaultsResult {
   const state = readSettingsState() ?? {};
   const projects = Array.isArray(state.projects) ? state.projects : [];
   const groups = Array.isArray(state.projectGroups) ? state.projectGroups : [];
   const presets = Array.isArray(state.presets) ? state.presets : [];
   const thinkingLevel = THINKING_LEVELS.find((level) => level === state.defaultThinkingLevel);
   const lastApprovalMode = APPROVAL_MODES.find((mode) => mode === state.lastApprovalMode);
-  return mainSessionDefaults({
+  const result = mainSessionDefaults({
     project: projects.map(scopedSource).find((entry) => entry.id === projectId) ?? null,
     groups: groups
       .map(scopedSource)
@@ -70,5 +85,8 @@ export function mainSessionDefaultsFor(
     presets: presets
       .map((preset) => record(preset))
       .flatMap((preset) => (typeof preset?.id === 'string' ? [{ id: preset.id }] : [])),
+    ...(model ? { model } : {}),
   });
+  logDefaultsTransition(result);
+  return result;
 }

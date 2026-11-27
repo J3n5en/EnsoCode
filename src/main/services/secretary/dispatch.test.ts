@@ -1619,6 +1619,23 @@ describe('session_send 转发图片', () => {
     expect(h.prompts).toEqual([]);
   });
 
+  it('session_create / todo_item_dispatch：默认模型不可用的报错原样交给秘书', async () => {
+    const unusable =
+      'no usable model: the default model "Magpie / devin/swe-2-1" is unavailable (its provider has no API key). No other model was used. Fix or re-pick it in Settings → Models → Default model.';
+    const h = harness({
+      createResult: { ok: false, error: unusable },
+      todos: [{ id: 't1', text: '修登录', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    expect(await call(h.handlers.session_create, { projectId: 'p1', prompt: '修登录' })).toEqual({
+      ok: false,
+      error: unusable,
+    });
+    expect(await call(h.handlers.todo_item_dispatch, { todoId: 't1' })).toEqual({
+      ok: false,
+      error: unusable,
+    });
+  });
+
   it('session_create 带图：图片读好交给建会话，跟着第一条 prompt 进去', async () => {
     const shot = image('shot.png');
     const h = harness();
@@ -4923,11 +4940,14 @@ describe('排队会话', () => {
       createConversation: (projectId: string) => rootConversation(`q-${++seq}`, projectId),
       removeConversation: () => undefined,
       defaults: () => ({
-        providerId: 'prov',
-        modelId: 'm1',
-        reasoningEnabled: true,
-        thinkingLevel: 'medium' as const,
-        approvalMode: 'assistant' as const,
+        ok: true as const,
+        value: {
+          providerId: 'prov',
+          modelId: 'm1',
+          reasoningEnabled: true,
+          thinkingLevel: 'medium' as const,
+          approvalMode: 'assistant' as const,
+        },
       }),
       createWorktree: async (id: string, projectId: string) => ({
         conversationId: id,

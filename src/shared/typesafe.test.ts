@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { modelUsability, resolveChatModel, sanitizeDefaultModel } from './defaultModel';
+import { assessDefaultModel, modelUsability, resolveChatModel } from './defaultModel';
 import { STATIC_PROVIDER_DEFINITIONS } from './providerCatalog';
 import type { ModelProvider } from './types';
 import {
@@ -71,8 +71,8 @@ describe('TypeSafe classifier-only boundary', () => {
       })
     ).toMatchObject({ providerId: null, modelId: null, reason: 'no-usable-model' });
     expect(
-      sanitizeDefaultModel({ defaultModel: ref, providers: [typesafe], credentials: ready })
-    ).toMatchObject({ status: 'sanitized', defaultModel: null });
+      assessDefaultModel({ defaultModel: ref, providers: [typesafe], credentials: ready })
+    ).toEqual({ status: 'unavailable', defaultModel: ref, reason: 'classifier-only' });
     expect(
       modelUsability({ providerId: VIRTUAL_PROVIDER_ID, modelId: 'auto' }, [typesafe], ready, [
         { id: 'auto', name: 'Auto', enabled: true, primary: ref, fast: ref, fallbacks: [ref] },

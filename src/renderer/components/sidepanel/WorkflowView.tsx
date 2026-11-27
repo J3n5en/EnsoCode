@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { unusableDefaultMessage } from '@/lib/unusableModel';
 import { cn } from '@/lib/utils';
 import { openSettings } from '@/stores/appView';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
@@ -63,9 +64,17 @@ function runPreset(
   if (resolution.source === 'none') {
     addToast({
       type: 'warning',
-      title: t(
-        'No usable model is available. Configure provider credentials and enable a model first.'
-      ),
+      title:
+        resolution.reason === 'no-usable-model' && resolution.unavailableDefault
+          ? unusableDefaultMessage(
+              resolution.unavailableDefault,
+              readMaterializedProviders(),
+              settings.virtualModels,
+              t
+            )
+          : t(
+              'No usable model is available. Configure provider credentials and enable a model first.'
+            ),
     });
     return false;
   }
