@@ -135,6 +135,45 @@ describe('buildAgyPrompt', () => {
     expect(todoOnly).not.toContain('mcp_enso_subagent');
   });
 
+  it('routes subagents to the Enso tool, never native ones, only when subagent is exposed', () => {
+    const textOf = (ensoTools: string[]) => {
+      const blocks = buildAgyPrompt({
+        messages: [{ role: 'user', content: 'go' }],
+        interactionMode: 'default',
+        includeInstructions: true,
+        includeRuntimeInfo: false,
+        modelLabel: 'm',
+        ensoTools,
+      });
+      return blocks[0]?.type === 'text' ? blocks[0].text : '';
+    };
+    const withSubagent = textOf(['subagent', 'workflow', 'todo']);
+    expect(withSubagent).toContain(
+      'Subagents, delegation and parallel work: always use `mcp_enso_subagent`'
+    );
+    expect(withSubagent).toContain('`mcp_enso_workflow` when a workflow was asked');
+    expect(withSubagent).toContain('Never use your native `invoke_subagent`/`manage_subagents`');
+    expect(withSubagent).toContain(
+      'Fall back to native subagents only when no `mcp_enso_subagent`'
+    );
+    expect(withSubagent).toContain(
+      'Enso tools may load late. Try the name once before you call it absent.'
+    );
+    expect(withSubagent).toContain(
+      'As a subagent or child, do the work yourself. Start no subagents unless your task says to.'
+    );
+
+    const subagentOnly = textOf(['subagent']);
+    expect(subagentOnly).toContain('always use `mcp_enso_subagent`');
+    expect(subagentOnly).not.toContain('mcp_enso_workflow');
+
+    for (const tools of [['todo', 'ask_user'], ['workflow'], []]) {
+      const text = textOf(tools);
+      expect(text).not.toContain('invoke_subagent');
+      expect(text).not.toContain('always use `mcp_enso_subagent`');
+    }
+  });
+
   it('passes a one-off turn note prefixed to the user text through unchanged', () => {
     // 一次性提示（无人值守开关等）由 supervisor 前置到用户文字，原样随本轮发给 agy
     const note =
