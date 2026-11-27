@@ -9,6 +9,7 @@ import { AskBar } from '@/components/chat/AskBar';
 import { CHAT_COL } from '@/components/chat/MessageTimeline';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { sidePanelCoversMain } from '@/components/sidepanel/sidePanelCover';
+import { SidePanelCloseButton } from '@/components/sidepanel/sidePanelHeaderClose';
 import { sidePanelWidthTransition } from '@/components/sidepanel/sidePanelWidthAnim';
 import { addToast } from '@/components/ui/toast';
 import { useIsMobile } from '@/hooks/useViewport';
@@ -455,6 +456,12 @@ export function BotChatView({ chat, group = chat }: { chat: BotChat; group?: Bot
                 )}
               </button>
             ))}
+            {/* 窄屏面板全屏盖住聊天区：就近给关闭 */}
+            {isMobile && (
+              <div className="ml-auto">
+                <SidePanelCloseButton onClick={() => useBotsStore.getState().togglePanel()} />
+              </div>
+            )}
           </div>
           {panelTab === 'browser' ? (
             <BotBrowserPanel chatId={group.id} visible={panelOpen} />

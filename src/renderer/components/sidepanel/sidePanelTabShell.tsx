@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
  * - pinned 的静态 pin 指示器留在 flex 流里（shrink-0 贴右缘），不 absolute；
  * - pin/unpin 与 × 的 hover overlay 脱离布局流 absolute 贴右缘，浮出时并排
  *   盖住指示器位置与标题尾部，渐变蒙版始终渲染以保证浮出可读；
+ * - 触屏没有 hover，overlay 永远点不到：sidepanel-dock.css 的 @media (pointer: coarse)
+ *   按 [data-side-tab-overlay] 只让激活 tab 的 ×（overlay 最后一个子节点）常显可点，并只为它留右侧空间；
  * - ref/className/...rest 必须透传到根 div：`<ContextMenuTrigger render={...} />`
  *   靠它注入 onContextMenu、ref 与 data-slot，少转发任何一个右键菜单就会失效。
  */
@@ -61,7 +63,10 @@ export function SidePanelTabShell({
       {pinIndicator}
       {/* pin/unpin 与 × 移出布局流：零占位，悬停或键盘聚焦时在右侧渐变蒙版上
          并排浮出，盖住指示器位置与标题尾部 */}
-      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md pl-5 pr-1">
+      <div
+        data-side-tab-overlay
+        className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md pl-5 pr-1"
+      >
         <div
           aria-hidden
           className="absolute inset-0 rounded-r-md bg-linear-to-l from-muted/95 from-65% to-transparent opacity-0 transition-opacity duration-100 group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100"

@@ -717,8 +717,8 @@ export default function App() {
             desktopShell && 'border-b-0',
             // 顶栏落在画布上：原生按钮底色随它透明，壁纸与侧栏一样透出来
             desktopShell && 'bg-transparent',
-            // 右侧面板开关与面板 tab 条右端（面板 8px 外边距 + 8px 内边距）对齐
-            desktopShell && chromeKind === 'mac' && 'pr-4'
+            // 右侧面板开关与面板 tab 条右端（面板 8px 外边距 + 8px 内边距）对齐；网页版同 mac
+            desktopShell && (chromeKind === 'mac' || chromeKind === 'web') && 'pr-4'
           )}
           actions={
             settingsOpen

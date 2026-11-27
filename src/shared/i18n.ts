@@ -746,6 +746,7 @@ export const zhTranslations: Record<string, string> = {
   'Use full chat width': '铺满两侧',
   'Use reading width': '恢复两侧留白',
   'Toggle side panel': '折叠/展开右侧面板',
+  'Close side panel': '关闭右侧面板',
   'Toggle side panel fullscreen': '右侧面板全屏',
   'Toggle minimize to tray': '切换最小化到托盘',
   'Works while the app is in the tray': '应用在托盘时也能切换',

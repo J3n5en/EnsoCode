@@ -18,8 +18,6 @@ import {
   Maximize2,
   MessageCircle,
   Minimize2,
-  MoreHorizontal,
-  PanelRight,
   Pin,
   Plus,
   SquareTerminal,
@@ -104,6 +102,11 @@ import { isPluginPanelId, pinnableTabForId, planPinnedPanels } from './pinnedTab
 import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { sidePanelCoversMain } from './sidePanelCover';
+import {
+  SIDE_ACTIONS_EXTRA_CLASS,
+  SidePanelCloseButton,
+  SidePanelCollapseButton,
+} from './sidePanelHeaderClose';
 import { SidePanelTabShell } from './sidePanelTabShell';
 import { liftsIntoTitleRow } from './sidePanelTitleRow';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
@@ -768,7 +771,7 @@ function SidePanelHeaderActions({
   }, [focusProposal, secretary, containerApi, conversationId, projectId, secretaryName]);
   // 顶栏右端三个按钮（+ / 全屏 / 收起）平时收纳成一个「…」省出 tab 条空间：
   // hover / 键盘聚焦时 + 和全屏从左侧展开，「…」变回收起图标；直接点「…」就是收起。
-  // 只在三个按钮齐全的位置（顶栏行 + 右上角组）收纳，其余位置照旧平铺。
+  // 只在三个按钮齐全的位置（顶栏行 + 右上角组）收纳，其余位置照旧平铺；触屏不收纳。
   const collapsible = titleRow && topRight;
   const [menuOpen, setMenuOpen] = useState(false);
   const pinned = headerActionsPinned({ menuOpen, promptAt: headerNewTabMenuPromptAt });
@@ -783,13 +786,7 @@ function SidePanelHeaderActions({
           collapsible && 'group/side-actions [-webkit-app-region:no-drag]'
         )}
       >
-        <div
-          className={cn(
-            'flex items-center gap-0.5',
-            collapsible &&
-              'hidden group-focus-within/side-actions:flex group-hover/side-actions:flex group-data-[expanded]/side-actions:flex'
-          )}
-        >
+        <div className={cn('flex items-center gap-0.5', collapsible && SIDE_ACTIONS_EXTRA_CLASS)}>
           <NewTabMenu
             compact
             promptAt={headerNewTabMenuPromptAt}
@@ -877,24 +874,9 @@ function SidePanelHeaderActions({
             )}
           </button>
         </div>
-        {collapsible && (
-          <button
-            type="button"
-            className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
-            onClick={toggleOpen}
-            aria-label={t('Toggle side panel')}
-            title={t('Toggle side panel')}
-          >
-            <MoreHorizontal
-              aria-hidden
-              className="h-4 w-4 group-focus-within/side-actions:hidden group-hover/side-actions:hidden group-data-[expanded]/side-actions:hidden"
-            />
-            <PanelRight
-              aria-hidden
-              className="hidden h-4 w-4 group-focus-within/side-actions:block group-hover/side-actions:block group-data-[expanded]/side-actions:block"
-            />
-          </button>
-        )}
+        {collapsible && <SidePanelCollapseButton onClick={toggleOpen} />}
+        {/* 窄屏面板全屏盖住工作区：就近给关闭，不必回顶栏找开关 */}
+        {isMobile && <SidePanelCloseButton onClick={toggleOpen} />}
       </div>
       {titleRow && topRight && windows && (
         // 给 Windows 原生最小化/最大化/关闭让位（扣掉工作区 8px 右边距、tab 条右内边距与按钮间距）

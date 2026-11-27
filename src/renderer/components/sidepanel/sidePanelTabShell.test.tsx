@@ -93,6 +93,93 @@ describe('pinned tab 零占位布局', () => {
   });
 });
 
+/**
+ * 触屏（手机/iPad PWA）没有 hover：Tailwind 的 group-hover 包在 @media (hover: hover) 里永不命中，
+ * overlay 里的 × 一直 pointer-events:none；globals.css 窄屏触屏规则还会把它强制显形（看得见点不着）。
+ * 触屏契约放在 sidepanel-dock.css 的 @media (pointer: coarse)：激活 tab 常显可点的 ×、只为它留右侧空间，
+ * 其余 overlay 不显示。桌面（精确指针）的零占位契约不受影响。
+ */
+describe('触屏：激活 tab 的 × 一次点击可关', () => {
+  type Rule = { selector: string; body: string; media: string[] };
+  const rules = (): Rule[] => {
+    const css = readFileSync(resolve(__dirname, 'sidepanel-dock.css'), 'utf8').replace(
+      /\/\*[\s\S]*?\*\//g,
+      ''
+    );
+    const out: Rule[] = [];
+    const stack: string[] = [];
+    let buf = '';
+    for (const ch of css) {
+      if (ch === '{') {
+        stack.push(buf.trim());
+        buf = '';
+      } else if (ch === '}') {
+        const head = stack.pop() ?? '';
+        if (!head.startsWith('@')) {
+          for (const selector of head.split(',').map((s) => s.trim())) {
+            out.push({ selector, body: buf, media: stack.filter((s) => s.startsWith('@media')) });
+          }
+        }
+        buf = '';
+      } else {
+        buf += ch;
+      }
+    }
+    return out;
+  };
+  const coarse = (r: Rule) => r.media.some((m) => m.includes('pointer: coarse'));
+  /** 类、属性、伪类个数：须高过 globals.css 的 `.opacity-0[class*="group-hover"]`（2 个） */
+  const weight = (selector: string) => (selector.match(/\.[\w-]|\[|:(?!:)/g) ?? []).length;
+
+  it('shell 标记 overlay，× 是 overlay 的最后一个子节点（CSS 契约依赖此结构）', () => {
+    const { document } = parseHTML(`<div>${shell(true)}</div>`);
+    const overlay = document.querySelector('[data-side-tab-overlay]');
+    expect(overlay).not.toBeNull();
+    expect(overlay?.lastElementChild?.getAttribute('aria-label')).toBe('close');
+  });
+
+  it('触屏下激活 tab 的 × 常显且接收点击，权重盖过窄屏触屏的强制显形规则', () => {
+    const close = rules().filter(
+      (r) =>
+        coarse(r) &&
+        r.selector.includes('[data-side-tab][data-active]') &&
+        r.selector.includes('[data-side-tab-overlay] > :last-child')
+    );
+    expect(close.some((r) => /pointer-events:\s*auto/.test(r.body))).toBe(true);
+    expect(close.some((r) => /opacity:\s*1/.test(r.body))).toBe(true);
+    for (const r of close) expect(weight(r.selector)).toBeGreaterThan(2);
+  });
+
+  it('触屏下非激活 tab 与 pin/unpin 浮出按钮不显示，避免看得见点不着', () => {
+    const all = rules().filter(coarse);
+    const hiddenOverlay = all.find(
+      (r) =>
+        /\[data-side-tab\]\s+\[data-side-tab-overlay\]$/.test(r.selector) &&
+        /display:\s*none/.test(r.body)
+    );
+    expect(hiddenOverlay).toBeDefined();
+    expect(weight(hiddenOverlay?.selector ?? '')).toBeGreaterThan(2);
+    const others = all.find(
+      (r) =>
+        r.selector.includes('[data-side-tab-overlay] > :not(:last-child)') &&
+        /display:\s*none/.test(r.body)
+    );
+    expect(others).toBeDefined();
+  });
+
+  it('只在触屏为激活 tab 留右侧空间；精确指针下任何 tab 都不留', () => {
+    const padded = rules().filter(
+      (r) => /\[data-side-tab\]/.test(r.selector) && /padding-(right|inline-end)/.test(r.body)
+    );
+    expect(padded.length).toBeGreaterThan(0);
+    for (const r of padded) {
+      expect(coarse(r)).toBe(true);
+      expect(r.selector).toContain('[data-active]');
+      expect(r.selector).not.toContain('[data-pinned]');
+    }
+  });
+});
+
 describe('真实 DOM 回归', () => {
   let root: Root;
   let container: HTMLElement;

@@ -46,7 +46,9 @@ export function TitleBar({ title, className, actions, leading, centered, middle 
       className={cn(
         // 固定像素高度：红绿灯位置 (y:16) 按 44px 高度对齐，不随 rem 缩放
         'relative flex h-[44px] shrink-0 items-center border-b bg-background',
-        isMac ? 'pl-[84px] pr-3' : 'pl-3',
+        // 右缘动作别贴屏幕边；Linux 自绘窗口按钮要贴窗口右缘，Windows 由内联 padding 给原生按钮让位
+        isMac ? 'pl-[84px]' : 'pl-3',
+        kind !== 'linux' && 'pr-3',
         className
       )}
     >
