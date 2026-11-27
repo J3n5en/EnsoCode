@@ -34,6 +34,7 @@ import {
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import { AGENT_COMPACTION_LOG } from '@shared/agentWorkerExit';
+import { AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { setAppLoggingEnabled } from '@shared/appLogFile';
 import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
@@ -136,7 +137,12 @@ import { classifyUpstreamError } from '@shared/upstreamRecovery';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
+import { version as appVersion } from '../../package.json';
 import { AgentControlInvoker } from './agentControl';
+import { isAgyModel, registerAgyProvider } from './agy/provider';
+import { closeAgySession, closeAllAgySessions } from './agy/registry';
+import { attachAgyBridgeToSession } from './agy/sessionBridge';
+import { setAgyWorkerConfig } from './agy/workerConfig';
 import {
   createApplyPatchTool,
   createRemoteApplyPatchIo,
@@ -959,6 +965,7 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
   runtime.registerProvider(QODER_PROVIDER_ID, qoderProviderConfig('global'));
   runtime.registerProvider(QODER_CN_PROVIDER_ID, qoderProviderConfig('cn'));
   await loadCursorProvider(runtime);
+  registerAgyProvider(runtime);
   // 已关联 Codex 的账号也可能在 worker 里触发刷新，必须同样接管；须在按需注册克隆之前
   installCodexLinkedRefresh(runtime);
   // registerProvider 只触发 allowNetwork:false 的 refresh，拿到的是兜底清单；Main 侧界面
@@ -1834,6 +1841,17 @@ export class SessionSupervisor {
       this.longCacheRetention = command.enabled;
       return;
     }
+    if (command.type === 'set-agy-config') {
+      setAgyWorkerConfig({
+        binaryPath: command.binaryPath,
+        skipPermissions: command.skipPermissions,
+        models: command.models,
+      });
+      void this.getRuntime()
+        .then((runtime) => registerAgyProvider(runtime, command.models))
+        .catch(() => {});
+      return;
+    }
     if (command.type === 'set-app-logging') {
       setAppLoggingEnabled(command.enabled);
       return;
@@ -2372,7 +2390,12 @@ export class SessionSupervisor {
           managed.session.model ? Boolean(managed.session.model.reasoning) : false,
           command.model.modelId
         );
+        // 切走前记下：setModel 之后 session.model 已经是新模型
+        const leavingAgy = isAgyModel(managed.session.model ?? {}) && !isAgyModel(next);
         await managed.session.setModel(next);
+        if (leavingAgy) {
+          void closeAgySession(managed.identity.sessionId);
+        }
         ensureAssistantUsage(managed.session.messages as unknown[]);
         managed.modelId = command.model.modelId;
         const usage = managed.session.getContextUsage();
@@ -3474,6 +3497,20 @@ export class SessionSupervisor {
               cwd
             )
           : undefined;
+        // 每个子会话一个 agy 会话：匿名子会话用 pi 自己的会话 id，dispose 时关掉。
+        // 不看起始模型：桥对其他模型是空操作，会话中途切到 agy 也接得上
+        const agyChildId = childIdentity?.sessionId ?? childSessionId ?? session.sessionId;
+        const agyChildTemp = sessionTempDir(agyChildId, { cwd });
+        attachAgyBridgeToSession(session, {
+          ensoSessionId: agyChildId,
+          resumable: !ephemeral,
+          cwd,
+          sessionDir: this.options.sessionDir,
+          clientVersion: appVersion,
+          gate: childGate,
+          planActive: () => false,
+          readRoots: () => [cwd, ...(agyChildTemp ? [agyChildTemp] : [])],
+        });
         if (childIdentity) {
           const childServers = typed
             ? selectedMcp
@@ -3926,6 +3963,17 @@ export class SessionSupervisor {
       },
       () => this.emitPlanState(managed)
     );
+    // 不看起始模型：桥对其他模型是空操作，会话中途切到 agy 也接得上
+    const agyTemp = sessionTempDir(sessionId, { cwd });
+    attachAgyBridgeToSession(session, {
+      ensoSessionId: sessionId,
+      cwd,
+      sessionDir: this.options.sessionDir,
+      clientVersion: appVersion,
+      gate,
+      planActive: () => plan.state().active,
+      readRoots: () => [cwd, ...(agyTemp ? [agyTemp] : [])],
+    });
     // 关掉 plan 时先退出 plan 模式，再撤掉控制器：工具门不再限制，set-plan-mode 不再生效
     const setPlanEnabled = (enabled: boolean) => {
       if (enabled === (managed.plan !== undefined)) return;
@@ -6683,6 +6731,7 @@ export class SessionSupervisor {
 
   async shutdown(): Promise<void> {
     clearInterval(this.evictionTimer);
+    void closeAllAgySessions();
     this.reminders.dispose();
     this.workspaceSwitch.clear();
     this.recordInterruptedTasks();
@@ -7644,6 +7693,12 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
     if (!provider) throw new Error(`oauth provider not found: ${registered.provider}`);
     runtime.registerNativeProvider(withRequestBodyBudget(provider));
     return registered;
+  }
+  if (model.settingsProviderId === AGY_PROVIDER_ID) {
+    registerAgyProvider(runtime, undefined, model.modelId);
+    const agyModel = runtime.getModel(AGY_PROVIDER_ID, model.modelId);
+    if (!agyModel) throw new Error(`agy model not found: ${model.modelId}`);
+    return agyModel;
   }
   const providerId = providerKeyFor(model);
   const entry: ModelEntry = { id: model.modelId };

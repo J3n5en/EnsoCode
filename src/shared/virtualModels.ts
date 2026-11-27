@@ -1,3 +1,4 @@
+import { isSessionOnlyProvider } from './agy/settings';
 import type { DefaultModelRef } from './defaultModel';
 import { DEFAULT_BASE_URLS, isClassifierOnlyProvider } from './providerCatalog';
 import type { ModelProvider } from './types/llm';
@@ -154,12 +155,13 @@ export function directMemberRef(entry: VirtualModelEntry): DefaultModelRef {
   return entry.fast ?? entry.primary;
 }
 
-/** Cursor 走 sessionBridge 直调工具，不经 pi 请求管线，不能做成员。 */
+/** Cursor 与 agy cli 走 sessionBridge，不经 pi 请求管线，不能做成员。 */
 export function canBeVirtualMember(
-  provider: Partial<Pick<ModelProvider, 'oauthAccountKey' | 'api' | 'baseUrl' | 'catalogId'>>
+  provider: Partial<Pick<ModelProvider, 'id' | 'oauthAccountKey' | 'api' | 'baseUrl' | 'catalogId'>>
 ): boolean {
   return (
     !isClassifierOnlyProvider(provider) &&
+    !isSessionOnlyProvider(provider) &&
     (!provider.oauthAccountKey || providerIdOfAccountKey(provider.oauthAccountKey) !== 'cursor')
   );
 }

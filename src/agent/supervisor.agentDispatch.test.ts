@@ -17,6 +17,12 @@ const mocks = vi.hoisted(() => ({
   mcpRefresh: vi.fn(),
   createAgentSession: vi.fn(),
   loaderOptions: [] as Array<Record<string, unknown>>,
+  closeAgySession: vi.fn(async (_sessionId: string) => undefined),
+}));
+
+vi.mock('./agy/registry', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  closeAgySession: mocks.closeAgySession,
 }));
 
 vi.mock('./cursor/loadProvider', () => ({
@@ -3195,4 +3201,53 @@ describe('SessionSupervisor custom parent system prompt', () => {
       await supervisor.shutdown();
     }
   );
+});
+
+describe('SessionSupervisor agy model switch', () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    mocks.sessions.length = 0;
+    mocks.managers.length = 0;
+    mocks.closeAgySession.mockClear();
+    mocks.createAgentSession.mockReset();
+    mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
+    mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
+      session: session(options),
+    }));
+  });
+
+  const agyModel = { ...model, modelId: 'default', settingsProviderId: 'agy-cli' };
+
+  async function switched(from: typeof model, to: typeof model) {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-agy-switch-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model: from });
+    await settleUntil(() => events.some((event) => event.type === 'parent-ready'), 200);
+    const created = mocks.sessions[0] as ReturnType<typeof session>;
+    Object.assign(created, {
+      setModel: vi.fn(async (next: unknown) => {
+        created.model = next;
+      }),
+      getContextUsage: () => undefined,
+      settingsManager: { getCompactionSettings: () => ({ enabled: false, reserveTokens: 0 }) },
+    });
+    supervisor.handleCommand({ type: 'set-model', identity: parent, model: to });
+    await settleUntil(() => events.some((event) => event.type === 'model-changed'), 200);
+    expect(events.map((event) => event.type)).toContain('model-changed');
+    await supervisor.shutdown();
+  }
+
+  it('closes the agy process when the session switches away from agy cli', async () => {
+    await switched(agyModel, model);
+    expect(mocks.closeAgySession).toHaveBeenCalledWith(parent.sessionId);
+  });
+
+  it('keeps nothing to close when the session switches onto agy cli', async () => {
+    await switched(model, agyModel);
+    expect(mocks.closeAgySession).not.toHaveBeenCalledWith(parent.sessionId);
+  });
 });

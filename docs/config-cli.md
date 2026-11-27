@@ -63,7 +63,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 | --- | --- | --- | --- |
 | 密钥和凭据 | 任一段键名匹配 `apiKey`、`api_key`、`secret`、`password`、`credential`、`authorization`、`cookie`、`*token`，或键名就是 `env`（MCP 环境变量）。例如 `providers.<id>.apiKey`、`providers.<id>.headers.Authorization`、`mcpServers.<id>.env`。名字含 `secret` 字样但不是密钥的字段（`secretaryEnabled`）在 `policy.ts` 的 `NOT_SECRET_FIELDS` 里豁免 | `get` 返回 `{ ok: false, hidden: true }`；`list` 和父对象中显示为 `***` | 拒绝 |
 | 文件路径 | `worktreeRoot`、`backgroundImagePath`、`backgroundFolderPath`，以及任一段是 `path`、`dir`、`root`、`cwd` 或以 `Path`、`Dir`、`Root` 结尾的键 | 可读 | 拒绝 |
-| 执行命令 | `terminalShell`、`windowsLocalShell`、`fileOpenRules`、`contextMenuOpen`，以及任一段是 `command` 或 `args` 的键（例如 MCP 的启动命令） | 可读 | 拒绝 |
+| 执行命令 | `terminalShell`、`windowsLocalShell`、`fileOpenRules`、`contextMenuOpen`、`agy`（整个对象，含 `binaryPath` 与 `skipPermissions`），以及任一段是 `command` 或 `args` 的键（例如 MCP 的启动命令） | 可读 | 拒绝 |
 | 本机文件配对标记 | `gitCommitPromptCustomized`：自定义 Git Commit 提示词正文存在 `<userData>/git-commit-prompt.txt`，由设置页经专用 IPC 写入 / 删除，标记必须与文件同步 | 可读 | 拒绝，只能在设置页编辑或恢复默认 |
 | 技能 / 指令装卸 | 整体替换或增删 `skills`、`instructions` 的条目 | 可读 | 拒绝；条目内的字段（如 `skills.<id>.enabled`）可以写 |
 | 供应商端点 | `providers.<id>.api`、`providers.<id>.baseUrl`、`providers.<id>.headers`、`providers.<id>.proxy` 及其子键：它们决定 API Key 发往哪里、经哪个出口发送，改了会让自动拉取立刻带着 key 请求新地址或新代理 | 可读（密钥仍显示为 `***`，`proxy.url` 里的账密显示为 `***@`） | 拒绝，只能在设置页改 |
@@ -96,6 +96,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 `providers.<id>.modelRefreshIntervalHours` 设置这条 API Key 供应商在本机自动拉取模型的间隔，接受 1–168 的整数，单位为小时，默认 1。关闭自动拉取时也可以修改。修改已开启条目的间隔时，该条目从保存时重新计时，在途请求继续。每条供应商的开关和间隔均无需重启。
 
 `longCacheRetention`（布尔，默认 `false`）打开后，会话请求（主会话、子代理、coworker、秘书、插件 agent.run）对 Anthropic Messages 接口的模型使用 1 小时 prompt cache，其余接口和标题等一次性辅助请求仍用默认 5 分钟；从下一次请求起生效，无需重启。
+
+`agy`（对象，`binaryPath` 字符串、`skipPermissions` 布尔，默认空路径和 false）是本机 Antigravity CLI 的路径和跳过权限开关。路径和执行类设置，CLI 不可写，只在设置页改。
 
 `recentModels` 是模型选择器「最近使用」列表：`{ providerId, modelId }` 数组，最近的在前，最多 10 条且不重复；不符合的整体写入会被拒绝。它只存 id，不是密钥、路径或执行入口，热生效，不参与配置同步（引用本机 provider id）。
 

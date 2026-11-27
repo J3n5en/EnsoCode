@@ -1,3 +1,4 @@
+import type { AgyAuthStatus } from '@shared/agy/types';
 import type { AppLogEntry, LogExportResult, LogSummaryLevel } from '@shared/appLog';
 import type { BotTemplateLibrary } from '@shared/bots/templateLibrary';
 import type {
@@ -1013,6 +1014,12 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED, listener);
     },
+  },
+
+  agy: {
+    /** refresh=true 才重新探测。设置页打开用缓存，重新检测传 true。不要在窗口聚焦时调用。 */
+    authStatus: (refresh = false): Promise<AgyAuthStatus> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGY_AUTH_STATUS, refresh),
   },
 
   assets: {

@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import { useOneShotProviders } from '@/stores/modelDirectory/useProviders';
 
 const MODES = { session: '跟随当前会话', title: '跟随标题模型', fixed: '指定模型' } as const;
 
@@ -19,7 +19,7 @@ export function PluginModelConfigField({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const providers = useUsableProviders();
+  const providers = useOneShotProviders();
   const choice = parsePluginModelChoice(value) ?? 'session';
   const mode = typeof choice === 'string' ? choice : 'fixed';
   const fixed = typeof choice === 'string' ? null : choice;

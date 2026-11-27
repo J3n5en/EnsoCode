@@ -40,7 +40,7 @@ import {
 } from '@/components/ui/dialog';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import { useOneShotProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import {
   SettingsButton,
@@ -312,7 +312,7 @@ export function MemorySettings({
   const setChatModel = useSettingsStore((state) => state.setMemoryChatModel);
   const memoryLanguage = useSettingsStore((state) => state.memoryLanguage);
   const setMemoryLanguage = useSettingsStore((state) => state.setMemoryLanguage);
-  const modelCandidates = useUsableProviders();
+  const modelCandidates = useOneShotProviders();
   const distillProvider = distillModel
     ? modelCandidates.find((entry) => entry.id === distillModel.providerId)
     : undefined;

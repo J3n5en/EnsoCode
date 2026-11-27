@@ -751,6 +751,26 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
   },
   { id: 'providers.advanced', category: 'providers', title: 'Advanced' },
   {
+    id: 'providers.agy-binary-path',
+    category: 'providers',
+    title: 'Binary path',
+    description: 'Leave empty to find agy on PATH or in ~/.local/bin.',
+  },
+  {
+    id: 'providers.agy-cli',
+    category: 'providers',
+    title: 'agy cli (experimental)',
+    description:
+      'Runs sessions through the local agy acp command. EnsoCode does not sign in for you.',
+  },
+  {
+    id: 'providers.agy-skip-permissions',
+    category: 'providers',
+    title: 'Skip permissions',
+    description:
+      'Passes --dangerously-skip-permissions. agy will not ask before commands or edits.',
+  },
+  {
     id: 'providers.assistant-approval-model',
     category: 'providers',
     title: 'Assistant approval model',

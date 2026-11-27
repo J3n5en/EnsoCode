@@ -25,6 +25,7 @@ import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { invalidateModelMeta } from '@/stores/modelMeta';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
+import { AgyCliSettings } from './AgyCliSettings';
 import { ApprovalReviewerPicker } from './ApprovalReviewerPicker';
 import { chatgptPoolSources, createChatgptPoolProvider, providerDisplayName } from './chatgptPool';
 import { API_KIND_LABELS } from './constants';
@@ -310,6 +311,7 @@ export function ProvidersSettings() {
       <SubagentModelsSettings />
 
       <SettingsSection rowId="providers.providers" title={t('Providers')}>
+        <AgyCliSettings />
         {poolSources.length > 0 && !providers.some((p) => p.oauthAccountPool) && (
           <SettingsRow
             rowId="providers.create-chatgpt-account-pool"

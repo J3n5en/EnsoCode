@@ -1626,6 +1626,13 @@ export type AgentCommand =
   | { type: 'set-auto-retry-limit'; limit: number }
   /** 长缓存：会话请求对 Anthropic Messages 模型用 1h prompt cache，下一次请求生效 */
   | { type: 'set-long-cache-retention'; enabled: boolean }
+  /** agy CLI：二进制路径、跳过权限、探测缓存的模型。空路径表示从 PATH 查找。 */
+  | {
+      type: 'set-agy-config';
+      binaryPath: string;
+      skipPermissions: boolean;
+      models: { id: string; name: string }[];
+    }
   /** 「记录应用日志」热切换：worker 的 agent.log / compaction.log 是否落盘 */
   | { type: 'set-app-logging'; enabled: boolean }
   /** 设置里禁用的内置预设：worker 执行与工具说明都按它过滤 */
@@ -4499,6 +4506,27 @@ const agentCommandParsers = {
     return hasExactKeys(value, ['type', 'enabled']) && typeof value.enabled === 'boolean'
       ? (value as unknown as AgentCommand)
       : null;
+  },
+  'set-agy-config': (value: Record<string, unknown>): AgentCommand | null => {
+    if (
+      !hasExactKeys(value, ['type', 'binaryPath', 'skipPermissions', 'models']) ||
+      typeof value.binaryPath !== 'string' ||
+      typeof value.skipPermissions !== 'boolean' ||
+      !Array.isArray(value.models)
+    ) {
+      return null;
+    }
+    const models = [];
+    for (const item of value.models) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+      const row = item as { id?: unknown; name?: unknown };
+      if (typeof row.id !== 'string' || !row.id || typeof row.name !== 'string' || !row.name) {
+        return null;
+      }
+      models.push({ id: row.id, name: row.name });
+    }
+    value.models = models;
+    return value as unknown as AgentCommand;
   },
   'set-app-logging': (value: Record<string, unknown>): AgentCommand | null => {
     return hasExactKeys(value, ['type', 'enabled']) && typeof value.enabled === 'boolean'

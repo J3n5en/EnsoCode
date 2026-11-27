@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { openSettings } from '@/stores/appView';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import { useOneShotProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 
 /** 提交信息输入框旁的「AI 生成」：校验配置 → 生成 → 回填；进行中再点即取消，取消后结果作废 */
@@ -30,7 +30,7 @@ export function GitCommitAiButton({
 }) {
   const { t } = useI18n();
   const model = useSettingsStore((state) => state.gitCommitModel);
-  const providers = useUsableProviders();
+  const providers = useOneShotProviders();
   const [running, setRunning] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const current = useRef<string | null>(null);

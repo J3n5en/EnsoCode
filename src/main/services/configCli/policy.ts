@@ -30,6 +30,7 @@ const READ_DENIED = new Set(['projects', 'projectGroups']);
 /** 写入即改文件路径或可执行入口；或与 Main 管理的本机文件配对、只能经设置页专用 IPC 改的标记 */
 const WRITE_DENIED = new Set([
   'worktreeRoot',
+  'agy',
   'backgroundImagePath',
   'backgroundFolderPath',
   'terminalShell',

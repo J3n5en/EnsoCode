@@ -1,3 +1,5 @@
+import { AGY_PROVIDER_ID } from '@shared/agy/constants';
+import { agySettingsProvider, isSessionOnlyProvider } from '@shared/agy/settings';
 import { type ModelDirectorySnapshot, materializeProviders } from '@shared/modelDirectory';
 import type { ModelProvider } from '@shared/types';
 import { useMemo } from 'react';
@@ -7,13 +9,19 @@ import {
   useOauthCredentialStore,
 } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
+import { agyModelsFromStatus, useAgyAuthStore } from '../agyAuth';
 import { useModelDirectoryStore } from './index';
 
 /** 目录未就绪时与 settings.providers 同形透传；就绪后 OAuth models 按目录合成。 */
 export function useMaterializedProviders(): ModelProvider[] {
   const providers = useSettingsStore((state) => state.providers);
   const snapshot = useModelDirectoryStore((state) => state.snapshot);
-  return useMemo(() => materializeProviders(providers, snapshot), [providers, snapshot]);
+  const agyStatus = useAgyAuthStore((state) => state.status);
+  return useMemo(() => {
+    const materialized = materializeProviders(providers, snapshot);
+    if (materialized.some((provider) => provider.id === AGY_PROVIDER_ID)) return materialized;
+    return [...materialized, agySettingsProvider(agyModelsFromStatus(agyStatus))];
+  }, [providers, snapshot, agyStatus]);
 }
 
 /** picker / 默认模型共用口径：先物化目录，再按 OAuth 凭证筛可用条目。 */
@@ -21,6 +29,15 @@ export function useUsableProviders(): ModelProvider[] {
   const providers = useMaterializedProviders();
   const snapshot = useOauthCredentialStore((state) => state.snapshot);
   return useMemo(() => usableProvidersForOauthSnapshot(providers, snapshot), [providers, snapshot]);
+}
+
+/** 一次性请求（标题、提交信息、代审、压缩、记忆、插件）的 picker：去掉只能在会话里跑的 agy cli。 */
+export function useOneShotProviders(): ModelProvider[] {
+  const providers = useUsableProviders();
+  return useMemo(
+    () => providers.filter((provider) => !isSessionOnlyProvider(provider)),
+    [providers]
+  );
 }
 
 /**

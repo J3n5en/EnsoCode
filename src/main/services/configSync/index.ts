@@ -79,6 +79,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
     mode: 'excluded',
     reason: 'device-local prompt cache cost policy',
   },
+  agy: { mode: 'excluded', reason: 'device-local Antigravity CLI path and permission skip' },
   computerPreview: { mode: 'excluded', reason: 'macOS-only desktop display preference' },
   computerAllowAllApps: { mode: 'excluded', reason: 'device-local computer control trust' },
   openLinksInBuiltinBrowser: { mode: 'excluded', reason: 'desktop link-opening preference' },

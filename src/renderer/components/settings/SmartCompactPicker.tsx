@@ -6,7 +6,7 @@ import {
 import { SMART_COMPACT_MODES, type SmartCompactMode } from '@shared/smartCompactMode';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { useI18n } from '@/i18n';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import { useOneShotProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { SettingsButton, SettingsRow, SettingsSelect } from './kit';
 import { NewSessionBadge } from './NewSessionBadge';
@@ -37,7 +37,7 @@ export function SmartCompactPicker() {
   const setModel = useSettingsStore((state) => state.setSmartCompactModel);
   const mode = useSettingsStore((state) => state.smartCompactMode);
   const setMode = useSettingsStore((state) => state.setSmartCompactMode);
-  const candidates = useUsableProviders();
+  const candidates = useOneShotProviders();
   const selectedProvider = model
     ? candidates.find((entry) => entry.id === model.providerId)
     : undefined;

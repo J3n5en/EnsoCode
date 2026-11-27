@@ -143,6 +143,8 @@ export interface SettingsState {
   rtkEnabled: boolean;
   /** 会话请求对 Anthropic Messages 模型用 1h prompt cache；缺省关，下一次请求生效。 */
   longCacheRetention: boolean;
+  /** 本机 agy CLI。binaryPath 空则从 PATH 查找。skipPermissions 默认关。 */
+  agy: AgySettings;
   /** 后台操作电脑时显示被操作窗口的画中画（macOS） */
   computerPreview: boolean;
   /** computer 操作任何 app 都不再询问（macOS），缺省关 */
@@ -427,6 +429,7 @@ export interface SettingsState {
   setExploreFoldEnabled: (value: boolean) => void;
   setRtkEnabled: (value: boolean) => void;
   setLongCacheRetention: (value: boolean) => void;
+  setAgy: (value: AgySettings) => void;
   setComputerPreview: (value: boolean) => void;
   setComputerAllowAllApps: (value: boolean) => void;
   setOpenLinksInBuiltinBrowser: (value: boolean) => void;
@@ -654,3 +657,5 @@ export interface SettingsState {
   setUsageModelPricing: (modelId: string, pricing: ModelPricing) => boolean;
   removeUsageModelPricing: (modelId: string) => void;
 }
+
+import type { AgySettings } from '@shared/agy/types';

@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import { useOneShotProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { SettingsButton, SettingsRow, SettingsSection, SettingsSelect } from './kit';
 
@@ -18,7 +18,7 @@ export function GitCommitSettings() {
   const setModel = useSettingsStore((state) => state.setGitCommitModel);
   const customized = useSettingsStore((state) => state.gitCommitPromptCustomized);
   const setCustomized = useSettingsStore((state) => state.setGitCommitPromptCustomized);
-  const providers = useUsableProviders();
+  const providers = useOneShotProviders();
   const provider = model ? providers.find((entry) => entry.id === model.providerId) : undefined;
   const models = provider?.models.filter((entry) => entry.enabled !== false) ?? [];
   const selectedModel = models.find((entry) => entry.id === model?.modelId);
