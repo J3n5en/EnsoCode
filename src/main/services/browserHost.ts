@@ -495,6 +495,9 @@ export class BrowserHost {
         }
       } else {
         tab.view.setVisible(false);
+        // Windows 上 setVisible(false) 之后视图仍可能吃掉点击（设置页盖住工作区时最明显）：
+        // 隐藏时把尺寸交出去，0×0 的视图不可能再参与命中测试
+        tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
         if (!tab.devtoolsOpen) {
           for (const cmd of hiddenTabCdpCommands()) void this.cdp(tab, cmd.method, cmd.params);
         }

@@ -95,6 +95,7 @@ import {
   type ViewSide,
   viewLayerState,
 } from '@/lib/viewTransition';
+import { useWorkspaceCovered } from '@/lib/workspaceCovered';
 import { Z_INDEX } from '@/lib/z-index';
 import { pluginCommands, runPluginCommand } from '@/plugins/commands';
 import { resolvePluginKeybindings } from '@/plugins/keybindings';
@@ -105,7 +106,6 @@ import {
   openSettings,
   setSettingsMobileDetail,
   settingsHistoryDepth,
-  setWorkbenchCovered,
   toggleSettings,
   useAppViewStore,
   useSettingsOpen,
@@ -515,7 +515,7 @@ export default function App() {
     shown: shownOpen,
     animating: viewMotion !== null,
   });
-  useLayoutEffect(() => setWorkbenchCovered(settingsMounted), [settingsMounted]);
+  useWorkspaceCovered(settingsMounted);
   useEffect(() => {
     if (settingsOpen) setDrawerOpen(false);
   }, [settingsOpen]);
