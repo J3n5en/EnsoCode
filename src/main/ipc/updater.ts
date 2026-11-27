@@ -1,5 +1,5 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import type { UpdaterState } from '@shared/types/updater';
+import type { UpdateCheckResult, UpdaterState } from '@shared/types/updater';
 import { isUpdateChannel } from '@shared/updater/channel';
 import { isAutoRestartMode } from '@shared/updater/idleRestart';
 import { app, ipcMain } from 'electron';
@@ -22,10 +22,10 @@ export function registerUpdaterHandlers(): void {
     console.error('Failed to discard legacy interrupted-by-update record:', error);
   }
 
-  ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async () => {
-    if (!isUpdaterEnabled()) return;
+  ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async (): Promise<UpdateCheckResult> => {
+    if (!isUpdaterEnabled()) return { ok: true, status: 'unsupported' };
     const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
-    await autoUpdaterService.checkForUpdates();
+    return autoUpdaterService.checkForUpdates();
   });
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE, async () => {

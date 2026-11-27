@@ -273,12 +273,18 @@ export const zhTranslations: Record<string, string> = {
   'Current version': '当前版本',
   'Check for updates': '检查更新',
   'Checking for updates…': '正在检查更新…',
+  'Checking…': '检查中…',
   'New version {{version}} found': '发现新版本 {{version}}',
+  'A new version is available': '发现新版本',
   'You are on the latest version': '已是最新版本',
+  'You are up to date': '已是最新',
   'Downloading update… {{percent}}%': '正在下载更新… {{percent}}%',
   'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.':
     '新版本 {{version}} 已下载。重启会在当前工具结束后进行，转到后台的命令会接着跑。',
+  'Update downloaded. Restart to install.': '更新已下载可重启安装',
+  'Automatic updates are not supported on this platform': '当前平台不支持自动更新',
   'Update check failed': '检查更新失败',
+  'Update check failed: {{error}}': '检查失败：{{error}}',
   'Restart to update': '重启更新',
   'Restart to update is already in progress. Please wait.': '正在重启更新，请稍候',
   'No downloaded update to install. Check for updates again.':

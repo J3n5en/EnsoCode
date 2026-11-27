@@ -1,7 +1,13 @@
 import path from 'node:path';
 import { is } from '@electron-toolkit/utils';
+import { redactSecrets } from '@shared/redactSecrets';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import type { ManualInstall, RestartToUpdateResult, UpdateStatus } from '@shared/types/updater';
+import type {
+  ManualInstall,
+  RestartToUpdateResult,
+  UpdateCheckResult,
+  UpdateStatus,
+} from '@shared/types/updater';
 import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
@@ -33,6 +39,8 @@ const MIN_FOCUS_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const BUSY_POLL_MS = 5_000;
 // 渲染层落盘只等在途的设置写入（毫秒级）；短于通用的 5s，超时由这里记日志
 const UPDATE_FLUSH_TIMEOUT_MS = 3_000;
+const UPDATE_CHECK_ERROR_MAX = 200;
+const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 
 /**
  * 自动更新单例(移植自 EnsoAI,剥离 proxy 耦合)。
@@ -233,14 +241,20 @@ class AutoUpdaterService {
     }
   }
 
-  async checkForUpdates(): Promise<void> {
-    if (this.updateDownloaded) return;
+  async checkForUpdates(): Promise<UpdateCheckResult> {
+    if (this.updateDownloaded) return { ok: true, status: 'downloaded' };
     try {
       this.lastCheckTime = Date.now();
       if (this.localBuildReady) await this.localBuildReady;
-      await autoUpdater.checkForUpdates();
+      const result = await autoUpdater.checkForUpdates();
+      const version = result?.updateInfo?.version;
+      if (typeof version === 'string' && isNewerRelease(version, app.getVersion())) {
+        return { ok: true, status: 'available' };
+      }
+      return { ok: true, status: 'up-to-date' };
     } catch (error) {
       console.error('Failed to check for updates:', error);
+      return { ok: false, error: publicCheckError(error) };
     }
   }
 
@@ -419,6 +433,46 @@ function projectInfo(info: electronUpdater.UpdateInfo): UpdateStatus['info'] {
     ...(notes ? { releaseNotes: notes } : {}),
     ...(info.releaseName ? { releaseName: info.releaseName } : {}),
   };
+}
+
+/** 无法解析的版本不当成更新：dev / 垃圾标签保持 up-to-date */
+function isNewerRelease(candidate: string, current: string): boolean {
+  const next = RELEASE_VERSION.exec(candidate.trim());
+  const installed = RELEASE_VERSION.exec(current.trim());
+  if (!next || !installed) return false;
+  for (let i = 1; i <= 3; i++) {
+    const diff = Number(next[i]) - Number(installed[i]);
+    if (diff !== 0) return diff > 0;
+  }
+  return comparePrerelease(next[4], installed[4]) > 0;
+}
+
+function comparePrerelease(left: string | undefined, right: string | undefined): number {
+  if (left === right) return 0;
+  if (left === undefined) return 1;
+  if (right === undefined) return -1;
+  const a = left.split('.');
+  const b = right.split('.');
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = /^\d+$/.test(x) ? Number(x) : Number.NaN;
+    const ny = /^\d+$/.test(y) ? Number(y) : Number.NaN;
+    const diff = Number.isNaN(nx) || Number.isNaN(ny) ? x.localeCompare(y) : Math.sign(nx - ny);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function publicCheckError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const text = redactSecrets(raw, { redactPii: true }).replace(/\s+/g, ' ').trim();
+  if (!text) return 'Update check failed';
+  return text.length > UPDATE_CHECK_ERROR_MAX
+    ? `${text.slice(0, UPDATE_CHECK_ERROR_MAX - 1)}…`
+    : text;
 }
 
 export const autoUpdaterService = new AutoUpdaterService();
