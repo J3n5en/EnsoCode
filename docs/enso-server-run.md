@@ -53,6 +53,7 @@ node out/server/index.js run \
 | `--base-url <url>` | 模型端点 |
 | `--reasoning-effort <level>` | `off` / `none` 或 `minimal` / `low` / `medium` / `high` / `xhigh` / `max` |
 | `--timeout-ms <n>` | 整次运行的墙钟上限 |
+| `--hold-timeout-ms <n>` | 等后台任务/提醒唤醒的连续空闲上限，默认 1800000（30 分钟）。到点强制收尾一轮后退出 3（`hold-expired`） |
 | `--output-format text\|json\|stream-json` | 默认 `text` |
 | `--resume <session id>` | 恢复数据目录里已有的会话 |
 | `--continue` | 恢复当前目录最近一次 `run` |
@@ -73,12 +74,22 @@ node out/server/index.js run \
 | `ENSO_API` | 协议种类 |
 | `ENSO_REASONING_EFFORT` | 推理档位 |
 | `ENSO_TIMEOUT_MS` | 超时毫秒 |
+| `ENSO_HOLD_TIMEOUT_MS` | 后台任务/提醒的持有上限毫秒 |
 
 `ENSO_API_KEY`、`ENSO_BASE_URL` 都没设置、没指定供应商、但给了模型时，才整组回退厂商变量：先 `OPENAI_API_KEY` + `OPENAI_BASE_URL`，再 `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL`（后者默认 `anthropic-messages`）。不同厂商的 key 和地址不会混搭；环境里常驻的厂商 key 也不会盖掉 `settings.json` 里已配好的供应商。
 
 已有 `$ENSO_DATA_DIR/settings.json` 的 `enso-settings.state.providers` 会直接用。标志或环境变量给出 key 和 base URL 时，会合并或新建一条供应商，文件权限收成 `0600`。
 
 `run` 始终打开无人值守：按档位本该询问的动作立即拒绝，不会挂起。`full` 下放行几乎所有工具，仍然需要确认的高风险动作会被拒绝并让模型换一条路。`assistant` 需要设置里已经有代审模型，否则按配置错误退出。
+
+## 后台任务与提醒的等待
+
+模型起的后台任务还没跑完、或 `remind_me` 定的提醒还没到点时，这一轮结束进程不会退出：后台完成通知和提醒到点都会唤醒新一轮，让 agent 消费成果后再交付。等待有上限保护：
+
+- `--timeout-ms` 是整次运行的绝对上限（评测总预算语义），到点退出 124。
+- `--hold-timeout-ms` 是连续持有上限（默认 30 分钟），防的是后台任务挂死、完成通知永远不会来的情况。到点后强制注入一轮收尾，要求 agent 对还在跑的任务表态并交付；这一轮结束仍在等后台工作就退出 3（`hold-expired`）。每轮真正开始（任务被消费或开始新工作）都重置计时，所以正常的长编译、长训练只要被逐轮消费就不会误触发。
+
+没有 `--goal` 的 run 不给模型 `goal_complete` / `goal_blocked` / `goal_wait`：没有 goal 状态机时调用它只会假成功，误导模型对任务状态的判断。
 
 ## 退出码
 
@@ -87,7 +98,7 @@ node out/server/index.js run \
 | 0 | 会话正常结束。goal 模式里这表示 `goal_complete` |
 | 1 | 会话或 worker 失败 |
 | 2 | 参数或配置错误，stdout 为空 |
-| 3 | goal 被 `goal_blocked` 或 `goal_wait` 停住 |
+| 3 | goal 被 `goal_blocked` / `goal_wait` 停住，或后台任务/提醒的持有上限到点（`exitReason` 为 `hold-expired`） |
 | 4 | 自动轮数用尽，或连续无进展 |
 | 124 | `--timeout-ms` 到期 |
 | 130 | SIGINT / SIGTERM。第二次信号直接退出 |

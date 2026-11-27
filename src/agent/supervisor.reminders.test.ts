@@ -593,4 +593,25 @@ describe('会话自定提醒', () => {
     );
     expect(ctx.disk().reminders).toEqual([]);
   });
+
+  it('根会话收口才起的在跑后台任务：turn-completed 带 awaitingBackground（headless 靠它保持进程）', async () => {
+    const ctx = await setup();
+    const bash = toolOf(0, 'bash');
+    await round(ctx.parentSession, 'started in background', async () => {
+      const result = (await bash.execute('bg1', { command: 'sleep 30', background: true })) as {
+        content: Array<{ text?: string }>;
+      };
+      expect(result.content[0]?.text).toContain('Started background task');
+    });
+    expect(ofType(ctx.events, 'turn-completed').at(-1)).toMatchObject({
+      awaitingBackground: true,
+    });
+  });
+
+  it('根会话收口时没有后台任务与提醒：turn-completed 不带 awaitingBackground', async () => {
+    const ctx = await setup();
+    await round(ctx.parentSession, 'all done');
+    const last = ofType(ctx.events, 'turn-completed').at(-1);
+    expect(last).not.toHaveProperty('awaitingBackground');
+  });
 });

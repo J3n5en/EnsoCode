@@ -53,6 +53,8 @@ export interface RunArgs {
   api?: ModelApiKind;
   reasoningEffort?: string;
   timeoutMs?: number;
+  /** 等后台任务/提醒唤醒的连续空闲上限（毫秒）；到点强制收尾一轮再结束 */
+  holdTimeoutMs: number;
   outputFormat: OutputFormat;
   resume?: string;
   continue: boolean;
@@ -87,6 +89,8 @@ export const RUN_USAGE = `enso-server run — 无界面跑一轮真实 agent 会
   --base-url <url>            模型端点，例如 https://host/v1
   --reasoning-effort <level>  off | minimal | low | medium | high | xhigh | max
   --timeout-ms <n>            整次运行的墙钟上限；超时退出 124
+  --hold-timeout-ms <n>       等后台任务/提醒唤醒的连续空闲上限，默认 1800000（30 分钟）。
+                              到点强制收尾一轮后退出 3（hold-expired）；--timeout-ms 仍是绝对上限
   --output-format <format>    text | json | stream-json（默认 text）
   --resume <session id>       恢复已有会话
   --continue                  恢复当前目录最近一次 run 会话
@@ -108,7 +112,7 @@ export const RUN_USAGE = `enso-server run — 无界面跑一轮真实 agent 会
 run 默认无人值守：会挡住的审批按档位当场拒绝，不会等待。web / browser / image_generation
 默认关闭，避免除模型端点以外的出站请求。
 
-退出码: 0 成功；1 运行失败；2 参数或配置错误；3 goal 阻塞或等待；
+退出码: 0 成功；1 运行失败；2 参数或配置错误；3 goal 阻塞/等待，或后台任务、提醒的持有上限到点（hold-expired）；
         4 自动轮数用尽或连续无进展；124 超时；130 SIGINT/SIGTERM。
 诊断只写 stderr。`;
 
@@ -127,6 +131,7 @@ const FLAG_VALUE = new Set([
   '--base-url',
   '--reasoning-effort',
   '--timeout-ms',
+  '--hold-timeout-ms',
   '--output-format',
   '--resume',
   '--disallowed-tools',
@@ -287,6 +292,13 @@ export function parseRunArgs(
     if (typeof parsed === 'string') return { ok: false, error: parsed };
     timeoutMs = parsed;
   }
+  let holdTimeoutMs = 30 * 60_000;
+  const holdText = values.get('--hold-timeout-ms') ?? envValue(env, 'ENSO_HOLD_TIMEOUT_MS');
+  if (holdText !== undefined) {
+    const parsed = parsePositiveInt(holdText, '--hold-timeout-ms', 86_400_000);
+    if (typeof parsed === 'string') return { ok: false, error: parsed };
+    holdTimeoutMs = parsed;
+  }
 
   const providerId = values.get('--provider')?.trim() || envValue(env, 'ENSO_PROVIDER_ID');
   const modelId = values.get('--model')?.trim() || envValue(env, 'ENSO_MODEL', 'OPENAI_MODEL');
@@ -323,6 +335,7 @@ export function parseRunArgs(
       ...(api ? { api } : {}),
       ...(reasoning ? { reasoningEffort: reasoning } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      holdTimeoutMs,
       outputFormat: formatText as OutputFormat,
       ...(resume ? { resume } : {}),
       continue: continueSession,

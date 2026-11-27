@@ -1452,6 +1452,16 @@ function detachedResult(
   return {
     content: [{ type: 'text' as const, text }],
     details: { ...details, backgroundTaskId: taskId },
+    // bash 声明了 outputSchema：codemode 脚本按 { output, ... } 读结果。
+    // 让位不是退出——exit_code 取 null 表示命令还在跑，不能把 0 伪装成成功
+    structuredContent: {
+      output: error.output,
+      truncated: false,
+      exit_code: null,
+      wall_time_seconds: (Date.now() - context.startedAt) / 1000,
+      background_task_id: taskId,
+      ...(context.logPath ? { full_output_path: context.logPath } : {}),
+    },
   };
 }
 
