@@ -1286,6 +1286,27 @@ describe('model picker workbench', () => {
     expect(html).toContain('Gateway model');
     expect(harness.usageAccountKeys).toEqual([]);
   });
+
+  it('工作台不被外层 overflow-y-auto 滚动容器包裹，避免负边距触发双滚动条', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: workbenchProviders,
+        providerId: 'gateway',
+        modelId: 'gw',
+      })
+    );
+    const parsed = parseHTML(`<body>${html}</body>`).document;
+    const workbench = parsed.querySelector('[data-model-picker="workbench"]');
+    expect(workbench).not.toBeNull();
+    let ancestor = workbench?.parentElement ?? null;
+    while (ancestor) {
+      const classes = ancestor.className.split(/\s+/);
+      expect(classes).not.toContain('overflow-y-auto');
+      expect(classes).not.toContain('overflow-auto');
+      ancestor = ancestor.parentElement;
+    }
+  });
 });
 
 describe('centeredScrollTop', () => {

@@ -1461,307 +1461,310 @@ export function ModelPicker({
             )}
           </div>
 
-          <div className="max-h-[268px] overflow-y-auto">
-            {searching ? (
-              <div className="py-1">
-                {virtualItems}
-                {searchHits.map(({ provider, model, entryTag, showId }) => {
-                  const key = pinnedModelKey(provider.id, model.id);
+          {searching ? (
+            <div className="max-h-[268px] overflow-y-auto py-1">
+              {virtualItems}
+              {searchHits.map(({ provider, model, entryTag, showId }) => {
+                const key = pinnedModelKey(provider.id, model.id);
+                return (
+                  <MenuItem
+                    key={`${provider.id}/${model.id}`}
+                    className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
+                    onClick={() => handleSelectModel(provider.id, model.id)}
+                  >
+                    <ModelRowContent
+                      model={model}
+                      meta={metaByProvider[provider.id]?.[model.id]}
+                      entryTag={entryTag}
+                      showId={showId}
+                      selected={provider.id === providerId && model.id === modelId}
+                      pin={{ key, pinned: pinnedKeys.has(key), onToggle: handleTogglePin }}
+                    />
+                  </MenuItem>
+                );
+              })}
+              {searchHits.length === 0 && virtualItems.length === 0 && (
+                <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+                  {t('No models found')}
+                </p>
+              )}
+            </div>
+          ) : groups.length === 0 && virtualItems.length === 0 ? (
+            <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+              {t('No models found')}
+            </p>
+          ) : (
+            <div
+              data-model-picker="workbench"
+              className={cn(
+                '-mx-1.5 flex h-[268px] overflow-hidden',
+                !showReasoningControls && '-mb-1.5'
+              )}
+            >
+              <div
+                ref={setNavList}
+                data-model-picker="nav-list"
+                className="relative w-36 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5 sm:w-48"
+              >
+                {view.showFavoritesNav && (
+                  <button
+                    type="button"
+                    data-model-picker-nav="favorites"
+                    data-model-picker-nav-selected={
+                      providerId === VIRTUAL_PROVIDER_ID ? '' : undefined
+                    }
+                    onMouseEnter={() => setActiveNav({ kind: 'favorites' })}
+                    onClick={() => setActiveNav({ kind: 'favorites' })}
+                    className={cn(
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
+                      view.activeNav.kind === 'favorites' && 'bg-accent'
+                    )}
+                  >
+                    <Star className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1 truncate">{t('Starred & virtual')}</span>
+                    <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
+                      {visibleVirtualModels.length + pinnedHits.length}
+                    </Badge>
+                  </button>
+                )}
+                {view.showRecentNav && (
+                  <button
+                    type="button"
+                    data-model-picker-nav="recent"
+                    onMouseEnter={() => setActiveNav({ kind: 'recent' })}
+                    onClick={() => setActiveNav({ kind: 'recent' })}
+                    className={cn(
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
+                      view.activeNav.kind === 'recent' && 'bg-accent'
+                    )}
+                  >
+                    <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">{t('Recently used')}</span>
+                    <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
+                      {recentHits.length}
+                    </Badge>
+                  </button>
+                )}
+                {groups.map((group) => {
+                  const vendorLabel =
+                    group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
+                  const sole = group.providers.length === 1 ? group.providers[0] : undefined;
+                  const soleInfo = sole ? entryInfoByProviderId[sole.id] : undefined;
+                  const solePrimary = sole ? (soleInfo?.primary ?? sole.name) : undefined;
+                  const soleSubtitle = sole
+                    ? solePrimary === vendorLabel
+                      ? (soleInfo?.secondary ?? t('Custom'))
+                      : solePrimary
+                    : undefined;
+                  const selectedHere = group.providers.some(
+                    (provider) => provider.id === providerId
+                  );
+                  const navActive =
+                    view.activeNav.kind === 'vendor' && view.activeNav.vendorId === group.vendorId;
                   return (
-                    <MenuItem
-                      key={`${provider.id}/${model.id}`}
-                      className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
-                      onClick={() => handleSelectModel(provider.id, model.id)}
+                    <div
+                      key={group.vendorId}
+                      data-model-picker-nav={`vendor:${group.vendorId}`}
+                      data-model-picker-vendor={group.vendorId}
+                      data-model-picker-nav-selected={selectedHere ? '' : undefined}
+                      onMouseEnter={() =>
+                        setActiveNav({ kind: 'vendor', vendorId: group.vendorId })
+                      }
+                      className={cn(
+                        'group flex w-full items-center rounded-md text-left text-xs hover:bg-accent',
+                        navActive && 'bg-accent'
+                      )}
                     >
-                      <ModelRowContent
-                        model={model}
-                        meta={metaByProvider[provider.id]?.[model.id]}
-                        entryTag={entryTag}
-                        showId={showId}
-                        selected={provider.id === providerId && model.id === modelId}
-                        pin={{ key, pinned: pinnedKeys.has(key), onToggle: handleTogglePin }}
+                      <button
+                        type="button"
+                        onClick={() => setActiveNav({ kind: 'vendor', vendorId: group.vendorId })}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{vendorLabel}</span>
+                          <span className="block truncate text-[10px] text-muted-foreground/70">
+                            {sole
+                              ? soleSubtitle
+                              : t('{{count}} accounts', { count: group.providers.length })}
+                          </span>
+                        </span>
+                        {sole && soleInfo?.plan && (
+                          <Badge
+                            variant="outline"
+                            size="sm"
+                            className="max-w-16 shrink-0 truncate text-[9px] uppercase"
+                          >
+                            {soleInfo.plan}
+                          </Badge>
+                        )}
+                        {!sole && (
+                          <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
+                            {group.providers.length}
+                          </Badge>
+                        )}
+                        {selectedHere && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                      </button>
+                      <VendorNavRefresh
+                        vendorId={group.vendorId}
+                        providers={group.providers}
+                        emphasized={navActive}
+                        updateProvider={updateProvider}
                       />
-                    </MenuItem>
+                    </div>
                   );
                 })}
-                {searchHits.length === 0 && virtualItems.length === 0 && (
-                  <p className="px-1 py-4 text-center text-xs text-muted-foreground">
-                    {t('No models found')}
-                  </p>
-                )}
               </div>
-            ) : groups.length === 0 && virtualItems.length === 0 ? (
-              <p className="px-1 py-4 text-center text-xs text-muted-foreground">
-                {t('No models found')}
-              </p>
-            ) : (
-              <div data-model-picker="workbench" className="-mx-1.5 flex h-[268px] overflow-hidden">
-                <div
-                  ref={setNavList}
-                  data-model-picker="nav-list"
-                  className="relative w-36 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5 sm:w-48"
-                >
-                  {view.showFavoritesNav && (
-                    <button
-                      type="button"
-                      data-model-picker-nav="favorites"
-                      data-model-picker-nav-selected={
-                        providerId === VIRTUAL_PROVIDER_ID ? '' : undefined
+              <div className="flex min-w-0 flex-1 flex-col overflow-hidden p-1.5">
+                {view.activeNav.kind === 'favorites' ? (
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {virtualItems}
+                    {pinnedHits.map(({ provider, model, entryTag, showId }) => {
+                      const key = pinnedModelKey(provider.id, model.id);
+                      return (
+                        <MenuItem
+                          key={`pin/${key}`}
+                          className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
+                          onClick={() => handleSelectModel(provider.id, model.id)}
+                        >
+                          <ModelRowContent
+                            model={model}
+                            meta={metaByProvider[provider.id]?.[model.id]}
+                            entryTag={entryTag}
+                            showId={showId}
+                            selected={provider.id === providerId && model.id === modelId}
+                            pin={{ key, pinned: true, onToggle: handleTogglePin }}
+                          />
+                        </MenuItem>
+                      );
+                    })}
+                  </div>
+                ) : view.activeNav.kind === 'recent' ? (
+                  <div data-model-picker="recent-list" className="min-h-0 flex-1 overflow-y-auto">
+                    {recentHits.map((hit) => {
+                      const key = pinnedModelKey(hit.ref.providerId, hit.ref.modelId);
+                      const remove = (
+                        <RecentRemoveButton
+                          refKey={key}
+                          onRemove={() => removeRecentModel(hit.ref)}
+                        />
+                      );
+                      if (hit.kind === 'virtual') {
+                        return renderVirtualItem(hit.entry, `recent/${key}`, remove);
                       }
-                      onMouseEnter={() => setActiveNav({ kind: 'favorites' })}
-                      onClick={() => setActiveNav({ kind: 'favorites' })}
-                      className={cn(
-                        'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
-                        view.activeNav.kind === 'favorites' && 'bg-accent'
-                      )}
-                    >
-                      <Star className="h-3.5 w-3.5 shrink-0 text-primary" />
-                      <span className="min-w-0 flex-1 truncate">{t('Starred & virtual')}</span>
-                      <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
-                        {visibleVirtualModels.length + pinnedHits.length}
-                      </Badge>
-                    </button>
-                  )}
-                  {view.showRecentNav && (
-                    <button
-                      type="button"
-                      data-model-picker-nav="recent"
-                      onMouseEnter={() => setActiveNav({ kind: 'recent' })}
-                      onClick={() => setActiveNav({ kind: 'recent' })}
-                      className={cn(
-                        'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
-                        view.activeNav.kind === 'recent' && 'bg-accent'
-                      )}
-                    >
-                      <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">{t('Recently used')}</span>
-                      <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
-                        {recentHits.length}
-                      </Badge>
-                    </button>
-                  )}
-                  {groups.map((group) => {
-                    const vendorLabel =
-                      group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
-                    const sole = group.providers.length === 1 ? group.providers[0] : undefined;
-                    const soleInfo = sole ? entryInfoByProviderId[sole.id] : undefined;
-                    const solePrimary = sole ? (soleInfo?.primary ?? sole.name) : undefined;
-                    const soleSubtitle = sole
-                      ? solePrimary === vendorLabel
-                        ? (soleInfo?.secondary ?? t('Custom'))
-                        : solePrimary
-                      : undefined;
-                    const selectedHere = group.providers.some(
-                      (provider) => provider.id === providerId
-                    );
-                    const navActive =
-                      view.activeNav.kind === 'vendor' &&
-                      view.activeNav.vendorId === group.vendorId;
-                    return (
+                      const { provider, model, entryTag, showId } = hit;
+                      return (
+                        <MenuItem
+                          key={`recent/${key}`}
+                          className="group min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
+                          onClick={() => handleSelectModel(provider.id, model.id)}
+                        >
+                          <ModelRowContent
+                            model={model}
+                            meta={metaByProvider[provider.id]?.[model.id]}
+                            entryTag={entryTag}
+                            showId={showId}
+                            selected={provider.id === providerId && model.id === modelId}
+                            pin={{
+                              key,
+                              pinned: pinnedKeys.has(key),
+                              onToggle: handleTogglePin,
+                            }}
+                          />
+                          {remove}
+                        </MenuItem>
+                      );
+                    })}
+                  </div>
+                ) : detailGroup && detailProvider ? (
+                  <>
+                    {detailGroup.providers.length > 1 ? (
                       <div
-                        key={group.vendorId}
-                        data-model-picker-nav={`vendor:${group.vendorId}`}
-                        data-model-picker-vendor={group.vendorId}
-                        data-model-picker-nav-selected={selectedHere ? '' : undefined}
-                        onMouseEnter={() =>
-                          setActiveNav({ kind: 'vendor', vendorId: group.vendorId })
-                        }
+                        data-model-picker="account-tabs"
+                        className="mb-1 flex flex-wrap gap-1 border-b pb-1.5"
+                      >
+                        {detailGroup.providers.map((provider) => {
+                          const info = entryInfoByProviderId[provider.id];
+                          const current = provider.id === detailProvider.id;
+                          return (
+                            <button
+                              key={provider.id}
+                              type="button"
+                              data-model-picker-account={provider.id}
+                              aria-pressed={current}
+                              onMouseEnter={() =>
+                                rememberAccount(detailGroup.vendorId, provider.id)
+                              }
+                              onClick={() => rememberAccount(detailGroup.vendorId, provider.id)}
+                              className={cn(
+                                'flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]',
+                                current ? 'border-primary bg-accent' : 'hover:bg-accent'
+                              )}
+                            >
+                              <span className="truncate">{info?.primary ?? provider.name}</span>
+                              {info?.plan && (
+                                <Badge
+                                  variant="outline"
+                                  size="sm"
+                                  className="max-w-16 shrink-0 truncate text-[9px] uppercase"
+                                >
+                                  {info.plan}
+                                </Badge>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div
+                        data-model-picker="account-header"
                         className={cn(
-                          'group flex w-full items-center rounded-md text-left text-xs hover:bg-accent',
-                          navActive && 'bg-accent'
+                          'mb-1 flex items-center justify-between gap-2 border-b px-1 pb-1 text-[11px]',
+                          (!entryInfoByProviderId[detailProvider.id]?.secondary ||
+                            (entryInfoByProviderId[detailProvider.id]?.primary ??
+                              detailProvider.name) === detailGroup.label) &&
+                            'sr-only'
                         )}
                       >
-                        <button
-                          type="button"
-                          onClick={() => setActiveNav({ kind: 'vendor', vendorId: group.vendorId })}
-                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left"
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate">{vendorLabel}</span>
-                            <span className="block truncate text-[10px] text-muted-foreground/70">
-                              {sole
-                                ? soleSubtitle
-                                : t('{{count}} accounts', { count: group.providers.length })}
-                            </span>
+                        <span className="flex min-w-0 items-center gap-1.5 truncate">
+                          <span className="truncate">
+                            {entryInfoByProviderId[detailProvider.id]?.primary ??
+                              detailProvider.name}
                           </span>
-                          {sole && soleInfo?.plan && (
-                            <Badge
-                              variant="outline"
-                              size="sm"
-                              className="max-w-16 shrink-0 truncate text-[9px] uppercase"
-                            >
-                              {soleInfo.plan}
-                            </Badge>
-                          )}
-                          {!sole && (
-                            <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
-                              {group.providers.length}
-                            </Badge>
-                          )}
-                          {selectedHere && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                        </button>
-                        <VendorNavRefresh
-                          vendorId={group.vendorId}
-                          providers={group.providers}
-                          emphasized={navActive}
-                          updateProvider={updateProvider}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex min-w-0 flex-1 flex-col overflow-hidden p-1.5">
-                  {view.activeNav.kind === 'favorites' ? (
-                    <div className="min-h-0 flex-1 overflow-y-auto">
-                      {virtualItems}
-                      {pinnedHits.map(({ provider, model, entryTag, showId }) => {
-                        const key = pinnedModelKey(provider.id, model.id);
-                        return (
-                          <MenuItem
-                            key={`pin/${key}`}
-                            className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
-                            onClick={() => handleSelectModel(provider.id, model.id)}
-                          >
-                            <ModelRowContent
-                              model={model}
-                              meta={metaByProvider[provider.id]?.[model.id]}
-                              entryTag={entryTag}
-                              showId={showId}
-                              selected={provider.id === providerId && model.id === modelId}
-                              pin={{ key, pinned: true, onToggle: handleTogglePin }}
-                            />
-                          </MenuItem>
-                        );
-                      })}
-                    </div>
-                  ) : view.activeNav.kind === 'recent' ? (
-                    <div data-model-picker="recent-list" className="min-h-0 flex-1 overflow-y-auto">
-                      {recentHits.map((hit) => {
-                        const key = pinnedModelKey(hit.ref.providerId, hit.ref.modelId);
-                        const remove = (
-                          <RecentRemoveButton
-                            refKey={key}
-                            onRemove={() => removeRecentModel(hit.ref)}
-                          />
-                        );
-                        if (hit.kind === 'virtual') {
-                          return renderVirtualItem(hit.entry, `recent/${key}`, remove);
-                        }
-                        const { provider, model, entryTag, showId } = hit;
-                        return (
-                          <MenuItem
-                            key={`recent/${key}`}
-                            className="group min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
-                            onClick={() => handleSelectModel(provider.id, model.id)}
-                          >
-                            <ModelRowContent
-                              model={model}
-                              meta={metaByProvider[provider.id]?.[model.id]}
-                              entryTag={entryTag}
-                              showId={showId}
-                              selected={provider.id === providerId && model.id === modelId}
-                              pin={{
-                                key,
-                                pinned: pinnedKeys.has(key),
-                                onToggle: handleTogglePin,
-                              }}
-                            />
-                            {remove}
-                          </MenuItem>
-                        );
-                      })}
-                    </div>
-                  ) : detailGroup && detailProvider ? (
-                    <>
-                      {detailGroup.providers.length > 1 ? (
-                        <div
-                          data-model-picker="account-tabs"
-                          className="mb-1 flex flex-wrap gap-1 border-b pb-1.5"
-                        >
-                          {detailGroup.providers.map((provider) => {
-                            const info = entryInfoByProviderId[provider.id];
-                            const current = provider.id === detailProvider.id;
-                            return (
-                              <button
-                                key={provider.id}
-                                type="button"
-                                data-model-picker-account={provider.id}
-                                aria-pressed={current}
-                                onMouseEnter={() =>
-                                  rememberAccount(detailGroup.vendorId, provider.id)
-                                }
-                                onClick={() => rememberAccount(detailGroup.vendorId, provider.id)}
-                                className={cn(
-                                  'flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]',
-                                  current ? 'border-primary bg-accent' : 'hover:bg-accent'
-                                )}
-                              >
-                                <span className="truncate">{info?.primary ?? provider.name}</span>
-                                {info?.plan && (
-                                  <Badge
-                                    variant="outline"
-                                    size="sm"
-                                    className="max-w-16 shrink-0 truncate text-[9px] uppercase"
-                                  >
-                                    {info.plan}
-                                  </Badge>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div
-                          data-model-picker="account-header"
-                          className={cn(
-                            'mb-1 flex items-center justify-between gap-2 border-b px-1 pb-1 text-[11px]',
-                            (!entryInfoByProviderId[detailProvider.id]?.secondary ||
-                              (entryInfoByProviderId[detailProvider.id]?.primary ??
-                                detailProvider.name) === detailGroup.label) &&
-                              'sr-only'
-                          )}
-                        >
-                          <span className="flex min-w-0 items-center gap-1.5 truncate">
-                            <span className="truncate">
-                              {entryInfoByProviderId[detailProvider.id]?.primary ??
-                                detailProvider.name}
+                          {entryInfoByProviderId[detailProvider.id]?.secondary && (
+                            <span className="truncate text-[10px] text-muted-foreground/70">
+                              {entryInfoByProviderId[detailProvider.id]?.secondary}
                             </span>
-                            {entryInfoByProviderId[detailProvider.id]?.secondary && (
-                              <span className="truncate text-[10px] text-muted-foreground/70">
-                                {entryInfoByProviderId[detailProvider.id]?.secondary}
-                              </span>
-                            )}
-                          </span>
-                          {entryInfoByProviderId[detailProvider.id]?.plan && (
-                            <Badge
-                              variant="outline"
-                              size="sm"
-                              className="max-w-20 shrink-0 truncate text-[9px] uppercase"
-                            >
-                              {entryInfoByProviderId[detailProvider.id]?.plan}
-                            </Badge>
                           )}
-                        </div>
-                      )}
-                      {detailAccountKey && <SubmenuUsage accountKey={detailAccountKey} />}
-                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                        <ProviderSubmenuList
-                          key={detailProvider.id}
-                          provider={detailProvider}
-                          meta={metaByProvider[detailProvider.id]}
-                          selectedProviderId={providerId}
-                          selectedModelId={modelId}
-                          pinnedKeys={pinnedKeys}
-                          onTogglePin={handleTogglePin}
-                          onSelectModel={(mid) => handleSelectModel(detailProvider.id, mid)}
-                        />
+                        </span>
+                        {entryInfoByProviderId[detailProvider.id]?.plan && (
+                          <Badge
+                            variant="outline"
+                            size="sm"
+                            className="max-w-20 shrink-0 truncate text-[9px] uppercase"
+                          >
+                            {entryInfoByProviderId[detailProvider.id]?.plan}
+                          </Badge>
+                        )}
                       </div>
-                    </>
-                  ) : null}
-                </div>
+                    )}
+                    {detailAccountKey && <SubmenuUsage accountKey={detailAccountKey} />}
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                      <ProviderSubmenuList
+                        key={detailProvider.id}
+                        provider={detailProvider}
+                        meta={metaByProvider[detailProvider.id]}
+                        selectedProviderId={providerId}
+                        selectedModelId={modelId}
+                        pinnedKeys={pinnedKeys}
+                        onTogglePin={handleTogglePin}
+                        onSelectModel={(mid) => handleSelectModel(detailProvider.id, mid)}
+                      />
+                    </div>
+                  </>
+                ) : null}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {showReasoningControls && (
             <div className="-mx-1.5 -mb-1.5 border-t bg-muted/15 px-3 py-1.5">
