@@ -104,6 +104,7 @@ import { isPluginPanelId, pinnableTabForId, planPinnedPanels } from './pinnedTab
 import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { sidePanelCoversMain } from './sidePanelCover';
+import { SidePanelTabShell } from './sidePanelTabShell';
 import { liftsIntoTitleRow } from './sidePanelTitleRow';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { ShowEverywhereItem, SideTabTitle } from './sideTabScope';
@@ -425,7 +426,7 @@ function fillPinnedEverywhere(tab: PinnableSidePanelTab): void {
 }
 
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
-function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null }>) {
+export function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null }>) {
   const { t } = useI18n();
   const { conversationId } = useContext(PanelContext);
   const tabNode = useRef<HTMLDivElement | null>(null);
@@ -488,98 +489,81 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
       })
     );
   };
+  const pinnedPinButton =
+    pinned && pinnableTab && !liveGlobal ? (
+      <button
+        type="button"
+        aria-label={t('Unpin default tab')}
+        aria-pressed="true"
+        title={t('Unpin default tab')}
+        // 常显 pin 留在 flex 流里贴右缘：它参与 tab 的固有宽度，不需要任何 padding 预留
+        className="shrink-0 rounded p-0.5 text-primary transition-opacity duration-100 hover:text-foreground"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          togglePinnedTab(pinnableTab);
+        }}
+      >
+        <Pin className="h-3 w-3" />
+      </button>
+    ) : undefined;
+  const pinHoverButton =
+    pinnableTab && !liveGlobal && !pinned ? (
+      <button
+        type="button"
+        aria-label={t('Pin as default tab')}
+        aria-pressed={false}
+        title={t('Pin as default tab')}
+        className="relative shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-foreground group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          togglePinnedTab(pinnableTab);
+        }}
+      >
+        <Pin className="h-3 w-3" />
+      </button>
+    ) : undefined;
   const tab = (
-    <div
-      ref={(node) => {
+    <SidePanelTabShell
+      panelId={props.api.id}
+      active={active}
+      pinned={pinned}
+      tabRef={(node) => {
         tabNode.current = node;
       }}
-      data-side-tab
-      data-panel-id={props.api.id}
-      data-active={active || undefined}
-      data-pinned={pinned || undefined}
-      className={cn(
-        'group/tab relative flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
-        active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
-      )}
-    >
-      {props.api.id === 'changes' ? (
-        <GitCompare className="h-3 w-3 shrink-0" />
-      ) : props.api.id === 'files' ? (
-        <FolderOpen className="h-3 w-3 shrink-0" />
-      ) : props.api.id.startsWith('btw:') ? (
-        <MessageCircle className="h-3 w-3 shrink-0" />
-      ) : props.api.id === 'workflow' ? (
-        <Workflow className="h-3 w-3 shrink-0" />
-      ) : props.api.id === 'secretary' ? (
-        <LayoutGrid className="h-3 w-3 shrink-0" />
-      ) : props.api.id.startsWith('plugin:') ? (
-        <PluginIcon pluginId={props.api.id.split(':')[1] ?? ''} className="h-3 w-3 shrink-0" />
-      ) : isBrowser && favicon && !faviconBroken ? (
-        <img
-          src={favicon}
-          alt=""
-          className="h-3 w-3 shrink-0"
-          onError={() => setFaviconBroken(true)}
-        />
-      ) : isBrowser ? (
-        <Globe className="h-3 w-3 shrink-0" />
-      ) : (
-        <SquareTerminal className="h-3 w-3 shrink-0" />
-      )}
-      <SideTabTitle title={title} global={pluginPanel && shared} />
-      {/* pinned 的 pin 常显且不占 hover overlay 的格子：脱离 flex 流锚定在 tab 右缘，
-         位置由 tab 的 padding-right 预留（见 sidepanel-dock.css [data-pinned]） */}
-      {pinned && pinnableTab && !liveGlobal ? (
-        <button
-          type="button"
-          aria-label={t('Unpin default tab')}
-          aria-pressed="true"
-          title={t('Unpin default tab')}
-          className="absolute inset-y-0 right-1 my-auto h-fit rounded p-0.5 text-primary transition-opacity duration-100 hover:text-foreground"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            togglePinnedTab(pinnableTab);
-          }}
-        >
-          <Pin className="h-3 w-3" />
-        </button>
-      ) : null}
-      {/* pin/× 移出布局流：平时不占位，悬停或键盘聚焦时在右侧渐变蒙版上浮出，覆盖标题尾部 */}
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md pl-5 pr-1',
-          // pinned 时 × 要落在常显 pin 的左侧：overlay 右缘整体让出 pin 的格子
-          //（pin 槽 = right-1 边距 + pin 按钮 18px），不用 pr 垫，避免蒙版盖住常显的 pin
-          pinned && !liveGlobal ? 'right-[18px]' : null
-        )}
-      >
-        {/* pinned 时 tab 已按 pin+× 宽度预留（sidepanel-dock.css），按钮下没有文字，
-           蒙版只会弄脏标题尾巴；非 pinned 才需要蒙版盖住被压的标题尾部 */}
-        {pinned && !liveGlobal ? null : (
-          <div
-            aria-hidden
-            className="absolute inset-0 rounded-r-md bg-linear-to-l from-muted/90 from-55% to-transparent opacity-0 transition-opacity duration-100 group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100"
+      icon={
+        props.api.id === 'changes' ? (
+          <GitCompare className="h-3 w-3 shrink-0" />
+        ) : props.api.id === 'files' ? (
+          <FolderOpen className="h-3 w-3 shrink-0" />
+        ) : props.api.id.startsWith('btw:') ? (
+          <MessageCircle className="h-3 w-3 shrink-0" />
+        ) : props.api.id === 'workflow' ? (
+          <Workflow className="h-3 w-3 shrink-0" />
+        ) : props.api.id === 'secretary' ? (
+          <LayoutGrid className="h-3 w-3 shrink-0" />
+        ) : props.api.id.startsWith('plugin:') ? (
+          <PluginIcon pluginId={props.api.id.split(':')[1] ?? ''} className="h-3 w-3 shrink-0" />
+        ) : isBrowser && favicon && !faviconBroken ? (
+          <img
+            src={favicon}
+            alt=""
+            className="h-3 w-3 shrink-0"
+            onError={() => setFaviconBroken(true)}
           />
-        )}
-        {pinnableTab && !liveGlobal && !pinned ? (
-          <button
-            type="button"
-            aria-label={t('Pin as default tab')}
-            aria-pressed={false}
-            title={t('Pin as default tab')}
-            className="relative shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-foreground group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              togglePinnedTab(pinnableTab);
-            }}
-          >
-            <Pin className="h-3 w-3" />
-          </button>
-        ) : null}
+        ) : isBrowser ? (
+          <Globe className="h-3 w-3 shrink-0" />
+        ) : (
+          <SquareTerminal className="h-3 w-3 shrink-0" />
+        )
+      }
+      title={<SideTabTitle title={title} global={pluginPanel && shared} />}
+      pinButton={pinnedPinButton}
+      pinHoverButton={pinHoverButton}
+      closeButton={
         <button
           type="button"
           className="relative shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-destructive group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
@@ -595,8 +579,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         >
           <X className="h-3 w-3" />
         </button>
-      </div>
-    </div>
+      }
+    />
   );
   return (
     <ContextMenu>
