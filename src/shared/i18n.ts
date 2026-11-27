@@ -2491,8 +2491,10 @@ export const zhTranslations: Record<string, string> = {
   'Model unavailable': '模型不可用',
   'The agent sees this entry with suffix #{{count}}': '主 agent 看到的名称带后缀 #{{count}}',
   'Disabled ({{count}})': '已停用 ({{count}})',
-  'Pick a model for each role. Roles may share a model; each keeps its own description and reasoning.':
-    '为每个角色选一个模型。不同角色可以选同一个模型，各自保留描述和推理设置。',
+  'Pick models only for the roles you need; empty roles are skipped. Roles may share a model.':
+    '只给需要的角色选模型，留空的角色会跳过；不同角色可以选同一个模型。',
+  'Fine-tune': '微调',
+  'Click to add a description…': '点击编辑添加选型描述…',
   'Existing models': '已有模型',
   'Append to existing list': '追加到现有列表',
   'Replace existing list': '替换现有列表',

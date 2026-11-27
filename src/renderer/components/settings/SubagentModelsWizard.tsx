@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
@@ -25,17 +26,21 @@ import {
   buildWizardEntries,
   SUBAGENT_ROLE_PRESETS,
   type SubagentRoleDraft,
+  type SubagentRoleId,
   type SubagentWizardMode,
 } from './subagentModelPresets';
 
 // 继承项只做能力适配显示，不落成独立覆盖；只有用户操作才写入。
 const ignoreInheritedNormalization = () => undefined;
 
-function isReasoningOverride(value: unknown): value is 'on' | 'off' {
+/** 两行起步、随文本增高、不带右下角缩放角的描述框 */
+export const COMPACT_TEXTAREA_CLASS = '[&_textarea]:min-h-12 [&_textarea]:resize-none';
+
+export function isReasoningOverride(value: unknown): value is 'on' | 'off' {
   return value === 'on' || value === 'off';
 }
 
-function isThinkingLevelOverride(value: unknown): value is ModelThinkingLevelOverride {
+export function isThinkingLevelOverride(value: unknown): value is ModelThinkingLevelOverride {
   return (
     typeof value === 'string' &&
     (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value)
@@ -119,14 +124,8 @@ function applyPickerPatch(
   };
 }
 
-/** 一页式角色向导：每个角色选一个模型（可重复）并改写描述，确认时一次写入列表。 */
-export function SubagentModelsWizard({
-  seed,
-  onClose,
-}: {
-  seed: { providerId: string; modelId: string } | null;
-  onClose: () => void;
-}) {
+/** 一页式角色向导：只给需要的角色选模型（可重复），确认时一次写入列表。默认全部跳过。 */
+export function SubagentModelsWizard({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const existing = useSettingsStore((state) => state.subagentModels);
   const setEntries = useSettingsStore((state) => state.setSubagentModels);
@@ -136,14 +135,21 @@ export function SubagentModelsWizard({
   const [drafts, setDrafts] = useState<SubagentRoleDraft[]>(() =>
     SUBAGENT_ROLE_PRESETS.map((role) => ({
       roleId: role.id,
-      selection: role.skipByDefault ? null : seed,
+      selection: null,
       description: t(role.template),
     }))
   );
+  const [tuning, setTuning] = useState<ReadonlySet<SubagentRoleId>>(() => new Set());
   const preview = buildWizardEntries(drafts, existing, mode, () => '');
 
   const patchDraft = (index: number, update: (draft: SubagentRoleDraft) => SubagentRoleDraft) =>
     setDrafts((current) => current.map((draft, i) => (i === index ? update(draft) : draft)));
+  const toggleTuning = (roleId: SubagentRoleId) =>
+    setTuning((current) => {
+      const next = new Set(current);
+      if (!next.delete(roleId)) next.add(roleId);
+      return next;
+    });
 
   const confirm = () => {
     setEntries(buildWizardEntries(drafts, existing, mode, () => crypto.randomUUID()).entries);
@@ -157,7 +163,7 @@ export function SubagentModelsWizard({
           <DialogTitle>{t('Quick setup wizard')}</DialogTitle>
           <DialogDescription>
             {t(
-              'Pick a model for each role. Roles may share a model; each keeps its own description and reasoning.'
+              'Pick models only for the roles you need; empty roles are skipped. Roles may share a model.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -173,60 +179,94 @@ export function SubagentModelsWizard({
               ]}
             />
           )}
-          {SUBAGENT_ROLE_PRESETS.map((role, index) => {
-            const draft = drafts[index];
-            return (
-              <div
-                key={role.id}
-                data-slot="subagent-wizard-role"
-                className="space-y-2 rounded-lg border border-border/80 p-3"
-              >
-                <div>
-                  <div className="font-medium text-sm">{t(role.title)}</div>
-                  <div className="text-muted-foreground text-xs">{t(role.summary)}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="min-w-0 max-w-[400px] flex-1">
-                    <SubagentEntryModelPicker
-                      providers={candidates}
-                      virtualModels={virtualModels}
-                      zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
-                      emptyLabel={t('Skip this role')}
-                      value={{
-                        providerId: draft.selection?.providerId ?? '',
-                        modelId: draft.selection?.modelId ?? '',
-                        reasoning: draft.reasoning,
-                        thinkingLevel: draft.thinkingLevel,
-                      }}
-                      onChange={(patch) => patchDraft(index, (d) => applyPickerPatch(d, patch))}
-                    />
+          <div className="divide-y divide-border/60">
+            {SUBAGENT_ROLE_PRESETS.map((role, index) => {
+              const draft = drafts[index];
+              const open = tuning.has(role.id);
+              return (
+                <div
+                  key={role.id}
+                  data-slot="subagent-wizard-role"
+                  data-selected={draft.selection ? 'true' : undefined}
+                  className="px-3.5 py-3"
+                >
+                  <div className="flex items-center gap-3 max-sm:flex-col max-sm:items-stretch">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-[13px]">{t(role.title)}</div>
+                      <div className="text-muted-foreground text-xs">{t(role.summary)}</div>
+                    </div>
+                    <div className="flex w-[300px] shrink-0 items-center gap-1 max-sm:w-full">
+                      <div className="min-w-0 flex-1">
+                        <SubagentEntryModelPicker
+                          providers={candidates}
+                          virtualModels={virtualModels}
+                          zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
+                          emptyLabel={t('Skip this role')}
+                          value={{
+                            providerId: draft.selection?.providerId ?? '',
+                            modelId: draft.selection?.modelId ?? '',
+                            reasoning: draft.reasoning,
+                            thinkingLevel: draft.thinkingLevel,
+                          }}
+                          onChange={(patch) => patchDraft(index, (d) => applyPickerPatch(d, patch))}
+                        />
+                      </div>
+                      {draft.selection && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t('Skip this role')}
+                          className="shrink-0 text-muted-foreground"
+                          onClick={() => patchDraft(index, (d) => ({ ...d, selection: null }))}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   {draft.selection && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t('Skip this role')}
-                      className="shrink-0 text-muted-foreground"
-                      onClick={() => patchDraft(index, (d) => ({ ...d, selection: null }))}
+                    // 收起时一行小字预览；微调时文本框占同一位置，「完成」贴在右下角，不多占一行
+                    <div
+                      className={cn(
+                        'mt-1.5 flex gap-2 text-xs',
+                        open ? 'items-end' : 'items-baseline'
+                      )}
                     >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
+                      {open ? (
+                        <Textarea
+                          size="sm"
+                          className={cn('min-w-0 flex-1', COMPACT_TEXTAREA_CLASS)}
+                          aria-label={t('Description')}
+                          value={draft.description}
+                          onChange={(event) =>
+                            patchDraft(index, (d) => ({ ...d, description: event.target.value }))
+                          }
+                        />
+                      ) : (
+                        <span
+                          data-slot="subagent-wizard-description-preview"
+                          className="min-w-0 flex-1 truncate text-muted-foreground"
+                          title={draft.description}
+                        >
+                          {draft.description}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        data-slot="subagent-wizard-tune"
+                        aria-expanded={open}
+                        className="shrink-0 cursor-pointer text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                        onClick={() => toggleTuning(role.id)}
+                      >
+                        {open ? t('Done') : t('Fine-tune')}
+                      </button>
+                    </div>
                   )}
                 </div>
-                {draft.selection && (
-                  <Textarea
-                    size="sm"
-                    aria-label={t('Description')}
-                    value={draft.description}
-                    onChange={(event) =>
-                      patchDraft(index, (d) => ({ ...d, description: event.target.value }))
-                    }
-                  />
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </DialogPanel>
         <DialogFooter className="sm:items-center">
           <span className="mr-auto text-muted-foreground text-sm">

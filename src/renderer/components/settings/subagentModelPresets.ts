@@ -13,8 +13,6 @@ export interface SubagentRolePreset {
   readonly summary: string;
   readonly chip: string;
   readonly template: string;
-  /** 向导打开时不预选模型 */
-  readonly skipByDefault: boolean;
 }
 
 export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
@@ -25,7 +23,6 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
     chip: 'scout research',
     template:
       'Use for lookups and read-only exploration: reading code, searching the repo, checking docs, and summarizing findings. Fast and cheap; do not use it for architecture decisions.',
-    skipByDefault: false,
   },
   {
     id: 'worker',
@@ -34,7 +31,6 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
     chip: 'worker build',
     template:
       'Use for the main coding work: implementing features, fixing bugs, and self-contained coding subtasks with a clear scope.',
-    skipByDefault: false,
   },
   {
     id: 'reviewer',
@@ -43,7 +39,6 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
     chip: 'reviewer review',
     template:
       'Use for code review, architecture trade-offs, and hard debugging. Strongest reasoning but slower and pricier; do not use it for bulk scanning.',
-    skipByDefault: false,
   },
   {
     id: 'tester',
@@ -52,7 +47,6 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
     chip: 'tester tests',
     template:
       'Use for writing tests: failing tests first for TDD, and adding unit test coverage to existing code.',
-    skipByDefault: false,
   },
   {
     id: 'light',
@@ -61,7 +55,6 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
     chip: 'light errands',
     template:
       'Use for bulk mechanical replacements, formatting, and high-throughput errands, or as a fallback for exploration. Cheapest; not for tasks that need judgment.',
-    skipByDefault: true,
   },
 ];
 

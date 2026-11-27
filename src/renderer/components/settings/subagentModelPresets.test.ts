@@ -27,7 +27,7 @@ function ids() {
 }
 
 describe('SUBAGENT_ROLE_PRESETS', () => {
-  it('列出五个角色，只有轻量角色默认跳过', () => {
+  it('按固定顺序列出五个角色', () => {
     expect(SUBAGENT_ROLE_PRESETS.map((role) => role.id)).toEqual([
       'scout',
       'worker',
@@ -35,9 +35,6 @@ describe('SUBAGENT_ROLE_PRESETS', () => {
       'tester',
       'light',
     ]);
-    expect(
-      SUBAGENT_ROLE_PRESETS.filter((role) => role.skipByDefault).map((role) => role.id)
-    ).toEqual(['light']);
   });
 });
 

@@ -779,24 +779,6 @@ exports[`模型与服务商组设置迁移前后行为一致 > 每个控件的�
     "row": "providers.virtual-models",
   },
   {
-    "current": {
-      "subagentModels": [
-        {
-          "description": "cheap",
-          "id": "sub",
-          "modelId": "fast",
-          "providerId": "api",
-        },
-      ],
-    },
-    "effects": [
-      "{"store":{"subagentModels":[{"id":"sub","providerId":"agy-cli","modelId":"default","description":"cheap"}]},"api":[]}",
-      "{"store":{"subagentModels":[{"id":"sub","providerId":"api","modelId":"smart","description":"cheap"}]},"api":[]}",
-    ],
-    "kind": "choice",
-    "row": null,
-  },
-  {
     "current": {},
     "effects": [
       "{"store":{},"api":[]}",
@@ -873,12 +855,6 @@ exports[`模型与服务商组设置迁移前后行为一致 > 每个控件的�
       },
     ],
     "kind": "switch",
-    "row": null,
-  },
-  {
-    "current": "cheap",
-    "effects": [],
-    "kind": "textarea",
     "row": null,
   },
 ]

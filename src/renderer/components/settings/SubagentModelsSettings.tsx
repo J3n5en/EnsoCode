@@ -1,14 +1,16 @@
 import type { SubagentModelEntry } from '@shared/types';
 import { isVirtualRef, selectableVirtualModels, VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
-import { ArrowDown, ArrowUp, Plus, Trash2, Wand2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, Wand2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { useI18n } from '@/i18n';
+import { type TFunction, useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { providerDisplayName } from './chatgptPool';
 import {
   SettingsButton,
   SettingsEmptyState,
@@ -17,7 +19,14 @@ import {
   SettingsSection,
   SettingsSwitch,
 } from './kit';
-import { SubagentEntryModelPicker, SubagentModelsWizard } from './SubagentModelsWizard';
+import { LEVEL_LABEL_KEYS } from './ProviderModelRow';
+import {
+  COMPACT_TEXTAREA_CLASS,
+  isReasoningOverride,
+  isThinkingLevelOverride,
+  SubagentEntryModelPicker,
+  SubagentModelsWizard,
+} from './SubagentModelsWizard';
 import { SUBAGENT_ROLE_PRESETS } from './subagentModelPresets';
 
 type Selection = { providerId: string; modelId: string };
@@ -49,10 +58,19 @@ export function subagentRuntimeSuffixes(
   return suffixes;
 }
 
+/** 展示行的推理摘要，口径同 ModelPicker 触发器；follow 时返回 null 由调用方弱化 */
+function reasoningSummary(entry: SubagentModelEntry, t: TFunction): string | null {
+  if (!isReasoningOverride(entry.reasoning)) return null;
+  if (entry.reasoning === 'off') return t('Off');
+  const level = isThinkingLevelOverride(entry.thinkingLevel) ? entry.thinkingLevel : 'medium';
+  return `${t('On')} · ${t(LEVEL_LABEL_KEYS[level])}`;
+}
+
 /**
  * 「允许子代理指定模型」：默认模型下方的集中配置区。
  * 同一模型可配多条（不同角色描述/推理档位）；描述随 spawn 下发,
  * 注入 subagent/coworker 工具的 model 参数说明,帮主 agent 按任务挑模型。
+ * 列表平时只读展示，点行或铅笔才展开该条的内联编辑。
  */
 export function SubagentModelsSettings() {
   const { t } = useI18n();
@@ -67,6 +85,7 @@ export function SubagentModelsSettings() {
   const virtualModels = useSettingsStore((state) => state.virtualModels);
   const candidates = useUsableProviders();
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const selectableVirtual = useMemo(
     () => selectableVirtualModels(virtualModels, candidates),
@@ -101,81 +120,102 @@ export function SubagentModelsSettings() {
   };
   const isUsable = (entry: SubagentModelEntry) => runtimeBaseName(entry) !== null;
 
+  const displayName = (entry: SubagentModelEntry): string => {
+    if (isVirtualRef(entry)) {
+      return virtualModels.find((item) => item.id === entry.modelId)?.name ?? entry.modelId;
+    }
+    const provider = candidates.find((item) => item.id === entry.providerId);
+    if (!provider) return entry.modelId;
+    const model = provider.models.find((item) => item.id === entry.modelId);
+    return `${providerDisplayName(provider, t)} / ${model?.label || entry.modelId}`;
+  };
+
   const active = entries.filter((entry) => entry.enabled !== false);
   const disabled = entries.filter((entry) => entry.enabled === false);
   const suffixes = subagentRuntimeSuffixes(entries, runtimeBaseName);
   const firstFallbackId = active.find(isUsable)?.id;
 
   const addManually = () => {
-    if (seedSelection) addEntry({ ...seedSelection, description: '' });
+    if (!seedSelection) return;
+    setEditingId(addEntry({ ...seedSelection, description: '' }).id);
   };
+  const toggleEditing = (id: string) => setEditingId((current) => (current === id ? null : id));
 
   const renderEntry = (entry: SubagentModelEntry, index: number, group: SubagentModelEntry[]) => {
-    const usable = isUsable(entry);
+    const editing = editingId === entry.id;
     const suffix = suffixes.get(entry.id);
+    const reasoning = reasoningSummary(entry, t);
     return (
-      <div
-        key={entry.id}
-        data-slot="subagent-model-row"
-        className="space-y-2 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7"
-      >
-        <div data-slot="subagent-model-head" className="flex flex-wrap items-center gap-2">
-          <Switch
-            data-slot="subagent-model-enabled"
-            aria-label={t('Enable subagent model')}
-            title={t('Make this model available to subagents')}
-            checked={entry.enabled !== false}
-            onCheckedChange={(next) => updateEntry(entry.id, { enabled: next })}
-          />
-          <div className="min-w-[240px] max-w-[400px] flex-1 max-sm:min-w-0">
-            <SubagentEntryModelPicker
-              providers={candidates}
-              virtualModels={virtualModels}
-              value={entry}
-              onChange={(patch) => updateEntry(entry.id, patch)}
-            />
-          </div>
-          {entry.id === firstFallbackId && (
-            <Badge variant="info" className="shrink-0 text-[10px]">
-              {t('Preferred fallback')}
-            </Badge>
-          )}
-          {!usable && (
-            <Badge variant="warning" className="shrink-0 text-[10px]">
-              {t('Model unavailable')}
-            </Badge>
-          )}
-          {suffix !== undefined && (
-            <Badge
-              variant="outline"
-              className="shrink-0 text-[10px]"
-              title={t('The agent sees this entry with suffix #{{count}}', { count: suffix })}
+      <div key={entry.id} data-slot="subagent-model-row" data-editing={editing || undefined}>
+        <div className="flex items-start gap-3 px-4 py-2.5 pl-10 max-sm:pr-3 max-sm:pl-7">
+          <button
+            type="button"
+            data-slot="subagent-model-summary"
+            aria-expanded={editing}
+            className="min-w-0 flex-1 cursor-pointer text-left"
+            onClick={() => toggleEditing(entry.id)}
+          >
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span
+                data-slot="subagent-model-name"
+                className={cn(
+                  'break-all font-medium text-[13px]',
+                  entry.enabled === false && 'text-muted-foreground'
+                )}
+              >
+                {displayName(entry)}
+              </span>
+              <span
+                data-slot="subagent-model-reasoning"
+                className={cn(
+                  'shrink-0 text-[11px]',
+                  reasoning ? 'text-muted-foreground' : 'text-muted-foreground/60'
+                )}
+              >
+                {reasoning ?? t('Follow parent')}
+              </span>
+              {entry.id === firstFallbackId && (
+                <Badge variant="info" className="shrink-0 text-[10px]">
+                  {t('Preferred fallback')}
+                </Badge>
+              )}
+              {!isUsable(entry) && (
+                <Badge variant="warning" className="shrink-0 text-[10px]">
+                  {t('Model unavailable')}
+                </Badge>
+              )}
+              {suffix !== undefined && (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 text-[10px]"
+                  title={t('The agent sees this entry with suffix #{{count}}', { count: suffix })}
+                >
+                  #{suffix}
+                </Badge>
+              )}
+            </span>
+            <span
+              data-slot="subagent-model-description-text"
+              className={cn(
+                'mt-0.5 block whitespace-pre-wrap break-words text-xs leading-relaxed',
+                entry.description.trim() ? 'text-muted-foreground' : 'text-muted-foreground/50'
+              )}
             >
-              #{suffix}
-            </Badge>
-          )}
-          <div className="ml-auto flex shrink-0 items-center">
+              {entry.description.trim() ? entry.description : t('Click to add a description…')}
+            </span>
+          </button>
+          <div className="flex shrink-0 items-center gap-0.5">
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={t('Move up')}
-              disabled={index === 0}
-              className="text-muted-foreground"
-              onClick={() => moveEntry(entry.id, 'up')}
+              data-slot="subagent-model-edit"
+              aria-label={editing ? t('Done') : t('Edit')}
+              aria-pressed={editing}
+              className={cn('text-muted-foreground', editing && 'bg-accent text-foreground')}
+              onClick={() => toggleEditing(entry.id)}
             >
-              <ArrowUp className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t('Move down')}
-              disabled={index === group.length - 1}
-              className="text-muted-foreground"
-              onClick={() => moveEntry(entry.id, 'down')}
-            >
-              <ArrowDown className="h-3.5 w-3.5" />
+              <Pencil className="h-3.5 w-3.5" />
             </Button>
             <Button
               type="button"
@@ -187,30 +227,83 @@ export function SubagentModelsSettings() {
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
+            <Switch
+              data-slot="subagent-model-enabled"
+              aria-label={t('Enable subagent model')}
+              title={t('Make this model available to subagents')}
+              className="ml-1.5"
+              checked={entry.enabled !== false}
+              onCheckedChange={(next) => updateEntry(entry.id, { enabled: next })}
+            />
           </div>
         </div>
-        <Textarea
-          data-slot="subagent-model-description"
-          size="sm"
-          aria-label={t('Description')}
-          value={entry.description}
-          placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}
-          onChange={(event) => updateEntry(entry.id, { description: event.target.value })}
-        />
-        {!entry.description.trim() && (
-          <div className="flex flex-wrap gap-1.5">
-            {SUBAGENT_ROLE_PRESETS.map((role) => (
+        {editing && (
+          <div
+            data-slot="subagent-model-editor"
+            className="space-y-2 border-border/60 border-t bg-muted/45 px-4 py-3 pl-10 max-sm:pr-3 max-sm:pl-7 dark:bg-background/40"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="min-w-[240px] max-w-[420px] flex-1 max-sm:min-w-0">
+                <SubagentEntryModelPicker
+                  providers={candidates}
+                  virtualModels={virtualModels}
+                  value={entry}
+                  onChange={(patch) => updateEntry(entry.id, patch)}
+                />
+              </div>
               <Button
-                key={role.id}
                 type="button"
-                variant="outline"
-                size="xs"
-                data-slot="subagent-model-template-chip"
-                onClick={() => updateEntry(entry.id, { description: t(role.template) })}
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('Move up')}
+                disabled={index === 0}
+                className="text-muted-foreground"
+                onClick={() => moveEntry(entry.id, 'up')}
               >
-                {t(role.chip)}
+                <ArrowUp className="h-3.5 w-3.5" />
               </Button>
-            ))}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('Move down')}
+                disabled={index === group.length - 1}
+                className="text-muted-foreground"
+                onClick={() => moveEntry(entry.id, 'down')}
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </Button>
+              <SettingsButton
+                data-slot="subagent-model-done"
+                className="ml-auto"
+                onClick={() => setEditingId(null)}
+              >
+                {t('Done')}
+              </SettingsButton>
+            </div>
+            <Textarea
+              data-slot="subagent-model-description"
+              size="sm"
+              className={COMPACT_TEXTAREA_CLASS}
+              aria-label={t('Description')}
+              value={entry.description}
+              placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}
+              onChange={(event) => updateEntry(entry.id, { description: event.target.value })}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {SUBAGENT_ROLE_PRESETS.map((role) => (
+                <Button
+                  key={role.id}
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  data-slot="subagent-model-template-chip"
+                  onClick={() => updateEntry(entry.id, { description: t(role.template) })}
+                >
+                  {t(role.chip)}
+                </Button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -306,9 +399,7 @@ export function SubagentModelsSettings() {
         </>
       )}
 
-      {wizardOpen && (
-        <SubagentModelsWizard seed={seedSelection} onClose={() => setWizardOpen(false)} />
-      )}
+      {wizardOpen && <SubagentModelsWizard onClose={() => setWizardOpen(false)} />}
     </SettingsSection>
   );
 }
