@@ -60,6 +60,10 @@ class FakeApi implements TelegramApi {
     messageId: number;
     replyMarkup: TelegramInlineKeyboard;
   }[] = [];
+  /** deleteMessage 删掉的消息 */
+  deletedMessages: { chatId: number; messageId: number }[] = [];
+  /** deleteMessage 失败时用 */
+  deleteError: Error | null = null;
   /** 每次 setMyCommands 连同 scope/language_code 一起记下来 */
   commands: {
     commands: { command: string; description: string }[];
@@ -161,6 +165,11 @@ class FakeApi implements TelegramApi {
     if (this.markupError) throw this.markupError;
     this.check(undefined, params.replyMarkup);
     this.markupEdits.push(params);
+  }
+
+  async deleteMessage(params: { chatId: number; messageId: number }): Promise<void> {
+    if (this.deleteError) throw this.deleteError;
+    this.deletedMessages.push(params);
   }
 
   /**
@@ -2366,10 +2375,15 @@ describe('「正在输入…」', () => {
   /** 直接落盘成已绑定：不走 /start 向导，按需起轮询 */
   async function boundStore(
     h: ReturnType<typeof harness>,
-    options: { syncMirror?: boolean; poll?: boolean } = {}
+    options: { syncMirror?: boolean; poll?: boolean; showProgress?: boolean } = {}
   ): Promise<void> {
     await h.store.saveToken(TOKEN);
-    h.store.save({ ...h.store.file(), chat: { id: 777 }, syncMirror: options.syncMirror === true });
+    h.store.save({
+      ...h.store.file(),
+      chat: { id: 777 },
+      syncMirror: options.syncMirror === true,
+      channels: { telegram: { showProgress: options.showProgress !== false } },
+    });
     if (options.poll) await h.service.start();
     h.api.sent.length = 0;
   }
@@ -2401,6 +2415,26 @@ describe('「正在输入…」', () => {
     h.service.onTurnStart('sec-1');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.api.chatActions).toEqual([]);
+  });
+
+  it('「显示处理过程」默认关：手机发起与镜像的回合都不发 typing、不发占位', async () => {
+    const h = harness();
+    await boundStore(h, { poll: true, syncMirror: true, showProgress: false });
+    expect(h.service.state().channels[0]?.prefs.showProgress).toBe(false);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    const before = h.api.sent.length;
+    h.service.onTurnStart('sec-1');
+    h.service.onToolCall('sec-1', 'read');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.chatActions).toEqual([]);
+    expect(h.api.sent.length).toBe(before);
+    h.service.onTurnReply('sec-1', '**好了**');
+    await waitFor(() => h.api.sent.length === before + 1, 'reply');
+    expect(h.api.sent.at(-1)?.text).toBe('<b>好了</b>');
+    expect(h.api.edited).toEqual([]);
+    expect(h.api.deletedMessages).toEqual([]);
+    await h.service.stop();
   });
 
   it('没绑定 chat 时不发', async () => {
@@ -2444,7 +2478,8 @@ describe('「正在输入…」', () => {
     h.service.onTurnReply('sec-1', '巡检正常');
     await vi.advanceTimersByTimeAsync(20_000);
     expect(h.api.chatActions).toHaveLength(1);
-    expect(h.api.sent.at(-1)?.text).toContain('巡检正常');
+    // 处理中占位原地换成回复
+    expect(h.api.edited.at(-1)?.text).toContain('巡检正常');
   });
 
   it('静默回合收尾就停，不再续发', async () => {
@@ -2456,7 +2491,9 @@ describe('「正在输入…」', () => {
     h.service.onTurnSilent('sec-1');
     await vi.advanceTimersByTimeAsync(20_000);
     expect(h.api.chatActions).toHaveLength(1);
-    expect(h.api.sent).toEqual([]);
+    // 只有处理中占位，静默收尾时删掉
+    expect(h.api.sent.map((sent) => sent.text)).toEqual(['⏳ 处理中…']);
+    expect(h.api.deletedMessages).toEqual([{ chatId: 777, messageId: 1 }]);
   });
 
   it('会话停止时定时器清掉', async () => {
@@ -2511,7 +2548,162 @@ describe('「正在输入…」', () => {
     expect(h.audits.filter((entry) => entry.op === 'contact_typing')).toHaveLength(1);
     h.service.onTurnReply('sec-1', '在，刚把登录修完');
     await vi.advanceTimersByTimeAsync(0);
-    expect(h.api.sent.at(-1)?.text).toContain('在，刚把登录修完');
+    expect(h.api.edited.at(-1)?.text).toContain('在，刚把登录修完');
+  });
+});
+
+describe('显示处理过程', () => {
+  const PLACEHOLDER = '⏳ 处理中…';
+
+  /** 已绑定私聊、打开镜像：应用内回合的回复会发到手机 */
+  async function progressOn(showProgress = true) {
+    const h = harness();
+    await h.store.saveToken(TOKEN);
+    h.store.save({
+      ...h.store.file(),
+      chat: { id: 777 },
+      syncMirror: true,
+      channels: { telegram: { showProgress } },
+    });
+    return h;
+  }
+
+  it('回合开始发 typing 和一条处理中占位', async () => {
+    const h = await progressOn();
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.sent.length === 1, 'placeholder');
+    expect(h.api.sent[0]).toMatchObject({ chatId: 777, text: PLACEHOLDER });
+    expect(h.api.chatActions).toEqual([{ chatId: 777, action: 'typing' }]);
+    h.service.onTurnEnd('sec-1');
+    await h.service.stop();
+  });
+
+  it('工具步骤节流后原地改占位，只显示最新一步', async () => {
+    const h = await progressOn();
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    h.service.onToolCall('sec-1', 'read');
+    h.service.onToolCall('sec-1', 'bash');
+    h.service.onToolCall('sec-1', 'grep');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.edited).toEqual([]);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(h.api.edited).toHaveLength(1);
+    expect(h.api.edited[0]).toMatchObject({
+      chatId: 777,
+      messageId: 1,
+      text: '⏳ 处理中…（第 3 步：grep）',
+    });
+    h.service.onToolCall('sec-1', 'edit');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.api.edited).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(h.api.edited.at(-1)?.text).toBe('⏳ 处理中…（第 4 步：edit）');
+    h.service.onTurnEnd('sec-1');
+  });
+
+  it('回复就绪时占位原地换成 Markdown 渲染后的回复，不多发也不删', async () => {
+    const h = await progressOn();
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.sent.length === 1, 'placeholder');
+    // 先收到 status idle，再收到 turn-completed：占位要留到回复来
+    h.service.onTurnEnd('sec-1');
+    h.service.onTurnReply('sec-1', '**修好了**，见 [文档](file:///tmp/a.md)');
+    await waitFor(() => h.api.edited.length === 1, 'replaced');
+    expect(h.api.edited[0]).toMatchObject({
+      chatId: 777,
+      messageId: 1,
+      parseMode: 'HTML',
+      text: '<b>修好了</b>，见 <code>文档</code>',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toHaveLength(1);
+    expect(h.api.deletedMessages).toEqual([]);
+  });
+
+  it('超长回复：第一片换掉占位，其余分片接着发', async () => {
+    const h = await progressOn();
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.sent.length === 1, 'placeholder');
+    const line = '这一行大概六十个字符，用来把消息撑到上限以上，看看会不会被切开。';
+    const long = Array.from({ length: 160 }, (_v, index) => `${index} ${line}`).join('\n');
+    h.service.onTurnReply('sec-1', long);
+    await waitFor(() => h.api.edited.length === 1 && h.api.sent.length > 1, 'split');
+    expect(h.api.edited[0]?.messageId).toBe(1);
+    expect(h.api.edited[0]?.text.startsWith('0 这一行')).toBe(true);
+    expect(h.api.sent.slice(1).every((sent) => sent.text.length <= 4096)).toBe(true);
+    expect(h.api.sent.at(-1)?.text).toContain('159 这一行');
+    expect(h.api.deletedMessages).toEqual([]);
+  });
+
+  it('占位改不动：删掉占位，整条回复重新发', async () => {
+    const h = await progressOn();
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.sent.length === 1, 'placeholder');
+    h.api.editTextError = new TelegramApiError('api', 'Bad Request: message to edit not found');
+    h.service.onTurnReply('sec-1', '好了');
+    await waitFor(() => h.api.sent.length === 2, 'resent');
+    expect(h.api.deletedMessages).toEqual([{ chatId: 777, messageId: 1 }]);
+    expect(h.api.sent[1]?.text).toBe('好了');
+  });
+
+  it('静默回合删掉占位，不发任何消息', async () => {
+    const h = await progressOn();
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.sent.length === 1, 'placeholder');
+    h.service.onTurnSilent('sec-1');
+    await waitFor(() => h.api.deletedMessages.length === 1, 'deleted');
+    expect(h.api.deletedMessages).toEqual([{ chatId: 777, messageId: 1 }]);
+    expect(h.api.sent).toHaveLength(1);
+  });
+
+  it('中止或出错（只有收尾没有回复）：到点删掉占位；删不掉只记审计', async () => {
+    const h = await progressOn();
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    h.api.deleteError = new TelegramApiError('api', "Bad Request: message can't be deleted");
+    h.service.onTurnEnd('sec-1');
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.audits.some((entry) => entry.op === 'contact_progress')).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.audits.find((entry) => entry.op === 'contact_progress')).toMatchObject({
+      ok: false,
+      detail: 'delete api',
+    });
+    // 下一轮照常开新占位
+    h.api.deleteError = null;
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.sent.map((sent) => sent.text)).toEqual([PLACEHOLDER, PLACEHOLDER]);
+    h.service.onTurnEnd('sec-1');
+  });
+
+  it('回合中途关掉：typing 立刻停、进度不再改，回复照样换掉占位', async () => {
+    const h = await progressOn();
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.chatActions).toHaveLength(1);
+    expect(h.service.setChannelPrefs('telegram', { showProgress: false })).toEqual({ ok: true });
+    expect(h.service.state().channels[0]?.prefs.showProgress).toBe(false);
+    h.service.onToolCall('sec-1', 'read');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toHaveLength(1);
+    expect(h.api.edited).toEqual([]);
+    h.service.onTurnReply('sec-1', '完成');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.edited).toHaveLength(1);
+    expect(h.api.edited[0]).toMatchObject({ messageId: 1, text: '完成' });
+    expect(h.api.sent).toHaveLength(1);
+  });
+
+  it('开关落盘，重启后还在；别的开关不受影响', async () => {
+    const h = await progressOn(false);
+    h.service.setChannelPrefs('telegram', { showProgress: true });
+    const prefs = h.restart().state().channels[0]?.prefs;
+    expect(prefs).toMatchObject({ showProgress: true, syncMirror: true, push: true });
   });
 });
 
@@ -3070,6 +3262,7 @@ describe('多渠道联系方式', () => {
     );
     expect(h.world.delivered.at(-1)).not.toContain('senderId=');
     expect(h.service.phoneTurnChat('sec-1')).toEqual(wxPeer);
+    h.service.setChannelPrefs(wechat.id, { showProgress: true });
     h.service.onTurnStart('sec-1');
     await waitFor(() => wechat.typings.length > 0, 'typing');
     expect(h.api.chatActions).toHaveLength(0);

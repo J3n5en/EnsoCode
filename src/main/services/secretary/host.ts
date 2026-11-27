@@ -1016,6 +1016,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
   /** 秘书会话最近一条用户消息：纯系统回传的回合不打扰，不亮「正在输入…」 */
   const lastUserText = new Map<string, string>();
+  /** 这一轮已经报过的工具调用 id：流式 upsert 会重复带同一个 toolCall，只数一次 */
+  const seenToolCalls = new Map<string, Set<string>>();
 
   /**
    * 联系方式：秘书自己会话里的提问、回复与审批同步到手机。
@@ -1028,6 +1030,19 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (event.message.role === 'user') {
         lastUserText.set(conversationId, messageText(event.message));
       }
+      if (event.message.role === 'assistant' && contact.onToolCall) {
+        let seen = seenToolCalls.get(conversationId);
+        for (const part of event.message.content) {
+          if (part.type !== 'toolCall' || !part.id || !part.name.trim()) continue;
+          if (!seen) {
+            seen = new Set();
+            seenToolCalls.set(conversationId, seen);
+          }
+          if (seen.has(part.id)) continue;
+          seen.add(part.id);
+          contact.onToolCall(conversationId, part.name);
+        }
+      }
       return;
     }
     if (event.type === 'status') {
@@ -1035,6 +1050,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (event.status !== 'running') {
         // 收尾就清掉：下一轮没拿到用户消息时按「不是系统回传」处理，宁可多亮一次
         lastUserText.delete(conversationId);
+        seenToolCalls.delete(conversationId);
         contact.onTurnEnd(conversationId);
         return;
       }

@@ -55,6 +55,7 @@ const state: SecretaryContactState = {
         cardConfirm: true,
         approvalRemote: false,
         syncMirror: false,
+        showProgress: false,
         memory: false,
       },
     },
@@ -134,6 +135,7 @@ describe('设置 → 联系方式与主人的分组与控件', () => {
       'secretary-contact-push',
       'secretary-contact-allow-dispatch',
       'secretary-contact-mirror',
+      'secretary-contact-progress',
       'secretary-contact-allow-memory',
     ];
     for (const id of ids) {
@@ -148,6 +150,26 @@ describe('设置 → 联系方式与主人的分组与控件', () => {
     await act(async () => mirror.click());
     expect(contactSettings).toHaveBeenCalledWith(
       { channelId: 'telegram', prefs: { syncMirror: true } },
+      undefined
+    );
+  });
+
+  it('「显示处理过程」紧跟在同步镜像下面，默认关，打开时单独提交 showProgress', async () => {
+    await renderFramed();
+    const rows = [...container.querySelectorAll('[data-enso^="secretary-contact-"]')].map((node) =>
+      node.getAttribute('data-enso')
+    );
+    const mirrorAt = rows.indexOf('secretary-contact-mirror');
+    expect(mirrorAt).toBeGreaterThanOrEqual(0);
+    expect(rows[mirrorAt + 1]).toBe('secretary-contact-progress');
+    const row = container.querySelector('[data-enso="secretary-contact-progress"]') as HTMLElement;
+    expect(row.textContent).toContain('Show progress');
+    expect(row.textContent).toContain('typing indicator');
+    const toggle = row.querySelector('[role="switch"]') as HTMLElement;
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle.click());
+    expect(contactSettings).toHaveBeenCalledWith(
+      { channelId: 'telegram', prefs: { showProgress: true } },
       undefined
     );
   });

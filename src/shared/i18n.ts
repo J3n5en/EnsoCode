@@ -29,6 +29,9 @@ export const zhTranslations: Record<string, string> = {
   'Mirror every reply': '同步镜像',
   'Off by default. Every reply in the secretary conversation is sent here, not just milestones.':
     '默认关闭。秘书会话里每一轮回复都发到这里，不只是里程碑。',
+  'Show progress': '显示处理过程',
+  'Off by default. When on, this channel shows the typing indicator, a "Working…" placeholder and tool steps while the secretary works, and the placeholder is replaced in place when the reply is ready. When off, only the final reply is sent and the typing indicator is hidden.':
+    '默认关闭。开启后处理期间会显示「正在输入」状态、处理中占位和工具步骤进度，回复就绪时原位替换；关闭后只发最终回复，并隐藏「正在输入」状态。',
   'Allow viewing memory titles': '允许查看记忆标题',
   'No buttons: questions and cards arrive as numbered text.':
     '没有按钮：提问和确认卡会变成编号文本。',

@@ -171,6 +171,8 @@ export interface TelegramApi {
     messageId: number;
     replyMarkup: TelegramInlineKeyboard;
   }): Promise<void>;
+  /** 删掉自己发的一条（处理中占位）：静默或中止的回合不留卡住的「⏳」 */
+  deleteMessage(params: { chatId: number; messageId: number }): Promise<void>;
   /** 命令菜单：只登记当前可用的命令 */
   setMyCommands(
     commands: { command: string; description: string }[],
@@ -367,6 +369,12 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         chat_id: chatId,
         message_id: messageId,
         reply_markup: replyMarkup,
+      });
+    },
+    deleteMessage: async ({ chatId, messageId }) => {
+      await request<boolean>(base, token, 'deleteMessage', {
+        chat_id: chatId,
+        message_id: messageId,
       });
     },
     setMyCommands: async (commands, options) => {

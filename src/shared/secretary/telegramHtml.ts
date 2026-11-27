@@ -21,19 +21,71 @@ export function escapeHtml(text: string): string {
   return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
 }
 
-/** 行内标记：先整体转义，再换标记，标记本身不含会被转义的字符 */
+/** Telegram 只接受这几种 href，其余（file://、conversation://…）发过去整条 400 */
+const TELEGRAM_HREF = /^(?:https?:\/\/|tg:\/\/|mailto:)/iu;
+/** 占位槽的分隔符；用户输入里的 NUL 先剔掉，不会撞槽 */
+const NUL = String.fromCharCode(0);
+const SLOT = new RegExp(`${NUL}(\\d+)${NUL}`, 'gu');
+const TAG = /<(\/?)([a-z][a-z0-9-]*)[^>]*>/giu;
+
+/** 片段里的标签是否成对且正确嵌套 */
+function balanced(html: string): boolean {
+  const stack: string[] = [];
+  for (const match of html.matchAll(TAG)) {
+    const name = match[2] ?? '';
+    if (match[1]) {
+      if (stack.pop() !== name) return false;
+    } else {
+      stack.push(name);
+    }
+  }
+  return stack.length === 0;
+}
+
+/**
+ * 行内标记：代码和链接先整体换成占位槽（内容不再参与后续替换），
+ * 其余文本整体转义后再换粗体/删除线/斜体，最后把槽填回去。
+ */
 function inline(text: string): string {
-  let out = escapeHtml(text);
-  out = out.replace(/`([^`\n]+)`/gu, (_m, code: string) => `<code>${code}</code>`);
-  out = out.replace(
-    /\[([^\]\n]+)\]\(([^)\s]+)\)/gu,
-    (_m, label: string, url: string) => `<a href="${url.replace(/"/gu, '&quot;')}">${label}</a>`
+  const slots: string[] = [];
+  const slot = (html: string) => {
+    slots.push(html);
+    return `${NUL}${slots.length - 1}${NUL}`;
+  };
+  const restore = (html: string): string => {
+    let out = html;
+    // 槽最多嵌两层（链接文字里的行内代码）；兜底剔掉残留 NUL，避免死循环
+    for (let depth = 0; depth < 4 && out.includes(NUL); depth += 1) {
+      out = out.replace(SLOT, (_m, index: string) => slots[Number(index)] ?? '');
+    }
+    return out.split(NUL).join('');
+  };
+  let out = text.split(NUL).join('');
+  out = out.replace(/`([^`\n]+)`/gu, (_m, code: string) =>
+    slot(`<code>${escapeHtml(code)}</code>`)
   );
-  out = out.replace(/\*\*([^*\n]+)\*\*/gu, '<b>$1</b>');
-  out = out.replace(/~~([^~\n]+)~~/gu, '<s>$1</s>');
-  out = out.replace(/\*([^*\n]+)\*/gu, '<i>$1</i>');
-  out = out.replace(/(^|[\s(（【])_([^_\n]+)_(?=[\s).,，。!?！？]|$)/gu, '$1<i>$2</i>');
-  return out;
+  out = escapeHtml(out);
+  out = out.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/gu, (_m, label: string, url: string) => {
+    if (TELEGRAM_HREF.test(url)) {
+      return slot(`<a href="${url.replace(/"/gu, '&quot;')}">${restore(label)}</a>`);
+    }
+    if (/^file:\/\//iu.test(url)) {
+      return slot(`<code>${restore(label).replace(/<\/?code>/gu, '')}</code>`);
+    }
+    return label;
+  });
+  // 每一步只包住本身成对的片段，保证结果始终是合法嵌套
+  // pattern 固定两组：(前导)(正文)
+  const wrap = (pattern: RegExp, tag: string) => {
+    out = out.replace(pattern, (match: string, lead: string, body: string) =>
+      balanced(body) ? `${lead}<${tag}>${body}</${tag}>` : match
+    );
+  };
+  wrap(/()\*\*([^*\n]+)\*\*/gu, 'b');
+  wrap(/()~~([^~\n]+)~~/gu, 's');
+  wrap(/()\*([^*\n]+)\*/gu, 'i');
+  wrap(/(^|[\s(（【])_([^_\n]+)_(?=[\s).,，。!?！？]|$)/gu, 'i');
+  return restore(out);
 }
 
 /** 表格按列宽对齐成等宽文本：Telegram 没有表格，但对齐后照样读得懂 */
@@ -93,7 +145,8 @@ export function markdownToTelegramBlocks(markdown: string): TelegramBlock[] {
     }
     const heading = /^\s{0,3}#{1,6}\s+(.*)$/u.exec(line);
     if (heading) {
-      blocks.push({ html: `<b>${inline(heading[1] ?? '')}</b>`, pre: false });
+      const title = inline(heading[1] ?? '').replace(/<\/?b>/gu, '');
+      blocks.push({ html: `<b>${title}</b>`, pre: false });
       index += 1;
       continue;
     }
@@ -131,20 +184,88 @@ export function markdownToTelegramBlocks(markdown: string): TelegramBlock[] {
   return blocks;
 }
 
-/** 在空格或换行处切，别切在标签中间 */
+interface OpenTag {
+  name: string;
+  text: string;
+}
+
+const closeTags = (stack: OpenTag[]) =>
+  stack
+    .slice()
+    .reverse()
+    .map((tag) => `</${tag.name}>`)
+    .join('');
+const reopenTags = (stack: OpenTag[]) => stack.map((tag) => tag.text).join('');
+
+/**
+ * 超长单段硬切：按「标签 / 实体 / 单个字符」切词，绝不切在标签或实体中间；
+ * 切点处仍开着的标签在本段末尾补闭合，下一段开头原样重开，每段都是合法 HTML。
+ * 优先切在空白处。
+ */
 function hardSplit(text: string, limit: number): string[] {
+  const tokens = text.match(/<[^>]*>|&#?[a-z0-9]+;|[\s\S]/giu) ?? [];
   const pieces: string[] = [];
-  let rest = text;
-  while (rest.length > limit) {
-    let cut = rest.lastIndexOf(' ', limit);
-    if (cut < limit / 2) cut = rest.lastIndexOf('\n', limit);
-    if (cut < limit / 2) cut = limit;
-    const open = rest.lastIndexOf('<', cut);
-    if (open !== -1 && rest.indexOf('>', open) > cut) cut = open;
-    pieces.push(rest.slice(0, cut).trimEnd());
-    rest = rest.slice(cut).trimStart();
+  let stack: OpenTag[] = [];
+  let current = '';
+  let contentStart = 0;
+  let closeCost = 0;
+  let lastBreak: { pos: number; next: number; stack: OpenTag[] } | null = null;
+
+  const start = (nextStack: OpenTag[]) => {
+    stack = nextStack;
+    current = reopenTags(stack);
+    contentStart = current.length;
+    closeCost = closeTags(stack).length;
+    lastBreak = null;
+  };
+  const emit = (body: string, openStack: OpenTag[]) => {
+    const trimmed = body.trimEnd();
+    // 只剩标签没有正文的段不发
+    if (!trimmed.replace(/<[^>]*>/gu, '').trim()) return;
+    pieces.push(`${trimmed}${closeTags(openStack)}`);
+  };
+
+  start([]);
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index] ?? '';
+    // 段首不留空白
+    if (current.length === contentStart && /^\s$/u.test(token)) {
+      index += 1;
+      continue;
+    }
+    const tag = /^<(\/?)([a-z][a-z0-9-]*)[^>]*>$/iu.exec(token);
+    const closing = tag?.[1] === '/';
+    const extra = tag && !closing ? `</${tag[2]}>`.length : 0;
+    const fits = current.length + token.length + closeCost + extra <= limit;
+    if (!closing && !fits && current.length > contentStart) {
+      const cut: { pos: number; next: number; stack: OpenTag[] } | null = lastBreak;
+      if (cut && cut.pos - contentStart >= (limit - contentStart) / 2) {
+        emit(current.slice(0, cut.pos), cut.stack);
+        index = cut.next;
+        start(cut.stack);
+      } else {
+        emit(current, stack);
+        start(stack.slice());
+      }
+      continue;
+    }
+    if (tag && closing) {
+      const top = stack[stack.length - 1];
+      if (top && top.name === tag[2]) {
+        stack = stack.slice(0, -1);
+        closeCost -= token.length;
+      }
+    } else if (tag) {
+      stack = [...stack, { name: tag[2] ?? '', text: token }];
+      closeCost += extra;
+    } else if (/^\s$/u.test(token)) {
+      lastBreak = { pos: current.length, next: index + 1, stack };
+    }
+    current += token;
+    index += 1;
   }
-  if (rest) pieces.push(rest);
+  emit(current, stack);
   return pieces;
 }
 

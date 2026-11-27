@@ -810,6 +810,20 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     }
   }
 
+  async deleteMessage(peerId: string, messageId: string): Promise<ChannelResult> {
+    const token = this.store.token();
+    if (!token) return { ok: false, error: 'token-required' };
+    try {
+      await this.apiFor(token).deleteMessage({
+        chatId: Number(peerId),
+        messageId: Number(messageId),
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: telegramErrorCode(error) };
+    }
+  }
+
   sendImage(peerId: string, image: ChannelImage, topicId?: string): Promise<ChannelSend> {
     return this.upload(peerId, 'photo', image, topicId);
   }

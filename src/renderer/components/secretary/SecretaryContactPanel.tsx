@@ -479,6 +479,16 @@ function ChannelBody({
         onChange={(value) => onPrefs({ syncMirror: value })}
       />
       <PrefRow
+        dataEnso="secretary-contact-progress"
+        label={t('Show progress')}
+        hint={t(
+          'Off by default. When on, this channel shows the typing indicator, a "Working…" placeholder and tool steps while the secretary works, and the placeholder is replaced in place when the reply is ready. When off, only the final reply is sent and the typing indicator is hidden.'
+        )}
+        checked={prefs.showProgress}
+        disabled={busy}
+        onChange={(value) => onPrefs({ showProgress: value })}
+      />
+      <PrefRow
         dataEnso={telegram ? 'secretary-contact-allow-memory' : 'secretary-contact-memory'}
         label={
           telegram ? t('Allow viewing memory titles on Telegram') : t('Allow viewing memory titles')
