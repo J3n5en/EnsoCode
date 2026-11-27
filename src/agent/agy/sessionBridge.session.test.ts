@@ -16,7 +16,7 @@ import {
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApprovalGate } from '../approval';
 import { batchSteering, steerActiveSession } from '../sessionAdapter';
 import { createTodoTool } from '../todo';
@@ -27,10 +27,17 @@ import { setAgySessionOpener } from './runtimeHost';
 import type { AgyHostMcp, AgySession, AgyTurnInput, AgyTurnResult } from './session';
 import { openAgySession } from './session';
 import { attachAgyBridgeToSession } from './sessionBridge';
+import { setAgyWorkerConfig } from './workerConfig';
 
 const cleanups: Array<() => void> = [];
+beforeEach(() => {
+  // 会话由假 opener 提供，但 runtimeHost 仍先解析 agy 二进制：指向一个必然存在的文件，
+  // 免得测试依赖开发机装没装 agy（CI 上没有）
+  setAgyWorkerConfig({ binaryPath: process.execPath, skipPermissions: false, models: [] });
+});
 afterEach(async () => {
   setAgySessionOpener(undefined);
+  setAgyWorkerConfig({ binaryPath: '', skipPermissions: false, models: [] });
   await closeAllAgySessions();
   await closeHostMcp();
   for (const cleanup of cleanups.splice(0)) cleanup();
