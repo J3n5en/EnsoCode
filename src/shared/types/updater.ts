@@ -46,6 +46,11 @@ export type RestartToUpdateResult =
   | { ok: false; reason: 'not-downloaded' | 'busy' }
   | { ok: false; reason: 'error'; error: string };
 
+/** 手动检查更新的结果：渲染层据此提示，不能再只靠被吞掉的副作用 */
+export type UpdateCheckResult =
+  | { ok: true; status: 'up-to-date' | 'available' | 'downloaded' | 'unsupported' }
+  | { ok: false; error: string };
+
 /** 无界面服务端的更新途径：npm 为全局安装可自更新；manual（npx、不可写前缀）只报告新版本 */
 export type ServerUpdateMode = 'npm' | 'manual';
 

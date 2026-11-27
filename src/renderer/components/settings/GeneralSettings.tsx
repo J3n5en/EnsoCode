@@ -1,7 +1,12 @@
 import { CA_CERT_EXTENSIONS, type CaCertError, type CaCertStatus } from '@shared/caCert';
 import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { ShellIntegration } from '@shared/shellIntegration';
-import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
+import type {
+  ServerUpdateMode,
+  UpdateCheckResult,
+  UpdaterState,
+  UpdateStatus,
+} from '@shared/types/updater';
 import {
   isPrereleaseVersion,
   manualInstallSpec,
@@ -16,6 +21,8 @@ import { restartToUpdate } from '@/components/app/restartToUpdate';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
+import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { heightVariants } from '@/lib/motion';
 import { isRemoteClient } from '@/lib/remoteClient';
@@ -423,6 +430,36 @@ function serverModeText(
   );
 }
 
+function updateCheckToast(
+  result: UpdateCheckResult | undefined,
+  t: ReturnType<typeof useI18n>['t']
+): { type: 'success' | 'info' | 'warning' | 'error'; title: string } | null {
+  if (!result || typeof result !== 'object' || !('ok' in result)) return null;
+  if (!result.ok) {
+    return {
+      type: 'error',
+      title: t('Update check failed: {{error}}', {
+        error: result.error || t('Update check failed'),
+      }),
+    };
+  }
+  switch (result.status) {
+    case 'up-to-date':
+      return { type: 'success', title: t('You are up to date') };
+    case 'available':
+      return { type: 'info', title: t('A new version is available') };
+    case 'downloaded':
+      return { type: 'success', title: t('Update downloaded. Restart to install.') };
+    case 'unsupported':
+      return {
+        type: 'warning',
+        title: t('Automatic updates are not supported on this platform'),
+      };
+    default:
+      return null;
+  }
+}
+
 /** 打包时由 vite 注入的 app 版本(见 electron.vite.config.ts define);dev 下取 package.json */
 const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'dev';
 
@@ -441,6 +478,7 @@ function UpdateSection() {
   const [host, setHost] = React.useState<UpdaterState | null>(null);
   const [confirmRestart, setConfirmRestart] = React.useState(false);
   const [notesOpen, setNotesOpen] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
 
   React.useEffect(() => {
     let alive = true;
@@ -520,6 +558,26 @@ function UpdateSection() {
   const text = statusText();
   const busy = status?.status === 'checking' || status?.status === 'downloading';
 
+  const runCheck = async () => {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const result = await window.electronAPI.updater.checkForUpdates();
+      const toast = updateCheckToast(result, t);
+      if (toast) addToast(toast);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      addToast({
+        type: 'error',
+        title: t('Update check failed: {{error}}', {
+          error: message || t('Update check failed'),
+        }),
+      });
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const autoRestartRow = (
     <SettingsSubRow
       rowId="general.restart-automatically-to-apply-updates"
@@ -597,11 +655,9 @@ function UpdateSection() {
             {t('Download update')}
           </SettingsButton>
         ) : (
-          <SettingsButton
-            disabled={busy}
-            onClick={() => void window.electronAPI.updater.checkForUpdates()}
-          >
-            {t('Check for updates')}
+          <SettingsButton disabled={busy || checking} onClick={() => void runCheck()}>
+            {checking ? <Spinner className="size-3.5" /> : null}
+            {checking ? t('Checking…') : t('Check for updates')}
           </SettingsButton>
         )}
         <ReleaseNotesDialog
