@@ -301,7 +301,7 @@ import {
   runWithPrivacySink,
 } from './privacyMask/runtime';
 import { createProjectSettingsManager } from './projectCode';
-import { projectMessage } from './projection';
+import { projectMessage, projectTodos } from './projection';
 import { promptCatalogExtension } from './promptCatalog';
 import { applyWorkerProxyEnv, runWithProviderProxy } from './proxyEnv';
 import { withReadTruncationMeta } from './readTruncation';
@@ -5268,6 +5268,8 @@ export class SessionSupervisor {
           managed.toolDurations.set(event.toolCallId, Date.now() - start);
         }
         // toolResult 消息可能晚到（agy / Cursor 整段回复结束才落盘、pi 并行工具按源序补发）：先告诉界面它已收口
+        // todo 的清单同 toolResult 投影一样取自 result.details，清单行与固定待办条不必等落盘
+        const todos = event.toolName === 'todo' ? projectTodos(event.result?.details) : null;
         this.options.emit({
           type: 'tool-output',
           identity: managed.identity,
@@ -5275,6 +5277,7 @@ export class SessionSupervisor {
           toolCallId: event.toolCallId,
           output: toolResultText(event.result),
           ended: event.isError === true || event.result?.isError === true ? 'error' : 'ok',
+          ...(todos ? { todos } : {}),
         });
         return;
       }

@@ -1262,6 +1262,64 @@ describe('applyAgentEvent tool-output', () => {
     });
     expect(failed.toolEnded).toEqual({});
   });
+
+  it('收口事件带的 todo 清单记进 toolTodos，生命周期同 toolEnded（toolResult / 轮次收口 / 快照即清）', () => {
+    const todos = [
+      { content: 'a', status: 'in_progress' as const },
+      { content: 'b', status: 'pending' as const },
+    ];
+    const plain = applyAgentEvent(base, 's1', {
+      ...toolOutput(1, 'x'),
+      ended: 'ok',
+    } as RendererAgentEvent);
+    expect(plain.toolTodos ?? {}).toEqual({});
+    const ended = applyAgentEvent(base, 's1', {
+      ...toolOutput(1, 'Todos (0/2 done)'),
+      ended: 'ok',
+      todos,
+    } as RendererAgentEvent);
+    expect(ended.toolTodos).toEqual({ t1: todos });
+    // 过期 seq 不生效
+    expect(
+      applyAgentEvent(ended, 's1', {
+        ...toolOutput(1, 'x'),
+        ended: 'ok',
+        todos: [],
+      } as RendererAgentEvent).toolTodos
+    ).toEqual({ t1: todos });
+    const settled = applyAgentEvent(ended, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 2,
+      index: 0,
+      message: { role: 'toolResult', toolCallId: 't1', toolName: 'todo', todos, content: [] },
+    });
+    expect(settled.toolTodos).toEqual({});
+    const completed = applyAgentEvent(ended, 's1', {
+      type: 'turn-completed',
+      identity: identity(),
+      seq: 2,
+      turnId: 'turn-1',
+    });
+    expect(completed.toolTodos).toEqual({});
+    const failed = applyAgentEvent(ended, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 2,
+      turnId: 'turn-1',
+      error: 'boom',
+    });
+    expect(failed.toolTodos).toEqual({});
+    const interrupted = applyAgentEvent(ended, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 2,
+      turnId: 'turn-1',
+      error: 'boom',
+      interrupted: { at: 1, kind: 'quit' },
+    } as RendererAgentEvent);
+    expect(interrupted.toolTodos).toEqual({});
+  });
 });
 
 describe('lastOutputAt stall heartbeat', () => {
@@ -1779,6 +1837,35 @@ describe('snapshot running clocks', () => {
     expect(restored.lastOutputAt).toBe(2_000);
     expect(restore(running, { status: 'idle' }).toolOutputs).toEqual({});
     expect(restore(running, { identity: identity('g2') }).toolOutputs).toEqual({});
+  });
+
+  it('同轮快照只清掉已落 toolResult 的 todo 清单，idle 或新代快照全清', () => {
+    const todos = [{ content: 'a', status: 'pending' as const }];
+    const calls: SessionProjection['messages'][number] = {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'c1', name: 'todo' },
+        { type: 'toolCall', id: 'c2', name: 'todo' },
+      ],
+    };
+    const running: SessionProjection = {
+      ...base,
+      generation: 'g1',
+      status: 'running',
+      runStartedAt: 1_000,
+      messages: [calls],
+      toolOutputs: {},
+      toolTodos: { c1: todos, c2: todos },
+    };
+    const restored = restore(running, {
+      messages: [
+        calls,
+        { role: 'toolResult', toolCallId: 'c1', toolName: 'todo', todos, content: [] },
+      ],
+    });
+    expect(restored.toolTodos).toEqual({ c2: todos });
+    expect(restore(running, { status: 'idle' }).toolTodos).toEqual({});
+    expect(restore(running, { identity: identity('g2') }).toolTodos).toEqual({});
   });
 
   it('messages-truncated 按绝对 length 减去 historyBaseIndex 裁局部窗口', () => {

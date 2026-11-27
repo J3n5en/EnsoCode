@@ -1,5 +1,5 @@
 import { secretaryAvatarUrl } from '@shared/localImage';
-import type { AgentSessionCustomEntry, ProjectedMessage } from '@shared/types/agent';
+import type { AgentSessionCustomEntry, ProjectedMessage, TodoItem } from '@shared/types/agent';
 import {
   type RefObject,
   useCallback,
@@ -118,6 +118,7 @@ export function ChatSessionTimeline({
     (state) => state.conversations[conversationId]?.toolStartedAt
   );
   const toolEnded = useSessionsStore((state) => state.conversations[conversationId]?.toolEnded);
+  const toolTodos = useSessionsStore((state) => state.conversations[conversationId]?.toolTodos);
   const pendingApprovals = useSessionsStore(
     (state) => state.conversations[conversationId]?.pendingApprovals
   );
@@ -153,6 +154,7 @@ export function ChatSessionTimeline({
     conversationId: string;
     items: TimelineItem[];
     toolEnded?: Record<string, 'ok' | 'error'>;
+    toolTodos?: Record<string, TodoItem[]>;
   }>({
     conversationId: '',
     items: [],
@@ -163,7 +165,7 @@ export function ChatSessionTimeline({
     }
     // 正文还在流时工具收口了（agy 的工具与正文同在一条流式 assistant 里）：只补正文会漏掉卡片转完成
     const patched =
-      cache.current.toolEnded === toolEnded
+      cache.current.toolEnded === toolEnded && cache.current.toolTodos === toolTodos
         ? patchStreamingTimeline(cache.current.items, messages, running, historyBaseIndex)
         : null;
     const items =
@@ -175,6 +177,7 @@ export function ChatSessionTimeline({
         historyBaseIndex,
         toolOutputs,
         toolEnded,
+        toolTodos,
         toolStartedAt,
         pendingApprovals,
         secretarySession,
@@ -182,6 +185,7 @@ export function ChatSessionTimeline({
       });
     cache.current.items = items;
     cache.current.toolEnded = toolEnded;
+    cache.current.toolTodos = toolTodos;
     return items;
   }, [
     compaction,
@@ -199,6 +203,7 @@ export function ChatSessionTimeline({
     toolEnded,
     toolOutputs,
     toolStartedAt,
+    toolTodos,
   ]);
   useOpenChangesOnEdit(timeline, peek ? undefined : conversationId);
 

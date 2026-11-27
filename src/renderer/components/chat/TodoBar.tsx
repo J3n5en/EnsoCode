@@ -65,9 +65,10 @@ export function TodoBar({ conversationId }: { conversationId: string }) {
   const { t } = useI18n();
   const enabled = useSettingsStore((s) => s.pinUnfinishedTodos);
   const messages = useSessionsStore((s) => s.conversations[conversationId]?.messages);
+  const toolTodos = useSessionsStore((s) => s.conversations[conversationId]?.toolTodos);
   const list = useMemo(
-    () => (enabled && messages ? latestUnfinishedTodos(messages) : null),
-    [enabled, messages]
+    () => (enabled && messages ? latestUnfinishedTodos(messages, toolTodos) : null),
+    [enabled, messages, toolTodos]
   );
   const [expanded, setExpanded] = useState(false);
   const [, setHiddenVersion] = useState(0);

@@ -941,7 +941,8 @@ function buildMessageTimeline(
   secretarySession = false,
   /** 被判定为「退出导致」的模型错误原文：这是应用退出，不是模型出错，不渲染成红行 */
   suppressedError?: string,
-  toolEnded?: Record<string, 'ok' | 'error'>
+  toolEnded?: Record<string, 'ok' | 'error'>,
+  toolTodos?: Record<string, TodoItem[]>
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -1353,7 +1354,8 @@ function buildMessageTimeline(
                   extractHashlineDiff(part.name, result?.editDiff)),
             writeContent: extractWriteContent(part.name, part.arguments),
             fileChanges: result?.fileChanges ?? null,
-            todos: result?.todos ?? null,
+            // toolResult 未落地时用收口事件带来的清单（agy 轮末才落盘）
+            todos: result ? result.todos : (toolTodos?.[part.id] ?? null),
             durationMs: result?.durationMs ?? null,
             agentMeta: result?.agentMeta ?? null,
             ...(result?.rtk ? { rtk: result.rtk } : {}),
@@ -1677,6 +1679,8 @@ export function buildTimeline(
     toolOutputs?: Record<string, string>;
     /** 已收口但 toolResult 未落地的工具结果（toolCallId → ok / error） */
     toolEnded?: Record<string, 'ok' | 'error'>;
+    /** 已收口但 toolResult 未落地的 todo 清单（toolCallId → 清单） */
+    toolTodos?: Record<string, TodoItem[]>;
     pendingApprovals?: readonly ApprovalRequestInfo[];
     toolStartedAt?: Record<string, number>;
     /** 按时间插入的分隔线，at 升序 */
@@ -1714,7 +1718,8 @@ export function buildTimeline(
     batchLabels,
     options?.secretarySession === true,
     options?.interrupted?.suppressedError,
-    options?.toolEnded
+    options?.toolEnded,
+    options?.toolTodos
   );
   const hostWrapUps = hostTaskWrapUpIndexes(messages, rowEntries, historyBaseIndex);
   const messageItems =

@@ -456,6 +456,56 @@ it('runs an Enso tool agy calls over Host MCP as one Enso card, persisted with i
   await vi.waitFor(() => expect(revoked).toBe(true));
 });
 
+it('ends the Host-MCP todo with its details mid-turn; the persisted toolResult keeps them after the turn', async () => {
+  const todos = [
+    { content: 'write tests', status: 'in_progress' },
+    { content: 'ship', status: 'pending' },
+  ];
+  const seen: Array<{ type: string; toolName?: unknown; result?: { details?: unknown } }> = [];
+  let midTurn: typeof seen = [];
+  setAgySessionOpener(async (options) => {
+    const hostMcp = options.hostMcp;
+    if (!hostMcp) throw new Error('no host MCP offered');
+    const grant = await hostMcp.issue();
+    return {
+      ...fakeAgy(async (input) => {
+        const client = await mcpClient(grant.server);
+        await client.callTool({ name: 'todo', arguments: { todos } });
+        await client.close();
+        // 本轮 assistant 还没收尾（toolResult 未落盘）时看到的事件
+        midTurn = [...seen];
+        input.onEvent?.({ type: 'text', delta: 'Listed.' });
+        return result('Listed.');
+      }),
+      ensoTools: hostMcp.tools,
+      close: async () => grant.revoke(),
+    };
+  });
+  const { session, manager } = await setup('enso-mcp-todo', { tools: [createTodoTool()] });
+  session.subscribe((event) => {
+    seen.push(event as unknown as (typeof seen)[number]);
+  });
+  await session.prompt('list it');
+  await session.waitForIdle();
+
+  const end = midTurn.find((event) => event.type === 'tool_execution_end');
+  expect(end).toMatchObject({ toolName: 'todo', result: { details: { todos } } });
+  expect(
+    midTurn.some(
+      (event) =>
+        event.type === 'message_end' &&
+        (event as { message?: { role?: string } }).message?.role === 'toolResult'
+    )
+  ).toBe(false);
+  const file = manager.getSessionFile();
+  if (!file) throw new Error('no session file');
+  const rows = persisted(file) as Array<Row & { toolName?: string; details?: unknown }>;
+  expect(rows.find((row) => row.role === 'toolResult')).toMatchObject({
+    toolName: 'todo',
+    details: { todos },
+  });
+});
+
 it('reaches a lazy plugin tool through enso_tool_search and enso_tool_call, shown as the real tool', async () => {
   noteCalls.length = 0;
   const outputs: Record<string, unknown> = {};
