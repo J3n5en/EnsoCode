@@ -30,6 +30,15 @@ pnpm typecheck && pnpm lint && pnpm test:changed
 
 一个可独立描述的修复、功能或重构使用一个独立提交，不把无关改动混在一起。
 
+## PR 截图上传标准做法
+
+PR 里需要贴截图时，用 gh CLI 真实上传，禁止本地路径、禁止浏览器控制上传、禁止推图床分支：
+
+- `gh pr edit <n> --body-file body.md --attach './x.png#alt文本'`（`--attach` 可重复，最多 50 个；`gh pr comment` 同样支持 `--attach`）
+- body 里写 `![alt](./x.png)` 相对路径引用，gh 上传后自动重写为 `https://github.com/user-attachments/assets/{uuid}` 公开匿名可访问的 URL
+- 要求 gh CLI v2.99.0+
+- uploads.github.com 对 GitHub 服务端故障极敏感：故障窗口内会持续 500/502 `Error creating/updating policy`——遇到这个不要怀疑方法错了、不要改用浏览器，等故障恢复同一条命令就能成功
+
 ## 关键边界
 
 - 新增 IPC 必须同步修改通道常量、Main handler 注册和 preload typed 出口。
