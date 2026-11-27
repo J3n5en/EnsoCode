@@ -83,6 +83,11 @@
   padding-inline: 0.625rem;
   background: transparent;
 }
+/* 固定的 tab 右侧为常显的 pin overlay 预留位置（此文件的规则是无层 CSS，
+   会压过 Tailwind 分层 utility，预留得写在这里而不是 className 上） */
+[data-title-row] .enso-side-dock [data-side-tab][data-pinned] {
+  padding-right: 1.75rem;
+}
 [data-title-row] .enso-side-dock [data-side-tab]:hover {
   background: color-mix(in oklab, var(--color-foreground) 5%, transparent);
 }
