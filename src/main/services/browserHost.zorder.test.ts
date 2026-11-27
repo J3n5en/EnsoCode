@@ -202,3 +202,14 @@ it('隐藏时截过图，再以相同矩形显示也要重新对齐', async () =
   host.setViewport('tab-a', 'conv', { ...viewport, x: 1 });
   expect(bounced()).toBe(false);
 });
+
+// Windows 上 setVisible(false) 之后视图仍可能参与命中测试：被设置页等渲染层盖住时
+// guest 必须交出尺寸，否则那块区域会一直吃点击
+it('不再显示时 guest 尺寸归零，不给隐藏视图留下吃点击的区域', async () => {
+  const { host } = await setup();
+  expect(mock.bounds.at(-1)).toEqual({ width: viewport.width, height: viewport.height });
+  host.setViewport('tab-a', 'conv', null);
+  expect(mock.bounds.at(-1)).toEqual({ width: 0, height: 0 });
+  host.setViewport('tab-a', 'conv', viewport);
+  expect(mock.bounds.at(-1)).toEqual({ width: viewport.width, height: viewport.height });
+});
