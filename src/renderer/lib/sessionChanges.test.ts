@@ -220,6 +220,110 @@ describe('aggregateSessionChanges', () => {
     });
   });
 
+  it('新建文件的截断预览不挡完整差异：基线本就是空，当前全文可直接当新文本', () => {
+    const result = aggregateSessionChanges({
+      tools: [
+        {
+          path: 'big-new.ts',
+          edits: null,
+          writeContent: null,
+          fileChange: {
+            path: 'big-new.ts',
+            oldText: '',
+            newText: 'partial…',
+            type: 'add',
+            truncated: true,
+          },
+        },
+      ],
+      snapshots: {},
+      currentByPath: { 'big-new.ts': 'full new text' },
+    });
+    expect(result).toEqual({
+      files: [{ path: 'big-new.ts', oldText: '', newText: 'full new text' }],
+      snapshots: { 'big-new.ts': '' },
+    });
+  });
+
+  it('旧版本留下的 null 标记在该路径其实是新建文件时按空基线恢复', () => {
+    const result = aggregateSessionChanges({
+      tools: [
+        {
+          path: 'big-new.ts',
+          edits: null,
+          writeContent: null,
+          fileChange: {
+            path: 'big-new.ts',
+            oldText: '',
+            newText: 'partial…',
+            type: 'add',
+            truncated: true,
+          },
+        },
+      ],
+      snapshots: { 'big-new.ts': null },
+      currentByPath: { 'big-new.ts': 'full new text' },
+    });
+    expect(result).toEqual({
+      files: [{ path: 'big-new.ts', oldText: '', newText: 'full new text' }],
+      snapshots: { 'big-new.ts': '' },
+    });
+  });
+
+  it('新建文件但当前全文读不到时仍报不完整，不凭空造 diff', () => {
+    const result = aggregateSessionChanges({
+      tools: [
+        {
+          path: 'big-new.ts',
+          edits: null,
+          writeContent: null,
+          fileChange: {
+            path: 'big-new.ts',
+            oldText: '',
+            newText: 'partial…',
+            type: 'add',
+            truncated: true,
+          },
+        },
+      ],
+      snapshots: {},
+      currentByPath: {},
+    });
+    expect(result).toEqual({ files: [], snapshots: {}, incompletePaths: ['big-new.ts'] });
+  });
+
+  it('先截断新建后又被改（不再是纯新增）时仍按基线不可知处理', () => {
+    const result = aggregateSessionChanges({
+      tools: [
+        {
+          path: 'big-new.ts',
+          edits: null,
+          writeContent: null,
+          fileChange: {
+            path: 'big-new.ts',
+            oldText: '',
+            newText: 'partial…',
+            type: 'add',
+            truncated: true,
+          },
+        },
+        {
+          path: 'big-new.ts',
+          edits: null,
+          writeContent: null,
+          fileChange: { path: 'big-new.ts', oldText: 'a', newText: 'b', type: 'update' },
+        },
+      ],
+      snapshots: {},
+      currentByPath: { 'big-new.ts': 'current' },
+    });
+    expect(result).toEqual({
+      files: [],
+      snapshots: { 'big-new.ts': null },
+      incompletePaths: ['big-new.ts'],
+    });
+  });
+
   it('首次 truncated 后的完整 fileChange 也不能把中途 oldText 冒充会话初始快照', () => {
     const result = aggregateSessionChanges({
       tools: [
