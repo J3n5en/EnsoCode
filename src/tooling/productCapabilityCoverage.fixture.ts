@@ -1280,6 +1280,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_VIEW_STATE_SET: excluded('Enso 插件侧栏页面状态写入，按插件 id 存在 Main。'),
   EXTENSION_PLUGINS_PICK_PATH: excluded('桌面专用：插件配置项选择文件或目录。'),
   AGY_AUTH_STATUS: excluded('本机 agy 登录探测，只在设置页打开或重新检测时调用。'),
+  AGY_CACHED_MODELS: excluded('本机 agy 模型清单的只读缓存，启动时填 picker，不探测。'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

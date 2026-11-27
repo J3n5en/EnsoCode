@@ -290,6 +290,8 @@ export const IPC_CHANNELS = {
   OAUTH_PROVIDERS_LIST: 'oauth-providers:list',
   /** 只在设置页打开、重新检测，或会话收到 -32000 时调用。不要在窗口聚焦时探测。 */
   AGY_AUTH_STATUS: 'agy:authStatus',
+  /** Main 当前提供的 agy 模型（含上次登录探测落盘的清单）。只读缓存，不探测。 */
+  AGY_CACHED_MODELS: 'agy:cachedModels',
   OAUTH_LOGIN: 'oauth-providers:login',
   OAUTH_LOGIN_RESPOND: 'oauth-providers:login-respond',
   OAUTH_LOGIN_CANCEL: 'oauth-providers:login-cancel',

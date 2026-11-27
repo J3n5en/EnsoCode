@@ -1,20 +1,53 @@
 import { existsSync } from 'node:fs';
 import os from 'node:os';
+import { join } from 'node:path';
+import { app } from '@platform';
+import { offeredAgyModels, parseAgyModels } from '@shared/agy/catalog';
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
 import type { AgyAuthStatus, AgyModelOption } from '@shared/agy/types';
 import { version } from '../../../package.json';
 import { agyChildEnv, agyCommandArgs, agyOnPath, resolveAgyBinary } from '../../agent/agy/launch';
 import { probeAgyAuth } from '../../agent/agy/probe';
+import { readJson, writeJsonAtomic } from './bots/files';
+
+/** 上次登录态探测拿到的模型清单；与登录状态分开存，重启后状态未知也能先列出模型。 */
+const MODELS_CACHE_NAME = 'agy-models-cache.json';
 
 let cached: AgyAuthStatus = { status: 'unknown' };
 let inflight: Promise<AgyAuthStatus> | undefined;
+let persisted: AgyModelOption[] | undefined;
+
+function modelsCachePath(): string {
+  return join(app.getPath('userData'), MODELS_CACHE_NAME);
+}
+
+/** 首次取用时读盘（Main 启动后第一次推 worker / 列 provider 时）；缺文件、坏文件当空清单。 */
+function persistedModels(): AgyModelOption[] {
+  if (persisted === undefined) {
+    const raw = readJson(modelsCachePath());
+    const row = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : undefined;
+    persisted = parseAgyModels((row as { models?: unknown } | undefined)?.models);
+  }
+  return persisted;
+}
+
+/** 只在登录态探测后调用：每次都重写。未登录 / 未安装不碰文件，存量会话仍可能引用这些模型。 */
+function persistModels(models: AgyModelOption[]): void {
+  persisted = models;
+  try {
+    writeJsonAtomic(modelsCachePath(), { models });
+  } catch {
+    // 缓存是派生数据；写失败只影响下次启动前的清单
+  }
+}
 
 export function cachedAgyAuth(): AgyAuthStatus {
   return cached;
 }
 
+/** 不探测：登录态用实时清单，状态未知用落盘清单，明确不可用时为空。 */
 export function cachedAgyModels(): AgyModelOption[] {
-  return cached.status === 'signed-in' ? cached.models : [];
+  return offeredAgyModels(cached, persistedModels());
 }
 
 /**
@@ -47,6 +80,7 @@ async function run(binaryPath: string): Promise<AgyAuthStatus> {
     env: agyChildEnv(process.env),
     clientVersion: version,
   });
+  if (cached.status === 'signed-in') persistModels(cached.models);
   return cached;
 }
 

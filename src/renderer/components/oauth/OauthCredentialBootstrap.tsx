@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { bootstrapAgyModels } from '@/stores/agyAuth';
 import { bootstrapModelDirectory, useModelDirectoryStore } from '@/stores/modelDirectory';
 import {
   beginOauthCredentialRefresh,
@@ -25,6 +26,8 @@ export function OauthCredentialBootstrap() {
   React.useEffect(() => {
     void refreshOauthCredentialState();
     bootstrapModelDirectory();
+    // agy 模型只读 Main 缓存，不探测
+    bootstrapAgyModels();
     // 目录冷启动期间默认模型重验会 defer（不写回）；分区到达后补一次重验闭环
     let lastRevision = useModelDirectoryStore.getState().snapshot?.revision;
     const unsubscribeDirectory = useModelDirectoryStore.subscribe((state) => {

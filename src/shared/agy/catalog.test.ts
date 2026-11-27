@@ -4,7 +4,9 @@ import {
   modelsFromSessionResult,
   modelToSet,
   nearestThinking,
+  offeredAgyModels,
   parseAgyAuthStatus,
+  parseAgyModels,
 } from './catalog';
 
 const session = {
@@ -105,5 +107,39 @@ describe('parseAgyAuthStatus', () => {
     ]) {
       expect(parseAgyAuthStatus(bad)).toEqual({ status: 'unknown' });
     }
+  });
+});
+
+describe('parseAgyModels', () => {
+  it('keeps well-formed entries and treats any other shape as an empty list', () => {
+    expect(parseAgyModels([{ id: 'm', name: 'M' }, { id: 'n' }, { id: '' }, 3, null])).toEqual([
+      { id: 'm', name: 'M' },
+      { id: 'n', name: 'n' },
+    ]);
+    for (const bad of [null, undefined, 'm', {}, { models: [] }, 7]) {
+      expect(parseAgyModels(bad)).toEqual([]);
+    }
+  });
+});
+
+describe('offeredAgyModels', () => {
+  const persisted = [{ id: 'old', name: 'Old' }];
+
+  it('uses the live list after a signed-in probe', () => {
+    const live = [{ id: 'new', name: 'New' }];
+    expect(
+      offeredAgyModels({ status: 'signed-in', version: '1.5.18', models: live }, persisted)
+    ).toEqual(live);
+  });
+
+  it('falls back to the persisted list while the status is unknown', () => {
+    expect(offeredAgyModels({ status: 'unknown' }, persisted)).toEqual(persisted);
+    expect(offeredAgyModels({ status: 'unknown' }, [])).toEqual([]);
+  });
+
+  it('offers nothing beyond the default once agy is known to be unavailable', () => {
+    expect(offeredAgyModels({ status: 'signed-out', version: '1.5.18' }, persisted)).toEqual([]);
+    expect(offeredAgyModels({ status: 'not-installed' }, persisted)).toEqual([]);
+    expect(offeredAgyModels({ status: 'too-old', version: '1.4.0' }, persisted)).toEqual([]);
   });
 });
