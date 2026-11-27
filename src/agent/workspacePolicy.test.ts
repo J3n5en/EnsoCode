@@ -22,4 +22,18 @@ describe('WORKSPACE_POLICY_PROMPT', () => {
     expect(WORKSPACE_POLICY_PROMPT).not.toMatch(/hidden test/i);
     expect(WORKSPACE_POLICY_PROMPT).not.toMatch(/score|grading|grader|evaluat/i);
   });
+
+  it('包含验证矛盾必须解决的通用措辞', () => {
+    expect(WORKSPACE_POLICY_PROMPT).toMatch(/contradicts your work/);
+    expect(WORKSPACE_POLICY_PROMPT).toMatch(/resolve that contradiction before delivering/);
+    expect(WORKSPACE_POLICY_PROMPT).toMatch(/the same as not verifying at all/);
+  });
+
+  it('包含交付文件精确性纪律的通用措辞', () => {
+    expect(WORKSPACE_POLICY_PROMPT).toMatch(
+      /the file's content is the answer itself, exact and unadorned/
+    );
+    expect(WORKSPACE_POLICY_PROMPT).toMatch(/no report, no commentary/);
+    expect(WORKSPACE_POLICY_PROMPT).toMatch(/the task's literal wording exactly/);
+  });
 });
