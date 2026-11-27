@@ -78,7 +78,7 @@ interface Harness {
       asks: { conversationId: string; requestId: string }[];
       resolved: { conversationId: string; requestId: string }[];
       replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
-      silent: { conversationId: string; updates: number }[];
+      silent: { conversationId: string }[];
       turns: { conversationId: string; kind: 'start' | 'end' }[];
       scheduleFired: { scheduleId: string; text: string }[];
     };
@@ -199,8 +199,8 @@ function harness(
       onTurnEnd: (conversationId) => {
         state.contact.turns.push({ conversationId, kind: 'end' });
       },
-      onTurnSilent: (conversationId, updates) => {
-        state.contact.silent.push({ conversationId, updates });
+      onTurnSilent: (conversationId) => {
+        state.contact.silent.push({ conversationId });
       },
     },
     isSecretaryConversation: (conversationId) =>
@@ -1938,7 +1938,7 @@ describe('投递结算', () => {
     expect(h.state.file.outbox).toEqual([]);
   });
 
-  it('静默回合把这一批回传的条数交给手机，批次照常结算', () => {
+  it('静默回合不打扰手机，批次照常结算', () => {
     const h = harness({
       secretaryIds: ['sec1'],
       file: { ...pending(), inflight: { ...inflight, keys: ['a', 'b', 'c'] } },
@@ -1953,7 +1953,7 @@ describe('投递结算', () => {
       } as unknown as RendererAgentEvent,
       []
     );
-    expect(h.state.contact.silent).toEqual([{ conversationId: 'sec1', updates: 3 }]);
+    expect(h.state.contact.silent).toEqual([{ conversationId: 'sec1' }]);
     expect(h.state.contact.replies).toEqual([]);
     expect(h.state.file.inflight).toBeUndefined();
   });
@@ -2445,7 +2445,7 @@ describe('联系方式转发', () => {
       { conversationId: 'sec-1', text: '在，刚把登录修完' },
     ]);
 
-    // 静默回合不发正文，只把这一批回传的条数交出去
+    // 静默回合不发正文，一条都不推给手机
     h.host.onAgentEvent(
       secretaryEvent('turn-completed', {
         silent: true,
@@ -2454,7 +2454,7 @@ describe('联系方式转发', () => {
       []
     );
     expect(h.state.contact.replies).toHaveLength(1);
-    expect(h.state.contact.silent).toEqual([{ conversationId: 'sec-1', updates: 0 }]);
+    expect(h.state.contact.silent).toEqual([{ conversationId: 'sec-1' }]);
 
     // 不是秘书会话：一个都不发
     h.host.onAgentEvent(

@@ -344,8 +344,8 @@ export function formatSyncMessage(lang: ContactLang, on: boolean): string {
   const zh = lang === 'zh';
   if (on) {
     return zh
-      ? '🔔 已打开同步：秘书会话里每一轮回复都会发到这里，静默回合只发一行摘要。发 /sync off 关掉。'
-      : '🔔 Sync is on: every reply in the secretary conversation comes here, silent turns as a one-line summary. Send /sync off to stop.';
+      ? '🔔 已打开同步：秘书会话里每一轮回复都会发到这里，静默回合不打扰。发 /sync off 关掉。'
+      : '🔔 Sync is on: every reply in the secretary conversation comes here, silent turns stay quiet. Send /sync off to stop.';
   }
   return zh
     ? '🔕 同步已关闭：只发完成、失败、需要你这类里程碑。发 /sync on 打开。'

@@ -3575,8 +3575,8 @@ export const zhTranslations: Record<string, string> = {
   'Off by default. /memory lists titles only, never the memory text.':
     '默认关闭。/memory 只列标题，不显示记忆正文。',
   'Mirroring every conversation to Telegram': '正在把所有对话同步到 Telegram',
-  'Every reply in the secretary conversation is sent to your phone, not just milestones. Silent turns arrive as a one-line summary. Telegram messages are not end-to-end encrypted and stay on Telegram servers. Send /sync off in Telegram to stop.':
-    '秘书会话里每一轮回复都会发到手机，不再只发里程碑；静默回合只发一行摘要。Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。在 Telegram 发 /sync off 可以关掉。',
+  'Every reply in the secretary conversation is sent to your phone, not just milestones. Silent turns stay quiet. Telegram messages are not end-to-end encrypted and stay on Telegram servers. Send /sync off in Telegram to stop.':
+    '秘书会话里每一轮回复都会发到手机，不再只发里程碑；静默回合不打扰。Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。在 Telegram 发 /sync off 可以关掉。',
   'Only milestones go to Telegram. Send /sync in Telegram to mirror every reply; /last replays the latest round.':
     '目前只把里程碑发到 Telegram。在 Telegram 发 /sync 可以把每一轮回复都同步过去；/last 回看最近一轮。',
   'Followed from the phone: {{count}}': '手机关注的 {{count}} 个任务',

@@ -1057,8 +1057,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     // 审批卡不在这里：所有会话（含秘书会话）都由远程审批桥统一发到手机
     if (event.type !== 'turn-completed' || event.aborted) return;
     if (event.silent) {
-      // 静默回合没有正文：把这一批回传的条数交出去，手机上只发一行摘要
-      contact.onTurnSilent(conversationId, inflightUpdateCount(conversationId));
+      // 静默回合就是不打扰：手机上一条都不发，只收掉「正在输入…」等未决状态
+      contact.onTurnSilent(conversationId);
       return;
     }
     const text = event.digest?.assistantText?.trim();
@@ -1070,13 +1070,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       ...(delivery ? { delivery: true } : {}),
       ...(event.turnId ? { turnId: event.turnId } : {}),
     });
-  }
-
-  /** 这一轮正在处理的回传批次有几条：静默摘要用；没有在途批次就是 0 */
-  function inflightUpdateCount(conversationId: string): number {
-    const inflight = ports.file().inflight;
-    if (!inflight || inflight.secretaryConversationId !== conversationId) return 0;
-    return inflight.keys.length;
   }
 
   /**

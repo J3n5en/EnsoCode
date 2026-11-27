@@ -42,7 +42,6 @@ import {
   formatMilestoneMessage,
   formatNeedsAppConfirmLine,
   formatRemoteApprovalMessage,
-  formatSilentTurnLine,
   formatTestMessage,
   parseApprovalCallbackData,
   parseAskCallbackData,
@@ -214,8 +213,8 @@ export interface SecretaryContactPort {
   ): void;
   /** 手机关注中的任务：结果一定要回推，不受 notify 降噪影响 */
   follows?(conversationId: string): boolean;
-  /** 静默回合：/sync 打开时只发一行摘要，正文不发 */
-  onTurnSilent(conversationId: string, updates: number): void;
+  /** 静默回合：语义就是不打扰，什么消息都不发；只收掉「正在输入…」和未决状态 */
+  onTurnSilent(conversationId: string): void;
 }
 
 /** 联系方式服务用到的 Main 侧能力；全部注入，单测里换成假的 */
@@ -1502,21 +1501,11 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
     }
   }
 
-  /** 静默回合：正文是空的，打开镜像的渠道补一行摘要，让手机知道秘书看过 */
-  onTurnSilent(conversationId: string, updates: number): void {
-    // 静默就是不打扰：先收掉「正在输入…」，摘要发完也不再续
+  onTurnSilent(conversationId: string): void {
     this.onTurnEnd(conversationId);
-    // 手机发起的回合一定会回话，静默只可能来自系统回传
-    const fromPhone = this.awaitingReply.delete(conversationId);
+    // 手机发起的回合一定会回话，静默只可能来自系统回传；这里只负责清掉未决状态
+    this.awaitingReply.delete(conversationId);
     this.prunePhoneChain(conversationId);
-    if (fromPhone) return;
-    for (const peer of this.mirrorTargets()) {
-      void this.post(peer, 'sendText', {
-        text: formatSilentTurnLine(this.ports.lang(), updates),
-      }).then((sent) => {
-        this.audit('contact_mirror', sent.ok, sent.ok ? 'silent' : sent.error);
-      });
-    }
   }
 
   /**
