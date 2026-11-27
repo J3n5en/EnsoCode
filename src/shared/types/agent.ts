@@ -1449,6 +1449,8 @@ export type AgentCommand =
       dcgPath?: string;
       /** 用户按规则记忆豁免的 dcg rule_id（仅当前 dcg 版本有效） */
       dcgExemptRules?: string[];
+      /** 额外启用的 dcg pack（如 system.processes）；仅 0.17.2+ 二进制可识别，由 Main 按版本门控下发 */
+      dcgExtraPacks?: string[];
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
       /** 旁路会话：首条 prompt 前缀注入，消费一次 */
@@ -4153,6 +4155,7 @@ const agentCommandParsers = {
         'rtkEnabled',
         'dcgPath',
         'dcgExemptRules',
+        'dcgExtraPacks',
         'remote',
         'rolePrompt',
         'systemPrompt',
@@ -4203,6 +4206,14 @@ const agentCommandParsers = {
           Array.isArray(value.dcgExemptRules) &&
           value.dcgExemptRules.length <= 500 &&
           value.dcgExemptRules.every(isDcgRuleId)
+        )) ||
+      (value.dcgExtraPacks !== undefined &&
+        !(
+          Array.isArray(value.dcgExtraPacks) &&
+          value.dcgExtraPacks.length <= 32 &&
+          value.dcgExtraPacks.every(
+            (entry) => typeof entry === 'string' && /^[a-z][a-z0-9]*(\.[a-z0-9]+)*$/.test(entry)
+          )
         )) ||
       (value.planMode !== undefined && typeof value.planMode !== 'boolean') ||
       (value.windowsLocalShell !== undefined &&

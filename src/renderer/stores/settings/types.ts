@@ -158,6 +158,9 @@ export interface SettingsState {
   /** dcg 命令守卫：命中危险命令强制真人确认；需先安装二进制，新建或冷恢复会话生效。 */
   dcgEnabled: boolean;
 
+  /** dcg system.processes pack：拦截 pkill/killall/kill -1 等批量杀进程命令；需 dcg 0.17.2+，新建或冷恢复会话生效。 */
+  dcgProcessGuard: boolean;
+
   /** 文件编辑工具模式；缺省 apply_patch，新建或冷恢复会话生效。 */
   editMode: EditMode;
 
@@ -435,6 +438,7 @@ export interface SettingsState {
   setOpenLinksInBuiltinBrowser: (value: boolean) => void;
   setProtectedActionsInCode: (value: boolean) => void;
   setDcgEnabled: (value: boolean) => void;
+  setDcgProcessGuard: (value: boolean) => void;
   setMemoryEmbeddingModel: (value: string) => void;
   setMemoryEmbeddingAutoDownload: (value: boolean) => void;
   setMemoryModelIdleMinutes: (value: number) => void;

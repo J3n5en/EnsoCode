@@ -128,6 +128,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   botAssistantModel: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   protectedActionsInCode: { mode: 'excluded', reason: 'device-local safety preference' },
   dcgEnabled: { mode: 'excluded', reason: 'dcg binary is installed on this device' },
+  dcgProcessGuard: { mode: 'excluded', reason: 'dcg binary is installed on this device' },
   autoUpdate: { mode: 'excluded', reason: 'device update policy' },
   autoRestartForUpdate: { mode: 'excluded', reason: 'device update policy' },
   updateChannel: { mode: 'excluded', reason: 'device update policy' },

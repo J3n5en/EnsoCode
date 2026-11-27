@@ -473,6 +473,29 @@ describe.skipIf(process.platform === 'win32')('createDcgGuard', () => {
     ]);
   });
 
+  it('extraPacks 在命令前拼成 --with-packs，缺省不带', async () => {
+    const bin = script('packs', `printf '%s\\n' "$@" > '${argsLog}'\necho '${DENY}'\nexit 1`);
+    await createDcgGuard(bin, undefined, ['system.processes'])('bash', 'pkill node');
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync(argsLog, 'utf8').trim().split('\n')).toEqual([
+      '--robot',
+      'test',
+      '--dialect',
+      'posix',
+      '--with-packs',
+      'system.processes',
+      'pkill node',
+    ]);
+    await createDcgGuard(bin)('bash', 'ls');
+    expect(readFileSync(argsLog, 'utf8').trim().split('\n')).toEqual([
+      '--robot',
+      'test',
+      '--dialect',
+      'posix',
+      'ls',
+    ]);
+  });
+
   it('放行、非命令工具、缺二进制、超时都返回 null', async () => {
     const allow = script('allow', `echo '{"decision":"allow"}'\nexit 0`);
     expect(await createDcgGuard(allow)('bash', 'ls')).toBeNull();

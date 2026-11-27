@@ -1102,6 +1102,13 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
       'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.',
   },
   {
+    id: 'tools.dcgProcessGuard',
+    category: 'tools',
+    title: 'Block mass process kills (system.processes)',
+    description:
+      'Also check commands like pkill, killall and kill -1 that signal processes by pattern. New conversations only. Requires dcg v0.17.2 or later.',
+  },
+  {
     id: 'tools.editMode',
     category: 'tools',
     title: 'File edit mode',

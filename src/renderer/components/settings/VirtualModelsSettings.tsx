@@ -5,11 +5,12 @@ import {
   CLASSIFIER_TIMEOUT_MIN_MS,
   canBeVirtualMember,
   clampClassifierTimeoutMs,
+  moveFallback,
   VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
   type VirtualClassifierConfig,
   type VirtualModelEntry,
 } from '@shared/virtualModels';
-import { Plus, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
@@ -432,6 +433,32 @@ function VirtualModelCard({
           <div className="flex w-[280px] max-w-full flex-col items-stretch gap-1">
             {entry.fallbacks.map((ref, index) => (
               <div key={`${ref.providerId}/${ref.modelId}`} className="flex items-center gap-1">
+                {entry.fallbacks.length > 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('Move up')}
+                      disabled={index === 0}
+                      onClick={() =>
+                        update({ fallbacks: moveFallback(entry.fallbacks, index, -1) })
+                      }
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('Move down')}
+                      disabled={index === entry.fallbacks.length - 1}
+                      onClick={() => update({ fallbacks: moveFallback(entry.fallbacks, index, 1) })}
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                )}
                 <MemberPicker
                   providers={providers}
                   value={ref}
