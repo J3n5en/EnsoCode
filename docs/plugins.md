@@ -122,7 +122,7 @@
 | `ui.openExternal` | 要打开外部链接 | `enso.ui.openExternal` |
 | `session.read` | 要列出会话、读会话状态或得知回合结束 | `enso.session.list` / `enso.session.status` / `enso.session.onTurnEnd`，限本项目 |
 | `session.readAll` | 要看所有项目的会话 | `enso.session.list({ scope: 'all' })`，`enso.session.status` 可查任意项目的会话；涵盖 `session.read` |
-| `session.focus` | 要切换到会话 | `enso.session.focus` |
+| `session.focus` | 要切换到会话 | `enso.session.focus`，限本项目；同时声明 `session.readAll` 时可跳到任意项目与秘书会话 |
 | `session.create` | 要新建会话 | `enso.session.create` |
 | `agent.run` | 要用会话的模型跑只读代理 | `enso.agent.run`，见「只读代理」 |
 | `secretary.contact` | 要做秘书的联系方式渠道（如微信） | `enso.contact.*`，见「秘书联系方式」 |
@@ -249,7 +249,7 @@ export async function activate(enso) {
 | `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null`。再加 `includeSecretary: true` 会纳入在用秘书的主会话，这些项带 `kind: 'secretary'`，`projectName` 是秘书名，没有标题时 `title` 也是秘书名；缺省不含秘书会话 |
 | `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在含秘书会话的全局列表）里，否则 `NOT_FOUND` |
 | `session.onTurnEnd(listener)` | 需要 `session.read` 或 `session.readAll`。主会话一轮结束时回调 `listener({ sessionId })`，返回取消订阅函数，见「回合结束」 |
-| `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
+| `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签），当前在 Bot 模式时先切回 Code 视图。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND`，调用不属于任何会话返回 `NO_SESSION`。同时有 `session.readAll` 时，目标可以是含秘书会话的全局列表里的任意会话，调用也可以不属于任何会话（如不绑会话的全局侧栏页面），目标不在全局列表里返回 `NOT_FOUND`；用户手势照样必需 |
 | `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
 | `host.capabilities()` | 返回 `{ host: 'desktop' \| 'server', hostVersion, notify, mcp, clipboard, openExternal, composer }`，用来在桌面和服务端之间降级 |
 | `agent.run(input)` | 见「只读代理」 |

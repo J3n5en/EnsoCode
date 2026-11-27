@@ -933,6 +933,80 @@ describe('PluginHostGate', () => {
       });
   });
 
+  it('session.focus 带 session.readAll 时，全局面板（无会话）也能跳到别的项目与秘书会话', async () => {
+    const info = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: id,
+      updatedAt: 1,
+      state: 'idle' as const,
+      ...extra,
+    });
+    const listAll = vi.fn((options?: { includeSecretary?: boolean }) => [
+      info('s1', { projectId: 'p1', projectName: 'a' }),
+      info('x9', { projectId: 'p2', projectName: 'b' }),
+      ...(options?.includeSecretary
+        ? [info('sec', { projectId: 'sp', projectName: '小秘', kind: 'secretary' })]
+        : []),
+    ]);
+    const sessionUi = vi.fn(async () => null);
+    deps.sessions = { list: vi.fn(() => [info('s1')]), listAll };
+    deps.sessionUi = sessionUi;
+    const panel = (gesture = true) =>
+      gate.invocations.create({
+        pluginId: 'a.b',
+        sessionId: null,
+        projectRoot: null,
+        gesture,
+        origin: 7,
+      });
+
+    deps.manifest = () => manifest({ permissions: ['session.focus', 'session.readAll'] });
+    gate = new PluginHostGate(deps);
+    for (const target of ['x9', 'sec', 'x9::cw-1']) {
+      await expect(
+        gate.handle('a.b', 'session.focus', { sessionId: target }, panel())
+      ).resolves.toBeNull();
+      expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: target, origin: 7 }, 'focusSession', {
+        sessionId: target,
+      });
+    }
+    // 发起调用属于某个会话时，别的项目照样能跳
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'sec' }, uiCall())
+    ).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: 's1', origin: null }, 'focusSession', {
+      sessionId: 'sec',
+    });
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'ghost' }, panel())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'x9' }, panel(false))
+    ).rejects.toMatchObject({ code: 'GESTURE_REQUIRED' });
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'x9' }, agentCall())
+    ).rejects.toMatchObject({ code: 'GESTURE_REQUIRED' });
+
+    // 只有 readAll、没有 session.focus：照样拒绝
+    deps.manifest = () => manifest({ permissions: ['session.readAll'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'x9' }, panel())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+    // 没有 readAll：无会话报 NO_SESSION，别的项目与秘书会话报 NOT_FOUND
+    deps.manifest = () => manifest({ permissions: ['session.focus'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'x9' }, panel())
+    ).rejects.toMatchObject({ code: 'NO_SESSION' });
+    for (const target of ['x9', 'sec'])
+      await expect(
+        gate.handle('a.b', 'session.focus', { sessionId: target }, uiCall())
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(sessionUi).toHaveBeenCalledTimes(4);
+  });
+
   it('会话状态：本项目凭 session.read，跨项目需 session.readAll', async () => {
     const status = vi.fn((sessionId: string) => ({
       sessionId,

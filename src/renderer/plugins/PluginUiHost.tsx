@@ -5,6 +5,7 @@ import {
   openSidePanelPluginView,
   pruneUndeclaredPluginTabs,
 } from '@/lib/sidePanelDock';
+import { showLocalCodeView } from '@/stores/bots/mode';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
 import { newInterceptBreakers } from './breakers';
@@ -19,9 +20,12 @@ import { pluginStatusRefs, setPluginStatusItems } from './statusItems';
 import { setPluginTriggers } from './triggers';
 import { setPluginViews } from './viewBridge';
 
-const sessionDeps = {
+export const sessionDeps = {
   conversation: (id: string) => useSessionsStore.getState().conversations[id] ?? null,
+  // 与系统通知点击（App onFocusSession）一致：Bot 模式或全局面板里跳转先回本地会话视图，
+  // 跨项目与秘书会话都在会话表里，selectConversation 按 activeId 带出项目与秘书焦点
   focus: (rootId: string, target: string) => {
+    showLocalCodeView();
     const sessions = useSessionsStore.getState();
     sessions.selectConversation(rootId);
     if (target !== rootId) sessions.selectTab(rootId, target);

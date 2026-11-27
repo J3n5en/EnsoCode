@@ -436,6 +436,10 @@ export interface EnsoHostApi {
   };
   /** 缺省发起会话；别的会话须在可见列表里 */
   'session.status': (sessionId?: string) => Promise<EnsoSessionStatus>;
+  /**
+   * 需 `session.focus` 与用户手势。缺省只能跳到本项目的会话；
+   * 同时有 `session.readAll` 时可跳到任意项目与秘书会话，不绑会话的全局面板里也能用。
+   */
   'session.focus': (sessionId: string) => Promise<void>;
   /** 切到会话并展开某个子代理的详情；子代理不是标签页，靠 TaskBar 展开 */
   'session.focusSubagent': (sessionId: string, agentId: string) => Promise<void>;

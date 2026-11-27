@@ -1198,21 +1198,31 @@ export class PluginHostGate {
       case 'session.focus': {
         permit('session.focus');
         const inv = gestured('切换会话');
-        const current = sessionOf(inv);
+        // 有 readAll 的插件能看到所有项目与秘书会话，全局面板（不属于任何会话）也能跳
+        const readAll = manifest.permissions.includes('session.readAll');
+        const current = readAll ? inv.sessionId : sessionOf(inv);
         if (typeof a.sessionId !== 'string' || a.sessionId.length === 0 || a.sessionId.length > 256)
           throw pluginError('INVALID_ARGS', 'sessionId 不合法');
         const target = a.sessionId;
         // 会话列表只收根会话；coworker 和子代理的 id 是 `<根>::<子>`，
-        // 根在列表里就算本项目内的目标，具体怎么切由窗口按会话表决定。
-        const visible = this.deps.sessions?.list(current) ?? [];
+        // 根在列表里就算可见的目标，具体怎么切由窗口按会话表决定。
+        const sessions = this.deps.sessions;
+        const visible = [
+          ...(current ? (sessions?.list(current) ?? []) : []),
+          ...(readAll ? (sessions?.listAll?.({ includeSecretary: true }) ?? []) : []),
+        ];
         const rootId = target.split('::')[0];
-        const inProject =
+        const reachable =
           visible.some((session) => session.id === target) ||
           (rootId !== target && visible.some((session) => session.id === rootId));
-        if (!inProject) throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
-        await sessionUi()({ sessionId: current, origin: inv.origin ?? null }, 'focusSession', {
-          sessionId: target,
-        });
+        if (!reachable)
+          throw pluginError('NOT_FOUND', readAll ? '会话不存在' : '会话不存在或不在本项目');
+        // 窗口按 payload 切会话；没有发起会话时 target 只占请求的会话位
+        await sessionUi()(
+          { sessionId: current ?? target, origin: inv.origin ?? null },
+          'focusSession',
+          { sessionId: target }
+        );
         return null;
       }
       case 'session.focusSubagent': {
