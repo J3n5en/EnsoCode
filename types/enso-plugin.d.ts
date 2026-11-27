@@ -376,6 +376,8 @@ export interface EnsoHostApi {
     expect?: EnsoDraftExpect;
   }) => Promise<EnsoDraftRev>;
   'config.get': () => Promise<Record<string, string | number | boolean>>;
+  /** 只能在用户手势触发的调用里用；键须在清单 `configuration` 里声明，null 清除；落盘同设置页 */
+  'config.set': (patch: Record<string, string | number | boolean | null>) => Promise<{ ok: true }>;
   'mcp.tools': () => Promise<EnsoMcpTool[]>;
   'mcp.call': (
     server: string,
@@ -612,7 +614,7 @@ export interface EnsoMain {
     insertText: EnsoHostApi['composer.insertText'];
     replaceDraft: EnsoHostApi['composer.replaceDraft'];
   };
-  config: { get: EnsoHostApi['config.get'] };
+  config: { get: EnsoHostApi['config.get']; set: EnsoHostApi['config.set'] };
   mcp: { tools: EnsoHostApi['mcp.tools']; call: EnsoHostApi['mcp.call'] };
 }
 

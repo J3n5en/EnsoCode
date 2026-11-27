@@ -667,6 +667,68 @@ describe('PluginHostGate', () => {
     expect(deps.config).toHaveBeenCalledWith('a.b');
   });
 
+  describe('config.set', () => {
+    const field = (key: string, secret = false) => ({
+      key,
+      title: key,
+      description: '',
+      secret,
+      type: 'string' as const,
+    });
+    beforeEach(() => {
+      deps.manifest = (id) =>
+        id === 'a.b'
+          ? manifest({
+              contributes: {
+                ...manifest().contributes,
+                configuration: [field('chatId'), field('token', true)],
+              },
+            })
+          : null;
+      deps.setConfig = vi.fn(async () => ({ ok: true }));
+      gate = new PluginHostGate(deps);
+    });
+
+    it('只能在用户手势里改，成功返回 { ok: true } 并按插件落盘', async () => {
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: '42' }, agentCall())
+      ).rejects.toMatchObject({ code: 'GESTURE_REQUIRED' });
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: '42' }, undefined)
+      ).rejects.toMatchObject({ code: 'NO_INVOCATION' });
+      expect(deps.setConfig).not.toHaveBeenCalled();
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: '42', token: null }, uiCall())
+      ).resolves.toEqual({ ok: true });
+      expect(deps.setConfig).toHaveBeenCalledWith('a.b', { chatId: '42', token: null });
+    });
+
+    it('空 patch、非对象、未声明的键、非法值类型一律拒绝', async () => {
+      const bad = [
+        {},
+        null,
+        'x',
+        ['chatId'],
+        { other: '1' },
+        { chatId: { a: 1 } },
+        { chatId: [1] },
+      ];
+      for (const patch of bad)
+        await expect(gate.handle('a.b', 'config.set', patch, uiCall())).rejects.toMatchObject({
+          code: 'INVALID_ARGS',
+        });
+      expect(deps.setConfig).not.toHaveBeenCalled();
+    });
+
+    it('落盘失败报 PLUGIN_ERROR', async () => {
+      deps.setConfig = vi.fn(async () => ({ ok: false, error: '配置项 chatId 需要数字' }));
+      gate = new PluginHostGate(deps);
+      await expect(
+        gate.handle('a.b', 'config.set', { chatId: 'x' }, uiCall())
+      ).rejects.toMatchObject({ code: 'PLUGIN_ERROR' });
+    });
+  });
+
   describe('宿主 MCP', () => {
     const mcpManifest = () =>
       manifest({ permissions: ['mcp.call'], mcp: { tools: ['enhance_prompt'] } });

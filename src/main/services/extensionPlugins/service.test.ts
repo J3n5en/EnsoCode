@@ -1176,6 +1176,38 @@ describe('ExtensionPluginService', () => {
       await service.uninstall('example.demo');
       expect(existsSync(join(root, 'config', 'example.demo.json'))).toBe(false);
     });
+
+    it('插件进程在用户手势里经 config.set 改配置；落盘同设置页，密钥不回显', async () => {
+      const writesConfig = `export function activate(enso) {
+        enso.commands.register('save', async () => { await enso.config.set({ baseUrl: 'https://z', token: 'sk-2' }); });
+        enso.tools.register('lookup', async () => JSON.stringify(await enso.config.set({ baseUrl: 'https://t' })));
+      }`;
+      const parsed = JSON.parse(configManifest());
+      const withCommand = JSON.stringify({
+        ...parsed,
+        contributes: { ...parsed.contributes, commands: [{ id: 'save', title: 'Save' }] },
+      });
+      await install({ 'enso-plugin.json': withCommand, 'main.mjs': writesConfig });
+      await service.setEnabled('example.demo', true);
+      const call = { pluginId: 'example.demo', sessionId: 's1', projectRoot: null } as const;
+      await service.callUi({ ...call, method: 'command.run', payload: { id: 'save' } });
+      expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://z', token: 'sk-2' });
+      const view = service.configView('example.demo');
+      const token = view.ok ? view.fields.find((f) => f.key === 'token') : undefined;
+      expect(token).toMatchObject({ set: true });
+      expect(token).not.toHaveProperty('value');
+      expect(statSync(join(root, 'config', 'example.demo.json')).mode & 0o777).toBe(0o600);
+      // 代理工具调用不是用户手势：拒绝，配置不变
+      await expect(
+        service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: {},
+          sessionId: 's1',
+          projectRoot: null,
+        })
+      ).rejects.toThrow('用户操作');
+      expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://z', token: 'sk-2' });
+    });
   });
 });
 

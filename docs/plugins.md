@@ -263,6 +263,7 @@ export async function activate(enso) {
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
+| `config.set(patch)` | 改本插件的配置，只能在用户手势触发的调用里用（如命令、侧栏操作）。键须在 `configuration` 里声明，值为字符串、数字、布尔或 `null`（清除）；校验与落盘同设置页，返回 `{ ok: true }`，不合法报 `INVALID_ARGS` / `PLUGIN_ERROR` |
 | `mcp.tools()` / `mcp.call(server, tool, args?)` | 见下 |
 
 每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`agent`（来自子会话时的来源，主会话和非会话调用为 `null`，见「子代理与 coworker」）、`invocationId`、`signal`（调用被取消或超时时 abort）和 `progress(text)`（只在工具调用里有效，见下）。

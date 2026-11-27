@@ -275,6 +275,8 @@ export const PLUGIN_HOST_APIS = [
   'composer.insertText',
   'composer.replaceDraft',
   'config.get',
+  /** 改本插件的配置，需用户手势；args 即 patch：清单声明的键 → 基本类型值，null 清除；返回 { ok: true } */
+  'config.set',
   'mcp.tools',
   'mcp.call',
   /** 工具执行中上报进度；args { text } */

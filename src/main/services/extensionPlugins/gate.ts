@@ -215,6 +215,11 @@ export interface GateDeps {
   ): Promise<unknown>;
   /** 插件自己的配置值（含密钥）；只交给插件进程，不进渲染层 */
   config(pluginId: string): Record<string, string | number | boolean>;
+  /** 写插件自己的配置；与设置页同路径落盘，键已按清单校验 */
+  setConfig?(
+    pluginId: string,
+    patch: Record<string, string | number | boolean | null>
+  ): Promise<{ ok: boolean; error?: string }>;
   mcpTools(target: McpTarget, signal: AbortSignal): Promise<McpToolInfo[]>;
   mcpCall(
     target: McpTarget,
@@ -446,6 +451,25 @@ export class InvocationTable {
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** 非空、键都在清单 configuration 里、值是基本类型或 null；否则 null */
+function parseConfigPatch(
+  value: unknown,
+  manifest: ExtensionPluginManifest
+): Record<string, string | number | boolean | null> | null {
+  if (!isRecord(value)) return null;
+  const keys = new Set(manifest.contributes.configuration.map((field) => field.key));
+  const entries = Object.entries(value);
+  if (entries.length === 0) return null;
+  const patch: Record<string, string | number | boolean | null> = {};
+  for (const [key, v] of entries) {
+    if (!keys.has(key)) return null;
+    if (v !== null && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean')
+      return null;
+    patch[key] = v;
+  }
+  return patch;
+}
 const within = (parent: string, child: string) => {
   const rel = relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -758,6 +782,15 @@ export class PluginHostGate {
       }
       case 'config.get':
         return this.deps.config(pluginId);
+      case 'config.set': {
+        gestured('修改插件配置');
+        const patch = parseConfigPatch(args, manifest);
+        if (!patch) throw pluginError('INVALID_ARGS', '配置须是清单声明过的键与基本类型值');
+        if (!this.deps.setConfig) throw pluginError('UNSUPPORTED', '当前环境不能修改配置');
+        const result = await this.deps.setConfig(pluginId, patch);
+        if (!result.ok) throw pluginError('PLUGIN_ERROR', result.error ?? '保存配置失败');
+        return { ok: true };
+      }
       case 'mcp.tools': {
         permit('mcp.call');
         const inv = invocation();

@@ -603,7 +603,10 @@ export function runPluginHost(
         insertText: (input: unknown) => hostCall('composer.insertText', input),
         replaceDraft: (input: unknown) => hostCall('composer.replaceDraft', input),
       },
-      config: { get: () => hostCall('config.get', {}) },
+      config: {
+        get: () => hostCall('config.get', {}),
+        set: (patch: unknown) => hostCall('config.set', patch ?? {}),
+      },
       mcp: {
         tools: () => hostCall('mcp.tools', {}),
         call: (server: string, tool: string, args?: unknown) =>

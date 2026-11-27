@@ -222,7 +222,7 @@ export interface ExtensionPluginServiceOptions {
   capabilities?: PluginHostCapabilities;
   sessionBridge?: () => PluginSessionBridge | null;
   fork(modulePath: string, args: string[], options: WorkerForkOptions): WorkerProcess;
-  gate: Omit<GateDeps, 'manifest' | 'config'>;
+  gate: Omit<GateDeps, 'manifest' | 'config' | 'setConfig'>;
   market?: PluginMarket;
   /** 拉起动态工具时单个插件的等待上限，测试可缩短 */
   prepareTimeoutMs?: number;
@@ -358,6 +358,7 @@ export class ExtensionPluginService {
       ...options.gate,
       manifest: (id) => this.gateManifests.get(id) ?? this.enabledManifest(id),
       config: (id) => this.pluginConfig(id),
+      setConfig: (id, patch) => this.setConfig(id, patch),
       progress: (invocationId, text) => this.progressTaps.get(invocationId)?.(text),
       statusUpdate: (pluginId, id, patch) => {
         const current = this.statusState.get(pluginId) ?? {};
