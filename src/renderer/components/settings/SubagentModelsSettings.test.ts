@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
+import { SUBAGENT_ROLE_PRESETS } from './subagentModelPresets';
 
 const providers: ModelProvider[] = [
   {
@@ -20,12 +21,16 @@ const harness = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   pickerProps: [] as Record<string, unknown>[],
   entrySwitchProps: [] as Record<string, unknown>[],
+  buttonProps: [] as Record<string, unknown>[],
   followClicks: [] as Array<() => void>,
   updateEntry: vi.fn(),
 }));
 
 vi.mock('@/i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      key.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(params?.[name])),
+  }),
 }));
 
 vi.mock('@/stores/settings', () => ({
@@ -53,10 +58,20 @@ vi.mock('@/stores/oauthCredentials', () => ({
 
 vi.mock('@/components/ui/button', () => ({
   Button: (props: Record<string, unknown>) => {
+    harness.buttonProps.push(props);
     if (props['data-slot'] === 'subagent-model-follow' && typeof props.onClick === 'function') {
       harness.followClicks.push(props.onClick as () => void);
     }
-    return createElement('button', { type: 'button', 'data-slot': props['data-slot'] });
+    return createElement(
+      'button',
+      {
+        type: 'button',
+        'data-slot': props['data-slot'],
+        'aria-label': props['aria-label'],
+        disabled: props.disabled,
+      },
+      props.children as never
+    );
   },
 }));
 
@@ -94,6 +109,9 @@ function renderEntries(entries: SubagentModelEntry[]) {
     addSubagentModel: vi.fn(),
     updateSubagentModel: harness.updateEntry,
     removeSubagentModel: vi.fn(),
+    moveSubagentModel: vi.fn(),
+    setSubagentModels: vi.fn(),
+    virtualModels: [],
     defaultModel: { providerId: 'api', modelId: 'model' },
     defaultReasoningEnabled: true,
     defaultThinkingLevel: 'max',
@@ -104,8 +122,95 @@ function renderEntries(entries: SubagentModelEntry[]) {
 beforeEach(() => {
   harness.pickerProps = [];
   harness.entrySwitchProps = [];
+  harness.buttonProps = [];
   harness.followClicks = [];
   harness.updateEntry.mockClear();
+});
+
+const rows = (html: string) => html.split('data-slot="subagent-model-row"').slice(1);
+
+describe('SubagentModelsSettings layout', () => {
+  it('每个启用条目两行：头部控件一行，描述是整行多行文本框', () => {
+    const [row] = rows(renderEntries([entry('a', { description: '很长的选型说明' })]));
+    expect(row).toContain('data-slot="subagent-model-head"');
+    expect(row).toMatch(/<textarea[^>]*>很长的选型说明<\/textarea>/);
+    expect(row).toContain('aria-label="Move up"');
+    expect(row).toContain('aria-label="Move down"');
+    expect(row).toContain('aria-label="Delete"');
+  });
+
+  it('同一模型多个启用条目从第二条起显示运行时后缀，停用条目不占序号', () => {
+    const html = renderEntries([
+      entry('a'),
+      entry('off', { enabled: false }),
+      entry('b'),
+      entry('c'),
+    ]);
+    const [a, b, c] = rows(html);
+    expect(a).not.toContain('>#');
+    expect(b).toContain('>#2<');
+    expect(c).toContain('>#3<');
+  });
+
+  it('首选兜底标在第一个启用且可用的条目上，不可用条目标「模型不可用」且不计序号', () => {
+    const [ghost, first, second] = rows(
+      renderEntries([entry('ghost', { modelId: 'ghost' }), entry('first'), entry('second')])
+    );
+    expect(ghost).toContain('Model unavailable');
+    expect(ghost).not.toContain('Preferred fallback');
+    expect(first).toContain('Preferred fallback');
+    expect(first).not.toContain('>#');
+    expect(second).not.toContain('Preferred fallback');
+    expect(second).toContain('>#2<');
+  });
+
+  it('停用条目收进「已停用 (N)」分组：有启用条目时默认折叠，只剩停用时默认展开', () => {
+    const mixed = renderEntries([
+      entry('a'),
+      entry('x', { enabled: false }),
+      entry('y', { enabled: false }),
+    ]);
+    expect(mixed).toContain('Disabled (2)');
+    expect(rows(mixed)).toHaveLength(1);
+
+    harness.pickerProps = [];
+    const onlyDisabled = renderEntries([entry('x', { enabled: false })]);
+    expect(onlyDisabled).toContain('Disabled (1)');
+    expect(rows(onlyDisabled)).toHaveLength(1);
+    expect(harness.pickerProps).toHaveLength(1);
+  });
+
+  it('开启但列表为空时显示向导与手动添加两个入口', () => {
+    const html = renderEntries([]);
+    expect(rows(html)).toHaveLength(0);
+    expect(html).toContain('Quick setup wizard');
+    expect(html).toContain('Add model manually');
+  });
+
+  it('描述为空时显示角色模板 chip，点击填入对应模板；有描述时不显示', () => {
+    renderEntries([entry('blank', { description: '' })]);
+    const chips = harness.buttonProps.filter(
+      (props) => props['data-slot'] === 'subagent-model-template-chip'
+    );
+    expect(chips.map((props) => props.children)).toEqual([
+      'scout research',
+      'worker build',
+      'reviewer review',
+      'tester tests',
+      'light errands',
+    ]);
+    (chips[2].onClick as () => void)();
+    const reviewer = SUBAGENT_ROLE_PRESETS.find((role) => role.id === 'reviewer');
+    expect(harness.updateEntry.mock.calls).toEqual([
+      ['blank', { description: reviewer?.template }],
+    ]);
+
+    harness.buttonProps = [];
+    renderEntries([entry('filled')]);
+    expect(
+      harness.buttonProps.filter((props) => props['data-slot'] === 'subagent-model-template-chip')
+    ).toHaveLength(0);
+  });
 });
 
 describe('SubagentModelsSettings reasoning controls', () => {
@@ -138,19 +243,23 @@ describe('SubagentModelsSettings reasoning controls', () => {
 
   it('旧条目默认启用，显式停用仍保留可编辑的模型与推理配置', () => {
     const html = renderEntries([
-      entry('legacy'),
       entry('disabled', { enabled: false, reasoning: 'off', thinkingLevel: 'high' }),
+      entry('legacy'),
     ]);
-    expect(harness.entrySwitchProps.map((props) => props.checked)).toEqual([true, false]);
+    expect(harness.entrySwitchProps.map((props) => props.checked)).toEqual([true]);
     expect(harness.entrySwitchProps[0]['aria-label']).toBe('Enable subagent model');
-    expect(harness.pickerProps).toHaveLength(2);
-    expect(harness.pickerProps[1]).toMatchObject({
+    expect(html).toContain('Disabled (1)');
+    expect(html).toContain('Applies to newly started conversations.');
+
+    harness.pickerProps = [];
+    harness.entrySwitchProps = [];
+    renderEntries([entry('disabled', { enabled: false, reasoning: 'off', thinkingLevel: 'high' })]);
+    expect(harness.entrySwitchProps.map((props) => props.checked)).toEqual([false]);
+    expect(harness.pickerProps[0]).toMatchObject({
       reasoningEnabled: false,
       thinkingLevel: 'high',
     });
     expect(harness.updateEntry).not.toHaveBeenCalled();
-    expect(html).toContain('Disabled');
-    expect(html).toContain('Applies to newly started conversations.');
   });
 
   it('单行停用再启用只写 enabled，不改其它行或遗失该行模型与推理档位', () => {
