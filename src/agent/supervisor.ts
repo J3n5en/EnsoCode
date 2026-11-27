@@ -2180,7 +2180,8 @@ export class SessionSupervisor {
           command.workflowPresetFiles,
           command.secretaryTools,
           command.askRelay,
-          command.dcgExemptRules
+          command.dcgExemptRules,
+          command.dcgExtraPacks
         );
         if (command.forkFrom) this.injectForkTranscript(command.identity, command.forkFrom);
         return;
@@ -2891,7 +2892,8 @@ export class SessionSupervisor {
     workflowPresetFiles: readonly string[] = [],
     secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = [],
     askRelay?: { name: string },
-    dcgExemptRules: readonly string[] = []
+    dcgExemptRules: readonly string[] = [],
+    dcgExtraPacks: readonly string[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -3059,7 +3061,9 @@ export class SessionSupervisor {
         autoReject: autoRejectApprovals,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
         commandGuard: withTempRootGuard(
-          dcgPath ? withDcgExemptions(createDcgGuard(dcgPath), dcgExemptRules) : undefined
+          dcgPath
+            ? withDcgExemptions(createDcgGuard(dcgPath, undefined, dcgExtraPacks), dcgExemptRules)
+            : undefined
         ),
         sessionTempDir: remote ? null : sessionTempDir(sessionId, { cwd }),
       }

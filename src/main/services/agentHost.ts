@@ -157,7 +157,7 @@ import { backgroundTaskStates } from './backgroundTaskTracker';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
 import { isComputerPlatformSupported } from './computer/support';
-import { DCG_VERSION, dcgRoot, installedDcgPath } from './dcgBinary';
+import { compareDcgVersions, DCG_VERSION, dcgRoot, resolveInstalledDcg } from './dcgBinary';
 import { activeDcgExemptRules } from './dcgRuleMemory';
 import { ensureElevationServer } from './elevation';
 import {
@@ -1849,8 +1849,17 @@ export function spawnSession(
   const pluginEvents = extensionPlugins?.eventPlanForSpawn(secretaryPluginIds) ?? null;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
-  const dcgPath = state?.dcgEnabled === true ? installedDcgPath(dcgRoot()) : null;
-  const dcgExemptRules = dcgPath ? activeDcgExemptRules(dcgRoot(), DCG_VERSION) : [];
+  const installedDcg = state?.dcgEnabled === true ? resolveInstalledDcg(dcgRoot()) : null;
+  const dcgPath = installedDcg?.path ?? null;
+  const dcgActiveVersion = installedDcg?.version ?? DCG_VERSION;
+  const dcgExemptRules = dcgPath ? activeDcgExemptRules(dcgRoot(), dcgActiveVersion) : [];
+  // system.processes pack 是 0.17.2 新增：旧版二进制不认识（直接放行一切），绝不能透传
+  const dcgExtraPacks =
+    dcgPath &&
+    state?.dcgProcessGuard === true &&
+    (compareDcgVersions(dcgActiveVersion, '0.17.2') ?? -1) >= 0
+      ? (['system.processes'] as const)
+      : null;
   const sent = sendAgentCommand({
     type: 'spawn-parent',
     identity,
@@ -1866,6 +1875,7 @@ export function spawnSession(
     rtkEnabled: state?.rtkEnabled !== false,
     ...(dcgPath ? { dcgPath } : {}),
     ...(dcgExemptRules.length > 0 ? { dcgExemptRules } : {}),
+    ...(dcgExtraPacks ? { dcgExtraPacks: [...dcgExtraPacks] } : {}),
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     editMode,
     ...(compactStrategy !== 'standard' ? { compactStrategy } : {}),

@@ -212,6 +212,7 @@ const initialState = {
   openLinksInBuiltinBrowser: true,
   protectedActionsInCode: false,
   dcgEnabled: false,
+  dcgProcessGuard: false,
   editMode: 'apply_patch' as import('@shared/types').EditMode,
   compactStrategy: 'standard' as import('@shared/compactStrategy').CompactStrategy,
   smartCompactEnabled: false,
@@ -437,6 +438,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ openLinksInBuiltinBrowser }),
       setProtectedActionsInCode: (protectedActionsInCode) => set({ protectedActionsInCode }),
       setDcgEnabled: (dcgEnabled) => set({ dcgEnabled }),
+      setDcgProcessGuard: (dcgProcessGuard) => set({ dcgProcessGuard }),
       setMemoryEmbeddingModel: (memoryEmbeddingModel) => set({ memoryEmbeddingModel }),
       setMemoryEmbeddingAutoDownload: (memoryEmbeddingAutoDownload) =>
         set({ memoryEmbeddingAutoDownload }),

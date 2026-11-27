@@ -8,6 +8,7 @@ import {
   dcgRoot,
   dcgStatus,
   installDcg,
+  resolveInstalledDcg,
   uninstallDcg,
 } from '../services/dcgBinary';
 import {
@@ -23,18 +24,26 @@ import { isMainRenderer } from '../services/renderers';
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-const UNTRUSTED: DcgStatus = { supported: false, installed: false, version: DCG_VERSION };
+const UNTRUSTED: DcgStatus = {
+  supported: false,
+  installed: false,
+  installedVersion: null,
+  version: DCG_VERSION,
+};
 
 const isTrusted = (id: number) => isMainRenderer(id);
 
 let installing: Promise<DcgActionResult> | null = null;
+
+/** 豁免记忆按实际生效的二进制版本分组：升级 dcg 后旧版本豁免自然失效、重新询问 */
+const activeVersion = (): string => resolveInstalledDcg(dcgRoot())?.version ?? DCG_VERSION;
 
 const ruleHandler =
   (action: typeof readDcgRuleState) =>
   async (event: { sender: { id: number } }, ruleId: unknown): Promise<DcgRuleState | null> => {
     if (!isTrusted(event.sender.id) || !isDcgRuleId(ruleId)) return null;
     try {
-      return await action(dcgRoot(), ruleId, DCG_VERSION);
+      return await action(dcgRoot(), ruleId, activeVersion());
     } catch {
       return null;
     }
@@ -62,7 +71,7 @@ export function registerDcgHandlers(): void {
     async (event, ruleId: unknown): Promise<DcgRuleExemption[] | null> => {
       if (!isTrusted(event.sender.id) || !isDcgRuleId(ruleId)) return null;
       try {
-        return await revokeDcgExemption(dcgRoot(), ruleId, DCG_VERSION);
+        return await revokeDcgExemption(dcgRoot(), ruleId, activeVersion());
       } catch {
         return null;
       }
@@ -71,7 +80,7 @@ export function registerDcgHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.DCG_EXEMPTIONS_LIST, async (event): Promise<DcgRuleExemption[]> => {
     if (!isTrusted(event.sender.id)) return [];
     try {
-      return await listDcgExemptions(dcgRoot(), DCG_VERSION);
+      return await listDcgExemptions(dcgRoot(), activeVersion());
     } catch {
       return [];
     }

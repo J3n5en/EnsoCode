@@ -739,7 +739,11 @@ export function withTempRootGuard(inner: CommandGuard | undefined): CommandGuard
 const DCG_RECHECK_UNAVAILABLE_REASON =
   'Command guard could not finish rechecking the remaining command; confirm before running.';
 
-export function createDcgGuard(binaryPath: string, timeoutMs = 1500): CommandGuard {
+export function createDcgGuard(
+  binaryPath: string,
+  timeoutMs = 1500,
+  extraPacks: readonly string[] = []
+): CommandGuard {
   return (tool, command, signal, options) => {
     const dialect = dcgDialect(tool);
     const failClosed = options?.failClosedOnError === true;
@@ -756,7 +760,11 @@ export function createDcgGuard(binaryPath: string, timeoutMs = 1500): CommandGua
     return new Promise((resolve) => {
       let stdout = '';
       let settled = false;
-      const child = spawn(binaryPath, ['--robot', 'test', '--dialect', dialect, command], {
+      const argv = ['--robot', 'test', '--dialect', dialect];
+      // --with-packs 只能由 0.17.2+ 二进制识别；版本门控在 Main 侧下发前完成
+      if (extraPacks.length > 0) argv.push('--with-packs', extraPacks.join(','));
+      argv.push(command);
+      const child = spawn(binaryPath, argv, {
         shell: false,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],

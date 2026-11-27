@@ -33,6 +33,26 @@ describe('removed project memory protocol', () => {
     expect(parseAgentCommand({ ...command, localMemoryEnabled: true })).toBeNull();
     expect(parseAgentCommand({ ...command, memoryPhase2Model: model })).toBeNull();
   });
+
+  it('dcgExtraPacks 只接受点分隔 pack 名，拒绝脏值与未知键', () => {
+    const command = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    const withPacks = { ...command, dcgExtraPacks: ['system.processes'] };
+    expect(parseAgentCommand(withPacks)).toEqual(withPacks);
+    expect(parseAgentCommand({ ...command, dcgExtraPacks: ['system.processes', 'core'] })).toEqual({
+      ...command,
+      dcgExtraPacks: ['system.processes', 'core'],
+    });
+    for (const dcgExtraPacks of [
+      [''],
+      ['rm -rf /'],
+      ['System.Processes'],
+      ['system processes'],
+      'system.processes',
+      Array(33).fill('system.processes'),
+    ]) {
+      expect(parseAgentCommand({ ...command, dcgExtraPacks })).toBeNull();
+    }
+  });
 });
 
 describe('一次性文本补全命令', () => {

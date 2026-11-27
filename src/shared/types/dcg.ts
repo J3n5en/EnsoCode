@@ -1,6 +1,9 @@
 export interface DcgStatus {
   supported: boolean;
   installed: boolean;
+  /** 实际落盘生效的 dcg 版本；未安装时为 null。可能与 version 不同（升级前的旧版兜底） */
+  installedVersion: string | null;
+  /** EnsoCode 内置的目标 dcg 版本 */
   version: string;
 }
 
