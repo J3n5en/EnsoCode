@@ -131,4 +131,25 @@ describe('TitleBar on narrow viewports (remote browser)', () => {
       mobile = false;
     }
   });
+
+  it('keeps the right-edge actions off the screen edge (same inset as macOS)', () => {
+    mobile = true;
+    try {
+      for (const platform of ['darwin', 'win32', 'linux'] as const) {
+        setPlatform(platform);
+        const header = render({ title: 'EnsoCode', actions }).match(/<header[^>]*>/)?.[0] ?? '';
+        expect(header).toMatch(/\bpr-3\b/);
+      }
+    } finally {
+      mobile = false;
+    }
+  });
+
+  it('linux desktop keeps its caption buttons flush with the window edge', () => {
+    setPlatform('linux');
+    const header = render({ title: 'EnsoCode', actions }).match(/<header[^>]*>/)?.[0] ?? '';
+    expect(header).not.toMatch(/\bpr-3\b/);
+  });
 });
+
+const actions = createElement('button', { type: 'button' }, 'act');
