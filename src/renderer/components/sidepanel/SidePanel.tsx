@@ -489,33 +489,29 @@ export function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string
       })
     );
   };
-  const pinnedPinButton =
+  const pinIndicator =
     pinned && pinnableTab && !liveGlobal ? (
-      <button
-        type="button"
-        aria-label={t('Unpin default tab')}
-        aria-pressed="true"
-        title={t('Unpin default tab')}
-        // 常显 pin 留在 flex 流里贴右缘：它参与 tab 的固有宽度，不需要任何 padding 预留
-        className="shrink-0 rounded p-0.5 text-primary transition-opacity duration-100 hover:text-foreground"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          togglePinnedTab(pinnableTab);
-        }}
+      // 常显 pin 指示器留在 flex 流里贴右缘：参与 tab 固有宽度，无 padding 预留；
+      // 非交互，hover/聚焦时淡出，让位给 overlay 里真正可点的 Unpin，避免重影
+      <span
+        aria-hidden
+        data-pinned-indicator
+        className="inline-flex shrink-0 p-0.5 text-primary transition-opacity duration-100 group-hover/tab:opacity-0 group-has-[:focus-visible]/tab:opacity-0"
       >
         <Pin className="h-3 w-3" />
-      </button>
+      </span>
     ) : undefined;
   const pinHoverButton =
-    pinnableTab && !liveGlobal && !pinned ? (
+    pinnableTab && !liveGlobal ? (
       <button
         type="button"
-        aria-label={t('Pin as default tab')}
-        aria-pressed={false}
-        title={t('Pin as default tab')}
-        className="relative shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-foreground group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100"
+        aria-label={pinned ? t('Unpin default tab') : t('Pin as default tab')}
+        aria-pressed={pinned}
+        title={pinned ? t('Unpin default tab') : t('Pin as default tab')}
+        className={cn(
+          'relative shrink-0 rounded p-0.5 opacity-0 transition-opacity duration-100 hover:text-foreground group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100',
+          pinned ? 'text-primary' : 'text-muted-foreground'
+        )}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.preventDefault();
@@ -561,7 +557,7 @@ export function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string
         )
       }
       title={<SideTabTitle title={title} global={pluginPanel && shared} />}
-      pinButton={pinnedPinButton}
+      pinIndicator={pinIndicator}
       pinHoverButton={pinHoverButton}
       closeButton={
         <button
