@@ -3,7 +3,14 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useAppViewStore } from '@/stores/appView';
-import { resetOverlayGuard, setOverlayGuardSink } from './overlayGuard';
+import {
+  acquireOverlayGuard,
+  overlayGuardActive,
+  releaseOverlayGuard,
+  resetOverlayGuard,
+  setOverlayGuardSink,
+} from './overlayGuard';
+import { escapeBlockedBeforeHandlers } from './settingsEscape';
 import { useWorkspaceCovered } from './workspaceCovered';
 
 let container: HTMLElement;
@@ -48,4 +55,23 @@ it('设置页盖住工作区时立刻让原生 guest 沉下去，关闭后复位
 it('工作区没被盖住时不动 guest', async () => {
   await render(false);
   expect(calls).toEqual([]);
+});
+
+it('设置页自己的遮盖不算模态浮层：Esc 仍能退出设置', async () => {
+  await render(true);
+  expect(calls).toEqual([true]);
+  expect(overlayGuardActive()).toBe(false);
+  expect(escapeBlockedBeforeHandlers(document)).toBe(false);
+});
+
+it('设置页之上开真弹窗：Esc 先归弹窗，关掉后 guest 不闪回且 Esc 恢复', async () => {
+  await render(true);
+  acquireOverlayGuard();
+  expect(escapeBlockedBeforeHandlers(document)).toBe(true);
+  releaseOverlayGuard();
+  expect(calls).toEqual([true]);
+  expect(escapeBlockedBeforeHandlers(document)).toBe(false);
+
+  await render(false);
+  expect(calls).toEqual([true, false]);
 });

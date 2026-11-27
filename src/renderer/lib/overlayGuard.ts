@@ -7,11 +7,12 @@ const defaultSink: Sink = (active) => {
 };
 
 let sink: Sink = defaultSink;
-let count = 0;
+let overlayCount = 0;
+let coverCount = 0;
 let active = false;
 
 function sync(): void {
-  const next = count > 0;
+  const next = overlayCount + coverCount > 0;
   if (next === active) return;
   active = next;
   sink(active);
@@ -31,7 +32,8 @@ export function syncOverlayGuard(): void {
 }
 
 export function resetOverlayGuard(): void {
-  count = 0;
+  overlayCount = 0;
+  coverCount = 0;
   active = false;
   sink = defaultSink;
 }
@@ -42,17 +44,33 @@ export function resetOverlayGuard(): void {
  * 这里在 React 提交阶段（paint 前）就通知主进程沉下去，去掉那一闪。
  */
 export function acquireOverlayGuard(): void {
-  count += 1;
+  overlayCount += 1;
   sync();
 }
 
 export function releaseOverlayGuard(): void {
-  count = Math.max(0, count - 1);
+  overlayCount = Math.max(0, overlayCount - 1);
   sync();
 }
 
+/**
+ * 工作区遮盖引用计数（设置页这类盖住整个 workbench 的页面）。
+ * 同样要让原生 guest 沉下去，但它不是会吃 Esc 的模态浮层，
+ * 所以单独计数，不计入 overlayGuardActive()。
+ */
+export function acquireWorkbenchCover(): void {
+  coverCount += 1;
+  sync();
+}
+
+export function releaseWorkbenchCover(): void {
+  coverCount = Math.max(0, coverCount - 1);
+  sync();
+}
+
+/** 此刻是否有真模态浮层（会先于设置页吃掉 Esc 的那类）。工作区遮盖不算。 */
 export function overlayGuardActive(): boolean {
-  return count > 0;
+  return overlayCount > 0;
 }
 
 if (import.meta.hot) {
