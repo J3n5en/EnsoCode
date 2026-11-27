@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AssistantMessage } from '@earendil-works/pi-ai';
+import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai';
 import { getModel } from '@earendil-works/pi-ai/compat';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
@@ -19,8 +19,9 @@ import { AGY_PROVIDER_ID } from '@shared/agy/constants';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApprovalGate } from '../approval';
 import { continuousMemoryInlineExtension } from '../continuousMemory/extension';
+import { takeCompactCancel } from '../ensoCompact/cancel';
 import { smartCompactInlineExtension } from '../smartCompact';
-import { agyCompactGuardExtension } from './compactGuard';
+import { agyCompactGuardExtension, withAgyCompactGuard } from './compactGuard';
 import { closeHostMcp } from './hostMcp';
 import { registerAgyProvider, streamAgy } from './provider';
 import { closeAllAgySessions } from './registry';
@@ -68,8 +69,9 @@ function summaryReply(text: string): AssistantMessage {
 
 interface SetupOptions {
   extensions?: InlineExtension[];
-  /** 打开 pi 自动压缩，并把阈值压到第一轮就触发 */
+  /** 打开 pi 自动压缩，并把阈值压到第一轮就触发（reserveTokens 缺省 990k） */
   autoCompact?: boolean;
+  reserveTokens?: number;
   env?: Record<string, string>;
 }
 
@@ -143,7 +145,7 @@ async function setup(name: string, options: SetupOptions = {}) {
     settingsManager: SettingsManager.inMemory({
       retry: { enabled: false },
       compaction: options.autoCompact
-        ? { enabled: true, reserveTokens: 990_000, keepRecentTokens: 1 }
+        ? { enabled: true, reserveTokens: options.reserveTokens ?? 990_000, keepRecentTokens: 1 }
         : { enabled: false, keepRecentTokens: 1 },
     }),
     noTools: 'builtin',
@@ -182,7 +184,13 @@ async function setup(name: string, options: SetupOptions = {}) {
       );
   };
   const compactions = () => manager.getEntries().filter((entry) => entry.type === 'compaction');
-  return { session, manager, prompts, compactions, otherCalls };
+  const starts: string[] = [];
+  const ends: Array<{ reason: string; aborted: boolean; errorMessage?: string }> = [];
+  session.subscribe((event) => {
+    if (event.type === 'compaction_start') starts.push(event.reason);
+    if (event.type === 'compaction_end') ends.push(event);
+  });
+  return { session, manager, prompts, compactions, otherCalls, starts, ends };
 }
 
 async function chat(session: Awaited<ReturnType<typeof setup>>['session'], texts: string[]) {
@@ -222,23 +230,99 @@ it('standard strategy: manual compaction is local, persisted, and the session ke
   expect(prompts()).toEqual([expect.stringContaining('first'), 'second', 'third']);
 }, 30_000);
 
-it('standard strategy: threshold auto compaction never prompts agy', async () => {
-  const { session, prompts, compactions } = await setup('enso-standard-auto', {
+it('a turn whose model calls sum past the window is not a context overflow', async () => {
+  // 真实会话：一轮里 agy 内部多次调用，PromptResponse.usage 累加到 5.3M；usage_update.used 才是上下文
+  const { session, prompts, starts } = await setup('enso-aggregate', {
+    autoCompact: true,
+    reserveTokens: 16_384,
+    extensions: standard,
+    env: { FAKE_AGY_INPUT_TOKENS: '5357142', FAKE_AGY_CONTEXT_USED: '30000' },
+  });
+  await chat(session, ['first', 'second']);
+  await session.waitForIdle();
+  const last = session.messages.filter((message) => message.role === 'assistant').at(-1);
+  expect(last?.role).toBe('assistant');
+  const assistant = last as AssistantMessage;
+  expect(assistant.usage).toMatchObject({ input: 30_000, cacheRead: 0, totalTokens: 30_000 });
+  expect(isContextOverflow(assistant, 1_000_000)).toBe(false);
+  expect(starts).toEqual([]);
+  expect(prompts()).toHaveLength(2);
+}, 30_000);
+
+it('agy sessions run no automatic compaction: a context past the threshold starts none', async () => {
+  // agy 自己管上下文，Enso 只把最后一条 user 发过去：压 Enso 的记录对 agy 没有任何作用
+  const { session, prompts, compactions, starts } = await setup('enso-standard-auto', {
     autoCompact: true,
     extensions: standard,
-    // agy 报的是它自己的上下文占用：报大一点，越过阈值且压缩确有节省
-    env: { FAKE_AGY_INPUT_TOKENS: '50000' },
-  });
-  const ends: Array<{ errorMessage?: string; aborted?: boolean }> = [];
-  session.subscribe((event) => {
-    if (event.type === 'compaction_end') ends.push(event);
+    env: { FAKE_AGY_INPUT_TOKENS: '50000', FAKE_AGY_CONTEXT_USED: '50000' },
   });
   await chat(session, ['first', 'second', 'third']);
-  await vi.waitFor(() => expect(compactions().length).toBeGreaterThan(0));
+  await session.waitForIdle();
+  expect(starts).toEqual([]);
+  expect(compactions()).toEqual([]);
   expect(prompts()).toEqual([expect.stringContaining('first'), 'second', 'third']);
-  expect(ends.every((end) => end.errorMessage === undefined)).toBe(true);
-  for (const entry of compactions()) expect(summaryOf(entry)).toContain('## Progress');
+  // 手动压缩照常可用，且是本地摘要
+  const result = await session.compact();
+  expect(result.summary).toContain('## Progress');
+  expect(prompts()).toHaveLength(3);
 }, 30_000);
+
+// 真实故障的形状：会话只有一轮（agy 一轮里跑了几十个工具），切点落在这一轮中间，
+// messagesToSummarize 为空、全在 turnPrefixMessages 里。Enso 的处理器裁不出东西返回 undefined，
+// pi 退回原生「turn prefix」摘要，发给 agy 被桥拒绝，用户看到「压缩失败」。
+const giveUpStrategies: Array<[string, () => InlineExtension]> = [
+  [
+    'continuous-memory',
+    () =>
+      withAgyCompactGuard(continuousMemoryInlineExtension({ compact: { ...sessionModelRoute } })),
+  ],
+  [
+    'smart',
+    () => withAgyCompactGuard(smartCompactInlineExtension(null, false, { ...sessionModelRoute })),
+  ],
+  [
+    'smart with a summary model',
+    () =>
+      withAgyCompactGuard(
+        smartCompactInlineExtension(null, false, {
+          mode: 'fast',
+          summaryModel: { provider: other.provider, id: other.id },
+        })
+      ),
+  ],
+];
+
+for (const [name, extension] of giveUpStrategies) {
+  it(`${name} strategy: a compaction the Enso handler gives up on never reaches agy, and fails silently`, async () => {
+    const { session, manager, prompts, compactions, ends } = await setup(`enso-giveup-${name}`, {
+      extensions: [extension()],
+    });
+    await chat(session, ['one long turn']);
+    expect(prompts()).toHaveLength(1);
+    // 溢出恢复那条路（真实故障）：pi 不重试，压不了就安静取消
+    const overflow = (
+      session as unknown as { _runAutoCompaction: (r: string, w: boolean) => Promise<boolean> }
+    )._runAutoCompaction('overflow', false);
+    await expect(overflow).resolves.toBe(false);
+    // 手动压缩同样不进 agy；取消不带错误文案
+    const manual = await session.compact().then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error))
+    );
+    expect(manual ?? '').not.toMatch(/agy only serves|summarization failed/);
+    expect(prompts()).toHaveLength(1);
+    expect(compactions()).toEqual([]);
+    expect(ends.length).toBe(2);
+    for (const end of ends) {
+      expect(end.errorMessage).toBeUndefined();
+      expect(end.aborted).toBe(true);
+    }
+    // supervisor 把钩子留下的取消原因当错误弹 toast：这里不能留
+    expect(takeCompactCancel(manager)).toBeUndefined();
+    await chat(session, ['next']);
+    expect(prompts()).toHaveLength(2);
+  }, 30_000);
+}
 
 it('smart strategy without a summary model: manual compaction stays local', async () => {
   const { session, prompts, compactions, otherCalls } = await setup('enso-smart-manual', {

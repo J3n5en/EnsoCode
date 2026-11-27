@@ -120,6 +120,13 @@ export interface TranslatorState {
   plan: AgyPlanItem[] | null;
   /** 丢掉的 agy 卡（我们自己 Host MCP 工具的那张）：后续只带 id 的 update 也丢 */
   hidden?: string[];
+  /** 最近一个 usage_update：agy 当前上下文占用。PromptResponse.usage 是整轮内部调用的累加，不是占用 */
+  context?: AgyContextUsage;
+}
+
+export interface AgyContextUsage {
+  used: number;
+  size?: number;
 }
 
 export type TranslatorEffect =

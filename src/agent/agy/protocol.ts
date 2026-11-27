@@ -1,4 +1,9 @@
-import type { AgyConfigOption, AgyModeInfo, AgyPermissionRequest } from '@shared/agy/types';
+import type {
+  AgyConfigOption,
+  AgyContextUsage,
+  AgyModeInfo,
+  AgyPermissionRequest,
+} from '@shared/agy/types';
 import { agyVersionAtLeast } from '@shared/agy/version';
 
 /** agy 1.5.18 不报 mcpCapabilities，但 session/new 里的 HTTP MCP 照样接（见计划文档 Live findings）。 */
@@ -96,25 +101,33 @@ export function thinkingValues(options: readonly AgyConfigOption[]): string[] {
   return option?.options.map((entry) => entry.value) ?? [];
 }
 
-export function usageFromPrompt(result: unknown): {
+export interface AgyTurnUsage {
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   totalTokens: number;
-} {
-  const usage = record(record(result)?.usage);
-  const numberOf = (key: string) => (typeof usage?.[key] === 'number' ? usage[key] : 0);
-  const cacheRead = numberOf('cachedReadTokens');
-  const input = numberOf('inputTokens') + cacheRead;
-  const output = numberOf('outputTokens');
-  return {
-    input,
-    output,
-    cacheRead,
-    cacheWrite: numberOf('cachedWriteTokens'),
-    totalTokens: numberOf('totalTokens') || input + output,
-  };
+}
+
+/**
+ * 一轮回复给 pi 的 usage。PromptResponse.usage 是这一轮 agy 内部所有模型调用的累加（真实会话一轮 5.3M），
+ * 拿它当上下文占用会让 pi 判成溢出去压缩；占用只认最后一个 usage_update 的 used。
+ * pi 的溢出判断看 input + cacheRead，阈值看 totalTokens，Enso 的占用看 input + cacheRead + cacheWrite：
+ * 三处都只放 used。output 取各 prompt 的 outputTokens 之和，只进状态栏的输出量和速度，不参与占用。
+ * 没收到 usage_update（或 used 为 0）就全给 0，pi 和 Enso 都会跳过这条、回落到估算。
+ */
+export function agyTurnUsage(
+  context: AgyContextUsage | undefined,
+  responses: readonly unknown[]
+): AgyTurnUsage {
+  const used = context?.used ?? 0;
+  if (!(used > 0)) return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
+  let output = 0;
+  for (const response of responses) {
+    const value = record(record(response)?.usage)?.outputTokens;
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) output += value;
+  }
+  return { input: used, output, cacheRead: 0, cacheWrite: 0, totalTokens: used };
 }
 
 export function parsePermissionRequest(params: unknown): AgyPermissionRequest | undefined {

@@ -139,7 +139,7 @@ import type { WebSearchChainEntry } from '@shared/webSearchChain';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { version as appVersion } from '../../package.json';
 import { AgentControlInvoker } from './agentControl';
-import { agyCompactGuardExtension } from './agy/compactGuard';
+import { agyCompactGuardExtension, withAgyCompactGuard } from './agy/compactGuard';
 import { isAgyModel, registerAgyProvider } from './agy/provider';
 import { closeAgySession, closeAllAgySessions } from './agy/registry';
 import { attachAgyBridgeToSession } from './agy/sessionBridge';
@@ -806,30 +806,34 @@ function createSessionResourceLoader(options: {
             } satisfies InlineExtension,
           ]
         : []),
+      // 每种策略都包上 agy 兜底：Enso 处理器对 agy 会话给不出结果时不能落到 pi 原生摘要
       ...(!options.noExtensions && options.compactStrategy === 'continuous-memory'
         ? [
-            continuousMemoryInlineExtension({
-              model: options.smartCompactSummaryModel,
-              mode: options.smartCompactMode,
-              compact: options.compactRoute,
-            }),
+            withAgyCompactGuard(
+              continuousMemoryInlineExtension({
+                model: options.smartCompactSummaryModel,
+                mode: options.smartCompactMode,
+                compact: options.compactRoute,
+              })
+            ),
           ]
         : !options.noExtensions &&
             (options.compactStrategy === 'smart' || options.compactStrategy === 'codex-native')
           ? [
-              smartCompactInlineExtension(
-                options.compactRoute
-                  ? null
-                  : {
-                      summaryModel: options.smartCompactSummaryModel,
-                      mode: options.smartCompactMode,
-                    },
-                options.compactStrategy === 'codex-native',
-                options.compactRoute
+              withAgyCompactGuard(
+                smartCompactInlineExtension(
+                  options.compactRoute
+                    ? null
+                    : {
+                        summaryModel: options.smartCompactSummaryModel,
+                        mode: options.smartCompactMode,
+                      },
+                  options.compactStrategy === 'codex-native',
+                  options.compactRoute
+                )
               ),
             ]
-          : // 没有 Enso 压缩扩展时 pi 原生会拿会话模型总结；agy 会话换成本地摘要
-            [agyCompactGuardExtension]),
+          : [agyCompactGuardExtension]),
       ...(options.pluginEvents ? [createPluginEventsExtension(options.pluginEvents.invoker)] : []),
       skillChainExtension(() => loader.getSkills().skills),
       options.silentTurnRecovery,

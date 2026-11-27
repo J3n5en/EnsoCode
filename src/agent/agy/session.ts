@@ -39,12 +39,13 @@ import { AgyRpcError } from './connection';
 import type { AcpHttpMcpServer, HostMcpGrant } from './hostMcp';
 import { startAgyProcess } from './process';
 import {
+  type AgyTurnUsage,
+  agyTurnUsage,
   configValue,
   parseInitialize,
   parsePermissionRequest,
   parseSessionSetup,
   thinkingValues,
-  usageFromPrompt,
 } from './protocol';
 
 const CANCEL_GRACE_MS = 5_000;
@@ -72,7 +73,7 @@ export interface AgyTurnResult {
   thinking: string;
   tools: TranslatorState['tools'];
   sessionId: string;
-  usage: ReturnType<typeof usageFromPrompt>;
+  usage: AgyTurnUsage;
 }
 
 export interface AgySession {
@@ -468,23 +469,19 @@ function adoptSteered(segments: readonly Segment[], messages: readonly PromptMes
 }
 
 function combine(taken: readonly Segment[], sessionId: string, aborted: boolean): AgyTurnResult {
-  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
-  for (const segment of taken) {
-    const part = usageFromPrompt(segment.response);
-    usage.input += part.input;
-    usage.output += part.output;
-    usage.cacheRead += part.cacheRead;
-    usage.cacheWrite += part.cacheWrite;
-    usage.totalTokens += part.totalTokens;
-  }
   const last = taken.at(-1);
+  // 占用取这几段里最后一个 usage_update，不把各段的 PromptResponse.usage 相加
+  const context = taken.findLast((segment) => segment.state.context)?.state.context;
   return {
     stopReason: aborted ? 'aborted' : stopFromPrompt(record(last?.response)?.stopReason),
     text: taken.map((segment) => segment.state.text).join(''),
     thinking: taken.map((segment) => segment.state.thinking).join(''),
     tools: taken.flatMap((segment) => segment.state.tools),
     sessionId,
-    usage,
+    usage: agyTurnUsage(
+      context,
+      taken.map((segment) => segment.response)
+    ),
   };
 }
 
