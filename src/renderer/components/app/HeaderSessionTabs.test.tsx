@@ -443,4 +443,59 @@ describe('HeaderSessionTabs 布局', () => {
     expect(rootEl.style.paddingRight).toBe('100px');
     expect(scrolled).toContain(tab('b'));
   });
+
+  it('关闭按钮放在绝对定位的覆盖层里，不参与布局流', async () => {
+    harness.state.conversations = { a: conversation('a'), b: conversation('b') };
+    harness.state.activeIds = ['a', 'b'];
+    harness.state.order = ['a', 'b'];
+    harness.state.activeId = 'a';
+    await render();
+    await act(async () => publish());
+
+    const button = closeButton('b');
+    expect(button).not.toBeNull();
+    const overlay = button?.parentElement;
+    expect(overlay?.className).toContain('absolute');
+    expect(overlay?.className).toContain('inset-y-0');
+    expect(overlay?.className).toContain('right-0');
+    // 覆盖层带向左渐隐的蒙版，遮住标题时按钮仍可读
+    expect(overlay?.className).toContain('bg-linear-to-l');
+    // 按钮不再占布局位（原 mr-1 shrink-0 流内排版）
+    expect(button?.className).not.toContain('mr-1');
+    // 标签根元素是相对定位锚点
+    expect(tab('b')?.className).toContain('relative');
+  });
+
+  it('非激活标签的关闭层默认隐藏，悬停或键盘聚焦才浮出', async () => {
+    harness.state.conversations = { a: conversation('a'), b: conversation('b') };
+    harness.state.activeIds = ['a', 'b'];
+    harness.state.order = ['a', 'b'];
+    harness.state.activeId = 'a';
+    await render();
+    await act(async () => publish());
+
+    const overlay = closeButton('b')?.parentElement;
+    expect(overlay?.className).toContain('opacity-0');
+    expect(overlay?.className).toContain('group-hover/tab:opacity-100');
+    // 隐藏时不能拦截标题上的点击
+    expect(overlay?.className).toContain('pointer-events-none');
+  });
+
+  it('激活标签的关闭层常显，选择按钮预留右侧内边距避开覆盖区', async () => {
+    harness.state.conversations = { a: conversation('a'), b: conversation('b') };
+    harness.state.activeIds = ['a', 'b'];
+    harness.state.order = ['a', 'b'];
+    harness.state.activeId = 'a';
+    await render();
+    await act(async () => publish());
+
+    const overlay = closeButton('a')?.parentElement;
+    expect(overlay?.className).not.toContain('opacity-0');
+    // 常显就要避开：选择按钮右侧预留 padding，标题不会穿到按钮下面
+    const select = tab('a')?.querySelector('button[title]');
+    expect(select?.className).toContain('pr-6');
+    // 非激活标签不预留，标题可以用满宽度
+    const selectB = tab('b')?.querySelector('button[title]');
+    expect(selectB?.className).toContain('pr-2.5');
+  });
 });

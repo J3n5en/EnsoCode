@@ -182,7 +182,7 @@ function SessionTab({
       data-session-tab={id}
       data-active={active || undefined}
       className={cn(
-        'group/tab no-drag box-border flex h-7 w-[202.5px] min-w-[80px] shrink items-center rounded-md border-[0.5px] border-foreground/10 text-[0.8125rem] transition-colors',
+        'group/tab no-drag relative box-border flex h-7 w-[202.5px] min-w-[80px] shrink items-center rounded-md border-[0.5px] border-foreground/10 text-[0.8125rem] transition-colors',
         active
           ? 'bg-background text-foreground'
           : 'bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground'
@@ -195,7 +195,8 @@ function SessionTab({
         type="button"
         className={cn(
           'flex h-full min-w-0 flex-1 items-center gap-1.5 pl-2.5',
-          onClose ? 'pr-1' : 'pr-2.5'
+          // 关闭层常显时预留右边距避开按钮；悬停浮出则覆盖标题，不预留
+          active && onClose ? 'pr-6' : 'pr-2.5'
         )}
         onClick={() => onSelect(id)}
         title={title}
@@ -236,18 +237,25 @@ function SessionTab({
         )}
       </button>
       {onClose && (
-        <button
-          type="button"
+        <div
           className={cn(
-            'mr-1 flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:bg-foreground/[0.08] hover:text-foreground focus-visible:opacity-100',
-            active ? 'opacity-100' : 'opacity-0 group-hover/tab:opacity-100'
+            'absolute inset-y-0 right-0 flex items-center rounded-r-md pr-1 pl-5 transition-opacity duration-100',
+            'bg-linear-to-l from-60% to-transparent',
+            active
+              ? 'from-background opacity-100'
+              : 'pointer-events-none from-[color-mix(in_oklab,var(--background),var(--foreground)_5.5%)] opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:pointer-events-auto group-has-[:focus-visible]/tab:opacity-100'
           )}
-          onClick={() => onClose(id)}
-          title={closeLabel}
-          aria-label={closeLabel}
         >
-          <X className="size-3" />
-        </button>
+          <button
+            type="button"
+            className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground"
+            onClick={() => onClose(id)}
+            title={closeLabel}
+            aria-label={closeLabel}
+          >
+            <X className="size-3" />
+          </button>
+        </div>
       )}
     </div>
   );
