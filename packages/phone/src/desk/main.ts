@@ -32,7 +32,7 @@ import { watchShellUpdate } from '../shellUpdate';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
 import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } from '../storageGuard';
 import { PHONE_URL, saveUiMode } from '../uiMode';
-import { buildWidgetSnapshotFromDeskReads } from '../widgetState';
+import { DeskWidgetTracker } from '../widgetState';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
 import { createDeviceDrawer, DESKTOP_DRAWER_QUERY } from './deviceDrawer';
@@ -276,16 +276,21 @@ async function main(): Promise<void> {
 
   let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
   const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
-  const syncNativeDeskWidget = () => {
-    const convKey = `${IPC_CHANNELS.CONVERSATIONS_READ}\0[]`;
-    const convJson = reads.get(convKey)?.json;
+  const deskWidget = new DeskWidgetTracker();
+  const syncNativeDeskWidget = (ingestReads = false) => {
+    if (ingestReads) {
+      deskWidget.ingestSettingsJson(reads.get(`${IPC_CHANNELS.SETTINGS_READ}\0[]`)?.json);
+      deskWidget.ingestSourceAuthorityJson(
+        reads.get(`${IPC_CHANNELS.SOURCE_AUTHORITY_READ}\0[]`)?.json
+      );
+      deskWidget.ingestConversationsJson(reads.get(`${IPC_CHANNELS.CONVERSATIONS_READ}\0[]`)?.json);
+    }
     pushNativeWidgetState(
-      buildWidgetSnapshotFromDeskReads({
+      deskWidget.buildSnapshot({
         deviceLabel: link.deviceLabel,
         connectionState: link.state,
         transport: link.transport ?? '',
         rttMs: link.rttMs,
-        conversationsJson: convJson,
       })
     );
   };
@@ -422,6 +427,14 @@ async function main(): Promise<void> {
         })();
       });
       attached[kind] = frame;
+      if (kind === 'main') {
+        frame.on(IPC_CHANNELS.AGENT_EVENT, (payload) => {
+          if (deskWidget.applyAgentEventPayload(payload)) syncNativeDeskWidget();
+        });
+        frame.on(IPC_CHANNELS.CONVERSATIONS_PATCH, (payload) => {
+          if (deskWidget.applyConversationsPatchPayload(payload)) syncNativeDeskWidget();
+        });
+      }
       return {
         invoke: (channel, payload) => {
           const result = frame.invoke(channel, payload);
@@ -429,9 +442,13 @@ async function main(): Promise<void> {
             void result.then(() => {
               if (!settingsLoaded) void markReady(version);
               settingsLoaded = true;
+              syncNativeDeskWidget(true);
             });
-          if (channel === IPC_CHANNELS.CONVERSATIONS_READ)
-            void result.then(() => syncNativeDeskWidget());
+          if (
+            channel === IPC_CHANNELS.CONVERSATIONS_READ ||
+            channel === IPC_CHANNELS.SOURCE_AUTHORITY_READ
+          )
+            void result.then(() => syncNativeDeskWidget(true));
           return result;
         },
         send: frame.send,
@@ -461,12 +478,14 @@ async function main(): Promise<void> {
       enabled: true,
       onHydrated: (channel) => {
         if (channel === IPC_CHANNELS.SETTINGS_READ) optimisticHydrated = true;
+        syncNativeDeskWidget(true);
       },
       onVerified: (channel) => {
         if (channel === IPC_CHANNELS.SETTINGS_READ && !settingsLoaded) {
           settingsLoaded = true;
           void markReady(version);
         }
+        syncNativeDeskWidget(true);
       },
     },
     exitDesk() {
@@ -784,6 +803,7 @@ async function main(): Promise<void> {
     );
     for (const [key, entry] of saved) reads.set(key, entry);
     savedReadsSig = readsSignature(reads);
+    syncNativeDeskWidget(true);
   }
   tunnel.start();
   const launched = cached !== null && (await cachedBuild(cached));

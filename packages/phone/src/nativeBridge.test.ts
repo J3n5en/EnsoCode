@@ -16,7 +16,11 @@ import {
   setNativePushGatewayResolver,
   subscribePush,
 } from './push';
-import { buildWidgetSnapshotFromCatalog, buildWidgetSnapshotFromDeskReads } from './widgetState';
+import {
+  buildWidgetSnapshotFromCatalog,
+  buildWidgetSnapshotFromDeskReads,
+  DeskWidgetTracker,
+} from './widgetState';
 
 describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () => {
   const origWindow = globalThis.window;
@@ -443,5 +447,121 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
     });
     expect(deskSnap.runningCount).toBe(1);
     expect(deskSnap.activeSessionId).toBe('c1');
+  });
+
+  it('DeskWidgetTracker 解析真实 conversations:read 结构并合并 agent:event 实时运行与待审批状态', () => {
+    const tracker = new DeskWidgetTracker();
+    tracker.ingestSettingsJson(
+      JSON.stringify({
+        'enso-settings': {
+          state: { projects: [{ id: 'p-enso', name: 'enso-code', path: '/work/enso-code' }] },
+        },
+      })
+    );
+    tracker.ingestConversationsJson(
+      JSON.stringify({
+        seq: 12,
+        value: {
+          state: {
+            conversations: {
+              's-1': {
+                id: 's-1',
+                title: '优化 QUIC 与灵动岛',
+                projectId: 'p-enso',
+                status: 'idle',
+                updatedAt: 1000,
+              },
+              's-2': {
+                id: 's-2',
+                title: '后台构建任务',
+                projectId: 'p-enso',
+                status: 'idle',
+                updatedAt: 900,
+              },
+              's-child': {
+                id: 's-child',
+                title: '子代理',
+                projectId: 'p-enso',
+                parentId: 's-1',
+                updatedAt: 1100,
+              },
+            },
+          },
+        },
+      })
+    );
+
+    expect(
+      tracker.applyAgentEventPayload(
+        JSON.stringify([
+          {
+            type: 'snapshot',
+            sessions: [
+              {
+                identity: { sessionId: 's-1' },
+                status: 'running',
+                pendingApprovals: [{ requestId: 'a1', toolName: 'bash' }],
+                pendingAsks: [],
+              },
+              {
+                identity: { sessionId: 's-2' },
+                status: 'running',
+                pendingApprovals: [],
+                pendingAsks: [],
+              },
+              {
+                identity: { sessionId: 's-child', parentSessionId: 's-1' },
+                status: 'running',
+                pendingApprovals: [],
+                pendingAsks: [],
+              },
+            ],
+          },
+        ]),
+        2000
+      )
+    ).toBe(true);
+
+    const liveSnap = tracker.buildSnapshot({
+      deviceLabel: '电脑 1',
+      connectionState: 'online',
+      transport: 'direct',
+      rttMs: 12.6,
+      now: 2500,
+    });
+    expect(liveSnap.rttMs).toBe(13);
+    expect(liveSnap.runningCount).toBe(2);
+    expect(liveSnap.pendingCount).toBe(1);
+    expect(liveSnap.activeSessionId).toBe('s-1');
+    expect(liveSnap.activeTitle).toBe('优化 QUIC 与灵动岛');
+    expect(liveSnap.activeProject).toBe('enso-code');
+    expect(liveSnap.activeStatus).toBe('pending');
+    expect(liveSnap.activeDetail).toBe('等待审批 bash');
+    expect(liveSnap.sessions.map((s) => s.id)).toEqual(['s-1', 's-2']);
+
+    tracker.applyAgentEventPayload(
+      JSON.stringify([
+        { type: 'approval-resolved', identity: { sessionId: 's-1' }, requestId: 'a1' },
+      ]),
+      3000
+    );
+    tracker.applyAgentEventPayload(
+      JSON.stringify([{ type: 'turn-completed', identity: { sessionId: 's-1' } }]),
+      3100
+    );
+    tracker.applyAgentEventPayload(
+      JSON.stringify([{ type: 'status', identity: { sessionId: 's-2' }, status: 'idle' }]),
+      3200
+    );
+    const doneSnap = tracker.buildSnapshot({
+      deviceLabel: '电脑 1',
+      connectionState: 'online',
+      transport: 'direct',
+      rttMs: 12,
+      now: 3300,
+    });
+    expect(doneSnap.runningCount).toBe(0);
+    expect(doneSnap.pendingCount).toBe(0);
+    expect(doneSnap.activeStatus).toBe('idle');
   });
 });

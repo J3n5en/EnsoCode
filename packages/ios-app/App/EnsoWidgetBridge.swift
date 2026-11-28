@@ -112,21 +112,25 @@ final class EnsoWidgetBridge {
                     sessionId: sid,
                     deviceLabel: snapshot.deviceLabel
                 )
-                if #available(iOS 16.2, *) {
-                    _ = try? Activity.request(
-                        attributes: attrs,
-                        content: ActivityContent(
-                            state: state,
-                            staleDate: Date().addingTimeInterval(30 * 60)
-                        ),
-                        pushType: nil
-                    )
-                } else {
-                    _ = try? Activity.request(
-                        attributes: attrs,
-                        contentState: state,
-                        pushType: nil
-                    )
+                do {
+                    if #available(iOS 16.2, *) {
+                        _ = try Activity.request(
+                            attributes: attrs,
+                            content: ActivityContent(
+                                state: state,
+                                staleDate: Date().addingTimeInterval(30 * 60)
+                            ),
+                            pushType: nil
+                        )
+                    } else {
+                        _ = try Activity.request(
+                            attributes: attrs,
+                            contentState: state,
+                            pushType: nil
+                        )
+                    }
+                } catch {
+                    NSLog("[EnsoWidgetBridge] Activity.request failed: %@", String(describing: error))
                 }
             }
             return
