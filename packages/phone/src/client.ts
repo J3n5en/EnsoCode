@@ -205,6 +205,7 @@ export class PairClient {
   private probeSentAt: number | null = null;
   private relayEpoch: string | null = null;
   private relaySeq = 0;
+  private lastReplayedFrom: number | null = null;
   private metadata: Omit<PhoneCacheData, 'sessions'> = {
     catalog: [],
     pinnedOrder: [],
@@ -251,6 +252,22 @@ export class PairClient {
 
   transport(): DirectTransport {
     return this.direct.transport();
+  }
+
+  diagnostics(): {
+    relayKind: string | null;
+    hostV2: boolean;
+    relayEpoch: string | null;
+    relaySeq: number;
+    replayedFrom: number | null;
+  } {
+    return {
+      relayKind: this.ws?.transportKind ?? null,
+      hostV2: this.hostFrameV2,
+      relayEpoch: this.relayEpoch,
+      relaySeq: this.relaySeq,
+      replayedFrom: this.lastReplayedFrom,
+    };
   }
 
   connect(): void {
@@ -398,16 +415,19 @@ export class PairClient {
               Number.isSafeInteger(control.relaySeq) &&
               control.relaySeq >= 0
             ) {
-              this.relayEpoch = control.relayEpoch;
-              this.relaySeq =
+              const replayed =
                 typeof control.replayedFrom === 'number' &&
                 Number.isSafeInteger(control.replayedFrom) &&
                 control.replayedFrom >= 0
                   ? control.replayedFrom
-                  : control.relaySeq;
+                  : null;
+              this.relayEpoch = control.relayEpoch;
+              this.lastReplayedFrom = replayed;
+              this.relaySeq = replayed ?? control.relaySeq;
             } else {
               this.relayEpoch = null;
               this.relaySeq = 0;
+              this.lastReplayedFrom = null;
             }
             // 防重放只在这里重置：host 进房时同样收到 peer-joined 一起重置。中继重连尝试不能重置，
             // 否则直连上的帧退回随机 nonce，被仍锁定旧前缀的 host 静默丢弃
@@ -421,6 +441,7 @@ export class PairClient {
             this.roomStatusSeen = true;
             this.relayEpoch = null;
             this.relaySeq = 0;
+            this.lastReplayedFrom = null;
             this.events.onState('host-offline');
             this.direct.peerOnline(false);
             this.roomPrimed = false;
@@ -533,7 +554,7 @@ export class PairClient {
       .catch(() => {});
   }
 
-  private async handleFrame(frame: Uint8Array, socket?: WebSocket): Promise<void> {
+  private async handleFrame(frame: Uint8Array, socket?: RelaySocketLike): Promise<void> {
     let payload: HostToPhone;
     try {
       const opened = await this.replay.open(this.contentKey, frame);

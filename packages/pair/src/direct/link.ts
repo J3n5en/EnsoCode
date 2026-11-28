@@ -168,6 +168,12 @@ export class DirectLink {
     return this.state.phase === 'connected' && this.dcOpen ? 'direct' : 'relay';
   }
 
+  hasBulk(): boolean {
+    return (
+      this.transport() === 'direct' && Boolean(this.peer?.sendBulk && this.peer?.isBulkOpen?.())
+    );
+  }
+
   /** 直连可用时分片发出；大帧或 bulk 标记优先走独立 bulk DataChannel，返回 false 表示调用方应改走中继 */
   send(frame: Uint8Array, opts?: { bulk?: boolean }): boolean {
     if (this.transport() !== 'direct' || !this.peer) return false;

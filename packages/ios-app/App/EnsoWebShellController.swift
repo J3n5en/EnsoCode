@@ -150,7 +150,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         }
         // 切回前台时立即通知前端触发原生 QUIC / WebRTC 探活与重连
         EnsoPushManager.shared.clearBadge()
-        evalJS("window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));")
+        evalJS("window.dispatchEvent(new Event('enso:foreground'));")
     }
 
     func openSessionFromNotification(_ sessionId: String) {
@@ -170,7 +170,9 @@ final class EnsoWebShellController: NSObject, ObservableObject {
     }
 
     @objc private func appDidEnterBackground() {
-        evalJS("window.dispatchEvent(new Event('pagehide'));")
+        // 不能伪造 persisted=false 的 pagehide，否则前端会误以为页面卸载而向桌面发 rpc-bye，
+        // 导致切回前台后宿主拒绝续连（resumed=false）并强制重载整个 iframe。
+        evalJS("window.dispatchEvent(new Event('enso:background'));")
     }
 
     private func requestDeskAssetFromWebView(path: String, completion: @escaping (LocalProxyAsset) -> Void) {

@@ -145,9 +145,11 @@ private struct SmallWidgetView: View {
         let accent = statusAccent(snapshot)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 5) {
-                Circle()
-                    .fill(accent)
-                    .frame(width: 8, height: 8)
+                EnsoMarkView(
+                    size: 13,
+                    color: accent,
+                    badge: snapshot.pendingCount > 0 ? .pending : .none
+                )
                 Text(snapshot.deviceLabel)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -211,9 +213,11 @@ private struct MediumWidgetView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
-                    Circle()
-                        .fill(accent)
-                        .frame(width: 8, height: 8)
+                    EnsoMarkView(
+                        size: 13,
+                        color: accent,
+                        badge: snapshot.pendingCount > 0 ? .pending : .none
+                    )
                     Text(snapshot.deviceLabel)
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
@@ -300,15 +304,15 @@ private struct CircularLockView: View {
 
     var body: some View {
         let count = snapshot.pendingCount > 0 ? snapshot.pendingCount : snapshot.runningCount
-        let symbol = snapshot.pendingCount > 0
-            ? "exclamationmark.bubble.fill"
-            : (snapshot.runningCount > 0 ? "sparkles" : "terminal.fill")
         ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 1) {
-                Image(systemName: symbol)
-                    .font(.caption2.weight(.semibold))
-                Text(count > 0 ? "\(count)" : "OK")
+                EnsoMarkView(
+                    size: 15,
+                    color: .primary,
+                    badge: snapshot.pendingCount > 0 ? .pending : .none
+                )
+                Text(count > 0 ? "\(count)" : "就绪")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .monospacedDigit()
             }
@@ -322,8 +326,11 @@ private struct RectangularLockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
-                Image(systemName: snapshot.pendingCount > 0 ? "exclamationmark.bubble.fill" : "sparkles")
-                    .font(.caption2)
+                EnsoMarkView(
+                    size: 12,
+                    color: .primary,
+                    badge: snapshot.pendingCount > 0 ? .pending : .none
+                )
                 Text("Enso · \(connectionBadgeText(snapshot))")
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
