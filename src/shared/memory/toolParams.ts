@@ -38,6 +38,8 @@ export interface MemorySearchRequest extends Partial<Record<MemorySearchDateKey,
   spaceId: MemorySearchSpace;
   /** fast = 等权三通道，不调 LLM；deep = 按查询意图换融合权重。缺省 fast */
   mode: MemorySearchMode;
+  /** 仅秘书：只检索它可见的这个项目的空间；可见性由 Main 校验 */
+  projectId?: string;
 }
 
 /** Main 侧收窄后的结果：unitType 已落到闭集，unitTypeSource 是派生信息，不出现在工具参数里 */
@@ -49,6 +51,8 @@ export interface MemoryCaptureRequest {
   importance: number;
   /** 缺省由 Main 按会话决定：bot 会话写 bot，否则 project */
   spaceId?: MemoryCaptureSpace;
+  /** 仅秘书：写进它可见的这个项目的空间；可见性由 Main 校验 */
+  projectId?: string;
   eventStart?: string;
   eventEnd?: string;
   /** 看过候选后仍要写入 */
@@ -110,6 +114,7 @@ export function normalizeMemorySearchParams(raw: unknown): unknown {
     const v = optionalText(record[key]);
     if (v) dates[key] = v;
   }
+  const projectId = optionalText(record.projectId);
   return {
     query: typeof record.query === 'string' ? record.query : record.query,
     limit:
@@ -121,6 +126,7 @@ export function normalizeMemorySearchParams(raw: unknown): unknown {
       ? (mode as MemorySearchMode)
       : 'fast',
     ...dates,
+    ...(projectId ? { projectId } : {}),
   };
 }
 
@@ -133,6 +139,7 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
   // agent 写入缺省 AGENT_CREATE_IMPORTANCE=0.6，与 API 缺省 0.5 不同
   const importance = asNumber(record.importance);
   const space = typeof record.spaceId === 'string' ? record.spaceId.trim() : '';
+  const projectId = optionalText(record.projectId);
   const title = optionalText(record.title);
   const eventStart = optionalText(record.eventStart);
   const eventEnd = optionalText(record.eventEnd);
@@ -155,6 +162,7 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
         : AGENT_CREATE_IMPORTANCE,
     // 缺省 / 非法不产出：worker 不知道会话是否 Bot 模式，由 Main 决定缺省 space
     ...((MEMORY_CAPTURE_SPACES as readonly string[]).includes(space) ? { spaceId: space } : {}),
+    ...(projectId ? { projectId } : {}),
     ...(eventStart ? { eventStart } : {}),
     ...(eventEnd ? { eventEnd } : {}),
     ...(force ? { force } : {}),
@@ -207,6 +215,9 @@ export function normalizeMemoryCrystallizeParams(raw: unknown): unknown {
 const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]) =>
   Object.keys(value).every((key) => allowed.includes(key));
 
+const isOptionalText = (value: unknown) =>
+  value === undefined || (typeof value === 'string' && value.trim() !== '');
+
 export function normalizeMemoryDeleteParams(raw: unknown): unknown {
   const record = asRecord(raw);
   if (!record) return raw;
@@ -233,7 +244,14 @@ export function parseMemorySearchRequest(value: unknown): MemorySearchRequest | 
   if (
     !record ||
     typeof value === 'string' ||
-    !hasOnlyKeys(record, ['query', 'limit', 'spaceId', 'mode', ...MEMORY_SEARCH_DATE_KEYS]) ||
+    !hasOnlyKeys(record, [
+      'query',
+      'limit',
+      'spaceId',
+      'mode',
+      'projectId',
+      ...MEMORY_SEARCH_DATE_KEYS,
+    ]) ||
     typeof record.query !== 'string' ||
     !record.query.trim() ||
     typeof record.limit !== 'number' ||
@@ -243,6 +261,7 @@ export function parseMemorySearchRequest(value: unknown): MemorySearchRequest | 
     !(MEMORY_SEARCH_SPACES as readonly unknown[]).includes(record.spaceId) ||
     (record.mode !== undefined &&
       !(MEMORY_SEARCH_MODES as readonly unknown[]).includes(record.mode)) ||
+    !isOptionalText(record.projectId) ||
     MEMORY_SEARCH_DATE_KEYS.some(
       (k) => record[k] !== undefined && (typeof record[k] !== 'string' || !record[k].trim())
     )
@@ -254,6 +273,7 @@ export function parseMemorySearchRequest(value: unknown): MemorySearchRequest | 
     limit: record.limit,
     spaceId: record.spaceId as MemorySearchSpace,
     mode: record.mode === 'deep' ? 'deep' : 'fast',
+    ...(typeof record.projectId === 'string' ? { projectId: record.projectId } : {}),
   };
   for (const k of MEMORY_SEARCH_DATE_KEYS) if (typeof record[k] === 'string') out[k] = record[k];
   return out;
@@ -295,6 +315,7 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
       'unitType',
       'importance',
       'spaceId',
+      'projectId',
       'eventStart',
       'eventEnd',
       'force',
@@ -311,6 +332,7 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
     record.importance > 1 ||
     (record.spaceId !== undefined &&
       !(MEMORY_CAPTURE_SPACES as readonly unknown[]).includes(record.spaceId)) ||
+    !isOptionalText(record.projectId) ||
     (record.eventStart !== undefined && typeof record.eventStart !== 'string') ||
     (record.eventEnd !== undefined && typeof record.eventEnd !== 'string') ||
     (record.force !== undefined && typeof record.force !== 'boolean') ||
@@ -339,6 +361,7 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
     unitTypeSource,
     importance: record.importance,
     ...(record.spaceId !== undefined ? { spaceId: record.spaceId as MemoryCaptureSpace } : {}),
+    ...(typeof record.projectId === 'string' ? { projectId: record.projectId } : {}),
     ...(record.eventStart !== undefined ? { eventStart: record.eventStart } : {}),
     ...(record.eventEnd !== undefined ? { eventEnd: record.eventEnd } : {}),
     ...(record.force !== undefined ? { force: record.force } : {}),

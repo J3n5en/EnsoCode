@@ -5,7 +5,7 @@ description: >
   historical decisions, and high-cost pitfalls. Use before non-trivial or cross-layer changes,
   when adding IPC or session/worker behavior, when debugging state/history/input issues,
   when a fix reveals a reusable rule, or when the user asks to search or capture project knowledge.
-  项目知识导航、踩坑检索、根因沉淀、TDD 和工程约定。
+  项目知识导航、踩坑检索、根因沉淀和工程约定。
 ---
 
 # Project Knowledge
@@ -57,13 +57,9 @@ UI → store/reducer → preload → IPC → Main → worker / 文件 / 网络
 
 ## 测试与验证
 
-改动纯函数、解析器、协议校验、路径校验或 reducer 时必须遵循：
+改动纯函数、解析器、协议校验、路径校验或 reducer 时补充或更新单元测试，修 bug 时补回归测试；跑 `pnpm test:changed` 后提交（跨模块改动再跑全量 `pnpm test`）。
 
-1. 先写测试并确认它因缺少功能而失败（RED）。
-2. 写最小实现使其通过（GREEN）。
-3. 跑 `pnpm test:changed` 后提交（跨模块改动再跑全量 `pnpm test`）。
-
-修 bug 同样先写复现测试。测试应断言可观察行为，不要只断言内部调用或错误文案。涉及模型自主调用工具的链路，至少用两个不同厂商的模型真机验证。
+测试应断言可观察行为，不要只断言内部调用或错误文案。涉及模型自主调用工具的链路，至少用两个不同厂商的模型真机验证。
 
 提交前运行：
 

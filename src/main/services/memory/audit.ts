@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import type { EvolvesRelation } from '@shared/memory/constants';
 import type { MemoryDeletionImpact } from '@shared/memory/dto';
 import { contentHash } from './contentHash';
 import type { ForgettingRunSummary } from './forgetting';
@@ -43,6 +44,20 @@ export type MemoryAuditEntry =
       actor: 'user' | 'system';
       ids: string[];
       reason: 'candidates' | 'auto';
+    }
+  /** 秘书写入 / 删除共享空间（global、可见项目）的记忆；自己的私有空间不记 */
+  | {
+      ts: string;
+      action: 'memory.agent-write';
+      actor: 'secretary';
+      sessionId: string;
+      op: 'capture' | 'crystallize' | 'delete';
+      memoryId: string;
+      spaceId: string;
+      title: string;
+      contentHash: string;
+      contentChars: number;
+      evolves?: { relation: EvolvesRelation; olderId: string };
     };
 
 export function editAuditEntry(result: ManualEditResult, now = new Date()): MemoryAuditEntry {
