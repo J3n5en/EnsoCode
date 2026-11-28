@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { MemoryAuditEntry } from './audit';
 import { executeMemoryOp } from './bridge';
 import { openMemoryDb } from './db';
 import { listPendingWrites } from './pending';
@@ -428,6 +429,90 @@ describe('executeMemoryOp', () => {
     expect(deleted).toEqual([own]);
   });
 
+  describe('delete 与设置页删除同一路径', () => {
+    const ctx = { projectId: PROJECT };
+    const add = async (content: string, extra: Record<string, unknown> = {}) => {
+      const r = await createMemory(db, {
+        content,
+        spaceId: projectSpaceId(PROJECT),
+        force: true,
+        ...extra,
+      });
+      if (r.status !== 'inserted') throw new Error('setup');
+      return r.memory.id;
+    };
+    const replacesEdges = () =>
+      db
+        .prepare(
+          "SELECT older_id AS olderId, newer_id AS newerId FROM evolves WHERE content_relation = 'replaces'"
+        )
+        .all();
+    const crystalOf = async (sources: string[]) => {
+      const crystal = await add('结晶：部署约定');
+      db.prepare(
+        "UPDATE memories SET is_crystal = 1, crystal_title = 'C', source_unit_count = ? WHERE id = ?"
+      ).run(sources.length, crystal);
+      const edge = db.prepare(
+        'INSERT INTO crystallized_from (crystal_id, source_id, contribution_weight, created_at) VALUES (?, ?, ?, ?)'
+      );
+      for (const s of sources) edge.run(crystal, s, 1 / sources.length, new Date().toISOString());
+      return crystal;
+    };
+
+    it('删 replaces 链中间版本：前后版本重新接上，最新版本不受影响', async () => {
+      const v1 = await add('部署用 v1 脚本');
+      const v2 = await add('部署用 v2 脚本', { evolvesFromId: v1, evolvesRelation: 'replaces' });
+      const v3 = await add('部署用 v3 脚本', { evolvesFromId: v2, evolvesRelation: 'replaces' });
+
+      const result = await executeMemoryOp(db, 'delete', { id: v2 }, ctx);
+      expect(result).toMatchObject({
+        status: 'deleted',
+        id: v2,
+        relinked: [{ olderId: v1, newerId: v3 }],
+      });
+      expect(result).not.toHaveProperty('alsoDeletedHistory');
+      expect(getMemory(db, v2)).toBeNull();
+      expect(getMemory(db, v1)?.isLatest).toBe(false);
+      expect(getMemory(db, v3)?.isLatest).toBe(true);
+      expect(replacesEdges()).toEqual([{ olderId: v1, newerId: v3 }]);
+    });
+
+    it('删 replaces 链最新版本：只通向它的历史版本一起删，不留不可见旧行', async () => {
+      const v1 = await add('缓存用 v1');
+      const v2 = await add('缓存用 v2', { evolvesFromId: v1, evolvesRelation: 'replaces' });
+
+      expect(await executeMemoryOp(db, 'delete', { id: v2 }, ctx)).toMatchObject({
+        status: 'deleted',
+        alsoDeletedHistory: [v1],
+      });
+      expect(getMemory(db, v1)).toBeNull();
+      expect(replacesEdges()).toEqual([]);
+    });
+
+    it('删结晶来源：剩余来源够则更新计数与权重，不够则降为普通记忆', async () => {
+      const sources = [];
+      for (const x of ['a', 'b', 'c', 'd']) sources.push(await add(`来源 ${x}`));
+      const crystal = await crystalOf(sources);
+
+      expect(await executeMemoryOp(db, 'delete', { id: sources[0] }, ctx)).toMatchObject({
+        crystalsUpdated: [crystal],
+      });
+      expect(getMemory(db, crystal)).toMatchObject({ isCrystal: true, sourceUnitCount: 3 });
+      const weights = db
+        .prepare('SELECT contribution_weight AS w FROM crystallized_from WHERE crystal_id = ?')
+        .all(crystal) as { w: number }[];
+      expect(weights.map((r) => r.w)).toEqual([1 / 3, 1 / 3, 1 / 3]);
+
+      expect(await executeMemoryOp(db, 'delete', { id: sources[1] }, ctx)).toMatchObject({
+        crystalsDemoted: [crystal],
+      });
+      expect(getMemory(db, crystal)).toMatchObject({ isCrystal: false, sourceUnitCount: 0 });
+      expect(
+        db.prepare('SELECT count(*) AS n FROM crystallized_from WHERE crystal_id = ?').get(crystal)
+      ).toEqual({ n: 0 });
+    });
+  });
+
   it('search 非法载荷 → 抛错；未知 op → 抛错', async () => {
     await expect(
       executeMemoryOp(db, 'search', { query: 'q' }, { projectId: PROJECT })
@@ -560,27 +645,174 @@ describe('executeMemoryOp：秘书空间', () => {
   const SECRETARY = '55555555-5555-4555-8555-555555555555';
   const VISIBLE = '66666666-6666-4666-8666-666666666666';
   const OTHER = '77777777-7777-4777-8777-777777777777';
-  const ctx = { projectId: SECRETARY, secretary: { readProjectIds: [VISIBLE] } };
-  const readOnly = (run: Promise<unknown>) =>
-    expect(run).rejects.toMatchObject({ code: 'read_only' });
+  const SESSION = 'secretary-session-1';
+  let audit: MemoryAuditEntry[];
+  let ctx: Parameters<typeof executeMemoryOp>[3];
+  beforeEach(() => {
+    audit = [];
+    ctx = {
+      projectId: SECRETARY,
+      secretary: { projectIds: [VISIBLE], sessionId: SESSION },
+      audit: (entry) => audit.push(entry),
+    };
+  });
   const add = async (content: string, spaceId: string) => {
     const r = await createMemory(db, { content, spaceId });
     if (r.status !== 'inserted') throw new Error('setup');
     return r.memory.id;
   };
+  const count = () => (db.prepare('SELECT COUNT(*) AS n FROM memories').get() as { n: number }).n;
+  const rejects = (run: Promise<unknown>, code: string) =>
+    expect(run).rejects.toMatchObject({ code });
 
-  it('capture 缺省落私有空间；写 global 被拒且不落库', async () => {
-    const r = (await executeMemoryOp(
+  it('capture 缺省落私有空间且不记审计；global 与可见项目（projectId）直接写入并记审计', async () => {
+    const own = (await executeMemoryOp(
       db,
       'capture',
       { content: '用户偏好周报在周五', importance: 0.6 },
       ctx
     )) as { status: string; memory: { spaceId: string } };
-    expect(r.status).toBe('inserted');
-    expect(r.memory.spaceId).toBe(projectSpaceId(SECRETARY));
+    expect(own).toMatchObject({
+      status: 'inserted',
+      memory: { spaceId: projectSpaceId(SECRETARY) },
+    });
+    expect(audit).toEqual([]);
 
-    await readOnly(executeMemoryOp(db, 'capture', capture('x', { spaceId: 'global' }), ctx));
-    expect(db.prepare('SELECT COUNT(*) AS n FROM memories').get()).toEqual({ n: 1 });
+    const global = (await executeMemoryOp(
+      db,
+      'capture',
+      capture('用户所有项目都用 pnpm 管理依赖', { spaceId: 'global', title: '包管理器' }),
+      ctx
+    )) as { status: string; memory: { id: string; spaceId: string } };
+    expect(global).toMatchObject({ status: 'inserted', memory: { spaceId: 'global' } });
+
+    const visible = (await executeMemoryOp(
+      db,
+      'capture',
+      { content: '该项目发版前要跑 e2e', importance: 0.6, projectId: VISIBLE },
+      ctx
+    )) as { status: string; memory: { id: string; spaceId: string } };
+    expect(visible).toMatchObject({
+      status: 'inserted',
+      memory: { spaceId: projectSpaceId(VISIBLE) },
+    });
+
+    expect(audit).toEqual([
+      {
+        ts: expect.any(String),
+        action: 'memory.agent-write',
+        actor: 'secretary',
+        sessionId: SESSION,
+        op: 'capture',
+        memoryId: global.memory.id,
+        spaceId: 'global',
+        title: '包管理器',
+        contentHash: expect.stringMatching(/^[0-9a-f]+$/),
+        contentChars: Array.from('用户所有项目都用 pnpm 管理依赖').length,
+      },
+      expect.objectContaining({
+        op: 'capture',
+        memoryId: visible.memory.id,
+        spaceId: projectSpaceId(VISIBLE),
+      }),
+    ]);
+    // 审计不存正文（标题照记，与人工编辑审计同口径）
+    expect(JSON.stringify(audit)).not.toContain('管理依赖');
+  });
+
+  it('纠正 = capture + replaces：可见项目里旧记忆不再是 latest、留作历史，审计带 evolves', async () => {
+    const old = await add('发版窗口是周二', projectSpaceId(VISIBLE));
+    const r = (await executeMemoryOp(
+      db,
+      'capture',
+      {
+        content: '发版窗口改到周四',
+        importance: 0.6,
+        projectId: VISIBLE,
+        evolvesFromId: old,
+        evolvesRelation: 'replaces',
+      },
+      ctx
+    )) as { status: string; memory: { id: string; spaceId: string } };
+    expect(r).toMatchObject({
+      status: 'inserted',
+      evolves: { relation: 'replaces', olderId: old },
+      memory: { spaceId: projectSpaceId(VISIBLE) },
+    });
+    expect(getMemory(db, old)).toMatchObject({ isLatest: false });
+    expect(audit).toEqual([
+      expect.objectContaining({
+        op: 'capture',
+        memoryId: r.memory.id,
+        evolves: { relation: 'replaces', olderId: old },
+      }),
+    ]);
+  });
+
+  it('candidates_found 与完全重复（deduplicated）没有写入，不记审计', async () => {
+    const embedder = { model: 'const', dim: 2, embed: async () => Float32Array.from([1, 0]) };
+    const long = '所有项目的提交信息都用 conventional commits，scope 写模块名。'.repeat(3);
+    const withEmbedder = { ...ctx, embedder };
+    await executeMemoryOp(db, 'capture', capture(long, { spaceId: 'global' }), withEmbedder);
+    audit.length = 0;
+    const similar = await executeMemoryOp(
+      db,
+      'capture',
+      capture(`${long} 变体`, { spaceId: 'global' }),
+      withEmbedder
+    );
+    expect(similar).toMatchObject({ status: 'candidates_found', written: false });
+    const same = await executeMemoryOp(
+      db,
+      'capture',
+      capture(long, { spaceId: 'global' }),
+      withEmbedder
+    );
+    expect(same).toMatchObject({ status: 'inserted', deduplicated: true });
+    expect(audit).toEqual([]);
+  });
+
+  it('不可见项目：capture / search 带 projectId 被拒；delete / crystallize 按 id 视同不存在', async () => {
+    const hidden = [
+      await add('不可见 a', projectSpaceId(OTHER)),
+      await add('不可见 b', projectSpaceId(OTHER)),
+      await add('不可见 c', projectSpaceId(OTHER)),
+    ];
+    await rejects(
+      executeMemoryOp(db, 'capture', { content: 'x', importance: 0.6, projectId: OTHER }, ctx),
+      'project_not_visible'
+    );
+    await rejects(
+      executeMemoryOp(
+        db,
+        'search',
+        { query: '不可见', limit: 5, spaceId: 'all', projectId: OTHER },
+        ctx
+      ),
+      'project_not_visible'
+    );
+    await rejects(executeMemoryOp(db, 'delete', { id: hidden[0] }, ctx), 'not_found');
+    await rejects(
+      executeMemoryOp(
+        db,
+        'crystallize',
+        { content: '汇总', title: '汇总', sourceIds: hidden },
+        ctx
+      ),
+      'crystal_sources'
+    );
+    await rejects(
+      executeMemoryOp(
+        db,
+        'capture',
+        { content: 'x', importance: 0.6, spaceId: 'global', projectId: VISIBLE },
+        ctx
+      ),
+      'invalid_request'
+    );
+    expect(count()).toBe(3);
+    expect(getMemory(db, hidden[0])).not.toBeNull();
+    expect(audit).toEqual([]);
   });
 
   it('search all 只含私有 + 可见项目 + global；非私有结果脱敏并包进不可信标签', async () => {
@@ -606,40 +838,83 @@ describe('executeMemoryOp：秘书空间', () => {
       expect(String(hit.content)).not.toMatch(/abcdef123456|sk-live/);
       expect(String(hit.content)).toContain('[REDACTED]');
     }
+
+    const scoped = (await executeMemoryOp(
+      db,
+      'search',
+      { query: '周报', limit: 10, spaceId: 'all', projectId: VISIBLE },
+      ctx
+    )) as { results: Record<string, unknown>[] };
+    expect(scoped.results.map((hit) => hit.spaceId)).toEqual([projectSpaceId(VISIBLE)]);
+    expect(String(scoped.results[0].content)).toMatch(/^<untrusted-content /);
   });
 
-  it('delete：私有空间可删，可见项目与 global 的记忆被拒', async () => {
+  it('delete：私有、可见项目与 global 都可删；只有共享空间记审计', async () => {
     const own = await add('私有记忆', projectSpaceId(SECRETARY));
     const visible = await add('可见项目记忆', projectSpaceId(VISIBLE));
     const global = await add('全局记忆', 'global');
 
-    await readOnly(executeMemoryOp(db, 'delete', { id: visible }, ctx));
-    await readOnly(executeMemoryOp(db, 'delete', { id: global }, ctx));
-    expect(getMemory(db, visible)).not.toBeNull();
-    expect(getMemory(db, global)).not.toBeNull();
-
-    await expect(executeMemoryOp(db, 'delete', { id: own }, ctx)).resolves.toMatchObject({
-      status: 'deleted',
-      id: own,
-      title: expect.any(String),
-      content: expect.stringContaining('私有记忆'),
-    });
+    for (const id of [own, visible, global]) {
+      await expect(executeMemoryOp(db, 'delete', { id }, ctx)).resolves.toMatchObject({
+        status: 'deleted',
+        id,
+      });
+      expect(getMemory(db, id)).toBeNull();
+    }
+    expect(audit).toEqual([
+      expect.objectContaining({
+        op: 'delete',
+        memoryId: visible,
+        spaceId: projectSpaceId(VISIBLE),
+        sessionId: SESSION,
+        contentChars: Array.from('可见项目记忆').length,
+      }),
+      expect.objectContaining({ op: 'delete', memoryId: global, spaceId: 'global' }),
+    ]);
   });
 
-  it('crystallize：源在可见项目 → 拒；源在私有空间 → 写入私有空间', async () => {
+  it('delete：可见项目里删最新版本，连带删除的历史版本逐条记审计', async () => {
+    const old = await add('周会改到周二', projectSpaceId(VISIBLE));
+    const r = await createMemory(db, {
+      content: '周会改到周三',
+      spaceId: projectSpaceId(VISIBLE),
+      evolvesFromId: old,
+      evolvesRelation: 'replaces',
+    });
+    if (r.status !== 'inserted') throw new Error('setup');
+    const latest = r.memory.id;
+
+    await expect(executeMemoryOp(db, 'delete', { id: latest }, ctx)).resolves.toMatchObject({
+      alsoDeletedHistory: [old],
+    });
+    expect(getMemory(db, old)).toBeNull();
+    expect(audit).toEqual([
+      expect.objectContaining({ op: 'delete', memoryId: latest, spaceId: projectSpaceId(VISIBLE) }),
+      expect.objectContaining({
+        op: 'delete',
+        memoryId: old,
+        spaceId: projectSpaceId(VISIBLE),
+        contentChars: Array.from('周会改到周二').length,
+      }),
+    ]);
+  });
+
+  it('crystallize：源在可见项目 → 写入该项目并记审计；源在私有空间 → 写入私有空间不记审计', async () => {
     const visible = [
       await add('可见项目 a', projectSpaceId(VISIBLE)),
       await add('可见项目 b', projectSpaceId(VISIBLE)),
       await add('可见项目 c', projectSpaceId(VISIBLE)),
     ];
-    await readOnly(
-      executeMemoryOp(
-        db,
-        'crystallize',
-        { content: '汇总', title: '汇总', sourceIds: visible },
-        ctx
-      )
-    );
+    const shared = (await executeMemoryOp(
+      db,
+      'crystallize',
+      { content: '可见项目汇总', title: '汇总', sourceIds: visible },
+      ctx
+    )) as { status: string; memory: { id: string; spaceId: string } };
+    expect(shared).toMatchObject({
+      status: 'inserted',
+      memory: { spaceId: projectSpaceId(VISIBLE) },
+    });
 
     const own = [
       await add('私有 a', projectSpaceId(SECRETARY)),
@@ -654,5 +929,46 @@ describe('executeMemoryOp：秘书空间', () => {
     )) as { status: string; memory: { spaceId: string } };
     expect(r.status).toBe('inserted');
     expect(r.memory.spaceId).toBe(projectSpaceId(SECRETARY));
+    expect(audit).toEqual([
+      expect.objectContaining({
+        op: 'crystallize',
+        memoryId: shared.memory.id,
+        spaceId: projectSpaceId(VISIBLE),
+      }),
+    ]);
+  });
+
+  it('普通与 Bot 会话：带 projectId 被拒（project_scope）且不落库，也从不记审计', async () => {
+    const plainCtxs = [
+      { projectId: PROJECT, audit: (e: MemoryAuditEntry) => audit.push(e) },
+      { projectId: PROJECT, botId: BOT, audit: (e: MemoryAuditEntry) => audit.push(e) },
+    ];
+    for (const plain of plainCtxs) {
+      await rejects(
+        executeMemoryOp(db, 'capture', capture('x', { projectId: VISIBLE }), plain),
+        'project_scope'
+      );
+      await rejects(
+        executeMemoryOp(
+          db,
+          'search',
+          { query: 'x', limit: 5, spaceId: 'all', projectId: VISIBLE },
+          plain
+        ),
+        'project_scope'
+      );
+    }
+    expect(count()).toBe(0);
+    const plain = plainCtxs[0];
+    const g = (await executeMemoryOp(
+      db,
+      'capture',
+      capture('全局偏好', { spaceId: 'global' }),
+      plain
+    )) as {
+      memory: { id: string };
+    };
+    await executeMemoryOp(db, 'delete', { id: g.memory.id }, plain);
+    expect(audit).toEqual([]);
   });
 });

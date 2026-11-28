@@ -9,9 +9,11 @@ import {
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { MemoryOp } from '@shared/types/agent';
 import type Database from 'better-sqlite3';
-import { deleteMemoryPermanently } from '../memoryAdmin';
+import type { MemoryAuditEntry } from './audit';
+import { contentHash } from './contentHash';
 import { createCrystal } from './crystal';
 import { type Complete, redactSecrets } from './distill';
+import { deleteMemoriesManually, planMemoryDeletion } from './manual';
 import { type PendingWriteInput, queuePendingWrite } from './pending';
 import { sanitizeMemoryWrite } from './safety';
 import { searchMemories } from './search';
@@ -19,6 +21,7 @@ import { createSearchAssist } from './searchLlm';
 import {
   defaultCaptureSpace,
   type MemorySpaceContext,
+  requestSpaceIds,
   resolveSpaceIds,
   secretaryPrivateSpace,
 } from './space';
@@ -41,6 +44,8 @@ export interface MemoryBridgeContext extends MemorySpaceContext {
   vectorWarming?: boolean;
   /** 检索等查询向量的剩余预算；超出即跳过向量通道并同样标注 */
   vectorBudgetMs?: number;
+  /** 秘书写共享空间的审计落点 */
+  audit?: (entry: MemoryAuditEntry) => void;
 }
 
 // 给模型看的说明：结果暂时不全，别把「没搜到」当成「没有」
@@ -80,16 +85,27 @@ function queueForReview(
 
 const REDACTED_NOTE = 'Secrets in the content were replaced with [REDACTED] before saving.';
 
-/**
- * 秘书只能写自己的私有空间，其它空间一律只读。校验放在服务里：工具描述与模型都不可信。
- */
-function assertWritable(ctx: MemoryBridgeContext, spaceId: string): void {
-  const own = secretaryPrivateSpace(ctx);
-  if (own === null || spaceId === own) return;
-  throw new MemoryValidationError(
-    'read_only',
-    `the secretary can only write its own memory space; ${spaceId} is read-only`
-  );
+/** 秘书真正写入 / 删除了私有空间之外的记忆：留审计，正文只记 hash 与长度 */
+function auditSecretaryWrite(
+  ctx: MemoryBridgeContext,
+  op: 'capture' | 'crystallize' | 'delete',
+  memory: Pick<Memory, 'id' | 'spaceId' | 'title' | 'content'>,
+  evolves?: Extract<MemoryAuditEntry, { action: 'memory.agent-write' }>['evolves']
+): void {
+  if (!ctx.secretary || !ctx.audit || memory.spaceId === secretaryPrivateSpace(ctx)) return;
+  ctx.audit({
+    ts: (ctx.now ?? new Date()).toISOString(),
+    action: 'memory.agent-write',
+    actor: 'secretary',
+    sessionId: ctx.secretary.sessionId,
+    op,
+    memoryId: memory.id,
+    spaceId: memory.spaceId,
+    title: memory.title,
+    contentHash: contentHash(memory.content),
+    contentChars: Array.from(memory.content).length,
+    ...(evolves ? { evolves } : {}),
+  });
 }
 
 /**
@@ -106,7 +122,7 @@ export async function executeMemoryOp(
     const request = parseMemorySearchRequest(params);
     if (!request)
       throw new MemoryValidationError('invalid_request', 'invalid memory_search params');
-    const spaceIds = resolveSpaceIds(request.spaceId, ctx);
+    const spaceIds = requestSpaceIds(request.spaceId, request.projectId, ctx);
     const assist =
       request.mode === 'deep' ? createSearchAssist((await ctx.complete?.()) ?? null) : undefined;
     let vectorSkipped = ctx.vectorWarming === true;
@@ -129,15 +145,15 @@ export async function executeMemoryOp(
       recordedDateFrom: request.recordedDateFrom ?? null,
       recordedDateTo: request.recordedDateTo ?? null,
     });
-    // 秘书读到的其它空间是别人的记忆：脱敏并包进不可信标签，提示词据此禁止照做
+    // 秘书读到的其它空间是共享记忆：脱敏并包进不可信标签，提示词据此禁止照做
     const own = secretaryPrivateSpace(ctx);
-    const readOnly = (spaceId: string) => own !== null && spaceId !== own;
+    const shared = (spaceId: string) => own !== null && spaceId !== own;
     return {
       // 顺序即排名；relevance 是向量余弦，未走向量通道时省略，不填占位值（#168）
       results: hits.map((hit, index) => ({
         id: hit.memory.id,
-        title: readOnly(hit.memory.spaceId) ? redactSecrets(hit.memory.title) : hit.memory.title,
-        content: readOnly(hit.memory.spaceId)
+        title: shared(hit.memory.spaceId) ? redactSecrets(hit.memory.title) : hit.memory.title,
+        content: shared(hit.memory.spaceId)
           ? wrapUntrusted(`memory:${hit.memory.spaceId}`, redactSecrets(hit.memory.content))
           : hit.memory.content,
         unitType: hit.memory.unitType,
@@ -157,14 +173,17 @@ export async function executeMemoryOp(
     if (!request) {
       throw new MemoryValidationError('invalid_request', 'invalid memory_capture params');
     }
-    const [spaceId] = resolveSpaceIds(request.spaceId ?? defaultCaptureSpace(ctx), ctx);
+    const [spaceId] = requestSpaceIds(
+      request.spaceId ?? defaultCaptureSpace(ctx),
+      request.projectId,
+      ctx
+    );
     if (!spaceId) {
       throw new MemoryValidationError(
         'no_project',
         "this session has no project; use spaceId 'global' instead"
       );
     }
-    assertWritable(ctx, spaceId);
     const safe = sanitizeMemoryWrite({ title: request.title ?? null, content: request.content });
     if (needsReview(ctx, spaceId)) {
       return queueForReview(db, ctx, {
@@ -224,6 +243,16 @@ export async function executeMemoryOp(
       };
     }
     const { memory } = result;
+    if (!result.deduplicated) {
+      auditSecretaryWrite(
+        ctx,
+        'capture',
+        memory,
+        result.evolves
+          ? { relation: result.evolves.relation, olderId: result.evolves.olderId }
+          : undefined
+      );
+    }
     return {
       status: 'inserted',
       ...(result.deduplicated ? { deduplicated: true } : {}),
@@ -269,7 +298,6 @@ export async function executeMemoryOp(
       );
     }
     const [spaceId] = spaceIds;
-    assertWritable(ctx, spaceId);
     const safe = sanitizeMemoryWrite({ title: request.title, content: request.content });
     if (needsReview(ctx, spaceId)) {
       return queueForReview(db, ctx, {
@@ -310,6 +338,7 @@ export async function executeMemoryOp(
       };
     }
     const { memory } = result;
+    auditSecretaryWrite(ctx, 'crystallize', memory);
     return {
       status: 'inserted',
       memory: {
@@ -338,16 +367,35 @@ export async function executeMemoryOp(
         `memory not found or not visible in this session: ${request.id}`
       );
     }
-    assertWritable(ctx, memory.spaceId);
-    if (!deleteMemoryPermanently(db, request.id)) {
+    // 与设置页删除同一条路径：一并删掉只通向它的历史版本、重连 replaces 链、修正引用它的结晶。
+    // 演进边与结晶来源都限定在同一 space，所以连带影响不会越出上面的可见性检查。
+    // 先按预览取出将被删的行，删完后逐条审计（正文只记 hash）
+    const doomed = new Map(
+      (planMemoryDeletion(db, [request.id])?.deleted ?? []).map((d) => [d.id, getMemory(db, d.id)])
+    );
+    const impact = deleteMemoriesManually(db, [request.id]);
+    if (!impact) {
       throw new MemoryValidationError('not_found', `memory not found: ${request.id}`);
     }
+    for (const entry of impact.deleted) {
+      const row = entry.id === memory.id ? memory : doomed.get(entry.id);
+      if (row) auditSecretaryWrite(ctx, 'delete', row);
+    }
     ctx.onDeleted?.(request.id);
+    const history = impact.deleted.filter((d) => d.role === 'history').map((d) => d.id);
     return {
       status: 'deleted',
       id: request.id,
       title: memory.title,
       content: memory.content.slice(0, 240),
+      ...(history.length > 0 ? { alsoDeletedHistory: history } : {}),
+      ...(impact.bridges.length > 0 ? { relinked: impact.bridges } : {}),
+      ...(impact.crystalsUpdated.length > 0
+        ? { crystalsUpdated: impact.crystalsUpdated.map((c) => c.id) }
+        : {}),
+      ...(impact.crystalsDemoted.length > 0
+        ? { crystalsDemoted: impact.crystalsDemoted.map((c) => c.id) }
+        : {}),
     };
   }
   throw new MemoryValidationError('unknown_op', `unknown memory op: ${String(op)}`);

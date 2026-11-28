@@ -157,10 +157,19 @@ function languageHint(language: string | undefined): string {
   );
 }
 
+/** 秘书专属参数：指向它可见的某个项目的记忆空间；普通会话的 schema 里没有它 */
+const secretaryProjectId = (purpose: string) => ({
+  projectId: {
+    type: 'string',
+    description: `Id of one of your visible projects (from project_list): ${purpose}`,
+  },
+});
+
 export function createMemoryTools(
   invoker: MemoryInvoker,
-  opts: { language?: string } = {}
+  opts: { language?: string; secretary?: boolean } = {}
 ): ToolDefinition[] {
+  const secretary = opts.secretary === true;
   const define = (
     name: string,
     label: string,
@@ -244,6 +253,11 @@ export function createMemoryTools(
             description:
               "'fast' (default) = equal-weight vector/FTS/entity, no extra LLM; 'deep' = same recall, intent-weighted fusion",
           },
+          ...(secretary
+            ? secretaryProjectId(
+                "search only that project's memory space. Omit it to search by spaceId."
+              )
+            : {}),
         },
         ['query']
       ),
@@ -265,7 +279,10 @@ export function createMemoryTools(
         'session yields at most 1-3 memories. If the result is ' +
         "status='candidates_found', NOTHING was written: similar memories already exist. Either drop " +
         'the capture, resubmit with evolvesFromId + evolvesRelation + evolvesReason to record how it relates to one ' +
-        'of them, or resubmit with force=true to store it as a separate memory.',
+        'of them, or resubmit with force=true to store it as a separate memory. To correct a wrong ' +
+        "memory, capture the corrected version with evolvesFromId=<old id> and evolvesRelation='replaces' " +
+        `in the same space${secretary ? ' (pass the same projectId)' : ''}: the old one stops being latest ` +
+        'and stays as history. Use memory_delete only when the memory must not exist at all.',
       schema(
         {
           content: {
@@ -334,6 +351,11 @@ export function createMemoryTools(
               'Only with evolvesRelation: one sentence on why they relate or conflict. It is shown to the ' +
               'user when a contradiction is reviewed, so say what changed or which claim disagrees.',
           },
+          ...(secretary
+            ? secretaryProjectId(
+                "save into that project's memory space. Omit it for your own space ('project') or 'global'."
+              )
+            : {}),
         },
         ['content']
       ),
@@ -386,8 +408,12 @@ export function createMemoryTools(
       'Permanently delete one memory by id; this cannot be undone. Use it only when the user asks ' +
         'to forget or remove a memory, or confirms that a memory is wrong or obsolete. Get the id ' +
         'from memory_search first. Do not use it to replace an outdated memory with a newer ' +
-        'version: capture the new one with evolvesRelation=replaces instead. Only memories in the ' +
-        'global space or the current project can be deleted.',
+        'version: capture the new one with evolvesRelation=replaces instead. ' +
+        'Older versions that only it replaced are deleted with it, the replaces chain is relinked ' +
+        'around it, and crystals built from it are updated or demoted; the result lists these. ' +
+        (secretary
+          ? 'Only memories in your own space, the global space or one of your visible projects can be deleted.'
+          : 'Only memories in the global space or the current project can be deleted.'),
       schema(
         {
           id: { type: 'string', description: 'Id of the memory to delete (from memory_search)' },

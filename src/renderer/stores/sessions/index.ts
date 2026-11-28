@@ -574,6 +574,11 @@ interface SessionsState {
   hireCoworker(parentId: string, name: string, agentType?: string): Promise<string | null>;
   /** 指定会话入队（不依赖 activeId）：手机端在轮次进行中发消息走这里 */
   enqueueMessage(conversationId: string, text: string, images?: AttachedImage[]): void;
+  /**
+   * leader 补泵一次排队：别的界面排的消息可能在本轮收束之后才到达，等不到下一次收束。
+   * 会话仍在跑、压缩中或有待决项时不发，照旧等收束。
+   */
+  pumpQueue(conversationId: string): void;
   removeQueuedMessage(conversationId: string, messageId: string): void;
   withdrawMessage(conversationId: string, target: { kind: 'queue' | 'delivery'; id: string }): void;
   /** 拒收的气泡原样重发：收回旧气泡，按「立即发送」以新投递号发出 */
@@ -4333,6 +4338,12 @@ export const useSessionsStore = create<SessionsState>()(
               ],
             })
           );
+          // 手机按它看到的运行态入队，那一轮可能已在桌面收束
+          get().pumpQueue(conversationId);
+        },
+
+        pumpQueue(conversationId) {
+          if (isLeaderRenderer()) flushQueue(conversationId);
         },
 
         updateQueuedMessage(conversationId, messageId, text) {
@@ -4994,10 +5005,26 @@ async function forkConversation(
   return targetId;
 }
 
+/**
+ * 别的界面（PWA 完整模式）排的消息经写回到达，可能晚于本轮收束：有新排队项的会话补泵一次。
+ * 只改字/删条不泵，中断后留着的队列照旧等用户处理。
+ */
+function pumpArrivedQueues(before: Record<string, Conversation>, ids: string[]): void {
+  const after = useSessionsStore.getState().conversations;
+  for (const id of ids) {
+    const known = new Set((before[id]?.queuedMessages ?? []).map((item) => item.id));
+    if (after[id]?.queuedMessages?.some((item) => !known.has(item.id))) {
+      useSessionsStore.getState().pumpQueue(id);
+    }
+  }
+}
+
 window.electronAPI.settings?.onConversationsPatch?.((value) => {
   const remotePatch = queueConversationsPatch(value);
   if (!remotePatch) return;
+  const before = useSessionsStore.getState().conversations;
   useSessionsStore.setState((state) => applySequencedConversationsPatch(state, remotePatch));
+  pumpArrivedQueues(before, Object.keys(remotePatch.upserts));
 });
 
 // 写回被 Main 拒收：重读磁盘并把磁盘行补回内存，之后的写回以这份磁盘值为基线
@@ -5006,9 +5033,10 @@ window.electronAPI.settings?.onConversationsResync?.(() => {
     .readConversations()
     .then(({ value, seq }) => {
       resetConversationsAppliedSeq(seq);
-      useSessionsStore.setState((state) =>
-        applyConversationsPatchToState(state, diffConversations(undefined, value))
-      );
+      const disk = diffConversations(undefined, value);
+      const before = useSessionsStore.getState().conversations;
+      useSessionsStore.setState((state) => applyConversationsPatchToState(state, disk));
+      pumpArrivedQueues(before, Object.keys(disk.upserts));
     })
     .catch(() => {});
 });

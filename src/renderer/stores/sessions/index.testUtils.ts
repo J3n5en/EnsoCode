@@ -14,6 +14,7 @@ import type * as SessionsModule from './index';
 export let onAgentEvent: ((event: RendererAgentEvent) => void) | undefined;
 export let onDispatchEvent: ((event: DispatchMainEvent) => void) | undefined;
 export let onConversationsResync: (() => void) | undefined;
+export let onConversationsPatch: ((patch: unknown) => void) | undefined;
 export let onUpstreamHealth: ((snapshots: ProviderHealthSnapshot[]) => void) | undefined;
 export let onUpstreamWake:
   | ((event: { conversationId: string; reason: 'probe' | 'recovered' | 'manual' }) => void)
@@ -230,6 +231,10 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
         registerConversation,
         onConversationsResync: vi.fn((callback: () => void) => {
           onConversationsResync = callback;
+          return vi.fn();
+        }),
+        onConversationsPatch: vi.fn((callback: (patch: unknown) => void) => {
+          onConversationsPatch = callback;
           return vi.fn();
         }),
         writeKey: vi.fn(async () => true),

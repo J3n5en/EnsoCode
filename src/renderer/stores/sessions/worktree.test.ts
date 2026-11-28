@@ -420,7 +420,12 @@ describe('workspace branch switching', () => {
   });
   it('blocks queued sends and goal kickoff before optimistic echo during switching', async () => {
     const id = await seedShared();
-    sessions.useSessionsStore.getState().enqueueMessage(id, 'queued');
+    sessions.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        [id]: { ...state.conversations[id], queuedMessages: [{ id: 'q1', text: 'queued' }] },
+      },
+    }));
     wtSwitch.mockImplementationOnce(async () => {
       const state = sessions.useSessionsStore.getState();
       const messageId = state.conversations[id].queuedMessages![0].id;

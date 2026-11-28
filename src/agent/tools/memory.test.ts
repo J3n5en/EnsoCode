@@ -151,6 +151,47 @@ describe('createMemoryTools', () => {
     expect(desc('en')).toContain('verbatim');
   });
 
+  it('projectId 只出现在秘书的 memory_search / memory_capture schema 里，且秘书的归一产物过 schema', () => {
+    type Schema = { properties: Record<string, { type?: string }> };
+    const invoker = new MemoryInvoker(identity, () => {});
+    const props = (secretary?: boolean) =>
+      createMemoryTools(invoker, { secretary }).map(
+        (tool) => (tool.parameters as unknown as Schema).properties
+      );
+    for (const plain of [props(), props(false)]) {
+      for (const p of plain) expect(p).not.toHaveProperty('projectId');
+    }
+    const [search, capture, crystallize, remove] = props(true);
+    expect(search.projectId).toMatchObject({ type: 'string' });
+    expect(capture.projectId).toMatchObject({ type: 'string' });
+    expect(crystallize).not.toHaveProperty('projectId');
+    expect(remove).not.toHaveProperty('projectId');
+
+    const tools = createMemoryTools(invoker, { secretary: true });
+    const inputs: [number, unknown][] = [
+      [0, { query: 'pg', projectId: ' p-1 ' }],
+      [1, { content: 'c', projectId: 'p-1', evolvesFromId: 'm1', evolvesRelation: 'replaces' }],
+    ];
+    for (const [i, input] of inputs) {
+      const prepared = (tools[i].prepareArguments as unknown as (a: unknown) => unknown)(input);
+      expect(prepared).toMatchObject({ projectId: 'p-1' });
+      expect(matchesJsonSchema(tools[i].parameters as unknown as JsonSchema, prepared)).toBe(true);
+    }
+  });
+
+  it('memory_capture 描述说明纠正方式：replaces 链而非删除重建；秘书版提示带上同一 projectId', () => {
+    const invoker = new MemoryInvoker(identity, () => {});
+    const plain = createMemoryTools(invoker)[1].description ?? '';
+    const secretary = createMemoryTools(invoker, { secretary: true })[1].description ?? '';
+    for (const desc of [plain, secretary]) {
+      expect(desc).toMatch(/To correct a wrong memory/);
+      expect(desc).toContain("evolvesRelation='replaces'");
+      expect(desc).toMatch(/memory_delete only when/);
+    }
+    expect(plain).not.toContain('projectId');
+    expect(secretary).toContain('same projectId');
+  });
+
   it('prepareArguments 的输出必须通过本工具自己的 JSON schema', () => {
     const tools = createMemoryTools(new MemoryInvoker(identity, () => {}));
     const cases: Record<string, unknown[]> = {
