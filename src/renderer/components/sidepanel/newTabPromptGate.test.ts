@@ -1,5 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { headerActionsPinned, newTabAutoPopOpen } from './newTabPromptGate';
+import { headerActionsPinned, headerNewTabPromptAt, newTabAutoPopOpen } from './newTabPromptGate';
+
+describe('哪个顶栏消费 auto-pop 信号', () => {
+  const prompt = { conversationId: 'c1', at: 7 };
+
+  it('空态水印顶栏（无 group）、普通会话、信号属于本会话：消费', () => {
+    expect(
+      headerNewTabPromptAt({ prompt, conversationId: 'c1', inGroup: false, secretary: false })
+    ).toBe(7);
+  });
+
+  it('已有 tab 的分组顶栏：不消费，否则新建菜单会盖在刚建出来的 tab 上', () => {
+    expect(
+      headerNewTabPromptAt({ prompt, conversationId: 'c1', inGroup: true, secretary: false })
+    ).toBeNull();
+  });
+
+  it('秘书会话：不消费，秘书面板会自动打开', () => {
+    expect(
+      headerNewTabPromptAt({ prompt, conversationId: 'c1', inGroup: false, secretary: true })
+    ).toBeNull();
+  });
+
+  it('信号属于别的会话或没有信号：不消费', () => {
+    expect(
+      headerNewTabPromptAt({ prompt, conversationId: 'c2', inGroup: false, secretary: false })
+    ).toBeNull();
+    expect(
+      headerNewTabPromptAt({ prompt, conversationId: undefined, inGroup: false, secretary: false })
+    ).toBeNull();
+    expect(
+      headerNewTabPromptAt({
+        prompt: null,
+        conversationId: 'c1',
+        inGroup: false,
+        secretary: false,
+      })
+    ).toBeNull();
+  });
+});
 
 describe('顶栏按钮收纳成「…」时的强制展开', () => {
   it('空闲：收起，只露「…」', () => {

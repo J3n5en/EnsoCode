@@ -1,3 +1,18 @@
+/** auto-pop 信号由哪个顶栏消费。SidePanelHeaderActions 同时挂在空态水印（无 group）
+ *  和每个有 tab 的分组 tab 条上；只有空态水印该弹。分组顶栏一挂载就说明面板已经
+ *  建出来了（秘书面板自动打开、全局标签补进来、用户点了类型），此时再弹就是新建菜单
+ *  盖在刚出现的 tab 上。秘书会话展开总会自动建秘书面板，也不弹。 */
+export function headerNewTabPromptAt(input: {
+  prompt: { conversationId: string; at: number } | null;
+  conversationId: string | undefined;
+  inGroup: boolean;
+  secretary: boolean;
+}): number | null {
+  const { prompt, conversationId } = input;
+  if (input.inGroup || input.secretary || !prompt || !conversationId) return null;
+  return prompt.conversationId === conversationId ? prompt.at : null;
+}
+
 /** auto-pop（无 tab 展开自动弹出新建菜单）的放行判断。
  *
  *  菜单挂载首帧 floating-ui 就以当时的锚点几何定下位置与 --available-height。
