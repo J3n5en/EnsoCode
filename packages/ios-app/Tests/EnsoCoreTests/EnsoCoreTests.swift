@@ -264,4 +264,140 @@ final class EnsoCoreTests: XCTestCase {
         let url = EnsoWidgetSnapshot.deepLinkURL(sessionId: "s-1")
         XCTAssertEqual(url.absoluteString, "enso://open?session=s-1")
     }
+
+    func testPiPSnapshotDecodesFrontendJsonWithNullsAndIntegerTimestamps() throws {
+        let json = """
+        {
+          "sessionId": "s-9",
+          "title": "修复画中画",
+          "projectName": "enso-code",
+          "status": "pending",
+          "pendingHint": null,
+          "runningCount": 1,
+          "pendingCount": 1,
+          "connectionState": "online",
+          "updatedAt": 1700000000123,
+          "messages": [
+            { "id": "m1", "role": "user", "text": "跑一下测试", "toolName": null, "isStreaming": false, "isError": false, "timestamp": 1700000000000 },
+            { "id": "m2", "role": "assistant", "text": "好的", "isStreaming": true, "timestamp": 1700000000100 }
+          ]
+        }
+        """
+        let snapshot = try JSONDecoder().decode(EnsoPiPSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(snapshot.sessionId, "s-9")
+        XCTAssertNil(snapshot.pendingHint)
+        XCTAssertEqual(snapshot.updatedAt, 1_700_000_000_123)
+        XCTAssertEqual(snapshot.messages.count, 2)
+        XCTAssertNil(snapshot.messages[0].toolName)
+        XCTAssertEqual(snapshot.messages[0].timestamp, 1_700_000_000_000)
+        XCTAssertTrue(snapshot.messages[1].isStreaming)
+        XCTAssertFalse(snapshot.messages[1].isError)
+
+        let roundTripped = try JSONDecoder().decode(
+            EnsoPiPSnapshot.self,
+            from: JSONEncoder().encode(snapshot)
+        )
+        XCTAssertEqual(roundTripped, snapshot)
+
+        let minimal = try JSONDecoder().decode(EnsoPiPSnapshot.self, from: Data("{\"sessionId\":null}".utf8))
+        XCTAssertNil(minimal.sessionId)
+        XCTAssertEqual(minimal.status, "idle")
+        XCTAssertEqual(minimal.connectionState, "offline")
+        XCTAssertTrue(minimal.messages.isEmpty)
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(EnsoPiPMessage.self, from: Data("{\"role\":\"user\",\"text\":\"x\"}".utf8))
+        )
+    }
+
+    func testPiPSnapshotSanitizedForDisplayFiltersCapsAndTruncates() {
+        func msg(_ id: String, _ role: String, _ text: String, tool: String? = nil, streaming: Bool = false) -> EnsoPiPMessage {
+            EnsoPiPMessage(id: id, role: role, text: text, toolName: tool, isStreaming: streaming, timestamp: 0)
+        }
+        var messages = [
+            msg("blank", "assistant", "  \n\t "),
+            msg("tool", "tool", " ", tool: "bash"),
+            msg("stream", "assistant", "", streaming: true),
+            msg("blank-tool-name", "tool", "", tool: "   "),
+        ]
+        messages += (0..<20).map { msg("m\($0)", "assistant", "  第 \($0) 条\n") }
+        messages.append(msg("long", "assistant", String(repeating: "长", count: 1_000)))
+        messages.append(msg("emoji", "user", String(repeating: "👨‍👩‍👧", count: 700)))
+
+        let snapshot = EnsoPiPSnapshot(
+            sessionId: "   ",
+            title: " \n ",
+            projectName: "enso-code",
+            status: "running",
+            pendingHint: "  ",
+            runningCount: -2,
+            pendingCount: 0,
+            connectionState: "online",
+            messages: messages,
+            updatedAt: 42
+        )
+
+        let short = snapshot.sanitizedForDisplay(maxMessages: 30)
+        let ids = short.messages.map(\.id)
+        XCTAssertFalse(ids.contains("blank"))
+        XCTAssertFalse(ids.contains("blank-tool-name"))
+        XCTAssertTrue(ids.contains("tool"))
+        XCTAssertTrue(ids.contains("stream"))
+        XCTAssertEqual(short.messages.first(where: { $0.id == "tool" })?.toolName, "bash")
+        XCTAssertEqual(short.messages.first(where: { $0.id == "m3" })?.text, "第 3 条")
+        XCTAssertNil(short.sessionId)
+        XCTAssertNil(short.pendingHint)
+        XCTAssertEqual(short.title, EnsoPiPSnapshot.placeholder.title)
+        XCTAssertEqual(short.runningCount, 0)
+
+        let long = short.messages.first(where: { $0.id == "long" })!
+        XCTAssertEqual(long.text.count, 1000)
+        let veryLong = EnsoPiPSnapshot(
+            sessionId: "s",
+            title: "t",
+            projectName: "p",
+            status: "running",
+            pendingHint: nil,
+            runningCount: 1,
+            pendingCount: 0,
+            connectionState: "online",
+            messages: [msg("emoji", "user", String(repeating: "👨‍👩‍👧", count: 1500))],
+            updatedAt: 1
+        ).sanitizedForDisplay()
+        XCTAssertEqual(veryLong.messages.first?.text, String(repeating: "👨‍👩‍👧", count: 1400) + "…")
+
+        let capped = snapshot.sanitizedForDisplay()
+        XCTAssertEqual(capped.messages.count, 18)
+        XCTAssertEqual(capped.messages.last?.id, "emoji")
+        XCTAssertEqual(capped.messages.first?.id, "m4")
+
+        XCTAssertTrue(snapshot.sanitizedForDisplay(maxMessages: 0).messages.isEmpty)
+        XCTAssertTrue(snapshot.sanitizedForDisplay(maxMessages: -1).messages.isEmpty)
+        XCTAssertEqual(EnsoPiPSnapshot.placeholder.sanitizedForDisplay(), EnsoPiPSnapshot.placeholder)
+    }
+
+    func testPiPStatusPayloadEncodesStableShape() throws {
+        let idle = EnsoPiPStatusPayload(supported: true, active: false, auto: true, error: nil)
+        let idleObj = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(idle)) as? [String: Any]
+        )
+        XCTAssertEqual(Set(idleObj.keys), ["supported", "active", "auto", "aspect", "error"])
+        XCTAssertTrue(idleObj["error"] is NSNull)
+        XCTAssertEqual(idleObj["supported"] as? Bool, true)
+        XCTAssertEqual(idleObj["auto"] as? Bool, true)
+        XCTAssertEqual(idleObj["aspect"] as? String, "portrait")
+
+        let failed = EnsoPiPStatusPayload(supported: false, active: false, auto: false, error: "画中画不可用")
+        let decoded = try JSONDecoder().decode(EnsoPiPStatusPayload.self, from: JSONEncoder().encode(failed))
+        XCTAssertEqual(decoded, failed)
+        XCTAssertEqual(
+            try JSONDecoder().decode(EnsoPiPStatusPayload.self, from: JSONEncoder().encode(idle)),
+            idle
+        )
+
+        XCTAssertEqual(EnsoPiPAspect(rawOrDefault: "square"), .square)
+        XCTAssertEqual(EnsoPiPAspect(rawOrDefault: "invalid"), .portrait)
+        XCTAssertGreaterThan(EnsoPiPAspect.portrait.preferredContentSize.height, EnsoPiPAspect.portrait.preferredContentSize.width)
+        XCTAssertGreaterThan(EnsoPiPAspect.landscape.preferredContentSize.width, EnsoPiPAspect.landscape.preferredContentSize.height)
+    }
 }

@@ -66,10 +66,25 @@ final class EnsoWebShellController: NSObject, ObservableObject {
             self?.openSessionFromNotification(sessionId)
         }
 
+        let pip = EnsoPiPController.shared
+        pip.onStatusChange = { [weak self] status in
+            self?.publishPiPStatus(status)
+        }
+        pip.onRestoreSession = { [weak self] sessionId in
+            guard let sessionId, !sessionId.isEmpty else { return }
+            self?.openSessionFromNotification(sessionId)
+        }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(appDidBecomeActive),
             name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillResignActive),
+            name: UIApplication.willResignActiveNotification,
             object: nil
         )
         NotificationCenter.default.addObserver(
@@ -83,6 +98,21 @@ final class EnsoWebShellController: NSObject, ObservableObject {
     deinit {
         NotificationCenter.default.removeObserver(self)
         server?.stop()
+    }
+
+    var pipSourceView: UIView {
+        EnsoPiPController.shared.sourceView
+    }
+
+    func attachPiPViewIfNeeded() {
+        EnsoPiPController.shared.attach(sourceView: pipSourceView)
+    }
+
+    private func publishPiPStatus(_ status: EnsoPiPStatusPayload) {
+        guard let data = try? JSONEncoder().encode(status),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        evalJS("window.__ensoNativeInternal?.onPipState(\(json));")
     }
 
     func startIfNeeded() {
@@ -149,8 +179,13 @@ final class EnsoWebShellController: NSObject, ObservableObject {
             _ = try? server.ensureRunning()
         }
         // 切回前台时立即通知前端触发原生 QUIC / WebRTC 探活与重连
+        EnsoPiPController.shared.handleDidBecomeActive()
         EnsoPushManager.shared.clearBadge()
         evalJS("window.dispatchEvent(new Event('enso:foreground'));")
+    }
+
+    @objc private func appWillResignActive() {
+        EnsoPiPController.shared.handleWillResignActive()
     }
 
     func openSessionFromNotification(_ sessionId: String) {
@@ -172,6 +207,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
     @objc private func appDidEnterBackground() {
         // 不能伪造 persisted=false 的 pagehide，否则前端会误以为页面卸载而向桌面发 rpc-bye，
         // 导致切回前台后宿主拒绝续连（resumed=false）并强制重载整个 iframe。
+        // 画中画进行中或开启自动画中画时同样只发 enso:background，保持连接继续驱动 PiP 窗口刷新。
         evalJS("window.dispatchEvent(new Event('enso:background'));")
     }
 
@@ -220,6 +256,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
       let scanSeq = 0;
       const pushResolvers = new Map();
       let pushSeq = 0;
+      let pipStateCb = null, lastPipState = null;
 
       window.__ensoNativeInternal = {
         onOpen: (id) => { try { openCb && openCb(id); } catch {} },
@@ -236,6 +273,10 @@ final class EnsoWebShellController: NSObject, ObservableObject {
           pushResolvers.delete(cbId);
           if (fn) fn(result);
         },
+        onPipState: (state) => {
+          lastPipState = state;
+          try { pipStateCb && pipStateCb(state); } catch {}
+        },
       };
 
       window.__ensoNative = {
@@ -245,6 +286,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         push: true,
         liveActivity: true,
         widgets: true,
+        pip: true,
         openQuic: (params) => post({ type: 'quic-open', params }),
         sendQuicText: (id, text) => post({ type: 'quic-send-text', id, text }),
         sendQuicBinary: (id, lane, base64) => post({ type: 'quic-send-binary', id, lane, base64 }),
@@ -268,6 +310,15 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         },
         updateWidgetState: (snapshot) => {
           post({ type: 'widget-update', snapshot });
+        },
+        startPip: () => post({ type: 'pip-start' }),
+        stopPip: () => post({ type: 'pip-stop' }),
+        setPipAuto: (enabled) => post({ type: 'pip-set-auto', enabled: Boolean(enabled) }),
+        setPipAspect: (aspect) => post({ type: 'pip-set-aspect', aspect: String(aspect || 'portrait') }),
+        updatePipState: (snapshot) => post({ type: 'pip-update', snapshot }),
+        onPipState: (cb) => {
+          pipStateCb = cb;
+          if (lastPipState && cb) { try { cb(lastPipState); } catch {} }
         },
         replyDeskAsset: (reqId, status, mime, bodyBase64) => post({
           type: 'desk-asset-reply',
@@ -374,6 +425,27 @@ extension EnsoWebShellController: WKScriptMessageHandler {
             guard let snapshot = body["snapshot"] as? [String: Any] else { return }
             EnsoWidgetBridge.shared.update(from: snapshot)
 
+        case "pip-start":
+            EnsoPiPController.shared.start()
+
+        case "pip-stop":
+            EnsoPiPController.shared.stop()
+
+        case "pip-set-auto":
+            EnsoPiPController.shared.setAutoStart((body["enabled"] as? Bool) ?? false)
+
+        case "pip-set-aspect":
+            let raw = body["aspect"] as? String
+            EnsoPiPController.shared.setAspect(EnsoPiPAspect(rawOrDefault: raw))
+
+        case "pip-update":
+            guard let raw = body["snapshot"] as? [String: Any],
+                  JSONSerialization.isValidJSONObject(raw),
+                  let data = try? JSONSerialization.data(withJSONObject: raw, options: []),
+                  let snapshot = try? JSONDecoder().decode(EnsoPiPSnapshot.self, from: data)
+            else { return }
+            EnsoPiPController.shared.update(snapshot: snapshot)
+
         case "desk-asset-reply":
             guard let reqId = body["reqId"] as? String,
                   let status = body["status"] as? Int,
@@ -456,6 +528,11 @@ extension EnsoWebShellController: WKNavigationDelegate, WKUIDelegate {
             }
         }
         decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // 页面（重）加载后补发一次画中画状态，前端 onPipState 可立即拿到 supported/active/auto
+        publishPiPStatus(EnsoPiPController.shared.status)
     }
 
     func webView(

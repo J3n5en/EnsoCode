@@ -40,12 +40,30 @@ import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from './
 import { useMediaQuery, WIDE_LAYOUT_QUERY } from './media';
 import { NewSessionSheet } from './NewSessionSheet';
 import {
+  hasNativePip,
   hasNativePush,
+  type NativePipAspect,
+  type NativePipSnapshot,
+  type NativePipStatus,
+  pushNativePipState,
   pushNativeWidgetState,
   resolveNativePushGatewayOrigin,
+  setNativePipAspect,
+  setNativePipAuto,
+  startNativePip,
+  stopNativePip,
+  subscribeNativePipState,
 } from './nativeBridge';
 import { OutboxBar } from './OutboxBar';
 import { PairScreen } from './PairScreen';
+import {
+  buildPipSnapshotFromGuestView,
+  createTrailingThrottle,
+  loadNativePipAspect,
+  loadNativePipAuto,
+  saveNativePipAspect,
+  saveNativePipAuto,
+} from './pipState';
 import {
   isPushSupported,
   isStandalone,
@@ -802,6 +820,50 @@ export function App() {
     );
   }, [widgetDeviceLabel, state, transport, rttMs, catalog, activeId]);
 
+  // iOS 原生壳：当前对话实时推给画中画浮窗（流式出字按节流合并）
+  const [nativePip] = useState(hasNativePip);
+  const [pipStatus, setPipStatus] = useState<NativePipStatus>(() => ({
+    supported: true,
+    active: false,
+    auto: loadNativePipAuto(localStorage),
+    aspect: loadNativePipAspect(localStorage),
+  }));
+  const pipSnapshotRef = useRef<(() => NativePipSnapshot) | null>(null);
+  const [pipSync] = useState(() =>
+    createTrailingThrottle(() => {
+      const build = pipSnapshotRef.current;
+      if (build) pushNativePipState(build());
+    })
+  );
+  useEffect(() => {
+    if (!nativePip) return;
+    setNativePipAuto(loadNativePipAuto(localStorage));
+    setNativePipAspect(loadNativePipAspect(localStorage));
+    const unsubscribe = subscribeNativePipState(setPipStatus);
+    return () => {
+      unsubscribe();
+      pipSync.cancel();
+    };
+  }, [nativePip, pipSync]);
+  useEffect(() => {
+    if (!nativePip) return;
+    const theme =
+      typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+    pipSnapshotRef.current = () =>
+      buildPipSnapshotFromGuestView({
+        activeId,
+        entry,
+        view: view ?? undefined,
+        catalog,
+        connectionState: state,
+        deviceLabel: widgetDeviceLabel,
+        theme,
+      });
+    pipSync.schedule();
+  }, [nativePip, pipSync, activeId, entry, view, catalog, state, widgetDeviceLabel]);
+
   /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
   const resetHostState = (nextView: LastView) => {
     setCatalog([]);
@@ -1232,6 +1294,36 @@ export function App() {
         pushAvailability={pushAvailability()}
         pushConfigReady={pushConfigReady}
         onTogglePush={(next) => void togglePush(next)}
+        pip={
+          nativePip
+            ? {
+                active: pipStatus.active,
+                auto: pipStatus.auto,
+                aspect: pipStatus.aspect,
+                supported: pipStatus.supported,
+                error: pipStatus.error,
+                onToggle: () => {
+                  if (pipStatus.active) {
+                    stopNativePip();
+                    return;
+                  }
+                  pipSync.flush();
+                  startNativePip();
+                  closeDrawer();
+                },
+                onAutoChange: (next) => {
+                  saveNativePipAuto(localStorage, next);
+                  setNativePipAuto(next);
+                  setPipStatus((prev) => ({ ...prev, auto: next }));
+                },
+                onAspectChange: (next: NativePipAspect) => {
+                  saveNativePipAspect(localStorage, next);
+                  setNativePipAspect(next);
+                  setPipStatus((prev) => ({ ...prev, aspect: next }));
+                },
+              }
+            : undefined
+        }
         onSwitchDevice={switchDevice}
         onAddDevice={() => {
           closeDrawer();

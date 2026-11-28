@@ -4,11 +4,19 @@ import {
   createNativeOrBrowserRelaySocket,
   getNativeBridge,
   hasNativeDeskProxy,
+  hasNativePip,
   isNativeIosApp,
+  type NativePipSnapshot,
+  type NativePipStatus,
+  pushNativePipState,
   pushNativeWidgetState,
   registerNativeDeskFetcher,
   requestNativeQrScan,
   resolveNativePushGatewayOrigin,
+  setNativePipAuto,
+  startNativePip,
+  stopNativePip,
+  subscribeNativePipState,
 } from './nativeBridge';
 import {
   isPushSupported,
@@ -563,5 +571,115 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
     expect(doneSnap.runningCount).toBe(0);
     expect(doneSnap.pendingCount).toBe(0);
     expect(doneSnap.activeStatus).toBe('idle');
+  });
+});
+
+describe('nativeBridge 画中画', () => {
+  const setBridge = (bridge: Record<string, unknown> | undefined) => {
+    (globalThis as Record<string, unknown>).window = globalThis.window ?? {};
+    const win = window as unknown as Record<string, unknown>;
+    if (bridge) win.__ensoNative = bridge;
+    else delete win.__ensoNative;
+  };
+
+  afterEach(() => setBridge(undefined));
+
+  const snapshot: NativePipSnapshot = {
+    sessionId: 's1',
+    title: '会话',
+    projectName: 'proj',
+    status: 'running',
+    pendingHint: null,
+    runningCount: 1,
+    pendingCount: 0,
+    connectionState: 'online',
+    messages: [],
+    updatedAt: 1,
+  };
+
+  it('只有原生声明 pip 且带 startPip 才算支持；不支持时调用全部静默', () => {
+    setBridge(undefined);
+    expect(hasNativePip()).toBe(false);
+    expect(() => {
+      startNativePip();
+      stopNativePip();
+      setNativePipAuto(true);
+      pushNativePipState(snapshot);
+    }).not.toThrow();
+    expect(subscribeNativePipState(() => {})).toBeTypeOf('function');
+
+    setBridge({ platform: 'ios', pip: true });
+    expect(hasNativePip()).toBe(false);
+    setBridge({ platform: 'ios', pip: false, startPip: () => {} });
+    expect(hasNativePip()).toBe(false);
+    setBridge({ platform: 'ios', pip: true, startPip: () => {} });
+    expect(hasNativePip()).toBe(true);
+  });
+
+  it('start / stop / setAuto / push 原样转给原生，原生抛错不外泄', () => {
+    const startPip = vi.fn();
+    const stopPip = vi.fn();
+    const setPipAuto = vi.fn();
+    const updatePipState = vi.fn(() => {
+      throw new Error('native gone');
+    });
+    setBridge({ platform: 'ios', pip: true, startPip, stopPip, setPipAuto, updatePipState });
+    startNativePip();
+    stopNativePip();
+    setNativePipAuto(false);
+    expect(() => pushNativePipState(snapshot)).not.toThrow();
+    expect(startPip).toHaveBeenCalledTimes(1);
+    expect(stopPip).toHaveBeenCalledTimes(1);
+    expect(setPipAuto).toHaveBeenCalledWith(false);
+    expect(updatePipState).toHaveBeenCalledWith(snapshot);
+  });
+
+  it('subscribeNativePipState：只向原生挂一次回调，多订阅者都收到，晚到的先回放最近状态', () => {
+    const native: { cb?: (state: unknown) => void } = {};
+    const onPipState = vi.fn((cb: (state: unknown) => void) => {
+      native.cb = cb;
+    });
+    setBridge({ platform: 'ios', pip: true, startPip: () => {}, onPipState });
+
+    const a: NativePipStatus[] = [];
+    const b: NativePipStatus[] = [];
+    const offA = subscribeNativePipState((s) => a.push(s));
+    subscribeNativePipState((s) => b.push(s));
+    expect(onPipState).toHaveBeenCalledTimes(1);
+    expect(a).toEqual([]);
+
+    native.cb?.({ supported: true, active: true, auto: false });
+    expect(a).toEqual([
+      { supported: true, active: true, auto: false, aspect: 'portrait', error: null },
+    ]);
+    expect(b).toHaveLength(1);
+
+    const late: NativePipStatus[] = [];
+    subscribeNativePipState((s) => late.push(s));
+    expect(late).toEqual([
+      { supported: true, active: true, auto: false, aspect: 'portrait', error: null },
+    ]);
+    expect(onPipState).toHaveBeenCalledTimes(1);
+
+    offA();
+    native.cb?.({
+      supported: true,
+      active: false,
+      auto: true,
+      aspect: 'square',
+      error: 'interrupted',
+    });
+    expect(a).toHaveLength(1);
+    expect(b.at(-1)).toEqual({
+      supported: true,
+      active: false,
+      auto: true,
+      aspect: 'square',
+      error: 'interrupted',
+    });
+    expect(late).toHaveLength(2);
+
+    native.cb?.('garbage');
+    expect(late).toHaveLength(2);
   });
 });

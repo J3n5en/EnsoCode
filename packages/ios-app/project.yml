@@ -54,6 +54,8 @@ targets:
         NSCameraUsageDescription: 用于扫描桌面端 EnsoCode 配对二维码
         NSLocalNetworkUsageDescription: 用于在局域网内与桌面端 EnsoCode 建立低延迟直连
         NSSupportsLiveActivities: true
+        UIBackgroundModes:
+          - audio
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -70,7 +72,7 @@ targets:
         PRODUCT_NAME: EnsoCode
         DEVELOPMENT_TEAM: 69GW9UBCN2
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "8"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
@@ -110,7 +112,7 @@ targets:
         PRODUCT_NAME: EnsoNotificationService
         DEVELOPMENT_TEAM: 69GW9UBCN2
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "8"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
@@ -146,7 +148,7 @@ targets:
         PRODUCT_NAME: EnsoWidgets
         DEVELOPMENT_TEAM: 69GW9UBCN2
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "8"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic

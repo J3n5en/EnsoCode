@@ -1,10 +1,13 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// 对应 macOS 菜单栏 `build/trayTemplate.svg` 的 EnsoCode 圆相（Ensō）矢量图标。
 /// SVG 原始参数：viewBox 64x64，圆心 (32, 32)，半径 18.24，线宽 8.32，
 /// 弧线从 67.57° 顺时针绕 320° 至 27.43°，右下角留出约 40° 缺口。
-struct EnsoArcShape: Shape {
-    func path(in rect: CGRect) -> Path {
+public struct EnsoArcShape: Shape {
+    public init() {}
+
+    public func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
         let strokeWidth = side * (8.32 / 44.8)
         let radius = max(1, (side - strokeWidth) / 2)
@@ -22,18 +25,24 @@ struct EnsoArcShape: Shape {
     }
 }
 
-enum EnsoMarkBadge {
+public enum EnsoMarkBadge: Sendable {
     case none
     case pending
     case done
 }
 
-struct EnsoMarkView: View {
-    let size: CGFloat
-    let color: Color
-    var badge: EnsoMarkBadge = .none
+public struct EnsoMarkView: View {
+    public let size: CGFloat
+    public let color: Color
+    public var badge: EnsoMarkBadge
 
-    var body: some View {
+    public init(size: CGFloat, color: Color, badge: EnsoMarkBadge = .none) {
+        self.size = size
+        self.color = color
+        self.badge = badge
+    }
+
+    public var body: some View {
         let strokeWidth = max(1.8, size * (8.32 / 44.8))
         ZStack {
             EnsoArcShape()
@@ -68,3 +77,4 @@ struct EnsoMarkView: View {
         .frame(width: size, height: size)
     }
 }
+#endif
