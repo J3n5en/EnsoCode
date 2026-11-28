@@ -653,6 +653,7 @@ describe('DirectLink 双 DataChannel (ctrl + bulk) 与独立拼帧', () => {
     p.setBulkOpen(true);
     p.fire.open();
     expect(h.link.transport()).toBe('direct');
+    expect(h.link.hasBulk()).toBe(true);
     p.sent.length = 0; // 清掉心跳 ping
 
     const small = new Uint8Array(128).fill(1);
@@ -671,6 +672,7 @@ describe('DirectLink 双 DataChannel (ctrl + bulk) 与独立拼帧', () => {
     // 旧对端（未开 bulk 通道）：bulk=true 时自动回落到 ctrl 通道，保持向后兼容
     p.setBulkOpen(false);
     p.setBulkBuffered(0);
+    expect(h.link.hasBulk()).toBe(false);
     expect(h.link.send(large, { bulk: true })).toBe(true);
     expect(p.sent.length).toBeGreaterThan(2);
   });

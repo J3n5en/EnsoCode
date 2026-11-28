@@ -39,7 +39,11 @@ import { GroupChatScreen, type MemberPending } from './GroupChatScreen';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from './launchSession';
 import { useMediaQuery, WIDE_LAYOUT_QUERY } from './media';
 import { NewSessionSheet } from './NewSessionSheet';
-import { hasNativePush, resolveNativePushGatewayOrigin } from './nativeBridge';
+import {
+  hasNativePush,
+  pushNativeWidgetState,
+  resolveNativePushGatewayOrigin,
+} from './nativeBridge';
 import { OutboxBar } from './OutboxBar';
 import { PairScreen } from './PairScreen';
 import {
@@ -76,6 +80,7 @@ import { setPhoneAgentActions } from './stubs/electron-api';
 import { setQueueActions } from './stubs/sessions-store';
 import { deskUrl, takePairFromDesk } from './uiMode';
 import { shouldHoldWakeLock, syncWakeLock } from './wakeLock';
+import { buildWidgetSnapshotFromCatalog } from './widgetState';
 
 /**
  * 扫码直达：桌面二维码是 https 链接，系统相机可直接打开本页并带上 #relay=…&pk=…。
@@ -513,7 +518,7 @@ export function App() {
         vapidKeyRef.current = key;
         setPushConfigReady(true);
         if (hasNativePush()) {
-          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relay));
+          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relayUrl));
         }
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on') {
@@ -565,17 +570,31 @@ export function App() {
       client.conceal();
       client.flushCache();
     };
+    const onNativeForeground = () => {
+      client.nudge('visibility');
+      client.send({ type: 'presence', visible: true });
+      clearBadge();
+    };
+    const onNativeBackground = () => {
+      client.conceal();
+      client.send({ type: 'presence', visible: false });
+      client.flushCache();
+    };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('online', onOnline);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onFocus);
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('enso:foreground', onNativeForeground);
+    window.addEventListener('enso:background', onNativeBackground);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('enso:foreground', onNativeForeground);
+      window.removeEventListener('enso:background', onNativeBackground);
       if (botRefreshRef.current) clearTimeout(botRefreshRef.current);
       botRefreshRef.current = null;
       client.close();
@@ -766,6 +785,22 @@ export function App() {
   // 在线时附带业务帧出口（直连 / 中继）：顶栏副标题与抽屉设备行共用
   const connectionLabel =
     state === 'online' ? formatOnlineConnectionLabel(transport, rttMs) : CONN_STATE_LABEL[state];
+
+  // iOS 原生壳：同步活跃会话与运行态到主屏/锁屏小组件与灵动岛
+  const widgetDeviceLabel = device?.label ?? '';
+  useEffect(() => {
+    if (!widgetDeviceLabel) return;
+    pushNativeWidgetState(
+      buildWidgetSnapshotFromCatalog({
+        deviceLabel: widgetDeviceLabel,
+        connectionState: state,
+        transport: transport ?? '',
+        rttMs,
+        catalog,
+        activeId,
+      })
+    );
+  }, [widgetDeviceLabel, state, transport, rttMs, catalog, activeId]);
 
   /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
   const resetHostState = (nextView: LastView) => {

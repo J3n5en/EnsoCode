@@ -1419,7 +1419,9 @@ function sendRemoteMessage(conn: Connection, message: HostToPhone, group?: strin
 
 function sendRemoteFrame(conn: Connection, frame: HostToPhone): void {
   const bulkPart = frame.type === 'part' || frame.type === 'bpart';
-  void enqueueSend(conn, frame, bulkPart && conn.ws?.readyState === 1);
+  // WebRTC 已建立独立 pair-bulk 通道时允许分片走直连（背压打满自动回落中继），避免大帧强绕中继造成 seq 乱序缺口
+  const relayOnly = bulkPart && !conn.direct.hasBulk?.() && conn.ws?.readyState === 1;
+  void enqueueSend(conn, frame, relayOnly);
 }
 
 function sendFrameViaRelay(conn: Connection, frame: Uint8Array): boolean {

@@ -5,6 +5,7 @@ import {
   getNativeBridge,
   hasNativeDeskProxy,
   isNativeIosApp,
+  pushNativeWidgetState,
   registerNativeDeskFetcher,
   requestNativeQrScan,
   resolveNativePushGatewayOrigin,
@@ -15,6 +16,11 @@ import {
   setNativePushGatewayResolver,
   subscribePush,
 } from './push';
+import {
+  buildWidgetSnapshotFromCatalog,
+  buildWidgetSnapshotFromDeskReads,
+  DeskWidgetTracker,
+} from './widgetState';
 
 describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () => {
   const origWindow = globalThis.window;
@@ -360,5 +366,202 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
     const res = await subscribePush('vapid-pub-123');
     expect(res.ok).toBe(true);
     expect(subscribeSpy).toHaveBeenCalledWith('vapid-pub-123', 'https://relay-apns.example.com');
+
+    // 负缓存穿透：中继刚上线 APNs 时再次探测不该被 5 分钟旧缓存卡住，且兼容 wss:// 输入
+    let apnsReady = false;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true, apns: apnsReady }), { status: 200 })
+    ) as unknown as typeof fetch;
+    expect(await resolveNativePushGatewayOrigin('wss://relay-upgraded.example.com/')).toBeNull();
+    apnsReady = true;
+    expect(await resolveNativePushGatewayOrigin('wss://relay-upgraded.example.com/')).toBe(
+      'https://relay-upgraded.example.com'
+    );
+  });
+
+  it('小组件与灵动岛状态聚合：待审批优先于运行中，并同步给原生 updateWidgetState', () => {
+    const updateSpy = vi.fn();
+    (window as unknown as Record<string, unknown>).__ensoNative = {
+      platform: 'ios',
+      widgets: true,
+      liveActivity: true,
+      updateWidgetState: updateSpy,
+    };
+
+    const snap = buildWidgetSnapshotFromCatalog({
+      deviceLabel: 'Mac Studio',
+      connectionState: 'online',
+      transport: 'direct',
+      rttMs: 12,
+      activeId: 's-idle',
+      now: 1_700_000_000_000,
+      catalog: [
+        {
+          id: 's-idle',
+          title: '普通会话',
+          projectName: 'demo',
+          projectId: 'p1',
+          status: 'idle',
+          updatedAt: 100,
+        },
+        {
+          id: 's-run',
+          title: '正在跑构建',
+          projectName: 'enso-code',
+          projectId: 'p2',
+          status: 'running',
+          updatedAt: 200,
+        },
+        {
+          id: 's-pending',
+          title: '等待审批',
+          projectName: 'enso-code',
+          projectId: 'p2',
+          status: 'waiting',
+          pendingApprovalCount: 2,
+          unread: true,
+          updatedAt: 150,
+        },
+      ],
+    });
+
+    expect(snap.runningCount).toBe(1);
+    expect(snap.pendingCount).toBe(2);
+    expect(snap.activeSessionId).toBe('s-pending');
+    expect(snap.activeStatus).toBe('pending');
+    expect(snap.sessions[0]?.id).toBe('s-pending');
+    expect(snap.sessions[1]?.id).toBe('s-run');
+
+    pushNativeWidgetState(snap);
+    expect(updateSpy).toHaveBeenCalledWith(snap);
+
+    const deskSnap = buildWidgetSnapshotFromDeskReads({
+      deviceLabel: 'MacBook',
+      connectionState: 'online',
+      transport: 'relay',
+      rttMs: 38,
+      now: 1_700_000_000_000,
+      conversationsJson: JSON.stringify([
+        { id: 'c1', title: 'Desk 会话', projectName: 'proj', status: 'running', updatedAt: 500 },
+      ]),
+    });
+    expect(deskSnap.runningCount).toBe(1);
+    expect(deskSnap.activeSessionId).toBe('c1');
+  });
+
+  it('DeskWidgetTracker 解析真实 conversations:read 结构并合并 agent:event 实时运行与待审批状态', () => {
+    const tracker = new DeskWidgetTracker();
+    tracker.ingestSettingsJson(
+      JSON.stringify({
+        'enso-settings': {
+          state: { projects: [{ id: 'p-enso', name: 'enso-code', path: '/work/enso-code' }] },
+        },
+      })
+    );
+    tracker.ingestConversationsJson(
+      JSON.stringify({
+        seq: 12,
+        value: {
+          state: {
+            conversations: {
+              's-1': {
+                id: 's-1',
+                title: '优化 QUIC 与灵动岛',
+                projectId: 'p-enso',
+                status: 'idle',
+                updatedAt: 1000,
+              },
+              's-2': {
+                id: 's-2',
+                title: '后台构建任务',
+                projectId: 'p-enso',
+                status: 'idle',
+                updatedAt: 900,
+              },
+              's-child': {
+                id: 's-child',
+                title: '子代理',
+                projectId: 'p-enso',
+                parentId: 's-1',
+                updatedAt: 1100,
+              },
+            },
+          },
+        },
+      })
+    );
+
+    expect(
+      tracker.applyAgentEventPayload(
+        JSON.stringify([
+          {
+            type: 'snapshot',
+            sessions: [
+              {
+                identity: { sessionId: 's-1' },
+                status: 'running',
+                pendingApprovals: [{ requestId: 'a1', toolName: 'bash' }],
+                pendingAsks: [],
+              },
+              {
+                identity: { sessionId: 's-2' },
+                status: 'running',
+                pendingApprovals: [],
+                pendingAsks: [],
+              },
+              {
+                identity: { sessionId: 's-child', parentSessionId: 's-1' },
+                status: 'running',
+                pendingApprovals: [],
+                pendingAsks: [],
+              },
+            ],
+          },
+        ]),
+        2000
+      )
+    ).toBe(true);
+
+    const liveSnap = tracker.buildSnapshot({
+      deviceLabel: '电脑 1',
+      connectionState: 'online',
+      transport: 'direct',
+      rttMs: 12.6,
+      now: 2500,
+    });
+    expect(liveSnap.rttMs).toBe(13);
+    expect(liveSnap.runningCount).toBe(2);
+    expect(liveSnap.pendingCount).toBe(1);
+    expect(liveSnap.activeSessionId).toBe('s-1');
+    expect(liveSnap.activeTitle).toBe('优化 QUIC 与灵动岛');
+    expect(liveSnap.activeProject).toBe('enso-code');
+    expect(liveSnap.activeStatus).toBe('pending');
+    expect(liveSnap.activeDetail).toBe('等待审批 bash');
+    expect(liveSnap.sessions.map((s) => s.id)).toEqual(['s-1', 's-2']);
+
+    tracker.applyAgentEventPayload(
+      JSON.stringify([
+        { type: 'approval-resolved', identity: { sessionId: 's-1' }, requestId: 'a1' },
+      ]),
+      3000
+    );
+    tracker.applyAgentEventPayload(
+      JSON.stringify([{ type: 'turn-completed', identity: { sessionId: 's-1' } }]),
+      3100
+    );
+    tracker.applyAgentEventPayload(
+      JSON.stringify([{ type: 'status', identity: { sessionId: 's-2' }, status: 'idle' }]),
+      3200
+    );
+    const doneSnap = tracker.buildSnapshot({
+      deviceLabel: '电脑 1',
+      connectionState: 'online',
+      transport: 'direct',
+      rttMs: 12,
+      now: 3300,
+    });
+    expect(doneSnap.runningCount).toBe(0);
+    expect(doneSnap.pendingCount).toBe(0);
+    expect(doneSnap.activeStatus).toBe('idle');
   });
 });
