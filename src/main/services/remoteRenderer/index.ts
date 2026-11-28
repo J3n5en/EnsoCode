@@ -8,10 +8,11 @@ import {
   type HostToRemote,
   type RemoteToHost,
 } from '@enso/pair';
-import { app, type IpcEvent, type IpcInvokeEvent, ipcMain } from '@platform';
+import { app, type IpcEvent, type IpcInvokeEvent, images, ipcMain } from '@platform';
 import { RemoteReadCache, takeRemoteMarks, writeSeedOf } from '@shared/remoteDelta';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { readSettings } from '../../ipc/settings';
+import { getSourceAuthorityRegistry } from '../../ipc/agent';
+import { readSettings, settingsRevision } from '../../ipc/settings';
 import { handleLocalImageRequest } from '../localImageProtocol';
 import { isPairHeadless, setPairHeadless } from '../pairSessionHost';
 import { localMainContents } from '../renderers';
@@ -20,6 +21,7 @@ import { bundleManifest, downloadEstimate, readRendererAsset, rendererBuildId } 
 import { isRemoteChannelAllowed } from './channels';
 import { withoutConversations } from './conversationSync';
 import { type RemoteLink, setRemoteHostHooks } from './hostHooks';
+import { shrinkRemoteAvatar } from './imageShrink';
 import { installIpcRegistry, registeredHandler, registeredListeners } from './ipcRegistry';
 import { resumeGrace } from './resumeGrace';
 import { trimSecretaryResult } from './secretaryTrim';
@@ -58,10 +60,43 @@ export type { RemoteLink };
 const graceTimers = new Map<number, NodeJS.Timeout>();
 const leaderSent = new Map<number, boolean>();
 
+const readHash = (json: string): string =>
+  createHash('sha1').update(json).digest('base64url').slice(0, 22);
+
 /** 只读结果按内容 hash 缓存（已脱敏），各远端共用 */
-const readCache = new RemoteReadCache((json) =>
-  createHash('sha1').update(json).digest('base64url').slice(0, 22)
-);
+const readCache = new RemoteReadCache(readHash);
+
+/** 按数据源 revision 复用已编码/序列化/哈希的大读包，跳过重复 JSON.stringify 与 sha1 */
+const prehashedReads = new Map<
+  string,
+  { rev: string; data: unknown; json: string; h: string; chars: number }
+>();
+
+function encodePrehashedRead(
+  channel: string,
+  rawResult: unknown
+): { data: unknown; json: string; h: string; chars: number } | null {
+  let rev: string | null = null;
+  if (channel === IPC_CHANNELS.SETTINGS_READ) {
+    rev = String(settingsRevision());
+  } else if (channel === IPC_CHANNELS.CONVERSATIONS_READ) {
+    rev =
+      rawResult && typeof rawResult === 'object'
+        ? `${settingsRevision()}:${(rawResult as { seq?: number }).seq ?? -1}`
+        : null;
+  } else if (channel === IPC_CHANNELS.SOURCE_AUTHORITY_READ) {
+    const registry = getSourceAuthorityRegistry();
+    rev = registry ? String(registry.revision) : null;
+  }
+  if (rev === null) return null;
+  const cached = prehashedReads.get(channel);
+  if (cached?.rev === rev) return cached;
+  const data = encodeRemoteValue(prepareResult(channel, rawResult));
+  const json = JSON.stringify(data ?? null);
+  const entry = { rev, data, json, h: readHash(json), chars: json.length };
+  prehashedReads.set(channel, entry);
+  return entry;
+}
 
 const rendererRoot = (): string => join(app.getAppPath(), 'out', 'renderer');
 
@@ -200,8 +235,8 @@ async function hello(link: RemoteLink, command: Extract<RemoteToHost, { type: 'r
       leader,
       replay: true,
     });
-    // 接入/续连后补发秘书重读通知：丢失过推送的远端借此自愈，提案卡不再停在占位行
-    primeSecretaryRereads(sender, secretaryIdProvider());
+    // 仅断线续连后补发秘书重读通知：丢失过推送的远端借此自愈；冷启动浏览器随即自己拉列表与状态
+    if (resumed) primeSecretaryRereads(sender, secretaryIdProvider());
   };
   const existing = getRemoteSender(link.pairId, command.cid);
   if (existing && existing.kind === command.kind) {
@@ -261,18 +296,44 @@ async function invoke(link: RemoteLink, command: Extract<RemoteToHost, { type: '
   }
   const args = prepareArgs(command.ch, raw);
   try {
-    const result = prepareResult(command.ch, await handler(fakeEvent(sender), ...args));
+    const rawResult = await handler(fakeEvent(sender), ...args);
     commit?.();
-    const data = encodeRemoteValue(result);
-    const seed = writeSeedOf(command.ch, data);
-    if (seed) sender.writes.seed(seed.name, seed.value);
-    sender.post({
-      type: 'rpc-result',
-      cid: command.cid,
-      id: command.id,
-      ok: true,
-      data: marks.ifNone === undefined ? data : readCache.respond(data, marks.ifNone),
-    });
+    const prehashed = encodePrehashedRead(command.ch, rawResult);
+    if (prehashed) {
+      const seed = writeSeedOf(command.ch, prehashed.data);
+      if (seed) {
+        sender.writes.seedLazy(
+          seed.name,
+          () => writeSeedOf(command.ch, JSON.parse(prehashed.json))?.value
+        );
+      }
+      sender.post({
+        type: 'rpc-result',
+        cid: command.cid,
+        id: command.id,
+        ok: true,
+        data:
+          marks.ifNone === undefined
+            ? prehashed.data
+            : readCache.respondPrehashed(
+                prehashed.data,
+                prehashed.h,
+                prehashed.chars,
+                marks.ifNone
+              ),
+      });
+    } else {
+      const data = encodeRemoteValue(prepareResult(command.ch, rawResult));
+      const seed = writeSeedOf(command.ch, data);
+      if (seed) sender.writes.seed(seed.name, seed.value);
+      sender.post({
+        type: 'rpc-result',
+        cid: command.cid,
+        id: command.id,
+        ok: true,
+        data: marks.ifNone === undefined ? data : readCache.respond(data, marks.ifNone),
+      });
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -334,11 +395,12 @@ async function asset(link: RemoteLink, command: Extract<RemoteToHost, { type: 'a
       reply(413, 'text/plain', new Uint8Array());
       return;
     }
-    reply(
-      response.status,
-      response.headers.get('content-type') ?? 'application/octet-stream',
-      body
-    );
+    const rawMime = response.headers.get('content-type') ?? 'application/octet-stream';
+    const out =
+      response.status === 200
+        ? shrinkRemoteAvatar(url, rawMime, body, images)
+        : { contentType: rawMime, body };
+    reply(response.status, out.contentType, out.body);
     return;
   }
   reply(404, 'text/plain', new Uint8Array());

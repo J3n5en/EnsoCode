@@ -70,11 +70,33 @@ export function openBoxedContentKey(
 // ── 业务帧（AES-256-GCM，Web Crypto）────────────────────────────────────
 // 帧布局：version(1) + nonce(12) + ciphertext + tag(16)
 
+const keyCache = new WeakMap<Uint8Array, { bytes: Uint8Array; promise: Promise<CryptoKey> }>();
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < a.byteLength; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 async function importContentKey(contentKey: Uint8Array): Promise<CryptoKey> {
   if (contentKey.length !== CONTENT_KEY_LEN) {
     throw new PairCryptoError(`contentKey must be ${CONTENT_KEY_LEN} bytes`);
   }
-  return crypto.subtle.importKey('raw', ab(contentKey), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  const cached = keyCache.get(contentKey);
+  if (cached && bytesEqual(cached.bytes, contentKey)) return cached.promise;
+  const bytes = contentKey.slice();
+  const promise = crypto.subtle.importKey('raw', ab(bytes), 'AES-GCM', false, [
+    'encrypt',
+    'decrypt',
+  ]);
+  const entry = { bytes, promise };
+  keyCache.set(contentKey, entry);
+  void promise.catch(() => {
+    if (keyCache.get(contentKey) === entry) keyCache.delete(contentKey);
+  });
+  return promise;
 }
 
 /** 加密任意 JSON payload 成一帧密文 */

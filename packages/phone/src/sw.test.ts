@@ -55,7 +55,11 @@ function relay(state: { deployed: string; online: boolean; calls: string[]; miss
       ? 'text/css'
       : url.endsWith('.js')
         ? 'text/javascript'
-        : 'text/html';
+        : url.endsWith('.webmanifest')
+          ? 'application/manifest+json'
+          : url.endsWith('.png')
+            ? 'image/png'
+            : 'text/html';
     const pathname = new URL(url).pathname;
     // 和中继一样：不认识的 /assets 路径回退成 index.html
     const missing = pathname.startsWith('/assets/') && state.missing.includes(pathname);
@@ -90,7 +94,15 @@ function boot(
     skipWaiting: () => {},
     clients: {
       claim: async () => {},
-      matchAll: async () => [{ postMessage: (m: unknown) => env.posted.push(m) }],
+      matchAll: async () => [
+        {
+          url: `${ORIGIN}/desk?device=pair-1`,
+          postMessage: (m: unknown, ports?: { postMessage: (d: unknown) => void }[]) => {
+            env.posted.push(m);
+            ports?.[0]?.postMessage({ status: 404, mime: 'text/plain', body: new Uint8Array() });
+          },
+        },
+      ],
     },
     registration: {
       showNotification: async (title: string, options: { data?: { pending?: boolean } }) => {
@@ -118,6 +130,7 @@ function boot(
     setTimeout,
     clearTimeout,
     Promise,
+    MessageChannel,
     Date,
     Number,
     String,
@@ -351,5 +364,35 @@ describe('sw.js 页面壳预缓存', () => {
     expect(await text(await sw.asset('/assets/index-abcdefgh.js'))).toBe(
       `/assets/index-abcdefgh.js@${V1}`
     );
+  });
+
+  it('/manifest.webmanifest 与 /icons/* 经 shellAsset 缓存供离线复用', async () => {
+    const { state, env } = setup(V1);
+    const sw = boot(V1, env);
+    expect(await text(await sw.asset('/manifest.webmanifest'))).toBe(`/manifest.webmanifest@${V1}`);
+    expect(await text(await sw.asset('/icons/icon-192.png'))).toBe(`/icons/icon-192.png@${V1}`);
+
+    state.online = false;
+    expect(await text(await sw.asset('/manifest.webmanifest'))).toBe(`/manifest.webmanifest@${V1}`);
+    expect(await text(await sw.asset('/icons/icon-192.png'))).toBe(`/icons/icon-192.png@${V1}`);
+  });
+
+  it('/desk/li/* 命中 enso-remote-images 时由 SW 直接返回，不经过父页面桥接；未命中再问父页面', async () => {
+    const { env } = setup(V1);
+    const sw = boot(V1, env);
+    const imgPath = '/desk/li/pair-1/local-image%3A%2F%2Fsecretary-avatar%3Fs%3Ddefault%26v%3D1';
+    const imgCache = await env.caches.open('enso-remote-images');
+    await imgCache.put(
+      imgPath,
+      new Response('cached-avatar-bytes', { status: 200, headers: { 'Content-Type': 'image/png' } })
+    );
+
+    const hit = await sw.asset(imgPath);
+    expect(await text(hit)).toBe('cached-avatar-bytes');
+    expect(env.posted).toEqual([]);
+
+    const miss = await sw.asset('/desk/li/pair-1/missing');
+    expect(miss?.status).toBe(404);
+    expect(env.posted).toEqual([{ type: 'desk-fetch', path: 'li/missing' }]);
   });
 });

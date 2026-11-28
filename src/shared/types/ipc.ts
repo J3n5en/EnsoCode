@@ -459,6 +459,7 @@ export const IPC_CHANNELS = {
   /** 列出本机已安装、可打开项目目录的编辑器 / 终端 */
   PROJECTS_OPEN_IN_APPS: 'projects:open-in-apps',
   PROJECTS_GET_ICON: 'projects:get-icon',
+  PROJECTS_GET_ICONS: 'projects:get-icons',
   PROJECTS_SET_ICON: 'projects:set-icon',
 
   // SSH 连接配置（设置页 + 添加项目选择器）

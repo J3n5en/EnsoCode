@@ -445,4 +445,44 @@ describe('newSecretaryConversation', () => {
       window.electronAPI.secretary.getState = original;
     }
   });
+
+  it('bind 并行拉取多个秘书状态，且跳过首帧推送已先到的秘书', async () => {
+    const started: string[] = [];
+    const resolvers = new Map<string, (state: SecretaryState) => void>();
+    const origGetState = window.electronAPI.secretary.getState;
+    const origList = window.electronAPI.secretary.list;
+    window.electronAPI.secretary.list = (() =>
+      Promise.resolve([
+        { id: 'default', projectId: 'sec-project', name: '秘书1', avatar: null, order: 0 },
+        { id: 's-2', projectId: 'sec-project', name: '秘书2', avatar: null, order: 1 },
+        { id: 's-3', projectId: 'sec-project', name: '秘书3', avatar: null, order: 2 },
+      ])) as never;
+    window.electronAPI.secretary.getState = ((id?: string) => {
+      const key = id ?? 'default';
+      started.push(key);
+      return new Promise<SecretaryState>((resolve) => {
+        resolvers.set(key, resolve);
+      });
+    }) as never;
+
+    try {
+      const unbind = useSecretaryStore.getState().bind();
+      listener?.({ ...stateWith('executing'), secretaryId: 's-2' });
+      await vi.waitFor(() => expect(started).toHaveLength(2));
+      // 串行实现下第一个未 resolve 时不会发起第三个；同时跳过已有推送的 s-2
+      expect(started).toEqual(['default', 's-3']);
+
+      resolvers.get('default')?.({ ...stateWith('pending'), secretaryId: 'default' });
+      resolvers.get('s-3')?.({ ...stateWith('succeeded'), secretaryId: 's-3' });
+      await flush();
+
+      expect(useSecretaryStore.getState().states.default?.proposals.pr1?.status).toBe('pending');
+      expect(useSecretaryStore.getState().states['s-2']?.proposals.pr1?.status).toBe('executing');
+      expect(useSecretaryStore.getState().states['s-3']?.proposals.pr1?.status).toBe('succeeded');
+      unbind();
+    } finally {
+      window.electronAPI.secretary.getState = origGetState;
+      window.electronAPI.secretary.list = origList;
+    }
+  });
 });

@@ -176,7 +176,19 @@ async function shellAsset(event, url) {
  * 资源都不在中继上，经 desk 壳页面持有的加密隧道向桌面取；renderer 产物按 build 分代缓存。
  */
 const DESK_CACHE_PREFIX = 'enso-desk-';
+const REMOTE_IMAGE_CACHE = 'enso-remote-images';
 const DESK_FETCH_TIMEOUT_MS = 120_000;
+
+async function cachedDeskImage(url) {
+  const lookup = caches
+    .open(REMOTE_IMAGE_CACHE)
+    .then(
+      async (cache) =>
+        (await cache.match(url.href)) || (await cache.match(`${url.pathname}${url.search}`))
+    )
+    .catch(() => undefined);
+  return withTimeout(lookup, SHELL_CACHE_TIMEOUT_MS, undefined);
+}
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'desk-ping') event.ports[0]?.postMessage({ desk: 1 });
@@ -223,7 +235,11 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(shellPage(event, page));
       return;
     }
-    if (url.pathname.startsWith('/assets/')) {
+    if (
+      url.pathname.startsWith('/assets/') ||
+      url.pathname === '/manifest.webmanifest' ||
+      url.pathname.startsWith('/icons/')
+    ) {
       event.respondWith(shellAsset(event, url));
       return;
     }
@@ -234,7 +250,11 @@ self.addEventListener('fetch', (event) => {
 });
 
 async function deskFetch(url, kind, pairId, rest) {
-  if (kind === 'li') return askDeskShell(pairId, `li/${rest}`);
+  if (kind === 'li') {
+    const hit = await cachedDeskImage(url);
+    if (hit?.ok) return hit;
+    return askDeskShell(pairId, `li/${rest}`);
+  }
   const slash = rest.indexOf('/');
   if (slash <= 0) return new Response('Not found', { status: 404 });
   const build = decodeURIComponent(rest.slice(0, slash));

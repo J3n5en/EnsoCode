@@ -1,6 +1,7 @@
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { app, ipcMain, shell } from '@platform';
+import { mapLimited } from '@shared/coalesceRuns';
 import { conversationCwd } from '@shared/conversationCwd';
 import type { ProjectIconInfo } from '@shared/projectIcon';
 import { resolveSshTarget } from '@shared/ssh';
@@ -50,11 +51,38 @@ function parseRevealRequest(
 
 const NONE_ICON: ProjectIconInfo = { revision: 'none', kind: 'none' };
 const CUSTOM_ICON_BLOCKED = new Set(['scratch', 'secretary', 'bot-home']);
+const MAX_ICON_BATCH = 200;
+const ICON_BATCH_CONCURRENCY = 8;
 
 function parseProjectId(request: unknown): string | null {
   if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
   const projectId = (request as { projectId?: unknown }).projectId;
   return typeof projectId === 'string' && projectId.length > 0 ? projectId : null;
+}
+
+function parseProjectIds(request: unknown): string[] | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const raw = (request as { projectIds?: unknown }).projectIds;
+  if (!Array.isArray(raw)) return null;
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === 'string' && item.length > 0) {
+      seen.add(item);
+      if (seen.size >= MAX_ICON_BATCH) break;
+    }
+  }
+  return [...seen];
+}
+
+async function resolveProjectIcon(projectId: string): Promise<ProjectIconInfo> {
+  const project = getSourceAuthorityRegistry()?.project(projectId);
+  if (project?.state !== 'active') return NONE_ICON;
+  const icon = await getProjectIconStore().getIcon(
+    project.projectId,
+    project.canonicalPath,
+    project.kind
+  );
+  return icon.info;
 }
 
 function parseSetIcon(request: unknown): { projectId: string; image: Uint8Array | null } | null {
@@ -234,14 +262,21 @@ export function registerProjectHandlers(): void {
     async (event, request: unknown): Promise<ProjectIconInfo> => {
       if (!isMainRenderer(event.sender.id)) return NONE_ICON;
       const projectId = parseProjectId(request);
-      const project = projectId ? getSourceAuthorityRegistry()?.project(projectId) : null;
-      if (project?.state !== 'active') return NONE_ICON;
-      const icon = await getProjectIconStore().getIcon(
-        project.projectId,
-        project.canonicalPath,
-        project.kind
-      );
-      return icon.info;
+      return projectId ? resolveProjectIcon(projectId) : NONE_ICON;
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECTS_GET_ICONS,
+    async (event, request: unknown): Promise<Record<string, ProjectIconInfo>> => {
+      if (!isMainRenderer(event.sender.id)) return {};
+      const ids = parseProjectIds(request);
+      if (!ids || ids.length === 0) return {};
+      const entries = await mapLimited(ids, ICON_BATCH_CONCURRENCY, async (projectId) => [
+        projectId,
+        await resolveProjectIcon(projectId),
+      ]);
+      return Object.fromEntries(entries);
     }
   );
 

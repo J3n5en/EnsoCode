@@ -218,4 +218,24 @@ describe('会话补丁确认号与水合缓存', () => {
     );
     expect(mod.conversationsAppliedSeq()).toBe(9);
   });
+
+  it('序号不大于已确认号时直接忽略旧补丁并返回原 state 引用', async () => {
+    const mod = await load();
+    mod.flushBufferedConversationsPatches();
+    mod.resetConversationsAppliedSeq(9);
+
+    const state = {
+      conversations: { a: row('a') },
+      order: ['a'],
+      activeId: 'a',
+    };
+    const next = mod.applySequencedConversationsPatch(state, {
+      upserts: { b: { set: row('b'), unset: [] } },
+      removes: ['a'],
+      order: ['b'],
+      seq: 8,
+    });
+    expect(next).toBe(state);
+    expect(mod.conversationsAppliedSeq()).toBe(9);
+  });
 });

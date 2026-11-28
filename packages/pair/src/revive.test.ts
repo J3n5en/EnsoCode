@@ -71,8 +71,8 @@ describe('shouldReplaceOnNudge', () => {
 describe('isForegroundSocketStale', () => {
   it('短暂切走不拆链，后台超过阈值才视为半开', () => {
     expect(isForegroundSocketStale(0)).toBe(false);
-    expect(isForegroundSocketStale(1_999)).toBe(false);
-    expect(isForegroundSocketStale(2_000)).toBe(true);
+    expect(isForegroundSocketStale(14_999)).toBe(false);
+    expect(isForegroundSocketStale(15_000)).toBe(true);
   });
 });
 

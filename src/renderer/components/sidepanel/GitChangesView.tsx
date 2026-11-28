@@ -248,7 +248,7 @@ export function GitChangesView({
         void refresh(true);
         void useSessionsStore
           .getState()
-          .refreshWorktreeStatuses()
+          .refreshWorktreeStatuses({ force: true })
           .catch(() => {});
       }
     }

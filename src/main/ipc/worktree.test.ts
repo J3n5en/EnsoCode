@@ -126,6 +126,34 @@ describe('worktree statuses (batch)', () => {
     expect(await third).toEqual(await second);
     expect(mocks.status).toHaveBeenCalledTimes(2);
   });
+
+  it('5 秒内复用批量状态缓存，TTL 过期或变更操作后失效重查', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    try {
+      await invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+      expect(mocks.status).toHaveBeenCalledTimes(1);
+
+      await invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+      expect(mocks.status).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(5_000);
+      await invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+      expect(mocks.status).toHaveBeenCalledTimes(2);
+
+      // rename 使缓存失效
+      await invoke(IPC_CHANNELS.WORKTREE_RENAME, 'source', 'renamed');
+      await invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+      expect(mocks.status).toHaveBeenCalledTimes(3);
+
+      // status 单项检查或 create / bind / switch-branch / rebuild / remove 均会使缓存失效
+      await invoke(IPC_CHANNELS.WORKTREE_STATUS, 'source');
+      await invoke(IPC_CHANNELS.WORKTREE_STATUSES);
+      expect(mocks.status).toHaveBeenCalledTimes(5); // 1 次单项 WORKTREE_STATUS + 1 次全量
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('worktree binding', () => {

@@ -118,15 +118,16 @@ describe('projectIconStore', () => {
     expect((await store.getIcon('q', project)).info.kind).toBe('scanned');
   });
 
-  it('未命中 30 秒内不重复扫，命中看 mtime 且 60 秒后重读', async () => {
+  it('未命中 2 分钟内不重复扫，命中看 mtime 且 10 分钟后重读', async () => {
     let now = 1_000_000;
     const store = new ProjectIconStore(await tempDir('enso-icon-user-'), () => now);
     const project = await tempDir('enso-icon-proj-');
     expect((await store.getIcon('p', project, 'local')).info.kind).toBe('none');
     const file = join(project, 'favicon.svg');
     await writeFile(file, '<svg>1</svg>');
-    expect((await store.getIcon('p', project, 'local')).info.kind).toBe('none');
     now += 30_000;
+    expect((await store.getIcon('p', project, 'local')).info.kind).toBe('none');
+    now += 90_000;
     const hit = await store.getIcon('p', project, 'local');
     expect(hit.data?.toString()).toContain('>1<');
 
@@ -139,6 +140,8 @@ describe('projectIconStore', () => {
     const cached = await store.getIcon('p', project, 'local');
     expect(cached.data).toBe(changed.data);
     now += 60_000;
+    expect((await store.getIcon('p', project, 'local')).data).toBe(changed.data);
+    now += 540_000;
     const reread = await store.getIcon('p', project, 'local');
     expect(reread.data).not.toBe(changed.data);
     expect(reread.data?.equals(changed.data!)).toBe(true);

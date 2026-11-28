@@ -1207,6 +1207,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_CODE_SOURCES, request),
     getIcon: (projectId: string): Promise<ProjectIconInfo> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GET_ICON, { projectId }),
+    getIcons: (projectIds: string[]): Promise<Record<string, ProjectIconInfo>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GET_ICONS, { projectIds }),
     /** 上传自定义图标，或传 null 移除。scratch / 秘书 / bot-home 会被拒绝 */
     setIcon: (
       projectId: string,

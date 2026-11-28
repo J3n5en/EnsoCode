@@ -208,3 +208,83 @@ describe('流式消息增量', () => {
     expect(dec.decode(again.mark, again.message)).toEqual(msg(`${base}12`));
   });
 });
+
+describe('seedLazy 与 respondPrehashed 快路径', () => {
+  it('seedLazy 在首次写入前不求值，写入时按规范化顺序产出与 seed 一致的增量', async () => {
+    const sent: unknown[] = [];
+    const client = new RemoteWriteClient();
+    const bases = new RemoteWriteBases();
+    const initial = { b: 'x'.repeat(200), a: 1 };
+    const reorderedSameKeyOrderDiff = { a: 1, b: 'x'.repeat(200), c: 2 };
+    let clientLoads = 0;
+    let hostLoads = 0;
+
+    client.seedLazy('enso-conversations', () => {
+      clientLoads++;
+      return structuredClone(initial);
+    });
+    bases.seedLazy('enso-conversations', () => {
+      hostLoads++;
+      return structuredClone({ a: 1, b: 'x'.repeat(200) });
+    });
+
+    expect(clientLoads).toBe(0);
+    expect(hostLoads).toBe(0);
+
+    await client.write('enso-conversations', reorderedSameKeyOrderDiff, async (arg) => {
+      sent.push(arg);
+      const { value, commit } = bases.resolve('enso-conversations', arg);
+      expect(value).toEqual(reorderedSameKeyOrderDiff);
+      commit();
+      return true;
+    });
+
+    expect(clientLoads).toBe(1);
+    expect(hostLoads).toBe(1);
+    const mark = (sent[0] as { __ensoWrite: { ops?: unknown[]; v?: unknown } }).__ensoWrite;
+    expect(mark.ops).toBeDefined();
+    expect(mark.v).toBeUndefined();
+  });
+
+  it('respondPrehashed 跳过重复序列化，按 ifNone 返回 same / delta / full', () => {
+    const cache = new RemoteReadCache((json) => `h:${json.length}:${json.slice(0, 8)}`);
+    const v1 = { a: 1, pad: 'z'.repeat(200) };
+    const j1 = JSON.stringify(v1);
+    const h1 = `h:${j1.length}:${j1.slice(0, 8)}`;
+
+    expect(
+      (
+        cache as unknown as {
+          respondPrehashed(v: unknown, h: string, chars: number, ifNone: string): unknown;
+        }
+      ).respondPrehashed(v1, h1, j1.length, '')
+    ).toEqual({ __ensoCached: { h: h1, v: v1 } });
+
+    expect(
+      (
+        cache as unknown as {
+          respondPrehashed(v: unknown, h: string, chars: number, ifNone: string): unknown;
+        }
+      ).respondPrehashed(v1, h1, j1.length, h1)
+    ).toEqual({ __ensoCached: { h: h1, same: 1 } });
+
+    const v2 = { a: 2, pad: 'z'.repeat(200) };
+    const j2 = JSON.stringify(v2);
+    const h2 = `h:${j2.length}:${j2.slice(0, 8)}`;
+    const delta = (
+      cache as unknown as {
+        respondPrehashed(
+          v: unknown,
+          h: string,
+          chars: number,
+          ifNone: string
+        ): {
+          __ensoCached: { h: string; b?: string; ops?: unknown[] };
+        };
+      }
+    ).respondPrehashed(v2, h2, j2.length, h1);
+    expect(delta.__ensoCached.h).toBe(h2);
+    expect(delta.__ensoCached.b).toBe(h1);
+    expect(delta.__ensoCached.ops).toBeDefined();
+  });
+});

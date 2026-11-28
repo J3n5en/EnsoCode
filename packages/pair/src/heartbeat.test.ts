@@ -94,9 +94,12 @@ describe('attachHeartbeat 周期探测容错', () => {
     const ws = new FakeWs();
     const onDead = vi.fn();
     const hb = attachHeartbeat(ws as unknown as WebSocket, onDead);
+    expect(VISIBILITY_PROBE_MS).toBe(400);
     hb.probe(VISIBILITY_PROBE_MS);
 
-    vi.advanceTimersByTime(VISIBILITY_PROBE_MS);
+    vi.advanceTimersByTime(399);
+    expect(onDead).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     expect(onDead).toHaveBeenCalledOnce();
   });
 

@@ -68,6 +68,7 @@ export function applySequencedConversationsPatch<C extends object>(
   state: PatchTarget<C>,
   patch: SequencedConversationsPatch
 ): PatchTarget<C> {
+  if (patch.seq <= appliedSeq) return state;
   appliedSeq = Math.max(appliedSeq, patch.seq);
   return applyConversationsPatchToState(state, patch);
 }

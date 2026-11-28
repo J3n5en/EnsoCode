@@ -196,12 +196,15 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
           secretaries,
           focusedId: pickFocused(secretaries, state.focusedId),
         }));
-        for (const entry of secretaries) {
-          // 推送比首帧快时以推送为准，否则旧快照会盖掉刚确认的提案
-          const secretary = await window.electronAPI.secretary.getState(entry.id);
-          if (!bound || pushed.has(entry.id)) continue;
-          apply({ ...secretary, secretaryId: secretary.secretaryId ?? entry.id });
-        }
+        await Promise.all(
+          secretaries.map(async (entry) => {
+            if (pushed.has(entry.id)) return;
+            // 推送比首帧快时以推送为准，否则旧快照会盖掉刚确认的提案
+            const secretary = await window.electronAPI.secretary.getState(entry.id);
+            if (!bound || pushed.has(entry.id)) return;
+            apply({ ...secretary, secretaryId: secretary.secretaryId ?? entry.id });
+          })
+        );
       })
       .catch(() => undefined);
     // 手机上的消息带 enso://secretary?conversation=<id>[&proposal=<id>]：
@@ -295,15 +298,17 @@ async function scanSecretaryStates(): Promise<void> {
   scanningStates ??= (async () => {
     try {
       const list = await window.electronAPI.secretary.list().catch(() => []);
-      for (const entry of list) {
-        const state = await window.electronAPI.secretary.getState(entry.id).catch(() => null);
-        if (!state) continue;
-        applySecretaryStateMerge(
-          { ...state, secretaryId: state.secretaryId ?? entry.id },
-          useSecretaryStore.setState,
-          useSecretaryStore.getState
-        );
-      }
+      await Promise.all(
+        list.map(async (entry) => {
+          const state = await window.electronAPI.secretary.getState(entry.id).catch(() => null);
+          if (!state) return;
+          applySecretaryStateMerge(
+            { ...state, secretaryId: state.secretaryId ?? entry.id },
+            useSecretaryStore.setState,
+            useSecretaryStore.getState
+          );
+        })
+      );
     } finally {
       scanningStates = null;
     }

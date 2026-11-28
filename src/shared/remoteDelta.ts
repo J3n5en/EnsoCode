@@ -58,30 +58,60 @@ export function writeSeedOf(
   return value === undefined ? null : { name: 'enso-conversations', value };
 }
 
-/** 对象键排序后的 JSON：两端内容相同但键顺序不同（缓存加增量拼出的对象，新键排在最后）时结果一致 */
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value))
-    return `[${value.map((item) => canonicalJson(item) || 'null').join(',')}]`;
+const fnv = (h: number, str: string): number => {
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193);
+  return h;
+};
+
+const hasSerializableValue = (value: unknown): boolean => {
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+    return false;
+  }
+  if (Array.isArray(value)) return true;
+  if (value && typeof value === 'object') {
+    if (typeof (value as { toJSON?: unknown }).toJSON === 'function') {
+      return JSON.stringify(value) !== undefined;
+    }
+    return true;
+  }
+  return JSON.stringify(value) !== undefined;
+};
+
+/** 流式计算对象键排序后的 FNV-1a 哈希：两端内容相同但键顺序不同时结果一致，避免兆级字符串拼接 */
+function hashCanonical(value: unknown, h: number): number {
+  if (Array.isArray(value)) {
+    h = fnv(h, '[');
+    for (let i = 0; i < value.length; i++) {
+      if (i > 0) h = fnv(h, ',');
+      const item = value[i];
+      h = hasSerializableValue(item) ? hashCanonical(item, h) : fnv(h, 'null');
+    }
+    return fnv(h, ']');
+  }
   if (
     value &&
     typeof value === 'object' &&
     typeof (value as { toJSON?: unknown }).toJSON !== 'function'
   ) {
     const record = value as Record<string, unknown>;
-    const fields: string[] = [];
+    h = fnv(h, '{');
+    let first = true;
     for (const key of Object.keys(record).sort()) {
-      const item = canonicalJson(record[key]);
-      if (item) fields.push(`${JSON.stringify(key)}:${item}`);
+      const prop = record[key];
+      if (!hasSerializableValue(prop)) continue;
+      if (!first) h = fnv(h, ',');
+      first = false;
+      h = fnv(h, JSON.stringify(key));
+      h = fnv(h, ':');
+      h = hashCanonical(prop, h);
     }
-    return `{${fields.join(',')}}`;
+    return fnv(h, '}');
   }
-  return JSON.stringify(value) ?? '';
+  return fnv(h, JSON.stringify(value) ?? '');
 }
 
 function seedRevision(value: unknown): number {
-  const json = canonicalJson(value);
-  let h = 0x811c9dc5;
-  for (let i = 0; i < json.length; i++) h = Math.imul(h ^ json.charCodeAt(i), 0x01000193);
+  const h = hashCanonical(value, 0x811c9dc5);
   return -1 - (h >>> 0) * 1024;
 }
 
@@ -92,15 +122,37 @@ interface WriteMark {
   v?: unknown;
 }
 
+interface LazyWriteBase {
+  r: number | null;
+  v?: unknown;
+  load?: () => unknown;
+}
+
+function materializeBase(entry: LazyWriteBase): { r: number; v: unknown } {
+  if (entry.r === null) {
+    const loaded = entry.load ? entry.load() : entry.v;
+    entry.v = loaded;
+    entry.r = seedRevision(loaded);
+    entry.load = undefined;
+  }
+  return { r: entry.r, v: entry.v };
+}
+
 /** shim 侧：value 须是 JSON 安全的编码值且归调用方所有 */
 export class RemoteWriteClient {
-  private bases = new Map<string, { r: number; v: unknown }>();
+  private bases = new Map<string, LazyWriteBase>();
   private chains = new Map<string, Promise<unknown>>();
 
-  /** 有写入在途时不动：在途写入完成后的基线才与宿主一致 */
+  /** 有写入在途时不动：在途写入完成后的基线才与宿主一致；hash 推迟到首次写入才算 */
   seed(name: string, value: unknown): void {
     if (this.chains.has(name)) return;
-    this.bases.set(name, { r: seedRevision(value), v: value });
+    this.bases.set(name, { r: null, v: value });
+  }
+
+  /** 只在真正发生写入时才反序列化/克隆基线并算 hash，启动读零开销 */
+  seedLazy(name: string, load: () => unknown): void {
+    if (this.chains.has(name)) return;
+    this.bases.set(name, { r: null, load });
   }
 
   write(name: string, value: unknown, send: (arg: unknown) => Promise<unknown>): Promise<unknown> {
@@ -119,7 +171,8 @@ export class RemoteWriteClient {
       this.bases.delete(name);
       return send(undefined);
     }
-    const base = this.bases.get(name);
+    const rawBase = this.bases.get(name);
+    const base = rawBase ? materializeBase(rawBase) : undefined;
     const r = (base?.r ?? 0) + 1;
     if (base) {
       const ops = diffJson(base.v, value);
@@ -142,10 +195,15 @@ export class RemoteWriteClient {
 
 /** 宿主侧（每个远端 renderer 一份）：还原写入值；handler 成功后 commit 才推进基线 */
 export class RemoteWriteBases {
-  private bases = new Map<string, { r: number; v: unknown }>();
+  private bases = new Map<string, LazyWriteBase>();
 
   seed(name: string, value: unknown): void {
-    this.bases.set(name, { r: seedRevision(value), v: structuredClone(value) });
+    this.bases.set(name, { r: null, v: structuredClone(value) });
+  }
+
+  /** 推迟克隆与规范化 hash，直到远端真正发来增量写入才解析基线 */
+  seedLazy(name: string, load: () => unknown): void {
+    this.bases.set(name, { r: null, load });
   }
 
   resolve(name: string, arg: unknown): { value: unknown; commit: () => void } {
@@ -155,7 +213,8 @@ export class RemoteWriteBases {
     let value: unknown;
     if ('v' in mark) value = mark.v;
     else {
-      const base = this.bases.get(name);
+      const rawBase = this.bases.get(name);
+      const base = rawBase ? materializeBase(rawBase) : undefined;
       if (!base || base.r !== mark.b || !Array.isArray(mark.ops)) throw staleError();
       value = applyJsonDelta(base.v, mark.ops);
     }
@@ -204,13 +263,22 @@ export class RemoteReadCache {
 
   respond(value: unknown, ifNone: string): { [CACHED]: CachedMark } {
     const json = JSON.stringify(value ?? null);
-    const h = this.hash(json);
+    return this.respondPrehashed(value, this.hash(json), json.length, ifNone);
+  }
+
+  /** 宿主已按 revision 缓存好序列化 JSON 与 hash 时走此快路径，避免每次请求重复 JSON.stringify + sha1 */
+  respondPrehashed(
+    value: unknown,
+    h: string,
+    chars: number,
+    ifNone: string
+  ): { [CACHED]: CachedMark } {
     const base = ifNone ? this.lru.get(ifNone) : undefined;
-    this.put(h, value, json.length);
+    this.put(h, value, chars);
     if (ifNone === h) return { [CACHED]: { h, same: 1 } };
     if (base) {
       const ops = diffJson(base.v, value);
-      if (worth(ops, json.length)) return { [CACHED]: { h, b: ifNone, ops } };
+      if (worth(ops, chars)) return { [CACHED]: { h, b: ifNone, ops } };
     }
     return { [CACHED]: { h, v: value } };
   }
@@ -242,14 +310,19 @@ export class RemoteReadClient {
 
   constructor(private store: RemoteReadStore) {}
 
-  /** 返回编码值（每次调用独立副本） */
-  async read(key: string, send: (ifNone: string) => Promise<unknown>): Promise<unknown> {
+  /** 返回已缓存版本的原始 JSON（供需要懒构建基线的调用方复解析，避免 startup structuredClone） */
+  readJson(key: string, send: (ifNone: string) => Promise<unknown>): Promise<string> {
     let pending = this.inflight.get(key);
     if (!pending) {
       pending = this.fetch(key, send).finally(() => this.inflight.delete(key));
       this.inflight.set(key, pending);
     }
-    return JSON.parse(await pending);
+    return pending;
+  }
+
+  /** 返回编码值（每次调用独立副本） */
+  async read(key: string, send: (ifNone: string) => Promise<unknown>): Promise<unknown> {
+    return JSON.parse(await this.readJson(key, send));
   }
 
   private async fetch(key: string, send: (ifNone: string) => Promise<unknown>): Promise<string> {

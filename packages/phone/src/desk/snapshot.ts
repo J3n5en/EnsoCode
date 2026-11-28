@@ -12,8 +12,9 @@ const SAVED_HEADER = 'x-desk-saved';
 /** 桌面在线后盖着的上限：在线却迟迟起不来时不能一直挡住（桌面不在线的时间不计） */
 const MAX_SNAPSHOT_MS = 20_000;
 const SETTLED_MS = 2_500;
+const FAST_SETTLED_MS = 1_200;
 /** 启动请求全部回来、没有缺帧持续这么久：数据已到齐，不必再等文字量稳定 */
-const QUIET_MS = 600;
+const QUIET_MS = 250;
 /** 文字太少的快照（存的时候 renderer 正在重载）盖上去只是一片空白 */
 const MIN_SNAPSHOT_CHARS = 200;
 
@@ -48,9 +49,8 @@ export function snapshotReady(p: SnapshotProgress): boolean {
   if (!p.hostOnline) return false;
   if (p.elapsed >= MAX_SNAPSHOT_MS) return true;
   if (!p.settingsLoaded || p.liveLoading) return false;
-  return (
-    p.liveChars >= p.snapChars * 0.8 || p.stableFor >= SETTLED_MS || (p.idleFor ?? 0) >= QUIET_MS
-  );
+  const settled = p.liveChars >= MIN_SNAPSHOT_CHARS ? FAST_SETTLED_MS : SETTLED_MS;
+  return p.liveChars >= p.snapChars * 0.8 || p.stableFor >= settled || (p.idleFor ?? 0) >= QUIET_MS;
 }
 
 /**

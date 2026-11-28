@@ -57,7 +57,7 @@ interface Slot {
   /** 最近发出的 rpc-send：链路可能在察觉前已断，续上后重发（宿主按 id 去重） */
   sends: Request[];
   /** 宿主帧按 seq 顺序应用；缺口久未补齐则重新 hello 让宿主补发 */
-  stream: ReturnType<typeof createRemoteOrderedStream<Sequenced>>;
+  stream: ReturnType<typeof createRemoteOrderedStream<Sequenced | null>>;
   gapTimer: ReturnType<typeof setTimeout> | null;
   /** 当前缺口从何时开始、开始时的位置（诊断） */
   gap?: { at: number; where: string };
@@ -82,6 +82,14 @@ const encodedArgs = (args: unknown[]) => JSON.stringify(args);
 const ASSET_RETRY_MS = 10_000;
 const MAX_RECENT_SENDS = 200;
 const WATCH_MS = 2_000;
+/** 不阻塞首屏内容可读的低优后台通道：仍在途时不拖住快照遮罩揭开 */
+const BACKGROUND_IDLE_CHANNELS: ReadonlySet<string> = new Set([
+  'worktree:list',
+  'worktree:statuses',
+  'projects:get-icon',
+  'projects:get-icons',
+  'updater:getState',
+]);
 /** 每收这么多分片字节回报一次，宿主据此放行下一段（窗口 512KB） */
 const ACK_STEP = 128 * 1024;
 /** 请求超过这么久才回来记进诊断 */
@@ -333,7 +341,14 @@ export class DeskTunnel {
 
   private ordered(slot: Slot, frame: Sequenced): void {
     const before = slot.stream.applied;
-    for (const ready of slot.stream.push(frame.seq, frame)) this.apply(slot, ready);
+    // rpc-result 按 req id 一一对应，不等前置 rpc-event 补齐即可先兑现 invoke，避开队头阻塞
+    if (frame.type === 'rpc-result' && frame.seq !== undefined && frame.seq > slot.stream.applied) {
+      this.apply(slot, frame);
+    }
+    const item = frame.type === 'rpc-result' ? null : frame;
+    for (const ready of slot.stream.push(frame.seq, item)) {
+      if (ready) this.apply(slot, ready);
+    }
     if (slot.stream.applied > before) slot.appliedAt = Date.now();
     if (slot.stream.overflowed) {
       this.reset(slot);
@@ -529,7 +544,7 @@ export class DeskTunnel {
       queue: [],
       pending: new Map(),
       sends: [],
-      stream: createRemoteOrderedStream<Sequenced>(),
+      stream: createRemoteOrderedStream<Sequenced | null>(),
       gapTimer: null,
       listeners: new Map(),
       onReset,
@@ -582,12 +597,16 @@ export class DeskTunnel {
     };
   }
 
-  /** 该类 renderer 都已续上、没有在途请求、宿主帧没有缺口（启动遮罩据此判断数据到齐） */
+  /** 该类 renderer 都已续上、没有核心在途请求、宿主帧没有缺口（启动遮罩据此判断数据到齐） */
   idle(kind: RemoteKind): boolean {
     if (!this.online) return false;
-    for (const slot of this.slots.values())
-      if (slot.kind === kind && (!slot.ready || slot.pending.size > 0 || slot.stream.gap))
-        return false;
+    for (const slot of this.slots.values()) {
+      if (slot.kind !== kind) continue;
+      if (!slot.ready || slot.stream.gap) return false;
+      for (const entry of slot.pending.values()) {
+        if (!BACKGROUND_IDLE_CHANNELS.has(entry.message.ch)) return false;
+      }
+    }
     return true;
   }
 

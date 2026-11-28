@@ -145,6 +145,7 @@ export interface DecodedImage {
     quality?: 'good' | 'better' | 'best';
   }): DecodedImage;
   toJPEG(quality: number): Buffer;
+  toPNG?(): Buffer;
 }
 
 export interface PlatformImages {

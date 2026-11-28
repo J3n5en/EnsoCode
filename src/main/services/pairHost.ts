@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import {
   attachHeartbeat,
   backoffDelay,
@@ -12,7 +14,6 @@ import {
   type DirectSignal,
   type FrameReplay,
   fromBase64Url,
-  gzipRemoteJson,
   type Heartbeat,
   type HostAppearance,
   type HostPairSession,
@@ -132,6 +133,9 @@ import {
 } from './remoteRenderer/hostHooks';
 import { isSessionMuted } from './sessionMuteGate';
 
+const gzipAsync = promisify(gzip);
+const RESET_RELAY_ONLY_MS = 3_000;
+
 /**
  * 手机第二屏 host：跑在 main，不依赖窗口焦点。
  * 连中继（每台已配对设备一条 WSS）、解密白名单命令打进 agentHost、
@@ -203,6 +207,8 @@ interface Connection {
   remoteGzip: boolean;
   /** 对端是完整模式（进房 snapshot 声明）：不推手机版目录/事件，跨重连保留，下次 snapshot 改写 */
   deskGuest: boolean;
+  /** peer-joined 后短时间内仅走中继，避开直连抢先于重放重置到达 */
+  relayOnlyUntil: number;
   /** 直连和中继共用：一帧只封一次 */
   replay: FrameReplay;
 }
@@ -679,6 +685,7 @@ function openConnection(device: PairedDevice): void {
     remoteWindow: new BulkWindow((frame) => sendRemoteFrame(conn, frame)),
     remoteGzip: false,
     deskGuest: false,
+    relayOnlyUntil: 0,
     replay: createFrameReplay(),
   };
   conn.direct = new DirectLink({
@@ -812,6 +819,7 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'peer-joined') {
           conn.replay.peerReset();
+          conn.relayOnlyUntil = Date.now() + RESET_RELAY_ONLY_MS;
           conn.phoneOnline = true;
           conn.phoneVisible = true;
           conn.direct.peerOnline(true);
@@ -1234,8 +1242,9 @@ async function sendNow(
       releaseProviderFp();
       return false;
     }
-    // 直连优先；背压/刚好断掉时无缝退回中继。信令始终只走中继。
-    if (!relayOnly && conn.direct.send(frame)) return true;
+    // 直连优先；背压/刚好断掉/peer-joined 重放保护窗口内走中继。信令始终只走中继。
+    const forceRelay = relayOnly || (Date.now() < conn.relayOnlyUntil && conn.ws?.readyState === 1);
+    if (!forceRelay && conn.direct.send(frame)) return true;
     const ok = sendFrameViaRelay(conn, frame);
     if (!ok) releaseProviderFp();
     return ok;
@@ -1291,8 +1300,10 @@ function remoteLink(pairId: string): RemoteLink {
       const group = bulkGroupOf(message);
       // 压缩是异步的，可能与后续小帧换序：rpc 帧浏览器按 seq 重排，资源按 id 对应
       if (conn.remoteGzip && json.length >= REMOTE_GZIP_MIN_CHARS) {
-        void gzipRemoteJson(json)
-          .then((packed) => sendRemoteMessage(conn, packed, group))
+        void gzipAsync(Buffer.from(json))
+          .then((buf) =>
+            sendRemoteMessage(conn, { type: 'gzip' as const, data: buf.toString('base64') }, group)
+          )
           .catch((error) => console.warn('[pair] remote frame dropped', error));
       } else {
         sendRemoteMessage(conn, message, group);

@@ -346,7 +346,7 @@ export class PairClient {
       if (this.closed || this.revoked || this.ws !== ws) return;
       clearTimeout(connectTimer);
       this.attempt = 0;
-      this.primeRoom();
+      if (this.direct.transport() !== 'direct') this.primeRoom();
     };
 
     ws.onmessage = (event) => {

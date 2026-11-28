@@ -57,6 +57,11 @@ function getSettingsPath(): string {
 
 // 内存缓存和防抖配置
 let cachedSettings: Record<string, unknown> | null = null;
+let settingsRev = 0;
+
+export function settingsRevision(): number {
+  return settingsRev;
+}
 let pendingWrite: NodeJS.Timeout | null = null;
 let maxWaitTimer: NodeJS.Timeout | null = null;
 let isDirty = false;
@@ -375,10 +380,12 @@ export function readSettings(): Record<string, unknown> | null {
     const settingsPath = getSettingsPath();
     if (existsSync(settingsPath)) {
       cachedSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      settingsRev++;
       return cachedSettings;
     }
   } catch {}
   cachedSettings = null;
+  settingsRev++;
   return null;
 }
 
@@ -518,6 +525,7 @@ function scheduleWrite(
       }
     }
     cachedSettings = data;
+    settingsRev++;
     isDirty = true;
     providerModelRefresh?.sync();
     notifyMemoryEmbeddingSettings(data);
@@ -723,6 +731,7 @@ export function commitSettingsTransaction(
   }
 
   cachedSettings = next;
+  settingsRev++;
   isDirty = false;
   providerModelRefresh?.sync();
   notifyMemoryEmbeddingSettings(next);
@@ -881,6 +890,7 @@ export function reloadSettingsFromDisk(): boolean {
   maxWaitTimer = null;
   isDirty = false;
   cachedSettings = null;
+  settingsRev++;
   const data = readSettings();
   if (data !== null) {
     const ok = scheduleWrite(data, undefined, 'all-renderers');

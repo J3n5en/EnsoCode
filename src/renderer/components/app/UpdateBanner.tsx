@@ -4,6 +4,7 @@ import { Download, RotateCw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { heightVariants, heightVariantsReduced, usePrefersReducedMotion } from '@/lib/motion';
+import { isRemoteClient } from '@/lib/remoteClient';
 import { BannerBar } from './BannerBar';
 import { ManualInstallActions } from './ManualInstallActions';
 import { ReleaseNotesDialog } from './ReleaseNotesDialog';
@@ -20,14 +21,23 @@ export function UpdateBanner() {
 
   useEffect(() => {
     let alive = true;
-    // 服务端 manual 模式不能下载,发现新版只交给设置页
-    window.electronAPI.updater
-      .getState()
-      .then((state) => alive && setDesktop(state.host === 'desktop'))
-      .catch(() => {});
+    let hostChecked = false;
+    const syncHostKind = () => {
+      if (hostChecked) return;
+      hostChecked = true;
+      // 服务端 manual 模式不能下载,发现新版只交给设置页
+      window.electronAPI.updater
+        .getState()
+        .then((state) => alive && setDesktop(state.host === 'desktop'))
+        .catch(() => {});
+    };
+    if (!isRemoteClient()) syncHostKind();
     const off = window.electronAPI.updater.onStatus((next) => {
       setStatus(next);
-      if (next.status !== 'checking' && next.status !== 'not-available') setDismissed(false);
+      if (next.status !== 'checking' && next.status !== 'not-available') {
+        syncHostKind();
+        setDismissed(false);
+      }
     });
     return () => {
       alive = false;

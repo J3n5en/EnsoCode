@@ -237,4 +237,107 @@ describe('DeskTunnel', () => {
     mockState.events?.onState('online');
     expect(hellos()).toHaveLength(1);
   });
+
+  it('rpc-result 先到而前置 rpc-event 缺口未补时立即 resolve，缺口补齐后幂等不重放', async () => {
+    const { frame, cid } = createOnlineTunnel();
+    const events: string[] = [];
+    frame.on('evt', (payload) => events.push(payload));
+
+    const pending = frame.invoke('settings:read', '[]');
+    const req = mockState.sent.find(
+      (m): m is Extract<PhoneToHost, { type: 'rpc-invoke' }> => m.type === 'rpc-invoke'
+    );
+    expect(req).toBeTruthy();
+
+    // seq: 2 先到达，seq: 1（rpc-event）仍在路上：invoke 结果立刻兑现
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-result',
+      cid,
+      id: req!.id,
+      ok: true,
+      data: { ok: 1 },
+      seq: 2,
+    });
+    await expect(pending).resolves.toBe(JSON.stringify({ ok: 1 }));
+
+    // 随后 seq: 1 补到，按序应用；重复的 seq: 2 再次到来不会报错或二次兑现
+    mockState.events?.onRemoteFrame?.({ type: 'rpc-event', cid, ch: 'evt', args: ['e1'], seq: 1 });
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-result',
+      cid,
+      id: req!.id,
+      ok: true,
+      data: { ok: 2 },
+      seq: 2,
+    });
+    expect(events).toEqual(['["e1"]']);
+  });
+
+  it('rpc-result 越过缺口先行兑现后，缺口仍会触发 rehello-gap 补发前置事件', async () => {
+    const { frame, cid } = createOnlineTunnel();
+    const pending = frame.invoke('settings:read', '[]');
+    const req = mockState.sent.find(
+      (m): m is Extract<PhoneToHost, { type: 'rpc-invoke' }> => m.type === 'rpc-invoke'
+    );
+    mockState.sent = [];
+
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-result',
+      cid,
+      id: req!.id,
+      ok: true,
+      data: { ok: 1 },
+      seq: 2,
+    });
+    await expect(pending).resolves.toBe(JSON.stringify({ ok: 1 }));
+
+    vi.advanceTimersByTime(8_500);
+    expect(hellos()).toHaveLength(1);
+  });
+
+  it('idle 忽略后台低优通道，仅存在核心请求或流缺口时返回 false', () => {
+    const { tunnel, frame, cid } = createOnlineTunnel();
+    expect(tunnel.idle('main')).toBe(true);
+
+    // 后台低优通道在途时仍算 idle
+    for (const ch of [
+      'worktree:list',
+      'worktree:statuses',
+      'projects:get-icon',
+      'projects:get-icons',
+      'updater:getState',
+    ]) {
+      void frame.invoke(ch, '[]');
+    }
+    expect(tunnel.idle('main')).toBe(true);
+
+    // 核心通道在途时不算 idle，直到返回
+    const core = frame.invoke('settings:read', '[]');
+    const coreReq = mockState.sent.findLast(
+      (m): m is Extract<PhoneToHost, { type: 'rpc-invoke' }> =>
+        m.type === 'rpc-invoke' && m.ch === 'settings:read'
+    );
+    expect(tunnel.idle('main')).toBe(false);
+
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-result',
+      cid,
+      id: coreReq!.id,
+      ok: true,
+      data: {},
+      seq: 1,
+    });
+    expect(tunnel.idle('main')).toBe(true);
+    void core;
+
+    // 即使只剩低优通道在途，只要 stream 有 seq 缺口仍不算 idle
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-event',
+      cid,
+      ch: 'evt',
+      args: [1],
+      seq: 3,
+    });
+    expect(tunnel.idle('main')).toBe(false);
+  });
 });

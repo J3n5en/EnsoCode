@@ -83,6 +83,10 @@ import {
   clearTerminalThemeFromApp,
   isTerminalThemeDark,
 } from '@/lib/ghosttyTheme';
+import {
+  noteSourceAuthorityProjection,
+  readSharedSourceAuthority,
+} from '@/lib/sourceAuthorityCache';
 import { useModelDirectoryStore } from '@/stores/modelDirectory';
 import {
   type OauthCredentialSnapshot,
@@ -1481,10 +1485,13 @@ function sameProjectProjection(
 }
 
 async function refreshProjectAuthorityProjection(): Promise<void> {
-  applyProjectAuthorityProjection(await window.electronAPI.sourceAuthority.read());
+  applyProjectAuthorityProjection(await readSharedSourceAuthority());
 }
 
-window.electronAPI.sourceAuthority.onChanged(applyProjectAuthorityProjection);
+window.electronAPI.sourceAuthority.onChanged((projection) => {
+  noteSourceAuthorityProjection(projection);
+  applyProjectAuthorityProjection(projection);
+});
 void refreshProjectAuthorityProjection();
 
 // 跟随系统明暗变化

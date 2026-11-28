@@ -91,6 +91,10 @@ import { create } from 'zustand';
 import { persist, type StorageValue } from 'zustand/middleware';
 import { startQueuedSession } from '@/lib/queuedSessionApi';
 import { isLeaderRenderer } from '@/lib/rendererRole';
+import {
+  noteSourceAuthorityProjection,
+  readSharedSourceAuthority,
+} from '@/lib/sourceAuthorityCache';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
@@ -470,8 +474,8 @@ interface SessionsState {
   rebuildWorktree(id: string): Promise<string | null>;
   /** resume 发现 worktree 丢失后：回退主工作树继续 */
   fallbackToMainWorkspace(id: string): Promise<void>;
-  /** 刷新全部隔离会话的 worktree 状态（侧边栏徽标） */
-  refreshWorktreeStatuses(): Promise<void>;
+  /** 刷新全部隔离会话的 worktree 状态（侧边栏徽标）；force 跳过短时冷却 */
+  refreshWorktreeStatuses(options?: { force?: boolean }): Promise<void>;
   selectConversation(id: string): void;
   /** 手机打开会话时清未读，不改桌面选中 */
   markConversationRead(id: string): void;
@@ -2593,7 +2597,7 @@ export const useSessionsStore = create<SessionsState>()(
               return { conversations, workspaceRevisionByConversation };
             });
             void get()
-              .refreshWorktreeStatuses()
+              .refreshWorktreeStatuses({ force: true })
               .catch(() => {});
             return result;
           } catch (error) {
@@ -2814,43 +2818,57 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        // 启动、侧栏挂载、回焦会同时触发：合并成一次尾随刷新；状态一次批量取（宿主限并发跑 git）
-        refreshWorktreeStatuses: coalesceRuns(async () => {
-          const targets = get().conversations;
-          const [records, statuses] = await Promise.all([
-            window.electronAPI.worktree.list(),
-            window.electronAPI.worktree.statuses(),
-          ]);
-          const entries = records
-            .filter((record) => targets[record.conversationId])
-            .map((record) => ({ record, status: statuses[record.conversationId] }));
-          set((state) => {
-            const conversations = { ...state.conversations };
-            const worktreeStatuses = { ...state.worktreeStatuses };
-            for (const { record, status } of entries) {
-              const conversation = conversations[record.conversationId];
-              if (
-                !conversation ||
-                conversation !== targets[record.conversationId] ||
-                conversation.workspaceMigrating ||
-                conversation.projectId !== record.projectId
-              )
-                continue;
-              conversations[conversation.id] = {
-                ...conversation,
-                worktree: record,
-                worktreeMissing: status
-                  ? !status.exists || undefined
-                  : conversation.worktreeMissing,
-                ...(conversation.sessionFile && conversation.worktree?.path !== record.path
-                  ? { pendingWorkspaceNote: workspaceMigratedNote(record.path) }
-                  : {}),
-              };
-              if (status) worktreeStatuses[conversation.id] = status;
-            }
-            return { conversations, worktreeStatuses };
+        // 启动、侧栏挂载、回焦会同时触发：5s 内有状态时复用并合并尾随刷新；状态一次批量取（宿主限并发跑 git）
+        refreshWorktreeStatuses: (() => {
+          let lastWorktreeStatusAt = 0;
+          const run = coalesceRuns(async () => {
+            const targets = get().conversations;
+            const [records, statuses] = await Promise.all([
+              window.electronAPI.worktree.list(),
+              window.electronAPI.worktree.statuses(),
+            ]);
+            const entries = records
+              .filter((record) => targets[record.conversationId])
+              .map((record) => ({ record, status: statuses[record.conversationId] }));
+            set((state) => {
+              const conversations = { ...state.conversations };
+              const worktreeStatuses = { ...state.worktreeStatuses };
+              for (const { record, status } of entries) {
+                const conversation = conversations[record.conversationId];
+                if (
+                  !conversation ||
+                  conversation !== targets[record.conversationId] ||
+                  conversation.workspaceMigrating ||
+                  conversation.projectId !== record.projectId
+                )
+                  continue;
+                conversations[conversation.id] = {
+                  ...conversation,
+                  worktree: record,
+                  worktreeMissing: status
+                    ? !status.exists || undefined
+                    : conversation.worktreeMissing,
+                  ...(conversation.sessionFile && conversation.worktree?.path !== record.path
+                    ? { pendingWorkspaceNote: workspaceMigratedNote(record.path) }
+                    : {}),
+                };
+                if (status) worktreeStatuses[conversation.id] = status;
+              }
+              return { conversations, worktreeStatuses };
+            });
+            lastWorktreeStatusAt = Date.now();
           });
-        }),
+          return (options?: { force?: boolean }) => {
+            if (
+              !options?.force &&
+              Object.keys(get().worktreeStatuses).length > 0 &&
+              Date.now() - lastWorktreeStatusAt < 5_000
+            ) {
+              return Promise.resolve();
+            }
+            return run();
+          };
+        })(),
 
         async newConversation(projectId, options) {
           const sourceId = options?.worktreeFromConversationId;
@@ -4711,14 +4729,14 @@ export const useSessionsStore = create<SessionsState>()(
 installRemoteActiveMemory(useSessionsStore);
 
 async function syncConversationProjectIds(): Promise<void> {
-  const authority = await window.electronAPI.sourceAuthority.read();
+  const authority = await readSharedSourceAuthority();
   const conversations = useSessionsStore.getState().conversations;
   const next = remapConversationProjectIds(conversations, authority.conversations);
   if (next !== conversations) useSessionsStore.setState({ conversations: next });
 }
 
-void syncConversationProjectIds();
 window.electronAPI.sourceAuthority.onChanged((projection) => {
+  noteSourceAuthorityProjection(projection);
   const conversations = useSessionsStore.getState().conversations;
   const next = remapConversationProjectIds(conversations, projection.conversations);
   if (next !== conversations) useSessionsStore.setState({ conversations: next });

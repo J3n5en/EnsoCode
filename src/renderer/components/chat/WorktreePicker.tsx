@@ -275,7 +275,7 @@ export function WorktreePicker({
       if (error) {
         addToast({ type: 'error', title: t('Failed to clean up worktree'), description: error });
       } else {
-        void refreshWorktreeStatuses();
+        void refreshWorktreeStatuses({ force: true });
       }
     } catch (error) {
       addToast({
@@ -297,7 +297,7 @@ export function WorktreePicker({
       } else if (error) {
         addToast({ type: 'error', title: t('Failed to move to worktree'), description: error });
       } else {
-        void refreshWorktreeStatuses();
+        void refreshWorktreeStatuses({ force: true });
       }
     } catch (error) {
       addToast({

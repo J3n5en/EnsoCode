@@ -45,6 +45,8 @@ const CACHED_READS: ReadonlySet<string> = new Set([
   // 每 30s 轮询与启动高频读取的大包：没变直接回 same，避免反复重传百 KB 级列表
   IPC_CHANNELS.WORKTREE_LIST,
   IPC_CHANNELS.WORKTREE_STATUSES,
+  IPC_CHANNELS.PROJECTS_GET_ICON,
+  IPC_CHANNELS.PROJECTS_GET_ICONS,
   IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
   // 秘书面板状态可达数百 KB：冷启动与重载没变直接回 same，变了走增量
   IPC_CHANNELS.SECRETARY_GET_STATE,
@@ -91,9 +93,12 @@ async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown>
   }
   const key = `${channel}\0${JSON.stringify(encoded)}`;
   if (CACHED_READS.has(channel)) {
-    const result = await reads.read(key, (hash) => rawInvoke(channel, withIfNone(encoded, hash)));
+    const json = await reads.readJson(key, (hash) => rawInvoke(channel, withIfNone(encoded, hash)));
+    const result = JSON.parse(json);
     const seed = writeSeedOf(channel, result);
-    if (seed) writes.seed(seed.name, structuredClone(seed.value));
+    if (seed) {
+      writes.seedLazy(seed.name, () => writeSeedOf(channel, JSON.parse(json))?.value);
+    }
     return decodeRemoteValue(result);
   }
   if (SHARED_READS.has(channel)) {

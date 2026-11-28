@@ -54,7 +54,7 @@ export function shouldReplaceOnNudge(
 }
 
 /** 后台超过这个时长，iOS 多半已冻死 TCP，回前台不必再等 ping。 */
-export const FOREGROUND_STALE_HIDDEN_MS = 2_000;
+export const FOREGROUND_STALE_HIDDEN_MS = 15_000;
 
 export function isForegroundSocketStale(
   hiddenMs: number,

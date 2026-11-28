@@ -108,9 +108,9 @@ describe('snapshotReady', () => {
     // 有请求在途：照旧等
     expect(step({ now: 1000, liveChars: 1000, ...ready, requestsIdle: false })).toBe(false);
     expect(step({ now: 1200, liveChars: 1100, ...ready, requestsIdle: true })).toBe(false);
-    // 会话还在流式输出、文字一直在变，也照样揭开
-    expect(step({ now: 1600, liveChars: 1300, ...ready, requestsIdle: true })).toBe(false);
-    expect(step({ now: 1800, liveChars: 1400, ...ready, requestsIdle: true })).toBe(true);
+    // 会话还在流式输出、文字一直在变，满 250ms 也照样揭开
+    expect(step({ now: 1350, liveChars: 1300, ...ready, requestsIdle: true })).toBe(false);
+    expect(step({ now: 1450, liveChars: 1400, ...ready, requestsIdle: true })).toBe(true);
   });
 
   it('空闲中途又有请求发出：空闲时长重新计', () => {
@@ -119,8 +119,54 @@ describe('snapshotReady', () => {
     expect(step({ now: 1000, liveChars: 1000, ...ready, requestsIdle: true })).toBe(false);
     expect(step({ now: 1400, liveChars: 1100, ...ready, requestsIdle: false })).toBe(false);
     expect(step({ now: 1600, liveChars: 1200, ...ready, requestsIdle: true })).toBe(false);
-    expect(step({ now: 2100, liveChars: 1300, ...ready, requestsIdle: true })).toBe(false);
-    expect(step({ now: 2200, liveChars: 1400, ...ready, requestsIdle: true })).toBe(true);
+    expect(step({ now: 1849, liveChars: 1300, ...ready, requestsIdle: true })).toBe(false);
+    expect(step({ now: 1850, liveChars: 1400, ...ready, requestsIdle: true })).toBe(true);
+  });
+
+  it('实时正文达到阈值后稳定 1.2s 即揭开；不足阈值仍等 2.5s', () => {
+    const enough = snapshotReady({
+      snapChars: 5000,
+      liveChars: 200,
+      stableFor: 1199,
+      elapsed: 2000,
+      settingsLoaded: true,
+      liveLoading: false,
+      hostOnline: true,
+    });
+    expect(enough).toBe(false);
+    expect(
+      snapshotReady({
+        snapChars: 5000,
+        liveChars: 200,
+        stableFor: 1200,
+        elapsed: 2000,
+        settingsLoaded: true,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(true);
+    expect(
+      snapshotReady({
+        snapChars: 5000,
+        liveChars: 199,
+        stableFor: 1200,
+        elapsed: 2000,
+        settingsLoaded: true,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(false);
+    expect(
+      snapshotReady({
+        snapChars: 5000,
+        liveChars: 199,
+        stableFor: 2500,
+        elapsed: 2000,
+        settingsLoaded: true,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(true);
   });
 });
 

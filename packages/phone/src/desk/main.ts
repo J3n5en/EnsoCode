@@ -621,18 +621,30 @@ async function main(): Promise<void> {
       });
       if (!ready) return;
       dropSnapshot();
-    }, 200);
+    }, 100);
   };
 
   /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
   const reads = new Map<string, { h: string; json: string }>();
+  const readsSignature = (map: Map<string, { h: string; json: string }>): string =>
+    [...map.entries()]
+      .map(([k, v]) => `${k}\0${v.h}`)
+      .sort()
+      .join('\n');
+  let savedReadsSig = '';
   (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
   (window as Window & { __deskTrace?: unknown }).__deskTrace = tunnel.trace;
 
   /** 切后台/离开时存一份当前界面和只读缓存，下次启动先显示它 */
   const keepSnapshot = async (): Promise<void> => {
     if (!version || leaving) return;
-    void saveReads(`${DESK_CACHE_PREFIX}${version}`, base, reads).catch(() => {});
+    const sig = readsSignature(reads);
+    if (sig !== savedReadsSig) {
+      savedReadsSig = sig;
+      void saveReads(`${DESK_CACHE_PREFIX}${version}`, base, reads).catch(() => {
+        savedReadsSig = '';
+      });
+    }
     const doc = iframes.main?.contentDocument;
     if (snapshot || !settingsLoaded || !doc) return;
     await saveSnapshot(`${DESK_CACHE_PREFIX}${version}`, base, doc).catch(() => {});
@@ -685,6 +697,7 @@ async function main(): Promise<void> {
       new Map<string, { h: string; json: string }>()
     );
     for (const [key, entry] of saved) reads.set(key, entry);
+    savedReadsSig = readsSignature(reads);
   }
   const launched = cached !== null && (await cachedBuild(cached));
   if (launched) {

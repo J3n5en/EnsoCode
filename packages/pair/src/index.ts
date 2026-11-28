@@ -136,6 +136,7 @@ export {
 export { createFrameReplay, type FrameReplay, isReplayHello } from './replay';
 export {
   createCachedHostLookup,
+  FOREGROUND_STALE_HIDDEN_MS,
   isConnectStuck,
   isForegroundSocketStale,
   isMagicDnsOnly,

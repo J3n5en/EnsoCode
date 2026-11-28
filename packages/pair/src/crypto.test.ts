@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   boxContentKey,
   generateContentKey,
@@ -78,5 +78,23 @@ describe('NaCl box 换钥（Happy 对调：Electron 持钥）', () => {
     const hostKey = openBoxedContentKey(boxed, host.secretKey);
     const frame = await sealFrame(contentKey, { type: 'snapshot' });
     expect(await openFrame(hostKey, frame)).toEqual({ type: 'snapshot' });
+  });
+
+  it('复用同一 Uint8Array 的 CryptoKey，原址改字节时失效并重新导入', async () => {
+    const spy = vi.spyOn(crypto.subtle, 'importKey');
+    try {
+      const key = generateContentKey();
+      const f1 = await sealFrame(key, { n: 1 });
+      const f2 = await sealFrame(key, { n: 2 });
+      expect(await openFrame(key, f1)).toEqual({ n: 1 });
+      expect(await openFrame(key, f2)).toEqual({ n: 2 });
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      key[0] ^= 0xff;
+      await expect(openFrame(key, f1)).rejects.toThrow(PairCryptoError);
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

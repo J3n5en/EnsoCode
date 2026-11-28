@@ -13,7 +13,7 @@
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 8_000;
 /** 回前台探活：中继 pong 通常几十毫秒，半开链别干等 3s */
-export const VISIBILITY_PROBE_MS = 500;
+export const VISIBILITY_PROBE_MS = 400;
 
 export interface Heartbeat {
   /** 立即探测一次（回前台/睡眠唤醒/网络恢复时用），不等下个周期 */

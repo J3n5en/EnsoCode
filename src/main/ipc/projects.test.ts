@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -433,5 +436,44 @@ describe('project authority IPC', () => {
     mocks.project.mockReturnValue({ state: 'active', kind: 'ssh', canonicalPath: '/remote' });
     expect(codeSources(event(1), { projectId: 'project-1' })).toEqual([]);
     expect(mocks.listProjectCodeSources).not.toHaveBeenCalled();
+  });
+
+  it('get-icons 批量读取激活项目图标，去重并拒绝非主窗口与畸形请求', async () => {
+    const channel = (IPC_CHANNELS as Record<string, string>).PROJECTS_GET_ICONS;
+    const getIcons = mocks.handlers.get(channel)!;
+    const dir = mkdtempSync(join(tmpdir(), 'enso-icons-ipc-'));
+    try {
+      writeFileSync(join(dir, 'favicon.svg'), '<svg>ok</svg>');
+      mocks.project.mockImplementation((id: string) =>
+        id === 'p-local'
+          ? { projectId: 'p-local', state: 'active', kind: 'local', canonicalPath: dir }
+          : id === 'p-inactive'
+            ? { projectId: 'p-inactive', state: 'removed', kind: 'local', canonicalPath: dir }
+            : undefined
+      );
+
+      await expect(getIcons(event(2), { projectIds: ['p-local'] })).resolves.toEqual({});
+      await expect(getIcons(event(1), 'bad')).resolves.toEqual({});
+      await expect(getIcons(event(1), { projectIds: 'bad' })).resolves.toEqual({});
+
+      const overLimit = Array.from({ length: 205 }, (_, i) => `p-${i}`);
+      overLimit[0] = 'p-local';
+      overLimit[1] = 'p-local';
+      const batch = (await getIcons(event(1), {
+        projectIds: ['p-local', 'p-inactive', 'p-missing', '', 42, 'p-local'],
+      })) as Record<string, { kind: string; revision: string }>;
+      expect(batch['p-local']?.kind).toBe('scanned');
+      expect(batch['p-inactive']).toEqual({ revision: 'none', kind: 'none' });
+      expect(batch['p-missing']).toEqual({ revision: 'none', kind: 'none' });
+      expect(Object.keys(batch).sort()).toEqual(['p-inactive', 'p-local', 'p-missing']);
+
+      const capped = (await getIcons(event(1), { projectIds: overLimit })) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(capped).length).toBeLessThanOrEqual(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

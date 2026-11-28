@@ -432,6 +432,11 @@ function branchFailure(error: unknown): WorkspaceBranchFailure {
 
 export function registerWorktreeHandlers(): void {
   setWorkspaceBusyResolver(sessionWorktreeBusy);
+  const STATUS_CACHE_TTL_MS = 5_000;
+  let statusCache: { at: number; value: Record<string, WorktreeStatus> } | null = null;
+  const invalidateStatusCache = (): void => {
+    statusCache = null;
+  };
   // 上次没删完的回收目录：启动稍后在后台重试，不拖慢启动
   setTimeout(() => {
     void (async () => {
@@ -600,6 +605,7 @@ export function registerWorktreeHandlers(): void {
           if (!frozen) release();
         }
       }
+      invalidateStatusCache();
       return frozen
         ? {
             ok: false,
@@ -644,6 +650,7 @@ export function registerWorktreeHandlers(): void {
         if (!bindable(conversationId, sourceId, record))
           return { ok: false, error: 'worktree authority changed' };
         ensureRegistry().share(sourceId, conversationId);
+        invalidateStatusCache();
         return { ok: true, value: ensureRegistry().get(conversationId)! };
       } catch (error) {
         return fail(error);
@@ -675,7 +682,9 @@ export function registerWorktreeHandlers(): void {
         return { ok: false, error: 'worktree is unavailable' };
       }
       try {
-        return { ok: true, value: ensureRegistry().rename(conversationId, name) };
+        const renamed = ensureRegistry().rename(conversationId, name);
+        invalidateStatusCache();
+        return { ok: true, value: renamed };
       } catch (error) {
         return fail(error);
       }
@@ -696,7 +705,9 @@ export function registerWorktreeHandlers(): void {
         return { ok: false, error: 'invalid worktree create request' };
       }
       const { conversationId, projectId } = request;
-      return createConversationWorktree(conversationId, projectId);
+      const result = await createConversationWorktree(conversationId, projectId);
+      invalidateStatusCache();
+      return result;
     }
   );
 
@@ -715,7 +726,9 @@ export function registerWorktreeHandlers(): void {
       const record = ensureRegistry().get(conversationId);
       if (!record) return { ok: false, error: 'no worktree for conversation' };
       try {
-        return { ok: true, value: await worktreeStatus(record) };
+        const value = await worktreeStatus(record);
+        invalidateStatusCache();
+        return { ok: true, value };
       } catch (error) {
         return fail(error);
       }
@@ -738,7 +751,14 @@ export function registerWorktreeHandlers(): void {
     );
     return Object.fromEntries(entries.filter((entry) => entry !== null));
   });
-  ipcMain.handle(IPC_CHANNELS.WORKTREE_STATUSES, () => allStatuses());
+  ipcMain.handle(IPC_CHANNELS.WORKTREE_STATUSES, async () => {
+    if (statusCache && Date.now() - statusCache.at < STATUS_CACHE_TTL_MS) {
+      return statusCache.value;
+    }
+    const value = await allStatuses();
+    statusCache = { at: Date.now(), value };
+    return value;
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.WORKTREE_REMOVE,
@@ -748,6 +768,7 @@ export function registerWorktreeHandlers(): void {
       }
       try {
         await removeRegisteredWorktree(conversationId);
+        invalidateStatusCache();
         return { ok: true, value: null };
       } catch (error) {
         return fail(error);
@@ -777,6 +798,7 @@ export function registerWorktreeHandlers(): void {
         }
         const rebuilt = await rebuildSessionWorktree(record, worktreesRoot());
         ensureRegistry().replaceBindings(record, rebuilt);
+        invalidateStatusCache();
         return { ok: true, value: rebuilt };
       } catch (error) {
         return fail(error);

@@ -1123,7 +1123,7 @@ export function Sidebar({
       return;
     }
     if (archiveAfter) toggleArchiveConversation(id);
-    void refreshWorktreeStatuses();
+    void refreshWorktreeStatuses({ force: true });
   };
 
   const handleCleanupWorktree = async (id: string) => {
@@ -1169,7 +1169,7 @@ export function Sidebar({
       addToast({ type: 'error', title: t('Failed to move to worktree'), description: error });
       return;
     }
-    void refreshWorktreeStatuses();
+    void refreshWorktreeStatuses({ force: true });
   };
 
   const worktreeWarningText = (status?: WorktreeStatus): string => {

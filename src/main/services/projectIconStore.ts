@@ -9,8 +9,8 @@ import type { ProjectKind } from '@shared/types/agent';
 import { writeAtomic } from './bots/files';
 import { loadProjectIcon } from './projectIconScanner';
 
-const HIT_TTL_MS = 60_000;
-const MISS_TTL_MS = 30_000;
+const HIT_TTL_MS = 10 * 60_000;
+const MISS_TTL_MS = 2 * 60_000;
 const NONE_INFO: ProjectIconInfo = { revision: 'none', kind: 'none' };
 
 export interface ProjectIconResult {

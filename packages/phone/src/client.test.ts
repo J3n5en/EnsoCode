@@ -1,15 +1,21 @@
 import {
   type DirectPeer,
+  FOREGROUND_STALE_HIDDEN_MS,
   openFrame,
   type PairedDevice,
   type PhoneToHost,
   sealFrame,
+  VISIBILITY_PROBE_MS,
 } from '@enso/pair';
 import { emptyGuestView } from '@shared/pair/guestProjection';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ClientEvents, PairClient } from './client';
 import type { PhoneCacheData, PhoneCacheStore } from './sessionCache';
 
+const heartbeatMock = vi.hoisted(() => ({
+  probe: vi.fn(),
+  onDead: null as (() => void) | null,
+}));
 vi.mock('./theme', () => ({ setHostTheme: vi.fn() }));
 vi.mock('./stubs/settings-store', () => ({
   setCompactReadOnlyTools: vi.fn(),
@@ -24,7 +30,10 @@ vi.mock('@enso/pair', async (original) => ({
   openFrame: vi.fn(async (_key: unknown, frame: Uint8Array) =>
     JSON.parse(new TextDecoder().decode(frame))
   ),
-  attachHeartbeat: () => ({ stop() {}, probe() {} }),
+  attachHeartbeat: (_ws: unknown, onDead: () => void) => {
+    heartbeatMock.onDead = onDead;
+    return { stop() {}, probe: heartbeatMock.probe };
+  },
 }));
 
 class Socket {
@@ -172,6 +181,8 @@ describe('PairClient 缓存与续传', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     Socket.all = [];
+    heartbeatMock.probe.mockClear();
+    heartbeatMock.onDead = null;
     vi.stubGlobal('WebSocket', Socket);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -673,21 +684,27 @@ describe('PairClient 缓存与续传', () => {
   it('后台超过阈值回前台立即换 socket，不等 ping', async () => {
     const socket = await start();
     client.conceal();
-    await vi.advanceTimersByTimeAsync(2_000);
+    vi.setSystemTime(Date.now() + FOREGROUND_STALE_HIDDEN_MS);
     client.nudge('visibility');
     await settle();
     expect(socket.readyState).toBe(3);
     expect(Socket.all).toHaveLength(2);
   });
 
-  it('短暂切后台只探活，不拆还 OPEN 的 socket', async () => {
+  it('短暂切后台（5s < 15s）只探活不拆 OPEN socket；探活超时后立即重连', async () => {
     const socket = await start();
     client.conceal();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(5_000);
     client.nudge('visibility');
     await settle();
     expect(socket.readyState).toBe(1);
     expect(Socket.all).toHaveLength(1);
+    expect(heartbeatMock.probe).toHaveBeenCalledWith(VISIBILITY_PROBE_MS);
+    // 半开超时触发 onDead：立即关旧链并在 0ms 退避后重连
+    heartbeatMock.onDead?.();
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    expect(Socket.all).toHaveLength(2);
   });
 
   it('已经 CONNECTING 时回前台不另开一条', async () => {
@@ -696,7 +713,7 @@ describe('PairClient 缓存与续传', () => {
     expect(Socket.all).toHaveLength(1);
     expect(Socket.all[0].readyState).toBe(0);
     client.conceal();
-    await vi.advanceTimersByTimeAsync(2_000);
+    vi.setSystemTime(Date.now() + FOREGROUND_STALE_HIDDEN_MS);
     client.nudge('visibility');
     await settle();
     expect(Socket.all).toHaveLength(1);
@@ -713,7 +730,7 @@ describe('PairClient 缓存与续传', () => {
     expect(offersOnOld).not.toHaveLength(0);
 
     client.conceal();
-    await vi.advanceTimersByTimeAsync(2_000);
+    vi.setSystemTime(Date.now() + FOREGROUND_STALE_HIDDEN_MS);
     client.nudge('visibility');
     await settle();
     expect(Socket.all).toHaveLength(2);
@@ -737,13 +754,14 @@ describe('PairClient 缓存与续传', () => {
     socket.receive({ type: 'host-info', capabilities: ['direct-v1'], iceServers: [] });
     await settle();
     live.fireOpen();
+    live.fireMessage(new Uint8Array([0x03]));
     await vi.advanceTimersByTimeAsync(1_000);
     await settle();
     expect(client.transport()).toBe('direct');
     vi.mocked(events.onState).mockClear();
 
     client.conceal();
-    await vi.advanceTimersByTimeAsync(2_000);
+    vi.setSystemTime(Date.now() + FOREGROUND_STALE_HIDDEN_MS);
     client.nudge('visibility');
     await settle();
     expect(Socket.all).toHaveLength(2);
@@ -771,6 +789,7 @@ describe('PairClient 缓存与续传', () => {
     socket.receive({ type: 'host-info', capabilities: ['direct-v1'], iceServers: [] });
     await settle();
     live.fireOpen();
+    live.fireMessage(new Uint8Array([0x03]));
     await vi.advanceTimersByTimeAsync(1_000);
     await settle();
     expect(client.transport()).toBe('direct');
@@ -877,6 +896,79 @@ describe('PairClient 缓存与续传', () => {
       expect(await host.open(key, prompt)).toBeUndefined();
       expect(await host.open(key, hello)).toBeUndefined();
     });
+
+    it('直连已通时 replaceRelay 新 socket onopen 不经直连偷发 snapshot；host-online 后走中继且防重放握手不断', async () => {
+      const pair = await vi.importActual<typeof import('@enso/pair')>('@enso/pair');
+      vi.mocked(sealFrame).mockImplementation(plainSeal);
+      vi.mocked(openFrame).mockImplementation(plainOpen);
+      const key = new Uint8Array(32);
+      const host = pair.createFrameReplay(plainSeal, plainOpen);
+      const directSent: Uint8Array[] = [];
+      const live = liveDirectPeer((bytes) => directSent.push(bytes));
+      client.close();
+      client = new PairClient(device, events, () => live.peer, cache);
+      vi.stubGlobal('WebSocket', RawSocket);
+      client.connect();
+      await settle();
+      const socket = Socket.all[0] as RawSocket;
+      socket.open();
+      socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+      await settle();
+
+      let opened = 0;
+      const hostReadsRelay = async (sock: RawSocket) => {
+        for (const frame of sock.raw.slice(opened)) await host.open(key, frame);
+        opened = sock.raw.length;
+      };
+      await hostReadsRelay(socket);
+      socket.deliver(
+        await host.seal(key, { type: 'host-info', capabilities: ['direct-v1'], iceServers: [] })
+      );
+      await settle();
+      await hostReadsRelay(socket);
+      socket.deliver(await host.seal(key, { type: 'replay-hello' }));
+      live.fireOpen();
+      live.fireMessage(new Uint8Array([0x03]));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settle();
+      expect(client.transport()).toBe('direct');
+
+      // 后台超阈值回前台：replaceRelay 建新 socket
+      const directDataCount = () => directSent.filter((b) => b.byteLength > 1).length;
+      const directBefore = directDataCount();
+      client.conceal();
+      await vi.advanceTimersByTimeAsync(FOREGROUND_STALE_HIDDEN_MS);
+      client.nudge('visibility');
+      await settle();
+      live.fireMessage(new Uint8Array([0x03]));
+      expect(Socket.all).toHaveLength(2);
+      const next = Socket.all[1] as RawSocket;
+      // onopen 先于 host-online 到达：绝不能向直连偷发 snapshot（否则与随后的 peerReset 竞态）
+      next.open();
+      await settle();
+      expect(directDataCount()).toBe(directBefore);
+      expect(next.raw).toHaveLength(0);
+
+      // 宿主与手机收到进房通知后各自 peerReset；手机应经中继发 snapshot + 命令并被宿主完整接收
+      host.peerReset();
+      next.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+      await settle();
+      expect(directDataCount()).toBe(directBefore);
+      expect(next.raw.length).toBeGreaterThanOrEqual(1);
+      client.send({ type: 'prompt', sessionId: 's', text: 'after-resume' });
+      await settle();
+      expect(directDataCount()).toBe(directBefore);
+      const decoded: unknown[] = [];
+      for (const frame of next.raw) decoded.push(await host.open(key, frame));
+      expect(decoded.some((p) => (p as { type?: string })?.type === 'snapshot')).toBe(true);
+      expect(
+        decoded.some(
+          (p) =>
+            (p as { type?: string; text?: string })?.type === 'prompt' &&
+            (p as { text?: string }).text === 'after-resume'
+        )
+      ).toBe(true);
+    });
   });
 
   it('host-info 声明 readOnly 即只读，缺省（旧桌面或已切回可操作）不是只读', async () => {
@@ -934,6 +1026,8 @@ describe('PairClient Bot 帧', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     Socket.all = [];
+    heartbeatMock.probe.mockClear();
+    heartbeatMock.onDead = null;
     vi.stubGlobal('WebSocket', Socket);
     vi.stubGlobal('localStorage', {
       getItem: () => null,

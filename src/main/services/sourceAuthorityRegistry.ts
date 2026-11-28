@@ -91,6 +91,11 @@ export class SourceAuthorityRegistry {
   private readonly projects = new Map<string, ProjectAuthority>();
   private readonly conversations = new Map<string, ConversationAuthority>();
   private readonly randomUuid: () => string;
+  private _revision = 0;
+
+  get revision(): number {
+    return this._revision;
+  }
 
   constructor(private readonly options: SourceAuthorityRegistryOptions) {
     this.randomUuid = options.randomUuid ?? randomUUID;
@@ -656,6 +661,7 @@ export class SourceAuthorityRegistry {
   }
 
   private commit(): void {
+    this._revision++;
     mkdirSync(path.dirname(this.options.registryFile), { recursive: true });
     const temporary = `${this.options.registryFile}.tmp`;
     const state: PersistedAuthority = {
