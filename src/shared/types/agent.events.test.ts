@@ -678,6 +678,34 @@ describe('受保护动作底线协议', () => {
     expect(parseAgentCommand({ ...base, protectedActions: 'yes' })).toBeNull();
   });
 
+  it('spawn-parent 携 secretaryTrustedPluginIds：只有秘书会话可带，且是非空 id 列表', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(
+      parseAgentCommand({
+        ...base,
+        secretaryMode: true,
+        secretaryTrustedPluginIds: ['enso.telegram'],
+      })
+    ).toMatchObject({ secretaryTrustedPluginIds: ['enso.telegram'] });
+    expect(parseAgentCommand({ ...base, secretaryTrustedPluginIds: ['enso.telegram'] })).toBeNull();
+    for (const bad of ['enso.telegram', [''], [1], [null]]) {
+      expect(
+        parseAgentCommand({ ...base, secretaryMode: true, secretaryTrustedPluginIds: bad }),
+        JSON.stringify(bad)
+      ).toBeNull();
+    }
+  });
+
+  it('prompt / steer 的 ownerInput：只能是 true，且必须带 deliveryId', () => {
+    const prompt = { type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd-1' };
+    expect(parseAgentCommand({ ...prompt, ownerInput: true })).toMatchObject({ ownerInput: true });
+    expect(parseAgentCommand({ ...prompt, ownerInput: false })).toBeNull();
+    expect(parseAgentCommand({ ...prompt, ownerInput: 'yes' })).toBeNull();
+    const steer = { type: 'steer', identity: parent, text: 'hi' };
+    expect(parseAgentCommand({ ...steer, deliveryId: 'd-2', ownerInput: true })).not.toBeNull();
+    expect(parseAgentCommand({ ...steer, ownerInput: true })).toBeNull();
+  });
+
   it('approval-request 的 protected 只接受已知类别', () => {
     const event = {
       type: 'approval-request',

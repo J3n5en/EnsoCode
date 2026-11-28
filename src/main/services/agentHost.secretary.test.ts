@@ -121,6 +121,28 @@ it('普通会话照旧受全局"禁用内置工具"约束：memory 仍在禁用�
   expect(command.disabledTools).toContain('memory');
 });
 
+it('秘书信任的插件随 spawn-parent 下发；没信任时不带这个字段', () => {
+  const spawn = (trustedPluginIds?: string[]) => {
+    fork.posted.length = 0;
+    const result = spawnSession(
+      identity,
+      { sessionId: 'secretary', providerId: 'p', modelId: 'm', cwd: '/workspace' },
+      new Set(),
+      undefined,
+      undefined,
+      { secretary: { systemPrompt: 'SECRETARY PROMPT', trustedPluginIds } }
+    );
+    expect(result.ok).toBe(true);
+    return fork.posted.find((entry) => (entry as AgentCommand).type === 'spawn-parent') as Extract<
+      AgentCommand,
+      { type: 'spawn-parent' }
+    >;
+  };
+  expect(spawn(['enso.telegram']).secretaryTrustedPluginIds).toEqual(['enso.telegram']);
+  expect(spawn([])).not.toHaveProperty('secretaryTrustedPluginIds');
+  expect(spawn()).not.toHaveProperty('secretaryTrustedPluginIds');
+});
+
 it('秘书 spawn-parent 挂自有 skill 目录与勾选的全局 skill', () => {
   fork.posted.length = 0;
   state.skills = [

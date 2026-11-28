@@ -1664,6 +1664,8 @@ export function spawnSession(
     secretary?: {
       systemPrompt: string;
       pluginIds?: readonly string[];
+      /** 秘书资料里信任的插件 id：完全放行档且本轮由 owner 亲手触发时，其工具不再逐次确认 */
+      trustedPluginIds?: readonly string[];
       /** 勾选给秘书的全局 skill id */
       skillIds?: readonly string[];
       /** 秘书自有 skill 的目录（已按启用状态筛过），总是挂上 */
@@ -1916,6 +1918,9 @@ export function spawnSession(
     ...(promptKit.refusalRetryPrompt ? { refusalRetryPrompt: promptKit.refusalRetryPrompt } : {}),
     ...(options?.bot ? { botMode: true } : {}),
     ...(secretary ? { secretaryMode: true } : {}),
+    ...(secretary?.trustedPluginIds?.length
+      ? { secretaryTrustedPluginIds: [...secretary.trustedPluginIds] }
+      : {}),
     ...(options?.bot?.groupTasks ? { botGroupTasks: true } : {}),
     ...(options?.bot?.groupTasks && options.bot.discussMode ? { botDiscussMode: true } : {}),
     ...(options?.bot?.routines ? { botRoutines: true } : {}),
@@ -2536,7 +2541,9 @@ export function promptSession(
   /** 未送达时 worker 按它回执 delivery-rejected；调用方没有自己的号就现生成一个 */
   deliveryId: string,
   /** 带新消息的断点续跑：worker 先移出未完成的最后一条 assistant 再 prompt */
-  resume?: true
+  resume?: true,
+  /** owner 亲手输入（应用输入框、配对手机、秘书联系方式里绑定的本人）；Main 自己的投递不带 */
+  ownerInput?: true
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({
     type: 'prompt',
@@ -2545,6 +2552,7 @@ export function promptSession(
     ...(images?.length ? { images } : {}),
     deliveryId,
     ...(resume ? { resume } : {}),
+    ...(ownerInput ? { ownerInput } : {}),
     ...instanceField(identity),
   });
 }
@@ -2554,7 +2562,9 @@ export function steerSession(
   text: string,
   images?: AttachedImage[],
   deliveryId?: string,
-  activeOnly?: true
+  activeOnly?: true,
+  /** 同 promptSession；没有 deliveryId 时 worker 核对不了，不带 */
+  ownerInput?: true
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({
     type: 'steer',
@@ -2563,6 +2573,7 @@ export function steerSession(
     ...(images?.length ? { images } : {}),
     ...(deliveryId ? { deliveryId } : {}),
     ...(activeOnly ? { activeOnly } : {}),
+    ...(ownerInput && deliveryId ? { ownerInput } : {}),
     ...instanceField(identity),
   });
 }

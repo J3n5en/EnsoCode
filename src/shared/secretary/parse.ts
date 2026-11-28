@@ -215,6 +215,9 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
   // 停用名单缺省不落盘：大多数档案一个停用都没有
   const disabledSkillNames = texts(value.disabledSkillNames);
   if (disabledSkillNames.length > 0) profile.disabledSkillNames = disabledSkillNames;
+  // 信任名单缺省不落盘：没有这个字段的旧档案一个都不信任
+  const trustedPluginIds = texts(value.trustedPluginIds);
+  if (trustedPluginIds.length > 0) profile.trustedPluginIds = trustedPluginIds;
   const addressAs = text(value.addressAs);
   if (addressAs) profile.addressAs = addressAs;
   if (typeof value.dailyBriefAt === 'string' && CLOCK_RE.test(value.dailyBriefAt))
@@ -282,6 +285,12 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
   if (value.pluginIds !== undefined) {
     if (!validIdList(value.pluginIds)) return { ok: false, error: 'invalid pluginIds' };
     draft.pluginIds = texts(value.pluginIds);
+  }
+  if (value.trustedPluginIds !== undefined) {
+    if (!validIdList(value.trustedPluginIds)) {
+      return { ok: false, error: 'invalid trustedPluginIds' };
+    }
+    draft.trustedPluginIds = texts(value.trustedPluginIds);
   }
   if (value.skillIds !== undefined) {
     if (!validIdList(value.skillIds)) return { ok: false, error: 'invalid skillIds' };

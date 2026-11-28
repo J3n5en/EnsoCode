@@ -466,16 +466,24 @@ function withDcgWarning<T extends { details?: unknown }>(result: T, hit: Command
 /**
  * 秘书会话的插件工具：作者没声明只读的每次都要真人确认，不受会话档位与
  * 「本会话总是允许」影响——插件能以用户身份往外发消息，一次放行不能代表下一次。
+ *
+ * 例外：owner 在秘书资料里信任了这个插件（传入 trust），档位是 full，且本轮由 owner 亲手触发时，
+ * 改走常规审批：full 档本身免审，受保护动作底线与命令守卫照常拦。三条缺一条都回到逐次确认。
  */
 export function withMandatoryApproval(
   gate: ApprovalGate,
   kind: ApprovalKind,
-  definition: ToolDefinition
+  definition: ToolDefinition,
+  trust?: { ownerTurn(): boolean }
 ): ToolDefinition {
   if (definition.annotations?.readOnlyHint === true) return definition;
+  const regular = trust ? withApproval(gate, kind, definition) : undefined;
   return {
     ...definition,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
+      if (regular && gate.mode === 'full' && trust?.ownerTurn()) {
+        return regular.execute(toolCallId, params, signal, onUpdate, ctx);
+      }
       const result = await gate.ask(
         definition.name,
         kind,

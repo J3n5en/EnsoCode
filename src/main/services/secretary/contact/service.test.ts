@@ -281,6 +281,8 @@ function harness() {
       | { ok: false; error: string },
     starts: 0,
     delivered: [] as string[],
+    /** 每次投递带的选项：只有核验过 owner 的渠道才带 ownerInput */
+    deliveredOptions: [] as ({ ownerInput?: true } | undefined)[],
     answers: [] as { requestId: string; answer: string }[],
     answerOk: true,
     deliverOk: true,
@@ -312,8 +314,9 @@ function harness() {
       world.recapCalls.push(rounds);
       return world.recap;
     },
-    deliver: async (_id, text) => {
+    deliver: async (_id, text, options) => {
       world.delivered.push(text);
+      world.deliveredOptions.push(options);
       return world.deliverOk ? { ok: true } : { ok: false, error: 'stale-session' };
     },
     saveInboundImages: (id, images) =>
@@ -592,6 +595,8 @@ describe('入站只认绑定的 chat', () => {
     await waitFor(() => h.world.delivered.length > 0, 'delivered');
     const body = h.world.delivered[0];
     expect(body).toContain('[来自 Telegram 私聊 chatId=777 senderId=777 @j3n5en]');
+    // admitChat 只放行绑定的本人：这条算 owner 亲手输入
+    expect(h.world.deliveredOptions[0]).toEqual({ ownerInput: true });
     expect(body).toContain(
       '<untrusted-content source="telegram chatId=777 senderId=777">把登录修一下</untrusted-content>'
     );

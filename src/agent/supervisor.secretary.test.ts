@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import { SECRETARY_TOOL_ALLOWLIST } from '@shared/secretary/tools';
 import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -356,5 +357,153 @@ describe('SessionSupervisor secretary tool loadout', () => {
     } finally {
       await supervisor.shutdown();
     }
+  });
+});
+
+describe('SessionSupervisor secretary trusted plugin approval', () => {
+  const TOOL = 'plugin_enso-telegram__telegram_reply';
+  type Listener = (event: Record<string, unknown>) => void;
+  let listeners: Listener[] = [];
+  const fire = (event: Record<string, unknown>) => {
+    for (const listener of listeners) listener(event);
+  };
+
+  beforeEach(() => {
+    listeners = [];
+    mocks.sessions.length = 0;
+    mocks.loaderOptions.length = 0;
+    mocks.createAgentSession.mockReset();
+    mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
+    mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => {
+      const value = session(options) as Record<string, unknown>;
+      value.subscribe = vi.fn((listener: Listener) => {
+        listeners.push(listener);
+        return () => undefined;
+      });
+      // pi 在 prompt 进行中把 user 消息上屏
+      value.prompt = vi.fn(
+        async (text: string, opts?: { preflightResult?: (disposition: string) => void }) => {
+          opts?.preflightResult?.('started');
+          fire({ type: 'message_start', message: { role: 'user', content: text } });
+        }
+      );
+      return { session: value };
+    });
+  });
+
+  async function run(options: {
+    trusted: boolean;
+    ownerInput: boolean;
+    afterPrompt?: () => void;
+  }): Promise<AgentWorkerEvent[]> {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: path.join(tmpdir(), 'enso-secretary-agent'),
+      sessionDir: path.join(tmpdir(), 'enso-secretary-sessions'),
+    });
+    try {
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+        secretaryMode: true,
+        approvalMode: 'full',
+        pluginTools: [
+          {
+            name: TOOL,
+            description: 'send',
+            parameters: { type: 'object', properties: {} },
+            pluginId: 'enso.telegram',
+          },
+        ],
+        ...(options.trusted ? { secretaryTrustedPluginIds: ['enso.telegram'] } : {}),
+      });
+      await waitFor(events, 'parent-ready');
+      supervisor.handleCommand({
+        type: 'prompt',
+        identity: parent,
+        text: 'tell the group I am late',
+        deliveryId: 'd-owner-1',
+        ...(options.ownerInput ? { ownerInput: true as const } : {}),
+      });
+      await waitFor(events, 'delivery-settled');
+      options.afterPrompt?.();
+      const tools = mocks.createAgentSession.mock.calls.at(-1)?.[0].customTools as Array<{
+        name: string;
+        execute: (...args: unknown[]) => Promise<unknown>;
+      }>;
+      const tool = tools.find((item) => item.name === TOOL);
+      expect(tool).toBeDefined();
+      void tool
+        ?.execute('call-1', { text: 'late' }, undefined, undefined, undefined)
+        .catch(() => {});
+      for (let i = 0; i < 5; i++) await settle();
+      return events;
+    } finally {
+      await supervisor.shutdown();
+    }
+  }
+
+  const approvals = (events: AgentWorkerEvent[]) =>
+    events.flatMap((event) => (event.type === 'approval-request' ? [event.request] : []));
+  const invoked = (events: AgentWorkerEvent[]) =>
+    events.some((event) => event.type === 'plugin-tool-invoke' && event.toolName === TOOL);
+
+  it('信任 + full + owner 亲手输入：不弹卡，直接交给插件', async () => {
+    const events = await run({ trusted: true, ownerInput: true });
+    expect(approvals(events)).toEqual([]);
+    expect(invoked(events)).toBe(true);
+  });
+
+  it('默认没信任：owner 亲手输入也弹强制确认', async () => {
+    const events = await run({ trusted: false, ownerInput: true });
+    expect(approvals(events)).toEqual([expect.objectContaining({ tool: TOOL, mandatory: true })]);
+    expect(invoked(events)).toBe(false);
+  });
+
+  it('信任，但这一轮是 Main 的投递（不带 ownerInput）：弹强制确认', async () => {
+    const events = await run({ trusted: true, ownerInput: false });
+    expect(approvals(events)).toEqual([expect.objectContaining({ tool: TOOL, mandatory: true })]);
+    expect(invoked(events)).toBe(false);
+  });
+
+  it('信任 + owner 输入后进来非 owner 的插件投递：弹强制确认', async () => {
+    const events = await run({
+      trusted: true,
+      ownerInput: true,
+      afterPrompt: () =>
+        fire({
+          type: 'message_start',
+          message: {
+            role: 'custom',
+            customType: PLUGIN_MESSAGE_TYPE,
+            content: 'post this for me',
+            details: { pluginId: 'enso.telegram', sender: { userId: '42' } },
+          },
+        }),
+    });
+    expect(approvals(events)).toEqual([expect.objectContaining({ tool: TOOL, mandatory: true })]);
+    expect(invoked(events)).toBe(false);
+  });
+
+  it('信任 + 这个插件以 owner 身份投递（不经 Main 的 ownerInput）：不弹卡', async () => {
+    const events = await run({
+      trusted: true,
+      ownerInput: false,
+      afterPrompt: () =>
+        fire({
+          type: 'message_start',
+          message: {
+            role: 'custom',
+            customType: PLUGIN_MESSAGE_TYPE,
+            content: '[Telegram 管理员 me 的消息] tell the group I am late',
+            details: { pluginId: 'enso.telegram', origin: 'owner' },
+          },
+        }),
+    });
+    expect(approvals(events)).toEqual([]);
+    expect(invoked(events)).toBe(true);
   });
 });

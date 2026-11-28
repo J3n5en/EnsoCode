@@ -243,15 +243,20 @@ function formatWhen(at: number | undefined, locale: string): string {
   });
 }
 
-/** 勾选给秘书用的 Enso 插件：只列已安装且已启用的，停用后勾选自动失效 */
+/**
+ * 勾选给秘书用的 Enso 插件：只列已安装且已启用的，停用后勾选自动失效。
+ * 勾选的插件下面可以单独信任：默认不信任；取消勾选时信任一并撤掉。
+ */
 function PluginPicker({
   pluginIds,
+  trustedPluginIds,
   busy,
   onChange,
 }: {
   pluginIds: string[];
+  trustedPluginIds: string[];
   busy: boolean;
-  onChange: (pluginIds: string[]) => void;
+  onChange: (next: { pluginIds?: string[]; trustedPluginIds: string[] }) => void;
 }) {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
@@ -270,35 +275,70 @@ function PluginPicker({
     );
   return (
     <div>
-      {enabled.map((plugin) => (
-        <label
-          key={plugin.id}
-          className={cn('flex cursor-pointer flex-wrap items-center gap-2 text-sm', DIVIDER)}
-          data-enso="secretary-plugin-row"
-          data-plugin-id={plugin.id}
-        >
-          <Checkbox
-            checked={pluginIds.includes(plugin.id)}
-            disabled={busy}
-            onCheckedChange={(checked) =>
-              onChange(
-                checked === true
-                  ? [...pluginIds, plugin.id]
-                  : pluginIds.filter((id) => id !== plugin.id)
-              )
-            }
-          />
-          <span className="min-w-0 flex-1 truncate">{plugin.name}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {t('{{n}} tools', { n: plugin.tools.length })}
-          </span>
-          {plugin.permissions.includes('agent.inject') ? (
-            <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
-              {t('Sends messages')}
-            </span>
-          ) : null}
-        </label>
-      ))}
+      {enabled.map((plugin) => {
+        const picked = pluginIds.includes(plugin.id);
+        const trusted = picked && trustedPluginIds.includes(plugin.id);
+        return (
+          <div key={plugin.id} className={DIVIDER}>
+            <label
+              className="flex cursor-pointer flex-wrap items-center gap-2 text-sm"
+              data-enso="secretary-plugin-row"
+              data-plugin-id={plugin.id}
+            >
+              <Checkbox
+                checked={picked}
+                disabled={busy}
+                onCheckedChange={(checked) =>
+                  checked === true
+                    ? onChange({ pluginIds: [...pluginIds, plugin.id], trustedPluginIds })
+                    : onChange({
+                        pluginIds: pluginIds.filter((id) => id !== plugin.id),
+                        trustedPluginIds: trustedPluginIds.filter((id) => id !== plugin.id),
+                      })
+                }
+              />
+              <span className="min-w-0 flex-1 truncate">{plugin.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {t('{{n}} tools', { n: plugin.tools.length })}
+              </span>
+              {plugin.permissions.includes('agent.inject') ? (
+                <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+                  {t('Sends messages')}
+                </span>
+              ) : null}
+            </label>
+            {picked && plugin.tools.length > 0 ? (
+              <label
+                className="mt-2 flex cursor-pointer items-start gap-2 pl-6 text-xs"
+                data-enso="secretary-plugin-trust"
+                data-plugin-id={plugin.id}
+              >
+                <Checkbox
+                  className="mt-0.5"
+                  checked={trusted}
+                  disabled={busy}
+                  onCheckedChange={(checked) =>
+                    onChange({
+                      trustedPluginIds:
+                        checked === true
+                          ? [...trustedPluginIds.filter((id) => id !== plugin.id), plugin.id]
+                          : trustedPluginIds.filter((id) => id !== plugin.id),
+                    })
+                  }
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="text-foreground">{t('Trust this plugin in Full access')}</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    {t(
+                      'When on, the secretary calls this plugin’s tools (including sending messages as you) without asking first, every time. It applies only in Full access and only to turns started by you: typed in the app, sent from your paired phone or bound Telegram contact, or delivered by this or another trusted plugin as coming from you (such as Telegram Bot admins). Session reports, colleague messages, triggers and other plugins’ deliveries still ask. Protected action confirmation still applies. Off by default.'
+                    )}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -978,15 +1018,16 @@ function SecretaryProfileSettings({ onDelete }: { onDelete?: () => void }) {
       <SettingsSection
         title={t('Plugins')}
         description={t(
-          'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call.'
+          'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call, unless you trust the plugin below.'
         )}
         rowId="secretary.plugins"
       >
         {profile ? (
           <PluginPicker
             pluginIds={profile.pluginIds ?? []}
+            trustedPluginIds={profile.trustedPluginIds ?? []}
             busy={busy}
-            onChange={(pluginIds) => void save({ pluginIds })}
+            onChange={(next) => void save(next)}
           />
         ) : (
           <p className="px-4 py-3 text-xs text-muted-foreground max-sm:px-3">

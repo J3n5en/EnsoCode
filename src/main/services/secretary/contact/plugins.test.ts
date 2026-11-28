@@ -33,6 +33,7 @@ function setup(options?: {
   dirs.push(dir);
   const following = new FollowingStore(dir);
   const delivered: string[] = [];
+  const deliveredOptions: ({ ownerInput?: true } | undefined)[] = [];
   const calls: unknown[] = [];
   const errors: Array<{ code: string; detail?: string; channelId?: string }> = [];
   const listeners = new Set<() => void>();
@@ -72,8 +73,9 @@ function setup(options?: {
     secretaryName: () => '爱酱',
     secretaryConversationId: () => 'sec-1',
     startConversation: async () => ({ ok: true, conversationId: 'sec-1' }),
-    deliver: async (_id, text) => {
+    deliver: async (_id, text, options) => {
       delivered.push(text);
+      deliveredOptions.push(options);
       return { ok: true };
     },
     answerAsk: () => ({ ok: true }),
@@ -89,6 +91,7 @@ function setup(options?: {
     service,
     following,
     delivered,
+    deliveredOptions,
     calls,
     errors,
     handlers: wired.handlers,
@@ -144,6 +147,8 @@ describe('插件渠道接入', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(h.delivered.at(-1)).toContain('[来自 微信 私聊 chatId=wx-me senderId=wx-me @我]');
+    // 插件渠道的发送者由插件自报，Main 没核验过：不算 owner 亲手输入
+    expect(h.deliveredOptions.at(-1)).toBeUndefined();
     expect(h.delivered.at(-1)).toContain(
       'source="enso.clawbot:wechat chatId=wx-me senderId=wx-me"'
     );

@@ -1008,14 +1008,16 @@ describe('agent IPC Main identity boundary', () => {
         setModel(sessionId: string, providerId: string, modelId: string): void;
       };
 
-    it('裸 sessionId 被解析成 exact identity 后才下发', () => {
+    it('裸 sessionId 被解析成 exact identity 后才下发；配对手机算 owner 亲手输入', () => {
       mocks.currentIdentity.mockReturnValue(parent);
       bridge().prompt('conv-1', 'hello');
       expect(mocks.promptSession).toHaveBeenCalledWith(
         parent,
         'hello',
         undefined,
-        expect.any(String)
+        expect.any(String),
+        undefined,
+        true
       );
     });
 
@@ -1041,13 +1043,17 @@ describe('agent IPC Main identity boundary', () => {
         child,
         'hello',
         undefined,
-        expect.any(String)
+        expect.any(String),
+        undefined,
+        true
       );
       expect(mocks.promptSession).toHaveBeenCalledWith(
         child,
         'tray',
         undefined,
-        expect.any(String)
+        expect.any(String),
+        undefined,
+        true
       );
       expect(mocks.abortSession).toHaveBeenCalledWith(child);
     });
@@ -1131,7 +1137,7 @@ describe('agent IPC Main identity boundary', () => {
         mocks.currentIdentity.mockReturnValue(identity);
         send.mockReturnValue({ ok: true });
         await mocks.handlers.get(channel)?.(event, conversationId, 'hi', images, 'd-1');
-        expect(send).toHaveBeenLastCalledWith(identity, 'hi', images, 'd-1');
+        expect(send).toHaveBeenLastCalledWith(identity, 'hi', images, 'd-1', undefined, true);
         expect(readdirSync(userData)).not.toContain('bot-chats');
       } finally {
         vi.mocked(app.getPath).mockReturnValue('/tmp');
@@ -1147,17 +1153,17 @@ describe('agent IPC Main identity boundary', () => {
     const parent = { sessionId: 'conv-1', generation: 'gen-1' };
     const invoke = (...args: unknown[]) => mocks.handlers.get(channel)?.(event, ...args);
 
-    it('合法 deliveryId 原样下发；缺省时 prompt 拒绝（未送达只能按号回执），steer 照常不带', async () => {
+    it('合法 deliveryId 原样下发并标成 owner 亲手输入；缺省时 prompt 拒绝（未送达只能按号回执），steer 照常不带', async () => {
       mocks.currentIdentity.mockReturnValue(parent);
       send.mockReturnValue({ ok: true });
       await invoke('conv-1', 'hi', undefined, 'd-1');
-      expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, 'd-1');
+      expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, 'd-1', undefined, true);
       const missing = await invoke('conv-1', 'hi');
       if (channel === IPC_CHANNELS.AGENT_PROMPT) {
         expect(missing).toMatchObject({ ok: false });
         expect(send).toHaveBeenCalledTimes(1);
       } else {
-        expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, undefined);
+        expect(send).toHaveBeenLastCalledWith(parent, 'hi', undefined, undefined, undefined, true);
       }
     });
 

@@ -39,6 +39,26 @@ vi.mock('@/components/secretary/SecretaryDeleteDialog', () => ({
   },
 }));
 vi.mock('./PresetsSettings', () => ({ PickList: () => null }));
+/** base-ui 勾选框在 linkedom 里点不动：换成同语义的按钮 */
+vi.mock('@/components/ui/checkbox', () => ({
+  Checkbox: ({
+    checked,
+    disabled,
+    onCheckedChange,
+  }: {
+    checked?: boolean;
+    disabled?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={Boolean(checked)}
+      disabled={disabled}
+      onClick={() => onCheckedChange?.(!checked)}
+    />
+  ),
+}));
 
 /** 裁切弹窗与读文件都换成可控桩：这里只验上传状态机，不验 canvas */
 const raster = vi.hoisted(() => ({ readDataUrl: vi.fn() }));
@@ -210,6 +230,83 @@ describe('设置 → 秘书：同时运行的派发会话上限', () => {
     expect(getTranslation('zh', DESCRIPTION)).toBe(
       '秘书最多同时运行几个派发会话，超出的派发会排队，有空位时自动开始。'
     );
+  });
+});
+
+describe('设置 → 秘书 → 插件：完全放行时信任插件', () => {
+  const TRUST = '[data-enso="secretary-plugin-trust"]';
+  const telegram = {
+    id: 'enso.telegram',
+    name: 'Telegram Bot',
+    state: 'enabled',
+    tools: [{ name: 'telegram_reply', description: 'send' }],
+    permissions: ['agent.inject'],
+  };
+  const withPlugins = (patch: Partial<SecretaryProfile>) => {
+    (
+      window as unknown as { electronAPI: { extensionPlugins: { list: () => Promise<unknown> } } }
+    ).electronAPI.extensionPlugins.list = async () => [telegram];
+    api.getProfile.mockResolvedValue({
+      ok: true,
+      profile: { ...profile(3), ...patch },
+      persona: '',
+    });
+  };
+  const trustBox = () =>
+    container.querySelector(`${TRUST} [role="checkbox"]`) as HTMLButtonElement | null;
+  const pluginBox = () =>
+    container.querySelector(
+      '[data-enso="secretary-plugin-row"] [role="checkbox"]'
+    ) as HTMLButtonElement | null;
+
+  it('没勾选插件时不出现信任开关', async () => {
+    withPlugins({ pluginIds: [] });
+    await mount();
+    expect(pluginBox()).not.toBeNull();
+    expect(container.querySelector(TRUST)).toBeNull();
+  });
+
+  it('勾选后默认不信任，并写明打开的后果；打开只保存信任名单', async () => {
+    withPlugins({ pluginIds: ['enso.telegram'] });
+    api.saveProfile.mockResolvedValue({
+      ok: true,
+      profile: {
+        ...profile(3, 2),
+        pluginIds: ['enso.telegram'],
+        trustedPluginIds: ['enso.telegram'],
+      },
+    });
+    await mount();
+    expect(trustBox()?.getAttribute('aria-checked')).toBe('false');
+    expect(container.querySelector(TRUST)?.textContent).toContain('without asking first');
+    expect(container.querySelector(TRUST)?.textContent).toContain('Off by default');
+    await act(async () => trustBox()?.click());
+    expect(api.saveProfile).toHaveBeenCalledWith(
+      { trustedPluginIds: ['enso.telegram'] },
+      undefined
+    );
+    expect(trustBox()?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('取消勾选插件时一并撤掉信任', async () => {
+    withPlugins({ pluginIds: ['enso.telegram'], trustedPluginIds: ['enso.telegram'] });
+    api.saveProfile.mockResolvedValue({ ok: true, profile: { ...profile(3, 2), pluginIds: [] } });
+    await mount();
+    await act(async () => pluginBox()?.click());
+    expect(api.saveProfile).toHaveBeenCalledWith(
+      { pluginIds: [], trustedPluginIds: [] },
+      undefined
+    );
+  });
+
+  it('信任开关的文案有中文', () => {
+    expect(getTranslation('zh', 'Trust this plugin in Full access')).toBe('完全放行时信任这个插件');
+    expect(
+      getTranslation(
+        'zh',
+        'When on, the secretary calls this plugin’s tools (including sending messages as you) without asking first, every time. It applies only in Full access and only to turns started by you: typed in the app, sent from your paired phone or bound Telegram contact, or delivered by this or another trusted plugin as coming from you (such as Telegram Bot admins). Session reports, colleague messages, triggers and other plugins’ deliveries still ask. Protected action confirmation still applies. Off by default.'
+      )
+    ).toContain('默认关闭');
   });
 });
 

@@ -4358,11 +4358,14 @@ export const zhTranslations: Record<string, string> = {
   'Edit here': '就地修改',
   'Profile saved': '配置已保存',
   'Saving the profile…': '正在保存配置…',
-  'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call.':
-    '勾选插件，秘书就能用它的 Agent 工具与技能。不是只读的工具每次调用都要你确认。',
+  'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call, unless you trust the plugin below.':
+    '勾选插件，秘书就能用它的 Agent 工具与技能。不是只读的工具每次调用都要你确认，除非你在下面信任了这个插件。',
   'No plugins enabled': '没有已启用的插件',
   '{{n}} tools': '{{n}} 个工具',
   'Sends messages': '会投递消息',
+  'Trust this plugin in Full access': '完全放行时信任这个插件',
+  'When on, the secretary calls this plugin’s tools (including sending messages as you) without asking first, every time. It applies only in Full access and only to turns started by you: typed in the app, sent from your paired phone or bound Telegram contact, or delivered by this or another trusted plugin as coming from you (such as Telegram Bot admins). Session reports, colleague messages, triggers and other plugins’ deliveries still ask. Protected action confirmation still applies. Off by default.':
+    '打开后，秘书调用这个插件的工具（包括以你的身份发消息）以后都不再逐次问你。只在「完全放行」档、且这一轮由你发起时生效：在应用里输入、从配对手机或绑定的 Telegram 联系方式发来，或由这个或另一个被信任的插件以你的身份投递（例如 Telegram Bot 的管理员）。会话回传、同事消息、触发器和其他插件投递进来的轮次仍然要确认。「受保护动作确认」照常生效。默认关闭。',
   'Skills the secretary may use. It proposes new ones in the chat; you confirm before anything is written.':
     '秘书可以用的技能。新技能由它在聊天里提案，你确认后才写盘。',
   'Secretary skills': '秘书自有技能',

@@ -1492,6 +1492,11 @@ export type AgentCommand =
       botWriteLock?: { label: string; ancestors: string[] };
       /** 受保护动作底线（Bot 会话恒开；Code 会话由设置项决定） */
       protectedActions?: boolean;
+      /**
+       * 仅秘书会话：秘书资料里 owner 标记信任的插件 id。完全放行档且本轮由 owner 亲手触发时，
+       * 这些插件的非只读工具不再逐次确认，受保护动作底线照常生效。
+       */
+      secretaryTrustedPluginIds?: string[];
       /** 期望的 Plan 模式；与会话 jsonl 折叠结果不同时由 worker 追加切换条目 */
       planMode?: boolean;
     }
@@ -1546,6 +1551,11 @@ export type AgentCommand =
       images?: AttachedImage[];
       /** Bot 插话仅允许进入活轮；不再忙时交回 Main 重新准入。 */
       activeOnly?: true;
+      /**
+       * Main 认定这条是 owner 亲手输入（应用输入框、配对手机、秘书联系方式里绑定的本人），必须带 deliveryId。
+       * 秘书会话据此判断「本轮由 owner 触发」：Main 自己的投递（会话回传、同事消息、触发器、定时）不带。
+       */
+      ownerInput?: true;
       /**
        * 仅 prompt：带新消息的断点续跑（委派续跑附说明 / 验收原因 / 群背景新增）。worker 在空闲会话上开新轮前
        * 先按 retry 的语义把未完成（error / aborted / 停在工具调用）的最后一条 assistant 移出模型上下文；
@@ -4073,6 +4083,7 @@ const parsePromptOrSteer = (value: Record<string, unknown>): AgentCommand | null
     'deliveryId',
     'activeOnly',
     'resume',
+    'ownerInput',
     'instanceId',
   ]) &&
     parseAnySessionIdentity(value.identity) &&
@@ -4082,6 +4093,8 @@ const parsePromptOrSteer = (value: Record<string, unknown>): AgentCommand | null
     (value.activeOnly === undefined ||
       (value.type === 'steer' && value.activeOnly === true && isDeliveryId(value.deliveryId))) &&
     (value.resume === undefined || (value.type === 'prompt' && value.resume === true)) &&
+    (value.ownerInput === undefined ||
+      (value.ownerInput === true && isDeliveryId(value.deliveryId))) &&
     ((value.type === 'steer' && value.deliveryId === undefined) ||
       isDeliveryId(value.deliveryId)) &&
     (value.instanceId === undefined ||
@@ -4189,6 +4202,7 @@ const agentCommandParsers = {
         'botDelegationTask',
         'botWriteLock',
         'protectedActions',
+        'secretaryTrustedPluginIds',
         'planMode',
         'instanceId',
         'forkFrom',
@@ -4283,6 +4297,15 @@ const agentCommandParsers = {
           !Array.isArray(value.botWriteLock.ancestors) ||
           !value.botWriteLock.ancestors.every(isNonEmptyString))) ||
       (value.protectedActions !== undefined && typeof value.protectedActions !== 'boolean') ||
+      (value.secretaryTrustedPluginIds !== undefined &&
+        !(
+          value.secretaryMode === true &&
+          Array.isArray(value.secretaryTrustedPluginIds) &&
+          value.secretaryTrustedPluginIds.length <= 500 &&
+          value.secretaryTrustedPluginIds.every(
+            (entry) => typeof entry === 'string' && entry.length > 0 && entry.length <= 256
+          )
+        )) ||
       (value.instanceId !== undefined && !isUuid(value.instanceId)) ||
       (value.forkFrom !== undefined && !isNonEmptyString(value.forkFrom))
     ) {

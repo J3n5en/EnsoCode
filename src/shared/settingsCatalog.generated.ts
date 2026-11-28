@@ -936,7 +936,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     category: 'secretary',
     title: 'Plugins',
     description:
-      'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call.',
+      'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call, unless you trust the plugin below.',
   },
   {
     id: 'secretary.profile',

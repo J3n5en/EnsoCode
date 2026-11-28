@@ -414,12 +414,13 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
         }));
       },
       // 手机发来的话进秘书会话：worker 已被回收就先恢复，再投
-      deliver: (conversationId, text) =>
+      deliver: (conversationId, text, options) =>
         deliverToSecretary(
           {
             alive: isRootSessionAlive,
             resume: resumeRootFromMain,
-            prompt: (id, body) => promptRootFromMain(id, body, randomUUID()),
+            prompt: (id, body) =>
+              promptRootFromMain(id, body, randomUUID(), undefined, options?.ownerInput),
           },
           conversationId,
           text

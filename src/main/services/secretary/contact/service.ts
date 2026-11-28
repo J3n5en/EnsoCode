@@ -237,7 +237,12 @@ export interface ContactServicePorts {
   startConversation(): Promise<{ ok: true; conversationId: string } | { ok: false; error: string }>;
   /** /last：秘书会话最近的消息，Main 读 jsonl 后交回来；缺省表示读不到 */
   recentTurns?(rounds: number): Promise<readonly RecapMessage[]>;
-  deliver(conversationId: string, text: string): Promise<{ ok: boolean; error?: string }>;
+  /** ownerInput：这条消息的发送者已核验为 owner 本人（内置 Telegram 渠道的 admitChat） */
+  deliver(
+    conversationId: string,
+    text: string,
+    options?: { ownerInput?: true }
+  ): Promise<{ ok: boolean; error?: string }>;
   /** 手机发来的图片落盘到该秘书会话的图片目录；缺省表示不收图片 */
   saveInboundImages?(conversationId: string, images: readonly Buffer[]): SavedInboundImage[];
   answerAsk(
@@ -1915,7 +1920,12 @@ export class ContactService implements SecretaryContactPort, RemoteApprovalSink 
     this.remember(this.awaitingReply, conversationId, peer);
     // 这条消息发起了一条任务链：链上每一轮的正文都要回推这个联系人
     this.remember(this.phoneChain, conversationId, peer);
-    const delivered = await this.ports.deliver(conversationId, body);
+    // 内置 Telegram 渠道只放行绑定的本人（admitChat）；插件渠道的发送者由插件自报，不算核验过
+    const delivered = await this.ports.deliver(
+      conversationId,
+      body,
+      peer.channelId === TELEGRAM_CHANNEL_ID ? { ownerInput: true } : undefined
+    );
     this.audit(
       'contact_inbound',
       delivered.ok,

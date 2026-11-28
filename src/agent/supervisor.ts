@@ -242,6 +242,7 @@ import {
 import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
 import { type CompactCancel, formatCompactCancel, takeCompactCancel } from './ensoCompact/cancel';
+import { textOf } from './ensoCompact/serialize';
 import type { EnsoCompactOptions } from './ensoCompact/types';
 import {
   createExploreFoldState,
@@ -606,6 +607,11 @@ interface ManagedSession {
   /** 已入 pi steer 队列、尚未上屏的投递回执，与 pi 队列同序 */
   /** detach：Bot 插话结算时交回 Main；withdraw：用户在模型取用前撤回 */
   steerDeliveries?: { id: string | null; detach?: () => boolean; withdraw?: () => boolean }[];
+  /**
+   * Main 标记为 owner 亲手输入的投递：deliveryId → 原文。上屏时 id 对得上、正文也含原文，
+   * 才算 owner 触发的这一轮；回执错位时宁可当成不是 owner。
+   */
+  ownerDeliveries?: Map<string, string>;
   pendingBranch?: string;
   pendingBranchRequestId?: string;
   pendingVerifications?: number;
@@ -2181,7 +2187,8 @@ export class SessionSupervisor {
           command.secretaryTools,
           command.askRelay,
           command.dcgExemptRules,
-          command.dcgExtraPacks
+          command.dcgExtraPacks,
+          command.secretaryTrustedPluginIds
         );
         if (command.forkFrom) this.injectForkTranscript(command.identity, command.forkFrom);
         return;
@@ -2277,6 +2284,7 @@ export class SessionSupervisor {
       }
       case 'prompt': {
         const managed = this.must(command.identity);
+        if (command.ownerInput) this.noteOwnerInput(managed, command.deliveryId, command.text);
         managed.plan?.supersede();
         // 非提醒来源的输入：提醒连续链从头算
         this.reminders.resetChain(managed.identity.sessionId);
@@ -2315,6 +2323,8 @@ export class SessionSupervisor {
       }
       case 'steer': {
         const managed = this.must(command.identity);
+        if (command.ownerInput && command.deliveryId)
+          this.noteOwnerInput(managed, command.deliveryId, command.text);
         if (command.activeOnly && command.deliveryId) {
           await this.steerActive(managed, command.text, command.images, command.deliveryId);
           return;
@@ -2893,7 +2903,8 @@ export class SessionSupervisor {
     secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = [],
     askRelay?: { name: string },
     dcgExemptRules: readonly string[] = [],
-    dcgExtraPacks: readonly string[] = []
+    dcgExtraPacks: readonly string[] = [],
+    secretaryTrustedPluginIds: readonly string[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -3748,6 +3759,15 @@ export class SessionSupervisor {
             }
           )
         : undefined;
+    // 秘书资料里信任的插件：只认 Main 本次下发的描述符，按工具名定
+    const trustedPluginIds = new Set(secretaryMode ? secretaryTrustedPluginIds : []);
+    const ownerGate = new OwnerGate({ trustedPlugins: trustedPluginIds });
+    const trustedPluginTools = new Set(
+      pluginToolDescriptors
+        .filter((descriptor) => trustedPluginIds.has(descriptor.pluginId))
+        .map((descriptor) => descriptor.name)
+    );
+    const ownerTurn = { ownerTurn: () => ownerGate.isOwnerInputTurn() };
     const sessionTools = [
       ...buildCoreTools(),
       ...(secretary ? createSecretaryTools(secretary) : []),
@@ -3806,9 +3826,15 @@ export class SessionSupervisor {
         ? createPluginTools([...pluginToolDescriptors], pluginTools, {
             untrusted: secretaryMode,
           }).map((tool) =>
-            // 秘书会话里的插件工具可能以用户身份往外发消息：非只读的每次都要人确认
+            // 秘书会话里的插件工具可能以用户身份往外发消息：非只读的每次都要人确认，
+            // 除非 owner 信任了这个插件（仍要 full 档、owner 亲手触发，底线照常）
             secretaryMode
-              ? withMandatoryApproval(gate, 'mcp', tool)
+              ? withMandatoryApproval(
+                  gate,
+                  'mcp',
+                  tool,
+                  trustedPluginTools.has(tool.name) ? ownerTurn : undefined
+                )
               : withApproval(gate, 'mcp', tool)
           )
         : []),
@@ -3875,7 +3901,6 @@ export class SessionSupervisor {
     const readonlyAgentTypes = new Set(
       agentTypes.filter((type) => type.tools === 'readonly').map((type) => type.name)
     );
-    const ownerGate = new OwnerGate();
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) =>
         withOwnerGate(
@@ -5137,7 +5162,11 @@ export class SessionSupervisor {
         return;
       }
       case 'message_start': {
-        managed.ownerGate?.observeMessage(event.message);
+        const deliveryId = event.message.role === 'user' ? this.takeDelivery(managed) : null;
+        managed.ownerGate?.observeMessage(
+          event.message,
+          deliveryId !== null && this.takeOwnerInput(managed, deliveryId, event.message)
+        );
         const index = managed.messages.length;
         const message = projectMessage(event.message);
         if (message?.role === 'assistant') {
@@ -5145,7 +5174,6 @@ export class SessionSupervisor {
           managed.timings[index] = { stepStartMs: managed.requestStartMs ?? Date.now() };
           managed.requestStartMs = undefined;
         }
-        const deliveryId = event.message.role === 'user' ? this.takeDelivery(managed) : null;
         this.upsertLocalMessage(managed, message);
         if (deliveryId) {
           this.options.emit({
@@ -6030,6 +6058,7 @@ export class SessionSupervisor {
     reason?: 'turn-stuck'
   ): void {
     if (!deliveryId) return;
+    managed.ownerDeliveries?.delete(deliveryId);
     this.options.emit({
       type: 'delivery-rejected',
       identity: managed.identity,
@@ -6131,6 +6160,27 @@ export class SessionSupervisor {
     const slot = managed.promptDelivery ?? managed.steerDeliveries?.shift();
     managed.promptDelivery = undefined;
     return slot?.id ?? null;
+  }
+
+  /** Main 标了 owner 亲手输入的投递：记下原文，上屏时核对 */
+  private noteOwnerInput(managed: ManagedSession, deliveryId: string, text: string): void {
+    managed.ownerDeliveries ??= new Map();
+    const pending = managed.ownerDeliveries;
+    pending.set(deliveryId, text);
+    // 被 input hook 吃掉、从没上屏的投递不会被取走：只留最近的若干条
+    while (pending.size > OWNER_DELIVERY_LIMIT) {
+      const oldest = pending.keys().next().value;
+      if (oldest === undefined) break;
+      pending.delete(oldest);
+    }
+  }
+
+  /** 这条上屏的 user 消息是不是 owner 亲手输入：投递号对得上，且正文确实含原文 */
+  private takeOwnerInput(managed: ManagedSession, deliveryId: string, message: unknown): boolean {
+    const text = managed.ownerDeliveries?.get(deliveryId);
+    if (text === undefined) return false;
+    managed.ownerDeliveries?.delete(deliveryId);
+    return userMessageText(message).includes(text);
   }
 
   /** 子代理预算 Run 每完成一次模型请求记一笔：到软预算提示一次，到 1.5 倍中止并强制交出。 */
@@ -7347,6 +7397,14 @@ export class SessionSupervisor {
 
 /** 投影 idle 但 pi 仍 streaming 时，等它真正空闲的上限；超时视为僵尸轮 */
 const ZOMBIE_TURN_WAIT_MS = 5_000;
+/** 等着上屏核对的 owner 输入最多留几条 */
+const OWNER_DELIVERY_LIMIT = 32;
+
+function userMessageText(message: unknown): string {
+  return message && typeof message === 'object'
+    ? textOf((message as { content?: unknown }).content)
+    : '';
+}
 /** 子代理 Run 等自己后台任务的时限，从第一次持有起算 */
 export const AGENT_RUN_HOLD_LIMIT_MS = 10 * 60_000;
 /** 流式增量下发间隔：约 20 帧/秒，肉眼连贯，长回复的 IPC 与 markdown 重算降一个量级 */

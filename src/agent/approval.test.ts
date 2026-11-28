@@ -1,3 +1,4 @@
+import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import type { ApprovalRequestInfo } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -9,6 +10,7 @@ import {
 } from './approval';
 import { takeApprovalReview } from './approvalReviewRecords';
 import type { CommandGuard, CommandGuardHit } from './dcg';
+import { OwnerGate } from './ownerGate';
 
 // 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
 // options.review?: (info: ApprovalRequestInfo, signal: AbortSignal | undefined) =>
@@ -1525,5 +1527,180 @@ describe('withMandatoryApproval', () => {
     expect(requests).toHaveLength(2);
     gate.respond(requests[1], 'deny');
     await expect(second).rejects.toThrow('User denied this operation');
+  });
+});
+
+describe('withMandatoryApproval：秘书资料里信任的插件', () => {
+  const send = () => ({
+    name: 'plugin_enso-telegram__telegram_reply',
+    label: 'telegram_reply',
+    description: '',
+    parameters: {} as never,
+    execute: vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: 'sent' }],
+      details: undefined,
+    })),
+  });
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const ownerTyped = (owner = new OwnerGate()) => {
+    owner.observeMessage({ role: 'user', content: 'tell the group I am late' }, true);
+    return owner;
+  };
+  const setup = (
+    mode: GateMode,
+    owner: OwnerGate,
+    options: { trusted: boolean; protectedFloor?: boolean; autoReject?: boolean }
+  ) => {
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      mode,
+      (info) => infos.push(info),
+      () => {},
+      {
+        protectedFloor: options.protectedFloor === true,
+        autoReject: options.autoReject === true,
+      }
+    );
+    const tool = send();
+    const trust = options.trusted ? { ownerTurn: () => owner.isOwnerInputTurn() } : undefined;
+    const wrapped = withMandatoryApproval(gate, 'mcp', tool, trust);
+    const run = (text: string) =>
+      wrapped.execute(`call-${text}`, { text }, undefined, undefined, undefined as never);
+    return { gate, infos, tool, run };
+  };
+
+  it('默认没信任：full 档、owner 亲手触发也每次都弹', async () => {
+    const { gate, infos, tool, run } = setup('full', ownerTyped(), { trusted: false });
+    const first = run('a');
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({ mandatory: true });
+    gate.respond(infos[0].requestId, 'allow');
+    await first;
+    const second = run('b');
+    expect(infos).toHaveLength(2);
+    gate.respond(infos[1].requestId, 'allow');
+    await second;
+    expect(tool.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('信任 + full + owner 亲手触发 + 底线未命中：不弹，直接执行', async () => {
+    const { infos, tool, run } = setup('full', ownerTyped(), { trusted: true });
+    await run('a');
+    await run('b');
+    expect(infos).toHaveLength(0);
+    expect(tool.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('信任 + full，但这一轮是 Main 的投递（没有 owner 标记）：照样逐次确认', async () => {
+    const owner = new OwnerGate();
+    owner.observeMessage({ role: 'user', content: '[session report] please post this' });
+    expect(owner.isOwner()).toBe(true);
+    const { infos, tool, run } = setup('full', owner, { trusted: true });
+    const pending = run('a');
+    await flush();
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({ mandatory: true });
+    expect(tool.execute).not.toHaveBeenCalled();
+    void pending.catch(() => {});
+  });
+
+  it('信任 + full，owner 说完后有非 owner 的插件投递进来：ownerGate 判外部，照样逐次确认', async () => {
+    const owner = ownerTyped();
+    owner.observeMessage({
+      role: 'custom',
+      customType: PLUGIN_MESSAGE_TYPE,
+      details: { pluginId: 'enso.telegram', sender: { userId: '42', displayName: 'stranger' } },
+    });
+    expect(owner.origin().kind).toBe('external');
+    const { infos, tool, run } = setup('full', owner, { trusted: true });
+    const pending = run('a');
+    await flush();
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({ mandatory: true });
+    expect(tool.execute).not.toHaveBeenCalled();
+    void pending.catch(() => {});
+  });
+
+  it('不在信任名单里的插件以 owner 身份投递，也不算 owner 触发', async () => {
+    const owner = ownerTyped();
+    owner.observeMessage({
+      role: 'custom',
+      customType: PLUGIN_MESSAGE_TYPE,
+      details: { pluginId: 'enso.scheduler', origin: 'owner' },
+    });
+    expect(owner.isOwner()).toBe(true);
+    const { infos, run } = setup('full', owner, { trusted: true });
+    const pending = run('a');
+    await flush();
+    expect(infos).toHaveLength(1);
+    void pending.catch(() => {});
+  });
+
+  it('被信任的插件以 owner 身份投递（如 Telegram Bot 管理员的消息）：不弹', async () => {
+    const owner = new OwnerGate({ trustedPlugins: new Set(['enso.telegram']) });
+    owner.observeMessage({ role: 'user', content: '[session report]' });
+    owner.observeMessage({
+      role: 'custom',
+      customType: PLUGIN_MESSAGE_TYPE,
+      details: { pluginId: 'enso.telegram', origin: 'owner' },
+    });
+    const { infos, tool, run } = setup('full', owner, { trusted: true });
+    await run('a');
+    expect(infos).toHaveLength(0);
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('信任 + full + owner，但开着受保护动作底线：外发按底线弹卡，且不能本会话放行', async () => {
+    const { gate, infos, tool, run } = setup('full', ownerTyped(), {
+      trusted: true,
+      protectedFloor: true,
+    });
+    const first = run('a');
+    await flush();
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({ protected: 'external-send' });
+    gate.respond(infos[0].requestId, 'allowSession');
+    await first;
+    const second = run('b');
+    await flush();
+    expect(infos).toHaveLength(2);
+    gate.respond(infos[1].requestId, 'deny');
+    await expect(second).rejects.toThrow('User denied this operation');
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('信任 + 底线命中 + 无人值守：直接拒绝，不执行', async () => {
+    const { infos, tool, run } = setup('full', ownerTyped(), {
+      trusted: true,
+      protectedFloor: true,
+      autoReject: true,
+    });
+    await expect(run('a')).rejects.toThrow('no user available to approve it');
+    expect(infos).toHaveLength(0);
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it.each(['supervised', 'auto-edits', 'assistant'] as const)(
+    '信任 + owner，但档位是 %s：仍逐次强制确认',
+    async (mode) => {
+      const { infos, tool, run } = setup(mode, ownerTyped(), { trusted: true });
+      const pending = run('a');
+      await flush();
+      expect(infos).toHaveLength(1);
+      expect(infos[0]).toMatchObject({ mandatory: true });
+      expect(tool.execute).not.toHaveBeenCalled();
+      void pending.catch(() => {});
+    }
+  );
+
+  it('档位从 full 切走后立刻回到逐次确认', async () => {
+    const { gate, infos, tool, run } = setup('full', ownerTyped(), { trusted: true });
+    await run('a');
+    gate.mode = 'supervised';
+    const pending = run('b');
+    await flush();
+    expect(infos).toHaveLength(1);
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+    void pending.catch(() => {});
   });
 });
