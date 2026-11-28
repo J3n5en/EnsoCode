@@ -10,13 +10,11 @@
 - 非平凡改动、排障或发现可复用经验时，使用 [`project-knowledge`](.agents/skills/project-knowledge/SKILL.md) 检索和沉淀项目知识。
 - 真实排查过的高代价陷阱见 [`docs/engineering-reference/big-question/`](docs/engineering-reference/big-question/)。
 
-## 测试先行
+## 测试要求
 
-凡是改动可单测逻辑（纯函数、解析器、协议校验、路径校验、store reducer 等），按 Red-Green 循环：
+凡是改动可单测逻辑（纯函数、解析器、协议校验、路径校验、store reducer 等），补充或更新对应单元测试；修 bug 时补回归测试。
 
-1. 先写测试并确认它因缺少功能而失败；
-2. 写最小实现使测试通过；
-3. 跑 `pnpm test:changed`（只跑和改动相关的测试）通过后再提交；改动涉及 agent 核心、重启、IPC 契约等跨模块的东西时，再跑全量 `pnpm test`（本机排队串行）或 `pnpm test:formal`。合并以 CI 为准。细则见 [`docs/engineering-reference/testing.md`](docs/engineering-reference/testing.md#跑哪些测试)。
+跑 `pnpm test:changed`（只跑和改动相关的测试）通过后再提交；改动涉及 agent 核心、重启、IPC 契约等跨模块的东西时，再跑全量 `pnpm test`（本机排队串行）或 `pnpm test:formal`。合并以 CI 为准。细则见 [`docs/engineering-reference/testing.md`](docs/engineering-reference/testing.md#跑哪些测试)。
 
 重点覆盖身份/去重定义、字符串拼接与解析、安全边界、坏配置和脏输入。文件读取测试使用临时目录，不依赖开发机真实配置。测试应断言可观察行为，而不是只断言内部调用或错误文案。
 
