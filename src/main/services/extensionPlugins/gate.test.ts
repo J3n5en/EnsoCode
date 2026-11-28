@@ -542,6 +542,45 @@ describe('PluginHostGate', () => {
     ).rejects.toMatchObject({ code: 'TOO_LARGE' });
   });
 
+  it('ui.viewEvent 支持按 sessionId 定向推送（子会话归并到根会话），非法 sessionId 报 INVALID_ARGS', async () => {
+    const viewEvent = vi.fn();
+    deps.viewEvent = viewEvent;
+    deps.manifest = (id) => (id === 'a.b' ? manifest({ permissions: ['ui.view'] }) : null);
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle(
+        'a.b',
+        'ui.viewEvent',
+        { name: 'snapshot', data: { n: 1 }, sessionId: 's1' },
+        undefined
+      )
+    ).resolves.toBeNull();
+    expect(viewEvent).toHaveBeenLastCalledWith('a.b', 'snapshot', { n: 1 }, 's1');
+
+    await expect(
+      gate.handle(
+        'a.b',
+        'ui.viewEvent',
+        { name: 'snapshot', data: { n: 2 }, sessionId: 's1::sub1' },
+        undefined
+      )
+    ).resolves.toBeNull();
+    expect(viewEvent).toHaveBeenLastCalledWith('a.b', 'snapshot', { n: 2 }, 's1');
+
+    viewEvent.mockClear();
+    for (const badSessionId of ['', '::sub1', 'x'.repeat(257), null, 123]) {
+      await expect(
+        gate.handle(
+          'a.b',
+          'ui.viewEvent',
+          { name: 'snapshot', data: null, sessionId: badSessionId },
+          undefined
+        )
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    }
+    expect(viewEvent).not.toHaveBeenCalled();
+  });
+
   it('ui.viewOpen 在会话调用里打开或定位已声明的侧栏视图（缺省首个视图，子会话落到根会话）', async () => {
     const sessionUi = vi.fn(async () => null);
     deps.sessionUi = sessionUi;

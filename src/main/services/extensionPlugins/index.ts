@@ -247,8 +247,13 @@ export function getExtensionPlugins(): ExtensionPluginService {
         askAnswerer
           ? askAnswerer(sessionId, requestId, answer)
           : { ok: false, error: '当前环境不能回答提问' },
-      viewEvent: (pluginId, name, data) => {
-        broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, { pluginId, name, data });
+      viewEvent: (pluginId, name, data, sessionId) => {
+        broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, {
+          pluginId,
+          name,
+          data,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+        });
       },
       composer: (target, op, payload) =>
         getDraftBroker().request(target.origin, target.sessionId, op, payload),

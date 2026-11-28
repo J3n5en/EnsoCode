@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createViewBridge,
   decodeUtf8Base64,
+  shouldDeliverViewEvent,
   viewEventPush,
   viewFileEdit,
   viewFilePush,
@@ -70,6 +71,30 @@ describe('侧栏页面桥', () => {
       name: 'snapshot',
       data: { n: 1 },
     });
+  });
+
+  it('侧栏事件路由：无 sessionId 照常广播，带 sessionId 时仅投递给匹配会话并拦截其他会话与空白草稿', () => {
+    expect(shouldDeliverViewEvent({ pluginId: 'a.b', name: 'snapshot' }, 'a.b', 's1')).toBe(true);
+    expect(shouldDeliverViewEvent({ pluginId: 'a.b', name: 'snapshot' }, 'a.b', null)).toBe(true);
+    expect(
+      shouldDeliverViewEvent({ pluginId: 'a.b', name: 'snapshot', sessionId: 's1' }, 'a.b', 's1')
+    ).toBe(true);
+    expect(
+      shouldDeliverViewEvent({ pluginId: 'a.b', name: 'snapshot', sessionId: 's1' }, 'a.b', 's2')
+    ).toBe(false);
+    expect(
+      shouldDeliverViewEvent({ pluginId: 'a.b', name: 'snapshot', sessionId: 's1' }, 'a.b', null)
+    ).toBe(false);
+    expect(
+      shouldDeliverViewEvent(
+        { pluginId: 'other.p', name: 'snapshot', sessionId: 's1' },
+        'a.b',
+        's1'
+      )
+    ).toBe(false);
+    expect(
+      shouldDeliverViewEvent({ pluginId: 'a.b', name: 123, sessionId: 's1' }, 'a.b', 's1')
+    ).toBe(false);
   });
 
   it('文件查看器：推送当前文件，只收字符串编辑', () => {

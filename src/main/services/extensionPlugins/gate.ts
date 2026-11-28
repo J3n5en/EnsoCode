@@ -327,8 +327,8 @@ export interface GateDeps {
   ): Promise<unknown>;
   clipboard?(text: string): void;
   openExternal?(url: string): Promise<void> | void;
-  /** 把事件广播到该插件已打开的侧栏页面 */
-  viewEvent?(pluginId: string, name: string, data: unknown): void;
+  /** 把事件推到该插件已打开的侧栏页面；带 sessionId 时仅投递给绑定该会话的侧栏实例 */
+  viewEvent?(pluginId: string, name: string, data: unknown, sessionId?: string): void;
   /** 改输入框底栏的状态项；id 已校验在清单里 */
   statusUpdate?(pluginId: string, id: string, patch: StatusPatch): void;
   registerContrib?(pluginId: string, input: Record<string, unknown>): void;
@@ -709,6 +709,18 @@ export class PluginHostGate {
         permit('ui.view');
         if (typeof a.name !== 'string' || !VIEW_EVENT_NAME.test(a.name))
           throw pluginError('INVALID_ARGS', 'name 不合法');
+        let targetSessionId: string | undefined;
+        if (a.sessionId !== undefined) {
+          if (
+            typeof a.sessionId !== 'string' ||
+            a.sessionId.length === 0 ||
+            a.sessionId.length > 256
+          )
+            throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+          const rootId = a.sessionId.split('::')[0];
+          if (rootId.length === 0) throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+          targetSessionId = rootId;
+        }
         let encoded: string;
         try {
           encoded = JSON.stringify(a.data === undefined ? null : a.data);
@@ -719,7 +731,10 @@ export class PluginHostGate {
           throw pluginError('TOO_LARGE', '侧栏事件超过 256KB');
         if (!this.deps.viewEvent) throw pluginError('UNSUPPORTED', '当前环境不能更新侧栏');
         this.admitViewEvent(pluginId);
-        this.deps.viewEvent(pluginId, a.name, JSON.parse(encoded) as unknown);
+        const parsed = JSON.parse(encoded) as unknown;
+        if (targetSessionId !== undefined)
+          this.deps.viewEvent(pluginId, a.name, parsed, targetSessionId);
+        else this.deps.viewEvent(pluginId, a.name, parsed);
         return null;
       }
       case 'ui.statusUpdate': {

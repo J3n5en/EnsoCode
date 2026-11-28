@@ -245,6 +245,88 @@ describe('插件事件扩展', () => {
     });
   });
 
+  it('嵌套 tool_call / tool_result 透传 parentToolCallId，缺省时按 <parent>/<n> 推导，顶层不带该字段', async () => {
+    const { emit, handlers, invoker } = harness(
+      plan({
+        observe: ['tool_call', 'tool_result'],
+        intercept: [{ event: 'tool_call' }, { event: 'tool_result' }],
+      })
+    );
+    const pendingCall = handlers.get('tool_call')?.({
+      toolCallId: 'cm_1/1',
+      parentToolCallId: 'cm_1',
+      toolName: 'read',
+      input: { path: 'a.ts' },
+    } as never);
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      type: 'plugin-intercept',
+      event: 'tool_call',
+      payload: {
+        toolCallId: 'cm_1/1',
+        parentToolCallId: 'cm_1',
+        toolName: 'read',
+        input: { path: 'a.ts' },
+      },
+    });
+    reply(emit, invoker, { input: { path: 'b.ts' } });
+    await pendingCall;
+    expect(emit.mock.calls[1]?.[0]).toEqual({
+      type: 'plugin-event',
+      event: 'tool_call',
+      data: {
+        toolCallId: 'cm_1/1',
+        parentToolCallId: 'cm_1',
+        toolName: 'read',
+        input: { path: 'b.ts' },
+      },
+    });
+
+    // 未显式传 parentToolCallId 时按 `<parent>/<n>` 推导
+    const pendingResult = handlers.get('tool_result')?.({
+      toolCallId: 'cm_1/2',
+      toolName: 'read',
+      input: { path: 'b.ts' },
+      content: [{ type: 'text', text: 'ok' }],
+      isError: false,
+    } as never);
+    const resultIntercept = emit.mock.calls[2]?.[0] as { requestId: string; payload: unknown };
+    expect(resultIntercept.payload).toEqual({
+      toolCallId: 'cm_1/2',
+      parentToolCallId: 'cm_1',
+      toolName: 'read',
+      input: { path: 'b.ts' },
+      content: 'ok',
+      isError: false,
+    });
+    invoker.resolve({ requestId: resultIntercept.requestId, ok: true, result: undefined });
+    await pendingResult;
+    expect(emit.mock.calls[3]?.[0]).toEqual({
+      type: 'plugin-event',
+      event: 'tool_result',
+      data: {
+        toolCallId: 'cm_1/2',
+        parentToolCallId: 'cm_1',
+        toolName: 'read',
+        input: { path: 'b.ts' },
+        content: 'ok',
+        isError: false,
+      },
+    });
+
+    // 顶层调用不带 parentToolCallId 键
+    const observedOnly = harness(plan({ observe: ['tool_call'] }));
+    await observedOnly.handlers.get('tool_call')?.({
+      toolCallId: 'top_1',
+      toolName: 'bash',
+      input: { command: 'pwd' },
+    } as never);
+    const topEvent = observedOnly.emit.mock.calls[0]?.[0] as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    expect(topEvent?.data).toBeDefined();
+    expect(topEvent?.data).not.toHaveProperty('parentToolCallId');
+  });
+
   it('工具不在过滤名单里不上报，名单内改写输入', async () => {
     const { emit, handlers, invoker } = harness(
       plan({ intercept: [{ event: 'tool_call', tools: ['bash'] }] })
@@ -678,5 +760,52 @@ describe('contextUsagePayload', () => {
     expect(payload).not.toHaveProperty('usage');
     expect(payload).not.toHaveProperty('contextWindow');
     expect(payload.estimated).toBe(true);
+  });
+
+  it('传入 turns 与正数 reasoning 时透传 turns 和 usage.reasoningTokens；0 或缺省不输出 reasoningTokens', () => {
+    const withReasoning = contextUsagePayload(
+      occupancy,
+      [
+        {
+          role: 'assistant',
+          usage: { input: 10, output: 120, cacheRead: 90, cacheWrite: 0, reasoning: 80 },
+        },
+      ],
+      { turns: 3 }
+    );
+    expect(withReasoning.turns).toBe(3);
+    expect(withReasoning.usage).toEqual({
+      input: 10,
+      output: 120,
+      cacheRead: 90,
+      cacheWrite: 0,
+      reasoningTokens: 80,
+    });
+
+    const zeroReasoning = contextUsagePayload(
+      occupancy,
+      [
+        {
+          role: 'assistant',
+          usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        },
+      ],
+      { turns: 0 }
+    );
+    expect(zeroReasoning.turns).toBe(0);
+    expect(zeroReasoning.usage).toEqual({ input: 10, output: 20, cacheRead: 0, cacheWrite: 0 });
+    expect(zeroReasoning.usage).not.toHaveProperty('reasoningTokens');
+  });
+
+  it('最近一条回复的 usage 缺字段时按 0 计，不回退到更早一轮的用量', () => {
+    const payload = contextUsagePayload(occupancy, [
+      { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } },
+      { role: 'user' },
+      {
+        role: 'assistant',
+        usage: { input: 10, output: 2, cacheRead: Number.NaN } as never,
+      },
+    ]);
+    expect(payload.usage).toEqual({ input: 10, output: 2, cacheRead: 0, cacheWrite: 0 });
   });
 });

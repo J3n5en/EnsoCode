@@ -369,7 +369,7 @@ export interface EnsoHostApi {
   'fs.writeText': (path: string, text: string) => Promise<void>;
   'net.fetch': (url: string, init?: EnsoFetchInit) => Promise<EnsoFetchResponse>;
   'ui.notify': (title: string, body?: string) => Promise<void>;
-  'ui.viewEvent': (name: string, data?: unknown) => Promise<void>;
+  'ui.viewEvent': (name: string, data?: unknown, options?: { sessionId?: string }) => Promise<void>;
   'ui.viewOpen': (input?: string | { viewId?: string; sessionId?: string }) => Promise<void>;
   'ui.viewClose': (input?: string | { viewId?: string; sessionId?: string }) => Promise<void>;
   'ui.statusUpdate': (id: string, patch: StatusPatch) => Promise<void>;
@@ -625,6 +625,8 @@ export interface EnsoMain {
     /** 推给本插件已打开的侧栏页面；页面用 `enso.on` 订阅。需要 `ui.view`，不需要用户手势 */
     view: {
       emit: EnsoHostApi['ui.viewEvent'];
+      /** 只推给绑定到指定会话的侧栏页面（等价于 `emit(name, data, { sessionId })`）。需要 `ui.view` */
+      emitToSession: (sessionId: string, name: string, data?: unknown) => Promise<void>;
       /** 打开右侧栏并创建或聚焦本插件的侧栏页面（缺省首个视图）。需要 `ui.view` */
       open: EnsoHostApi['ui.viewOpen'];
       /** 关掉本插件的侧栏页面；右侧栏是 `open` 为它打开的就一并收起。需要 `ui.view` */
