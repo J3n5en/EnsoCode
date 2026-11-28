@@ -11,6 +11,10 @@ import WebKit
 /// - 原生 AVFoundation 二维码扫码与前后台生命周期唤醒
 @MainActor
 final class EnsoWebShellController: NSObject, ObservableObject {
+    /// 固定本地回环端口，确保每次冷启动 WKWebView 的 origin (`http://127.0.0.1:49321`) 恒定，
+    /// localStorage（配对设备列表）与 IndexedDB（离线快照/reads 缓存）可跨重启持久化保留。
+    private static let defaultLocalPort: UInt16 = 49321
+
     @Published var isShowingScanner = false
     @Published var startupError: String?
 
@@ -52,6 +56,8 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         #endif
         self.webView = wv
         super.init()
+        wv.navigationDelegate = self
+        wv.uiDelegate = self
 
         bridgeHandler.target = self
         ucc.add(bridgeHandler, name: "ensoNative")
@@ -93,7 +99,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
             }
         }
         do {
-            _ = try localServer.start()
+            _ = try localServer.start(preferredPort: Self.defaultLocalPort)
             self.server = localServer
             webView.load(URLRequest(url: localServer.baseURL))
         } catch {
@@ -125,6 +131,10 @@ final class EnsoWebShellController: NSObject, ObservableObject {
     }
 
     @objc private func appDidBecomeActive() {
+        // iOS 长时间挂起后台可能回收监听端口，先恢复 LocalWebServer 再通知前端重连
+        if let server, !server.isRunning {
+            _ = try? server.ensureRunning()
+        }
         // 切回前台时立即通知前端触发原生 QUIC / WebRTC 探活与重连
         evalJS("window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));")
     }
@@ -341,6 +351,110 @@ extension EnsoWebShellController: QuicRelayConnectionDelegate {
             else { return }
             self.evalJS("window.__ensoNativeInternal?.onClose(\(idLit), \(code), \(reasonLit));")
         }
+    }
+}
+
+extension EnsoWebShellController: WKNavigationDelegate, WKUIDelegate {
+    private func isLocalAppURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return true }
+        return host == "127.0.0.1" || host == "localhost"
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+        let scheme = url.scheme?.lowercased() ?? ""
+        if (scheme == "http" || scheme == "https") && !isLocalAppURL(url) {
+            if navigationAction.targetFrame?.isMainFrame != false {
+                UIApplication.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if let url = navigationAction.request.url {
+            if isLocalAppURL(url) {
+                webView.load(navigationAction.request)
+            } else {
+                UIApplication.shared.open(url)
+            }
+        }
+        return nil
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        guard let presenter = Self.topViewController() else {
+            completionHandler()
+            return
+        }
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler() })
+        presenter.present(alert, animated: true)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        guard let presenter = Self.topViewController() else {
+            completionHandler(false)
+            return
+        }
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler(true) })
+        presenter.present(alert, animated: true)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        guard let presenter = Self.topViewController() else {
+            completionHandler(nil)
+            return
+        }
+        let alert = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+        alert.addTextField { $0.text = defaultText }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(nil) })
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in
+            completionHandler(alert.textFields?.first?.text)
+        })
+        presenter.present(alert, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let keyWindow = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.first?.windows.first
+        var top = keyWindow?.rootViewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
     }
 }
 

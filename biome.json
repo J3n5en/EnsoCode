@@ -70,6 +70,9 @@
       "!docs/project-history/**/*.html",
       "!packages/relay-go/frontend/assets",
       "!packages/relay-go/frontend/desk-bundle",
+      "!packages/ios-app/.build",
+      "!packages/ios-app/WebApp",
+      "!packages/ios-app/EnsoCode.xcodeproj",
       "!src/agent/continuousMemory/vendor",
       "!src/shared/providers/devin/vendor",
       "!src/shared/providers/qoder/vendor"

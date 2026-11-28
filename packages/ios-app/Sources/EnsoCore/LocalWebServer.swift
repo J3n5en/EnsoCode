@@ -25,12 +25,20 @@ public final class LocalWebServer: @unchecked Sendable {
     private let webRoot: URL
     private let cacheRoot: URL
     private let queue = DispatchQueue(label: "com.ensocode.localweb")
+    private let stateLock = NSLock()
     private var listener: NWListener?
+    private var cancelGroup: DispatchGroup?
     private var assignedPort: UInt16 = 0
+    private var running = false
     public var deskAssetFetcher: DeskAssetFetcher?
 
     public var port: UInt16 { assignedPort }
     public var baseURL: URL { URL(string: "http://127.0.0.1:\(assignedPort)/")! }
+    public var isRunning: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return running
+    }
 
     public init(webRoot: URL, cacheRoot: URL) {
         self.webRoot = webRoot
@@ -39,6 +47,26 @@ public final class LocalWebServer: @unchecked Sendable {
     }
 
     public func start(preferredPort: UInt16 = 0) throws -> UInt16 {
+        do {
+            return try bind(port: preferredPort)
+        } catch {
+            if preferredPort != 0 {
+                return try bind(port: 0)
+            }
+            throw error
+        }
+    }
+
+    /// iOS 长时间挂起后台后系统可能回收 NWListener 套接字；切回前台调用此方法确保原端口恢复监听。
+    @discardableResult
+    public func ensureRunning() throws -> UInt16 {
+        if isRunning { return assignedPort }
+        let targetPort = assignedPort
+        stop()
+        return try start(preferredPort: targetPort)
+    }
+
+    private func bind(port preferredPort: UInt16) throws -> UInt16 {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         params.requiredLocalEndpoint = NWEndpoint.hostPort(
@@ -49,16 +77,39 @@ public final class LocalWebServer: @unchecked Sendable {
         self.listener = listener
 
         let ready = DispatchSemaphore(value: 0)
+        let group = DispatchGroup()
+        group.enter()
+        var leftGroup = false
+        self.cancelGroup = group
+        var signaled = false
         var startError: Error?
 
         listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             switch state {
             case .ready:
-                self?.assignedPort = listener.port?.rawValue ?? 0
-                ready.signal()
+                self.stateLock.lock()
+                self.assignedPort = listener.port?.rawValue ?? 0
+                self.running = true
+                let shouldSignal = !signaled
+                signaled = true
+                self.stateLock.unlock()
+                if shouldSignal { ready.signal() }
             case .failed(let err):
-                startError = err
-                ready.signal()
+                self.stateLock.lock()
+                self.running = false
+                let shouldSignal = !signaled
+                signaled = true
+                if shouldSignal { startError = err }
+                self.stateLock.unlock()
+                if shouldSignal { ready.signal() }
+            case .cancelled:
+                self.stateLock.lock()
+                self.running = false
+                let shouldLeave = !leftGroup
+                leftGroup = true
+                self.stateLock.unlock()
+                if shouldLeave { group.leave() }
             default:
                 break
             }
@@ -69,14 +120,23 @@ public final class LocalWebServer: @unchecked Sendable {
         listener.start(queue: queue)
         ready.wait()
         if let startError {
+            listener.cancel()
+            self.listener = nil
             throw startError
         }
         return assignedPort
     }
 
     public func stop() {
-        listener?.cancel()
+        stateLock.lock()
+        running = false
+        let current = listener
+        let group = cancelGroup
         listener = nil
+        cancelGroup = nil
+        stateLock.unlock()
+        current?.cancel()
+        _ = group?.wait(timeout: .now() + .milliseconds(300))
     }
 
     private func handleConnection(_ conn: NWConnection) {

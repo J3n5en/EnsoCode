@@ -80,6 +80,16 @@ final class EnsoCoreTests: XCTestCase {
         let (a2, _) = try await URLSession.shared.data(from: assetURL)
         XCTAssertEqual(String(data: a2, encoding: .utf8), "/*r/assets/app.js*/")
         XCTAssertEqual(fetchCount, 1)
+
+        // 模拟 iOS 后台回收后 stop -> ensureRunning() 恢复同一端口
+        server.stop()
+        XCTAssertFalse(server.isRunning)
+        let recoveredPort = try server.ensureRunning()
+        XCTAssertTrue(server.isRunning)
+        XCTAssertEqual(recoveredPort, port)
+        let (a3, resp3) = try await URLSession.shared.data(from: server.baseURL)
+        XCTAssertEqual((resp3 as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(String(data: a3, encoding: .utf8), "<!doctype html><title>Enso</title>")
     }
 
     /// 真实跨语言互通验证：Swift `NWProtocolQUIC` 客户端直连 Go `quic-go` 中继（经由环境变量注入端口与凭据）。
