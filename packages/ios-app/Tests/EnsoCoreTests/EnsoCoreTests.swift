@@ -351,15 +351,25 @@ final class EnsoCoreTests: XCTestCase {
         XCTAssertEqual(short.runningCount, 0)
 
         let long = short.messages.first(where: { $0.id == "long" })!
-        XCTAssertEqual(long.text.count, 601)
-        XCTAssertTrue(long.text.hasSuffix("…"))
-        let emoji = short.messages.first(where: { $0.id == "emoji" })!
-        XCTAssertEqual(emoji.text, String(repeating: "👨‍👩‍👧", count: 600) + "…")
+        XCTAssertEqual(long.text.count, 1000)
+        let veryLong = EnsoPiPSnapshot(
+            sessionId: "s",
+            title: "t",
+            projectName: "p",
+            status: "running",
+            pendingHint: nil,
+            runningCount: 1,
+            pendingCount: 0,
+            connectionState: "online",
+            messages: [msg("emoji", "user", String(repeating: "👨‍👩‍👧", count: 1500))],
+            updatedAt: 1
+        ).sanitizedForDisplay()
+        XCTAssertEqual(veryLong.messages.first?.text, String(repeating: "👨‍👩‍👧", count: 1400) + "…")
 
         let capped = snapshot.sanitizedForDisplay()
-        XCTAssertEqual(capped.messages.count, 12)
+        XCTAssertEqual(capped.messages.count, 18)
         XCTAssertEqual(capped.messages.last?.id, "emoji")
-        XCTAssertEqual(capped.messages.first?.id, "m10")
+        XCTAssertEqual(capped.messages.first?.id, "m4")
 
         XCTAssertTrue(snapshot.sanitizedForDisplay(maxMessages: 0).messages.isEmpty)
         XCTAssertTrue(snapshot.sanitizedForDisplay(maxMessages: -1).messages.isEmpty)
@@ -371,10 +381,11 @@ final class EnsoCoreTests: XCTestCase {
         let idleObj = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(idle)) as? [String: Any]
         )
-        XCTAssertEqual(Set(idleObj.keys), ["supported", "active", "auto", "error"])
+        XCTAssertEqual(Set(idleObj.keys), ["supported", "active", "auto", "aspect", "error"])
         XCTAssertTrue(idleObj["error"] is NSNull)
         XCTAssertEqual(idleObj["supported"] as? Bool, true)
         XCTAssertEqual(idleObj["auto"] as? Bool, true)
+        XCTAssertEqual(idleObj["aspect"] as? String, "portrait")
 
         let failed = EnsoPiPStatusPayload(supported: false, active: false, auto: false, error: "画中画不可用")
         let decoded = try JSONDecoder().decode(EnsoPiPStatusPayload.self, from: JSONEncoder().encode(failed))
@@ -383,5 +394,10 @@ final class EnsoCoreTests: XCTestCase {
             try JSONDecoder().decode(EnsoPiPStatusPayload.self, from: JSONEncoder().encode(idle)),
             idle
         )
+
+        XCTAssertEqual(EnsoPiPAspect(rawOrDefault: "square"), .square)
+        XCTAssertEqual(EnsoPiPAspect(rawOrDefault: "invalid"), .portrait)
+        XCTAssertGreaterThan(EnsoPiPAspect.portrait.preferredContentSize.height, EnsoPiPAspect.portrait.preferredContentSize.width)
+        XCTAssertGreaterThan(EnsoPiPAspect.landscape.preferredContentSize.width, EnsoPiPAspect.landscape.preferredContentSize.height)
     }
 }

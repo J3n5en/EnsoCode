@@ -132,13 +132,19 @@ describe('createDeviceDrawer 画中画', () => {
   });
 
   it('开启浮窗后收起面板；自动开关反映状态并回调取反值；状态变化即时重绘', () => {
-    let state = { active: false, auto: false, supported: true };
+    let state = {
+      active: false,
+      auto: false,
+      aspect: 'portrait' as 'portrait' | 'square' | 'landscape',
+      supported: true,
+    };
     const listeners = new Set<() => void>();
     const toggle = vi.fn(() => {
       state = { ...state, active: !state.active };
       for (const l of listeners) l();
     });
     const setAuto = vi.fn();
+    const setAspect = vi.fn();
     const pip = {
       state: () => state,
       onChange: (listener: () => void) => {
@@ -147,15 +153,18 @@ describe('createDeviceDrawer 画中画', () => {
       },
       toggle,
       setAuto,
+      setAspect,
     };
     const { drawer } = setup({ pip });
     drawer.open();
     const sw = openRoot().querySelector<HTMLButtonElement>('[aria-label="切后台自动画中画"]');
     expect(sw?.getAttribute('role')).toBe('switch');
     expect(sw?.getAttribute('aria-checked')).toBe('false');
-    expect(document.body.textContent).toContain('切到其他 App 时浮窗实时显示当前对话');
+    expect(document.body.textContent).toContain('浮窗支持双指放大');
     sw?.click();
     expect(setAuto).toHaveBeenCalledWith(true);
+    buttonByText('方形')?.click();
+    expect(setAspect).toHaveBeenCalledWith('square');
 
     state = { ...state, auto: true };
     for (const l of listeners) l();

@@ -28,12 +28,14 @@ final class EnsoPiPController: NSObject {
 
     private(set) var phase: EnsoPiPLifecyclePhase = .unavailable
     private(set) var autoStartEnabled = false
+    private(set) var aspect: EnsoPiPAspect = .portrait
     private var lastError: String?
 
     var onStatusChange: ((EnsoPiPStatusPayload) -> Void)?
     var onRestoreSession: ((String?) -> Void)?
 
     private var pipController: AVPictureInPictureController?
+    private weak var callViewController: AVPictureInPictureVideoCallViewController?
     private weak var attachedSourceView: UIView?
     private weak var hostSourceView: UIView?
     private var keepAlivePlayer: AVAudioPlayer?
@@ -48,6 +50,7 @@ final class EnsoPiPController: NSObject {
             supported: AVPictureInPictureController.isPictureInPictureSupported(),
             active: phase == .active,
             auto: autoStartEnabled,
+            aspect: aspect.rawValue,
             error: lastError
         )
     }
@@ -77,7 +80,7 @@ final class EnsoPiPController: NSObject {
         guard AVPictureInPictureController.isPictureInPictureSupported() else { return nil }
 
         let callViewController = AVPictureInPictureVideoCallViewController()
-        callViewController.preferredContentSize = CGSize(width: 340, height: 220)
+        callViewController.preferredContentSize = aspect.preferredContentSize
         callViewController.view.backgroundColor = .black
         let hosting = UIHostingController(rootView: EnsoPiPConversationView(model: viewModel))
         hosting.view.backgroundColor = .clear
@@ -111,6 +114,7 @@ final class EnsoPiPController: NSObject {
         }
         pipController?.delegate = nil
         pipController = controller
+        self.callViewController = callViewController
         attachedSourceView = sourceView
         return controller
     }
@@ -123,6 +127,7 @@ final class EnsoPiPController: NSObject {
         pipController?.delegate = nil
         pipController?.contentSource = nil
         pipController = nil
+        callViewController = nil
         attachedSourceView = nil
     }
 
@@ -174,6 +179,14 @@ final class EnsoPiPController: NSObject {
             deactivateAudioSessionIfIdle()
             detachControllerIfIdle()
         }
+        notifyStatus()
+    }
+
+    /// 切换画中画纵横比：正在展示的画中画会随 `preferredContentSize` 平滑变形，无需重启窗口。
+    func setAspect(_ next: EnsoPiPAspect) {
+        guard aspect != next else { return }
+        aspect = next
+        callViewController?.preferredContentSize = next.preferredContentSize
         notifyStatus()
     }
 

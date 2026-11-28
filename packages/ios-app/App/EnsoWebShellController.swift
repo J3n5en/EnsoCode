@@ -314,6 +314,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         startPip: () => post({ type: 'pip-start' }),
         stopPip: () => post({ type: 'pip-stop' }),
         setPipAuto: (enabled) => post({ type: 'pip-set-auto', enabled: Boolean(enabled) }),
+        setPipAspect: (aspect) => post({ type: 'pip-set-aspect', aspect: String(aspect || 'portrait') }),
         updatePipState: (snapshot) => post({ type: 'pip-update', snapshot }),
         onPipState: (cb) => {
           pipStateCb = cb;
@@ -432,6 +433,10 @@ extension EnsoWebShellController: WKScriptMessageHandler {
 
         case "pip-set-auto":
             EnsoPiPController.shared.setAutoStart((body["enabled"] as? Bool) ?? false)
+
+        case "pip-set-aspect":
+            let raw = body["aspect"] as? String
+            EnsoPiPController.shared.setAspect(EnsoPiPAspect(rawOrDefault: raw))
 
         case "pip-update":
             guard let raw = body["snapshot"] as? [String: Any],

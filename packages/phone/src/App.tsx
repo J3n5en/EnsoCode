@@ -42,11 +42,13 @@ import { NewSessionSheet } from './NewSessionSheet';
 import {
   hasNativePip,
   hasNativePush,
+  type NativePipAspect,
   type NativePipSnapshot,
   type NativePipStatus,
   pushNativePipState,
   pushNativeWidgetState,
   resolveNativePushGatewayOrigin,
+  setNativePipAspect,
   setNativePipAuto,
   startNativePip,
   stopNativePip,
@@ -57,7 +59,9 @@ import { PairScreen } from './PairScreen';
 import {
   buildPipSnapshotFromGuestView,
   createTrailingThrottle,
+  loadNativePipAspect,
   loadNativePipAuto,
+  saveNativePipAspect,
   saveNativePipAuto,
 } from './pipState';
 import {
@@ -822,6 +826,7 @@ export function App() {
     supported: true,
     active: false,
     auto: loadNativePipAuto(localStorage),
+    aspect: loadNativePipAspect(localStorage),
   }));
   const pipSnapshotRef = useRef<(() => NativePipSnapshot) | null>(null);
   const [pipSync] = useState(() =>
@@ -833,6 +838,7 @@ export function App() {
   useEffect(() => {
     if (!nativePip) return;
     setNativePipAuto(loadNativePipAuto(localStorage));
+    setNativePipAspect(loadNativePipAspect(localStorage));
     const unsubscribe = subscribeNativePipState(setPipStatus);
     return () => {
       unsubscribe();
@@ -841,6 +847,10 @@ export function App() {
   }, [nativePip, pipSync]);
   useEffect(() => {
     if (!nativePip) return;
+    const theme =
+      typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
     pipSnapshotRef.current = () =>
       buildPipSnapshotFromGuestView({
         activeId,
@@ -849,6 +859,7 @@ export function App() {
         catalog,
         connectionState: state,
         deviceLabel: widgetDeviceLabel,
+        theme,
       });
     pipSync.schedule();
   }, [nativePip, pipSync, activeId, entry, view, catalog, state, widgetDeviceLabel]);
@@ -1288,6 +1299,7 @@ export function App() {
             ? {
                 active: pipStatus.active,
                 auto: pipStatus.auto,
+                aspect: pipStatus.aspect,
                 supported: pipStatus.supported,
                 error: pipStatus.error,
                 onToggle: () => {
@@ -1303,6 +1315,11 @@ export function App() {
                   saveNativePipAuto(localStorage, next);
                   setNativePipAuto(next);
                   setPipStatus((prev) => ({ ...prev, auto: next }));
+                },
+                onAspectChange: (next: NativePipAspect) => {
+                  saveNativePipAspect(localStorage, next);
+                  setNativePipAspect(next);
+                  setPipStatus((prev) => ({ ...prev, aspect: next }));
                 },
               }
             : undefined

@@ -6,10 +6,13 @@ import {
   buildPipSnapshotFromGuestView,
   createTrailingThrottle,
   DeskPipTracker,
+  extractLatestTodo,
+  loadNativePipAspect,
   loadNativePipAuto,
   NATIVE_PIP_AUTO_KEY,
   parseInvokeSessionId,
   projectMessagesForPip,
+  saveNativePipAspect,
   saveNativePipAuto,
 } from './pipState';
 
@@ -61,7 +64,7 @@ describe('projectMessagesForPip', () => {
     expect(projectMessagesForPip([])).toEqual([]);
   });
 
-  it('user 取文本段，空消息跳过；assistant 文本与工具调用分开成卡片', () => {
+  it('user 取文本段，空消息跳过；assistant 文本保留，连续多条工具调用折叠为 tool-group', () => {
     const items = projectMessagesForPip(
       [
         user('  你好\r\n\r\n\r\n世界  '),
@@ -75,14 +78,14 @@ describe('projectMessagesForPip', () => {
             name: 'bash',
             arguments: { command: 'pnpm test\n--watch' },
           },
-          { type: 'toolCall', id: 'c2', name: 'read', arguments: { path: '/a/b.ts' } },
-          { type: 'toolCall', id: 'c3', name: 'todo', arguments: { items: [] } },
+          { type: 'toolCall', id: 'c2', name: 'read', arguments: { path: '/a/b/c.ts' } },
+          { type: 'toolCall', id: 'c3', name: 'todo', arguments: { todos: [] } },
         ]),
       ],
       { baseIndex: 10 }
     );
     expect(items).toEqual([
-      {
+      expect.objectContaining({
         id: '10',
         role: 'user',
         text: '你好\n\n世界',
@@ -90,17 +93,25 @@ describe('projectMessagesForPip', () => {
         isStreaming: false,
         isError: false,
         timestamp: 1000,
-      },
+      }),
       expect.objectContaining({ id: '12', role: 'assistant', text: '我先看看', timestamp: 2001 }),
-      expect.objectContaining({ role: 'tool', toolName: 'bash', text: 'bash · pnpm test' }),
-      expect.objectContaining({ role: 'tool', toolName: 'read', text: 'read · /a/b.ts' }),
-      expect.objectContaining({ role: 'tool', toolName: 'todo', text: 'todo' }),
+      expect.objectContaining({
+        role: 'tool-group',
+        toolState: 'ok',
+        stepCount: 3,
+        text: '已完成 · 1 条命令、1 次读取、1 项操作',
+        steps: [
+          expect.objectContaining({ name: 'bash', summary: '终端 · pnpm test', state: 'ok' }),
+          expect.objectContaining({ name: 'read', summary: '读取 · b/c.ts', state: 'ok' }),
+          expect.objectContaining({ name: 'todo', summary: '待办 · 0/0 项', state: 'ok' }),
+        ],
+      }),
     ]);
     expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
     expect(items.every((i) => !i.isStreaming)).toBe(true);
   });
 
-  it('运行中只把最后一条 assistant 的末张卡片标为流式；只有思考时显示思考中', () => {
+  it('运行中只把最后一条 assistant 的末张卡片标为流式；独立展示 thinking 思考行', () => {
     const messages = [
       assistant([{ type: 'text', text: '旧回复' }]),
       user('继续'),
@@ -108,19 +119,44 @@ describe('projectMessagesForPip', () => {
     ];
     const running = projectMessagesForPip(messages, { isRunning: true });
     expect(running.map((i) => i.isStreaming)).toEqual([false, false, true]);
+    expect(running[2]?.role).toBe('thinking');
     const thinking = running[2]?.text ?? '';
-    expect(thinking.startsWith('思考中…\n…')).toBe(true);
+    expect(thinking.startsWith('…')).toBe(true);
     expect(thinking.endsWith('最后几个字')).toBe(true);
 
     const idle = projectMessagesForPip(messages, { isRunning: false });
-    expect(idle).toHaveLength(2);
+    expect(idle).toHaveLength(3);
+    expect(idle[2]?.role).toBe('thinking');
     expect(idle.every((i) => !i.isStreaming)).toBe(true);
 
     const empty = projectMessagesForPip([assistant([])], { isRunning: true });
-    expect(empty).toEqual([expect.objectContaining({ text: '思考中…', isStreaming: true })]);
+    expect(empty).toEqual([
+      expect.objectContaining({ role: 'thinking', text: '思考中…', isStreaming: true }),
+    ]);
   });
 
-  it('工具结果只在失败时出一张错误卡片，原始输出不上卡片', () => {
+  it('工具调用与 toolResult 按 toolCallId 配对，不重复刷卡；孤立报错合并进工具行', () => {
+    const paired = projectMessagesForPip([
+      assistant([
+        { type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'gh pr view' } },
+      ]),
+      {
+        ...toolResult('bash', true, 'TLS handshake timeout'),
+        toolCallId: 'c1',
+      },
+    ]);
+    expect(paired).toHaveLength(1);
+    expect(paired[0]).toEqual(
+      expect.objectContaining({
+        role: 'tool',
+        toolName: '终端',
+        text: 'gh pr view',
+        toolState: 'error',
+        isError: true,
+        detail: 'TLS handshake timeout',
+      })
+    );
+
     const items = projectMessagesForPip([
       toolResult('bash', false, 'x'.repeat(5000)),
       toolResult('edit', true, '找不到要替换的文本'),
@@ -128,16 +164,9 @@ describe('projectMessagesForPip', () => {
     ]);
     expect(items).toEqual([
       expect.objectContaining({
-        role: 'tool',
-        toolName: 'edit',
+        role: 'tool-group',
         isError: true,
-        text: '找不到要替换的文本',
-      }),
-      expect.objectContaining({
-        role: 'tool',
-        toolName: 'grep',
-        isError: true,
-        text: 'grep 执行失败',
+        stepCount: 2,
       }),
     ]);
   });
@@ -151,21 +180,62 @@ describe('projectMessagesForPip', () => {
     ]);
   });
 
-  it('最多留最近 12 张；早先卡片截头 220 字，末张流式回复取尾 480 字', () => {
-    const messages = Array.from({ length: 20 }, (_, i) => user(`${i}:${'长'.repeat(400)}`));
-    messages.push(assistant([{ type: 'text', text: `${'前'.repeat(1000)}结尾` }]));
+  it('最多留最近 18 张；早先卡片截头 420 字，末张流式回复取尾 1200 字', () => {
+    const messages = Array.from({ length: 24 }, (_, i) => user(`${i}:${'长'.repeat(500)}`));
+    messages.push(assistant([{ type: 'text', text: `${'前'.repeat(1500)}结尾` }]));
     const items = projectMessagesForPip(messages, { isRunning: true });
-    expect(items).toHaveLength(12);
-    expect(items[0]?.id).toBe('9');
+    expect(items).toHaveLength(18);
+    expect(items[0]?.id).toBe('7');
     const first = Array.from(items[0]?.text ?? '');
-    expect(first).toHaveLength(221);
+    expect(first).toHaveLength(421);
     expect(first.at(-1)).toBe('…');
-    const last = items[11];
+    const last = items[17];
     expect(last?.isStreaming).toBe(true);
-    expect(Array.from(last?.text ?? '')).toHaveLength(481);
+    expect(Array.from(last?.text ?? '')).toHaveLength(1201);
     expect(last?.text.startsWith('…')).toBe(true);
     expect(last?.text.endsWith('结尾')).toBe(true);
     expect(projectMessagesForPip(messages, { maxItems: 3 })).toHaveLength(3);
+  });
+
+  it('extractLatestTodo 提取最新未完成清单，全部完成返回 null；loadNativePipAspect 默认 portrait', () => {
+    const todo = extractLatestTodo([
+      assistant([
+        {
+          type: 'toolCall',
+          id: 't1',
+          name: 'todo',
+          arguments: {
+            todos: [
+              { content: '第一步', status: 'completed' },
+              { content: '第二步正在做', status: 'in_progress' },
+              { content: '第三步', status: 'pending' },
+            ],
+          },
+        },
+      ]),
+    ]);
+    expect(todo).toEqual({ done: 1, total: 3, current: '第二步正在做' });
+
+    const doneAll = extractLatestTodo([
+      assistant([
+        {
+          type: 'toolCall',
+          id: 't2',
+          name: 'todo',
+          arguments: { todos: [{ content: '搞定', status: 'completed' }] },
+        },
+      ]),
+    ]);
+    expect(doneAll).toBeNull();
+
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+    };
+    expect(loadNativePipAspect(storage)).toBe('portrait');
+    saveNativePipAspect(storage, 'square');
+    expect(loadNativePipAspect(storage)).toBe('square');
   });
 });
 

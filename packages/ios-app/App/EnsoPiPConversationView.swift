@@ -14,16 +14,63 @@ final class EnsoPiPViewModel: ObservableObject {
     }
 }
 
-private enum PiPPalette {
-    static let surface = Color(red: 0.07, green: 0.08, blue: 0.10)
-    static let surfaceRaised = Color(red: 0.12, green: 0.13, blue: 0.16)
-    static let text = Color.white.opacity(0.92)
-    static let muted = Color.white.opacity(0.55)
-    static let running = Color(red: 0.39, green: 0.40, blue: 0.95)
-    static let pending = Color(red: 0.96, green: 0.62, blue: 0.04)
-    static let idle = Color(red: 0.06, green: 0.72, blue: 0.51)
-    static let failed = Color(red: 0.94, green: 0.33, blue: 0.31)
-    static let offline = Color.white.opacity(0.45)
+/// 与 EnsoCode 对话区对齐的明暗双色板。
+private struct PiPTheme {
+    let isLight: Bool
+    let surface: Color
+    let surfaceRaised: Color
+    let codeBg: Color
+    let cardBg: Color
+    let border: Color
+    let text: Color
+    let muted: Color
+    let userBubbleBg: Color
+    let userBubbleBorder: Color
+    let running: Color
+    let pending: Color
+    let idle: Color
+    let failed: Color
+    let offline: Color
+
+    static let dark = PiPTheme(
+        isLight: false,
+        surface: Color(red: 0.08, green: 0.085, blue: 0.10),
+        surfaceRaised: Color(red: 0.115, green: 0.12, blue: 0.145),
+        codeBg: Color(red: 0.13, green: 0.14, blue: 0.175),
+        cardBg: Color.white.opacity(0.055),
+        border: Color.white.opacity(0.10),
+        text: Color.white.opacity(0.93),
+        muted: Color.white.opacity(0.56),
+        userBubbleBg: Color(red: 0.39, green: 0.40, blue: 0.95).opacity(0.24),
+        userBubbleBorder: Color(red: 0.49, green: 0.51, blue: 0.98).opacity(0.35),
+        running: Color(red: 0.44, green: 0.46, blue: 0.98),
+        pending: Color(red: 0.98, green: 0.68, blue: 0.14),
+        idle: Color(red: 0.16, green: 0.78, blue: 0.56),
+        failed: Color(red: 0.96, green: 0.38, blue: 0.36),
+        offline: Color.white.opacity(0.42)
+    )
+
+    static let light = PiPTheme(
+        isLight: true,
+        surface: Color(red: 0.985, green: 0.986, blue: 0.992),
+        surfaceRaised: Color(red: 0.95, green: 0.955, blue: 0.97),
+        codeBg: Color(red: 0.93, green: 0.94, blue: 0.96),
+        cardBg: Color.black.opacity(0.04),
+        border: Color.black.opacity(0.09),
+        text: Color(red: 0.10, green: 0.11, blue: 0.14),
+        muted: Color(red: 0.42, green: 0.44, blue: 0.50),
+        userBubbleBg: Color(red: 0.36, green: 0.38, blue: 0.92).opacity(0.13),
+        userBubbleBorder: Color(red: 0.36, green: 0.38, blue: 0.92).opacity(0.24),
+        running: Color(red: 0.35, green: 0.37, blue: 0.90),
+        pending: Color(red: 0.85, green: 0.49, blue: 0.02),
+        idle: Color(red: 0.05, green: 0.62, blue: 0.42),
+        failed: Color(red: 0.85, green: 0.22, blue: 0.22),
+        offline: Color.black.opacity(0.38)
+    )
+
+    static func resolve(_ name: String?) -> PiPTheme {
+        name == "light" ? .light : .dark
+    }
 }
 
 /// 会话状态到画中画展示（文案 / 颜色 / 圆相角标）的映射表。
@@ -32,13 +79,13 @@ private struct PiPStatusStyle {
     let color: Color
     let badge: EnsoMarkBadge
 
-    init(status: String) {
+    init(status: String, theme: PiPTheme) {
         switch status {
-        case "running": self.init("运行中", PiPPalette.running, .none)
-        case "pending": self.init("待确认", PiPPalette.pending, .pending)
-        case "failed": self.init("失败", PiPPalette.failed, .none)
-        case "offline": self.init("离线", PiPPalette.offline, .none)
-        default: self.init("空闲", PiPPalette.idle, .done)
+        case "running": self.init("运行中", theme.running, .none)
+        case "pending": self.init("待确认", theme.pending, .pending)
+        case "failed": self.init("失败", theme.failed, .none)
+        case "offline": self.init("离线", theme.offline, .none)
+        default: self.init("已完成", theme.idle, .done)
         }
     }
 
@@ -56,64 +103,93 @@ struct EnsoPiPConversationView: View {
 
     var body: some View {
         let snapshot = model.snapshot
-        let style = PiPStatusStyle(status: snapshot.status)
+        let theme = PiPTheme.resolve(snapshot.theme)
+        let style = PiPStatusStyle(status: snapshot.status, theme: theme)
         VStack(spacing: 0) {
-            header(snapshot, style: style)
-            Divider().overlay(Color.white.opacity(0.08))
-            feed(snapshot, accent: style.color)
-            if let hint = snapshot.pendingHint {
-                pendingBanner(hint)
+            header(snapshot, style: style, theme: theme)
+            Rectangle().fill(theme.border).frame(height: 0.5)
+            feed(snapshot, accent: style.color, theme: theme)
+            if let todo = snapshot.todo {
+                Rectangle().fill(theme.border).frame(height: 0.5)
+                todoStrip(todo, theme: theme)
+            }
+            if let detail = snapshot.pendingDetail {
+                Rectangle().fill(theme.pending.opacity(0.32)).frame(height: 0.5)
+                pendingCard(detail, theme: theme)
+            } else if let hint = snapshot.pendingHint {
+                Rectangle().fill(theme.pending.opacity(0.28)).frame(height: 0.5)
+                pendingBanner(hint, theme: theme)
             }
         }
-        .background(PiPPalette.surface)
-        .environment(\.colorScheme, .dark)
+        .background(theme.surface)
+        .environment(\.colorScheme, theme.isLight ? .light : .dark)
     }
 
-    private func header(_ snapshot: EnsoPiPSnapshot, style: PiPStatusStyle) -> some View {
+    private func header(_ snapshot: EnsoPiPSnapshot, style: PiPStatusStyle, theme: PiPTheme) -> some View {
         HStack(spacing: 7) {
-            EnsoMarkView(size: 16, color: style.color, badge: style.badge)
+            EnsoMarkView(size: 17, color: style.color, badge: style.badge)
             VStack(alignment: .leading, spacing: 1) {
                 Text(snapshot.title)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(PiPPalette.text)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(theme.text)
                     .lineLimit(1)
-                if !snapshot.projectName.isEmpty {
-                    Text(snapshot.projectName)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundColor(PiPPalette.muted)
+                let sub = [snapshot.projectName, snapshot.meta ?? ""]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · ")
+                if !sub.isEmpty {
+                    Text(sub)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(theme.muted)
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
-            Text(style.label)
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundColor(style.color)
+            HStack(spacing: 4) {
+                if snapshot.runningCount > 1 {
+                    Text("\(snapshot.runningCount) 并行")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundColor(theme.muted)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(theme.cardBg))
+                }
+                HStack(spacing: 3.5) {
+                    if snapshot.status == "running" {
+                        PiPStreamingDot(color: style.color)
+                    }
+                    Text(style.label)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(style.color)
+                }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(style.color.opacity(0.16)))
+            }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(PiPPalette.surfaceRaised)
+        .padding(.vertical, 7)
+        .background(theme.surfaceRaised)
     }
 
-    private func feed(_ snapshot: EnsoPiPSnapshot, accent: Color) -> some View {
+    private func feed(_ snapshot: EnsoPiPSnapshot, accent: Color, theme: PiPTheme) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 if snapshot.messages.isEmpty {
-                    emptyState(snapshot)
+                    emptyState(snapshot, theme: theme)
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 6) {
+                    LazyVStack(alignment: .leading, spacing: 7) {
                         ForEach(snapshot.messages) { message in
                             PiPMessageRow(
                                 message: message,
                                 isLatest: message.id == snapshot.messages.last?.id,
-                                accent: accent
+                                accent: accent,
+                                theme: theme
                             )
                         }
                     }
                     .padding(.horizontal, 10)
-                    .padding(.top, 6)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
                 }
                 Color.clear
                     .frame(height: 4)
@@ -123,7 +199,7 @@ struct EnsoPiPConversationView: View {
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
             }
             .onChange(of: scrollKey(snapshot)) { _ in
-                withAnimation(.easeOut(duration: 0.2)) {
+                withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
@@ -133,23 +209,24 @@ struct EnsoPiPConversationView: View {
     /// 新快照、新消息或流式正文增长时都需要滚到底部。
     private func scrollKey(_ snapshot: EnsoPiPSnapshot) -> String {
         let last = snapshot.messages.last
-        return "\(snapshot.updatedAt)|\(snapshot.messages.count)|\(last?.id ?? "")|\(last?.text.count ?? 0)"
+        let stepsCount = last?.steps?.count ?? 0
+        return "\(snapshot.updatedAt)|\(snapshot.messages.count)|\(last?.id ?? "")|\(last?.text.count ?? 0)|\(stepsCount)"
     }
 
-    private func emptyState(_ snapshot: EnsoPiPSnapshot) -> some View {
+    private func emptyState(_ snapshot: EnsoPiPSnapshot, theme: PiPTheme) -> some View {
         VStack(spacing: 6) {
-            EnsoMarkView(size: 26, color: PiPPalette.muted.opacity(0.6))
+            EnsoMarkView(size: 28, color: theme.muted.opacity(0.55))
             Text("等待对话输出…")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(PiPPalette.muted)
+                .foregroundColor(theme.muted)
             if let hint = connectionHint(snapshot.connectionState) {
                 Text(hint)
                     .font(.system(size: 9.5))
-                    .foregroundColor(PiPPalette.muted.opacity(0.8))
+                    .foregroundColor(theme.muted.opacity(0.8))
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 26)
+        .padding(.top, 44)
     }
 
     private func connectionHint(_ state: String) -> String? {
@@ -161,25 +238,92 @@ struct EnsoPiPConversationView: View {
         }
     }
 
-    private func pendingBanner(_ hint: String) -> some View {
+    /// 底部固定待办进度条（对齐桌面 `TodoBar`）。
+    private func todoStrip(_ todo: EnsoPiPTodoSummary, theme: PiPTheme) -> some View {
+        let ratio = todo.total > 0 ? CGFloat(todo.done) / CGFloat(todo.total) : 0
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(theme.running)
+                Text("\(todo.done)/\(todo.total)")
+                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .foregroundColor(theme.text)
+                if let current = todo.current, !current.isEmpty {
+                    Text(current)
+                        .font(.system(size: 9.5))
+                        .foregroundColor(theme.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.border)
+                    Capsule()
+                        .fill(theme.running)
+                        .frame(width: max(4, geo.size.width * ratio))
+                }
+            }
+            .frame(height: 2.5)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(theme.surfaceRaised)
+    }
+
+    /// 底部审批 / 提问详情卡（对齐桌面 `ApprovalBar` / `AskBar`）。
+    private func pendingCard(_ detail: EnsoPiPPendingDetail, theme: PiPTheme) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: detail.kind == "ask" ? "questionmark.circle.fill" : "exclamationmark.shield.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.pending)
+                Text(detail.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.pending)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("点返回处理")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(theme.pending)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(theme.pending.opacity(0.18)))
+                    .fixedSize()
+            }
+            if let summary = detail.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.system(size: 9.5, design: detail.kind == "approval" ? .monospaced : .default))
+                    .foregroundColor(theme.text.opacity(0.88))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.pending.opacity(theme.isLight ? 0.12 : 0.16))
+    }
+
+    private func pendingBanner(_ hint: String, theme: PiPTheme) -> some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(PiPPalette.pending)
+                .fill(theme.pending)
                 .frame(width: 6, height: 6)
             Text("待确认 · \(hint)")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundColor(PiPPalette.pending)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(theme.pending)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Text("点击返回处理")
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundColor(PiPPalette.pending.opacity(0.8))
+            Text("点返回处理")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(theme.pending.opacity(0.85))
                 .lineLimit(1)
                 .fixedSize()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(PiPPalette.pending.opacity(0.16))
+        .background(theme.pending.opacity(0.14))
     }
 }
 
@@ -187,89 +331,357 @@ private struct PiPMessageRow: View {
     let message: EnsoPiPMessage
     let isLatest: Bool
     let accent: Color
+    let theme: PiPTheme
 
     var body: some View {
-        if message.role == "user" {
+        switch message.role {
+        case "user":
             userBubble
-        } else if message.role == "tool" || message.isError {
-            PiPToolTag(name: message.toolName ?? "tool", detail: message.text, isError: message.isError)
-        } else if message.role == "system" {
-            Text(message.text)
-                .font(.system(size: 10).italic())
-                .foregroundColor(PiPPalette.muted)
-                .lineLimit(2)
-        } else {
+        case "thinking":
+            thinkingRow
+        case "tool-group":
+            PiPToolGroupCard(message: message, theme: theme)
+        case "tool":
+            PiPToolRow(message: message, theme: theme)
+        case "system":
+            systemBanner
+        default:
             assistantText
         }
     }
 
     private var userBubble: some View {
         HStack {
-            Spacer(minLength: 36)
+            Spacer(minLength: 28)
             Text(message.text)
-                .font(.system(size: 11.5))
-                .foregroundColor(PiPPalette.text)
-                .lineLimit(3)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .font(.system(size: 11))
+                .foregroundColor(theme.text)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
                 .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(accent.opacity(0.24))
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(theme.userBubbleBg)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .stroke(theme.userBubbleBorder, lineWidth: 0.5)
+                        )
                 )
         }
     }
 
-    private var assistantText: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            if let toolName = message.toolName {
-                PiPToolTag(name: toolName, detail: nil, isError: false)
-            }
-            if !message.text.isEmpty || message.isStreaming {
-                HStack(alignment: .lastTextBaseline, spacing: 4) {
-                    if !message.text.isEmpty {
-                        Text(message.text)
-                            .font(.system(size: 12))
-                            .foregroundColor(PiPPalette.text)
-                            .lineLimit(isLatest || message.isStreaming ? 8 : 4)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+    /// 思考过程行（对齐桌面 `thinking` 行：淡色细竖线 + 脑图标 + 流式呼吸点）。
+    private var thinkingRow: some View {
+        HStack(alignment: .top, spacing: 5) {
+            Image(systemName: "brain")
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundColor(message.isStreaming ? accent : theme.muted)
+                .padding(.top, 1.5)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(message.isStreaming ? "思考中" : "思考过程")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundColor(message.isStreaming ? accent : theme.muted)
                     if message.isStreaming {
                         PiPStreamingDot(color: accent)
                     }
                 }
+                if !message.text.isEmpty && message.text != "思考中…" {
+                    Text(message.text)
+                        .font(.system(size: 10))
+                        .foregroundColor(theme.muted)
+                        .lineLimit(message.isStreaming ? 4 : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.leading, 6)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill((message.isStreaming ? accent : theme.muted).opacity(0.38))
+                .frame(width: 1.5)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var systemBanner: some View {
+        HStack(alignment: .top, spacing: 5) {
+            Image(systemName: message.isError ? "exclamationmark.triangle.fill" : "info.circle")
+                .font(.system(size: 9.5))
+                .foregroundColor(message.isError ? theme.failed : theme.muted)
+                .padding(.top, 1.5)
+            Text(message.text)
+                .font(.system(size: 10))
+                .foregroundColor(message.isError ? theme.failed : theme.muted)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill((message.isError ? theme.failed : theme.muted).opacity(0.12))
+        )
+    }
+
+    /// 助手正文：按 Markdown 块拆分为普通段落（支持加粗/行内代码/列表）与围栏代码块，对齐对话区可读性。
+    private var assistantText: some View {
+        let blocks = PiPMarkdownBlock.parse(message.text)
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { idx, block in
+                let isTailBlock = idx == blocks.count - 1
+                switch block {
+                case .paragraph(let content):
+                    HStack(alignment: .lastTextBaseline, spacing: 4) {
+                        PiPMarkdownParagraph(
+                            text: content,
+                            fontSize: 11.5,
+                            color: theme.text,
+                            lineLimit: isLatest || message.isStreaming ? 18 : 7
+                        )
+                        if isTailBlock && message.isStreaming {
+                            PiPStreamingDot(color: accent)
+                        }
+                    }
+                case .code(let lang, let code):
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !lang.isEmpty {
+                            Text(lang)
+                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                .foregroundColor(theme.muted)
+                        }
+                        Text(code)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundColor(theme.text.opacity(0.9))
+                            .lineLimit(isLatest || message.isStreaming ? 10 : 5)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(theme.codeBg)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(theme.border, lineWidth: 0.5)
+                            )
+                    )
+                }
+            }
+            if blocks.isEmpty && message.isStreaming {
+                PiPStreamingDot(color: accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct PiPToolTag: View {
-    let name: String
-    let detail: String?
-    let isError: Bool
+/// 单条工具行（对齐桌面 `StepDot + 工具标签 + 参数摘要 + 报错一行预览`）。
+private struct PiPToolRow: View {
+    let message: EnsoPiPMessage
+    let theme: PiPTheme
 
     var body: some View {
-        let tint = isError ? PiPPalette.failed : PiPPalette.muted
-        HStack(spacing: 4) {
-            Image(systemName: isError ? "exclamationmark.triangle.fill" : "terminal")
-                .font(.system(size: 8.5, weight: .semibold))
-            Text(name)
-                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
-            if let detail, !detail.isEmpty {
+        let state = message.toolState ?? (message.isError ? "error" : (message.isStreaming ? "running" : "ok"))
+        let isErr = state == "error" || message.isError
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                PiPStepDot(state: state, theme: theme)
+                if let name = message.toolName, !name.isEmpty {
+                    Text(name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(isErr ? theme.failed : theme.text.opacity(0.82))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundColor(isErr ? theme.failed.opacity(0.9) : theme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            if let detail = message.detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundColor(tint.opacity(0.85))
-                    .lineLimit(1)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(isErr ? theme.failed.opacity(0.9) : theme.muted)
+                    .lineLimit(2)
+                    .padding(.leading, 12)
             }
         }
-        .foregroundColor(tint)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(tint.opacity(isError ? 0.16 : 0.12))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isErr ? theme.failed.opacity(0.13) : theme.cardBg)
         )
+    }
+}
+
+/// 折叠工具过程组（对齐桌面 `tool-group`：组头总结 + 尾段最多 3 步明细，避免刷屏）。
+private struct PiPToolGroupCard: View {
+    let message: EnsoPiPMessage
+    let theme: PiPTheme
+
+    var body: some View {
+        let state = message.toolState ?? (message.isError ? "error" : (message.isStreaming ? "running" : "ok"))
+        let isErr = state == "error" || message.isError
+        let steps = message.steps ?? []
+        let total = message.stepCount ?? steps.count
+        let hidden = max(0, total - steps.count)
+        VStack(alignment: .leading, spacing: 3.5) {
+            HStack(spacing: 5) {
+                PiPStepDot(state: state, theme: theme)
+                Text(message.text)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(isErr ? theme.failed : theme.text.opacity(0.84))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if total > 1 {
+                    Text("\(total) 步")
+                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(theme.muted)
+                }
+            }
+            if hidden > 0 {
+                Text("… 前面还有 \(hidden) 步")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(theme.muted.opacity(0.75))
+                    .padding(.leading, 12)
+            }
+            ForEach(steps) { step in
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                        PiPStepDot(state: step.state, theme: theme)
+                        Text(step.summary)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundColor(step.state == "error" ? theme.failed : theme.muted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 0)
+                    }
+                    if let out = step.output, !out.isEmpty {
+                        Text(out)
+                            .font(.system(size: 8.5, design: .monospaced))
+                            .foregroundColor(step.state == "error" ? theme.failed.opacity(0.88) : theme.muted)
+                            .lineLimit(1)
+                            .padding(.leading, 12)
+                    }
+                }
+                .padding(.leading, 4)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isErr ? theme.failed.opacity(0.11) : theme.cardBg)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(isErr ? theme.failed.opacity(0.28) : theme.border, lineWidth: 0.5)
+                )
+        )
+    }
+}
+
+/// 对齐桌面 `StepDot`：running 呼吸紫点 / error 红点 / ok 绿点。
+private struct PiPStepDot: View {
+    let state: String
+    let theme: PiPTheme
+
+    var body: some View {
+        Group {
+            if state == "running" {
+                PiPStreamingDot(color: theme.running)
+            } else if state == "error" {
+                Circle().fill(theme.failed).frame(width: 5.5, height: 5.5)
+            } else {
+                Circle().fill(theme.idle.opacity(0.85)).frame(width: 4.5, height: 4.5)
+            }
+        }
+        .frame(width: 7, height: 7)
+    }
+}
+
+/// 极轻 Markdown 段落渲染：优先走 Foundation `AttributedString(markdown:)` 呈现加粗/斜体/行内代码/链接，
+/// 解析失败（如流式半截反引号）时平滑回落为纯文本。
+private struct PiPMarkdownParagraph: View {
+    let text: String
+    let fontSize: CGFloat
+    let color: Color
+    let lineLimit: Int
+
+    var body: some View {
+        let rendered: Text = {
+            if let attr = try? AttributedString(
+                markdown: text,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+            ) {
+                return Text(attr)
+            }
+            return Text(text)
+        }()
+        return rendered
+            .font(.system(size: fontSize))
+            .foregroundColor(color)
+            .lineSpacing(2)
+            .lineLimit(lineLimit)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private enum PiPMarkdownBlock {
+    case paragraph(String)
+    case code(lang: String, code: String)
+
+    /// 把回复按 ``` 围栏拆成段落与代码块，支持流式未闭合的代码块。
+    static func parse(_ source: String) -> [PiPMarkdownBlock] {
+        guard !source.isEmpty else { return [] }
+        var blocks: [PiPMarkdownBlock] = []
+        var textLines: [String] = []
+        var codeLines: [String] = []
+        var inCode = false
+        var codeLang = ""
+
+        func flushText() {
+            let joined = textLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty { blocks.append(.paragraph(joined)) }
+            textLines.removeAll()
+        }
+        func flushCode() {
+            let joined = codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !joined.isEmpty { blocks.append(.code(lang: codeLang, code: joined)) }
+            codeLines.removeAll()
+            codeLang = ""
+        }
+
+        for rawLine in source.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                if inCode {
+                    flushCode()
+                    inCode = false
+                } else {
+                    flushText()
+                    codeLang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                    inCode = true
+                }
+            } else if inCode {
+                codeLines.append(line)
+            } else {
+                textLines.append(line)
+            }
+        }
+        if inCode { flushCode() } else { flushText() }
+        return blocks
     }
 }
 

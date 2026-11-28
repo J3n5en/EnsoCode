@@ -60,9 +60,11 @@ const baseProps = {
 const pip = (active: boolean) => ({
   active,
   auto: true,
+  aspect: 'portrait' as const,
   supported: true,
   onToggle: () => {},
   onAutoChange: () => {},
+  onAspectChange: () => {},
 });
 
 describe('SessionDrawer 画中画', () => {
@@ -80,7 +82,9 @@ describe('SessionDrawer 画中画', () => {
     );
     expect(html.indexOf('推送通知')).toBeLessThan(html.indexOf('开启画中画浮窗'));
     expect(html).toContain('切后台自动画中画');
-    expect(html).toContain('切到其他 App 时浮窗实时显示当前对话');
+    expect(html).toContain('浮窗比例');
+    expect(html).toContain('竖屏大窗');
+    expect(html).toContain('浮窗支持双指放大');
     expect(html).toMatch(
       /role="switch"[^>]*aria-checked="true"|aria-checked="true"[^>]*role="switch"/
     );

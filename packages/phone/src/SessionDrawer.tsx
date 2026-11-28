@@ -118,10 +118,12 @@ interface Props {
   pip?: {
     active: boolean;
     auto: boolean;
+    aspect?: 'portrait' | 'square' | 'landscape';
     supported: boolean;
     error?: string | null;
     onToggle(): void;
     onAutoChange(next: boolean): void;
+    onAspectChange?(aspect: 'portrait' | 'square' | 'landscape'): void;
   };
   onClose(): void;
   onSelect(sessionId: string): void;
@@ -709,8 +711,45 @@ export function SessionDrawer({
                   onCheckedChange={pip.onAutoChange}
                 />
               </div>
+              {pip.onAspectChange && (
+                <div className="mt-2 flex items-center gap-2 pl-6">
+                  <span className="min-w-0 flex-1 text-muted-foreground text-sm">浮窗比例</span>
+                  <div
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
+                    role="group"
+                    aria-label="浮窗比例"
+                  >
+                    {(
+                      [
+                        { id: 'portrait', label: '竖屏大窗' },
+                        { id: 'square', label: '方形' },
+                        { id: 'landscape', label: '横屏' },
+                      ] as const
+                    ).map((opt) => {
+                      const selected = (pip.aspect ?? 'portrait') === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          disabled={!pip.supported}
+                          aria-pressed={selected}
+                          onClick={() => pip.onAspectChange?.(opt.id)}
+                          className={cn(
+                            'rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                            selected
+                              ? 'bg-background font-semibold text-foreground shadow-xs'
+                              : 'text-muted-foreground'
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-                {pip.error || '切到其他 App 时浮窗实时显示当前对话'}
+                {pip.error || '浮窗支持双指放大，切到其他 App 时实时同步对话'}
               </p>
             </div>
           )}

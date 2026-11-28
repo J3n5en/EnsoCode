@@ -66,23 +66,52 @@ export interface EnsoNativeBridge {
   stopPip?(): void;
   /** 切到后台时是否自动进入画中画 */
   setPipAuto?(enabled: boolean): void;
+  /** 调整画中画窗口纵横比：竖屏大窗 / 方形 / 横屏 */
+  setPipAspect?(aspect: NativePipAspect): void;
   /** 把当前对话的精简快照推给原生画中画浮窗 */
   updatePipState?(snapshot: NativePipSnapshot): void;
   onPipState?(cb: (state: NativePipStatus) => void): void;
 }
 
+export type NativePipAspect = 'portrait' | 'square' | 'landscape';
+
 export interface NativePipStatus {
   supported: boolean;
   active: boolean;
   auto: boolean;
+  aspect?: NativePipAspect;
   error?: string | null;
+}
+
+export interface NativePipToolStep {
+  id: string;
+  name: string;
+  summary: string;
+  state: 'running' | 'ok' | 'error';
+  output?: string | null;
+}
+
+export interface NativePipTodoSummary {
+  done: number;
+  total: number;
+  current?: string | null;
+}
+
+export interface NativePipPendingDetail {
+  kind: 'approval' | 'ask';
+  title: string;
+  summary?: string | null;
 }
 
 export interface NativePipMessage {
   id: string;
-  role: 'user' | 'assistant' | 'tool' | 'system';
+  role: 'user' | 'assistant' | 'thinking' | 'tool' | 'tool-group' | 'system';
   text: string;
   toolName: string | null;
+  toolState?: 'running' | 'ok' | 'error' | null;
+  detail?: string | null;
+  steps?: NativePipToolStep[] | null;
+  stepCount?: number | null;
   isStreaming: boolean;
   isError: boolean;
   /** 整数毫秒 */
@@ -95,10 +124,14 @@ export interface NativePipSnapshot {
   projectName: string;
   status: 'running' | 'pending' | 'idle' | 'failed' | 'offline';
   pendingHint: string | null;
+  pendingDetail?: NativePipPendingDetail | null;
+  todo?: NativePipTodoSummary | null;
+  meta?: string | null;
+  theme?: 'dark' | 'light';
   runningCount: number;
   pendingCount: number;
   connectionState: string;
-  /** 最多 12 条，旧 → 新 */
+  /** 最多 18 条，旧 → 新 */
   messages: NativePipMessage[];
   /** 整数毫秒 */
   updatedAt: number;
@@ -218,6 +251,10 @@ export function setNativePipAuto(enabled: boolean): void {
   callPip((bridge) => bridge.setPipAuto?.(enabled));
 }
 
+export function setNativePipAspect(aspect: NativePipAspect): void {
+  callPip((bridge) => bridge.setPipAspect?.(aspect));
+}
+
 export function pushNativePipState(snapshot: NativePipSnapshot): void {
   callPip((bridge) => bridge.updatePipState?.(snapshot));
 }
@@ -230,10 +267,15 @@ let lastPipStatus: NativePipStatus | null = null;
 function parsePipStatus(raw: unknown): NativePipStatus | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const value = raw as Record<string, unknown>;
+  const aspect =
+    value.aspect === 'portrait' || value.aspect === 'square' || value.aspect === 'landscape'
+      ? value.aspect
+      : 'portrait';
   return {
     supported: value.supported === true,
     active: value.active === true,
     auto: value.auto === true,
+    aspect,
     error: typeof value.error === 'string' && value.error ? value.error : null,
   };
 }

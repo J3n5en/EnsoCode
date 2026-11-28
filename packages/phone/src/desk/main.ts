@@ -17,11 +17,13 @@ import {
   hasNativeDeskProxy,
   hasNativePip,
   hasNativePush,
+  type NativePipAspect,
   type NativePipStatus,
   pushNativePipState,
   pushNativeWidgetState,
   registerNativeDeskFetcher,
   resolveNativePushGatewayOrigin,
+  setNativePipAspect,
   setNativePipAuto,
   startNativePip,
   stopNativePip,
@@ -30,8 +32,10 @@ import {
 import {
   createTrailingThrottle,
   DeskPipTracker,
+  loadNativePipAspect,
   loadNativePipAuto,
   parseInvokeSessionId,
+  saveNativePipAspect,
   saveNativePipAuto,
 } from '../pipState';
 import {
@@ -293,10 +297,19 @@ async function main(): Promise<void> {
   const deskWidget = new DeskWidgetTracker();
   /** 画中画只在 iOS 原生壳里有：浏览器 / PWA 不建追踪器，事件流零额外开销 */
   const deskPip = hasNativePip() ? new DeskPipTracker() : null;
+  const currentPipTheme = (): 'dark' | 'light' => {
+    const frameTheme = themeOfFrame(iframes.main);
+    if (frameTheme) return frameTheme.dark ? 'dark' : 'light';
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  };
   const pipSync = createTrailingThrottle(() => {
     if (!deskPip) return;
     pushNativePipState(
-      deskPip.buildSnapshot({ deviceLabel: link.deviceLabel, connectionState: link.state })
+      deskPip.buildSnapshot({
+        deviceLabel: link.deviceLabel,
+        connectionState: link.state,
+        theme: currentPipTheme(),
+      })
     );
   });
   const schedulePipSync = () => {
@@ -335,6 +348,7 @@ async function main(): Promise<void> {
     supported: true,
     active: false,
     auto: loadNativePipAuto(localStorage),
+    aspect: loadNativePipAspect(localStorage),
   };
   const pipListeners = new Set<() => void>();
   const publishPip = (next: NativePipStatus) => {
@@ -343,6 +357,7 @@ async function main(): Promise<void> {
   };
   if (deskPip) {
     setNativePipAuto(pipStatus.auto);
+    setNativePipAspect(pipStatus.aspect ?? 'portrait');
     subscribeNativePipState(publishPip);
   }
 
@@ -477,6 +492,11 @@ async function main(): Promise<void> {
             saveNativePipAuto(localStorage, enabled);
             setNativePipAuto(enabled);
             publishPip({ ...pipStatus, auto: enabled });
+          },
+          setAspect(aspect: NativePipAspect) {
+            saveNativePipAspect(localStorage, aspect);
+            setNativePipAspect(aspect);
+            publishPip({ ...pipStatus, aspect });
           },
         }
       : undefined,

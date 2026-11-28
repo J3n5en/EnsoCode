@@ -649,18 +649,34 @@ describe('nativeBridge 画中画', () => {
     expect(a).toEqual([]);
 
     native.cb?.({ supported: true, active: true, auto: false });
-    expect(a).toEqual([{ supported: true, active: true, auto: false, error: null }]);
+    expect(a).toEqual([
+      { supported: true, active: true, auto: false, aspect: 'portrait', error: null },
+    ]);
     expect(b).toHaveLength(1);
 
     const late: NativePipStatus[] = [];
     subscribeNativePipState((s) => late.push(s));
-    expect(late).toEqual([{ supported: true, active: true, auto: false, error: null }]);
+    expect(late).toEqual([
+      { supported: true, active: true, auto: false, aspect: 'portrait', error: null },
+    ]);
     expect(onPipState).toHaveBeenCalledTimes(1);
 
     offA();
-    native.cb?.({ supported: true, active: false, auto: true, error: 'interrupted' });
+    native.cb?.({
+      supported: true,
+      active: false,
+      auto: true,
+      aspect: 'square',
+      error: 'interrupted',
+    });
     expect(a).toHaveLength(1);
-    expect(b.at(-1)).toEqual({ supported: true, active: false, auto: true, error: 'interrupted' });
+    expect(b.at(-1)).toEqual({
+      supported: true,
+      active: false,
+      auto: true,
+      aspect: 'square',
+      error: 'interrupted',
+    });
     expect(late).toHaveLength(2);
 
     native.cb?.('garbage');

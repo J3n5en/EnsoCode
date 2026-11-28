@@ -42,10 +42,17 @@ export interface DeviceDrawerHost {
   wide(): boolean;
   /** iOS 原生壳的画中画实时对话浮窗；浏览器 / PWA 不传 */
   pip?: {
-    state(): { active: boolean; auto: boolean; supported: boolean; error?: string | null };
+    state(): {
+      active: boolean;
+      auto: boolean;
+      aspect?: 'portrait' | 'square' | 'landscape';
+      supported: boolean;
+      error?: string | null;
+    };
     onChange(listener: () => void): () => void;
     toggle(): void;
     setAuto(enabled: boolean): void;
+    setAspect?(aspect: 'portrait' | 'square' | 'landscape'): void;
   };
 }
 
@@ -107,6 +114,9 @@ html.kb-open .dd-sheet{padding-bottom:12px}
 .dd-switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:999px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
 .dd-switch[aria-checked=true]{background:var(--dd-primary)}
 .dd-switch[aria-checked=true]::after{transform:translateX(16px);background:var(--dd-primary-fg)}
+.dd-seg{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:var(--dd-radius);background:var(--dd-muted);flex-shrink:0}
+.dd-seg button{font-size:11px;padding:3px 7px;border-radius:calc(var(--dd-radius) - 2px);color:var(--dd-muted-fg);transition:background .12s,color .12s}
+.dd-seg button[aria-pressed=true]{background:var(--dd-bg);color:var(--dd-fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.14)}
 .dd-box{margin:2px 0;padding:10px;border:1px dashed var(--dd-border);border-radius:var(--dd-radius)}
 .dd-box p{margin:0 0 8px;font-size:12px}
 .dd-input{flex:1;min-width:0;height:36px;box-sizing:border-box;padding:0 10px;font:inherit;font-size:16px;color:inherit;background:var(--dd-bg);border:1px solid var(--dd-border);border-radius:var(--dd-radius);outline:none}
@@ -251,7 +261,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
   const renderPip = () => {
     const pip = host.pip;
     if (!pipBox || !pip) return;
-    const { active, auto, supported, error } = pip.state();
+    const { active, auto, aspect = 'portrait', supported, error } = pip.state();
     const action = button(
       { class: 'dd-line' },
       () => {
@@ -273,6 +283,32 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
       () => pip.setAuto(!auto)
     );
     autoSwitch.disabled = !supported;
+    const aspectOptions = [
+      { id: 'portrait' as const, label: '竖屏大窗' },
+      { id: 'square' as const, label: '方形' },
+      { id: 'landscape' as const, label: '横屏' },
+    ];
+    const aspectRow = pip.setAspect
+      ? el(
+          'div',
+          { class: 'dd-line' },
+          el('span', { style: 'width:16px;flex-shrink:0' }),
+          el('span', { class: 'dd-grow' }, '浮窗比例'),
+          el(
+            'div',
+            { class: 'dd-seg', role: 'group', 'aria-label': '浮窗比例' },
+            ...aspectOptions.map((opt) => {
+              const btn = button(
+                { 'aria-pressed': String(aspect === opt.id) },
+                () => pip.setAspect?.(opt.id),
+                opt.label
+              );
+              btn.disabled = !supported;
+              return btn;
+            })
+          )
+        )
+      : null;
     pipBox.replaceChildren(
       action,
       el(
@@ -282,7 +318,8 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
         el('span', { class: 'dd-grow' }, '切后台自动画中画'),
         autoSwitch
       ),
-      el('p', { class: 'dd-hint' }, error || '切到其他 App 时浮窗实时显示当前对话')
+      ...(aspectRow ? [aspectRow] : []),
+      el('p', { class: 'dd-hint' }, error || '浮窗支持双指放大，切到其他 App 时实时同步对话')
     );
   };
 
