@@ -181,6 +181,7 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
   private quicId: string | null = null;
   private ws: RelaySocketLike | null = null;
   private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private listeners = new Map<string, Set<(event: unknown) => void>>();
 
   constructor(
     private native: EnsoNativeBridge,
@@ -188,6 +189,45 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
   ) {
     ensureQuicWired(native);
     void this.start();
+  }
+
+  addEventListener(type: string, listener: (event: unknown) => void): void {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(listener);
+  }
+
+  removeEventListener(type: string, listener: (event: unknown) => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  private dispatch(type: string, event: unknown): void {
+    const set = this.listeners.get(type);
+    if (!set) return;
+    for (const fn of [...set]) {
+      try {
+        fn(event);
+      } catch {}
+    }
+  }
+
+  private emitOpen(): void {
+    this.readyState = 1;
+    this.onopen?.();
+    this.dispatch('open', { type: 'open' });
+  }
+
+  private emitMessage(event: { data: unknown }): void {
+    this.onmessage?.(event);
+    this.dispatch('message', event);
+  }
+
+  private emitError(): void {
+    this.onerror?.();
+    this.dispatch('error', { type: 'error' });
   }
 
   private async start(): Promise<void> {
@@ -205,8 +245,7 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
         this.clearFallbackTimer();
         this.active = 'quic';
         this.transportKind = 'quic';
-        this.readyState = 1;
-        this.onopen?.();
+        this.emitOpen();
       },
       onControl: (text) => {
         if (this.active !== 'quic' || this.quicId !== id) return;
@@ -214,7 +253,7 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
         try {
           const parsed = JSON.parse(text) as { type?: string };
           if (parsed.type === 'pong') {
-            this.onmessage?.({ data: 'pong' });
+            this.emitMessage({ data: 'pong' });
             return;
           }
           if (parsed.type === 'close') {
@@ -223,11 +262,11 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
             return;
           }
         } catch {}
-        this.onmessage?.({ data: text });
+        this.emitMessage({ data: text });
       },
       onBinary: (base64) => {
         if (this.active !== 'quic' || this.quicId !== id) return;
-        this.onmessage?.({ data: base64ToArrayBuffer(base64) });
+        this.emitMessage({ data: base64ToArrayBuffer(base64) });
       },
       onClose: (code, reason) => {
         quicRegistry.delete(id);
@@ -293,12 +332,11 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
     this.ws = ws;
     ws.onopen = () => {
       if (this.ws !== ws || this.active !== 'ws') return;
-      this.readyState = 1;
-      this.onopen?.();
+      this.emitOpen();
     };
     ws.onmessage = (event) => {
       if (this.ws !== ws || this.active !== 'ws') return;
-      this.onmessage?.(event);
+      this.emitMessage(event);
     };
     ws.onclose = (event) => {
       if (this.ws !== ws || this.active !== 'ws') return;
@@ -306,7 +344,7 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
     };
     ws.onerror = () => {
       if (this.ws !== ws || this.active !== 'ws') return;
-      this.onerror?.();
+      this.emitError();
     };
   }
 
@@ -315,7 +353,9 @@ class HappyEyeballsRelaySocket implements RelaySocketLike {
     this.clearFallbackTimer();
     this.active = 'closed';
     this.readyState = 3;
-    this.onclose?.({ code, reason });
+    const event = { code, reason };
+    this.onclose?.(event);
+    this.dispatch('close', event);
   }
 
   send(data: string | ArrayBuffer | Uint8Array): void {

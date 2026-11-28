@@ -21,16 +21,16 @@ final class EnsoCoreTests: XCTestCase {
         XCTAssertNil(LocalWebServer.extractDeskTunnelPath(from: "/desk"))
         XCTAssertNil(LocalWebServer.extractDeskTunnelPath(from: "/desk.html"))
         XCTAssertEqual(
-            LocalWebServer.extractDeskTunnelPath(from: "/desk/pair-1/v123/assets/index.js"),
+            LocalWebServer.extractDeskTunnelPath(from: "/desk/r/pair-1/v123/assets/index.js"),
             "r/assets/index.js"
         )
         XCTAssertEqual(
-            LocalWebServer.extractDeskTunnelPath(from: "/desk/pair-1/v123/"),
+            LocalWebServer.extractDeskTunnelPath(from: "/desk/r/pair-1/v123/"),
             "r/index.html"
         )
         XCTAssertEqual(
-            LocalWebServer.extractDeskTunnelPath(from: "/desk/li/pair-1/avatar.png"),
-            "li/avatar.png"
+            LocalWebServer.extractDeskTunnelPath(from: "/desk/li/pair-1/local-image%3A%2F%2Fsecretary-avatar%3Fs%3D1"),
+            "li/local-image%3A%2F%2Fsecretary-avatar%3Fs%3D1"
         )
     }
 
@@ -71,7 +71,7 @@ final class EnsoCoreTests: XCTestCase {
         XCTAssertEqual(String(data: deskData, encoding: .utf8), "<!doctype html><title>Desk</title>")
 
         // 2. Desk tunnel proxy hits fetcher once, second fetch hits disk cache
-        let assetURL = URL(string: "http://127.0.0.1:\(port)/desk/p1/v1/assets/app.js")!
+        let assetURL = URL(string: "http://127.0.0.1:\(port)/desk/r/p1/v1/assets/app.js")!
         let (a1, r1) = try await URLSession.shared.data(from: assetURL)
         XCTAssertEqual((r1 as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertEqual(String(data: a1, encoding: .utf8), "/*r/assets/app.js*/")

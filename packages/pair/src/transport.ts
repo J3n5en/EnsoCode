@@ -22,6 +22,8 @@ export interface RelaySocketLike {
   /** 可选车道发送（原生 QUIC 支持将 bulk 大包送往独立 Stream，不阻塞 ctrl） */
   sendOnLane?(data: ArrayBuffer | Uint8Array, lane: RelayTransportLane): void;
   close(code?: number, reason?: string): void;
+  addEventListener?(type: string, listener: (event: any) => void): void;
+  removeEventListener?(type: string, listener: (event: any) => void): void;
   /** 底层传输类型，用于诊断展示（缺省为 'ws'） */
   readonly transportKind?: RelayTransportKind;
 }

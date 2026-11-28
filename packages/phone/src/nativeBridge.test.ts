@@ -1,3 +1,4 @@
+import { attachHeartbeat } from '@enso/pair';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createNativeOrBrowserRelaySocket,
@@ -203,6 +204,77 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
     await vi.advanceTimersByTimeAsync(300);
     expect(wsCreated).toEqual(['wss://blocked-udp.example.com/v1/pair/p2?role=guest&token=t2']);
     expect(nativeMock.closeQuic).toHaveBeenCalledTimes(1);
+    sock.close();
+  });
+
+  it('兼容 attachHeartbeat 的 addEventListener/removeEventListener（WSS 回落与 QUIC 路径都不抛异常）', async () => {
+    const sent: unknown[] = [];
+    let fakeWs: {
+      readyState: number;
+      binaryType: string;
+      onopen: (() => void) | null;
+      onmessage: ((e: { data: unknown }) => void) | null;
+      onclose: ((e: { code: number; reason: string }) => void) | null;
+      onerror: (() => void) | null;
+      send: (d: unknown) => void;
+      close: () => void;
+    } | null = null;
+    class FakeWS {
+      readyState = 0;
+      binaryType = '';
+      onopen: (() => void) | null = null;
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onclose: ((e: { code: number; reason: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        fakeWs = this;
+      }
+      send(d: unknown) {
+        sent.push(d);
+      }
+      close() {
+        this.readyState = 3;
+      }
+    }
+    (globalThis as Record<string, unknown>).WebSocket = FakeWS;
+    (window as unknown as Record<string, unknown>).__ensoNative = {
+      platform: 'ios',
+      quic: true,
+      deskProxy: true,
+      openQuic: vi.fn(),
+      closeQuic: vi.fn(),
+      onQuicOpen: () => {},
+      onQuicControl: () => {},
+      onQuicBinary: () => {},
+      onQuicClose: () => {},
+    };
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 })
+    ) as unknown as typeof fetch;
+
+    const sock = createNativeOrBrowserRelaySocket({
+      relayUrl: 'https://relay-no-quic.example.com',
+      wsUrl: 'wss://relay-no-quic.example.com/v1/pair/p3?role=guest&token=t3',
+      pairId: 'p3',
+      role: 'guest',
+      token: 't3',
+    });
+    const onDead = vi.fn();
+    const rtts: number[] = [];
+    const hb = attachHeartbeat(sock as unknown as WebSocket, onDead, (ms) => rtts.push(ms));
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fakeWs).not.toBeNull();
+    fakeWs!.readyState = 1;
+    fakeWs!.onopen?.();
+    expect(sent).toEqual(['ping']);
+
+    await vi.advanceTimersByTimeAsync(25);
+    fakeWs!.onmessage?.({ data: 'pong' });
+    expect(rtts).toEqual([25]);
+    expect(onDead).not.toHaveBeenCalled();
+
+    hb.stop();
     sock.close();
   });
 

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 
@@ -181,17 +182,16 @@ public final class LocalWebServer: @unchecked Sendable {
         let method = String(parts[0])
         let rawTarget = String(parts[1])
         let pathOnly = rawTarget.split(separator: "?", maxSplits: 1).first.map(String.init) ?? "/"
-        let decodedPath = pathOnly.removingPercentEncoding ?? pathOnly
 
         if method != "GET" && method != "HEAD" {
             sendResponse(status: 405, mime: "text/plain", body: Data("method not allowed".utf8), on: conn)
             return
         }
 
-        // 1. 拦截 /desk/li/<pairId>/<rest> 与 /desk/<pairId>/<version>/<rest> 走加密隧道 + 本地磁盘缓存
-        if let deskTunnelPath = Self.extractDeskTunnelPath(from: decodedPath) {
+        // 1. 拦截 /desk/li/<pairId>/<encoded> 与 /desk/r/<pairId>/<version>/<rest>（保留原始百分号编码以对齐 sw.js）
+        if let deskTunnelPath = Self.extractDeskTunnelPath(from: pathOnly) {
             handleDeskProxy(
-                rawPath: decodedPath,
+                rawPath: pathOnly,
                 tunnelPath: deskTunnelPath,
                 headOnly: method == "HEAD",
                 on: conn
@@ -200,12 +200,13 @@ public final class LocalWebServer: @unchecked Sendable {
         }
 
         // 2. 其余路径直接读 App Bundle 内的 phone dist 静态文件
+        let decodedPath = pathOnly.removingPercentEncoding ?? pathOnly
         serveStatic(path: decodedPath, headOnly: method == "HEAD", on: conn)
     }
 
     /// 把浏览器请求的 `/desk/...` URL 转换为与 `packages/phone/public/sw.js` 完全一致的隧道资源路径：
     /// - `/desk/li/<pairId>/<rest>` -> `li/<rest>`
-    /// - `/desk/<pairId>/<version>/<rest>` -> `r/<rest>`（保留 index.html 回退）
+    /// - `/desk/r/<pairId>/<version>/<rest>` -> `r/<rest>`（保留 index.html 回退）
     /// - `/desk` 或 `/desk.html` 本身属于壳页，返回 nil 走静态文件。
     public static func extractDeskTunnelPath(from path: String) -> String? {
         let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
@@ -213,18 +214,22 @@ public final class LocalWebServer: @unchecked Sendable {
         let sub = String(trimmed.dropFirst("desk/".count))
         if sub.hasPrefix("li/") {
             let parts = sub.split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
-            guard parts.count == 3, !parts[2].isEmpty else { return nil }
+            guard parts.count == 3, !parts[1].isEmpty, !parts[2].isEmpty else { return nil }
             return "li/\(parts[2])"
         }
-        let parts = sub.split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
-        guard parts.count == 3, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
-        let rest = parts[2].isEmpty ? "index.html" : String(parts[2])
-        return "r/\(rest)"
+        if sub.hasPrefix("r/") {
+            let parts = sub.split(separator: "/", maxSplits: 3, omittingEmptySubsequences: false)
+            guard parts.count == 4, !parts[1].isEmpty, !parts[2].isEmpty else { return nil }
+            let rest = parts[3].isEmpty ? "index.html" : String(parts[3])
+            return "r/\(rest)"
+        }
+        return nil
     }
 
     private func handleDeskProxy(rawPath: String, tunnelPath: String, headOnly: Bool, on conn: NWConnection) {
         // 安全校验：禁止目录穿越
-        guard !rawPath.contains("..") else {
+        let decoded = rawPath.removingPercentEncoding ?? rawPath
+        guard !rawPath.contains(".."), !decoded.contains("..") else {
             sendResponse(status: 400, mime: "text/plain", body: Data("invalid path".utf8), on: conn)
             return
         }
@@ -265,10 +270,9 @@ public final class LocalWebServer: @unchecked Sendable {
     }
 
     private func cacheURL(for rawPath: String) -> URL {
-        let safe = rawPath
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        return cacheRoot.appendingPathComponent(safe)
+        let digest = SHA256.hash(data: Data(rawPath.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return cacheRoot.appendingPathComponent(hex)
     }
 
     private func saveCache(data: Data, mime: String, dataURL: URL, metaURL: URL) {

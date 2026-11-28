@@ -515,21 +515,24 @@ async function main(): Promise<void> {
   };
 
   /** 按版本寻址的图取到过就留本地副本：冷启动不等桌面，桌面那边换了图地址会变 */
+  const cacheStorage = typeof caches === 'undefined' ? null : caches;
   const deskImageUrl = (path: string) =>
     `${location.origin}/desk/li/${encodeURIComponent(device.pairId)}/${path.slice(3)}`;
   const fetchDeskImage = async (path: string): Promise<DeskAsset> => {
     const url = deskImageUrl(path);
-    const hit = await withTimeout(
-      cachedRemoteImage(caches, url).catch(() => undefined),
-      STORAGE_TIMEOUT_MS,
-      undefined
-    );
+    const hit = cacheStorage
+      ? await withTimeout(
+          cachedRemoteImage(cacheStorage, url).catch(() => undefined),
+          STORAGE_TIMEOUT_MS,
+          undefined
+        )
+      : undefined;
     if (hit) {
       const mime = hit.headers.get('content-type') ?? 'application/octet-stream';
       return { status: 200, mime, body: new Uint8Array(await hit.arrayBuffer()) };
     }
     const asset = await fetchDeskAsset(path);
-    void storeRemoteImage(caches, url, asset).catch(() => {});
+    if (cacheStorage) void storeRemoteImage(cacheStorage, url, asset).catch(() => {});
     return asset;
   };
 
@@ -558,8 +561,9 @@ async function main(): Promise<void> {
 
   /** 某个构建曾完整起来过（资源都在 SW 缓存里）：可以不等宿主，直接起 renderer */
   const cachedBuild = async (meta: DeskMeta): Promise<boolean> => {
+    if (!cacheStorage) return false;
     try {
-      const ready = caches
+      const ready = cacheStorage
         .open(`${DESK_CACHE_PREFIX}${meta.version}`)
         .then((cache) => buildReady(cache, location.origin, deskBase(device.pairId, meta.version)));
       return await withTimeout(ready, STORAGE_TIMEOUT_MS, false);
@@ -569,9 +573,9 @@ async function main(): Promise<void> {
   };
 
   const markReady = async (build: string): Promise<void> => {
-    if (!build) return;
+    if (!build || !cacheStorage) return;
     try {
-      const cache = await caches.open(`${DESK_CACHE_PREFIX}${build}`);
+      const cache = await cacheStorage.open(`${DESK_CACHE_PREFIX}${build}`);
       await markBuildReady(cache, location.origin, deskBase(device.pairId, build));
     } catch {}
   };
@@ -610,7 +614,8 @@ async function main(): Promise<void> {
 
   /** 快照里的远程图换成本地副本；没有副本的去掉，不显示裂图（快照不跑脚本，也可能不经 SW） */
   const localSnapshotImage = async (src: string): Promise<string | null> => {
-    const hit = await snapshotImage(caches, new URL(src, location.origin).href);
+    if (!cacheStorage) return null;
+    const hit = await snapshotImage(cacheStorage, new URL(src, location.origin).href);
     if (!hit) return null;
     const url = URL.createObjectURL(await hit.blob());
     snapshotBlobs.push(url);
@@ -780,23 +785,27 @@ async function main(): Promise<void> {
     `${DESK_CACHE_PREFIX}${current.version}`,
     devices.map((d) => d.pairId)
   );
-  void pruneRemoteImages(
-    caches,
-    devices.map((d) => d.pairId)
-  ).catch(() => {});
+  if (cacheStorage) {
+    void pruneRemoteImages(
+      cacheStorage,
+      devices.map((d) => d.pairId)
+    ).catch(() => {});
+  }
 
   // 上一次启动的构建保留到下次：升级时 SW 从中复用内容未变的带指纹文件
   const keep = new Set([current.version, cached?.version].map((v) => `${DESK_CACHE_PREFIX}${v}`));
-  void caches
-    .keys()
-    .then((keys) =>
-      Promise.all(
-        keys
-          .filter((k) => k.startsWith(DESK_CACHE_PREFIX) && !keep.has(k))
-          .map((k) => caches.delete(k))
+  if (cacheStorage) {
+    void cacheStorage
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((k) => k.startsWith(DESK_CACHE_PREFIX) && !keep.has(k))
+            .map((k) => cacheStorage.delete(k))
+        )
       )
-    )
-    .catch(() => {});
+      .catch(() => {});
+  }
 
   if (launched && cached.version === current.version) return;
   // 桌面已升级（或首次）：换到新构建，旧构建的快照也不再适用
