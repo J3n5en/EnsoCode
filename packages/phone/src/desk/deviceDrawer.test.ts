@@ -136,6 +136,7 @@ describe('createDeviceDrawer 画中画', () => {
       active: false,
       auto: false,
       aspect: 'portrait' as 'portrait' | 'square' | 'landscape',
+      follow: 'opened' as 'opened' | 'latest',
       supported: true,
     };
     const listeners = new Set<() => void>();
@@ -145,6 +146,7 @@ describe('createDeviceDrawer 画中画', () => {
     });
     const setAuto = vi.fn();
     const setAspect = vi.fn();
+    const setFollow = vi.fn();
     const pip = {
       state: () => state,
       onChange: (listener: () => void) => {
@@ -154,6 +156,7 @@ describe('createDeviceDrawer 画中画', () => {
       toggle,
       setAuto,
       setAspect,
+      setFollow,
     };
     const { drawer } = setup({ pip });
     drawer.open();
@@ -165,6 +168,8 @@ describe('createDeviceDrawer 画中画', () => {
     expect(setAuto).toHaveBeenCalledWith(true);
     buttonByText('方形')?.click();
     expect(setAspect).toHaveBeenCalledWith('square');
+    buttonByText('最新活跃')?.click();
+    expect(setFollow).toHaveBeenCalledWith('latest');
 
     state = { ...state, auto: true };
     for (const l of listeners) l();

@@ -25,6 +25,7 @@ export function createSilenceTurnTool(): ToolDefinition {
           },
         ],
         details: { silenced: true },
+        terminate: true,
       };
     },
   };

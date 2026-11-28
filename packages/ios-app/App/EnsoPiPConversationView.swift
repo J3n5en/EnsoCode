@@ -371,38 +371,52 @@ private struct PiPMessageRow: View {
         }
     }
 
-    /// 思考过程行（对齐桌面 `thinking` 行：淡色细竖线 + 脑图标 + 流式呼吸点）。
+    /// 思考过程行（对齐桌面折叠风格：已完成收成一行「思考了 Xs」，流式时才展示尾部 3 行预览）。
     private var thinkingRow: some View {
-        HStack(alignment: .top, spacing: 5) {
-            Image(systemName: "brain")
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundColor(message.isStreaming ? accent : theme.muted)
-                .padding(.top, 1.5)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(message.isStreaming ? "思考中" : "思考过程")
+        Group {
+            if message.isStreaming {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "brain")
                         .font(.system(size: 9.5, weight: .medium))
-                        .foregroundColor(message.isStreaming ? accent : theme.muted)
-                    if message.isStreaming {
-                        PiPStreamingDot(color: accent)
+                        .foregroundColor(accent)
+                        .padding(.top, 1.5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text("思考中")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(accent)
+                            PiPStreamingDot(color: accent)
+                        }
+                        if !message.text.isEmpty && message.text != "思考中…" {
+                            Text(message.text)
+                                .font(.system(size: 9.5))
+                                .foregroundColor(theme.muted)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                if !message.text.isEmpty && message.text != "思考中…" {
-                    Text(message.text)
-                        .font(.system(size: 10))
-                        .foregroundColor(theme.muted)
-                        .lineLimit(message.isStreaming ? 4 : 1)
-                        .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 6)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(accent.opacity(0.38))
+                        .frame(width: 1.5)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(theme.muted.opacity(0.65))
+                    Text(message.text.isEmpty ? "思考过程" : message.text)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundColor(theme.muted)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 1)
             }
         }
-        .padding(.leading, 6)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill((message.isStreaming ? accent : theme.muted).opacity(0.38))
-                .frame(width: 1.5)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var systemBanner: some View {
@@ -523,7 +537,8 @@ private struct PiPToolRow: View {
     }
 }
 
-/// 折叠工具过程组（对齐桌面 `tool-group`：组头总结 + 尾段最多 3 步明细，避免刷屏）。
+/// 折叠过程组（对齐桌面「已工作 XmYs」紧凑收起行：无 steps 时只显示轻量标题与一行摘要；
+/// 仅当显式传入 steps 时再展开子步）。
 private struct PiPToolGroupCard: View {
     let message: EnsoPiPMessage
     let theme: PiPTheme
@@ -533,59 +548,90 @@ private struct PiPToolGroupCard: View {
         let isErr = state == "error" || message.isError
         let steps = message.steps ?? []
         let total = message.stepCount ?? steps.count
-        let hidden = max(0, total - steps.count)
-        VStack(alignment: .leading, spacing: 3.5) {
-            HStack(spacing: 5) {
-                PiPStepDot(state: state, theme: theme)
-                Text(message.text)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(isErr ? theme.failed : theme.text.opacity(0.84))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if total > 1 {
-                    Text("\(total) 步")
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+        if steps.isEmpty && !isErr {
+            // 桌面同款收起态：「› 已工作 1m48s」+ 一行淡色摘要，不占大卡片空间
+            VStack(alignment: .leading, spacing: 1.5) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(theme.muted.opacity(0.65))
+                    Text(message.text)
+                        .font(.system(size: 9.5, weight: .medium))
                         .foregroundColor(theme.muted)
-                }
-            }
-            if hidden > 0 {
-                Text("… 前面还有 \(hidden) 步")
-                    .font(.system(size: 8.5))
-                    .foregroundColor(theme.muted.opacity(0.75))
-                    .padding(.leading, 12)
-            }
-            ForEach(steps) { step in
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 5) {
-                        PiPStepDot(state: step.state, theme: theme)
-                        Text(step.summary)
-                            .font(.system(size: 9.5, design: .monospaced))
-                            .foregroundColor(step.state == "error" ? theme.failed : theme.muted)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 0)
-                    }
-                    if let out = step.output, !out.isEmpty {
-                        Text(out)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if total > 1 {
+                        Text("\(total) 步")
                             .font(.system(size: 8.5, design: .monospaced))
-                            .foregroundColor(step.state == "error" ? theme.failed.opacity(0.88) : theme.muted)
-                            .lineLimit(1)
-                            .padding(.leading, 12)
+                            .foregroundColor(theme.muted.opacity(0.7))
                     }
                 }
-                .padding(.leading, 4)
+                if let detail = message.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 9))
+                        .foregroundColor(theme.muted.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.leading, 11)
+                }
             }
+            .padding(.vertical, 1.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let hidden = max(0, total - steps.count)
+            VStack(alignment: .leading, spacing: 3.5) {
+                HStack(spacing: 5) {
+                    PiPStepDot(state: state, theme: theme)
+                    Text(message.text)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(isErr ? theme.failed : theme.text.opacity(0.84))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if total > 1 {
+                        Text("\(total) 步")
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundColor(theme.muted)
+                    }
+                }
+                if hidden > 0 {
+                    Text("… 前面还有 \(hidden) 步")
+                        .font(.system(size: 8.5))
+                        .foregroundColor(theme.muted.opacity(0.75))
+                        .padding(.leading, 12)
+                }
+                ForEach(steps) { step in
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 5) {
+                            PiPStepDot(state: step.state, theme: theme)
+                            Text(step.summary)
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundColor(step.state == "error" ? theme.failed : theme.muted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 0)
+                        }
+                        if let out = step.output, !out.isEmpty {
+                            Text(out)
+                                .font(.system(size: 8.5, design: .monospaced))
+                                .foregroundColor(step.state == "error" ? theme.failed.opacity(0.88) : theme.muted)
+                                .lineLimit(1)
+                                .padding(.leading, 12)
+                        }
+                    }
+                    .padding(.leading, 4)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isErr ? theme.failed.opacity(0.11) : theme.cardBg)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(isErr ? theme.failed.opacity(0.28) : theme.border, lineWidth: 0.5)
+                    )
+            )
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isErr ? theme.failed.opacity(0.11) : theme.cardBg)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(isErr ? theme.failed.opacity(0.28) : theme.border, lineWidth: 0.5)
-                )
-        )
     }
 }
 

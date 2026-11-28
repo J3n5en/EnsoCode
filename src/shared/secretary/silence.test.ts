@@ -41,6 +41,78 @@ describe('静默回传', () => {
     ).toBe(false);
   });
 
+  it('插件投递与 agent-notification 触发的静默回合以及 turn_discard 都不通知，用户手打消息不静默', () => {
+    const callSilence = {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 't1', name: 'silence_turn' }],
+    };
+    // 插件投递（role: custom + pluginSource）+ silence_turn：即便模型多吐了文本也判静默
+    expect(
+      turnRequestedSilence([
+        {
+          role: 'custom',
+          pluginSource: { pluginId: 'enso.tgclient', name: 'Telegram' },
+          content: [{ type: 'text', text: '[Telegram] 群聊闲聊' }],
+        },
+        callSilence,
+        { role: 'toolResult', toolName: 'silence_turn', content: [{ type: 'text', text: 'ok' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'Silenced.' }] },
+      ])
+    ).toBe(true);
+
+    // <agent-notification> 提醒触发 + silence_turn
+    expect(
+      turnRequestedSilence([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '<agent-notification>Reminder due</agent-notification>' },
+          ],
+        },
+        callSilence,
+      ])
+    ).toBe(true);
+
+    // 插件投递 + turn_discard 成功：不打扰用户；若 turn_discard 报错则不静默
+    expect(
+      turnRequestedSilence([
+        {
+          role: 'custom',
+          pluginSource: { pluginId: 'enso.github', name: 'GitHub' },
+          content: [{ type: 'text', text: '[GitHub] noise' }],
+        },
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'd1', name: 'turn_discard' }] },
+        { role: 'toolResult', toolName: 'turn_discard', isError: false, content: [] },
+      ])
+    ).toBe(true);
+    expect(
+      turnRequestedSilence([
+        {
+          role: 'custom',
+          pluginSource: { pluginId: 'enso.github', name: 'GitHub' },
+          content: [{ type: 'text', text: '[GitHub] noise' }],
+        },
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'd1', name: 'turn_discard' }] },
+        { role: 'toolResult', toolName: 'turn_discard', isError: true, content: [] },
+      ])
+    ).toBe(false);
+
+    // 用户自己打字触发 + turn_discard：仍应正常通知（因为模型可能在同一轮回答了用户）
+    expect(
+      turnRequestedSilence([
+        { role: 'user', content: [{ type: 'text', text: '今天周几' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '周六' },
+            { type: 'toolCall', id: 'd1', name: 'turn_discard' },
+          ],
+        },
+        { role: 'toolResult', toolName: 'turn_discard', isError: false, content: [] },
+      ])
+    ).toBe(false);
+  });
+
   it('隐藏从回传消息到静默回复，用户自己的回合留着', () => {
     const messages = [
       { role: 'user', content: [{ type: 'text', text: '你好' }] },

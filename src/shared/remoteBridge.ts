@@ -62,6 +62,8 @@ export interface RemoteBridge {
   vapidPublicKey?(): string | null;
   setPushSubscription?(subscription: RemotePushSubscription | null): void;
   setPushPending?(pending: RemotePushPending): void;
+  /** 通知父壳当前正在查看的会话（供 iOS 画中画「跟随当前打开」模式实时切换） */
+  setViewedSession?(sessionId: string | null): void;
 }
 
 /** web-preload 额外挂到 window.electronAPI.remote；桌面 preload 不提供 */
