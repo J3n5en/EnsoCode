@@ -20,6 +20,58 @@ export type PushSubscribeResult =
   | { ok: true; subscription: WebPushSubscription }
   | { ok: false; reason: PushFailureReason };
 
+interface NativePushBridge {
+  readonly push?: boolean;
+  subscribePush?(vapidPublicKey: string, gatewayOrigin: string): Promise<PushSubscribeResult>;
+  unsubscribePush?(): void;
+}
+
+type NativePushGatewayResolver = () => Promise<string | null>;
+
+/** 原生 iOS 壳注入的推送桥接；完整版按钮在 iframe 里时也识别顶层窗口 */
+function nativePushBridge(): NativePushBridge | null {
+  if (typeof window === 'undefined') return null;
+  const readFrom = (view: Window): NativePushBridge | null => {
+    const candidate = (view as unknown as { __ensoNative?: NativePushBridge }).__ensoNative;
+    if (candidate?.push && typeof candidate.subscribePush === 'function') return candidate;
+    return null;
+  };
+  const selfBridge = readFrom(window);
+  if (selfBridge) return selfBridge;
+  try {
+    if (window.top && window.top !== window) return readFrom(window.top);
+  } catch {}
+  return null;
+}
+
+/** 壳页注册 APNs 网关解析器（按当前连接的中继 `/healthz` 判断是否启用 APNs），同源 iframe 共享 */
+export function setNativePushGatewayResolver(resolver: NativePushGatewayResolver | null): void {
+  if (typeof window === 'undefined') return;
+  (
+    window as unknown as { __ensoPushGatewayResolver?: NativePushGatewayResolver | null }
+  ).__ensoPushGatewayResolver = resolver;
+}
+
+async function resolveNativeGatewayOrigin(): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  const readResolver = (view: Window): NativePushGatewayResolver | null => {
+    const fn = (view as unknown as { __ensoPushGatewayResolver?: NativePushGatewayResolver | null })
+      .__ensoPushGatewayResolver;
+    return typeof fn === 'function' ? fn : null;
+  };
+  let resolver = readResolver(window);
+  try {
+    if (!resolver && window.top && window.top !== window) resolver = readResolver(window.top);
+  } catch {}
+  if (!resolver) return null;
+  try {
+    const origin = await resolver();
+    return typeof origin === 'string' && origin.startsWith('https://') ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
 function viewStandalone(view: Window): boolean {
   return (
     view.matchMedia('(display-mode: standalone)').matches ||
@@ -38,6 +90,7 @@ export function isStandalone(): boolean {
 }
 
 export function isPushSupported(): boolean {
+  if (nativePushBridge()) return true;
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
@@ -73,6 +126,16 @@ export function classifyPushError(errorName: string): PushFailureReason {
 
 /** 申请权限并订阅；失败返回原因，调用方据此提示 */
 export async function subscribePush(vapidPublicKey: string): Promise<PushSubscribeResult> {
+  const native = nativePushBridge();
+  if (native?.subscribePush) {
+    try {
+      const gatewayOrigin = await resolveNativeGatewayOrigin();
+      if (!gatewayOrigin) return { ok: false, reason: 'service-unreachable' };
+      return await native.subscribePush(vapidPublicKey, gatewayOrigin);
+    } catch {
+      return { ok: false, reason: 'subscribe-failed' };
+    }
+  }
   if (!isPushSupported()) return { ok: false, reason: 'unsupported' };
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return { ok: false, reason: 'permission-denied' };
@@ -101,6 +164,13 @@ export async function subscribePush(vapidPublicKey: string): Promise<PushSubscri
 
 /** 本地退订（配合上行 push-unsubscribe 使用） */
 export async function unsubscribePush(): Promise<void> {
+  const native = nativePushBridge();
+  if (native) {
+    try {
+      native.unsubscribePush?.();
+    } catch {}
+    return;
+  }
   if (!('serviceWorker' in navigator)) return;
   try {
     const registration = await navigator.serviceWorker.ready;

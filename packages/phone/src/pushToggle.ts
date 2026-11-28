@@ -48,7 +48,7 @@ export async function turnPushOn(key: string, deps: PushToggleDeps): Promise<Pus
 export const PUSH_ERROR_TEXT: Record<PushFailureReason, string> = {
   unsupported: '当前浏览器不支持推送。',
   'permission-denied': '通知权限被拒绝，请在浏览器站点设置中允许后重试。',
-  'service-unreachable': '无法连接 Google 推送服务（FCM），请检查网络或代理后重试。',
+  'service-unreachable': '无法连接推送服务，请检查网络或确认当前中继已启用推送。',
   'subscribe-failed': '订阅失败，请稍后重试。',
 };
 

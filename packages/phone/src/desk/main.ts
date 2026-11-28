@@ -13,8 +13,19 @@ import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
 import { installKeyboardInset } from '../keyboard';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
-import { hasNativeDeskProxy, registerNativeDeskFetcher } from '../nativeBridge';
-import { isStandalone, PHONE_PUSH_ENABLED_KEY, pushAvailability, subscribePush } from '../push';
+import {
+  hasNativeDeskProxy,
+  hasNativePush,
+  registerNativeDeskFetcher,
+  resolveNativePushGatewayOrigin,
+} from '../nativeBridge';
+import {
+  isStandalone,
+  PHONE_PUSH_ENABLED_KEY,
+  pushAvailability,
+  setNativePushGatewayResolver,
+  subscribePush,
+} from '../push';
 import { acceptPushSubscription, pushDeps, turnPushOff, turnPushOn } from '../pushToggle';
 import { watchShellUpdate } from '../shellUpdate';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
@@ -305,6 +316,9 @@ async function main(): Promise<void> {
       getPrefetch: () => collectPrefetchItems(reads),
       onPushConfig: (key) => {
         publishLink(reduceDeskLink(link, { type: 'push-config', key }));
+        if (hasNativePush()) {
+          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relay));
+        }
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) !== 'on') return;
         // 已经允许过：刷新订阅不需要再弹权限
         void subscribePush(key).then((result) => {
@@ -542,6 +556,11 @@ async function main(): Promise<void> {
   if (nativeDeskProxy) {
     registerNativeDeskFetcher(fetchDeskResource);
   }
+  window.addEventListener('enso:open-session', (event) => {
+    const detail = (event as CustomEvent<{ sessionId?: unknown }>).detail;
+    const sessionId = parseSessionId(detail?.sessionId);
+    if (sessionId) focusSession(sessionId);
+  });
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (event) => {
       const data = event.data as { type?: unknown; path?: unknown; sessionId?: unknown } | null;

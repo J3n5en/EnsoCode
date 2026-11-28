@@ -51,12 +51,12 @@ describe('POST /v1/pair/request 的公钥校验', () => {
 });
 
 describe('健康检查与 WebSocket Upgrade 路由（与 Go 中继对齐）', () => {
-  it('GET /healthz 返回 { ok: true, quic: false } 并带 CORS 头', async () => {
+  it('GET /healthz 返回 { ok: true, quic: false, apns: false } 并带 CORS 头', async () => {
     const { env } = fakeEnv();
     const res = await worker.fetch(new Request('https://relay/healthz'), env);
     expect(res.status).toBe(200);
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    expect(await res.json()).toEqual({ ok: true, quic: false });
+    expect(await res.json()).toEqual({ ok: true, quic: false, apns: false });
   });
 
   it('Upgrade 头大小写不敏感匹配 WebSocket', async () => {

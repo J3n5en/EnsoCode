@@ -17,6 +17,35 @@ final class EnsoCoreTests: XCTestCase {
         }
     }
 
+    func testWebPushAes128GcmDecryptMatchesNodeWebPushVector() throws {
+        // 由 Node `web-push@3` 真实加密生成的 RFC 8291 (aes128gcm) 向量，验证跨语言完全互通
+        let privRaw = Data(base64Encoded: "V/e+tQlacuWCtqUdY9Yro2AApuh6gWRNDVbXkoupirk=")!
+        let pubX963 = Data(base64Encoded: "BOPaN7SWJ8FSok+CNlm+VQY4MpYDWT/OEOHVtJdKu/jJm6LWB2GJiwDVagQSGb7UimUkuGhaSxFV8Y5RBn5MjCg=")!
+        let auth = Data(base64Encoded: "LVdRQGAIMCCW7QPTvTppgA==")!
+        let cipherB64 = "H2n3fRbncNzU6sIPppJERwAAEABBBKM6QPoA2/MQfDzXYRoLdP6/QDegWqyES6/oR3EMKy3opDfJJbiv6573XSKhea373E/aeyF3BZf/EB0Ey1xEoaLd+pi3CFKZxkC4CEADUwCPBmHOsUBOIBmCyJjC4p/wIT/LVuuOF2T45I/TrL4wJZ59F0ulM7uxD23xMO4EB50LceUTa309WdA46APhgVTzGzshbq7WBo70jS7N2l4GXafpAt6Ypbf35XJM1f26pKne8CcjPVxgGb5p"
+        let material = WebPushKeyMaterial(privateKeyRaw: privRaw, publicKeyX963: pubX963, authSecret: auth)
+
+        let payload = try WebPushCrypto.decryptPushPayload(ciphertextBase64: cipherB64, keys: material)
+        XCTAssertEqual(payload.title, "EnsoCode · 测试会话")
+        XCTAssertEqual(payload.body, "命令 ls 等待审批")
+        XCTAssertEqual(payload.sessionId, "sess-1")
+        XCTAssertEqual(payload.pending, true)
+
+        // 篡改密文末字节应抛出解密失败
+        var tampered = Data(base64Encoded: cipherB64)!
+        tampered[tampered.count - 1] ^= 0xFF
+        XCTAssertThrowsError(
+            try WebPushCrypto.decryptAes128Gcm(ciphertext: tampered, privateKeyRaw: privRaw, authSecret: auth)
+        ) { err in
+            XCTAssertEqual(err as? WebPushCryptoError, .decryptFailed)
+        }
+
+        // VAPID 公钥指纹校验
+        let vHash = try WebPushCrypto.vapidKeyHash(vapidPublicKeyBase64Url: material.p256dhBase64Url)
+        XCTAssertEqual(vHash.count, 43)
+        XCTAssertThrowsError(try WebPushCrypto.vapidKeyHash(vapidPublicKeyBase64Url: "too-short"))
+    }
+
     func testExtractDeskTunnelPath() {
         XCTAssertNil(LocalWebServer.extractDeskTunnelPath(from: "/desk"))
         XCTAssertNil(LocalWebServer.extractDeskTunnelPath(from: "/desk.html"))

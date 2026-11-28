@@ -87,6 +87,20 @@ func run(args []string) int {
 	}
 
 	relaySrv := newServer(store, static, log)
+	apnsCfg, err := loadAPNSConfigFromEnv()
+	if err != nil {
+		log.Error("load apns config", "err", err)
+		return 1
+	}
+	if apnsCfg != nil {
+		gw, err := newAPNSGateway(apnsCfg)
+		if err != nil {
+			log.Error("init apns gateway", "err", err)
+			return 1
+		}
+		relaySrv.apns = gw
+		log.Info("apns gateway enabled", "topic", gw.topic)
+	}
 	srv := &http.Server{
 		Addr:              *listen,
 		Handler:           relaySrv,
