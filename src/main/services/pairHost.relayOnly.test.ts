@@ -119,15 +119,21 @@ describe('pairHost peer-joined 防重放中继期与大帧 gzip', () => {
     startPairHost();
     await vi.waitFor(() => expect(mocks.socket?.onmessage).toBeTypeOf('function'));
     mocks.socket.onopen?.();
-    vi.useFakeTimers({
-      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
-    });
+    // 只 fake Date：保护期只看 Date.now()；真实定时器留给 vi.waitFor 等 gzip/WebCrypto 落地
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(10_000);
   });
 
-  const flushIO = async (): Promise<void> => {
-    for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r));
-  };
+  const openAll = (frames: Uint8Array[]): Promise<unknown[]> =>
+    Promise.all(frames.map((frame) => openFrame(contentKey, frame).catch(() => null)));
+  const relayed = (): Promise<unknown[]> =>
+    openAll(
+      (mocks.socket?.send.mock.calls ?? [])
+        .map(([data]) => data)
+        .filter((data): data is ArrayBuffer => data instanceof ArrayBuffer)
+        .map((data) => new Uint8Array(data))
+    );
+  const eventOn = (ch: string) => expect.objectContaining({ type: 'rpc-event', ch });
 
   afterEach(() => {
     stopPairHost();
@@ -155,23 +161,18 @@ describe('pairHost peer-joined 防重放中继期与大帧 gzip', () => {
     mocks.direct = true;
     mocks.socket?.onmessage?.({ data: JSON.stringify({ type: 'peer-joined' }) });
     await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'main' });
-    await flushIO();
-    expect(link).not.toBeNull();
+    await vi.waitFor(() => expect(link).not.toBeNull());
 
-    mocks.socket?.send.mockClear();
-    mocks.directSent = [];
     link!.send({ type: 'rpc-event', cid: 'c1', ch: 'early', args: [], seq: 1 } as never);
-    await flushIO();
-    expect(mocks.directSent).toHaveLength(0);
-    expect(mocks.socket?.send).toHaveBeenCalled();
+    await vi.waitFor(async () => expect(await relayed()).toContainEqual(eventOn('early')));
+    expect(await openAll(mocks.directSent)).not.toContainEqual(eventOn('early'));
 
-    await vi.advanceTimersByTimeAsync(3_100);
-    mocks.socket?.send.mockClear();
-    mocks.directSent = [];
+    vi.setSystemTime(Date.now() + 3_100);
     link!.send({ type: 'rpc-event', cid: 'c1', ch: 'later', args: [], seq: 2 } as never);
-    await flushIO();
-    expect(mocks.directSent).toHaveLength(1);
-    expect(mocks.socket?.send).not.toHaveBeenCalled();
+    await vi.waitFor(async () =>
+      expect(await openAll(mocks.directSent)).toContainEqual(eventOn('later'))
+    );
+    expect(await relayed()).not.toContainEqual(eventOn('later'));
   });
 
   it('remote-ack 声明 gzip 后，超过阈值的大帧压缩成 gzip 帧发出且线格式兼容 gunzipRemoteFrame', async () => {
@@ -196,9 +197,7 @@ describe('pairHost peer-joined 防重放中继期与大帧 gzip', () => {
     mocks.socket?.onmessage?.({ data: JSON.stringify({ type: 'peer-joined' }) });
     await deliverFromPhone({ type: 'remote-ack', bytes: 0, gzip: true });
     await deliverFromPhone({ type: 'rpc-hello', cid: 'c1', kind: 'main' });
-    await flushIO();
-    expect(link).not.toBeNull();
-    mocks.socket?.send.mockClear();
+    await vi.waitFor(() => expect(link).not.toBeNull());
 
     const payload = {
       type: 'rpc-result',
@@ -209,14 +208,13 @@ describe('pairHost peer-joined 防重放中继期与大帧 gzip', () => {
       seq: 1,
     };
     link!.send(payload as never);
-    await flushIO();
-    expect(mocks.socket?.send).toHaveBeenCalled();
-    const sentBytes = mocks.socket?.send.mock.calls.at(-1)?.[0] as ArrayBuffer;
-    const outer = (await openFrame(contentKey, new Uint8Array(sentBytes))) as {
-      type: string;
-      data: string;
-    };
-    expect(outer.type).toBe('gzip');
+    const outer = await vi.waitFor(async () => {
+      const gzipFrame = (await relayed()).find(
+        (frame) => (frame as { type?: string } | null)?.type === 'gzip'
+      );
+      expect(gzipFrame).toBeDefined();
+      return gzipFrame as { type: 'gzip'; data: string };
+    });
     expect(await pair.gunzipRemoteFrame(outer as never)).toEqual(payload);
   });
 });
