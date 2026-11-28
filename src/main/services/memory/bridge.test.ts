@@ -429,6 +429,90 @@ describe('executeMemoryOp', () => {
     expect(deleted).toEqual([own]);
   });
 
+  describe('delete 与设置页删除同一路径', () => {
+    const ctx = { projectId: PROJECT };
+    const add = async (content: string, extra: Record<string, unknown> = {}) => {
+      const r = await createMemory(db, {
+        content,
+        spaceId: projectSpaceId(PROJECT),
+        force: true,
+        ...extra,
+      });
+      if (r.status !== 'inserted') throw new Error('setup');
+      return r.memory.id;
+    };
+    const replacesEdges = () =>
+      db
+        .prepare(
+          "SELECT older_id AS olderId, newer_id AS newerId FROM evolves WHERE content_relation = 'replaces'"
+        )
+        .all();
+    const crystalOf = async (sources: string[]) => {
+      const crystal = await add('结晶：部署约定');
+      db.prepare(
+        "UPDATE memories SET is_crystal = 1, crystal_title = 'C', source_unit_count = ? WHERE id = ?"
+      ).run(sources.length, crystal);
+      const edge = db.prepare(
+        'INSERT INTO crystallized_from (crystal_id, source_id, contribution_weight, created_at) VALUES (?, ?, ?, ?)'
+      );
+      for (const s of sources) edge.run(crystal, s, 1 / sources.length, new Date().toISOString());
+      return crystal;
+    };
+
+    it('删 replaces 链中间版本：前后版本重新接上，最新版本不受影响', async () => {
+      const v1 = await add('部署用 v1 脚本');
+      const v2 = await add('部署用 v2 脚本', { evolvesFromId: v1, evolvesRelation: 'replaces' });
+      const v3 = await add('部署用 v3 脚本', { evolvesFromId: v2, evolvesRelation: 'replaces' });
+
+      const result = await executeMemoryOp(db, 'delete', { id: v2 }, ctx);
+      expect(result).toMatchObject({
+        status: 'deleted',
+        id: v2,
+        relinked: [{ olderId: v1, newerId: v3 }],
+      });
+      expect(result).not.toHaveProperty('alsoDeletedHistory');
+      expect(getMemory(db, v2)).toBeNull();
+      expect(getMemory(db, v1)?.isLatest).toBe(false);
+      expect(getMemory(db, v3)?.isLatest).toBe(true);
+      expect(replacesEdges()).toEqual([{ olderId: v1, newerId: v3 }]);
+    });
+
+    it('删 replaces 链最新版本：只通向它的历史版本一起删，不留不可见旧行', async () => {
+      const v1 = await add('缓存用 v1');
+      const v2 = await add('缓存用 v2', { evolvesFromId: v1, evolvesRelation: 'replaces' });
+
+      expect(await executeMemoryOp(db, 'delete', { id: v2 }, ctx)).toMatchObject({
+        status: 'deleted',
+        alsoDeletedHistory: [v1],
+      });
+      expect(getMemory(db, v1)).toBeNull();
+      expect(replacesEdges()).toEqual([]);
+    });
+
+    it('删结晶来源：剩余来源够则更新计数与权重，不够则降为普通记忆', async () => {
+      const sources = [];
+      for (const x of ['a', 'b', 'c', 'd']) sources.push(await add(`来源 ${x}`));
+      const crystal = await crystalOf(sources);
+
+      expect(await executeMemoryOp(db, 'delete', { id: sources[0] }, ctx)).toMatchObject({
+        crystalsUpdated: [crystal],
+      });
+      expect(getMemory(db, crystal)).toMatchObject({ isCrystal: true, sourceUnitCount: 3 });
+      const weights = db
+        .prepare('SELECT contribution_weight AS w FROM crystallized_from WHERE crystal_id = ?')
+        .all(crystal) as { w: number }[];
+      expect(weights.map((r) => r.w)).toEqual([1 / 3, 1 / 3, 1 / 3]);
+
+      expect(await executeMemoryOp(db, 'delete', { id: sources[1] }, ctx)).toMatchObject({
+        crystalsDemoted: [crystal],
+      });
+      expect(getMemory(db, crystal)).toMatchObject({ isCrystal: false, sourceUnitCount: 0 });
+      expect(
+        db.prepare('SELECT count(*) AS n FROM crystallized_from WHERE crystal_id = ?').get(crystal)
+      ).toEqual({ n: 0 });
+    });
+  });
+
   it('search 非法载荷 → 抛错；未知 op → 抛错', async () => {
     await expect(
       executeMemoryOp(db, 'search', { query: 'q' }, { projectId: PROJECT })
@@ -786,6 +870,32 @@ describe('executeMemoryOp：秘书空间', () => {
         contentChars: Array.from('可见项目记忆').length,
       }),
       expect.objectContaining({ op: 'delete', memoryId: global, spaceId: 'global' }),
+    ]);
+  });
+
+  it('delete：可见项目里删最新版本，连带删除的历史版本逐条记审计', async () => {
+    const old = await add('周会改到周二', projectSpaceId(VISIBLE));
+    const r = await createMemory(db, {
+      content: '周会改到周三',
+      spaceId: projectSpaceId(VISIBLE),
+      evolvesFromId: old,
+      evolvesRelation: 'replaces',
+    });
+    if (r.status !== 'inserted') throw new Error('setup');
+    const latest = r.memory.id;
+
+    await expect(executeMemoryOp(db, 'delete', { id: latest }, ctx)).resolves.toMatchObject({
+      alsoDeletedHistory: [old],
+    });
+    expect(getMemory(db, old)).toBeNull();
+    expect(audit).toEqual([
+      expect.objectContaining({ op: 'delete', memoryId: latest, spaceId: projectSpaceId(VISIBLE) }),
+      expect.objectContaining({
+        op: 'delete',
+        memoryId: old,
+        spaceId: projectSpaceId(VISIBLE),
+        contentChars: Array.from('周会改到周二').length,
+      }),
     ]);
   });
 
