@@ -835,6 +835,7 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     description: 'Model and prompt used by the AI button in the Git commit panel.',
   },
   { id: 'providers.gitCommitModel', category: 'providers', title: 'Model' },
+  { id: 'providers.gitCommitPrompt', category: 'providers', title: 'Prompt' },
   {
     id: 'providers.let-the-agent-pick-subagent-models',
     category: 'providers',
@@ -854,7 +855,6 @@ export const GENERATED_SETTINGS_CATALOG: readonly SettingsSearchEntry[] = [
     title: 'Primary model',
     description: 'Default for each new turn',
   },
-  { id: 'providers.provider', category: 'providers', title: 'Provider' },
   { id: 'providers.providers', category: 'providers', title: 'Providers' },
   { id: 'providers.proxy', category: 'providers', title: 'Proxy' },
   { id: 'providers.proxy-url', category: 'providers', title: 'Proxy URL' },

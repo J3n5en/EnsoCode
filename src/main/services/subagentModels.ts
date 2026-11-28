@@ -27,8 +27,9 @@ export interface SubagentModelRef {
 /**
  * 把设置页「允许子代理指定模型」列表解析成命名引用。
  * 条目需 `enabled !== false`。物理引用还要求 provider 存在、启用且有凭证、非分类器专用、模型行启用。
- * 虚拟引用只要求目录里存在且启用，不查凭证。禁用或缺失不占去重键。
- * 同一 provider+model 去重。凭证是否真能路由仍走 resolveModelSelection。
+ * 虚拟引用只要求目录里存在且启用，不查凭证。禁用或缺失不占序号。
+ * 同一模型可配多条（不同角色描述/推理档位），按列表顺序命名 base、base#2、base#3。
+ * 凭证是否真能路由仍走 resolveModelSelection。
  */
 export function pickSubagentModelRefs(
   entries: readonly SubagentModelEntry[],
@@ -37,14 +38,11 @@ export function pickSubagentModelRefs(
 ): SubagentModelRef[] {
   const refs: SubagentModelRef[] = [];
   const named = new Map<string, number>();
-  const seen = new Set<string>();
   for (const entry of entries) {
     if (!entry || typeof entry.providerId !== 'string' || typeof entry.modelId !== 'string') {
       continue;
     }
     if (entry.enabled === false) continue;
-    const key = `${entry.providerId}\u0000${entry.modelId}`;
-    if (seen.has(key)) continue;
     let base: string;
     let providerId: string;
     let modelId: string;
@@ -65,7 +63,6 @@ export function pickSubagentModelRefs(
       providerId = provider.id;
       modelId = model.id;
     }
-    seen.add(key);
     const count = (named.get(base) ?? 0) + 1;
     named.set(base, count);
     const description = typeof entry.description === 'string' ? entry.description.trim() : '';

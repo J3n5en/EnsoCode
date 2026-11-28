@@ -589,6 +589,10 @@ export interface SettingsState {
   addSubagentModel: (entry: Omit<SubagentModelEntry, 'id'>) => SubagentModelEntry;
   updateSubagentModel: (id: string, updates: Partial<Omit<SubagentModelEntry, 'id'>>) => void;
   removeSubagentModel: (id: string) => void;
+  /** 原子替换整张列表（向导确认）；条目 id 由调用方生成 */
+  setSubagentModels: (entries: SubagentModelEntry[]) => void;
+  /** 与同一启用状态的最近邻居交换；到边界或 id 不存在时不变 */
+  moveSubagentModel: (id: string, direction: 'up' | 'down') => void;
   addVirtualModel: (entry: Omit<VirtualModelEntry, 'id'>) => VirtualModelEntry;
   updateVirtualModel: (id: string, updates: Partial<Omit<VirtualModelEntry, 'id'>>) => void;
   removeVirtualModel: (id: string) => void;

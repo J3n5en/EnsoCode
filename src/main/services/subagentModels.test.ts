@@ -110,7 +110,7 @@ describe('pickSubagentModelRefs', () => {
     ).toEqual([{ name: 'Claude/sonnet', providerId: 'p1', modelId: 'sonnet' }]);
   });
 
-  it('name 冲突时追加序号保证唯一;同一模型重复条目去重', () => {
+  it('name 冲突时追加序号保证唯一;同一模型多条目各自保留', () => {
     const providers = [
       provider({ id: 'p1', name: 'X', models: [{ id: 'm' }] }),
       provider({ id: 'p2', name: 'X', models: [{ id: 'm' }] }),
@@ -123,6 +123,40 @@ describe('pickSubagentModelRefs', () => {
     expect(pickSubagentModelRefs(entries, providers, []).map((ref) => ref.name)).toEqual([
       'X/m',
       'X/m#2',
+      'X/m#3',
+    ]);
+  });
+
+  it('同一 provider+model 多个启用条目逐条透传各自描述与推理，停用条目不占序号', () => {
+    const entries = [
+      entry({ id: 'scout', description: '调研', reasoning: 'off' }),
+      entry({ id: 'off', description: '停用', enabled: false, reasoning: 'on' }),
+      entry({ id: 'review', description: '评审', reasoning: 'on', thinkingLevel: 'xhigh' }),
+      entry({ id: 'test', description: '测试', thinkingLevel: 'low' }),
+    ];
+    expect(pickSubagentModelRefs(entries, [provider({})], [])).toEqual([
+      {
+        name: 'OpenAI/gpt-cheap',
+        providerId: 'p1',
+        modelId: 'gpt-cheap',
+        description: '调研',
+        reasoning: 'off',
+      },
+      {
+        name: 'OpenAI/gpt-cheap#2',
+        providerId: 'p1',
+        modelId: 'gpt-cheap',
+        description: '评审',
+        reasoning: 'on',
+        thinkingLevel: 'xhigh',
+      },
+      {
+        name: 'OpenAI/gpt-cheap#3',
+        providerId: 'p1',
+        modelId: 'gpt-cheap',
+        description: '测试',
+        thinkingLevel: 'low',
+      },
     ]);
   });
 

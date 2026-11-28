@@ -154,3 +154,42 @@ describe('settings subagent model availability', () => {
     expect(store.getState().providers).toEqual(providers);
   });
 });
+
+describe('settings subagent model list editing', () => {
+  const item = (id: string, enabled?: boolean) => ({
+    id,
+    providerId: 'prov',
+    modelId: 'model',
+    description: id,
+    ...(enabled === undefined ? {} : { enabled }),
+  });
+  const ids = () => settingsModule.useSettingsStore.getState().subagentModels.map((e) => e.id);
+
+  it('setSubagentModels 一次性替换整张列表并落盘', async () => {
+    const store = settingsModule.useSettingsStore;
+    store.setState({ subagentModels: [item('old')] });
+    const next = [item('a'), item('b', false)];
+    store.getState().setSubagentModels(next);
+    await flush();
+    expect(store.getState().subagentModels).toEqual(next);
+    expect(writeKey).toHaveBeenLastCalledWith(
+      'enso-settings',
+      expect.objectContaining({ state: expect.objectContaining({ subagentModels: next }) })
+    );
+  });
+
+  it('moveSubagentModel 只与同一启用状态的最近邻居交换', () => {
+    const store = settingsModule.useSettingsStore;
+    store.setState({
+      subagentModels: [item('a'), item('x', false), item('b', true), item('y', false)],
+    });
+    store.getState().moveSubagentModel('b', 'up');
+    expect(ids()).toEqual(['b', 'x', 'a', 'y']);
+    store.getState().moveSubagentModel('x', 'down');
+    expect(ids()).toEqual(['b', 'y', 'a', 'x']);
+    store.getState().moveSubagentModel('a', 'down');
+    store.getState().moveSubagentModel('b', 'up');
+    store.getState().moveSubagentModel('ghost', 'up');
+    expect(ids()).toEqual(['b', 'y', 'a', 'x']);
+  });
+});
