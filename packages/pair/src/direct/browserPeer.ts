@@ -1,5 +1,5 @@
 import type { DirectCandidate, IceServerEntry } from '../protocol';
-import type { DirectPeer, DirectPeerFactory } from './peer';
+import type { DirectChannelKind, DirectPeer, DirectPeerFactory } from './peer';
 
 /** 浏览器 / Electron renderer 侧的 DirectPeer：包一层 RTCPeerConnection，只做 DataChannel */
 
@@ -11,13 +11,14 @@ export function createBrowserDirectPeerFactory(): DirectPeerFactory | null {
 function createBrowserPeer(iceServers: IceServerEntry[]): DirectPeer {
   const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'all' });
   let dc: RTCDataChannel | null = null;
+  let bulkDc: RTCDataChannel | null = null;
   let closed = false;
   let closeEmitted = false;
   let remoteSet = false;
   const queuedCandidates: DirectCandidate[] = [];
   const iceCbs: ((c: DirectCandidate) => void)[] = [];
   const openCbs: (() => void)[] = [];
-  const messageCbs: ((b: Uint8Array) => void)[] = [];
+  const messageCbs: ((b: Uint8Array, channel?: DirectChannelKind) => void)[] = [];
   const closeCbs: (() => void)[] = [];
 
   const emitClose = (): void => {
@@ -26,21 +27,31 @@ function createBrowserPeer(iceServers: IceServerEntry[]): DirectPeer {
     for (const cb of closeCbs) cb();
   };
 
-  const attach = (channel: RTCDataChannel): void => {
-    dc = channel;
+  const attach = (channel: RTCDataChannel, kind: DirectChannelKind): void => {
+    if (kind === 'bulk') bulkDc = channel;
+    else dc = channel;
     channel.binaryType = 'arraybuffer';
     channel.onopen = () => {
-      if (!closed) for (const cb of openCbs) cb();
+      if (!closed && kind === 'ctrl') for (const cb of openCbs) cb();
     };
     channel.onmessage = (event) => {
       if (closed) return;
       const data = event.data as ArrayBuffer | string;
       const bytes =
         typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
-      for (const cb of messageCbs) cb(bytes);
+      for (const cb of messageCbs) cb(bytes, kind);
     };
-    channel.onclose = emitClose;
-    channel.onerror = emitClose;
+    if (kind === 'ctrl') {
+      channel.onclose = emitClose;
+      channel.onerror = emitClose;
+    } else {
+      channel.onclose = () => {
+        if (bulkDc === channel) bulkDc = null;
+      };
+      channel.onerror = () => {
+        if (bulkDc === channel) bulkDc = null;
+      };
+    }
   };
 
   pc.onicecandidate = (event) => {
@@ -54,7 +65,7 @@ function createBrowserPeer(iceServers: IceServerEntry[]): DirectPeer {
     if (s === 'disconnected' || s === 'failed' || s === 'closed') emitClose();
   };
   pc.ondatachannel = (event) => {
-    if (!closed) attach(event.channel);
+    if (!closed) attach(event.channel, event.channel.label === 'pair-bulk' ? 'bulk' : 'ctrl');
   };
 
   const flushCandidates = async (): Promise<void> => {
@@ -68,7 +79,8 @@ function createBrowserPeer(iceServers: IceServerEntry[]): DirectPeer {
 
   return {
     async createOffer() {
-      attach(pc.createDataChannel('pair', { ordered: true }));
+      attach(pc.createDataChannel('pair', { ordered: true }), 'ctrl');
+      attach(pc.createDataChannel('pair-bulk', { ordered: true }), 'bulk');
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       return offer.sdp ?? '';
@@ -118,10 +130,25 @@ function createBrowserPeer(iceServers: IceServerEntry[]): DirectPeer {
         return false;
       }
     },
+    sendBulk(bytes) {
+      if (closed || bulkDc?.readyState !== 'open') return false;
+      if (bulkDc.bufferedAmount > 1_048_576) return false;
+      try {
+        bulkDc.send(bytes.slice().buffer as ArrayBuffer);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     buffered: () => (dc && !closed ? dc.bufferedAmount : 0),
+    bufferedBulk: () => (bulkDc && !closed ? bulkDc.bufferedAmount : 0),
+    isBulkOpen: () => !closed && bulkDc?.readyState === 'open',
     close() {
       if (closed) return;
       closed = true;
+      try {
+        bulkDc?.close();
+      } catch {}
       try {
         dc?.close();
       } catch {}
