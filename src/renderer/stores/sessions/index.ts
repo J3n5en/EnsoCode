@@ -200,7 +200,11 @@ function hotSessionIds(
   return ids;
 }
 const parentTailInFlight = new Set<string>();
+/** 上一次给远端/主进程触发尾窗读的时刻：避免单次挂起永久占坑，切回或自动恢复都能重发 */
+const parentTailInFlightAt = new Map<string, number>();
 const olderHistoryInFlight = new Set<string>();
+/** 在途超过此时间仍未回包则视为挂起：自动重试一次，不让用户干等 20s 才出重试按钮 */
+const PARENT_TAIL_RETRY_MS = 6_000;
 /** 冷缓存清掉的 child 再被看到时补历史。实现在 store 创建后赋值。 */
 let loadViewedChildHistory: (conversationId: string) => void = () => {};
 /**
@@ -3889,6 +3893,7 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           if (!conversation) return;
           parentTailInFlight.delete(id);
+          parentTailInFlightAt.delete(id);
           const stuckSpawn = conversation.spawning && !conversation.started;
           set((state) =>
             patch(state, id, {
@@ -4764,12 +4769,20 @@ useSettingsStore.subscribe((state, previous) => {
 let lastReportedViewedId: string | null = null;
 
 async function hydrateParentHistoryTail(conversationId: string): Promise<void> {
-  if (parentTailInFlight.has(conversationId)) return;
+  const startedAt = parentTailInFlightAt.get(conversationId);
+  if (parentTailInFlight.has(conversationId)) {
+    if (startedAt !== undefined && Date.now() - startedAt < PARENT_TAIL_RETRY_MS) return;
+    // 在途超时（如手机切后台丢响应或慢链路卡住）：放行并发再拉一次，避免永久卡在「正在读取历史…」
+    parentTailInFlight.delete(conversationId);
+    parentTailInFlightAt.delete(conversationId);
+  }
   const current = useSessionsStore.getState().conversations[conversationId];
   if (!current || current.parentId || hasAuthoritativeMessages(current.messages)) return;
   const read = window.electronAPI.agent.readParentHistoryTail;
   if (!read) return;
   parentTailInFlight.add(conversationId);
+  const attemptAt = Date.now();
+  parentTailInFlightAt.set(conversationId, attemptAt);
   try {
     const result = await read(conversationId);
     if (!result.ok || result.messages.length === 0) {
@@ -4793,7 +4806,10 @@ async function hydrateParentHistoryTail(conversationId: string): Promise<void> {
     // 尾巴失败不挡 resume；worker 快照仍能补回正文
     markParentHistoryAttempted(conversationId);
   } finally {
-    parentTailInFlight.delete(conversationId);
+    if (parentTailInFlightAt.get(conversationId) === attemptAt) {
+      parentTailInFlight.delete(conversationId);
+      parentTailInFlightAt.delete(conversationId);
+    }
   }
 }
 
@@ -4873,6 +4889,7 @@ function hydrateViewedOnTransition(conversationId: string, conversation: Convers
 
 let preparingStallTimer: ReturnType<typeof setTimeout> | null = null;
 let preparingStallId: string | null = null;
+let preparingAutoRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 只看空正文的非生成态准备：这正是 Preparing 占满时间线的情形 */
 function isPreparingStallCandidate(conversation: Conversation): boolean {
@@ -4889,9 +4906,29 @@ function watchPreparingStall(state: SessionsState, viewed: string | null): void 
   const candidate = conversation && isPreparingStallCandidate(conversation) ? viewed : null;
   if (candidate === preparingStallId) return;
   if (preparingStallTimer) clearTimeout(preparingStallTimer);
+  if (preparingAutoRetryTimer) clearTimeout(preparingAutoRetryTimer);
   preparingStallTimer = null;
+  preparingAutoRetryTimer = null;
   preparingStallId = candidate;
   if (!candidate) return;
+  // 6s 仍在准备且没正文：自动清掉可能挂死的尾窗去重位并静默补拉一次尾窗 + 快照，
+  // 等价于用户手动切走再切回，避免远程链路切后台恢复后一直停在「正在读取历史…」
+  preparingAutoRetryTimer = setTimeout(() => {
+    preparingAutoRetryTimer = null;
+    const current = useSessionsStore.getState();
+    const latest = current.conversations[candidate];
+    if (viewedFromState(current) !== candidate || !latest || !isPreparingStallCandidate(latest)) {
+      return;
+    }
+    if (!latest.parentId && needsHistoryHydration(latest)) {
+      parentTailInFlight.delete(candidate);
+      parentTailInFlightAt.delete(candidate);
+      void hydrateParentHistoryTail(candidate);
+    }
+    if (needsWorkerSnapshot(latest)) {
+      void window.electronAPI.agent.requestSnapshot(candidate);
+    }
+  }, PARENT_TAIL_RETRY_MS);
   preparingStallTimer = setTimeout(() => {
     preparingStallTimer = null;
     preparingStallId = null;
@@ -4902,6 +4939,7 @@ function watchPreparingStall(state: SessionsState, viewed: string | null): void 
     }
     // 挂住的尾窗读（远程隧道断线）不能继续占着去重位，否则重试也被吞掉
     parentTailInFlight.delete(candidate);
+    parentTailInFlightAt.delete(candidate);
     useSessionsStore.setState((s) => patch(s, candidate, { syncStalled: true }));
   }, PREPARING_STALL_MS);
 }

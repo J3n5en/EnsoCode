@@ -175,4 +175,32 @@ describe('新会话 Preparing 收敛', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(chatTimelineActivity(parent())).toBeNull();
   });
+
+  it('首次尾窗读挂住时 6 秒自动重拉并自愈，无需用户切会话或干等超时', async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    readParentHistoryTail.mockImplementation(() => {
+      call += 1;
+      if (call === 1) return new Promise<ParentHistoryTailResult>(() => {});
+      return Promise.resolve({
+        ok: true,
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: '恢复的正文' }] }],
+        baseIndex: 0,
+      });
+    });
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, started: true },
+      },
+    }));
+    expect(readParentHistoryTail).toHaveBeenCalledTimes(1);
+    expect(chatTimelineActivity(parent())).toBe('loading');
+
+    await vi.advanceTimersByTimeAsync(6_100);
+    expect(readParentHistoryTail).toHaveBeenCalledTimes(2);
+    expect(parent().messages).toHaveLength(1);
+    expect(parent().syncStalled).toBeUndefined();
+    expect(chatTimelineActivity(parent())).toBeNull();
+  });
 });
