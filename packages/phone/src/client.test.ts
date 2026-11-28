@@ -1188,4 +1188,30 @@ describe('PairClient Bot 帧', () => {
     expect(events.onBotChats).toHaveBeenNthCalledWith(2, [], []);
     expect(events.onBotThreadResult).toHaveBeenCalledExactlyOnceWith(result);
   });
+
+  it('host-info 声明 frame-v2 时开启 v2 能力，snapshot 附带 v2: true', async () => {
+    const socket = await start();
+    expect(client.hostV2).toBe(false);
+    expect(socket.sent.find((m) => m.type === 'snapshot')).toEqual({
+      type: 'snapshot',
+      ...(typeof DecompressionStream === 'function' ? { v2: true } : {}),
+    });
+
+    socket.receive({
+      type: 'host-info',
+      hostname: 'Mac',
+      appVersion: '1.0.0',
+      capabilities: ['direct-v1', 'frame-v2'],
+    });
+    await settle();
+    expect(client.hostV2).toBe(true);
+
+    socket.receive({
+      type: 'host-info',
+      hostname: 'Mac',
+      appVersion: '1.0.0',
+    });
+    await settle();
+    expect(client.hostV2).toBe(false);
+  });
 });

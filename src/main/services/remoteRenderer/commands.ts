@@ -54,7 +54,12 @@ export function parseRemoteCommand(v: Record<string, unknown>): Check {
       return ok({ type: 'asset-get', id: v.id, path: v.path });
     case 'remote-ack':
       if (!isSeq(v.bytes)) return { ok: false, error: 'invalid remote-ack' };
-      return ok({ type: 'remote-ack', bytes: v.bytes, ...(v.gzip === true ? { gzip: true } : {}) });
+      return ok({
+        type: 'remote-ack',
+        bytes: v.bytes,
+        ...(v.gzip === true ? { gzip: true } : {}),
+        ...(v.v2 === true ? { v2: true } : {}),
+      });
     default:
       return { ok: false, error: 'unknown remote command' };
   }

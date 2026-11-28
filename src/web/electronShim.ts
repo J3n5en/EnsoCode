@@ -16,6 +16,7 @@ import {
   withUpsertReset,
   writeSeedOf,
 } from '@shared/remoteDelta';
+import { expandRemoteWireResult } from '@shared/remoteWireCompact';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { decodeRemoteValue, encodeRemoteValue } from '../../packages/pair/src/remote';
 import { isRemoteChannelAllowed } from '../main/services/remoteRenderer/channels';
@@ -94,10 +95,11 @@ async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown>
   const key = `${channel}\0${JSON.stringify(encoded)}`;
   if (CACHED_READS.has(channel)) {
     const json = await reads.readJson(key, (hash) => rawInvoke(channel, withIfNone(encoded, hash)));
-    const result = JSON.parse(json);
+    const expanded = () => expandRemoteWireResult(channel, JSON.parse(json));
+    const result = expanded();
     const seed = writeSeedOf(channel, result);
     if (seed) {
-      writes.seedLazy(seed.name, () => writeSeedOf(channel, JSON.parse(json))?.value);
+      writes.seedLazy(seed.name, () => writeSeedOf(channel, expanded())?.value);
     }
     return decodeRemoteValue(result);
   }

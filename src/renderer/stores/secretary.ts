@@ -223,6 +223,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
     });
     return () => {
       bound = false;
+      hydratedProposalIds.clear();
       off();
       offList();
       offOpen();
@@ -288,20 +289,30 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
 
   ensureProposal: async (proposalId) => {
     if (Object.values(get().states).some((state) => state.proposals[proposalId])) return;
-    await scanSecretaryStates();
+    await scanSecretaryStates(true);
   },
 }));
 
+/** 按需拉取过的历史终态提案 id：后续常规推送若按远端窗口裁剪掉它们，不冲回占位行 */
+const hydratedProposalIds = new Set<string>();
+
 /** 一次性重拉所有秘书状态：调用方负责先判断值得扫；在途合并 */
 let scanningStates: Promise<void> | null = null;
-async function scanSecretaryStates(): Promise<void> {
+let scanningIncludeAll = false;
+async function scanSecretaryStates(includeAllProposals = false): Promise<void> {
+  if (includeAllProposals) scanningIncludeAll = true;
   scanningStates ??= (async () => {
     try {
       const list = await window.electronAPI.secretary.list().catch(() => []);
       await Promise.all(
         list.map(async (entry) => {
-          const state = await window.electronAPI.secretary.getState(entry.id).catch(() => null);
+          const state = await window.electronAPI.secretary
+            .getState(entry.id, scanningIncludeAll ? { includeAllProposals: true } : undefined)
+            .catch(() => null);
           if (!state) return;
+          if (scanningIncludeAll) {
+            for (const id of Object.keys(state.proposals ?? {})) hydratedProposalIds.add(id);
+          }
           applySecretaryStateMerge(
             { ...state, secretaryId: state.secretaryId ?? entry.id },
             useSecretaryStore.setState,
@@ -311,6 +322,7 @@ async function scanSecretaryStates(): Promise<void> {
       );
     } finally {
       scanningStates = null;
+      scanningIncludeAll = false;
     }
   })();
   return scanningStates;
@@ -325,7 +337,29 @@ function applySecretaryStateMerge(
   const id = secretary.secretaryId ?? get().focusedId;
   if (!id) return;
   set((state) => {
-    const states = { ...state.states, [id]: secretary };
+    const prev = state.states[id];
+    let mergedSecretary = secretary;
+    if (
+      secretary.enabled &&
+      secretary.profile !== null &&
+      hydratedProposalIds.size > 0 &&
+      prev?.proposals
+    ) {
+      let extra: Record<string, SecretaryState['proposals'][string]> | null = null;
+      for (const [pid, proposal] of Object.entries(prev.proposals)) {
+        if (
+          hydratedProposalIds.has(pid) &&
+          !(pid in secretary.proposals) &&
+          proposal.status !== 'pending' &&
+          proposal.status !== 'executing'
+        ) {
+          extra ??= { ...secretary.proposals };
+          extra[pid] = proposal;
+        }
+      }
+      if (extra) mergedSecretary = { ...secretary, proposals: extra };
+    }
+    const states = { ...state.states, [id]: mergedSecretary };
     syncTakenOver(states);
     const focusedId = pickFocused(state.secretaries, state.focusedId) ?? id;
     if (focusedId !== id) return { states, focusedId };
@@ -333,9 +367,9 @@ function applySecretaryStateMerge(
     return {
       states,
       focusedId,
-      secretary,
+      secretary: mergedSecretary,
       // 设置完成后欢迎页让位给会话；档案被重来清掉时再回到欢迎页（首次启动没有档案不弹）
-      welcomeOpen: secretary.profile
+      welcomeOpen: mergedSecretary.profile
         ? false
         : before.profile !== null && before.enabled
           ? true

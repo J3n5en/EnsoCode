@@ -1,16 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import {
+  createRemoteBinaryPartAssembler,
   createRemoteOrderedStream,
   createRemotePartAssembler,
   decodeBase64,
   gunzipRemoteFrame,
   type HostToRemote,
   isHostRemoteFrame,
+  isRemoteBinaryPart,
   isRemotePart,
   type RemoteKind,
   type RemoteToHost,
   splitRemoteFrame,
 } from '@enso/pair';
+import { nodeFrameCodec } from '../pairFrameCodec';
 
 export interface NodeAsset {
   status: number;
@@ -66,6 +69,7 @@ export class NodeRemoteTunnel {
     { message: RemoteToHost; resolve: (a: NodeAsset) => void; timer?: NodeJS.Timeout }
   >();
   private parts = createRemotePartAssembler();
+  private binaryParts = createRemoteBinaryPartAssembler({ codec: nodeFrameCodec });
 
   constructor(private readonly post: (frame: RemoteToHost) => void) {}
 
@@ -85,7 +89,7 @@ export class NodeRemoteTunnel {
 
   private ack(): void {
     this.ackedBytes = this.receivedBytes;
-    this.post({ type: 'remote-ack', bytes: this.receivedBytes, gzip: true });
+    this.post({ type: 'remote-ack', bytes: this.receivedBytes, gzip: true, v2: true });
   }
 
   /** 宿主在线（含中继重建后再次 host-online）：逐个 hello 续上，补发在途资源请求 */
@@ -186,6 +190,20 @@ export class NodeRemoteTunnel {
   }
 
   receive(frame: HostToRemote, nested = false): void {
+    if (isRemoteBinaryPart(frame)) {
+      if (!nested) {
+        this.receivedBytes += frame.bin.byteLength;
+        if (this.online && this.receivedBytes - this.ackedBytes >= ACK_STEP) this.ack();
+      }
+      void this.binaryParts.push(frame).then((whole) => {
+        const type = (whole as { type?: unknown } | null)?.type;
+        if (typeof type !== 'string' || type === 'part' || type === 'bpart' || type === 'gzip') {
+          return;
+        }
+        if (isHostRemoteFrame({ type })) this.receive(whole as HostToRemote, true);
+      });
+      return;
+    }
     if (isRemotePart(frame)) {
       if (!nested) {
         this.receivedBytes += frame.data.length;
@@ -196,6 +214,7 @@ export class NodeRemoteTunnel {
         whole &&
         typeof whole.type === 'string' &&
         whole.type !== 'part' &&
+        whole.type !== 'bpart' &&
         isHostRemoteFrame(whole as { type: string })
       ) {
         this.receive(whole as HostToRemote, true);
@@ -206,7 +225,9 @@ export class NodeRemoteTunnel {
       case 'gzip':
         void gunzipRemoteFrame(frame).then((inner) => {
           const type = (inner as { type?: unknown } | null)?.type;
-          if (typeof type !== 'string' || type === 'gzip' || type === 'part') return;
+          if (typeof type !== 'string' || type === 'gzip' || type === 'part' || type === 'bpart') {
+            return;
+          }
           if (isHostRemoteFrame({ type })) this.receive(inner as HostToRemote, true);
         });
         return;
@@ -215,7 +236,8 @@ export class NodeRemoteTunnel {
         if (!pending) return;
         this.assets.delete(frame.id);
         clearTimeout(pending.timer);
-        pending.resolve({ status: frame.status, mime: frame.mime, body: decodeBase64(frame.data) });
+        const body = frame.bin instanceof Uint8Array ? frame.bin : decodeBase64(frame.data ?? '');
+        pending.resolve({ status: frame.status, mime: frame.mime, body });
         return;
       }
       case 'rpc-ready': {
@@ -247,6 +269,16 @@ export class NodeRemoteTunnel {
       case 'rpc-event': {
         const slot = this.slots.get(frame.cid);
         if (slot) this.ordered(slot, frame);
+        return;
+      }
+      case 'rpc-batch': {
+        if (!Array.isArray(frame.frames)) return;
+        for (const item of frame.frames) {
+          if (!item || typeof item !== 'object') continue;
+          if (item.type !== 'rpc-result' && item.type !== 'rpc-event') continue;
+          const slot = this.slots.get(item.cid);
+          if (slot) this.ordered(slot, item);
+        }
         return;
       }
     }

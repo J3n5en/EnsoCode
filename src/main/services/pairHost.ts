@@ -8,6 +8,7 @@ import {
   buildPairLink,
   type CatalogEntry,
   createFrameReplay,
+  createRemoteBinaryPartAssembler,
   createRemotePartAssembler,
   DEFAULT_RELAY_URL,
   DirectLink,
@@ -16,11 +17,15 @@ import {
   fromBase64Url,
   type Heartbeat,
   type HostAppearance,
+  type HostCapability,
   type HostPairSession,
   type HostToPhone,
   isConnectStuck,
+  isIncompressibleMime,
+  isRemoteBinaryPart,
   isRemotePart,
   isReplayHello,
+  openFrame,
   type PairedDevice,
   type PairScope,
   type PairSyncCursor,
@@ -30,10 +35,15 @@ import {
   type ProviderEntry,
   pollHostPairing,
   RELAY_CONNECT_TIMEOUT_MS,
+  REMOTE_BIN_PART_BYTES,
   REMOTE_GZIP_MIN_CHARS,
+  type RemoteBinaryPartAssembler,
   type RemotePartAssembler,
   revokePairing,
+  sealFrame,
+  sealFrameV2,
   shouldReplaceOnNudge,
+  splitRemoteBinaryFrame,
   splitRemoteFrame,
   startHostPairing,
   type TerminalPalette,
@@ -84,6 +94,7 @@ import type { BotSessionAccess } from './pairBotFrames';
 import { builtinRelayUrl, dialRelayUrl, publicRelayUrl } from './pairBuiltinRelay';
 import { PAIR_DIRECT_ENABLED, PAIR_STUN_SERVERS } from './pairDirectConfig';
 import { isDirectPeerAvailable, mainDirectPeerFactory, preloadDirectPeer } from './pairDirectPeer';
+import { nodeFrameCodec } from './pairFrameCodec';
 import { flushChangedMeta, requestPairMeta } from './pairMetaFlush';
 import { startPairNetworkWatch } from './pairNetworkWatch';
 import {
@@ -201,10 +212,14 @@ interface Connection {
   sendQueue: Promise<void>;
   /** 远程桌面上行大帧的分片重组 */
   remoteParts: RemotePartAssembler;
+  /** 远程桌面/配对 v2 二进制大帧的分片重组 */
+  remoteBinaryParts: RemoteBinaryPartAssembler;
   /** 远程桌面下行大帧的流控窗口 */
   remoteWindow: BulkWindow<HostToPhone>;
   /** 浏览器声明能解 gzip：大帧压缩后再发（桌面上行常是瓶颈） */
   remoteGzip: boolean;
+  /** 对端支持二进制加密帧 v2 */
+  remoteV2: boolean;
   /** 对端是完整模式（进房 snapshot 声明）：不推手机版目录/事件，跨重连保留，下次 snapshot 改写 */
   deskGuest: boolean;
   /** peer-joined 后短时间内仅走中继，避开直连抢先于重放重置到达 */
@@ -682,11 +697,19 @@ function openConnection(device: PairedDevice): void {
     receiveQueue: Promise.resolve(),
     sendQueue: Promise.resolve(),
     remoteParts: createRemotePartAssembler(),
+    remoteBinaryParts: createRemoteBinaryPartAssembler({ codec: nodeFrameCodec }),
     remoteWindow: new BulkWindow((frame) => sendRemoteFrame(conn, frame)),
     remoteGzip: false,
+    remoteV2: false,
     deskGuest: false,
     relayOnlyUntil: 0,
-    replay: createFrameReplay(),
+    replay: createFrameReplay(
+      (key, payload, nonce) =>
+        conn.remoteV2
+          ? sealFrameV2(key, payload, { nonce, codec: nodeFrameCodec })
+          : sealFrame(key, payload, nonce),
+      (key, frame) => openFrame(key, frame, { codec: nodeFrameCodec })
+    ),
   };
   conn.direct = new DirectLink({
     role: 'host',
@@ -732,8 +755,10 @@ function clearConnectionSubscription(conn: Connection): void {
   conn.ioEpoch++;
   conn.syncRevision++;
   conn.remoteParts.clear();
+  conn.remoteBinaryParts.clear();
   conn.remoteWindow.reset();
   conn.remoteGzip = false;
+  conn.remoteV2 = false;
   remoteLinkDown(conn.device.pairId);
   conn.receiveQueue = Promise.resolve();
   conn.sendQueue = Promise.resolve();
@@ -948,7 +973,12 @@ async function handleFrame(
   if (isRemotePart(payload)) {
     if (deviceScope(conn.device) !== 'operate') return;
     const assembled = conn.remoteParts.push(payload);
-    if (assembled === null || isRemotePart(assembled)) return;
+    if (assembled === null || isRemotePart(assembled) || isRemoteBinaryPart(assembled)) return;
+    payload = assembled;
+  } else if (isRemoteBinaryPart(payload)) {
+    if (deviceScope(conn.device) !== 'operate') return;
+    const assembled = await conn.remoteBinaryParts.push(payload);
+    if (assembled === null || isRemotePart(assembled) || isRemoteBinaryPart(assembled)) return;
     payload = assembled;
   }
   const parsed = parsePhoneCommand(payload);
@@ -1052,6 +1082,7 @@ async function handleFrame(
       // 只要目录；会话正文走 subscribe。peer-joined 已经 forget 过 catalog，
       // 这里再 forget 会把刚发出的 14kB 瘦目录再打一遍。
       conn.deskGuest = command.desk === true;
+      if (command.v2 === true) conn.remoteV2 = true;
       resyncGuestMeta(conn, false);
       break;
     case 'set-model': {
@@ -1151,9 +1182,11 @@ async function handleFrame(
       return;
     case 'remote-ack':
       conn.remoteGzip = command.gzip === true;
+      if (command.v2 === true) conn.remoteV2 = true;
       conn.remoteWindow.ack(command.bytes);
       return;
     case 'part':
+    case 'bpart':
       return;
     case 'spawn': {
       const check = checkSpawn(command, whitelist);
@@ -1288,6 +1321,9 @@ function remoteLink(pairId: string): RemoteLink {
     get gzip() {
       return connections.get(pairId)?.remoteGzip === true;
     },
+    get v2() {
+      return connections.get(pairId)?.remoteV2 === true;
+    },
     send(message) {
       const conn = connections.get(pairId);
       if (!conn) return;
@@ -1296,14 +1332,31 @@ function remoteLink(pairId: string): RemoteLink {
         remoteLinkDown(pairId);
         return;
       }
-      const json = JSON.stringify(message);
       const group = bulkGroupOf(message);
+      if (conn.remoteV2) {
+        const rawBytes =
+          'bin' in message && message.bin instanceof Uint8Array
+            ? message.bin.byteLength + 512
+            : Buffer.byteLength(JSON.stringify(message));
+        if (rawBytes <= REMOTE_BIN_PART_BYTES) sendRemoteFrame(conn, message);
+        else sendRemoteBinaryParts(conn, message, group);
+        return;
+      }
+      const json = JSON.stringify(message);
+      const skipGzip = message.type === 'asset' && isIncompressibleMime(message.mime);
       // 压缩是异步的，可能与后续小帧换序：rpc 帧浏览器按 seq 重排，资源按 id 对应
-      if (conn.remoteGzip && json.length >= REMOTE_GZIP_MIN_CHARS) {
+      if (conn.remoteGzip && !skipGzip && json.length >= REMOTE_GZIP_MIN_CHARS) {
+        const { generation, ioEpoch } = conn;
         void gzipAsync(Buffer.from(json))
-          .then((buf) =>
-            sendRemoteMessage(conn, { type: 'gzip' as const, data: buf.toString('base64') }, group)
-          )
+          .then((buf) => {
+            if (!connectionCurrent(conn, generation, ioEpoch)) return;
+            const b64 = buf.toString('base64');
+            if (b64.length + 24 < json.length) {
+              sendRemoteMessage(conn, { type: 'gzip' as const, data: b64 }, group);
+            } else {
+              sendRemoteMessage(conn, message, group);
+            }
+          })
           .catch((error) => console.warn('[pair] remote frame dropped', error));
       } else {
         sendRemoteMessage(conn, message, group);
@@ -1319,8 +1372,28 @@ function bulkGroupOf(message: HostToPhone): string | undefined {
   ) {
     return `rpc:${message.cid}:${message.seq}`;
   }
+  if (message.type === 'rpc-batch') {
+    const first = message.frames[0];
+    return first ? `rpc:${first.cid}:batch:${first.seq ?? 0}` : undefined;
+  }
   if (message.type === 'asset') return `asset:${message.id}`;
   return undefined;
+}
+
+function sendRemoteBinaryParts(conn: Connection, message: HostToPhone, group?: string): void {
+  const { generation, ioEpoch } = conn;
+  void splitRemoteBinaryFrame(message, randomUUID, { codec: nodeFrameCodec })
+    .then((frames) => {
+      if (!connectionCurrent(conn, generation, ioEpoch)) return;
+      if (group && frames.some((frame) => frame.type === 'bpart')) {
+        conn.remoteWindow.dropGroup(group);
+      }
+      for (const frame of frames) {
+        if (frame.type === 'bpart') conn.remoteWindow.push(frame, frame.bin.byteLength, group);
+        else sendRemoteFrame(conn, frame);
+      }
+    })
+    .catch((error) => console.warn('[pair] remote binary frame dropped', error));
 }
 
 function sendRemoteMessage(conn: Connection, message: HostToPhone, group?: string): void {
@@ -1339,7 +1412,8 @@ function sendRemoteMessage(conn: Connection, message: HostToPhone, group?: strin
 }
 
 function sendRemoteFrame(conn: Connection, frame: HostToPhone): void {
-  void enqueueSend(conn, frame, frame.type === 'part' && conn.ws?.readyState === 1);
+  const bulkPart = frame.type === 'part' || frame.type === 'bpart';
+  void enqueueSend(conn, frame, bulkPart && conn.ws?.readyState === 1);
 }
 
 function sendFrameViaRelay(conn: Connection, frame: Uint8Array): boolean {
@@ -1394,10 +1468,12 @@ async function sendMeta(conn: Connection): Promise<void> {
   };
   const vapidPublicKey = getVapidPublicKey();
   const directReady = PAIR_DIRECT_ENABLED && isDirectPeerAvailable();
+  const capabilities: HostCapability[] = directReady ? ['direct-v1', 'frame-v2'] : ['frame-v2'];
   const hostInfo = {
     hostname: os.hostname(),
     appVersion: app.getVersion(),
-    ...(directReady ? { capabilities: ['direct-v1' as const], iceServers: PAIR_STUN_SERVERS } : {}),
+    capabilities,
+    ...(directReady ? { iceServers: PAIR_STUN_SERVERS } : {}),
     ...(deviceScope(conn.device) === 'read'
       ? { readOnly: true as const }
       : { remoteDesktop: true as const }),

@@ -1,7 +1,17 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, sep } from 'node:path';
-import { encodeBase64, gzipRemoteJson, REMOTE_GZIP_MIN_CHARS } from '@enso/pair';
+import { promisify } from 'node:util';
+import { gzip as gzipCallback } from 'node:zlib';
+import {
+  encodeBase64,
+  FRAME_V2_GZIP_MIN_BYTES,
+  gzipRemoteJson,
+  isIncompressibleMime,
+  REMOTE_GZIP_MIN_CHARS,
+} from '@enso/pair';
+
+const gzipBytes = promisify(gzipCallback);
 
 /** 浏览器 renderer 的入口：先跑 web-preload（经父页面隧道实现 window.electronAPI），再加载桌面原样产物 */
 export const WEB_PRELOAD_FILE = 'web-preload.js';
@@ -114,9 +124,14 @@ export function initialAssetPaths(html: string): string[] {
 
 const estimates = new Map<string, Promise<number>>();
 
-/** 首次下载的线上字节数估算（与 asset 帧同样编码，按浏览器是否接受 gzip 计），按构建缓存 */
-export function downloadEstimate(root: string, gzip: boolean, build = ''): Promise<number> {
-  const key = `${root}\0${build}\0${gzip}`;
+/** 首次下载的线上字节数估算（与 asset 帧同样编码，按浏览器是否接受 gzip / v2 计），按构建缓存 */
+export function downloadEstimate(
+  root: string,
+  gzip: boolean,
+  build = '',
+  v2 = false
+): Promise<number> {
+  const key = `${root}\0${build}\0${gzip}\0${v2}`;
   const cached = build ? estimates.get(key) : undefined;
   if (cached) return cached;
   const task = (async () => {
@@ -125,6 +140,16 @@ export function downloadEstimate(root: string, gzip: boolean, build = ''): Promi
     let total = 0;
     for (const path of initialAssetPaths(new TextDecoder().decode(entry.body))) {
       const file = await readRendererAsset(root, path);
+      if (v2) {
+        const rawBytes = file.body.byteLength;
+        if (gzip && !isIncompressibleMime(file.mime) && rawBytes >= FRAME_V2_GZIP_MIN_BYTES) {
+          const packed = await gzipBytes(file.body);
+          total += Math.min(rawBytes, packed.byteLength);
+        } else {
+          total += rawBytes;
+        }
+        continue;
+      }
       const json = JSON.stringify({
         type: 'asset',
         id: 0,
@@ -133,8 +158,8 @@ export function downloadEstimate(root: string, gzip: boolean, build = ''): Promi
         data: encodeBase64(file.body),
       });
       total +=
-        gzip && json.length >= REMOTE_GZIP_MIN_CHARS
-          ? (await gzipRemoteJson(json)).data.length
+        gzip && json.length >= REMOTE_GZIP_MIN_CHARS && !isIncompressibleMime(file.mime)
+          ? Math.min(json.length, (await gzipRemoteJson(json)).data.length)
           : json.length;
     }
     return total;

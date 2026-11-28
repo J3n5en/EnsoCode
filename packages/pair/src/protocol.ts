@@ -40,6 +40,8 @@ export interface PushSubscriptionJson {
 
 /** host 声明的直连能力；guest 只在看到它时才发起 offer，旧桌面永不声明、旧 PWA 忽略字段 */
 export type DirectCapability = 'direct-v1';
+/** host 能力集合：直连与二进制加密帧 v2 */
+export type HostCapability = DirectCapability | 'frame-v2';
 
 export interface IceServerEntry {
   urls: string[];
@@ -74,8 +76,8 @@ export type PhoneToHost =
   | { type: 'abort'; sessionId: string }
   | { type: 'approval-respond'; sessionId: string; requestId: string; decision: ApprovalDecision }
   | { type: 'ask-respond'; sessionId: string; requestId: string; answer: string }
-  /** desk：完整模式，宿主只回 host-info/推送配置，不推目录与会话事件 */
-  | { type: 'snapshot'; desk?: true }
+  /** desk：完整模式，宿主只回 host-info/推送配置，不推目录与会话事件；v2：支持二进制加密帧 v2 */
+  | { type: 'snapshot'; desk?: true; v2?: true }
   | {
       type: 'subscribe';
       sessionId: string | null;
@@ -221,6 +223,7 @@ export const PHONE_COMMAND_TYPES = [
   'asset-get',
   'remote-ack',
   'part',
+  'bpart',
 ] as const satisfies readonly PhoneToHost['type'][];
 
 export function isPhoneCommand(value: unknown): value is PhoneToHost {
@@ -583,8 +586,8 @@ export type HostToPhone =
       type: 'host-info';
       hostname: string;
       appVersion: string;
-      /** 直连能力声明；缺省（旧桌面）即不支持 */
-      capabilities?: DirectCapability[];
+      /** 直连与协议能力声明；缺省（旧桌面）即仅支持 v1 */
+      capabilities?: HostCapability[];
       /** STUN 列表由 host 下发，guest 不硬编码，换地址只改桌面 */
       iceServers?: IceServerEntry[];
       /** 本设备被桌面设为只读：手机隐藏发送/审批等写操作（host 侧另有强制拦截） */

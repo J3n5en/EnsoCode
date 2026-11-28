@@ -4,6 +4,8 @@ export interface RemoteLink {
   pairId: string;
   /** 浏览器已声明能解 gzip（估算首次下载量用） */
   readonly gzip?: boolean;
+  /** 浏览器已声明支持二进制加密帧 v2（零 Base64 / 原生压缩） */
+  readonly v2?: boolean;
   send(message: HostToPhone): void;
 }
 

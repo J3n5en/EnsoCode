@@ -10,6 +10,7 @@ import {
 } from '@enso/pair';
 import { app, type IpcEvent, type IpcInvokeEvent, images, ipcMain } from '@platform';
 import { RemoteReadCache, takeRemoteMarks, writeSeedOf } from '@shared/remoteDelta';
+import { compactRemoteWireResult, expandRemoteWireResult } from '@shared/remoteWireCompact';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { getSourceAuthorityRegistry } from '../../ipc/agent';
 import { readSettings, settingsRevision } from '../../ipc/settings';
@@ -196,13 +197,31 @@ function prepareArgs(channel: string, args: unknown[]): unknown[] {
   }
 }
 
-function prepareResult(channel: string, result: unknown): unknown {
-  return channel === IPC_CHANNELS.SETTINGS_READ
-    ? redactSecrets(withoutConversations(result))
-    : trimSecretaryResult(channel, result);
+function prepareResult(channel: string, result: unknown, args: unknown[] = []): unknown {
+  if (channel === IPC_CHANNELS.SETTINGS_READ) {
+    return redactSecrets(withoutConversations(result));
+  }
+  if (
+    channel === IPC_CHANNELS.CONVERSATIONS_READ ||
+    channel === IPC_CHANNELS.SOURCE_AUTHORITY_READ
+  ) {
+    return compactRemoteWireResult(channel, result);
+  }
+  if (channel === IPC_CHANNELS.SECRETARY_GET_STATE) {
+    const opts = args[1];
+    const includeAllProposals =
+      typeof opts === 'object' &&
+      opts !== null &&
+      (opts as { includeAllProposals?: unknown }).includeAllProposals === true;
+    return trimSecretaryResult(channel, result, Date.now(), { includeAllProposals });
+  }
+  return trimSecretaryResult(channel, result);
 }
 
-const deliverer = (link: RemoteLink) => (frame: HostToRemote) => link.send(frame);
+const deliverer = (link: RemoteLink) =>
+  Object.assign((frame: HostToRemote) => link.send(frame), {
+    canBatch: () => link.v2 === true,
+  });
 
 function cancelGrace(sender: RemoteSender): void {
   const timer = graceTimers.get(sender.id);
@@ -298,14 +317,13 @@ async function invoke(link: RemoteLink, command: Extract<RemoteToHost, { type: '
   try {
     const rawResult = await handler(fakeEvent(sender), ...args);
     commit?.();
+    const expandedSeed = (encoded: unknown) =>
+      writeSeedOf(command.ch, expandRemoteWireResult(command.ch, encoded))?.value;
     const prehashed = encodePrehashedRead(command.ch, rawResult);
     if (prehashed) {
       const seed = writeSeedOf(command.ch, prehashed.data);
       if (seed) {
-        sender.writes.seedLazy(
-          seed.name,
-          () => writeSeedOf(command.ch, JSON.parse(prehashed.json))?.value
-        );
+        sender.writes.seedLazy(seed.name, () => expandedSeed(JSON.parse(prehashed.json)));
       }
       sender.post({
         type: 'rpc-result',
@@ -323,9 +341,12 @@ async function invoke(link: RemoteLink, command: Extract<RemoteToHost, { type: '
               ),
       });
     } else {
-      const data = encodeRemoteValue(prepareResult(command.ch, rawResult));
+      const data = encodeRemoteValue(prepareResult(command.ch, rawResult, args));
       const seed = writeSeedOf(command.ch, data);
-      if (seed) sender.writes.seed(seed.name, seed.value);
+      if (seed) {
+        const value = expandedSeed(data);
+        if (value !== undefined) sender.writes.seed(seed.name, value);
+      }
       sender.post({
         type: 'rpc-result',
         cid: command.cid,
@@ -357,11 +378,15 @@ function emit(link: RemoteLink, command: Extract<RemoteToHost, { type: 'rpc-send
 
 async function asset(link: RemoteLink, command: Extract<RemoteToHost, { type: 'asset-get' }>) {
   const reply = (status: number, mime: string, body: Uint8Array) =>
-    link.send({ type: 'asset', id: command.id, status, mime, data: encodeBase64(body) });
+    link.v2
+      ? link.send({ type: 'asset', id: command.id, status, mime, bin: body })
+      : link.send({ type: 'asset', id: command.id, status, mime, data: encodeBase64(body) });
   if (command.path === 'meta') {
     const root = rendererRoot();
     const version = await rendererBuildId(root, app.getVersion());
-    const download = version ? await downloadEstimate(root, link.gzip === true, version) : 0;
+    const download = version
+      ? await downloadEstimate(root, link.gzip === true, version, link.v2 === true)
+      : 0;
     const bundle = version ? (await bundleManifest(root, version))?.id : undefined;
     const body = JSON.stringify(
       version

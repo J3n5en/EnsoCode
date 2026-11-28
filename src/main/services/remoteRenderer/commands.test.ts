@@ -55,6 +55,14 @@ describe('parseRemoteCommand', () => {
       ok: true,
       command: { type: 'remote-ack', bytes: 0, gzip: true },
     });
+    expect(parseRemoteCommand({ type: 'remote-ack', bytes: 0, gzip: true, v2: true })).toEqual({
+      ok: true,
+      command: { type: 'remote-ack', bytes: 0, gzip: true, v2: true },
+    });
+    expect(parseRemoteCommand({ type: 'remote-ack', bytes: 0, v2: 'yes' })).toEqual({
+      ok: true,
+      command: { type: 'remote-ack', bytes: 0 },
+    });
     expect(parseRemoteCommand({ type: 'remote-ack', bytes: -1 }).ok).toBe(false);
     expect(parseRemoteCommand({ type: 'remote-ack', bytes: 1.5 }).ok).toBe(false);
   });
