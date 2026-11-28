@@ -25,7 +25,7 @@ export function managerOfSync(
 ): string | null {
   const contexts = secretaryContexts();
   for (const ctx of contexts) {
-    if (Object.hasOwn(new SecretaryStore(ctx.dir).dispatch().dispatched, conversationId))
+    if (Object.hasOwn(new SecretaryStore(ctx.dir).dispatchView().dispatched, conversationId))
       return ctx.id;
   }
   const origin = originOwner(rows[conversationId]);
@@ -55,7 +55,7 @@ export async function runningTotal(): Promise<{ running: number; max: number }> 
   const rows = readPersistedConversations();
   let running = 0;
   for (const ctx of secretaryContexts()) {
-    for (const record of Object.values(new SecretaryStore(ctx.dir).dispatch().dispatched)) {
+    for (const record of Object.values(new SecretaryStore(ctx.dir).dispatchView().dispatched)) {
       if (record.takeover) continue;
       if (
         countsAsRunning(
@@ -81,7 +81,7 @@ export async function runningWorktreePaths(): Promise<Set<string>> {
   const rows = readPersistedConversations();
   const ids = new Set<string>();
   for (const ctx of secretaryContexts()) {
-    for (const record of Object.values(new SecretaryStore(ctx.dir).dispatch().dispatched)) {
+    for (const record of Object.values(new SecretaryStore(ctx.dir).dispatchView().dispatched)) {
       const status = observedSessionStatus(record.conversationId);
       if (countsAsRunning(record, rows[record.conversationId], status))
         ids.add(record.conversationId);

@@ -494,3 +494,61 @@ describe('成功判定与重投', () => {
     expect(h.state.prompts[0].text).toContain('line');
   });
 });
+
+describe('只读判断不整份复制派发记录', () => {
+  /** dispatch.json 近 1MB：每次 file() 都是一次深拷贝，只有真要写回时才该付这个代价 */
+  function counted(h: Harness) {
+    const calls = { copies: 0 };
+    const ports: DeliveryPorts = {
+      ...h.ports,
+      file: () => {
+        calls.copies += 1;
+        return structuredClone(h.state.file);
+      },
+      peekFile: () => h.state.file,
+    };
+    return { ports, calls };
+  }
+
+  it('没有到点的更新：一次都不复制', async () => {
+    const h = harness({ file: { outbox: [update({ key: 'later', deliverAt: 90_000 })] } });
+    const { ports, calls } = counted(h);
+    await flushDeliveries(ports, 1_000);
+    expect(h.state.prompts).toHaveLength(0);
+    expect(calls.copies).toBe(0);
+  });
+
+  it('投出一批：只为写回在途记录复制一次，结果与不带视图时相同', async () => {
+    const h = harness({ file: { outbox: [update(), update({ key: 'k2', text: 'two' })] } });
+    const { ports, calls } = counted(h);
+    await flushDeliveries(ports, 1_000);
+    expect(calls.copies).toBe(1);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.file.inflight).toMatchObject({ keys: ['k1', 'k2'], attempt: 1 });
+
+    const plain = harness({ file: { outbox: [update(), update({ key: 'k2', text: 'two' })] } });
+    await flushDeliveries(plain.ports, 1_000);
+    expect(plain.state.prompts.map((prompt) => prompt.text)).toEqual(
+      h.state.prompts.map((prompt) => prompt.text)
+    );
+  });
+
+  it('结算别的会话的事件：不复制', () => {
+    const h = harness({
+      file: {
+        outbox: [update()],
+        inflight: {
+          deliveryId: 'd1',
+          secretaryConversationId: 'sec1',
+          keys: ['k1'],
+          attempt: 1,
+          nextAttemptAt: 99_999,
+        },
+      },
+    });
+    const { ports, calls } = counted(h);
+    settleDelivery(ports, 'sec2', 'done', 1_000);
+    expect(calls.copies).toBe(0);
+    expect(h.state.file.inflight?.deliveryId).toBe('d1');
+  });
+});

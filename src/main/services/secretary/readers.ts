@@ -936,10 +936,11 @@ export function readPortsFor(
       return (await import('../sessionReminders')).readSessionReminders(conversationId);
     },
     goalResult(conversationId) {
-      return new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId]?.goalResult;
+      // 只读：用缓存视图，不整份复制（collect 每行都要问一次，几百行就是几百次深拷贝）
+      return new SecretaryStore(ctx.dir).dispatchView().dispatched[conversationId]?.goalResult;
     },
     autoArchived(conversationId, row) {
-      const record = new SecretaryStore(ctx.dir).dispatch().dispatched[conversationId];
+      const record = new SecretaryStore(ctx.dir).dispatchView().dispatched[conversationId];
       return record ? autoArchived(record, row) : false;
     },
     repo: realRepoDeps,
