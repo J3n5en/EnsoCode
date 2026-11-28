@@ -453,4 +453,51 @@ describe('buildChildContextSeed', () => {
       expect(seed.text).not.toContain(forbidden);
     }
   });
+
+  it('fork_compact：审批底线会拦的密钥读取（bash 点名密钥、grep glob 点名密钥）结果不转交子代理', async () => {
+    const messages: ContextMessage[] = [
+      { role: 'user', content: 'Check the deploy config.' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'b1', name: 'bash', arguments: { command: 'cat .env.local' } },
+          {
+            type: 'toolCall',
+            id: 'g1',
+            name: 'grep',
+            arguments: { pattern: 'KEY', path: '.', glob: '.env*' },
+          },
+          { type: 'toolCall', id: 'b2', name: 'bash', arguments: { command: 'git status' } },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'b1',
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'BASH_SECRET_VALUE=1' }],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'g1',
+        toolName: 'grep',
+        content: [{ type: 'text', text: '.env:1:GREP_SECRET_VALUE=2' }],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'b2',
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'nothing to commit' }],
+      },
+    ];
+
+    const seed = await buildChildContextSeed(messages, undefined, {
+      mode: 'fork_compact',
+      cwd,
+      acceptsImages: false,
+    });
+
+    expect(seed.text).toContain('nothing to commit');
+    expect(seed.text).not.toContain('BASH_SECRET_VALUE');
+    expect(seed.text).not.toContain('GREP_SECRET_VALUE');
+  });
 });

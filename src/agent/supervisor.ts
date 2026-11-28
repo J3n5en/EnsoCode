@@ -4548,6 +4548,7 @@ export class SessionSupervisor {
     if (!resumeFile) {
       managedRef.pendingRole = config.systemPrompt;
       if (seedContext && seedContext !== 'none') {
+        // 种子是可选增强：构建失败只丢种子，不能让已注册的 child 卡在未 ready
         const seed = await buildChildContextSeed(
           (parent.session.messages ?? []) as readonly ContextMessage[],
           parent.readLedger,
@@ -4557,8 +4558,14 @@ export class SessionSupervisor {
             acceptsImages: acceptsImageInput(result.session.model),
             remote: factory.remote,
           }
-        );
-        if (seed.text || seed.images?.length) {
+        ).catch((error: unknown) => {
+          console.warn(
+            '[seed-context] build failed, spawning without seed:',
+            toErrorMessage(error)
+          );
+          return undefined;
+        });
+        if (seed && (seed.text || seed.images?.length)) {
           managedRef.pendingSeed = seed;
         }
       }
@@ -4588,8 +4595,7 @@ export class SessionSupervisor {
     agentTypeName?: string,
     modelName?: string,
     resumeFile?: string,
-    thinking?: ChildThinkingLevel,
-    seedContext?: SubagentSeedContext
+    thinking?: ChildThinkingLevel
   ): Promise<CoworkerInfo> {
     const parent = this.mustCurrent(parentId);
     const factory = parent.factory;
@@ -4682,26 +4688,9 @@ export class SessionSupervisor {
       ...(requestBudget ? { requestBudget } : {}),
     });
     this.attachChildPlugins(managed, { pluginTools, pluginEvents }, Boolean(resumeFile));
-    // 角色提示与上下文种子在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
-    if (!resumeFile) {
-      if (agentType?.systemPrompt) {
-        managed.pendingRole = agentType.systemPrompt;
-      }
-      if (seedContext && seedContext !== 'none') {
-        const seed = await buildChildContextSeed(
-          (parent.session.messages ?? []) as readonly ContextMessage[],
-          parent.readLedger,
-          {
-            mode: seedContext,
-            cwd: factory.cwd,
-            acceptsImages: acceptsImageInput(session.model),
-            remote: factory.remote,
-          }
-        );
-        if (seed.text || seed.images?.length) {
-          managed.pendingSeed = seed;
-        }
-      }
+    // 角色提示在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
+    if (!resumeFile && agentType?.systemPrompt) {
+      managed.pendingRole = agentType.systemPrompt;
     }
     parent.coworkers.set(name, info);
     return info;

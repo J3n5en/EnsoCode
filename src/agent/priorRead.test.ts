@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -46,7 +46,7 @@ describe('ReadLedger', () => {
     expect(await ledger.check('a.txt')).toBeUndefined();
   });
 
-  it('getMeta / listSeen / snapshot 提供只读查询且不泄露内部状态', async () => {
+  it('getMeta 提供只读查询且不泄露内部状态', async () => {
     const file = path.join(dir, 'a.txt');
     const link = path.join(dir, 'link.txt');
     writeFileSync(file, 'hello');
@@ -69,18 +69,13 @@ describe('ReadLedger', () => {
     if (hasSymlink) {
       expect(await ledger.getMeta('link.txt')).toEqual(byRel);
     }
-    expect(ledger.listSeen()).toHaveLength(1);
-
-    const snap = ledger.snapshot();
-    expect(snap.size).toBe(1);
-    const realKey = ledger.listSeen()[0]!;
-    expect(snap.get(realKey)).toEqual(byRel);
-    // 修改返回的快照副本不影响账本本身
-    (snap as Map<string, { mtimeMs: number; size: number }>).clear();
-    expect(ledger.listSeen()).toHaveLength(1);
+    // 修改返回的副本不影响账本本身
+    if (byRel) (byRel as { size: number }).size = -1;
+    expect((await ledger.getMeta('a.txt'))?.size).toBe(5);
     // 删除文件后仍可按规范路径查到历史元数据
+    const realKey = realpathSync(file);
     rmSync(file);
-    expect(await ledger.getMeta(realKey)).toEqual(byRel);
+    expect((await ledger.getMeta(realKey))?.size).toBe(5);
   });
 
   it('withPriorRead：未读即拒且不执行底层工具，按工具 cwd 解析相对路径', async () => {

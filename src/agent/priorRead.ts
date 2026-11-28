@@ -40,20 +40,6 @@ export class ReadLedger {
     }
   }
 
-  /** 返回已记录文件的规范 realpath 列表快照（只读） */
-  listSeen(): string[] {
-    return [...this.seen.keys()];
-  }
-
-  /** 返回账本的只读浅拷贝快照，供跨会话种子鲜度校验使用 */
-  snapshot(): ReadonlyMap<string, ReadLedgerMeta> {
-    const copy = new Map<string, ReadLedgerMeta>();
-    for (const [key, value] of this.seen) {
-      copy.set(key, { ...value });
-    }
-    return copy;
-  }
-
   async record(filePath: string, cwd?: string): Promise<void> {
     try {
       const real = await realpath(this.resolve(filePath, cwd));

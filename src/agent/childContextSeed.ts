@@ -3,7 +3,13 @@ import path from 'node:path';
 import type { SubagentSeedContext } from '@shared/types/agent';
 import { type ContextMessage, imagePlaceholder, sanitizeContextMessages } from './imageContext';
 import type { ReadLedger } from './priorRead';
-import { expandPiToolPath, isSecretFilePath, isUnderSecretDirectory } from './protectedActions';
+import {
+  classifyProtectedCommand,
+  classifyProtectedTool,
+  expandPiToolPath,
+  isSecretFilePath,
+  isUnderSecretDirectory,
+} from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
 export const MAX_PRIOR_READS_CHARS = 30_000;
@@ -575,6 +581,14 @@ function summarizeToolCall(call: { name: string; args: Record<string, unknown> }
 
 function isSensitiveCall(call: ToolCallRecord | undefined): boolean {
   if (!call) return false;
+  // 与审批底线同源：子代理自己去拿要真人确认的结果（命令点名密钥、grep glob 点名密钥），不经种子转交
+  if (classifyProtectedTool(call.name, 'read', call.args) === 'secret') return true;
+  if (
+    typeof call.args.command === 'string' &&
+    classifyProtectedCommand(call.args.command) === 'secret'
+  ) {
+    return true;
+  }
   const rawPath = rawPathOfArgs(call.args);
   if (rawPath) {
     const expanded = expandPiToolPath(rawPath);
