@@ -61,12 +61,13 @@ type SendPluginMessage = ExtensionAPI['sendMessage'];
 
 type ContextUsageMessage = {
   role?: string;
-  usage?: TokenUsage & { reasoning?: number; reasoningTokens?: number };
+  /** 原始 pi 消息的 usage（pi-ai 的 reasoning 已含在 output 内），或投影后的四项计数 */
+  usage?: TokenUsage & { reasoning?: number };
 };
 
-function isTokenCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
-}
+/** 与投影 projectUsage 同口径：缺失或非法的计数按 0 */
+const tokenCount = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 
 function positiveTokenCount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
@@ -82,17 +83,10 @@ export function contextUsagePayload(
   for (const id of CONTEXT_USAGE_BUCKETS) buckets[id] = occupancy.buckets[id];
   const last = messages.findLast(
     (message) =>
-      message.role === 'assistant' &&
-      message.usage !== undefined &&
-      isTokenCount(message.usage.input) &&
-      isTokenCount(message.usage.output) &&
-      isTokenCount(message.usage.cacheRead) &&
-      isTokenCount(message.usage.cacheWrite)
+      message.role === 'assistant' && typeof message.usage === 'object' && message.usage !== null
   );
   const usage = last?.usage;
-  const reasoningTokens = usage
-    ? positiveTokenCount(usage.reasoning ?? usage.reasoningTokens)
-    : undefined;
+  const reasoningTokens = usage ? positiveTokenCount(usage.reasoning) : undefined;
   const turns =
     typeof options?.turns === 'number' && Number.isInteger(options.turns) && options.turns >= 0
       ? options.turns
@@ -108,10 +102,10 @@ export function contextUsagePayload(
     ...(usage
       ? {
           usage: {
-            input: usage.input,
-            output: usage.output,
-            cacheRead: usage.cacheRead,
-            cacheWrite: usage.cacheWrite,
+            input: tokenCount(usage.input),
+            output: tokenCount(usage.output),
+            cacheRead: tokenCount(usage.cacheRead),
+            cacheWrite: tokenCount(usage.cacheWrite),
             ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
           },
         }

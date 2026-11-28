@@ -796,4 +796,16 @@ describe('contextUsagePayload', () => {
     expect(zeroReasoning.usage).toEqual({ input: 10, output: 20, cacheRead: 0, cacheWrite: 0 });
     expect(zeroReasoning.usage).not.toHaveProperty('reasoningTokens');
   });
+
+  it('最近一条回复的 usage 缺字段时按 0 计，不回退到更早一轮的用量', () => {
+    const payload = contextUsagePayload(occupancy, [
+      { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } },
+      { role: 'user' },
+      {
+        role: 'assistant',
+        usage: { input: 10, output: 2, cacheRead: Number.NaN } as never,
+      },
+    ]);
+    expect(payload.usage).toEqual({ input: 10, output: 2, cacheRead: 0, cacheWrite: 0 });
+  });
 });

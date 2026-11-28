@@ -258,7 +258,7 @@ export async function activate(enso) {
 | `fs.readText(path)` / `fs.writeText(path, text)` | 路径相对当前会话的项目根 |
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
-| `ui.view.emit(name, data?, options?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。传入 `options.sessionId`（子会话自动归并到所属主会话）时仅投递给绑定到该会话的侧栏实例，其余会话与空白草稿页在宿主侧拦截；缺省则广播到本插件全部已打开的侧栏页面。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
+| `ui.view.emit(name, data?, options?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。传入 `options.sessionId`（子会话自动归并到所属主会话）时仅投递给绑定到该会话的侧栏实例，其余会话与空白草稿页在宿主侧拦截；全局页面跟随当前会话，只在该会话处于前台时收到，切过去时不补发；缺省则广播到本插件全部已打开的侧栏页面。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
 | `ui.view.emitToSession(sessionId, name, data?)` | 等价于 `ui.view.emit(name, data, { sessionId })`，显式按会话定向推送（漏传或空 `sessionId` 会以 `INVALID_ARGS` 拒绝，不退化为全局广播） |
 | `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。全局页面会加进所有会话。需要 `ui.view`，不需要用户手势 |
 | `ui.view.close(viewId?)` | 关掉当前会话里本插件的侧栏页面；右侧栏原本是收起的、由 `open` 打开，并且这个页面仍是当前标签时，一并收起右侧栏。全局页面会从所有会话一起关掉。需要 `ui.view`，不需要用户手势 |
