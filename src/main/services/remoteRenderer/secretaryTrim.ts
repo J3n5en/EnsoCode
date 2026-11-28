@@ -7,12 +7,26 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
  */
 export const REMOTE_DONE_RECENT = 30;
 export const REMOTE_DONE_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** 历史提案只保留活跃项、24 小时内项和最近 N 条终态项，其余由聊天卡片按需拉回 */
+export const REMOTE_PROPOSALS_RECENT = 40;
+export const REMOTE_PROPOSALS_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export interface TrimSecretaryOptions {
+  includeAllProposals?: boolean;
+}
 
 interface DoneCard {
   startedAt?: number;
   stateSince?: number;
   resultAt?: number;
   triage?: boolean;
+}
+
+interface ProposalRecord {
+  status?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  resolvedAt?: number;
 }
 
 type Board = { done?: unknown };
@@ -30,15 +44,61 @@ function trimBoard<T extends Board>(board: T, now: number): T {
   return { ...board, done };
 }
 
+function trimProposals(proposals: Record<string, unknown>, now: number): Record<string, unknown> {
+  const entries = Object.entries(proposals);
+  if (entries.length <= REMOTE_PROPOSALS_RECENT) return proposals;
+  const since = now - REMOTE_PROPOSALS_WINDOW_MS;
+  const kept: Record<string, unknown> = {};
+  const resolved: { id: string; item: unknown; ts: number }[] = [];
+
+  for (const [id, item] of entries) {
+    if (id === '__proto__') continue;
+    const p = item && typeof item === 'object' ? (item as ProposalRecord) : undefined;
+    if (p?.status === 'pending' || p?.status === 'executing') {
+      kept[id] = item;
+    } else {
+      resolved.push({ id, item, ts: p?.resolvedAt ?? p?.updatedAt ?? p?.createdAt ?? 0 });
+    }
+  }
+
+  resolved.sort((a, b) => b.ts - a.ts);
+  resolved.forEach((entry, index) => {
+    if (index < REMOTE_PROPOSALS_RECENT || entry.ts >= since) {
+      kept[entry.id] = entry.item;
+    }
+  });
+  return kept;
+}
+
 const hasBoard = (value: unknown): value is { board: Board } =>
   !!value &&
   typeof value === 'object' &&
   !!(value as { board?: unknown }).board &&
   typeof (value as { board?: unknown }).board === 'object';
 
-export function trimSecretaryResult(channel: string, result: unknown, now = Date.now()): unknown {
+export function trimSecretaryResult(
+  channel: string,
+  result: unknown,
+  now = Date.now(),
+  options: TrimSecretaryOptions = {}
+): unknown {
   if (channel === IPC_CHANNELS.SECRETARY_GET_STATE) {
-    return hasBoard(result) ? { ...result, board: trimBoard(result.board, now) } : result;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+    const state = result as Record<string, unknown>;
+    const board = hasBoard(state) ? trimBoard(state.board, now) : state.board;
+    const proposals =
+      options.includeAllProposals !== true &&
+      state.proposals &&
+      typeof state.proposals === 'object' &&
+      !Array.isArray(state.proposals)
+        ? trimProposals(state.proposals as Record<string, unknown>, now)
+        : state.proposals;
+    return {
+      ...state,
+      ...(typeof state.persona === 'string' && state.persona.length > 0 ? { persona: '' } : {}),
+      ...(hasBoard(state) ? { board } : {}),
+      ...(proposals !== undefined ? { proposals } : {}),
+    };
   }
   if (channel === IPC_CHANNELS.SECRETARY_OVERVIEW) {
     const boards = (result as { boards?: unknown } | null)?.boards;

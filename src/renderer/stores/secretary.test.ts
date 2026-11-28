@@ -485,4 +485,66 @@ describe('newSecretaryConversation', () => {
       window.electronAPI.secretary.list = origList;
     }
   });
+
+  it('ensureProposal 携带 includeAllProposals 拉回旧终态提案，后续裁剪推送不冲掉已水合提案', async () => {
+    const calls: unknown[][] = [];
+    const origGetState = window.electronAPI.secretary.getState;
+    const oldProposal: SecretaryProposal = {
+      ...proposal,
+      id: 'pr-old',
+      status: 'succeeded',
+    };
+    const testProfile: SecretaryProfile = {
+      version: 1,
+      name: '秘书',
+      avatar: { color: '#6b7280' },
+      takeoverScope: { mode: 'projects', projectIds: [] },
+      visibleProjectIds: 'all',
+      maxRunningDispatches: 3,
+      patrolEnabled: true,
+      replyLanguage: 'ui',
+      style: 'concise',
+      notify: 'needs-user',
+      updatedAt: 1,
+    };
+    window.electronAPI.secretary.getState = ((id?: string, options?: unknown) => {
+      calls.push([id, options]);
+      if ((options as { includeAllProposals?: boolean } | undefined)?.includeAllProposals) {
+        return Promise.resolve({
+          ...stateWith('pending'),
+          profile: testProfile,
+          proposals: { pr1: proposal, 'pr-old': oldProposal },
+        });
+      }
+      return Promise.resolve({
+        ...stateWith('pending'),
+        profile: testProfile,
+        proposals: { pr1: proposal },
+      });
+    }) as never;
+
+    try {
+      const unbind = useSecretaryStore.getState().bind();
+      await flush();
+      expect(useSecretaryStore.getState().secretary.proposals['pr-old']).toBeUndefined();
+
+      await useSecretaryStore.getState().ensureProposal('pr-old');
+      expect(
+        calls.some(([, opt]) => (opt as { includeAllProposals?: boolean })?.includeAllProposals)
+      ).toBe(true);
+      expect(useSecretaryStore.getState().secretary.proposals['pr-old']?.status).toBe('succeeded');
+
+      // 常规推送不含已裁剪的 pr-old，仍保留在 store 里
+      listener?.({
+        ...stateWith('executing'),
+        profile: testProfile,
+        proposals: { pr1: { ...proposal, status: 'executing' } },
+      });
+      expect(useSecretaryStore.getState().secretary.proposals['pr-old']?.status).toBe('succeeded');
+      expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('executing');
+      unbind();
+    } finally {
+      window.electronAPI.secretary.getState = origGetState;
+    }
+  });
 });

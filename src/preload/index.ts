@@ -486,8 +486,11 @@ const electronAPI = {
 
   secretary: {
     /** 工作台与聊天卡片读同一份 Main 状态；开关关闭时 enabled 为 false */
-    getState: (secretaryId?: string): Promise<SecretaryState> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE, secretaryId),
+    getState: (
+      secretaryId?: string,
+      options?: { includeAllProposals?: boolean }
+    ): Promise<SecretaryState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE, secretaryId, options),
     /** 秘书清单：侧栏、设置页与新建流程用 */
     list: (): Promise<SecretarySummary[]> => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_LIST),
     onListChanged: (callback: (list: SecretarySummary[]) => void): (() => void) => {

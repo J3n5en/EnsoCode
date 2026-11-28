@@ -58,6 +58,63 @@ describe('electronShim 设置写入', () => {
       expect(JSON.parse(secondPayload ?? '[]')).toEqual([{ __ensoIfNone: `h-${ch}` }]);
     }
   });
+
+  it('CONVERSATIONS_READ 展开压缩包并在缓存 same 命中及写回基线处保持一致', async () => {
+    const { ipcRenderer } = await import('./electronShim');
+    const { compactRemoteWireResult } = await import('@shared/remoteWireCompact');
+    const rawConv = {
+      seq: 1,
+      value: {
+        version: 4,
+        state: {
+          activeId: 'c1',
+          order: ['c1'],
+          conversations: {
+            c1: {
+              id: 'c1',
+              projectId: 'p1',
+              title: 'Original',
+              createdAt: 1,
+              messages: [],
+              commands: [],
+              customEntries: [],
+              dispatchMainEvents: {},
+              lastSeq: 0,
+              spawning: false,
+              started: false,
+              status: 'idle',
+              toolOutputs: {},
+              toolStartedAt: {},
+              toolDeadlineAt: {},
+              toolEnded: {},
+              toolTodos: {},
+              pendingApprovals: [],
+              pendingAsks: [],
+              backgroundTasks: [],
+              subagents: [],
+            },
+          },
+        },
+      },
+    };
+    const compacted = compactRemoteWireResult(IPC_CHANNELS.CONVERSATIONS_READ, rawConv);
+    invoke.mockResolvedValueOnce(JSON.stringify({ __ensoCached: { h: 'h-conv-1', v: compacted } }));
+    expect(await ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ)).toEqual(rawConv);
+
+    invoke.mockResolvedValueOnce(JSON.stringify({ __ensoCached: { h: 'h-conv-1', same: 1 } }));
+    expect(await ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ)).toEqual(rawConv);
+
+    // 写回修改单字段时走增量（ops）而非整包覆盖
+    invoke.mockResolvedValueOnce('true');
+    const nextValue = structuredClone(rawConv.value);
+    (nextValue.state.conversations.c1 as Record<string, unknown>).title = 'Updated';
+    await ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, 'enso-conversations', nextValue, 1);
+    const [, writePayload] = invoke.mock.calls.at(-1) ?? [];
+    const writeArgs = JSON.parse(writePayload ?? '[]') as unknown[];
+    expect(writeArgs[1]).toMatchObject({
+      __ensoWrite: { ops: expect.any(Array) },
+    });
+  });
 });
 
 describe('electronShim 秘书状态', () => {
