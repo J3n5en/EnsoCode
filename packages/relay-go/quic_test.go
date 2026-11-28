@@ -10,9 +10,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"math/big"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -370,4 +373,86 @@ func pairOnURL(t *testing.T, baseURL string) (string, string, string) {
 	}
 	hostToken := req2["hostToken"].(string)
 	return pairID, hostToken, guestToken
+}
+
+func writeTempSelfSignedPEM(t *testing.T, dir, prefix, cn string) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("gen key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: cn},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	keyDer, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	certPath := filepath.Join(dir, prefix+".crt")
+	keyPath := filepath.Join(dir, prefix+".key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDer}), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	return certPath, keyPath
+}
+
+func TestReloadingCertHotReloadAndFallback(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeTempSelfSignedPEM(t, dir, "relay", "first.example.com")
+	loader, err := newReloadingCert(certPath, keyPath, nil)
+	if err != nil {
+		t.Fatalf("newReloadingCert: %v", err)
+	}
+	loader.checkInterval = 0
+
+	c1, err := loader.getCertificate(nil)
+	if err != nil || c1 == nil {
+		t.Fatalf("getCertificate #1: %v", err)
+	}
+	x1, _ := x509.ParseCertificate(c1.Certificate[0])
+	if x1.Subject.CommonName != "first.example.com" {
+		t.Fatalf("expected CN first.example.com, got %s", x1.Subject.CommonName)
+	}
+
+	newCert, newKey := writeTempSelfSignedPEM(t, dir, "next", "renewed.example.com")
+	bCert, _ := os.ReadFile(newCert)
+	bKey, _ := os.ReadFile(newKey)
+	_ = os.WriteFile(certPath, bCert, 0o600)
+	_ = os.WriteFile(keyPath, bKey, 0o600)
+	future := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(certPath, future, future)
+	_ = os.Chtimes(keyPath, future, future)
+
+	c2, err := loader.getCertificate(nil)
+	if err != nil || c2 == nil {
+		t.Fatalf("getCertificate #2: %v", err)
+	}
+	x2, _ := x509.ParseCertificate(c2.Certificate[0])
+	if x2.Subject.CommonName != "renewed.example.com" {
+		t.Fatalf("expected reloaded CN renewed.example.com, got %s", x2.Subject.CommonName)
+	}
+
+	_ = os.WriteFile(certPath, []byte("corrupted"), 0o600)
+	future2 := future.Add(2 * time.Second)
+	_ = os.Chtimes(certPath, future2, future2)
+	c3, err := loader.getCertificate(nil)
+	if err != nil || c3 == nil {
+		t.Fatalf("expected fallback cert on corrupt reload, got err=%v", err)
+	}
+	x3, _ := x509.ParseCertificate(c3.Certificate[0])
+	if x3.Subject.CommonName != "renewed.example.com" {
+		t.Fatalf("expected fallback CN renewed.example.com, got %s", x3.Subject.CommonName)
+	}
 }

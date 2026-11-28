@@ -111,9 +111,18 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         }
     }
 
-    /// 支持 Universal Link / `enso://` 深链直达配对
+    /// 支持 Universal Link / `enso://` 深链直达配对或指定会话（小组件 / 灵动岛点击）
     func handleIncomingURL(_ url: URL) {
         guard let base = server?.baseURL else { return }
+        if url.scheme == "enso", url.host == "open" {
+            if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let sessionId = comps.queryItems?.first(where: { $0.name == "session" })?.value,
+               !sessionId.isEmpty
+            {
+                openSessionFromNotification(sessionId)
+            }
+            return
+        }
         if url.scheme == "enso" || url.fragment?.contains("pk=") == true {
             var comps = URLComponents(url: base, resolvingAgainstBaseURL: false)
             comps?.fragment = url.fragment ?? url.query
@@ -232,6 +241,8 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         quic: true,
         deskProxy: true,
         push: true,
+        liveActivity: true,
+        widgets: true,
         openQuic: (params) => post({ type: 'quic-open', params }),
         sendQuicText: (id, text) => post({ type: 'quic-send-text', id, text }),
         sendQuicBinary: (id, lane, base64) => post({ type: 'quic-send-binary', id, lane, base64 }),
@@ -252,6 +263,9 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         }),
         unsubscribePush: () => {
           post({ type: 'push-unsubscribe' });
+        },
+        updateWidgetState: (snapshot) => {
+          post({ type: 'widget-update', snapshot });
         },
         replyDeskAsset: (reqId, status, mime, bodyBase64) => post({
           type: 'desk-asset-reply',
@@ -353,6 +367,10 @@ extension EnsoWebShellController: WKScriptMessageHandler {
 
         case "push-unsubscribe":
             EnsoPushManager.shared.clearBadge()
+
+        case "widget-update":
+            guard let snapshot = body["snapshot"] as? [String: Any] else { return }
+            EnsoWidgetBridge.shared.update(from: snapshot)
 
         case "desk-asset-reply":
             guard let reqId = body["reqId"] as? String,

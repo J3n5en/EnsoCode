@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -35,7 +36,9 @@ func run(args []string) int {
 	dbPath := flags.String("db", envOr("RELAY_DB", ""), "SQLite 路径（默认：可执行文件旁边的 relay.sqlite）")
 	tlsCert := flags.String("tls-cert", envOr("RELAY_TLS_CERT", ""), "可选 TLS 证书")
 	tlsKey := flags.String("tls-key", envOr("RELAY_TLS_KEY", ""), "可选 TLS 私钥")
-	quicListen := flags.String("quic-listen", envOr("RELAY_QUIC_LISTEN", ""), "可选原生 QUIC UDP 监听地址（例如 :443，需搭配 --tls-cert 与 --tls-key）")
+	quicListen := flags.String("quic-listen", envOr("RELAY_QUIC_LISTEN", ""), "可选原生 QUIC UDP 监听地址（例如 :443，需搭配 --quic-tls-cert/--tls-cert 与私钥）")
+	quicTLSCert := flags.String("quic-tls-cert", envOr("RELAY_QUIC_TLS_CERT", ""), "可选 QUIC 专用 TLS 证书（反代模式下仅给 QUIC 用 TLS，不把 HTTP 监听改成 HTTPS）")
+	quicTLSKey := flags.String("quic-tls-key", envOr("RELAY_QUIC_TLS_KEY", ""), "可选 QUIC 专用 TLS 私钥")
 	showVersion := flags.Bool("version", false, "打印版本")
 	autoUpdate := flags.Bool("auto-update", envBool("RELAY_AUTO_UPDATE", true), "检查并安装 GitHub Release 更新")
 	updateInterval := flags.Duration("update-interval", envDuration("RELAY_UPDATE_INTERVAL", defaultUpdateInterval), "自动更新检查间隔")
@@ -109,19 +112,27 @@ func run(args []string) int {
 
 	var quicSrv *quicServer
 	if *quicListen != "" {
-		if *tlsCert == "" || *tlsKey == "" {
-			log.Error("quic requires --tls-cert and --tls-key")
+		qCertPath := *quicTLSCert
+		if qCertPath == "" {
+			qCertPath = *tlsCert
+		}
+		qKeyPath := *quicTLSKey
+		if qKeyPath == "" {
+			qKeyPath = *tlsKey
+		}
+		if qCertPath == "" || qKeyPath == "" {
+			log.Error("quic requires --quic-tls-cert/--tls-cert and --quic-tls-key/--tls-key")
 			return 1
 		}
-		cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		certLoader, err := newReloadingCert(qCertPath, qKeyPath, log)
 		if err != nil {
 			log.Error("load quic tls cert", "err", err)
 			return 1
 		}
 		qs, err := startQuicServer(relaySrv, *quicListen, &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			NextProtos:   []string{quicALPN},
-			MinVersion:   tls.VersionTLS13,
+			GetCertificate: certLoader.getCertificate,
+			NextProtos:     []string{quicALPN},
+			MinVersion:     tls.VersionTLS13,
 		})
 		if err != nil {
 			log.Error("listen quic", "addr", *quicListen, "err", err)
@@ -195,6 +206,70 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// reloadingCert 支持磁盘证书热加载（例如 Caddy / Certbot 自动续签 Let's Encrypt 证书后无需重启 enso-relay）。
+type reloadingCert struct {
+	certPath      string
+	keyPath       string
+	log           *slog.Logger
+	checkInterval time.Duration
+
+	mu        sync.Mutex
+	cert      *tls.Certificate
+	certMod   time.Time
+	keyMod    time.Time
+	lastCheck time.Time
+}
+
+func newReloadingCert(certPath, keyPath string, log *slog.Logger) (*reloadingCert, error) {
+	rc := &reloadingCert{
+		certPath:      certPath,
+		keyPath:       keyPath,
+		log:           log,
+		checkInterval: 30 * time.Second,
+	}
+	if err := rc.reloadLocked(true); err != nil {
+		return nil, err
+	}
+	return rc, nil
+}
+
+func (r *reloadingCert) getCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if time.Since(r.lastCheck) >= r.checkInterval {
+		if err := r.reloadLocked(false); err != nil && r.log != nil {
+			r.log.Warn("reload quic tls cert failed; keeping previous cert", "err", err)
+		}
+	}
+	return r.cert, nil
+}
+
+func (r *reloadingCert) reloadLocked(force bool) error {
+	r.lastCheck = time.Now()
+	ci, err := os.Stat(r.certPath)
+	if err != nil {
+		return err
+	}
+	ki, err := os.Stat(r.keyPath)
+	if err != nil {
+		return err
+	}
+	if !force && r.cert != nil && ci.ModTime().Equal(r.certMod) && ki.ModTime().Equal(r.keyMod) {
+		return nil
+	}
+	pair, err := tls.LoadX509KeyPair(r.certPath, r.keyPath)
+	if err != nil {
+		return err
+	}
+	r.cert = &pair
+	r.certMod = ci.ModTime()
+	r.keyMod = ki.ModTime()
+	if !force && r.log != nil {
+		r.log.Info("reloaded quic tls cert", "cert", r.certPath)
+	}
+	return nil
 }
 
 func defaultDBPath() string {
