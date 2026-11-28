@@ -115,6 +115,38 @@ describe('host MCP tool selection', () => {
     ]);
   });
 
+  it("lists the secretary's frequent ops directly so it does not search for them first", () => {
+    const { eager, lazy } = agyHostTools(
+      [
+        'session_create',
+        'session_list',
+        'session_read',
+        'session_send',
+        'session_archive',
+        'cleanup_list',
+        'cleanup_apply',
+        'result_mark_done',
+        'trigger_create',
+        'silence_turn',
+        'memory_search',
+        'ask_user',
+      ].map((name) => ({ name }))
+    );
+    expect(names(eager)).toEqual([
+      'ask_user',
+      'silence_turn',
+      'cleanup_apply',
+      'cleanup_list',
+      'session_list',
+      'session_archive',
+      'session_read',
+      'result_mark_done',
+      'memory_search',
+      ...META,
+    ]);
+    expect(names(lazy)).toEqual(['session_create', 'session_send', 'trigger_create']);
+  });
+
   it('moves a core tool that does not fit the budget to the lazy set instead of dropping it', () => {
     const { eager, lazy } = agyHostTools(
       [sized('subagent', 600), sized('workflow', 2000), sized('todo', 300), sized('tg_a', 100)],
