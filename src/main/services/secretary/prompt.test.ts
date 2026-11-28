@@ -25,6 +25,17 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/bash|file/i);
   });
 
+  it('记忆权限：私有空间、global 与可见项目可写，写共享空间有审计，纠正走 replaces', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
+    const memory = prompt.split('\n').find((line) => line.startsWith('Memory:')) ?? '';
+    expect(memory).toContain("spaceId 'project'");
+    expect(memory).toContain("spaceId 'global'");
+    expect(memory).toContain('projectId');
+    expect(memory).toMatch(/audited/);
+    expect(memory).toMatch(/evolvesRelation 'replaces'/);
+    expect(memory).toMatch(/untrusted/);
+  });
+
   it('needsUser 每条是用户要亲自决定或动手的一件事，followUps 不需要用户，处理完用 result_mark_done 收口', () => {
     const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
     const results = prompt.split('\n').find((line) => line.startsWith('Results:')) ?? '';
