@@ -16,13 +16,17 @@ import {
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AGY_PROVIDER_ID } from '@shared/agy/constants';
+import { AGY_SYSTEM_APPEND_MAX_BYTES } from '@shared/agy/systemAppend';
+import type { SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildSecretarySystemPrompt } from '../../main/services/secretary/prompt';
 import { ApprovalGate } from '../approval';
 import {
   appendSystemPromptExtension,
   SUBAGENT_CONTRACT_PROMPT,
   tailSystemPromptSection,
 } from '../childContract';
+import { type PersonaHolder, personaExtension } from '../personaExtension';
 import { batchSteering, steerActiveSession } from '../sessionAdapter';
 import { createTodoTool } from '../todo';
 import { VIZ_GUIDANCE_PROMPT, WORKSPACE_POLICY_PROMPT } from '../workspacePolicy';
@@ -84,6 +88,8 @@ interface SetupOptions {
   extensions?: InlineExtension[];
   /** 用 pi 默认的开头角色段（含 "running inside pi"）而不是自定义提示词，并读工作区的 AGENTS.md */
   piPrompt?: { agentsMd: string };
+  /** 秘书 / Bot 的人设，照 supervisor 那样同时交给 personaExtension 和桥 */
+  persona?: PersonaHolder;
 }
 
 const other = getModel('openai', 'gpt-4o-mini');
@@ -187,6 +193,7 @@ async function setup(ensoSessionId = 'enso-1', options: SetupOptions = {}) {
       ),
     planActive: () => false,
     readRoots: () => [cwd],
+    ...(options.persona ? { persona: () => options.persona!.current } : {}),
   });
   let disposed = false;
   const dispose = () => {
@@ -847,7 +854,7 @@ describe('Enso system append handed to agy', () => {
     tailSystemPromptSection('preset_tail', 'PRESET-TAIL-MARKER'),
   ];
 
-  async function appendFor(child: boolean) {
+  async function appendFor(child: boolean, persona?: PersonaHolder) {
     const atOpen: Array<string | undefined> = [];
     const atTurn: Array<string | undefined> = [];
     setAgySessionOpener(async (options) => {
@@ -857,10 +864,14 @@ describe('Enso system append handed to agy', () => {
         return result('ok');
       });
     });
-    const { session } = await setup(child ? 'enso-child' : 'enso-top', {
-      extensions: ensoExtensions(child),
-      piPrompt: { agentsMd: 'AGENTS-MD-MARKER' },
-    });
+    const { session } = await setup(
+      persona ? 'enso-secretary' : child ? 'enso-child' : 'enso-top',
+      {
+        extensions: [...ensoExtensions(child), ...(persona ? [personaExtension(persona)] : [])],
+        piPrompt: { agentsMd: 'AGENTS-MD-MARKER' },
+        ...(persona ? { persona } : {}),
+      }
+    );
     await session.prompt('draw a chart');
     await session.waitForIdle();
     // pi 那边确实带着这些段，agy 这边才有得剔
@@ -897,4 +908,36 @@ describe('Enso system append handed to agy', () => {
     expect(text).toContain('```html-viz');
     expect(text).not.toContain('running inside pi');
   });
+
+  it("puts the secretary's own rules first and leaves the rest of the append as it was", async () => {
+    const plain = await appendFor(false);
+    const rules = buildSecretarySystemPrompt({
+      profile: SECRETARY_PROFILE,
+      persona: 'Call me J.',
+      uiLanguage: 'zh',
+      contactBound: true,
+      colleagues: [{ id: 's-2', name: 'Bob' }],
+    });
+    const text = await appendFor(false, { current: rules });
+    expect(text).toBe(`<role>\n${rules}\n</role>\n\n${plain}`);
+    expect(text).toContain("You are Ada, the user's secretary.");
+    expect(text).toContain('call silence_turn and stop');
+    expect(text).toContain('session_create and todo_item_dispatch run right away');
+    expect(text).toContain('How the user wants you to behave:\nCall me J.');
+    expect(new TextEncoder().encode(text).length).toBeLessThanOrEqual(AGY_SYSTEM_APPEND_MAX_BYTES);
+  });
 });
+
+const SECRETARY_PROFILE: SecretaryProfile = {
+  version: 1,
+  name: 'Ada',
+  avatar: { color: '#888888' },
+  takeoverScope: { mode: 'all' },
+  visibleProjectIds: 'all',
+  maxRunningDispatches: 3,
+  patrolEnabled: true,
+  replyLanguage: 'ui',
+  style: 'concise',
+  notify: 'needs-user',
+  updatedAt: 0,
+};

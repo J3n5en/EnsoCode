@@ -45,6 +45,23 @@ const NOT_EXPOSED = new Set([
 export const AGY_HOST_MCP_BUDGET_BYTES = 30_000;
 
 /**
+ * 秘书最常用、篇幅又小的 op。懒加载时每个都得先 enso_tool_search 查 schema：多一次 agy 安全预审（MCP 工具
+ * 不在 agy_tool_safety 白名单里），再多一次带全量上下文的主模型请求。本机 2 天 agy 秘书会话实测：
+ * silence_turn 70 次、cleanup_apply/list 65 次、session_list/archive/read 49 次、result_mark_done 6 次，
+ * 55 次 enso_tool_search 里 49 次出在秘书会话。这几个直挂共约 8.6 KB。
+ * session_create（4.7 KB）、session_send（3.5 KB）篇幅大，每轮都带的成本不一定抵得过省下的查询，仍走懒加载。
+ */
+const SECRETARY_HOT = [
+  'silence_turn',
+  'cleanup_apply',
+  'cleanup_list',
+  'session_list',
+  'session_archive',
+  'session_read',
+  'result_mark_done',
+];
+
+/**
  * agy 直接看到的 Enso 核心工具，越靠前越优先，同一档按会话工具表原顺序。
  * 其余（插件、接管的 MCP、内置浏览器、ImageGen…）都走懒加载：只挂 enso_tool_search / enso_tool_call，
  * agy 先查再调。agy 1.5.18 对 ACP 注入的服务器一律 eager，不给原生懒加载（见 PR 说明）。
@@ -53,6 +70,7 @@ const CORE: ReadonlyArray<string | RegExp> = [
   'subagent',
   'workflow',
   'ask_user',
+  ...SECRETARY_HOT,
   'todo',
   /^goal_/,
   'remind_me',
