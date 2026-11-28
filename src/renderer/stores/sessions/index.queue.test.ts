@@ -9,6 +9,7 @@ import {
   installSessionGlobals,
   loadSessionModules,
   onAgentEvent,
+  onConversationsPatch,
   onConversationsResync,
   readConversations,
   registerConversation,
@@ -37,6 +38,16 @@ bindSessionProjection({
   },
 });
 installSessionGlobals();
+
+/** Main 推来的补丁序号单调递增；跨用例共用同一个已应用序号，所以从足够大处起步 */
+let remotePatchSeq = 1_000_000;
+function pushRemoteQueue(id: string, queuedMessages: { id: string; text: string }[]) {
+  onConversationsPatch?.({
+    upserts: { [id]: { set: { queuedMessages }, unset: [] } },
+    removes: [],
+    seq: ++remotePatchSeq,
+  });
+}
 
 describe('typed Agent child projection', () => {
   beforeAll(async () => {
@@ -219,6 +230,135 @@ describe('typed Agent child projection', () => {
     expect(queued[0]).toMatchObject({ text: 'from phone' });
     // 入队不投递，等本轮收束后由 flushQueue 发
     expect(agentPrompt).not.toHaveBeenCalled();
+  });
+
+  it('别的界面（PWA 完整模式）排的消息在轮次收束后才到达：会话空闲就直接发出', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          queuedMessages: [],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    pushRemoteQueue('parent', [{ id: 'q-remote', text: 'from pwa' }]);
+
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+    expect(agentPrompt).toHaveBeenCalledWith('parent', 'from pwa', undefined, expect.any(String));
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(conversation.queuedMessages).toEqual([]);
+    expect(conversation.messages.some((message) => message.optimistic)).toBe(true);
+  });
+
+  it('别的界面排的消息在轮次进行中到达：仍等本轮收束再发', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'running' as const,
+          queuedMessages: [],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    pushRemoteQueue('parent', [{ id: 'q-remote', text: 'from pwa' }]);
+
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q-remote', text: 'from pwa' },
+    ]);
+  });
+
+  it('中断后留着的排队消息：别的界面只是改字或删条，不触发投递', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          queuedMessages: [
+            { id: 'q1', text: 'held' },
+            { id: 'q2', text: 'also held' },
+          ],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    pushRemoteQueue('parent', [{ id: 'q1', text: 'held, edited' }]);
+
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'held, edited' },
+    ]);
+  });
+
+  it('写回被拒后重读磁盘：磁盘上别的界面新排的消息在空闲会话里补发', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          queuedMessages: [],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+    readConversations.mockResolvedValueOnce({
+      value: {
+        state: {
+          conversations: {
+            parent: {
+              id: 'parent',
+              projectId: 'project',
+              queuedMessages: [{ id: 'q-disk', text: 'from disk' }],
+            },
+          },
+          order: ['parent'],
+        },
+        version: 3,
+      },
+      seq: 0,
+    });
+
+    onConversationsResync?.();
+
+    await vi.waitFor(() =>
+      expect(agentPrompt).toHaveBeenCalledWith('parent', 'from disk', undefined, expect.any(String))
+    );
+  });
+
+  it('手机端入队时会话已空闲（手机看到的运行态过期）：桌面直接发出', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          queuedMessages: [],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    sessionsModule.useSessionsStore.getState().enqueueMessage('parent', 'from phone');
+
+    expect(agentPrompt).toHaveBeenCalledWith('parent', 'from phone', undefined, expect.any(String));
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual(
+      []
+    );
   });
 
   it('编辑排队消息保留图片', () => {
