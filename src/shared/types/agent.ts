@@ -2847,6 +2847,14 @@ const isModelSelectPayload = (data: Record<string, unknown>): boolean => {
 const isTokenRecord = (value: unknown, keys: readonly string[]): boolean =>
   isRecord(value) && hasExactKeys(value, keys) && keys.every((key) => isTokenCount(value[key]));
 
+const isContextUsageReport = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoningTokens']) &&
+  (['input', 'output', 'cacheRead', 'cacheWrite'] as const).every((key) =>
+    isTokenCount(value[key])
+  ) &&
+  (value.reasoningTokens === undefined || isTokenCount(value.reasoningTokens));
+
 const isContextUsagePayload = (data: Record<string, unknown>): boolean =>
   hasOnlyKeys(data, [
     'used',
@@ -2863,8 +2871,7 @@ const isContextUsagePayload = (data: Record<string, unknown>): boolean =>
   (data.contextWindow === undefined || isTokenCount(data.contextWindow)) &&
   (data.percent === undefined || isTokenCount(data.percent)) &&
   isTokenRecord(data.buckets, CONTEXT_USAGE_BUCKETS) &&
-  (data.usage === undefined ||
-    isTokenRecord(data.usage, ['input', 'output', 'cacheRead', 'cacheWrite'])) &&
+  (data.usage === undefined || isContextUsageReport(data.usage)) &&
   (data.turns === undefined || isSequence(data.turns)) &&
   (data.parts === undefined ||
     (Array.isArray(data.parts) &&
@@ -2906,11 +2913,14 @@ const isPluginInterceptPayload = (event: string, payload: unknown): boolean => {
       payload.reason.length <= 64
     );
   }
+  const isOptionalParentToolCallId = (value: unknown): boolean =>
+    value === undefined || (isNonEmptyString(value) && value.length <= 512);
   if (event === 'tool_call') {
     return (
-      hasExactKeys(payload, ['toolCallId', 'toolName', 'input']) &&
+      hasOnlyKeys(payload, ['toolCallId', 'parentToolCallId', 'toolName', 'input']) &&
       isNonEmptyString(payload.toolCallId) &&
       payload.toolCallId.length <= 512 &&
+      isOptionalParentToolCallId(payload.parentToolCallId) &&
       isNonEmptyString(payload.toolName) &&
       payload.toolName.length <= 256 &&
       isRecord(payload.input)
@@ -2918,9 +2928,17 @@ const isPluginInterceptPayload = (event: string, payload: unknown): boolean => {
   }
   if (event === 'tool_result') {
     return (
-      hasExactKeys(payload, ['toolCallId', 'toolName', 'input', 'content', 'isError']) &&
+      hasOnlyKeys(payload, [
+        'toolCallId',
+        'parentToolCallId',
+        'toolName',
+        'input',
+        'content',
+        'isError',
+      ]) &&
       isNonEmptyString(payload.toolCallId) &&
       payload.toolCallId.length <= 512 &&
+      isOptionalParentToolCallId(payload.parentToolCallId) &&
       isNonEmptyString(payload.toolName) &&
       payload.toolName.length <= 256 &&
       isRecord(payload.input) &&

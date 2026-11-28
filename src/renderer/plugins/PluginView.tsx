@@ -5,6 +5,7 @@ import { inlinePluginViewHtml } from './inlineAssets';
 import {
   createViewBridge,
   decodeUtf8Base64,
+  shouldDeliverViewEvent,
   usePluginViews,
   viewEventPush,
   viewFileEdit,
@@ -102,7 +103,7 @@ export function PluginFrame({
       attributeFilter: ['class'],
     });
     const unsubscribeViewEvent = window.electronAPI.extensionPlugins.onViewEvent((event) => {
-      if (event.pluginId !== pluginId || typeof event.name !== 'string') return;
+      if (!shouldDeliverViewEvent(event, pluginId, sessionRef.current)) return;
       try {
         channel?.port1.postMessage(viewEventPush(event.name, event.data));
       } catch {

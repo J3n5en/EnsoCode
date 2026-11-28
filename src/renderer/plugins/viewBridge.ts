@@ -61,6 +61,17 @@ export function viewEventPush(
   return { type: 'enso-view-event', name, data };
 }
 
+/** 判断主进程推来的侧栏事件是否应投递给当前侧栏实例 */
+export function shouldDeliverViewEvent(
+  event: { pluginId: string; name: unknown; sessionId?: string },
+  pluginId: string,
+  currentSessionId: string | null
+): event is { pluginId: string; name: string; sessionId?: string } {
+  if (event.pluginId !== pluginId || typeof event.name !== 'string') return false;
+  if (event.sessionId !== undefined && event.sessionId !== currentSessionId) return false;
+  return true;
+}
+
 /** 宿主推给文件查看器的当前文件内容 */
 /** 全局页面换了当前会话时推给页面；会话页面打开时也带一次 */
 export function viewSessionPush(

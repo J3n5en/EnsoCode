@@ -105,7 +105,7 @@
 | --- | --- | --- |
 | `agent.tool` | 有 `agentTools` | 注册 Agent 工具 |
 | `ui.slot` | 有 `renderer` 或 `triggers` | 渲染模块、补全来源 |
-| `ui.view` | 有 `views` | 侧栏页面，以及 `enso.ui.view.emit` |
+| `ui.view` | 有 `views` | 侧栏页面，以及 `enso.ui.view.emit` / `emitToSession` |
 | `ui.notify` | 要发系统通知 | `enso.ui.notify` |
 | `composer.draft` | 要读写输入框 | `enso.composer.*` |
 | `fs.read` / `fs.write` | 声明了对应范围 | 读写当前会话的项目文件 |
@@ -258,7 +258,8 @@ export async function activate(enso) {
 | `fs.readText(path)` / `fs.writeText(path, text)` | 路径相对当前会话的项目根 |
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
-| `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
+| `ui.view.emit(name, data?, options?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。传入 `options.sessionId`（子会话自动归并到所属主会话）时仅投递给绑定到该会话的侧栏实例，其余会话与空白草稿页在宿主侧拦截；全局页面跟随当前会话，只在该会话处于前台时收到，切过去时不补发；缺省则广播到本插件全部已打开的侧栏页面。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
+| `ui.view.emitToSession(sessionId, name, data?)` | 等价于 `ui.view.emit(name, data, { sessionId })`，显式按会话定向推送（漏传或空 `sessionId` 会以 `INVALID_ARGS` 拒绝，不退化为全局广播） |
 | `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。全局页面会加进所有会话。需要 `ui.view`，不需要用户手势 |
 | `ui.view.close(viewId?)` | 关掉当前会话里本插件的侧栏页面；右侧栏原本是收起的、由 `open` 打开，并且这个页面仍是当前标签时，一并收起右侧栏。全局页面会从所有会话一起关掉。需要 `ui.view`，不需要用户手势 |
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
@@ -291,8 +292,8 @@ export async function activate(enso) {
 | `agent_start` / `agent_end` | 一轮回复开始 / 结束 | `agent_start`：`{}`；`agent_end`：`{ text }`，本轮最后一条助手回复的文字部分（不含思考与工具调用，最多 64K 字符，没有文字时为空串）；秘书本轮调用了 `silence_turn`（静默回合）时多带 `silent: true` | 否 |
 | `before_compact` | 上下文压缩前 | `{ reason }` | 否。主会话只等已经在运行的插件（含常驻）处理完，最多 10 秒，然后照常压缩；没在运行的非常驻插件直接跳过，不会为此拉起进程。子会话里只通知、不等待 |
 | `after_compact` | 压缩后 | `{ reason }` | 否 |
-| `tool_call` | 工具执行前 | `{ toolCallId, toolName, input }` | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
-| `tool_result` | 工具执行后 | `{ toolCallId, toolName, input, content, isError }`。通知里的 `content` 最多 64K 字符，超出截断；拦截看到的是完整文本 | 返回 `{ content?, isError? }` 改写结果 |
+| `tool_call` | 工具执行前 | `{ toolCallId, parentToolCallId?, toolName, input }`。`codemode` 等工具内发起的嵌套调用带 `parentToolCallId`；顶层调用不带 | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
+| `tool_result` | 工具执行后 | `{ toolCallId, parentToolCallId?, toolName, input, content, isError }`。通知里的 `content` 最多 64K 字符，超出截断；拦截看到的是完整文本 | 返回 `{ content?, isError? }` 改写结果 |
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
 | `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
 | `session_status` | 主会话的汇总状态或挂起的提问 / 审批数变化时，所有项目的会话都会发 | `{ sessionId, state, previous, pendingAsks, pendingApprovals }`，见「会话状态」 | 否 |
@@ -308,7 +309,7 @@ export async function activate(enso) {
 
 通知按「插件 + 事件 + 会话」分开投递；子代理或 coworker 再按子会话身份（种类、子会话 id、名字）分开，所以一个会话的 `session_end` 不会盖掉另一个会话或子代理的。`context_usage` 和 `tool_result` 这类高频通知，同一条队列上如果上一条还在处理，后来的只保留最新一条。`session_start` / `session_end`、`agent_start` / `agent_end`、`before_compact` / `after_compact`，以及通知型的 `tool_call`、`input`，不合并，按到达顺序排队，每条队列最多 32 条，满了丢掉最旧的。
 
-`context_usage` 与输入框旁的上下文占用同源：`buckets` 是 `system` / `instructions` / `skills` / `tools` / `conversation` / `compaction` / `reminders` 各自的 token 数（文件、工具结果都算在 `conversation` 里），`used` 是总占用，`estimated` 为 `true` 表示还没有模型实报用量可校准、全部是估算。`usage` 是最近一次带用量的回复的实报 `{ input, output, cacheRead, cacheWrite }`，可据此算缓存命中率；还没有回复时不带。同一轮里会发多次，按最后一次为准。
+`context_usage` 与输入框旁的上下文占用同源：`buckets` 是 `system` / `instructions` / `skills` / `tools` / `conversation` / `compaction` / `reminders` 各自的 token 数（文件、工具结果都算在 `conversation` 里），`used` 是总占用，`estimated` 为 `true` 表示还没有模型实报用量可校准、全部是估算。`usage` 是最近一次带用量的回复的实报 `{ input, output, cacheRead, cacheWrite, reasoningTokens? }`（模型报告正数推理 token 时附带 `reasoningTokens`，它已包含在 `output` 中），可据此算缓存命中率与思考开销；还没有回复时不带。同一轮里会发多次，按最后一次为准。
 
 `parts` 是更细的拆分，形状与 magpie 的 prompt parts 相同：按 `system` / `tools` / `skills` / `memory` / `files` / `results` / `chat` 顺序，每类 `{ kind, tokens, items }`，空的类不出现。`items` 每项 `{ name, tag, n?, tokens }`，每类最多 24 项：
 
