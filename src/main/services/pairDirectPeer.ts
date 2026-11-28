@@ -56,6 +56,7 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
   });
   let dc: NdcChannel | null = null;
   let bulkDc: NdcChannel | null = null;
+  let bulkOpened = false;
   let closed = false;
   let remoteSet = false;
   const queuedCandidates: DirectCandidate[] = [];
@@ -75,7 +76,11 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     if (kind === 'bulk') bulkDc = channel;
     else dc = channel;
     channel.onOpen(() => {
-      if (closed || kind !== 'ctrl') return;
+      if (closed) return;
+      if (kind === 'bulk') {
+        bulkOpened = true;
+        return;
+      }
       // 真机验收靠这一行分辨 LAN（host↔host）、STUN 打洞（srflx/prflx）与地址族（v6 无 NAT）
       try {
         const pair = pc.getSelectedCandidatePair();
@@ -103,10 +108,16 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
       channel.onError(emitClose);
     } else {
       channel.onClosed(() => {
-        if (bulkDc === channel) bulkDc = null;
+        if (bulkDc === channel) {
+          bulkDc = null;
+          bulkOpened = false;
+        }
       });
       channel.onError(() => {
-        if (bulkDc === channel) bulkDc = null;
+        if (bulkDc === channel) {
+          bulkDc = null;
+          bulkOpened = false;
+        }
       });
     }
   };
@@ -119,7 +130,10 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     if (state === 'disconnected' || state === 'failed' || state === 'closed') emitClose();
   });
   pc.onDataChannel((channel) => {
-    if (!closed) attach(channel, channel.getLabel() === 'pair-bulk' ? 'bulk' : 'ctrl');
+    if (closed) return;
+    const kind: DirectChannelKind = channel.getLabel() === 'pair-bulk' ? 'bulk' : 'ctrl';
+    attach(channel, kind);
+    if (kind === 'bulk' && channel.isOpen()) bulkOpened = true;
   });
 
   const flushCandidates = (): void => {
@@ -201,7 +215,7 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
       }
     },
     sendBulk(bytes) {
-      if (closed || !bulkDc?.isOpen()) return false;
+      if (closed || !bulkOpened || !bulkDc?.isOpen()) return false;
       if (bulkDc.bufferedAmount() > 1_048_576) return false;
       try {
         bulkDc.sendMessageBinary(bytes);
@@ -212,10 +226,11 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     },
     buffered: () => (dc && !closed && dc.isOpen() ? dc.bufferedAmount() : 0),
     bufferedBulk: () => (bulkDc && !closed && bulkDc.isOpen() ? bulkDc.bufferedAmount() : 0),
-    isBulkOpen: () => !closed && Boolean(bulkDc?.isOpen()),
+    isBulkOpen: () => !closed && bulkOpened && Boolean(bulkDc?.isOpen()),
     close() {
       if (closed) return;
       closed = true;
+      bulkOpened = false;
       try {
         bulkDc?.close();
       } catch {}
