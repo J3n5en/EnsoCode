@@ -33,7 +33,7 @@ pnpm typecheck && pnpm lint && pnpm test:changed
 PR 里需要贴截图时，用 gh CLI 真实上传，禁止本地路径、禁止浏览器控制上传、禁止推图床分支：
 
 - `gh pr edit <n> --body-file body.md --attach './x.png#alt文本'`（`--attach` 可重复，最多 50 个；`gh pr comment` 同样支持 `--attach`）
-- body 里写 `![alt](./x.png)` 相对路径引用，gh 上传后自动重写为 `https://github.com/user-attachments/assets/{uuid}` 公开匿名可访问的 URL
+- body 里用 Markdown 图片语法引用同一个相对路径（如 `./x.png`），gh 上传后自动重写为 `https://github.com/user-attachments/assets/{uuid}` 公开匿名可访问的 URL
 - 要求 gh CLI v2.99.0+
 - uploads.github.com 对 GitHub 服务端故障极敏感：故障窗口内会持续 500/502 `Error creating/updating policy`——遇到这个不要怀疑方法错了、不要改用浏览器，等故障恢复同一条命令就能成功
 
