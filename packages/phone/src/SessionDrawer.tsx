@@ -119,11 +119,13 @@ interface Props {
     active: boolean;
     auto: boolean;
     aspect?: 'portrait' | 'square' | 'landscape';
+    follow?: 'opened' | 'latest';
     supported: boolean;
     error?: string | null;
     onToggle(): void;
     onAutoChange(next: boolean): void;
     onAspectChange?(aspect: 'portrait' | 'square' | 'landscape'): void;
+    onFollowChange?(mode: 'opened' | 'latest'): void;
   };
   onClose(): void;
   onSelect(sessionId: string): void;
@@ -734,6 +736,42 @@ export function SessionDrawer({
                           disabled={!pip.supported}
                           aria-pressed={selected}
                           onClick={() => pip.onAspectChange?.(opt.id)}
+                          className={cn(
+                            'rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                            selected
+                              ? 'bg-background font-semibold text-foreground shadow-xs'
+                              : 'text-muted-foreground'
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {pip.onFollowChange && (
+                <div className="mt-2 flex items-center gap-2 pl-6">
+                  <span className="min-w-0 flex-1 text-muted-foreground text-sm">跟随会话</span>
+                  <div
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
+                    role="group"
+                    aria-label="跟随会话"
+                  >
+                    {(
+                      [
+                        { id: 'opened', label: '当前打开' },
+                        { id: 'latest', label: '最新活跃' },
+                      ] as const
+                    ).map((opt) => {
+                      const selected = (pip.follow ?? 'opened') === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          disabled={!pip.supported}
+                          aria-pressed={selected}
+                          onClick={() => pip.onFollowChange?.(opt.id)}
                           className={cn(
                             'rounded px-1.5 py-0.5 text-[11px] transition-colors',
                             selected

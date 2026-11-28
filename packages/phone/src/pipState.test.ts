@@ -9,11 +9,13 @@ import {
   extractLatestTodo,
   loadNativePipAspect,
   loadNativePipAuto,
+  loadNativePipFollow,
   NATIVE_PIP_AUTO_KEY,
   parseInvokeSessionId,
   projectMessagesForPip,
   saveNativePipAspect,
   saveNativePipAuto,
+  saveNativePipFollow,
 } from './pipState';
 
 const user = (text: string, timestamp = 1000): ProjectedMessage => ({
@@ -94,21 +96,83 @@ describe('projectMessagesForPip', () => {
         isError: false,
         timestamp: 1000,
       }),
+      expect.objectContaining({
+        id: '12:th',
+        role: 'thinking',
+        text: '思考过程',
+        isStreaming: false,
+      }),
       expect.objectContaining({ id: '12', role: 'assistant', text: '我先看看', timestamp: 2001 }),
       expect.objectContaining({
         role: 'tool-group',
         toolState: 'ok',
         stepCount: 3,
-        text: '已完成 · 1 条命令、1 次读取、1 项操作',
-        steps: [
-          expect.objectContaining({ name: 'bash', summary: '终端 · pnpm test', state: 'ok' }),
-          expect.objectContaining({ name: 'read', summary: '读取 · b/c.ts', state: 'ok' }),
-          expect.objectContaining({ name: 'todo', summary: '待办 · 0/0 项', state: 'ok' }),
-        ],
+        text: '已工作 · 1 条命令 · 1 次读取 · 1 项操作',
+        steps: null,
       }),
     ]);
     expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
     expect(items.every((i) => !i.isStreaming)).toBe(true);
+  });
+
+  it('桌面折叠口径：连续思考+多步成功工具收成一行「已工作 XmYs」，失败工具与运行中尾步独立露出', () => {
+    const items = projectMessagesForPip(
+      [
+        assistant(
+          [
+            { type: 'thinking', text: '先检查代码' },
+            { type: 'toolCall', id: 't1', name: 'read', arguments: { path: '/a/foo.ts' } },
+            { type: 'toolCall', id: 't2', name: 'grep', arguments: { pattern: 'bar' } },
+          ],
+          { duration: 6700, timestamp: 1000 }
+        ),
+        { ...toolResult('read', false, 'ok'), toolCallId: 't1', duration: 3000, timestamp: 4000 },
+        {
+          ...toolResult('grep', false, 'ok'),
+          toolCallId: 't2',
+          duration: 98300,
+          timestamp: 102300,
+        },
+        assistant(
+          [
+            { type: 'toolCall', id: 't3', name: 'bash', arguments: { command: 'exit 1' } },
+            { type: 'toolCall', id: 't4', name: 'bash', arguments: { command: 'pnpm test' } },
+          ],
+          { timestamp: 103000 }
+        ),
+        {
+          ...toolResult('bash', true, 'Command exited with code 1'),
+          toolCallId: 't3',
+          duration: 100,
+          timestamp: 103100,
+        },
+      ],
+      { isRunning: true }
+    );
+    expect(items).toEqual([
+      expect.objectContaining({
+        role: 'tool-group',
+        text: '已工作 1m48s',
+        detail: '1 次读取 · 1 次检索',
+        steps: null,
+        stepCount: 2,
+      }),
+      expect.objectContaining({
+        role: 'tool',
+        toolName: '终端',
+        text: 'exit 1',
+        toolState: 'error',
+        isError: true,
+        detail: 'Command exited with code 1',
+      }),
+      expect.objectContaining({
+        role: 'tool',
+        toolName: '终端',
+        text: 'pnpm test',
+        toolState: 'running',
+        isStreaming: true,
+      }),
+    ]);
   });
 
   it('运行中只把最后一条 assistant 的末张卡片标为流式；独立展示 thinking 思考行', () => {
@@ -163,11 +227,8 @@ describe('projectMessagesForPip', () => {
       { ...toolResult('grep', true, ''), errorMessage: undefined },
     ]);
     expect(items).toEqual([
-      expect.objectContaining({
-        role: 'tool-group',
-        isError: true,
-        stepCount: 2,
-      }),
+      expect.objectContaining({ role: 'tool', toolName: '编辑', isError: true }),
+      expect.objectContaining({ role: 'tool', toolName: '搜索', isError: true }),
     ]);
   });
 
@@ -236,6 +297,9 @@ describe('projectMessagesForPip', () => {
     expect(loadNativePipAspect(storage)).toBe('portrait');
     saveNativePipAspect(storage, 'square');
     expect(loadNativePipAspect(storage)).toBe('square');
+    expect(loadNativePipFollow(storage)).toBe('opened');
+    saveNativePipFollow(storage, 'latest');
+    expect(loadNativePipFollow(storage)).toBe('latest');
   });
 });
 
@@ -355,7 +419,7 @@ describe('DeskPipTracker', () => {
     expect(snap(tracker).status).toBe('idle');
   });
 
-  it('审批挂起时浮窗切到待确认会话并给出提示，处理后回到正在看的会话', () => {
+  it('followMode=opened 始终跟随当前打开的会话；followMode=latest 优先跳到待确认/最新活跃会话', () => {
     const tracker = deskTracker();
     tracker.applyAgentEventPayload(
       ev({ type: 'message-upsert', identity: identity('s1'), index: 0, message: user('s1 的消息') })
@@ -367,6 +431,17 @@ describe('DeskPipTracker', () => {
         request: { requestId: 'r1', tool: 'bash', kind: 'command', summary: 'rm -rf dist' },
       })
     );
+    // 默认 opened：留在当前打开的 s1，但 pendingCount 与 pendingHint 仍提醒有别处待确认
+    expect(snap(tracker)).toMatchObject({
+      sessionId: 's1',
+      title: '修画中画',
+      status: 'idle',
+      pendingCount: 1,
+      pendingHint: '有 1 项待确认',
+    });
+
+    // 切到 latest：立刻跳到待确认的 s2
+    expect(tracker.setFollowMode('latest')).toBe(true);
     let s = snap(tracker);
     expect(s).toMatchObject({
       sessionId: 's2',
@@ -404,7 +479,7 @@ describe('DeskPipTracker', () => {
     expect(snap(tracker)).toMatchObject({ status: 'idle', pendingHint: null });
   });
 
-  it('焦点优先级：正在看且运行中 > 待确认 > 运行中 > 正在看 > 最近有消息', () => {
+  it('焦点优先级：opened 锁住当前打开会话；latest 按 待确认 > 运行中 > 最近有消息', () => {
     const tracker = new DeskPipTracker();
     const status = (sid: string, value: string, now: number) =>
       tracker.applyAgentEventPayload(
@@ -427,6 +502,11 @@ describe('DeskPipTracker', () => {
 
     status('runA', 'running', 3);
     status('runB', 'running', 4);
+    // opened 模式下即便其它会话正在跑，仍坚守用户当前打开的 old
+    expect(snap(tracker).sessionId).toBe('old');
+
+    // 切到 latest 后按 待确认 > 运行中 > 最近有消息
+    tracker.setFollowMode('latest');
     expect(snap(tracker).sessionId).toBe('runB');
 
     tracker.applyAgentEventPayload(
@@ -440,6 +520,8 @@ describe('DeskPipTracker', () => {
     expect(snap(tracker).sessionId).toBe('runA');
 
     tracker.setFocusedSession('runB');
+    expect(snap(tracker).sessionId).toBe('runA');
+    tracker.setFollowMode('opened');
     expect(snap(tracker).sessionId).toBe('runB');
   });
 
@@ -591,6 +673,36 @@ describe('buildPipSnapshotFromGuestView', () => {
       connectionState: 'offline',
     });
     expect(offline).toMatchObject({ sessionId: null, title: '办公机', status: 'offline' });
+  });
+
+  it('followMode=latest 优先展示最新待确认/运行中会话，opened 保持当前打开会话', () => {
+    const e1 = entry({ id: 's1', title: '当前会话', status: 'idle', updatedAt: 10 });
+    const e2 = entry({ id: 's2', title: '后台在跑', status: 'running', updatedAt: 20 });
+    const v1 = guestView({ messages: new Map([[0, user('在看 s1')]]) });
+    const v2 = guestView({ status: 'running', messages: new Map([[0, user('s2 正在跑')]]) });
+
+    const opened = buildPipSnapshotFromGuestView({
+      ...base,
+      activeId: 's1',
+      entry: e1,
+      view: v1,
+      catalog: [e1, e2],
+      followMode: 'opened',
+      getSession: (id) => (id === 's2' ? v2 : v1),
+    });
+    expect(opened).toMatchObject({ sessionId: 's1', title: '当前会话', status: 'idle' });
+
+    const latest = buildPipSnapshotFromGuestView({
+      ...base,
+      activeId: 's1',
+      entry: e1,
+      view: v1,
+      catalog: [e1, e2],
+      followMode: 'latest',
+      getSession: (id) => (id === 's2' ? v2 : v1),
+    });
+    expect(latest).toMatchObject({ sessionId: 's2', title: '后台在跑', status: 'running' });
+    expect(latest.messages.map((m) => m.text)).toEqual(['s2 正在跑']);
   });
 });
 

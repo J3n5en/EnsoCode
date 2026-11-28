@@ -34,9 +34,12 @@ import {
   DeskPipTracker,
   loadNativePipAspect,
   loadNativePipAuto,
+  loadNativePipFollow,
+  type NativePipFollowMode,
   parseInvokeSessionId,
   saveNativePipAspect,
   saveNativePipAuto,
+  saveNativePipFollow,
 } from '../pipState';
 import {
   isStandalone,
@@ -350,12 +353,14 @@ async function main(): Promise<void> {
     auto: loadNativePipAuto(localStorage),
     aspect: loadNativePipAspect(localStorage),
   };
+  let pipFollow: NativePipFollowMode = loadNativePipFollow(localStorage);
   const pipListeners = new Set<() => void>();
   const publishPip = (next: NativePipStatus) => {
     pipStatus = next;
     for (const listener of pipListeners) listener();
   };
   if (deskPip) {
+    deskPip.setFollowMode(pipFollow);
     setNativePipAuto(pipStatus.auto);
     setNativePipAspect(pipStatus.aspect ?? 'portrait');
     subscribeNativePipState(publishPip);
@@ -474,7 +479,7 @@ async function main(): Promise<void> {
     wide: () => matchMedia(DESKTOP_DRAWER_QUERY).matches,
     pip: deskPip
       ? {
-          state: () => pipStatus,
+          state: () => ({ ...pipStatus, follow: pipFollow }),
           onChange(listener: () => void) {
             pipListeners.add(listener);
             return () => pipListeners.delete(listener);
@@ -497,6 +502,12 @@ async function main(): Promise<void> {
             saveNativePipAspect(localStorage, aspect);
             setNativePipAspect(aspect);
             publishPip({ ...pipStatus, aspect });
+          },
+          setFollow(mode: NativePipFollowMode) {
+            pipFollow = mode;
+            saveNativePipFollow(localStorage, mode);
+            if (deskPip.setFollowMode(mode)) pipSync.flush();
+            publishPip({ ...pipStatus });
           },
         }
       : undefined,
@@ -531,7 +542,10 @@ async function main(): Promise<void> {
         invoke: (channel, payload) => {
           const result = frame.invoke(channel, payload);
           if (deskPip && kind === 'main') {
-            if (channel === IPC_CHANNELS.AGENT_PROMPT) {
+            if (
+              channel === IPC_CHANNELS.AGENT_PROMPT ||
+              channel === IPC_CHANNELS.SOURCE_CONVERSATION_SELECT
+            ) {
               const sessionId = parseInvokeSessionId(payload);
               if (sessionId && deskPip.setFocusedSession(sessionId)) schedulePipSync();
             } else if (channel === IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL) {
@@ -626,6 +640,9 @@ async function main(): Promise<void> {
       const parsed = parsePushPending(pending);
       if (!parsed) return;
       publishLink(reduceDeskLink(link, { type: 'push', ...parsed }));
+    },
+    setViewedSession(sessionId) {
+      if (deskPip?.setFocusedSession(sessionId)) schedulePipSync();
     },
   };
   (window as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote = bridge;

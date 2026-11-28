@@ -61,8 +61,11 @@ import {
   createTrailingThrottle,
   loadNativePipAspect,
   loadNativePipAuto,
+  loadNativePipFollow,
+  type NativePipFollowMode,
   saveNativePipAspect,
   saveNativePipAuto,
+  saveNativePipFollow,
 } from './pipState';
 import {
   isPushSupported,
@@ -828,6 +831,9 @@ export function App() {
     auto: loadNativePipAuto(localStorage),
     aspect: loadNativePipAspect(localStorage),
   }));
+  const [pipFollow, setPipFollow] = useState<NativePipFollowMode>(() =>
+    loadNativePipFollow(localStorage)
+  );
   const pipSnapshotRef = useRef<(() => NativePipSnapshot) | null>(null);
   const [pipSync] = useState(() =>
     createTrailingThrottle(() => {
@@ -857,12 +863,14 @@ export function App() {
         entry,
         view: view ?? undefined,
         catalog,
+        followMode: pipFollow,
+        getSession: (id) => clientRef.current?.getSession(id),
         connectionState: state,
         deviceLabel: widgetDeviceLabel,
         theme,
       });
     pipSync.schedule();
-  }, [nativePip, pipSync, activeId, entry, view, catalog, state, widgetDeviceLabel]);
+  }, [nativePip, pipSync, activeId, entry, view, catalog, pipFollow, state, widgetDeviceLabel]);
 
   /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
   const resetHostState = (nextView: LastView) => {
@@ -1300,6 +1308,7 @@ export function App() {
                 active: pipStatus.active,
                 auto: pipStatus.auto,
                 aspect: pipStatus.aspect,
+                follow: pipFollow,
                 supported: pipStatus.supported,
                 error: pipStatus.error,
                 onToggle: () => {
@@ -1320,6 +1329,10 @@ export function App() {
                   saveNativePipAspect(localStorage, next);
                   setNativePipAspect(next);
                   setPipStatus((prev) => ({ ...prev, aspect: next }));
+                },
+                onFollowChange: (next: NativePipFollowMode) => {
+                  saveNativePipFollow(localStorage, next);
+                  setPipFollow(next);
                 },
               }
             : undefined

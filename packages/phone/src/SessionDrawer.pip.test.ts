@@ -61,10 +61,12 @@ const pip = (active: boolean) => ({
   active,
   auto: true,
   aspect: 'portrait' as const,
+  follow: 'opened' as const,
   supported: true,
   onToggle: () => {},
   onAutoChange: () => {},
   onAspectChange: () => {},
+  onFollowChange: () => {},
 });
 
 describe('SessionDrawer 画中画', () => {
@@ -84,6 +86,9 @@ describe('SessionDrawer 画中画', () => {
     expect(html).toContain('切后台自动画中画');
     expect(html).toContain('浮窗比例');
     expect(html).toContain('竖屏大窗');
+    expect(html).toContain('跟随会话');
+    expect(html).toContain('当前打开');
+    expect(html).toContain('最新活跃');
     expect(html).toContain('浮窗支持双指放大');
     expect(html).toMatch(
       /role="switch"[^>]*aria-checked="true"|aria-checked="true"[^>]*role="switch"/

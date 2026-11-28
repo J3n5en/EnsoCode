@@ -7,7 +7,6 @@ import type {
   NativePipPendingDetail,
   NativePipSnapshot,
   NativePipTodoSummary,
-  NativePipToolStep,
 } from './nativeBridge';
 import { DeskWidgetTracker } from './widgetState';
 
@@ -23,16 +22,20 @@ import { DeskWidgetTracker } from './widgetState';
 
 export const NATIVE_PIP_AUTO_KEY = 'enso-native-pip-auto';
 export const NATIVE_PIP_ASPECT_KEY = 'enso-native-pip-aspect';
+export const NATIVE_PIP_FOLLOW_KEY = 'enso-native-pip-follow';
 export const PIP_MAX_MESSAGES = 18;
 /** 流式出字时推给原生的最小间隔：够顺滑，又不把 WKWebView postMessage 打满 */
 export const PIP_SYNC_INTERVAL_MS = 120;
 const LAST_ITEM_CHARS = 1200;
 const ITEM_CHARS = 420;
-const THINKING_TAIL_CHARS = 180;
+const THINKING_TAIL_CHARS = 160;
 const HINT_CHARS = 90;
 const OUTPUT_PREVIEW_CHARS = 140;
 /** 只投影最近这么多条原始消息：工具结果与调用配对后数量会收敛，留足够窗口保留多轮上下文 */
 const RAW_WINDOW = 80;
+
+/** 画中画跟随哪个会话：`opened` = 始终跟当前打开的会话；`latest` = 优先跳到最新待确认/运行中会话 */
+export type NativePipFollowMode = 'opened' | 'latest';
 const ARG_HINT_KEYS = [
   'command',
   'path',
@@ -109,6 +112,23 @@ export function saveNativePipAspect(
   } catch {}
 }
 
+export function loadNativePipFollow(storage: Pick<Storage, 'getItem'>): NativePipFollowMode {
+  try {
+    const raw = storage.getItem(NATIVE_PIP_FOLLOW_KEY);
+    if (raw === 'opened' || raw === 'latest') return raw;
+  } catch {}
+  return 'opened';
+}
+
+export function saveNativePipFollow(
+  storage: Pick<Storage, 'setItem'>,
+  mode: NativePipFollowMode
+): void {
+  try {
+    storage.setItem(NATIVE_PIP_FOLLOW_KEY, mode);
+  } catch {}
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -141,6 +161,17 @@ function joinText(parts: readonly ProjectedPart[], type: 'text' | 'thinking'): s
 
 function displayToolName(name: string): string {
   return TOOL_DISPLAY_LABELS[name] ?? name;
+}
+
+/** 对齐桌面 stats.ts 的耗时展示（如 6.7s / 1m48s） */
+function formatPipDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const sec = ms / 1000;
+  if (sec < 60) return sec < 10 ? `${sec.toFixed(1)}s` : `${Math.round(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  if (s === 60) return `${m + 1}m`;
+  return s > 0 ? `${m}m${s}s` : `${m}m`;
 }
 
 /** 缩短文件路径，保留末尾 2 段（如 `App/EnsoPiPController.swift`），更适合窄窗扫读 */
@@ -213,17 +244,17 @@ export function extractLatestTodo(
   return null;
 }
 
-function summarizeToolGroup(steps: readonly NativePipToolStep[], running: boolean): string {
+function summarizeActivityCounts(toolNames: readonly string[], thinkingCount: number): string {
   let commands = 0;
   let reads = 0;
   let searches = 0;
   let edits = 0;
   let others = 0;
-  for (const s of steps) {
-    if (COMMAND_TOOLS.has(s.name)) commands += 1;
-    else if (READ_TOOLS.has(s.name)) reads += 1;
-    else if (SEARCH_TOOLS.has(s.name)) searches += 1;
-    else if (EDIT_TOOLS.has(s.name)) edits += 1;
+  for (const name of toolNames) {
+    if (COMMAND_TOOLS.has(name)) commands += 1;
+    else if (READ_TOOLS.has(name)) reads += 1;
+    else if (SEARCH_TOOLS.has(name)) searches += 1;
+    else if (EDIT_TOOLS.has(name)) edits += 1;
     else others += 1;
   }
   const parts: string[] = [];
@@ -232,69 +263,181 @@ function summarizeToolGroup(steps: readonly NativePipToolStep[], running: boolea
   if (reads > 0) parts.push(`${reads} 次读取`);
   if (searches > 0) parts.push(`${searches} 次检索`);
   if (others > 0) parts.push(`${others} 项操作`);
-  const prefix = running ? '执行中' : '已完成';
-  return parts.length > 0 ? `${prefix} · ${parts.join('、')}` : `${prefix} ${steps.length} 步`;
+  if (parts.length === 0 && thinkingCount > 0) return `思考 ${thinkingCount} 次`;
+  return parts.join(' · ');
 }
 
-interface RawToolEntry {
-  id: string;
-  rawName: string;
-  label: string;
-  summary: string;
-  state: 'running' | 'ok' | 'error';
-  output: string | null;
-  timestamp: number;
+function summarizeWorkedGroup(
+  entries: readonly RawActivityEntry[],
+  live: boolean
+): {
+  title: string;
+  detail: string | null;
+  toolCount: number;
+} {
+  let workedMs = 0;
+  let thinkingCount = 0;
+  const toolNames: string[] = [];
+  const labels: string[] = [];
+  for (const e of entries) {
+    workedMs += e.durationMs;
+    if (e.kind === 'thinking') {
+      thinkingCount += 1;
+    } else {
+      toolNames.push(e.rawName);
+      const hint = e.summary || e.label;
+      if (hint && !labels.includes(hint)) labels.push(hint);
+    }
+  }
+  // 如果没有显式 duration 字段，用段内起止时间戳粗估耗时（仅当 ≥500ms）
+  if (workedMs <= 0 && entries.length >= 2) {
+    const firstTs = entries[0]?.timestamp ?? 0;
+    const lastTs = entries[entries.length - 1]?.timestamp ?? 0;
+    if (firstTs > 0 && lastTs > firstTs && lastTs - firstTs >= 500) {
+      workedMs = lastTs - firstTs;
+    }
+  }
+  const dur = formatPipDuration(workedMs);
+  const counts = summarizeActivityCounts(toolNames, thinkingCount);
+  const title = live
+    ? dur
+      ? `工作中 ${dur}`
+      : counts
+        ? `工作中 · ${counts}`
+        : '工作中'
+    : dur
+      ? `已工作 ${dur}`
+      : counts
+        ? `已工作 · ${counts}`
+        : `已工作 · ${entries.length} 步`;
+  // 与桌面「已工作 XmYs」下方一行概要对齐：有明确耗时就把统计/末尾几个动作放在一行副标题里
+  let detail: string | null = null;
+  if (dur && counts) {
+    detail = counts;
+  } else if (labels.length > 0) {
+    detail = clip(labels.slice(-3).join(' · '), OUTPUT_PREVIEW_CHARS, false);
+  }
+  return { title, detail, toolCount: toolNames.length };
 }
 
-/** 把相邻 ≥2 条工具步聚合成一条 `tool-group`，单条则保持 `tool`（对齐桌面过程折叠组） */
-function flushToolsInto(items: NativePipMessage[], buffer: RawToolEntry[]): void {
+type RawActivityEntry =
+  | {
+      kind: 'thinking';
+      id: string;
+      text: string;
+      durationMs: number;
+      timestamp: number;
+      isStreaming: boolean;
+    }
+  | {
+      kind: 'tool';
+      id: string;
+      rawName: string;
+      label: string;
+      summary: string;
+      state: 'running' | 'ok' | 'error';
+      output: string | null;
+      durationMs: number;
+      timestamp: number;
+    };
+
+/**
+ * 把连续的「思考 + 成功工具」段折叠成桌面同款「已工作 XmYs」一行（默认收起，不展开子步刷屏）：
+ * - 已离开活尾段的段：只要总成员 ≥2，整段收成一行 `tool-group`（steps: null）；
+ *   单条思考收成「思考了 Xs」紧凑行；单条工具保持单行 `tool`；报错工具打断段并单独保留以便一眼发现。
+ * - 正在进行的活尾段：已完成的前缀（≥2 步）照样折成一行「已工作 …」，当前正在流式的思考或正在跑的
+ *   工具保留在底部实时展示，不把历史工具全摊开占满浮窗。
+ */
+function flushActivityInto(
+  items: NativePipMessage[],
+  buffer: RawActivityEntry[],
+  isLiveTail: boolean
+): void {
   if (buffer.length === 0) return;
-  if (buffer.length === 1) {
-    const only = buffer[0];
-    if (only) {
+
+  const emitSingle = (entry: RawActivityEntry) => {
+    if (entry.kind === 'thinking') {
+      const dur = formatPipDuration(entry.durationMs);
+      const text = entry.isStreaming ? entry.text : dur ? `思考了 ${dur}` : '思考过程';
       items.push({
-        id: only.id,
-        role: 'tool',
-        text: only.summary,
-        toolName: only.label,
-        toolState: only.state,
-        detail: only.output,
+        id: entry.id,
+        role: 'thinking',
+        text,
+        toolName: null,
+        toolState: entry.isStreaming ? 'running' : 'ok',
+        detail: null,
         steps: null,
         stepCount: null,
-        isStreaming: only.state === 'running',
-        isError: only.state === 'error',
-        timestamp: only.timestamp,
+        isStreaming: entry.isStreaming,
+        isError: false,
+        timestamp: entry.timestamp,
       });
+      return;
     }
-    buffer.length = 0;
-    return;
+    items.push({
+      id: entry.id,
+      role: 'tool',
+      text: entry.summary,
+      toolName: entry.label,
+      toolState: entry.state,
+      detail: entry.state === 'error' ? entry.output : null,
+      steps: null,
+      stepCount: null,
+      isStreaming: entry.state === 'running',
+      isError: entry.state === 'error',
+      timestamp: entry.timestamp,
+    });
+  };
+
+  const emitFoldedGroup = (segment: RawActivityEntry[]) => {
+    if (segment.length === 0) return;
+    if (segment.length === 1) {
+      emitSingle(segment[0]!);
+      return;
+    }
+    const { title, detail, toolCount } = summarizeWorkedGroup(segment, false);
+    const first = segment[0]!;
+    const last = segment[segment.length - 1]!;
+    items.push({
+      id: `grp:${first.id}:${last.id}`,
+      role: 'tool-group',
+      text: title,
+      toolName: null,
+      toolState: 'ok',
+      detail,
+      // 桌面默认收起：已完成的「已工作」组只占一行，不再把每步明细展开刷屏
+      steps: null,
+      stepCount: toolCount > 0 ? toolCount : segment.length,
+      isStreaming: false,
+      isError: false,
+      timestamp: last.timestamp,
+    });
+  };
+
+  // 按失败工具与（活尾段中的）进行中成员切段：
+  // 成功的前缀聚合成「已工作」一行；失败工具和正在流式/运行中的尾步保持可见。
+  let okRun: RawActivityEntry[] = [];
+  const flushOkRun = () => {
+    if (okRun.length === 0) return;
+    emitFoldedGroup(okRun);
+    okRun = [];
+  };
+
+  for (let i = 0; i < buffer.length; i += 1) {
+    const entry = buffer[i]!;
+    const isErrorTool = entry.kind === 'tool' && entry.state === 'error';
+    const isActiveTail =
+      isLiveTail &&
+      ((entry.kind === 'thinking' && entry.isStreaming) ||
+        (entry.kind === 'tool' && entry.state === 'running'));
+    if (isErrorTool || isActiveTail) {
+      flushOkRun();
+      emitSingle(entry);
+    } else {
+      okRun.push(entry);
+    }
   }
-  const hasError = buffer.some((s) => s.state === 'error');
-  const hasRunning = buffer.some((s) => s.state === 'running');
-  const groupState: 'running' | 'ok' | 'error' = hasRunning ? 'running' : hasError ? 'error' : 'ok';
-  const steps: NativePipToolStep[] = buffer.map((entry) => ({
-    id: entry.id,
-    name: entry.rawName,
-    summary: entry.summary ? `${entry.label} · ${entry.summary}` : entry.label,
-    state: entry.state,
-    output: entry.output,
-  }));
-  // 组内只展示末尾 3 步，避免把正文顶出视口
-  const visibleSteps = steps.slice(-3);
-  const last = buffer[buffer.length - 1];
-  items.push({
-    id: `grp:${buffer[0]?.id ?? ''}:${last?.id ?? ''}`,
-    role: 'tool-group',
-    text: summarizeToolGroup(steps, hasRunning),
-    toolName: null,
-    toolState: groupState,
-    detail: hasError ? (buffer.findLast((s) => s.state === 'error')?.output ?? null) : null,
-    steps: visibleSteps,
-    stepCount: steps.length,
-    isStreaming: hasRunning,
-    isError: hasError,
-    timestamp: last?.timestamp ?? 0,
-  });
+  flushOkRun();
   buffer.length = 0;
 }
 
@@ -322,7 +465,7 @@ export function projectMessagesForPip(
   // 预扫描 toolResult，按 toolCallId 建立配对索引，这样每条 toolCall 都知道自己成功/报错/仍在运行
   const resultsByCallId = new Map<
     string,
-    { isError: boolean; output: string | null; toolName: string | null }
+    { isError: boolean; output: string | null; toolName: string | null; durationMs: number }
   >();
   for (let i = start; i < messages.length; i += 1) {
     const msg = messages[i];
@@ -337,12 +480,14 @@ export function projectMessagesForPip(
       isError,
       output: rawErr ? firstLine(rawErr, OUTPUT_PREVIEW_CHARS) : null,
       toolName: msg.toolName ?? null,
+      durationMs: typeof msg.duration === 'number' && msg.duration > 0 ? msg.duration : 0,
     });
   }
 
   const items: NativePipMessage[] = [];
-  const toolBuffer: RawToolEntry[] = [];
-  const flushTools = () => flushToolsInto(items, toolBuffer);
+  const activityBuffer: RawActivityEntry[] = [];
+  const flushActivity = (isLiveTail = false) =>
+    flushActivityInto(items, activityBuffer, isLiveTail);
 
   for (let i = start; i < messages.length; i += 1) {
     const msg = messages[i];
@@ -371,7 +516,7 @@ export function projectMessagesForPip(
       });
     };
     if (msg.role === 'user') {
-      flushTools();
+      flushActivity(false);
       const text =
         joinText(msg.content, 'text') ||
         (msg.content.some((part) => part.type === 'image') ? '[图片]' : '');
@@ -382,23 +527,31 @@ export function projectMessagesForPip(
       const text = joinText(msg.content, 'text');
       const hasToolCalls = msg.content.some((part) => part.type === 'toolCall');
       const onlyThinkingNow = streaming && !text && !hasToolCalls;
-      if (thinking && (onlyThinkingNow || !text)) {
-        flushTools();
-        add(
-          'th',
-          'thinking',
-          onlyThinkingNow
+      const msgDurationMs = typeof msg.duration === 'number' && msg.duration > 0 ? msg.duration : 0;
+      if (thinking) {
+        activityBuffer.push({
+          kind: 'thinking',
+          id: `${id}:th`,
+          text: onlyThinkingNow
             ? clip(thinking, THINKING_TAIL_CHARS, true)
             : firstLine(thinking, HINT_CHARS),
-          { isStreaming: onlyThinkingNow }
-        );
+          durationMs: msgDurationMs,
+          timestamp,
+          isStreaming: onlyThinkingNow,
+        });
       } else if (onlyThinkingNow) {
-        flushTools();
-        add('th', 'thinking', '思考中…', { isStreaming: true });
+        activityBuffer.push({
+          kind: 'thinking',
+          id: `${id}:th`,
+          text: '思考中…',
+          durationMs: 0,
+          timestamp,
+          isStreaming: true,
+        });
       }
 
       if (text) {
-        flushTools();
+        flushActivity(false);
         add('', 'assistant', text, { isStreaming: streaming && !hasToolCalls });
       }
 
@@ -412,19 +565,21 @@ export function projectMessagesForPip(
           : streaming
             ? 'running'
             : 'ok';
-        toolBuffer.push({
+        activityBuffer.push({
+          kind: 'tool',
           id: `${id}:t${k}`,
           rawName: part.name,
           label: displayToolName(part.name),
           summary: toolCallSummary(part.name, part.arguments),
           state,
           output: result?.output ?? null,
+          durationMs: result?.durationMs ?? 0,
           timestamp,
         });
       });
 
       if (msg.stopReason === 'error' && msg.errorMessage?.trim()) {
-        flushTools();
+        flushActivity(false);
         add('e', 'system', normalize(msg.errorMessage), { isError: true });
       }
     } else if (msg.role === 'toolResult' && msg.isError === true) {
@@ -433,18 +588,20 @@ export function projectMessagesForPip(
       if (callId && resultsByCallId.has(callId)) continue;
       const toolName = msg.toolName ?? '工具';
       const detail = normalize(msg.errorMessage ?? '') || joinText(msg.content, 'text');
-      toolBuffer.push({
+      activityBuffer.push({
+        kind: 'tool',
         id,
         rawName: toolName,
         label: displayToolName(toolName),
         summary: firstLine(detail || `${toolName} 执行失败`, HINT_CHARS),
         state: 'error',
         output: firstLine(detail, OUTPUT_PREVIEW_CHARS) || null,
+        durationMs: typeof msg.duration === 'number' && msg.duration > 0 ? msg.duration : 0,
         timestamp,
       });
     }
   }
-  flushTools();
+  flushActivity(opts.isRunning === true);
   const kept = items.slice(-(opts.maxItems ?? PIP_MAX_MESSAGES));
   return kept.map((item, k) => {
     const isLast = k === kept.length - 1;
@@ -577,6 +734,7 @@ export class DeskPipTracker {
   private readonly directory = new DeskWidgetTracker();
   private readonly sessions = new Map<string, PipSession>();
   private focusedSessionId: string | null = null;
+  private followMode: NativePipFollowMode = 'opened';
 
   ingestSettingsJson(json: string | undefined): boolean {
     return this.directory.ingestSettingsJson(json);
@@ -605,6 +763,16 @@ export class DeskPipTracker {
     if (this.focusedSessionId === sessionId) return false;
     this.focusedSessionId = sessionId;
     return true;
+  }
+
+  setFollowMode(mode: NativePipFollowMode): boolean {
+    if (this.followMode === mode) return false;
+    this.followMode = mode;
+    return true;
+  }
+
+  getFollowMode(): NativePipFollowMode {
+    return this.followMode;
   }
 
   private ensure(sessionId: string, now: number): PipSession {
@@ -798,18 +966,35 @@ export class DeskPipTracker {
     }
   }
 
-  /** 浮窗跟哪个会话：正在看且有动静的 > 待确认 > 运行中 > 正在看的 > 最近有消息的 */
+  /**
+   * 浮窗跟哪个会话：
+   * - `opened`（默认）：始终跟随 App 内当前打开的会话；只有完全未选中会话时兜底最近有动静的会话
+   * - `latest`：优先跳到最新待确认/运行中/有新消息的会话，其次正在看的
+   */
   private pickFocus(): string | null {
     const focused = this.focusedSessionId ?? this.directory.activeConversationId;
     const focusedSession = focused ? this.sessions.get(focused) : undefined;
-    if (focusedSession && (pendingOf(focusedSession) > 0 || focusedSession.status === 'running'))
-      return focused;
+    const focusedKnown =
+      focused !== null &&
+      (focusedSession !== undefined || this.directory.describeSession(focused, '') !== null);
     const recent = [...this.sessions].sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+
+    if (this.followMode === 'opened') {
+      if (focusedKnown) return focused;
+      return (
+        recent.find(([, s]) => pendingOf(s) > 0)?.[0] ??
+        recent.find(([, s]) => s.status === 'running')?.[0] ??
+        recent.find(([, s]) => s.messages.size > 0)?.[0] ??
+        null
+      );
+    }
+
     const pick =
-      recent.find(([, s]) => pendingOf(s) > 0) ?? recent.find(([, s]) => s.status === 'running');
+      recent.find(([, s]) => pendingOf(s) > 0) ??
+      recent.find(([, s]) => s.status === 'running') ??
+      recent.find(([, s]) => s.messages.size > 0);
     if (pick) return pick[0];
-    if (focused && (focusedSession || this.directory.describeSession(focused, ''))) return focused;
-    return recent.find(([, s]) => s.messages.size > 0)?.[0] ?? null;
+    return focusedKnown ? focused : null;
   }
 
   buildSnapshot(params: {
@@ -865,42 +1050,69 @@ export function buildPipSnapshotFromGuestView(input: {
   entry: CatalogEntry | undefined;
   view: GuestSessionView | undefined;
   catalog: readonly CatalogEntry[];
+  followMode?: NativePipFollowMode;
+  getSession?: (id: string) => GuestSessionView | undefined;
   connectionState: string;
   deviceLabel: string;
   theme?: 'dark' | 'light';
   now?: number;
 }): NativePipSnapshot {
-  const { activeId, entry, view } = input;
+  let targetId = input.activeId;
+  let targetEntry = input.entry;
+  let targetView = input.view;
   let runningCount = 0;
   let pendingCount = 0;
+  const visibleCatalog: CatalogEntry[] = [];
   for (const c of input.catalog) {
     if (c.archived || c.parentId) continue;
+    visibleCatalog.push(c);
     if (c.status === 'running') runningCount += 1;
     pendingCount += (c.pendingApprovalCount ?? 0) + (c.pendingAskCount ?? 0);
   }
-  const approval = view?.approvals[0];
-  const ask = view?.asks.find((a) => !a.answered);
-  const pending = view
-    ? view.approvals.length + view.asks.filter((a) => !a.answered).length
-    : (entry?.pendingApprovalCount ?? 0) + (entry?.pendingAskCount ?? 0);
+  if (input.followMode === 'latest' && visibleCatalog.length > 0) {
+    const sorted = [...visibleCatalog].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    const latest =
+      sorted.find((c) => (c.pendingApprovalCount ?? 0) + (c.pendingAskCount ?? 0) > 0) ??
+      sorted.find((c) => c.status === 'running') ??
+      sorted[0];
+    if (latest) {
+      targetId = latest.id;
+      targetEntry = latest;
+      targetView =
+        latest.id === input.activeId ? input.view : (input.getSession?.(latest.id) ?? undefined);
+    }
+  }
+  const approval = targetView?.approvals[0];
+  const ask = targetView?.asks.find((a) => !a.answered);
+  const pending = targetView
+    ? targetView.approvals.length + targetView.asks.filter((a) => !a.answered).length
+    : (targetEntry?.pendingApprovalCount ?? 0) + (targetEntry?.pendingAskCount ?? 0);
   const hint = approval ? approvalHint(approval.tool) : ask ? askHint(ask.question) : null;
   const pendingDetail: NativePipPendingDetail | null = approval
     ? approvalDetail(approval as unknown as Record<string, unknown>)
     : ask
       ? askDetail(ask as unknown as Record<string, unknown>)
       : null;
-  const tail = view ? contiguousTail(view.messages) : { messages: [], baseIndex: 0 };
-  const status = view?.status ?? entry?.status ?? 'idle';
+  const tail = targetView ? contiguousTail(targetView.messages) : { messages: [], baseIndex: 0 };
+  const status = targetView?.status ?? targetEntry?.status ?? 'idle';
   const metaParts: string[] = [];
-  if (entry?.modelLabel) metaParts.push(entry.modelLabel);
-  if (entry?.context && typeof entry.context.used === 'number' && entry.context.max > 0) {
-    const pct = Math.min(100, Math.round((entry.context.used / entry.context.max) * 100));
+  if (targetEntry?.modelLabel) metaParts.push(targetEntry.modelLabel);
+  if (
+    targetEntry?.context &&
+    typeof targetEntry.context.used === 'number' &&
+    targetEntry.context.max > 0
+  ) {
+    const pct = Math.min(
+      100,
+      Math.round((targetEntry.context.used / targetEntry.context.max) * 100)
+    );
     metaParts.push(`${pct}%`);
   }
   return {
-    sessionId: activeId,
-    title: entry?.title?.trim() || (activeId ? '未命名会话' : input.deviceLabel || 'EnsoCode'),
-    projectName: entry?.projectName || input.deviceLabel,
+    sessionId: targetId,
+    title:
+      targetEntry?.title?.trim() || (targetId ? '未命名会话' : input.deviceLabel || 'EnsoCode'),
+    projectName: targetEntry?.projectName || input.deviceLabel,
     status: resolveStatus(input.connectionState, pending, status),
     pendingHint: hint ?? otherPendingHint(pending > 0 ? pending : pendingCount),
     pendingDetail,

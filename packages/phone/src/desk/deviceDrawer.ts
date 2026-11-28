@@ -46,6 +46,7 @@ export interface DeviceDrawerHost {
       active: boolean;
       auto: boolean;
       aspect?: 'portrait' | 'square' | 'landscape';
+      follow?: 'opened' | 'latest';
       supported: boolean;
       error?: string | null;
     };
@@ -53,6 +54,7 @@ export interface DeviceDrawerHost {
     toggle(): void;
     setAuto(enabled: boolean): void;
     setAspect?(aspect: 'portrait' | 'square' | 'landscape'): void;
+    setFollow?(mode: 'opened' | 'latest'): void;
   };
 }
 
@@ -261,7 +263,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
   const renderPip = () => {
     const pip = host.pip;
     if (!pipBox || !pip) return;
-    const { active, auto, aspect = 'portrait', supported, error } = pip.state();
+    const { active, auto, aspect = 'portrait', follow = 'opened', supported, error } = pip.state();
     const action = button(
       { class: 'dd-line' },
       () => {
@@ -309,6 +311,31 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
           )
         )
       : null;
+    const followOptions = [
+      { id: 'opened' as const, label: '当前打开' },
+      { id: 'latest' as const, label: '最新活跃' },
+    ];
+    const followRow = pip.setFollow
+      ? el(
+          'div',
+          { class: 'dd-line' },
+          el('span', { style: 'width:16px;flex-shrink:0' }),
+          el('span', { class: 'dd-grow' }, '跟随会话'),
+          el(
+            'div',
+            { class: 'dd-seg', role: 'group', 'aria-label': '跟随会话' },
+            ...followOptions.map((opt) => {
+              const btn = button(
+                { 'aria-pressed': String(follow === opt.id) },
+                () => pip.setFollow?.(opt.id),
+                opt.label
+              );
+              btn.disabled = !supported;
+              return btn;
+            })
+          )
+        )
+      : null;
     pipBox.replaceChildren(
       action,
       el(
@@ -319,6 +346,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
         autoSwitch
       ),
       ...(aspectRow ? [aspectRow] : []),
+      ...(followRow ? [followRow] : []),
       el('p', { class: 'dd-hint' }, error || '浮窗支持双指放大，切到其他 App 时实时同步对话')
     );
   };
