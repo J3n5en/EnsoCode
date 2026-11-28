@@ -111,9 +111,18 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         }
     }
 
-    /// 支持 Universal Link / `enso://` 深链直达配对
+    /// 支持 Universal Link / `enso://` 深链直达配对或指定会话（小组件 / 灵动岛点击）
     func handleIncomingURL(_ url: URL) {
         guard let base = server?.baseURL else { return }
+        if url.scheme == "enso", url.host == "open" {
+            if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let sessionId = comps.queryItems?.first(where: { $0.name == "session" })?.value,
+               !sessionId.isEmpty
+            {
+                openSessionFromNotification(sessionId)
+            }
+            return
+        }
         if url.scheme == "enso" || url.fragment?.contains("pk=") == true {
             var comps = URLComponents(url: base, resolvingAgainstBaseURL: false)
             comps?.fragment = url.fragment ?? url.query
@@ -141,7 +150,7 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         }
         // 切回前台时立即通知前端触发原生 QUIC / WebRTC 探活与重连
         EnsoPushManager.shared.clearBadge()
-        evalJS("window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));")
+        evalJS("window.dispatchEvent(new Event('enso:foreground'));")
     }
 
     func openSessionFromNotification(_ sessionId: String) {
@@ -161,7 +170,9 @@ final class EnsoWebShellController: NSObject, ObservableObject {
     }
 
     @objc private func appDidEnterBackground() {
-        evalJS("window.dispatchEvent(new Event('pagehide'));")
+        // 不能伪造 persisted=false 的 pagehide，否则前端会误以为页面卸载而向桌面发 rpc-bye，
+        // 导致切回前台后宿主拒绝续连（resumed=false）并强制重载整个 iframe。
+        evalJS("window.dispatchEvent(new Event('enso:background'));")
     }
 
     private func requestDeskAssetFromWebView(path: String, completion: @escaping (LocalProxyAsset) -> Void) {
@@ -232,6 +243,8 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         quic: true,
         deskProxy: true,
         push: true,
+        liveActivity: true,
+        widgets: true,
         openQuic: (params) => post({ type: 'quic-open', params }),
         sendQuicText: (id, text) => post({ type: 'quic-send-text', id, text }),
         sendQuicBinary: (id, lane, base64) => post({ type: 'quic-send-binary', id, lane, base64 }),
@@ -252,6 +265,9 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         }),
         unsubscribePush: () => {
           post({ type: 'push-unsubscribe' });
+        },
+        updateWidgetState: (snapshot) => {
+          post({ type: 'widget-update', snapshot });
         },
         replyDeskAsset: (reqId, status, mime, bodyBase64) => post({
           type: 'desk-asset-reply',
@@ -353,6 +369,10 @@ extension EnsoWebShellController: WKScriptMessageHandler {
 
         case "push-unsubscribe":
             EnsoPushManager.shared.clearBadge()
+
+        case "widget-update":
+            guard let snapshot = body["snapshot"] as? [String: Any] else { return }
+            EnsoWidgetBridge.shared.update(from: snapshot)
 
         case "desk-asset-reply":
             guard let reqId = body["reqId"] as? String,

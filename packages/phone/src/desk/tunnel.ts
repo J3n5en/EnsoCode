@@ -71,6 +71,8 @@ interface Slot {
   listeners: Map<string, Set<(payload: string) => void>>;
   /** 宿主已丢失该 renderer（重启/缓冲溢出/超时）：壳重载对应 iframe */
   onReset: () => void;
+  /** attach 早于 online 时预挂好的只读预校验清单，首次 hello 复用而不清空 */
+  armedPrefetch?: RemotePrefetchItem[];
 }
 
 export interface DeskFrame {
@@ -166,6 +168,7 @@ export class DeskTunnel {
     >
   >();
   private prefetchReady = new Map<string, Map<string, { h: string; data: unknown; at: number }>>();
+  private prefetchHits = 0;
   /** 本次页面加载：宿主据此回收旧页面遗留的 renderer */
   private readonly page = crypto.randomUUID();
   /** 链路诊断：缺口、重新 hello、换链等关键时刻（壳挂到 window.__deskTrace，排查卡顿用） */
@@ -225,6 +228,13 @@ export class DeskTunnel {
     this.client.close();
   }
 
+  diagnostics(): Record<string, unknown> {
+    return {
+      ...this.client.diagnostics(),
+      prefetchHits: this.prefetchHits,
+    };
+  }
+
   start(): void {
     const client = this.client;
     client.connect();
@@ -250,6 +260,16 @@ export class DeskTunnel {
       // 真卸载（刷新/离开）尽力告别；进 bfcache 的页面可能回来，不发
       if (!event.persisted && this.online)
         for (const cid of this.slots.keys()) this.post({ type: 'rpc-bye', cid });
+    });
+    window.addEventListener('enso:background', () => {
+      this.note('native-bg');
+      client.conceal();
+      client.send({ type: 'presence', visible: false });
+    });
+    window.addEventListener('enso:foreground', () => {
+      this.note('native-fg');
+      client.nudge('visibility');
+      client.send({ type: 'presence', visible: true });
     });
   }
 
@@ -373,6 +393,50 @@ export class DeskTunnel {
     });
   }
 
+  private armPrefetch(slot: Slot, armTimeoutMs: number): RemotePrefetchItem[] {
+    if (slot.everReady || slot.kind !== 'main') return [];
+    const prefetch = this.link.getPrefetch?.() ?? [];
+    this.clearPrefetch(slot.cid);
+    slot.armedPrefetch = undefined;
+    if (prefetch.length === 0) return [];
+    const map = new Map<
+      string,
+      {
+        h: string;
+        promise: Promise<unknown>;
+        resolve: (data: unknown) => void;
+        settled: boolean;
+        taken: boolean;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >();
+    for (const item of prefetch) {
+      const key = `${item.ch}\0${JSON.stringify(item.args)}`;
+      if (map.has(key)) continue;
+      let resolve!: (data: unknown) => void;
+      const promise = new Promise<unknown>((res) => {
+        resolve = res;
+      });
+      const entry = {
+        h: item.h,
+        promise,
+        resolve,
+        settled: false,
+        taken: false,
+        timer: setTimeout(() => {
+          if (entry.settled) return;
+          entry.settled = true;
+          map.delete(key);
+          resolve(null);
+        }, armTimeoutMs),
+      };
+      map.set(key, entry);
+    }
+    this.prefetchPending.set(slot.cid, map);
+    slot.armedPrefetch = prefetch;
+    return prefetch;
+  }
+
   private hello(slot: Slot): void {
     slot.helloAt = Date.now();
     // 外部路径（resync / watch / online）已发补发请求时，推迟正在计时的缺口重发，避免 1 秒内叠发两遍
@@ -381,44 +445,30 @@ export class DeskTunnel {
       slot.gapTimer = null;
       this.watchGap(slot, slot.helloAt, false);
     }
-    const prefetch =
-      !slot.everReady && slot.kind === 'main' ? (this.link.getPrefetch?.() ?? []) : [];
-    this.clearPrefetch(slot.cid);
-    if (prefetch.length > 0) {
-      const map = new Map<
-        string,
-        {
-          h: string;
-          promise: Promise<unknown>;
-          resolve: (data: unknown) => void;
-          settled: boolean;
-          taken: boolean;
-          timer: ReturnType<typeof setTimeout>;
-        }
-      >();
-      for (const item of prefetch) {
-        const key = `${item.ch}\0${JSON.stringify(item.args)}`;
-        if (map.has(key)) continue;
-        let resolve!: (data: unknown) => void;
-        const promise = new Promise<unknown>((res) => {
-          resolve = res;
-        });
-        const entry = {
-          h: item.h,
-          promise,
-          resolve,
-          settled: false,
-          taken: false,
-          timer: setTimeout(() => {
+    let prefetch: RemotePrefetchItem[] = [];
+    if (!slot.everReady && slot.kind === 'main') {
+      const existingMap = this.prefetchPending.get(slot.cid);
+      if (slot.armedPrefetch && existingMap && existingMap.size > 0) {
+        // attach 早于 online 预挂好的 pending：保留已有 promise 让早到的 takePrefetch 直接命中，并重置超时
+        prefetch = slot.armedPrefetch;
+        slot.armedPrefetch = undefined;
+        for (const [key, entry] of existingMap) {
+          if (entry.settled) continue;
+          clearTimeout(entry.timer);
+          entry.timer = setTimeout(() => {
             if (entry.settled) return;
             entry.settled = true;
-            map.delete(key);
-            resolve(null);
-          }, PREFETCH_TIMEOUT_MS),
-        };
-        map.set(key, entry);
+            existingMap.delete(key);
+            entry.resolve(null);
+          }, PREFETCH_TIMEOUT_MS);
+        }
+      } else {
+        prefetch = this.armPrefetch(slot, PREFETCH_TIMEOUT_MS);
+        slot.armedPrefetch = undefined;
       }
-      this.prefetchPending.set(slot.cid, map);
+    } else {
+      this.clearPrefetch(slot.cid);
+      slot.armedPrefetch = undefined;
     }
     this.post({
       type: 'rpc-hello',
@@ -439,6 +489,7 @@ export class DeskTunnel {
       readyMap.delete(key);
       if (readyMap.size === 0) this.prefetchReady.delete(cid);
       if (hit.h === expectedHash && now - hit.at <= PREFETCH_READY_TTL_MS) {
+        this.prefetchHits += 1;
         return Promise.resolve(hit.data);
       }
       return null;
@@ -447,6 +498,7 @@ export class DeskTunnel {
       const entry = pendingMap.get(key);
       if (!entry || entry.h !== expectedHash || entry.settled || entry.taken) continue;
       entry.taken = true;
+      this.prefetchHits += 1;
       return entry.promise;
     }
     return null;
@@ -708,6 +760,7 @@ export class DeskTunnel {
           if (!entry) continue;
           clearTimeout(entry.timer);
           pendingMap?.delete(key);
+          this.note(`prefetch ${item.ch}`);
           if (entry.taken) {
             if (!entry.settled) {
               entry.settled = true;
@@ -764,6 +817,7 @@ export class DeskTunnel {
     this.slots.set(slot.cid, slot);
     this.note(`attach ${kind} ${slot.cid.slice(0, 4)}`);
     if (this.online) this.hello(slot);
+    else this.armPrefetch(slot, PREFETCH_TIMEOUT_MS * 2);
     return {
       invoke: (channel, payload) =>
         new Promise<string>((resolve, reject) => {

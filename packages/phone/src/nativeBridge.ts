@@ -53,8 +53,41 @@ export interface EnsoNativeBridge {
   >;
   /** 原生退订通知并清角标 */
   unsubscribePush?(): void;
+  /** 是否具备原生灵动岛与小组件状态同步能力 */
+  readonly widgets?: boolean;
+  readonly liveActivity?: boolean;
+  /** 把会话聚合快照同步给原生 App Group（小组件）与 ActivityKit（灵动岛） */
+  updateWidgetState?(snapshot: NativeWidgetSnapshot): void;
   /** 回传 /desk/* 资源给原生 LocalDeskProxyServer */
   replyDeskAsset?(reqId: string, status: number, mime: string, bodyBase64: string): void;
+}
+
+export interface NativeWidgetSessionItem {
+  id: string;
+  title: string;
+  projectName: string;
+  status: string;
+  pendingCount: number;
+  unread: boolean;
+  updatedAt: number;
+}
+
+export interface NativeWidgetSnapshot {
+  deviceLabel: string;
+  connectionState: string;
+  transport: string;
+  rttMs: number | null;
+  runningCount: number;
+  pendingCount: number;
+  unreadCount: number;
+  activeTitle: string | null;
+  activeProject: string | null;
+  activeSessionId: string | null;
+  activeStatus: string;
+  activeDetail: string | null;
+  startedAt: number | null;
+  sessions: NativeWidgetSessionItem[];
+  updatedAt: number;
 }
 
 interface QuicEndpoint {
@@ -104,6 +137,14 @@ export function hasNativePush(): boolean {
   return Boolean(bridge?.push && typeof bridge.subscribePush === 'function');
 }
 
+export function pushNativeWidgetState(snapshot: NativeWidgetSnapshot): void {
+  const bridge = getNativeBridge();
+  if (!bridge?.updateWidgetState) return;
+  try {
+    bridge.updateWidgetState(snapshot);
+  } catch {}
+}
+
 export async function requestNativeQrScan(): Promise<string | null> {
   const scan = getNativeBridge()?.scanQr;
   if (!scan) return null;
@@ -130,10 +171,13 @@ function toBytes(data: ArrayBuffer | Uint8Array): Uint8Array {
   return data instanceof Uint8Array ? data : new Uint8Array(data);
 }
 
-async function probeRelayHealth(relayUrl: string): Promise<RelayHealthInfo | null> {
+async function probeRelayHealth(
+  relayUrl: string,
+  options?: { fresh?: boolean }
+): Promise<RelayHealthInfo | null> {
   const now = Date.now();
   const cached = endpointCache.get(relayUrl);
-  if (cached && now - cached.at < QUIC_PROBE_TTL_MS) return cached;
+  if (!options?.fresh && cached && now - cached.at < QUIC_PROBE_TTL_MS) return cached;
   let parsed: URL;
   try {
     parsed = new URL(relayUrl);
@@ -188,9 +232,12 @@ async function probeQuicEndpoint(relayUrl: string): Promise<QuicEndpoint | null>
 export async function resolveNativePushGatewayOrigin(relayUrl?: string): Promise<string | null> {
   if (!relayUrl) return null;
   try {
-    const parsed = new URL(relayUrl);
+    const normalized = relayUrl.trim().replace(/^wss:\/\//i, 'https://');
+    const parsed = new URL(normalized);
     if (parsed.protocol !== 'https:') return null;
-    const health = await probeRelayHealth(relayUrl);
+    const cached = endpointCache.get(normalized);
+    // 仅命中过 apns:true 时复用缓存；未命中或曾因弱网/未重启中继失败时重新探测，避免 5 分钟假失败
+    const health = await probeRelayHealth(normalized, { fresh: !cached?.apns });
     return health?.apns ? parsed.origin : null;
   } catch {
     return null;

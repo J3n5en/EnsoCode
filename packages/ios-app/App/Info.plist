@@ -48,6 +48,8 @@
 	<string>用于扫描桌面端 EnsoCode 配对二维码</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于在局域网内与桌面端 EnsoCode 建立低延迟直连</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
