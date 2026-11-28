@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { isMobileViewport, useIsMobile } from '@/hooks/useViewport';
 import type { ScreenRect } from '@/lib/guestViewOcclusion';
 import { useSessionsStore } from '@/stores/sessions';
+import { useSettingsStore } from '@/stores/settings';
 import { normalizeGlobalState, type PanelScope, selectSidePanelShown } from './globalTabs';
 import { removeLayoutPanel } from './layoutSanitize';
 import { migrateSidePanelState, SIDE_PANEL_VERSION } from './migrate';
@@ -69,7 +70,8 @@ interface SidePanelState {
   /**
    * 一次性信号（运行态，不 persist）：无 tab 的会话刚被展开，该会话的侧栏空态应直接弹出新建菜单。
    * 按会话键控：dock 常驻、多张水印并存时只有目标会话的水印消费它。
-   * 菜单任何关闭动作负责 clear；收起再展开、有 tab 展开都不会置上。
+   * 菜单任何关闭动作负责 clear；收起、有 tab 展开、该会话写入面板时也清掉，免得残留到下次误弹。
+   * 秘书会话（展开即自动建秘书面板）与有全局标签的会话（展开即补全局面板）不置。
    */
   newTabMenuPrompt: { conversationId: string; at: number } | null;
   toggleOpen: () => void;
@@ -102,6 +104,25 @@ interface SidePanelState {
 
 function activeConversationId(): string | undefined {
   return useSessionsStore.getState().activeId ?? undefined;
+}
+
+/** 与侧栏 useSecretaryConversation 同口径：开关关掉时秘书项目的会话按普通会话处理 */
+function isSecretaryConversation(id: string): boolean {
+  const projectId = useSessionsStore.getState().conversations[id]?.projectId;
+  if (!projectId) return false;
+  const { secretaryEnabled, projects } = useSettingsStore.getState();
+  return (
+    secretaryEnabled &&
+    projects.some((project) => project.id === projectId && project.kind === 'secretary')
+  );
+}
+
+/** 该会话的信号若还挂着，返回清掉它的 patch */
+function promptWithout(
+  state: SidePanelState,
+  id: string
+): Partial<Pick<SidePanelState, 'newTabMenuPrompt'>> {
+  return state.newTabMenuPrompt?.conversationId === id ? { newTabMenuPrompt: null } : {};
 }
 
 function uiFor(state: SidePanelState, id: string): SidePanelUi {
@@ -152,17 +173,21 @@ export const useSidePanelStore = create<SidePanelState>()(
         if (!id) return;
         const open = !shownFor(get(), id);
         // 无 tab 的会话从关到开：记下一次性信号，空态水印直接弹新建菜单，省一步点 +。
-        // 有固定标签时不弹：展开由固定标签恢复接管（激活第一个固定 tab），
-        // 新建菜单和恢复出来的面板同时出现，菜单悬空又抢焦点
+        // 展开后会自动长出面板的都不弹：固定标签恢复、秘书面板、全局标签，
+        // 否则新建菜单和自动建出的面板同时出现，菜单悬空又抢焦点
         const pinnedTabs = get().pinnedTabs;
         const hasPinned = Array.isArray(pinnedTabs) && pinnedTabs.length > 0;
         const empty =
-          open && !hasPinned && Object.keys(get().layouts[id]?.panels ?? {}).length === 0;
+          open &&
+          !hasPinned &&
+          get().liveGlobalTabs.length === 0 &&
+          Object.keys(get().layouts[id]?.panels ?? {}).length === 0 &&
+          !isSecretaryConversation(id);
         set({
           uiByConversation: patchUi(get(), id, { open }),
           fullscreen: open ? get().fullscreen : false,
           fullscreenByConversation: rememberFullscreen(get(), id, open ? get().fullscreen : false),
-          newTabMenuPrompt: empty ? { conversationId: id, at: Date.now() } : get().newTabMenuPrompt,
+          newTabMenuPrompt: empty ? { conversationId: id, at: Date.now() } : null,
         });
       },
 
@@ -178,8 +203,15 @@ export const useSidePanelStore = create<SidePanelState>()(
 
       ensureOpen: (conversationId) => {
         const id = conversationId ?? activeConversationId();
-        if (!id || uiFor(get(), id).open) return;
-        set({ uiByConversation: patchUi(get(), id, { open: true }) });
+        if (!id) return;
+        // 调用方紧接着就建面板，等不到空态水印消费信号
+        const patch: Partial<SidePanelState> = {
+          ...promptWithout(get(), id),
+          ...(uiFor(get(), id).open
+            ? {}
+            : { uiByConversation: patchUi(get(), id, { open: true }) }),
+        };
+        if (Object.keys(patch).length > 0) set(patch);
       },
 
       nudgeWidth: (delta, workspaceWidth, handleWidth) => {
@@ -283,7 +315,11 @@ export const useSidePanelStore = create<SidePanelState>()(
 
       saveLayout: (conversationId, layout) => {
         if (!useSessionsStore.getState().conversations[conversationId]) return;
-        set({ layouts: { ...get().layouts, [conversationId]: layout } });
+        const hasPanels = Object.keys(layout?.panels ?? {}).length > 0;
+        set({
+          layouts: { ...get().layouts, [conversationId]: layout },
+          ...(hasPanels ? promptWithout(get(), conversationId) : {}),
+        });
       },
 
       forgetConversation: (conversationId) => {

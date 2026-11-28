@@ -94,7 +94,7 @@ import { restoreHostBrowserTabs } from './browserTabs';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { GlobalPluginLayer, GlobalPluginSlot } from './GlobalPluginLayer';
-import { headerActionsPinned, newTabAutoPopOpen } from './newTabPromptGate';
+import { headerActionsPinned, headerNewTabPromptAt, newTabAutoPopOpen } from './newTabPromptGate';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
@@ -757,9 +757,12 @@ function SidePanelHeaderActions({
   // 用户展开空面板想直接点类型，菜单贴着常驻的 + 出现一眼就能找；
   // 顶栏几何在展开动画里几乎不动，也进一步远离当初测量撞上中途几何的场景。
   const headerNewTabMenuPromptAt = useSidePanelStore((s) =>
-    conversationId && s.newTabMenuPrompt?.conversationId === conversationId
-      ? s.newTabMenuPrompt.at
-      : null
+    headerNewTabPromptAt({
+      prompt: s.newTabMenuPrompt,
+      conversationId,
+      inGroup: group !== undefined,
+      secretary,
+    })
   );
   // 深链或手机按钮要求定位某张卡时把秘书面板叫出来；同一个请求只处理一次
   const focusProposal = useSecretaryStore((s) => s.focusProposal);
