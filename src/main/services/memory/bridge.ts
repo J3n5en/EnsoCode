@@ -9,11 +9,11 @@ import {
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { MemoryOp } from '@shared/types/agent';
 import type Database from 'better-sqlite3';
-import { deleteMemoryPermanently } from '../memoryAdmin';
 import type { MemoryAuditEntry } from './audit';
 import { contentHash } from './contentHash';
 import { createCrystal } from './crystal';
 import { type Complete, redactSecrets } from './distill';
+import { deleteMemoriesManually, planMemoryDeletion } from './manual';
 import { type PendingWriteInput, queuePendingWrite } from './pending';
 import { sanitizeMemoryWrite } from './safety';
 import { searchMemories } from './search';
@@ -367,16 +367,35 @@ export async function executeMemoryOp(
         `memory not found or not visible in this session: ${request.id}`
       );
     }
-    if (!deleteMemoryPermanently(db, request.id)) {
+    // 与设置页删除同一条路径：一并删掉只通向它的历史版本、重连 replaces 链、修正引用它的结晶。
+    // 演进边与结晶来源都限定在同一 space，所以连带影响不会越出上面的可见性检查。
+    // 先按预览取出将被删的行，删完后逐条审计（正文只记 hash）
+    const doomed = new Map(
+      (planMemoryDeletion(db, [request.id])?.deleted ?? []).map((d) => [d.id, getMemory(db, d.id)])
+    );
+    const impact = deleteMemoriesManually(db, [request.id]);
+    if (!impact) {
       throw new MemoryValidationError('not_found', `memory not found: ${request.id}`);
     }
-    auditSecretaryWrite(ctx, 'delete', memory);
+    for (const entry of impact.deleted) {
+      const row = entry.id === memory.id ? memory : doomed.get(entry.id);
+      if (row) auditSecretaryWrite(ctx, 'delete', row);
+    }
     ctx.onDeleted?.(request.id);
+    const history = impact.deleted.filter((d) => d.role === 'history').map((d) => d.id);
     return {
       status: 'deleted',
       id: request.id,
       title: memory.title,
       content: memory.content.slice(0, 240),
+      ...(history.length > 0 ? { alsoDeletedHistory: history } : {}),
+      ...(impact.bridges.length > 0 ? { relinked: impact.bridges } : {}),
+      ...(impact.crystalsUpdated.length > 0
+        ? { crystalsUpdated: impact.crystalsUpdated.map((c) => c.id) }
+        : {}),
+      ...(impact.crystalsDemoted.length > 0
+        ? { crystalsDemoted: impact.crystalsDemoted.map((c) => c.id) }
+        : {}),
     };
   }
   throw new MemoryValidationError('unknown_op', `unknown memory op: ${String(op)}`);

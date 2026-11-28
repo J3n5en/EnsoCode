@@ -409,6 +409,8 @@ export function createMemoryTools(
         'to forget or remove a memory, or confirms that a memory is wrong or obsolete. Get the id ' +
         'from memory_search first. Do not use it to replace an outdated memory with a newer ' +
         'version: capture the new one with evolvesRelation=replaces instead. ' +
+        'Older versions that only it replaced are deleted with it, the replaces chain is relinked ' +
+        'around it, and crystals built from it are updated or demoted; the result lists these. ' +
         (secretary
           ? 'Only memories in your own space, the global space or one of your visible projects can be deleted.'
           : 'Only memories in the global space or the current project can be deleted.'),
