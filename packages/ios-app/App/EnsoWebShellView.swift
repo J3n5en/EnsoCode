@@ -51,11 +51,8 @@ private struct WebViewContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> ContainerView {
         let container = ContainerView()
         container.onMovedToWindow = onMovedToWindow
-        webView.frame = container.bounds
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        container.addSubview(webView)
 
-        // 使用小尺寸行内占位视图作为 PiP 源，避免被 iOS 当作全屏播放器自动触发画中画
+        // 把小尺寸行内 SampleBuffer 源视图放在 WebView 底层：用户界面不可见，同时满足 AVKit 挂载要求且不被误判为全屏视频
         pipSourceView.translatesAutoresizingMaskIntoConstraints = false
         pipSourceView.isUserInteractionEnabled = false
         container.addSubview(pipSourceView)
@@ -65,6 +62,10 @@ private struct WebViewContainer: UIViewRepresentable {
             pipSourceView.widthAnchor.constraint(equalToConstant: 170),
             pipSourceView.heightAnchor.constraint(equalToConstant: 110),
         ])
+
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(webView)
         return container
     }
 

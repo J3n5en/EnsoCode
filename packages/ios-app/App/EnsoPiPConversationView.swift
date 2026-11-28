@@ -98,8 +98,7 @@ private struct PiPStatusStyle {
 
 struct EnsoPiPConversationView: View {
     @ObservedObject var model: EnsoPiPViewModel
-
-    private static let bottomAnchor = "pip-bottom"
+    var isPaused: Bool = false
 
     var body: some View {
         let snapshot = model.snapshot
@@ -164,6 +163,14 @@ struct EnsoPiPConversationView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(style.color.opacity(0.16)))
+                if isPaused {
+                    Text("已暂停")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundColor(theme.pending)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(theme.pending.opacity(0.16)))
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -171,9 +178,12 @@ struct EnsoPiPConversationView: View {
         .background(theme.surfaceRaised)
     }
 
+    /// 用底部锚定 + 顶部裁切代替 `ScrollView`，确保 `ImageRenderer` 单次离屏渲染时
+    /// 最新消息始终贴底可见，超出可视高度的早期消息自然从顶部裁出。
     private func feed(_ snapshot: EnsoPiPSnapshot, accent: Color, theme: PiPTheme) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: snapshot.messages.isEmpty ? .center : .bottomLeading) {
                 if snapshot.messages.isEmpty {
                     emptyState(snapshot, theme: theme)
                 } else {
@@ -189,28 +199,12 @@ struct EnsoPiPConversationView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
-                    .padding(.bottom, 4)
-                }
-                Color.clear
-                    .frame(height: 4)
-                    .id(Self.bottomAnchor)
-            }
-            .onAppear {
-                proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
-            }
-            .onChange(of: scrollKey(snapshot)) { _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                    .padding(.bottom, 6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-        }
-    }
-
-    /// 新快照、新消息或流式正文增长时都需要滚到底部。
-    private func scrollKey(_ snapshot: EnsoPiPSnapshot) -> String {
-        let last = snapshot.messages.last
-        let stepsCount = last?.steps?.count ?? 0
-        return "\(snapshot.updatedAt)|\(snapshot.messages.count)|\(last?.id ?? "")|\(last?.text.count ?? 0)|\(stepsCount)"
+            .clipped()
     }
 
     private func emptyState(_ snapshot: EnsoPiPSnapshot, theme: PiPTheme) -> some View {
@@ -226,7 +220,7 @@ struct EnsoPiPConversationView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 44)
+        .padding(.horizontal, 12)
     }
 
     private func connectionHint(_ state: String) -> String? {

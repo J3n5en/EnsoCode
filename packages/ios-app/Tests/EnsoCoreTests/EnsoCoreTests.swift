@@ -1,4 +1,7 @@
+import CoreMedia
+import CoreVideo
 import Foundation
+import SwiftUI
 import XCTest
 @testable import EnsoCore
 
@@ -399,5 +402,49 @@ final class EnsoCoreTests: XCTestCase {
         XCTAssertEqual(EnsoPiPAspect(rawOrDefault: "invalid"), .portrait)
         XCTAssertGreaterThan(EnsoPiPAspect.portrait.preferredContentSize.height, EnsoPiPAspect.portrait.preferredContentSize.width)
         XCTAssertGreaterThan(EnsoPiPAspect.landscape.preferredContentSize.width, EnsoPiPAspect.landscape.preferredContentSize.height)
+    }
+
+    @MainActor
+    func testPiPFrameEncoderProducesRightSideUpIOSurfaceDisplayImmediatelySampleBuffer() throws {
+        let odd = EnsoPiPFrameEncoder.pixelDimensions(for: CGSize(width: 101, height: 51), scale: 1)
+        XCTAssertEqual(odd.width, 102)
+        XCTAssertEqual(odd.height, 52)
+
+        let view = VStack(spacing: 0) {
+            Color(red: 1, green: 0, blue: 0)
+            Color(red: 0, green: 0, blue: 1)
+        }
+        let sample = try XCTUnwrap(
+            EnsoPiPFrameEncoder.encode(view: view, size: CGSize(width: 60, height: 80), scale: 2)
+        )
+
+        let imageBuffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+        XCTAssertEqual(CVPixelBufferGetWidth(imageBuffer), 120)
+        XCTAssertEqual(CVPixelBufferGetHeight(imageBuffer), 160)
+        XCTAssertNotNil(CVPixelBufferGetIOSurface(imageBuffer))
+
+        let attachments = try XCTUnwrap(
+            CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
+        )
+        XCTAssertEqual(attachments.first?[kCMSampleAttachmentKey_DisplayImmediately] as? Bool, true)
+
+        CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly) }
+        let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(imageBuffer)).assumingMemoryBound(to: UInt8.self)
+        let bpr = CVPixelBufferGetBytesPerRow(imageBuffer)
+
+        // 32BGRA: byte 0 = B, byte 1 = G, byte 2 = R, byte 3 = A
+        // Row 10 (top half) must be red; row 150 (bottom half) must be blue.
+        let topOffset = 10 * bpr + 60 * 4
+        let topB = base[topOffset]
+        let topR = base[topOffset + 2]
+        XCTAssertGreaterThan(topR, 200, "top half should be red (R=\(topR), B=\(topB))")
+        XCTAssertLessThan(topB, 40, "top half should not be blue (R=\(topR), B=\(topB))")
+
+        let botOffset = 150 * bpr + 60 * 4
+        let botB = base[botOffset]
+        let botR = base[botOffset + 2]
+        XCTAssertGreaterThan(botB, 200, "bottom half should be blue (R=\(botR), B=\(botB))")
+        XCTAssertLessThan(botR, 40, "bottom half should not be red (R=\(botR), B=\(botB))")
     }
 }
