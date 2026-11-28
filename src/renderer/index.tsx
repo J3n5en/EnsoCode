@@ -22,8 +22,8 @@ installThemeStyles();
 installThemeStateAttributes();
 installScrollbarActivity();
 
-// dev-only:e2e/调试可经 CDP 直达 store
-if (import.meta.env.DEV) {
+// dev-only:e2e/调试可经 CDP 直达 store；性能基准用 VITE_ENSO_EXPOSE_STORES=1 构建的生产包同样暴露
+if (import.meta.env.DEV || import.meta.env.VITE_ENSO_EXPOSE_STORES === '1') {
   (window as unknown as Record<string, unknown>).__stores = {
     sessions: useSessionsStore,
     settings: useSettingsStore,

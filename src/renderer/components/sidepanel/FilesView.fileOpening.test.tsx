@@ -52,9 +52,12 @@ vi.mock('@dnd-kit/core', () => ({
   useDraggable: () => ({ setNodeRef: vi.fn(), listeners: {}, isDragging: false }),
 }));
 vi.mock('@pierre/diffs/edit', () => ({ Editor: class {} }));
-vi.mock('@pierre/diffs/react', () => {
+vi.mock('./filesHighlightPool', () => ({ filesHighlightPool: () => undefined }));
+vi.mock('@pierre/diffs/react', async () => {
+  const { createContext } = await import('react');
   const Wrap = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {
+    WorkerPoolContext: createContext(undefined),
     EditProvider: Wrap,
     Virtualizer: Wrap,
     File: ({
