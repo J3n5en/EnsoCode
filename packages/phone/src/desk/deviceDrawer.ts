@@ -40,6 +40,13 @@ export interface DeviceDrawerHost {
   diagnostics(): string;
   /** 宽屏桌面浏览器：面板排成居中对话框而不是底部抽屉 */
   wide(): boolean;
+  /** iOS 原生壳的画中画实时对话浮窗；浏览器 / PWA 不传 */
+  pip?: {
+    state(): { active: boolean; auto: boolean; supported: boolean; error?: string | null };
+    onChange(listener: () => void): () => void;
+    toggle(): void;
+    setAuto(enabled: boolean): void;
+  };
 }
 
 const ICONS = {
@@ -51,6 +58,7 @@ const ICONS = {
     '<path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  pip: '<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>',
   phone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
@@ -158,6 +166,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
 
   let root: HTMLDivElement | null = null;
   let pushBox: HTMLDivElement | null = null;
+  let pipBox: HTMLDivElement | null = null;
   let list: HTMLDivElement | null = null;
   let currentStatus: HTMLSpanElement | null = null;
   let currentDot: HTMLSpanElement | null = null;
@@ -237,6 +246,44 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     const link = host.link();
     if (currentStatus) currentStatus.textContent = statusText(link);
     if (currentDot) currentDot.className = `dd-dot dd-${linkTone(link.state)}`;
+  };
+
+  const renderPip = () => {
+    const pip = host.pip;
+    if (!pipBox || !pip) return;
+    const { active, auto, supported, error } = pip.state();
+    const action = button(
+      { class: 'dd-line' },
+      () => {
+        pip.toggle();
+        // 开启后收起面板，浮窗立刻露出来
+        if (!active) close();
+      },
+      el('span', { class: 'dd-dim', style: 'display:flex' }, icon('pip')),
+      el('span', { class: 'dd-grow' }, active ? '关闭画中画浮窗' : '开启画中画浮窗')
+    );
+    action.disabled = !supported;
+    const autoSwitch = button(
+      {
+        class: 'dd-switch',
+        role: 'switch',
+        'aria-checked': String(auto),
+        'aria-label': '切后台自动画中画',
+      },
+      () => pip.setAuto(!auto)
+    );
+    autoSwitch.disabled = !supported;
+    pipBox.replaceChildren(
+      action,
+      el(
+        'div',
+        { class: 'dd-line' },
+        el('span', { style: 'width:16px;flex-shrink:0' }),
+        el('span', { class: 'dd-grow' }, '切后台自动画中画'),
+        autoSwitch
+      ),
+      el('p', { class: 'dd-hint' }, error || '切到其他 App 时浮窗实时显示当前对话')
+    );
   };
 
   const renameRow = (d: StoredDevice) => {
@@ -377,7 +424,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
   const close = () => {
     const node = root;
     if (!node) return;
-    root = pushBox = list = null;
+    root = pushBox = pipBox = list = null;
     editing = confirming = null;
     for (const cleanup of cleanups) cleanup();
     cleanups = [];
@@ -423,6 +470,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     if (root) return;
     if (!doc.getElementById('dd-style')) doc.head.append(el('style', { id: 'dd-style' }, STYLE));
     pushBox = el('div');
+    pipBox = host.pip ? el('div') : null;
     list = el('div');
     const head = el(
       'div',
@@ -435,6 +483,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
       { class: 'dd-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': '电脑与通知' },
       head,
       pushBox,
+      pipBox,
       el('div', { class: 'dd-label' }, '已配对的电脑'),
       list,
       button(
@@ -466,6 +515,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
     applyLayout();
     applyTheme();
     renderPush();
+    renderPip();
     renderList();
     doc.body.append(root);
     const onKey = (event: KeyboardEvent) => {
@@ -486,6 +536,7 @@ export function createDeviceDrawer(host: DeviceDrawerHost) {
       }),
       host.watchTheme(applyTheme),
     ];
+    if (host.pip) cleanups.push(host.pip.onChange(renderPip));
     // 先以收起态排版一帧，再加 dd-open 才有滑入
     void root.offsetHeight;
     root.classList.add('dd-open');

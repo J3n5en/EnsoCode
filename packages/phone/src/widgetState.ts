@@ -163,6 +163,14 @@ function extractConversationRows(parsed: unknown): DeskConversationRow[] {
   return [];
 }
 
+function activeIdOf(parsed: unknown): string | null {
+  if (!isRecord(parsed)) return null;
+  const value = isRecord(parsed.value) ? parsed.value : parsed;
+  const state = isRecord(value.state) ? value.state : value;
+  const id = state.activeConversationId;
+  return typeof id === 'string' && id ? id : null;
+}
+
 /**
  * 完整版（Desk 模式）小组件与灵动岛状态追踪器：
  * - 从 `conversations:read` / `settings:read` / `source-authority:read` / `conversations:patch` 维护会话与项目元数据
@@ -172,6 +180,8 @@ export class DeskWidgetTracker {
   private projects = new Map<string, string>();
   private conversations = new Map<string, DeskConversationRow>();
   private live = new Map<string, LiveSessionRuntime>();
+  /** conversations:read 里桌面当前选中的会话 */
+  activeConversationId: string | null = null;
 
   ingestSettingsJson(json: string | undefined): boolean {
     if (!json) return false;
@@ -231,6 +241,7 @@ export class DeskWidgetTracker {
         if (typeof row.id !== 'string' || !row.id) continue;
         this.conversations.set(row.id, row);
       }
+      this.activeConversationId = activeIdOf(parsed);
       return rows.length > 0;
     } catch {
       return false;
@@ -310,8 +321,14 @@ export class DeskWidgetTracker {
           for (const req of snap.pendingApprovals) {
             if (!isRecord(req) || typeof req.requestId !== 'string') continue;
             approvals.add(req.requestId);
-            if (!detail && typeof req.toolName === 'string' && req.toolName) {
-              detail = `等待审批 ${req.toolName}`;
+            const tool =
+              typeof req.tool === 'string' && req.tool
+                ? req.tool
+                : typeof req.toolName === 'string'
+                  ? req.toolName
+                  : '';
+            if (!detail && tool) {
+              detail = `等待审批 ${tool}`;
             }
           }
         }
@@ -380,8 +397,14 @@ export class DeskWidgetTracker {
         if (!reqId) return false;
         const rt = ensure();
         rt.approvals.add(reqId);
-        if (req && typeof req.toolName === 'string' && req.toolName) {
-          rt.detail = `等待审批 ${req.toolName}`;
+        const tool =
+          req && typeof req.tool === 'string' && req.tool
+            ? req.tool
+            : req && typeof req.toolName === 'string'
+              ? req.toolName
+              : '';
+        if (tool) {
+          rt.detail = `等待审批 ${tool}`;
         }
         rt.updatedAt = now;
         return true;
@@ -438,6 +461,27 @@ export class DeskWidgetTracker {
     }
   }
 
+  private projectNameOf(row: DeskConversationRow | undefined, fallback: string): string {
+    const projectId = typeof row?.projectId === 'string' ? row.projectId : '';
+    return (
+      (typeof row?.projectName === 'string' && row.projectName.trim()) ||
+      (projectId ? this.projects.get(projectId) : undefined) ||
+      (typeof row?.cwd === 'string' ? basenameOfPath(row.cwd) : '') ||
+      fallback
+    );
+  }
+
+  /** 会话目录里的标题与项目名；目录里没有这一行时为 null */
+  describeSession(
+    id: string,
+    fallbackProject: string
+  ): { title: string | null; projectName: string } | null {
+    const row = this.conversations.get(id);
+    if (!row) return null;
+    const title = typeof row.title === 'string' && row.title.trim() ? row.title.trim() : null;
+    return { title, projectName: this.projectNameOf(row, fallbackProject) };
+  }
+
   buildSnapshot(params: {
     deviceLabel: string;
     connectionState: string;
@@ -459,11 +503,7 @@ export class DeskWidgetTracker {
       if (typeof row?.btwParentId === 'string' && row.btwParentId) continue;
 
       const projectId = typeof row?.projectId === 'string' ? row.projectId : '';
-      const projectName =
-        (typeof row?.projectName === 'string' && row.projectName.trim()) ||
-        (projectId ? this.projects.get(projectId) : undefined) ||
-        (typeof row?.cwd === 'string' ? basenameOfPath(row.cwd) : '') ||
-        params.deviceLabel;
+      const projectName = this.projectNameOf(row, params.deviceLabel);
 
       const pendingApprovalCount =
         rt?.approvals.size ??

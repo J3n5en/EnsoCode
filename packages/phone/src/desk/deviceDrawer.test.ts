@@ -43,7 +43,15 @@ const onlineLink: RemoteLinkStatus = {
   pushReady: true,
 } as RemoteLinkStatus;
 
-function setup({ wide = false, list = [device('a'), device('b')] } = {}) {
+function setup({
+  wide = false,
+  list = [device('a'), device('b')],
+  pip,
+}: {
+  wide?: boolean;
+  list?: StoredDevice[];
+  pip?: DeviceDrawerHost['pip'];
+} = {}) {
   const host: DeviceDrawerHost = {
     doc: document,
     currentId: 'a',
@@ -62,6 +70,7 @@ function setup({ wide = false, list = [device('a'), device('b')] } = {}) {
     watchTheme: () => () => {},
     diagnostics: () => 'diag',
     wide: () => wide,
+    pip,
   };
   return { host, drawer: createDeviceDrawer(host) };
 }
@@ -107,5 +116,80 @@ describe('createDeviceDrawer 布局', () => {
     phone.drawer.open();
     expect(document.body.textContent).toContain('这台手机');
     phone.drawer.close();
+  });
+});
+
+describe('createDeviceDrawer 画中画', () => {
+  const openRoot = () => document.querySelector('.dd-root.dd-open') ?? document;
+  const buttonByText = (text: string) =>
+    [...openRoot().querySelectorAll('button')].find((b) => b.textContent?.includes(text));
+
+  it('宿主没有画中画能力时不渲染相关控件', () => {
+    const { drawer } = setup();
+    drawer.open();
+    expect(document.body.textContent).not.toContain('画中画');
+    drawer.close();
+  });
+
+  it('开启浮窗后收起面板；自动开关反映状态并回调取反值；状态变化即时重绘', () => {
+    let state = { active: false, auto: false, supported: true };
+    const listeners = new Set<() => void>();
+    const toggle = vi.fn(() => {
+      state = { ...state, active: !state.active };
+      for (const l of listeners) l();
+    });
+    const setAuto = vi.fn();
+    const pip = {
+      state: () => state,
+      onChange: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      toggle,
+      setAuto,
+    };
+    const { drawer } = setup({ pip });
+    drawer.open();
+    const sw = openRoot().querySelector<HTMLButtonElement>('[aria-label="切后台自动画中画"]');
+    expect(sw?.getAttribute('role')).toBe('switch');
+    expect(sw?.getAttribute('aria-checked')).toBe('false');
+    expect(document.body.textContent).toContain('切到其他 App 时浮窗实时显示当前对话');
+    sw?.click();
+    expect(setAuto).toHaveBeenCalledWith(true);
+
+    state = { ...state, auto: true };
+    for (const l of listeners) l();
+    expect(
+      openRoot().querySelector('[aria-label="切后台自动画中画"]')?.getAttribute('aria-checked')
+    ).toBe('true');
+
+    buttonByText('开启画中画浮窗')?.click();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(drawer.isOpen()).toBe(false);
+    expect(listeners.size).toBe(0);
+
+    drawer.open();
+    buttonByText('关闭画中画浮窗')?.click();
+    expect(toggle).toHaveBeenCalledTimes(2);
+    expect(drawer.isOpen()).toBe(true);
+    expect(buttonByText('开启画中画浮窗')).toBeDefined();
+    drawer.close();
+  });
+
+  it('原生不支持画中画时控件禁用', () => {
+    const { drawer } = setup({
+      pip: {
+        state: () => ({ active: false, auto: false, supported: false }),
+        onChange: () => () => {},
+        toggle: vi.fn(),
+        setAuto: vi.fn(),
+      },
+    });
+    drawer.open();
+    expect(buttonByText('开启画中画浮窗')?.disabled).toBe(true);
+    expect(
+      openRoot().querySelector<HTMLButtonElement>('[aria-label="切后台自动画中画"]')?.disabled
+    ).toBe(true);
+    drawer.close();
   });
 });

@@ -15,11 +15,25 @@ import { installKeyboardInset } from '../keyboard';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
 import {
   hasNativeDeskProxy,
+  hasNativePip,
   hasNativePush,
+  type NativePipStatus,
+  pushNativePipState,
   pushNativeWidgetState,
   registerNativeDeskFetcher,
   resolveNativePushGatewayOrigin,
+  setNativePipAuto,
+  startNativePip,
+  stopNativePip,
+  subscribeNativePipState,
 } from '../nativeBridge';
+import {
+  createTrailingThrottle,
+  DeskPipTracker,
+  loadNativePipAuto,
+  parseInvokeSessionId,
+  saveNativePipAuto,
+} from '../pipState';
 import {
   isStandalone,
   PHONE_PUSH_ENABLED_KEY,
@@ -277,13 +291,27 @@ async function main(): Promise<void> {
   let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
   const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
   const deskWidget = new DeskWidgetTracker();
+  /** 画中画只在 iOS 原生壳里有：浏览器 / PWA 不建追踪器，事件流零额外开销 */
+  const deskPip = hasNativePip() ? new DeskPipTracker() : null;
+  const pipSync = createTrailingThrottle(() => {
+    if (!deskPip) return;
+    pushNativePipState(
+      deskPip.buildSnapshot({ deviceLabel: link.deviceLabel, connectionState: link.state })
+    );
+  });
+  const schedulePipSync = () => {
+    if (deskPip) pipSync.schedule();
+  };
   const syncNativeDeskWidget = (ingestReads = false) => {
     if (ingestReads) {
-      deskWidget.ingestSettingsJson(reads.get(`${IPC_CHANNELS.SETTINGS_READ}\0[]`)?.json);
-      deskWidget.ingestSourceAuthorityJson(
-        reads.get(`${IPC_CHANNELS.SOURCE_AUTHORITY_READ}\0[]`)?.json
-      );
-      deskWidget.ingestConversationsJson(reads.get(`${IPC_CHANNELS.CONVERSATIONS_READ}\0[]`)?.json);
+      const settingsJson = reads.get(`${IPC_CHANNELS.SETTINGS_READ}\0[]`)?.json;
+      const authorityJson = reads.get(`${IPC_CHANNELS.SOURCE_AUTHORITY_READ}\0[]`)?.json;
+      const conversationsJson = reads.get(`${IPC_CHANNELS.CONVERSATIONS_READ}\0[]`)?.json;
+      for (const tracker of deskPip ? [deskWidget, deskPip] : [deskWidget]) {
+        tracker.ingestSettingsJson(settingsJson);
+        tracker.ingestSourceAuthorityJson(authorityJson);
+        tracker.ingestConversationsJson(conversationsJson);
+      }
     }
     pushNativeWidgetState(
       deskWidget.buildSnapshot({
@@ -293,6 +321,7 @@ async function main(): Promise<void> {
         rttMs: link.rttMs,
       })
     );
+    schedulePipSync();
   };
   const publishLink = (next: typeof link) => {
     if (next === link) return;
@@ -301,6 +330,21 @@ async function main(): Promise<void> {
     for (const listener of linkListeners) listener(status);
     syncNativeDeskWidget();
   };
+
+  let pipStatus: NativePipStatus = {
+    supported: true,
+    active: false,
+    auto: loadNativePipAuto(localStorage),
+  };
+  const pipListeners = new Set<() => void>();
+  const publishPip = (next: NativePipStatus) => {
+    pipStatus = next;
+    for (const listener of pipListeners) listener();
+  };
+  if (deskPip) {
+    setNativePipAuto(pipStatus.auto);
+    subscribeNativePipState(publishPip);
+  }
 
   let tunnel!: DeskTunnel;
   tunnel = new DeskTunnel(
@@ -413,6 +457,29 @@ async function main(): Promise<void> {
         trace: tunnel.trace,
       }),
     wide: () => matchMedia(DESKTOP_DRAWER_QUERY).matches,
+    pip: deskPip
+      ? {
+          state: () => pipStatus,
+          onChange(listener: () => void) {
+            pipListeners.add(listener);
+            return () => pipListeners.delete(listener);
+          },
+          toggle() {
+            if (pipStatus.active) {
+              stopNativePip();
+              return;
+            }
+            // 先把最新对话推过去，浮窗一出来就有内容
+            pipSync.flush();
+            startNativePip();
+          },
+          setAuto(enabled: boolean) {
+            saveNativePipAuto(localStorage, enabled);
+            setNativePipAuto(enabled);
+            publishPip({ ...pipStatus, auto: enabled });
+          },
+        }
+      : undefined,
   });
 
   const bridge: RemoteBridge = {
@@ -433,14 +500,34 @@ async function main(): Promise<void> {
       if (kind === 'main') {
         frame.on(IPC_CHANNELS.AGENT_EVENT, (payload) => {
           if (deskWidget.applyAgentEventPayload(payload)) syncNativeDeskWidget();
+          if (deskPip?.applyAgentEventPayload(payload)) schedulePipSync();
         });
         frame.on(IPC_CHANNELS.CONVERSATIONS_PATCH, (payload) => {
           if (deskWidget.applyConversationsPatchPayload(payload)) syncNativeDeskWidget();
+          if (deskPip?.applyConversationsPatchPayload(payload)) schedulePipSync();
         });
       }
       return {
         invoke: (channel, payload) => {
           const result = frame.invoke(channel, payload);
+          if (deskPip && kind === 'main') {
+            if (channel === IPC_CHANNELS.AGENT_PROMPT) {
+              const sessionId = parseInvokeSessionId(payload);
+              if (sessionId && deskPip.setFocusedSession(sessionId)) schedulePipSync();
+            } else if (channel === IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL) {
+              const conversationId = parseInvokeSessionId(payload);
+              if (conversationId) {
+                deskPip.setFocusedSession(conversationId);
+                schedulePipSync();
+                void result.then(
+                  (json) => {
+                    if (deskPip.ingestHistoryTail(conversationId, json)) schedulePipSync();
+                  },
+                  () => {}
+                );
+              }
+            }
+          }
           if (channel === IPC_CHANNELS.SETTINGS_READ)
             void result.then(() => {
               if (!settingsLoaded) void markReady(version);
@@ -537,6 +624,7 @@ async function main(): Promise<void> {
    */
   let focusGen = 0;
   const focusSession = (sessionId: string) => {
+    if (deskPip?.setFocusedSession(sessionId)) schedulePipSync();
     const gen = ++focusGen;
     const started = Date.now();
     let sent = 0;

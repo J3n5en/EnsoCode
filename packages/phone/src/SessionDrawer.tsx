@@ -32,6 +32,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  PictureInPicture2,
   Pin,
   Plus,
   Unplug,
@@ -113,6 +114,15 @@ interface Props {
   /** 已收到桌面的 push-config；旧版桌面不会发，此时开关禁用并提示升级 */
   pushConfigReady: boolean;
   onTogglePush(next: boolean): void;
+  /** iOS 原生壳的画中画实时对话浮窗；浏览器 / PWA 不传 */
+  pip?: {
+    active: boolean;
+    auto: boolean;
+    supported: boolean;
+    error?: string | null;
+    onToggle(): void;
+    onAutoChange(next: boolean): void;
+  };
   onClose(): void;
   onSelect(sessionId: string): void;
   onNewConversation(projectId: string): void;
@@ -147,6 +157,7 @@ export function SessionDrawer({
   pushAvailability,
   pushConfigReady,
   onTogglePush,
+  pip,
   onClose,
   onSelect,
   onNewConversation,
@@ -672,6 +683,35 @@ export function SessionDrawer({
                   {hint.text}
                 </p>
               ))}
+            </div>
+          )}
+
+          {!confirmUnpair && pip && (
+            <div className="px-2 py-1.5">
+              <button
+                type="button"
+                disabled={!pip.supported}
+                onClick={pip.onToggle}
+                className="flex w-full items-center gap-2 text-left text-sm disabled:opacity-50"
+              >
+                <PictureInPicture2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 text-muted-foreground">
+                  {pip.active ? '关闭画中画浮窗' : '开启画中画浮窗'}
+                </span>
+              </button>
+              <div className="mt-2 flex items-center gap-2 pl-6">
+                <span className="min-w-0 flex-1 text-muted-foreground text-sm">
+                  切后台自动画中画
+                </span>
+                <Switch
+                  checked={pip.auto}
+                  disabled={!pip.supported}
+                  onCheckedChange={pip.onAutoChange}
+                />
+              </div>
+              <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
+                {pip.error || '切到其他 App 时浮窗实时显示当前对话'}
+              </p>
             </div>
           )}
 
