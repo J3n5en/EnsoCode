@@ -21,8 +21,12 @@ vi.mock('./secretaries', () => ({
 vi.mock('./store', () => ({
   SecretaryStore: class {
     constructor(private readonly dir: string) {}
-    dispatch() {
+    dispatchView() {
       return state.files[this.dir];
+    }
+    // 这些都是只读判断：整份复制近 1MB 的派发记录会卡住 Main，一律走缓存视图
+    dispatch(): never {
+      throw new Error('read-only path must not deep-copy dispatch.json');
     }
   },
 }));

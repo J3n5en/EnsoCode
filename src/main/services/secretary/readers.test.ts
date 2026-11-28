@@ -8,7 +8,7 @@ import type {
   ProjectAuthority,
   ProjectedMessage,
 } from '@shared/types/agent';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import {
   findHistoryMessage,
@@ -19,10 +19,12 @@ import {
 import {
   createSecretaryReadHandlers,
   projectAliasesFromSettings,
+  readPortsFor,
   type SecretaryReadPorts,
   type SecretarySessionStatus,
 } from './readers';
 import type { GitResult, RepoStatusDeps } from './repoStatus';
+import { SecretaryStore } from './store';
 import type { SecretaryOpHandler } from './tools';
 
 const SECRET = 'sk-1234567890abcdef1234';
@@ -1612,5 +1614,41 @@ describe('等子代理的可见性', () => {
         elapsedMinutes: 5,
       }),
     ]);
+  });
+});
+
+describe('readPortsFor 逐行查询派发记录', () => {
+  it('autoArchived / goalResult 读缓存视图，不按行深拷贝整份 dispatch.json', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-readers-ports-'));
+    try {
+      const store = new SecretaryStore(dir);
+      const file = store.dispatch();
+      file.dispatched.done = {
+        conversationId: 'done',
+        projectId: 'p1',
+        secretaryConversationId: 'sec',
+        createdAt: 1,
+        turn: 1,
+        lastState: 'idle',
+        lastEventAt: 1,
+        autoArchivedAt: 50,
+        goalResult: { at: 40, result: { summary: '修好了' } },
+      };
+      store.saveDispatch(file);
+      const copy = vi.spyOn(SecretaryStore.prototype, 'dispatch');
+      const ports = readPortsFor({ id: 'default', dir, projectId: null });
+      // collect 对几百行各问一次：每次都整份复制，就是几百次深拷贝
+      for (let i = 0; i < 50; i += 1) {
+        expect(ports.autoArchived?.('done', { archived: true, archivedAt: 50 })).toBe(true);
+        expect(ports.autoArchived?.('done', { archived: true, archivedAt: 51 })).toBe(false);
+        expect(ports.autoArchived?.('missing', { archived: true, archivedAt: 50 })).toBe(false);
+      }
+      expect(ports.goalResult?.('done')).toMatchObject({ at: 40, result: { summary: '修好了' } });
+      expect(ports.goalResult?.('missing')).toBeUndefined();
+      expect(copy).not.toHaveBeenCalled();
+      copy.mockRestore();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

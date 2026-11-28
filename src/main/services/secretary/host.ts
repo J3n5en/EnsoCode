@@ -133,8 +133,6 @@ const DAILY_KINDS: ReadonlySet<SecretaryResultKind> = new Set([
 
 export interface SecretaryHostPorts extends DeliveryPorts {
   enabled(): boolean;
-  /** 派发记录的只读视图（不复制）：流式事件先据此判断要不要读整份；不得修改 */
-  peekFile?(): Readonly<SecretaryDispatchFile>;
   profile(): SecretaryProfile | null;
   todos(): SecretaryTodo[];
   saveTodos(todos: SecretaryTodo[]): void;
@@ -1082,7 +1080,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const text = event.digest?.assistantText?.trim();
     if (!text) return;
     // 系统回传注入的回合：手机发起的任务链上，这一轮也算「回给手机」
-    const inflight = ports.file().inflight;
+    const inflight = (ports.peekFile?.() ?? ports.file()).inflight;
     const delivery = inflight?.secretaryConversationId === conversationId && inflight.started;
     contact.onTurnReply(conversationId, text, {
       ...(delivery ? { delivery: true } : {}),
@@ -1291,7 +1289,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (sessionId) touched.add(sessionId);
 
       // 先结算在途投递（自己读改写），再读最新状态记结果，避免用旧快照覆盖结算结果
-      const inflight = ports.file().inflight;
+      const inflight = (ports.peekFile?.() ?? ports.file()).inflight;
       if (inflight && touched.has(inflight.secretaryConversationId)) {
         const outcome = deliveryOutcome(event, inflight);
         if (outcome) settleDelivery(ports, inflight.secretaryConversationId, outcome, now);

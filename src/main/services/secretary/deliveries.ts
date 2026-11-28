@@ -18,6 +18,8 @@ export const DELIVERY_IDLE_GRACE_MS = 2_000;
 /** 回传投递用到的 Main 侧能力；全部同步读写，读改写之间不留 await */
 export interface DeliveryPorts {
   file(): SecretaryDispatchFile;
+  /** 派发记录的只读视图（不复制）：只读的判断都走它，读改写才用 file()；不得修改 */
+  peekFile?(): Readonly<SecretaryDispatchFile>;
   save(file: SecretaryDispatchFile): void;
   rows(): Readonly<Record<string, Record<string, unknown>>>;
   conversations(): readonly ConversationAuthority[];
@@ -37,6 +39,11 @@ export interface DeliveryPorts {
 
 function retryDelay(attempt: number): number {
   return RETRY_BASE_MS * 2 ** (attempt - 1);
+}
+
+/** 只读地看一眼派发记录：dispatch.json 近 1MB，每次 file() 都是一次整份深拷贝 */
+function view(ports: DeliveryPorts): Readonly<SecretaryDispatchFile> {
+  return ports.peekFile?.() ?? ports.file();
 }
 
 function secretaryProjectIds(ports: DeliveryPorts): Set<string> {
@@ -116,7 +123,7 @@ export function settleDelivery(
   outcome: DeliveryOutcome,
   now: number
 ): void {
-  const inflight = ports.file().inflight;
+  const inflight = view(ports).inflight;
   if (!inflight || inflight.secretaryConversationId !== conversationId) return;
   if (outcome === 'started') {
     const file = ports.file();
@@ -157,7 +164,7 @@ interface Group {
 const WAKES_SECRETARY: ReadonlySet<string> = new Set(['schedule', 'peer-message', 'trigger']);
 
 function dueKeys(ports: DeliveryPorts, now: number): Set<string> {
-  const file = ports.file();
+  const file = view(ports);
   const inflightKeys = new Set(file.inflight?.keys ?? []);
   return new Set(
     dueUpdates(
@@ -169,18 +176,16 @@ function dueKeys(ports: DeliveryPorts, now: number): Set<string> {
 
 function needsNewConversation(ports: DeliveryPorts, now: number): boolean {
   const due = dueKeys(ports, now);
-  return ports
-    .file()
-    .outbox.some(
-      (update) =>
-        due.has(update.key) &&
-        WAKES_SECRETARY.has(update.kind) &&
-        !resolveTarget(ports, update.secretaryConversationId)
-    );
+  return view(ports).outbox.some(
+    (update) =>
+      due.has(update.key) &&
+      WAKES_SECRETARY.has(update.kind) &&
+      !resolveTarget(ports, update.secretaryConversationId)
+  );
 }
 
 function planGroups(ports: DeliveryPorts, now: number): Group[] {
-  const file = ports.file();
+  const file = view(ports);
   const due = dueKeys(ports, now);
   const groups = new Map<string, SecretaryUpdate[]>();
   for (const update of file.outbox) {
@@ -211,7 +216,7 @@ const flushing = new WeakMap<DeliveryPorts, Promise<void>>();
 
 async function flushOnce(ports: DeliveryPorts, now: number): Promise<void> {
   let attempt = 1;
-  const pending = ports.file().inflight;
+  const pending = view(ports).inflight;
   if (pending) {
     if (now < pending.nextAttemptAt) return;
     if (ports.status(pending.secretaryConversationId).state !== 'idle') {
