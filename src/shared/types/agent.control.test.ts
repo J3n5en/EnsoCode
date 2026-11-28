@@ -30,7 +30,7 @@ describe('agent control tool protocol', () => {
         gate: { commandRef: 'tests' },
       })
     ).not.toBeNull();
-    for (const seedContext of ['none', 'prior_reads', 'fork_compact'] as const) {
+    for (const seedContext of ['none', 'prior_reads', 'fork_compact', 'fork'] as const) {
       expect(
         parseAgentControlToolRequest({
           operation: 'spawn',

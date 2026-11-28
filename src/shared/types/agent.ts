@@ -611,7 +611,7 @@ export interface AgentControlContext {
 }
 
 /** 子代理 spawn 首轮上下文种子策略；默认 none 保持空白起步 */
-export const SUBAGENT_SEED_CONTEXTS = ['none', 'prior_reads', 'fork_compact'] as const;
+export const SUBAGENT_SEED_CONTEXTS = ['none', 'prior_reads', 'fork_compact', 'fork'] as const;
 export type SubagentSeedContext = (typeof SUBAGENT_SEED_CONTEXTS)[number];
 
 export function isSubagentSeedContext(value: unknown): value is SubagentSeedContext {

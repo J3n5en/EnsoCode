@@ -47,7 +47,8 @@ export interface ChildContextSeed {
 }
 
 export interface BuildChildContextSeedOptions {
-  mode: SubagentSeedContext;
+  /** fork 档不走文本种子，由 supervisor 原样注入父请求前缀 */
+  mode: Exclude<SubagentSeedContext, 'fork'>;
   cwd: string;
   /** 目标子模型是否支持图像输入（不支持时降级为文本占位，防上游 400） */
   acceptsImages: boolean;

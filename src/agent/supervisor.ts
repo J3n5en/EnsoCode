@@ -20,6 +20,7 @@ import {
 import {
   type AgentSession,
   type AgentSessionEvent,
+  calculateContextTokens,
   createAgentSession,
   createFindToolDefinition,
   createGrepToolDefinition,
@@ -27,6 +28,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
   DefaultResourceLoader,
+  estimateTokens,
   type InlineExtension,
   ModelRuntime,
   type PromptOptions,
@@ -250,6 +252,7 @@ import {
   createExploreFoldTools,
   exploreFoldExtension,
 } from './exploreFold';
+import { withForkPrefix } from './forkPrefix';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
 import {
@@ -486,6 +489,14 @@ interface ForkBase {
 /** fork 代理能真正执行的工具；其余照原样声明（保住缓存前缀）但调用时拒绝 */
 const FORK_TOOLS = new Set(['read', 'grep', 'find', 'ls']);
 
+/** seed_context="fork" 子会话里注入的父前缀条数，resume 时据此把前缀改写接回去 */
+const FORK_PREFIX_ENTRY = 'enso-fork-prefix';
+const FORK_SEED_HINT = 'use seed_context "fork_compact" instead';
+/** 父上下文占窗口超过这个比例就不让 fork：子代理首轮就会自动压缩，继承的前缀和缓存一起丢 */
+const FORK_SEED_MAX_CONTEXT_RATIO = 0.7;
+const FORK_SEED_NOTE =
+  '<fork_context>\nThe conversation above is your parent session, copied verbatim. You are a subagent forked from it: do only the task below and report back; do not continue the parent task.\n</fork_context>';
+
 interface AgentRunHold {
   id: string;
   /** 第一次持有起算的时限；设过即表示这次 Run 进入过持有 */
@@ -599,6 +610,8 @@ interface ManagedSession {
   pendingSeed?: ChildContextSeed;
   /** 本地工作区已读文件账本（供子会话种子鲜度校验只读查询） */
   readLedger?: ReadLedger;
+  /** seed_context="fork" 注入的父请求前缀；每次请求原样放回开头（见 withForkPrefix） */
+  forkPrefix?: Message[];
   /** 父会话 spawn 时带了系统提示词：秘书档案改了就地换正文 */
   persona?: PersonaHolder;
   /** 最近一次会话请求原样留底：插件 fork 代理据此重放前缀，命中同一份提示缓存 */
@@ -4228,8 +4241,9 @@ export class SessionSupervisor {
         managed.pendingPrivacyMask = mergeMaskReports(managed.pendingPrivacyMask, report);
         session.sessionManager.appendCustomEntry(PRIVACY_MASK_ENTRY, record);
       };
-      session.agent.streamFunction = (model, context, options) =>
+      session.agent.streamFunction = (model, rawContext, options) =>
         runWithPrivacySink(privacySink, () => {
+          const context = withForkPrefix(managed.forkPrefix, rawContext);
           if (
             !session.isCompacting &&
             options?.sessionId === session.sessionId &&
@@ -4468,6 +4482,8 @@ export class SessionSupervisor {
     if (!resumeFile && parent.coworkers.size >= this.maxActiveCoworkers) {
       throw new Error(`coworker limit reached (${this.maxActiveCoworkers} active)`);
     }
+    // fork 档在建会话前就要确认有可分叉的父请求、且上下文留得出余量；明确拒绝，不静默降级
+    const forkBase = seedContext === 'fork' && !resumeFile ? forkSeedBase(parent) : undefined;
 
     let managedRef: ManagedSession | undefined;
     const gate = new ApprovalGate(
@@ -4507,6 +4523,29 @@ export class SessionSupervisor {
       ],
       pluginSource: { identity, kind: 'subagent', name: identity.instanceName },
     });
+    const forkPrefix = forkBase ? forkMessages(forkBase) : undefined;
+    if (forkBase && forkPrefix) {
+      try {
+        const mismatch = forkSeedMismatch(forkBase, parent.session, result.session);
+        if (mismatch) throw new Error(mismatch);
+        writeForkMessages(result.session, forkPrefix);
+        const first = forkPrefix[0];
+        const last = forkPrefix[forkPrefix.length - 1];
+        result.session.sessionManager.appendCustomEntry(FORK_PREFIX_ENTRY, {
+          count: forkPrefix.length,
+          firstTimestamp: first?.timestamp,
+          lastTimestamp: last?.timestamp,
+        });
+      } catch (error) {
+        // 还没登记：只释放这个会话，父会话和其他子代理不受影响
+        cancelContinuousMemory(result.session.sessionManager);
+        try {
+          releaseOauthPoolSession(result.session.sessionId);
+          result.session.dispose();
+        } catch {}
+        throw error;
+      }
+    }
     const metadata: ChildConversationMetadata = {
       parentId: identity.parent.sessionId,
       childGeneration: identity.generation,
@@ -4545,9 +4584,26 @@ export class SessionSupervisor {
       ...(result.requestBudget ? { requestBudget: result.requestBudget } : {}),
     });
     this.attachChildPlugins(managedRef, result, Boolean(resumeFile));
-    if (!resumeFile) {
+    if (forkBase && forkPrefix) {
       managedRef.pendingRole = config.systemPrompt;
-      if (seedContext && seedContext !== 'none') {
+      managedRef.forkPrefix = forkPrefix;
+      managedRef.pendingSeed = {
+        text: FORK_SEED_NOTE,
+        stats: {
+          mode: 'fork',
+          filesIncluded: 0,
+          staleFilesSkipped: 0,
+          userTurnsIncluded: 0,
+          imagesIncluded: 0,
+          chars: FORK_SEED_NOTE.length,
+        },
+      };
+      this.adoptForkMessages(managedRef, forkBase, forkPrefix);
+    } else if (resumeFile) {
+      managedRef.forkPrefix = restoredForkPrefix(result.session);
+    } else {
+      managedRef.pendingRole = config.systemPrompt;
+      if (seedContext && seedContext !== 'none' && seedContext !== 'fork') {
         // 种子是可选增强：构建失败只丢种子，不能让已注册的 child 卡在未 ready
         const seed = await buildChildContextSeed(
           (parent.session.messages ?? []) as readonly ContextMessage[],
@@ -5824,28 +5880,27 @@ export class SessionSupervisor {
     const model = managed.session.model;
     if (!model || model.id !== base.selection.id || model.provider !== base.selection.provider)
       return;
-    const reply = base.reply;
-    const settled =
-      reply?.stopReason === 'stop' && !reply.content.some((part) => part.type === 'toolCall');
-    const messages = settled ? [...base.messages, reply] : [...base.messages];
+    const messages = forkMessages(base);
     if (messages.length === 0) return;
     try {
-      for (const message of messages) {
-        managed.session.sessionManager.appendMessage(message);
-      }
-      managed.session.agent.state.messages = [...messages];
-      managed.forkBase = {
-        model: base.model,
-        messages: [...messages],
-        ...(base.options ? { options: base.options } : {}),
-        stream: base.stream,
-        selection: base.selection,
-      };
-      this.reconcileMessages(managed, this.transcript(managed));
-      managed.turnStartIndex = managed.messages.length;
+      writeForkMessages(managed.session, messages);
+      this.adoptForkMessages(managed, base, messages);
     } catch {
       // 注入失败不阻断旁路：会话仍是空起步的普通旁路
     }
+  }
+
+  /** 分叉底稿已写进会话：它本身也可再被分叉，投影给渲染层，本轮从底稿之后算起 */
+  private adoptForkMessages(managed: ManagedSession, base: ForkBase, messages: Message[]): void {
+    managed.forkBase = {
+      model: base.model,
+      messages: [...messages],
+      ...(base.options ? { options: base.options } : {}),
+      stream: base.stream,
+      selection: base.selection,
+    };
+    this.reconcileMessages(managed, this.transcript(managed));
+    managed.turnStartIndex = managed.messages.length;
   }
 
   private reconcileMessages(managed: ManagedSession, rawMessages: unknown[]): void {
@@ -7545,6 +7600,74 @@ function forkBaseOf(parent: ManagedSession): ForkBase | undefined {
   if (!base || model?.id !== base.selection.id || model.provider !== base.selection.provider)
     return;
   return base;
+}
+
+/** 分叉底稿：最近一次请求的消息；回复正常收尾（无工具调用）时接在后面 */
+function forkMessages(base: ForkBase): Message[] {
+  const reply = base.reply;
+  const settled =
+    reply?.stopReason === 'stop' && !reply.content.some((part) => part.type === 'toolCall');
+  return settled ? [...base.messages, reply] : [...base.messages];
+}
+
+/** 底稿原样写进会话记录与 agent state：落 jsonl，resume 时随记录恢复，不靠 worker 内存 */
+function writeForkMessages(session: AgentSession, messages: Message[]): void {
+  for (const message of messages) {
+    session.sessionManager.appendMessage(message);
+  }
+  session.agent.state.messages = [...messages];
+}
+
+/** seed_context="fork" 的父请求底稿；没有或放不下时明确报错 */
+function forkSeedBase(parent: ManagedSession): ForkBase {
+  const base = forkBaseOf(parent);
+  if (!base || base.messages.length === 0) {
+    throw new Error(
+      `seed_context "fork" needs the parent's latest request on its current model, and none is recorded (no request yet, the model changed, or the worker restarted); ${FORK_SEED_HINT}`
+    );
+  }
+  const window = base.model.contextWindow ?? 0;
+  const tokens = base.reply?.usage
+    ? calculateContextTokens(base.reply.usage)
+    : base.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+  if (window > 0 && tokens > window * FORK_SEED_MAX_CONTEXT_RATIO) {
+    throw new Error(
+      `parent context is too large to fork (${tokens}/${window} tokens); compact the parent first or ${FORK_SEED_HINT}`
+    );
+  }
+  return base;
+}
+
+/** 前缀要命中缓存，子会话必须与父会话同一选择模型、同一 thinking 档位；不一致就拒绝，不替它换 */
+function forkSeedMismatch(
+  base: ForkBase,
+  parent: AgentSession,
+  child: AgentSession
+): string | undefined {
+  const model = child.model;
+  if (!model || model.provider !== base.selection.provider || model.id !== base.selection.id) {
+    const got = model ? `${model.provider}/${model.id}` : 'none';
+    return `seed_context "fork" requires the child to run on the parent model ${base.selection.provider}/${base.selection.id}, got ${got}; omit model or ${FORK_SEED_HINT}`;
+  }
+  if (child.thinkingLevel !== parent.thinkingLevel) {
+    return `seed_context "fork" requires the parent thinking level "${parent.thinkingLevel}", got "${child.thinkingLevel}"; omit thinking or ${FORK_SEED_HINT}`;
+  }
+  return undefined;
+}
+
+/** resume 的 fork 子会话：记录开头仍是注入时的底稿（没压缩掉）才接回前缀改写 */
+function restoredForkPrefix(session: AgentSession): Message[] | undefined {
+  const entry = session.sessionManager
+    .getBranch()
+    .findLast((item) => item.type === 'custom' && item.customType === FORK_PREFIX_ENTRY);
+  const data = entry?.type === 'custom' ? (entry.data as Record<string, unknown>) : undefined;
+  const count = typeof data?.count === 'number' ? data.count : 0;
+  const messages = session.messages as Message[];
+  if (count <= 0 || messages.length < count) return undefined;
+  const prefix = messages.slice(0, count);
+  if (prefix[0]?.timestamp !== data?.firstTimestamp) return undefined;
+  if (prefix[count - 1]?.timestamp !== data?.lastTimestamp) return undefined;
+  return prefix;
 }
 
 /**

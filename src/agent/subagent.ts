@@ -281,7 +281,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       'Treat the delivered report as your source of record: do not re-read files it covered unless you are about to edit them or the report is incomplete.',
       'Default to doing the work yourself in this thread: a few reads, one search, a short edit, or a single check is faster inline than delegating. Do not fan out several subagents for one small task, do not spawn a subagent to review or re-check work you can verify yourself, and keep the count low — one well-briefed subagent beats several thin ones. When independent subagents should run in parallel, spawn them all in the same message.',
       'Brief a subagent like a smart colleague who just walked into the room: it has not seen this conversation. State the goal and why, what you already learned or ruled out, and the expected answer shape and length (e.g. "report in under 200 words").',
-      'On spawn, seed_context controls parent context handoff (default "none"): use "prior_reads" when delegating implementation or targeted review after you already read the relevant files; use "fork_compact" to carry multi-turn decisions across models; keep "none" for independent or blind review.',
+      'On spawn, seed_context controls parent context handoff (default "none"): use "prior_reads" when delegating implementation or targeted review after you already read the relevant files; use "fork_compact" to carry multi-turn decisions across models; use "fork" to hand over this conversation verbatim (same model/thinking only); keep "none" for independent or blind review.',
       'Subagents run in the background and you are notified automatically with a result summary when a Run finishes. Do not wait (wait operation or wait:true) unless your very next step cannot proceed without that result; keep working or reply to the user meanwhile. Do not sleep, poll, or call report/wait on a running Run just to check progress.',
       "Don't race: after launching a background Run you know nothing about its results. Never fabricate or predict them in any form — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the subagent is still running — give status, not a guess.",
       'The user may not see the subagent result in full — relay what matters in your own reply.',
@@ -346,7 +346,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
           type: 'string',
           enum: [...SUBAGENT_SEED_CONTEXTS],
           description:
-            'Optional parent context to seed on first turn (spawn only, default "none"). "prior_reads" passes fresh file slices read by the parent plus recent user constraints/images; "fork_compact" also includes a cross-model text summary of recent turns.',
+            'Parent context for first turn (spawn only, default "none"): "prior_reads" = fresh file slices you read + recent user constraints/images; "fork_compact" = that + cross-model recap of recent turns; "fork" = this conversation verbatim (same model/thinking only).',
         },
         wait: { type: 'boolean', description: 'Default false. Only wait for this tool call.' },
         schema: { type: 'object' },

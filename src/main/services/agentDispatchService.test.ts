@@ -172,7 +172,7 @@ async function setup(
     cwd: string;
     config: ResolvedAgentTypeSpawnConfig;
     resumeFile?: string;
-    seedContext?: 'none' | 'prior_reads' | 'fork_compact';
+    seedContext?: 'none' | 'prior_reads' | 'fork_compact' | 'fork';
   }> = [];
   const resumeCoworkerCalls: Array<{
     parent: { sessionId: string; generation: string };

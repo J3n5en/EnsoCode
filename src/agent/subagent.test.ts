@@ -169,7 +169,7 @@ describe('subagent unified control', () => {
       undefined
     );
 
-    for (const seed of ['none', 'prior_reads', 'fork_compact'] as const) {
+    for (const seed of ['none', 'prior_reads', 'fork_compact', 'fork'] as const) {
       await run({ operation: 'spawn', description: 'd', prompt: 'p', seed_context: seed });
       expect(invoke).toHaveBeenLastCalledWith(
         expect.objectContaining({ operation: 'spawn', seedContext: seed }),

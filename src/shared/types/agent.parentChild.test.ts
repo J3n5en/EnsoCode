@@ -794,7 +794,7 @@ describe('parent/child commands', () => {
       expect(parseAgentCommand({ ...command, config: bad })).toBeNull();
     }
     // spawn-child 可选透传 seedContext 白名单枚举，非法值拒绝
-    for (const seedContext of ['none', 'prior_reads', 'fork_compact'] as const) {
+    for (const seedContext of ['none', 'prior_reads', 'fork_compact', 'fork'] as const) {
       expect(parseAgentCommand({ ...command, seedContext })).toEqual({
         ...command,
         seedContext,
