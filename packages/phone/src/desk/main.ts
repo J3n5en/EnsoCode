@@ -317,7 +317,7 @@ async function main(): Promise<void> {
       onPushConfig: (key) => {
         publishLink(reduceDeskLink(link, { type: 'push-config', key }));
         if (hasNativePush()) {
-          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relay));
+          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relayUrl));
         }
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) !== 'on') return;
         // 已经允许过：刷新订阅不需要再弹权限

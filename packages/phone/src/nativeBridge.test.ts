@@ -360,5 +360,16 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
     const res = await subscribePush('vapid-pub-123');
     expect(res.ok).toBe(true);
     expect(subscribeSpy).toHaveBeenCalledWith('vapid-pub-123', 'https://relay-apns.example.com');
+
+    // 负缓存穿透：中继刚上线 APNs 时再次探测不该被 5 分钟旧缓存卡住，且兼容 wss:// 输入
+    let apnsReady = false;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true, apns: apnsReady }), { status: 200 })
+    ) as unknown as typeof fetch;
+    expect(await resolveNativePushGatewayOrigin('wss://relay-upgraded.example.com/')).toBeNull();
+    apnsReady = true;
+    expect(await resolveNativePushGatewayOrigin('wss://relay-upgraded.example.com/')).toBe(
+      'https://relay-upgraded.example.com'
+    );
   });
 });

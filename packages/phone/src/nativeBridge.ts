@@ -130,10 +130,13 @@ function toBytes(data: ArrayBuffer | Uint8Array): Uint8Array {
   return data instanceof Uint8Array ? data : new Uint8Array(data);
 }
 
-async function probeRelayHealth(relayUrl: string): Promise<RelayHealthInfo | null> {
+async function probeRelayHealth(
+  relayUrl: string,
+  options?: { fresh?: boolean }
+): Promise<RelayHealthInfo | null> {
   const now = Date.now();
   const cached = endpointCache.get(relayUrl);
-  if (cached && now - cached.at < QUIC_PROBE_TTL_MS) return cached;
+  if (!options?.fresh && cached && now - cached.at < QUIC_PROBE_TTL_MS) return cached;
   let parsed: URL;
   try {
     parsed = new URL(relayUrl);
@@ -188,9 +191,12 @@ async function probeQuicEndpoint(relayUrl: string): Promise<QuicEndpoint | null>
 export async function resolveNativePushGatewayOrigin(relayUrl?: string): Promise<string | null> {
   if (!relayUrl) return null;
   try {
-    const parsed = new URL(relayUrl);
+    const normalized = relayUrl.trim().replace(/^wss:\/\//i, 'https://');
+    const parsed = new URL(normalized);
     if (parsed.protocol !== 'https:') return null;
-    const health = await probeRelayHealth(relayUrl);
+    const cached = endpointCache.get(normalized);
+    // 仅命中过 apns:true 时复用缓存；未命中或曾因弱网/未重启中继失败时重新探测，避免 5 分钟假失败
+    const health = await probeRelayHealth(normalized, { fresh: !cached?.apns });
     return health?.apns ? parsed.origin : null;
   } catch {
     return null;

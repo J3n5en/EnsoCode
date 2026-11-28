@@ -513,7 +513,7 @@ export function App() {
         vapidKeyRef.current = key;
         setPushConfigReady(true);
         if (hasNativePush()) {
-          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relay));
+          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relayUrl));
         }
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on') {
