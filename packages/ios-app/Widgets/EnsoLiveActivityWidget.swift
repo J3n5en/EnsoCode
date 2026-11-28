@@ -15,21 +15,23 @@ struct EnsoLiveActivityWidget: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 6) {
-                        ActivityStatusIcon(status: context.state.status, size: 14)
+                        ActivityStatusIcon(status: context.state.status, size: 16)
                         Text(context.attributes.deviceLabel)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.9))
                             .lineLimit(1)
                     }
-                    .padding(.leading, 4)
+                    .padding(.leading, 10)
+                    .padding(.top, 2)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack(spacing: 6) {
                         if context.state.status == "running" {
                             Text(context.state.startedAt, style: .timer)
                                 .font(.caption.weight(.semibold).monospacedDigit())
+                                .multilineTextAlignment(.trailing)
                                 .foregroundStyle(Color(red: 0.65, green: 0.71, blue: 0.99))
-                                .frame(minWidth: 40, alignment: .trailing)
+                                .frame(width: 56, alignment: .trailing)
                         } else if context.state.pendingCount > 0 {
                             Text("\(context.state.pendingCount) 待办")
                                 .font(.caption.weight(.bold))
@@ -40,34 +42,42 @@ struct EnsoLiveActivityWidget: Widget {
                                 .foregroundStyle(Color(red: 0.20, green: 0.83, blue: 0.60))
                         }
                     }
-                    .padding(.trailing, 4)
+                    .padding(.trailing, 10)
+                    .padding(.top, 2)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Text(context.state.title)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Text(context.state.projectName)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.65))
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.68))
                                 .lineLimit(1)
                             Text("·")
                                 .font(.caption2)
                                 .foregroundStyle(.white.opacity(0.4))
                             Text(context.state.detail)
                                 .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
+                                .foregroundStyle(.white.opacity(0.85))
                                 .lineLimit(1)
                             Spacer(minLength: 0)
+                            if context.state.runningCount > 1 {
+                                Text("\(context.state.runningCount) 并行")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                    .lineLimit(1)
+                            }
                         }
                     }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 2)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
                 }
             } compactLeading: {
-                ActivityStatusIcon(status: context.state.status, size: 13)
+                ActivityStatusIcon(status: context.state.status, size: 15)
                     .padding(.leading, 2)
             } compactTrailing: {
                 if context.state.pendingCount > 0 {
@@ -78,8 +88,9 @@ struct EnsoLiveActivityWidget: Widget {
                 } else if context.state.status == "running" {
                     Text(context.state.startedAt, style: .timer)
                         .font(.caption2.weight(.semibold).monospacedDigit())
+                        .multilineTextAlignment(.trailing)
                         .foregroundStyle(Color(red: 0.65, green: 0.71, blue: 0.99))
-                        .frame(maxWidth: 44)
+                        .frame(width: 40, alignment: .trailing)
                         .padding(.trailing, 2)
                 } else {
                     Image(systemName: "checkmark")
@@ -93,7 +104,7 @@ struct EnsoLiveActivityWidget: Widget {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Color(red: 0.98, green: 0.75, blue: 0.14))
                 } else {
-                    ActivityStatusIcon(status: context.state.status, size: 12)
+                    ActivityStatusIcon(status: context.state.status, size: 14)
                 }
             }
             .widgetURL(EnsoWidgetSnapshot.deepLinkURL(sessionId: context.attributes.sessionId))
@@ -113,7 +124,7 @@ private struct LockScreenActivityView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(tint.opacity(0.2))
                     .frame(width: 40, height: 40)
-                ActivityStatusIcon(status: context.state.status, size: 18)
+                ActivityStatusIcon(status: context.state.status, size: 22)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -172,17 +183,15 @@ private struct ActivityStatusIcon: View {
     let size: CGFloat
 
     var body: some View {
-        let symbol: String = {
+        let badge: EnsoMarkBadge = {
             switch status {
-            case "pending": return "exclamationmark.bubble.fill"
-            case "done": return "checkmark.circle.fill"
-            case "offline": return "wifi.slash"
-            default: return "sparkles"
+            case "pending": return .pending
+            case "done": return .done
+            default: return .none
             }
         }()
-        Image(systemName: symbol)
-            .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(activityTint(status))
+        EnsoMarkView(size: size, color: activityTint(status), badge: badge)
+            .accessibilityLabel("EnsoCode")
     }
 }
 

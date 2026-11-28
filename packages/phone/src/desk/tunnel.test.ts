@@ -500,4 +500,75 @@ describe('DeskTunnel', () => {
     });
     await expect(oldPending!).resolves.toBeNull();
   });
+
+  it('冷启动 attach 早于 online 时预挂 prefetch，早到的 takePrefetch 直接复用 rpc-prefetch 结果', async () => {
+    const tunnel = new DeskTunnel(
+      DEVICE,
+      () => {},
+      () => {},
+      {
+        getPrefetch: () => [{ ch: 'settings:read', args: [], h: 'hs-early' }],
+      }
+    );
+    // 尚未 online 就 attach + 请求 takePrefetch（模拟真实冷启动 iframe 抢跑）
+    tunnel.attach('main', () => {});
+    const t = tunnel as unknown as {
+      takePrefetch: (key: string, expectedHash: string) => Promise<unknown> | null;
+    };
+    const earlyPending = t.takePrefetch('settings:read\0[]', 'hs-early');
+    expect(earlyPending).not.toBeNull();
+
+    mockState.events?.onState('online');
+    const hello = hellos()[0] as Extract<PhoneToHost, { type: 'rpc-hello' }> & {
+      prefetch?: unknown;
+    };
+    expect(hello.prefetch).toEqual([{ ch: 'settings:read', args: [], h: 'hs-early' }]);
+
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-ready',
+      cid: hello.cid,
+      ok: true,
+      resumed: false,
+      version: 'v1',
+      platform: 'darwin',
+      leader: true,
+      replay: true,
+      prefetch: true,
+    });
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-prefetch',
+      cid: hello.cid,
+      items: [
+        { ch: 'settings:read', args: [], data: { __ensoCached: { h: 'hs-early', same: 1 } } },
+      ],
+    });
+    await expect(earlyPending!).resolves.toEqual({ __ensoCached: { h: 'hs-early', same: 1 } });
+  });
+
+  it('原生 iOS 退后台 enso:background 只 conceal 不发 rpc-bye，避免切回被宿主拒掉续连', () => {
+    const listeners = new Map<string, Array<(event: Event) => void>>();
+    const origWindow = globalThis.window;
+    const origDocument = globalThis.document;
+    const addWin = (type: string, fn: (event: Event) => void) => {
+      const list = listeners.get(type) ?? [];
+      list.push(fn);
+      listeners.set(type, list);
+    };
+    vi.stubGlobal('window', { addEventListener: addWin });
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: () => {},
+    });
+    try {
+      const { tunnel } = createOnlineTunnel();
+      tunnel.start();
+      mockState.sent = [];
+      for (const fn of listeners.get('enso:background') ?? []) fn(new Event('enso:background'));
+      expect(mockState.sent.some((m) => m.type === 'rpc-bye')).toBe(false);
+      expect(mockState.sent.some((m) => m.type === 'presence')).toBe(true);
+    } finally {
+      vi.stubGlobal('window', origWindow);
+      vi.stubGlobal('document', origDocument);
+    }
+  });
 });

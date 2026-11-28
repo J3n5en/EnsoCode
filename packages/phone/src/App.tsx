@@ -570,17 +570,31 @@ export function App() {
       client.conceal();
       client.flushCache();
     };
+    const onNativeForeground = () => {
+      client.nudge('visibility');
+      client.send({ type: 'presence', visible: true });
+      clearBadge();
+    };
+    const onNativeBackground = () => {
+      client.conceal();
+      client.send({ type: 'presence', visible: false });
+      client.flushCache();
+    };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('online', onOnline);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onFocus);
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('enso:foreground', onNativeForeground);
+    window.addEventListener('enso:background', onNativeBackground);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('enso:foreground', onNativeForeground);
+      window.removeEventListener('enso:background', onNativeBackground);
       if (botRefreshRef.current) clearTimeout(botRefreshRef.current);
       botRefreshRef.current = null;
       client.close();

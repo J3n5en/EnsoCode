@@ -406,7 +406,10 @@ async function main(): Promise<void> {
         build: version,
         userAgent: navigator.userAgent,
         visibility: document.visibilityState,
-        link: toRemoteLinkStatus(link, pushAvailability()),
+        link: {
+          ...toRemoteLinkStatus(link, pushAvailability()),
+          ...tunnel.diagnostics(),
+        },
         trace: tunnel.trace,
       }),
     wide: () => matchMedia(DESKTOP_DRAWER_QUERY).matches,
@@ -760,6 +763,8 @@ async function main(): Promise<void> {
     else clearBadge();
   });
   window.addEventListener('pagehide', () => void keepSnapshot());
+  window.addEventListener('enso:background', () => void keepSnapshot());
+  window.addEventListener('enso:foreground', () => clearBadge());
   clearBadge();
   setInterval(() => {
     if (document.visibilityState === 'visible') void keepSnapshot();
