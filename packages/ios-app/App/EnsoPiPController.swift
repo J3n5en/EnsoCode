@@ -1,47 +1,86 @@
 import AVFoundation
 import AVKit
+import CoreMedia
 import EnsoCore
 import SwiftUI
 import UIKit
 
-/// 原生画中画（视频通话样式）实时对话窗口：
-/// 用户切到其他 App 时把当前会话浮在系统 PiP 窗口里，点 PiP 的还原按钮回到同一会话。
+/// 承载 `AVSampleBufferDisplayLayer` 的行内源视图：放在 WebView 底层，
+/// 让系统画中画以标准播放形态运行（自带左上角 × 关闭按钮、右上角返回按钮与暂停/继续控制）。
+final class SampleBufferPiPSourceView: UIView {
+    override class var layerClass: AnyClass {
+        AVSampleBufferDisplayLayer.self
+    }
+
+    var sampleBufferDisplayLayer: AVSampleBufferDisplayLayer {
+        layer as! AVSampleBufferDisplayLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        alpha = 1.0
+        isUserInteractionEnabled = false
+        isHidden = false
+        sampleBufferDisplayLayer.videoGravity = .resizeAspect
+        configureTimebase()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func configureTimebase() {
+        var timebase: CMTimebase?
+        let status = CMTimebaseCreateWithSourceClock(
+            allocator: kCFAllocatorDefault,
+            sourceClock: CMClockGetHostTimeClock(),
+            timebaseOut: &timebase
+        )
+        if status == noErr, let timebase {
+            CMTimebaseSetTime(timebase, time: .zero)
+            CMTimebaseSetRate(timebase, rate: 1.0)
+            sampleBufferDisplayLayer.controlTimebase = timebase
+        }
+    }
+}
+
+/// 原生画中画实时对话窗口：
+/// 使用 `AVSampleBufferDisplayLayer` + `ImageRenderer` 按需离屏绘制 SwiftUI 对话视图，
+/// 既保留完整的对话区排版，又拥有系统原生左上角 × 关闭按钮、右上角返回按钮和零空闲 CPU 开销。
 @MainActor
 final class EnsoPiPController: NSObject {
     static let shared = EnsoPiPController()
 
     /// `isPictureInPicturePossible` 迟迟不变为 true 时放弃本次启动的时限。
     private static let startTimeout: Duration = .milliseconds(2500)
+    private static let renderScale: CGFloat = 2.0
     private static let silentWavData: Data = makeSilentWavData()
 
     let viewModel = EnsoPiPViewModel()
 
-    /// 透明、不拦截触摸的小尺寸行内锚点视图（非全屏，避免关闭自动画中画时被 iOS 误判为全屏视频自动起窗）。
-    let sourceView: UIView = {
-        let view = UIView()
-        view.backgroundColor = .clear
-        view.alpha = 1.0
-        view.isUserInteractionEnabled = false
-        view.isHidden = false
-        return view
-    }()
+    /// 小尺寸行内源视图（非全屏、置于 WebView 底层，避免关闭自动画中画时被 iOS 误判为全屏视频自动起窗）。
+    let sourceView = SampleBufferPiPSourceView()
 
     private(set) var phase: EnsoPiPLifecyclePhase = .unavailable
     private(set) var autoStartEnabled = false
     private(set) var aspect: EnsoPiPAspect = .portrait
+    private(set) var isPaused = false
     private var lastError: String?
 
     var onStatusChange: ((EnsoPiPStatusPayload) -> Void)?
     var onRestoreSession: ((String?) -> Void)?
 
     private var pipController: AVPictureInPictureController?
-    private weak var callViewController: AVPictureInPictureVideoCallViewController?
-    private weak var attachedSourceView: UIView?
-    private weak var hostSourceView: UIView?
+    private weak var attachedSourceView: SampleBufferPiPSourceView?
+    private weak var hostSourceView: SampleBufferPiPSourceView?
     private var keepAlivePlayer: AVAudioPlayer?
     private var possibleObservation: NSKeyValueObservation?
     /// 非 nil 表示用户已请求启动，正在等待系统报告 `isPictureInPicturePossible`。
     private var pendingStart: Task<Void, Never>?
+    /// 标记画面维度或数据需要下次刷新；暂停期间延迟上屏，恢复播放时立刻补帧。
+    private var hasPendingFrameWhilePaused = false
+    private var lastRenderedSize: CGSize = .zero
 
     var isActive: Bool { phase == .active }
 
@@ -57,7 +96,7 @@ final class EnsoPiPController: NSObject {
 
     /// 记录已挂载到窗口的源视图；按 Apple 要求仅在开启自动画中画或手动启动时才挂载 ContentSource。
     func attach(sourceView: UIView) {
-        hostSourceView = sourceView
+        hostSourceView = (sourceView as? SampleBufferPiPSourceView) ?? self.sourceView
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
             transition(to: .unavailable)
             return
@@ -73,35 +112,25 @@ final class EnsoPiPController: NSObject {
     /// 幂等：仅在需要自动画中画或主动开启时才创建 AVPictureInPictureController。
     @discardableResult
     private func ensureControllerAttached() -> AVPictureInPictureController? {
-        guard let sourceView = hostSourceView ?? (self.sourceView.window != nil ? self.sourceView : nil) else {
+        let candidate = hostSourceView ?? (self.sourceView.window != nil ? self.sourceView : nil)
+        guard let sourceView = candidate, sourceView.window != nil else {
             return nil
         }
         if let existing = pipController, attachedSourceView === sourceView { return existing }
         guard AVPictureInPictureController.isPictureInPictureSupported() else { return nil }
 
-        let callViewController = AVPictureInPictureVideoCallViewController()
-        callViewController.preferredContentSize = aspect.preferredContentSize
-        callViewController.view.backgroundColor = .black
-        let hosting = UIHostingController(rootView: EnsoPiPConversationView(model: viewModel))
-        hosting.view.backgroundColor = .clear
-        hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        callViewController.addChild(hosting)
-        callViewController.view.addSubview(hosting.view)
-        NSLayoutConstraint.activate([
-            hosting.view.leadingAnchor.constraint(equalTo: callViewController.view.leadingAnchor),
-            hosting.view.trailingAnchor.constraint(equalTo: callViewController.view.trailingAnchor),
-            hosting.view.topAnchor.constraint(equalTo: callViewController.view.topAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: callViewController.view.bottomAnchor),
-        ])
-        hosting.didMove(toParent: callViewController)
+        // 先往 DisplayLayer 灌入一帧有效画面，系统才会把 isPictureInPicturePossible 置为 true。
+        renderCurrentFrame(into: sourceView, forceFlush: true)
 
         let source = AVPictureInPictureController.ContentSource(
-            activeVideoCallSourceView: sourceView,
-            contentViewController: callViewController
+            sampleBufferDisplayLayer: sourceView.sampleBufferDisplayLayer,
+            playbackDelegate: self
         )
         let controller = AVPictureInPictureController(contentSource: source)
         controller.delegate = self
+        controller.requiresLinearPlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = autoStartEnabled
+        controller.invalidatePlaybackState()
 
         possibleObservation = controller.observe(
             \.isPictureInPicturePossible,
@@ -114,7 +143,6 @@ final class EnsoPiPController: NSObject {
         }
         pipController?.delegate = nil
         pipController = controller
-        self.callViewController = callViewController
         attachedSourceView = sourceView
         return controller
     }
@@ -127,8 +155,8 @@ final class EnsoPiPController: NSObject {
         pipController?.delegate = nil
         pipController?.contentSource = nil
         pipController = nil
-        callViewController = nil
         attachedSourceView = nil
+        lastRenderedSize = .zero
     }
 
     func start() {
@@ -137,6 +165,10 @@ final class EnsoPiPController: NSObject {
             return
         }
         guard phase == .ready else { return }
+        isPaused = false
+        hasPendingFrameWhilePaused = false
+        renderCurrentFrameIfAttached(forceFlush: false)
+        controller.invalidatePlaybackState()
         activateAudioSession(startKeepAlive: true)
         lastError = nil
         transition(to: .starting)
@@ -174,6 +206,7 @@ final class EnsoPiPController: NSObject {
         if enabled {
             let controller = ensureControllerAttached()
             controller?.canStartPictureInPictureAutomaticallyFromInline = true
+            renderCurrentFrameIfAttached(forceFlush: false)
         } else {
             pipController?.canStartPictureInPictureAutomaticallyFromInline = false
             deactivateAudioSessionIfIdle()
@@ -182,11 +215,11 @@ final class EnsoPiPController: NSObject {
         notifyStatus()
     }
 
-    /// 切换画中画纵横比：正在展示的画中画会随 `preferredContentSize` 平滑变形，无需重启窗口。
+    /// 切换画中画纵横比：用新画布尺寸重绘一帧并 flush 图层，系统 PiP 随视频尺寸平滑调整比例。
     func setAspect(_ next: EnsoPiPAspect) {
         guard aspect != next else { return }
         aspect = next
-        callViewController?.preferredContentSize = next.preferredContentSize
+        renderCurrentFrameIfAttached(forceFlush: true)
         notifyStatus()
     }
 
@@ -194,6 +227,7 @@ final class EnsoPiPController: NSObject {
     func handleWillResignActive() {
         guard autoStartEnabled, phase == .ready else { return }
         ensureControllerAttached()?.canStartPictureInPictureAutomaticallyFromInline = true
+        renderCurrentFrameIfAttached(forceFlush: false)
         activateAudioSession(startKeepAlive: false)
     }
 
@@ -205,7 +239,39 @@ final class EnsoPiPController: NSObject {
     }
 
     func update(snapshot: EnsoPiPSnapshot) {
+        let before = viewModel.snapshot
         viewModel.apply(snapshot)
+        guard viewModel.snapshot != before else { return }
+        if isPaused && phase == .active {
+            hasPendingFrameWhilePaused = true
+            return
+        }
+        renderCurrentFrameIfAttached(forceFlush: false)
+    }
+
+    private func renderCurrentFrameIfAttached(forceFlush: Bool) {
+        guard let sourceView = attachedSourceView ?? hostSourceView, sourceView.window != nil else { return }
+        // 仅在活跃、启动中或已开启自动画中画（随时可能切后台弹出）时离屏绘制，空闲不耗电。
+        guard phase == .active || phase == .starting || autoStartEnabled else { return }
+        renderCurrentFrame(into: sourceView, forceFlush: forceFlush)
+    }
+
+    private func renderCurrentFrame(into sourceView: SampleBufferPiPSourceView, forceFlush: Bool) {
+        let size = aspect.preferredContentSize
+        let layer = sourceView.sampleBufferDisplayLayer
+        let sizeChanged = lastRenderedSize != size
+        if forceFlush || sizeChanged || layer.status == .failed {
+            layer.flush()
+        }
+        let presentationTime = layer.controlTimebase.map { CMTimebaseGetTime($0) } ?? .zero
+        guard let sample = EnsoPiPFrameEncoder.encode(
+            view: EnsoPiPConversationView(model: viewModel, isPaused: isPaused),
+            size: size,
+            scale: Self.renderScale,
+            presentationTime: presentationTime
+        ) else { return }
+        layer.enqueue(sample)
+        lastRenderedSize = size
     }
 
     private func pictureInPicturePossibleChanged(_ possible: Bool) {
@@ -340,6 +406,8 @@ extension EnsoPiPController: @preconcurrency AVPictureInPictureControllerDelegat
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        isPaused = false
+        hasPendingFrameWhilePaused = false
         transition(to: .ready)
         stopSilentKeepAlive()
         deactivateAudioSessionIfIdle(force: true)
@@ -352,5 +420,47 @@ extension EnsoPiPController: @preconcurrency AVPictureInPictureControllerDelegat
     ) {
         onRestoreSession?(viewModel.snapshot.sessionId)
         completionHandler(true)
+    }
+}
+
+/// 播放代理：将实时对话声明为无限时长直播流（隐藏进度条），并把系统暂停按钮映射为冻结/恢复浮窗刷新。
+extension EnsoPiPController: @preconcurrency AVPictureInPictureSampleBufferPlaybackDelegate {
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        setPlaying playing: Bool
+    ) {
+        isPaused = !playing
+        if !isPaused && hasPendingFrameWhilePaused {
+            hasPendingFrameWhilePaused = false
+        }
+        renderCurrentFrameIfAttached(forceFlush: false)
+        pictureInPictureController.invalidatePlaybackState()
+    }
+
+    func pictureInPictureControllerTimeRangeForPlayback(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) -> CMTimeRange {
+        CMTimeRange(start: .zero, duration: .positiveInfinity)
+    }
+
+    func pictureInPictureControllerIsPlaybackPaused(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) -> Bool {
+        isPaused
+    }
+
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        didTransitionToRenderSize newRenderSize: CMVideoDimensions
+    ) {
+        renderCurrentFrameIfAttached(forceFlush: false)
+    }
+
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        skipByInterval skipInterval: CMTime,
+        completion: @escaping () -> Void
+    ) {
+        completion()
     }
 }
