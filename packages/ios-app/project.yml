@@ -15,6 +15,7 @@ targets:
       - path: App
         excludes:
           - "Info.plist"
+          - "EnsoCode.entitlements"
       - path: WebApp
         type: folder
         buildPhase: resources
@@ -22,9 +23,18 @@ targets:
     dependencies:
       - package: EnsoCore
         product: EnsoCore
+      - target: EnsoNotificationService
+        embed: true
+    entitlements:
+      path: App/EnsoCode.entitlements
+      properties:
+        aps-environment: production
+        keychain-access-groups:
+          - "$(AppIdentifierPrefix)com.j3n5en.ensocode.shared"
     info:
       path: App/Info.plist
       properties:
+        AppIdentifierPrefix: "$(DEVELOPMENT_TEAM)."
         CFBundleDisplayName: EnsoCode
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
@@ -55,8 +65,47 @@ targets:
         PRODUCT_NAME: EnsoCode
         DEVELOPMENT_TEAM: 69GW9UBCN2
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "2"
+        CURRENT_PROJECT_VERSION: "3"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        PROVISIONING_PROFILE_SPECIFIER: "$(ENSO_APP_PROFILE_SPECIFIER)"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  EnsoNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: NotificationService
+        excludes:
+          - "Info.plist"
+          - "EnsoNotificationService.entitlements"
+    dependencies:
+      - package: EnsoCore
+        product: EnsoCore
+    entitlements:
+      path: NotificationService/EnsoNotificationService.entitlements
+      properties:
+        keychain-access-groups:
+          - "$(AppIdentifierPrefix)com.j3n5en.ensocode.shared"
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        AppIdentifierPrefix: "$(DEVELOPMENT_TEAM)."
+        CFBundleDisplayName: EnsoNotificationService
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).NotificationService"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.j3n5en.ensocode.notification-service
+        PRODUCT_NAME: EnsoNotificationService
+        DEVELOPMENT_TEAM: 69GW9UBCN2
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "3"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        PROVISIONING_PROFILE_SPECIFIER: "$(ENSO_NSE_PROFILE_SPECIFIER)"
+        SKIP_INSTALL: YES

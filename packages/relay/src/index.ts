@@ -1,9 +1,10 @@
+import { type ApnsEnv, handleApnsPush, isApnsConfigured } from './apns';
 import { isValidPublicKey, pairIdFromPublicKey } from './pairing';
 import { PairRoom } from './room';
 
 export { PairRoom };
 
-export interface Env {
+export interface Env extends ApnsEnv {
   PAIR_ROOM: DurableObjectNamespace<PairRoom>;
   /** 静态资源（手机 PWA）：非 /v1 路径回落到这里 */
   ASSETS: Fetcher;
@@ -73,7 +74,13 @@ async function route(request: Request, env: Env): Promise<Response> {
     return routeByPublicKey(request, env, '/claim');
   }
   if (path === '/healthz' && request.method === 'GET') {
-    return json({ ok: true, quic: false });
+    return json({ ok: true, quic: false, apns: isApnsConfigured(env) });
+  }
+
+  // /v1/push/apns/:env/:token  (E2E 加密 Web Push → APNs 转发网关)
+  const apnsMatch = /^\/v1\/push\/apns\/(prod|sandbox)\/([0-9a-fA-F]{64,256})$/.exec(path);
+  if (apnsMatch && request.method === 'POST') {
+    return handleApnsPush(request, env, apnsMatch[1], apnsMatch[2]);
   }
 
   // /v1/pair/:id  (WSS 连接 或 DELETE 解绑)

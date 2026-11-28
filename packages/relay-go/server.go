@@ -40,6 +40,7 @@ type Server struct {
 	now      func() int64
 	log      *slog.Logger
 	quicPort atomic.Int32
+	apns     *apnsGateway
 }
 
 func newServer(store *Store, static fs.FS, log *slog.Logger) *Server {
@@ -91,7 +92,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/v1/pair/claim" && r.Method == http.MethodPost:
 		s.handleClaim(w, r)
 	case p == "/healthz" && r.Method == http.MethodGet:
-		body := map[string]any{"ok": true}
+		body := map[string]any{"ok": true, "apns": s.apns != nil}
 		if qp := s.quicPort.Load(); qp > 0 {
 			body["quic"] = true
 			body["quicPort"] = int(qp)
@@ -101,6 +102,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/"+deskBundleDir+"/") && (r.Method == http.MethodGet || r.Method == http.MethodHead):
 		s.desk().serve(w, r, strings.TrimPrefix(p, "/"+deskBundleDir+"/"))
 	default:
+		if envName, token, ok := parseAPNSPath(p); ok && r.Method == http.MethodPost {
+			s.handleAPNSPush(w, r, envName, token)
+			return
+		}
 		if pairID, ok := pairIDFromPath(p); ok {
 			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 				s.handleConnect(w, r, pairID)

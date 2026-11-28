@@ -39,6 +39,7 @@ import { GroupChatScreen, type MemberPending } from './GroupChatScreen';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from './launchSession';
 import { useMediaQuery, WIDE_LAYOUT_QUERY } from './media';
 import { NewSessionSheet } from './NewSessionSheet';
+import { hasNativePush, resolveNativePushGatewayOrigin } from './nativeBridge';
 import { OutboxBar } from './OutboxBar';
 import { PairScreen } from './PairScreen';
 import {
@@ -47,6 +48,7 @@ import {
   PHONE_PUSH_ENABLED_KEY,
   type PushFailureReason,
   registerServiceWorker,
+  setNativePushGatewayResolver,
   subscribePush,
 } from './push';
 import { pushDeps, turnPushOff, turnPushOn } from './pushToggle';
@@ -277,11 +279,8 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: SW 消息路由注册一次；内部判定用最新状态
   useEffect(() => {
     void registerServiceWorker();
-    if (!('serviceWorker' in navigator)) return;
-    const onMessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string; sessionId?: string };
-      if (data?.type !== 'open-session') return;
-      const sessionId = parseSessionId(data.sessionId);
+    const openBySessionId = (rawSessionId: unknown) => {
+      const sessionId = parseSessionId(rawSessionId);
       if (!sessionId) return;
       // Bot 成员会话的通知（后台审批等）落到对应 Bot 聊天，不当作 Code 会话打开
       const chat = botChatsRef.current.find((item) =>
@@ -296,8 +295,25 @@ export function App() {
       }
       closeDrawer();
     };
-    navigator.serviceWorker.addEventListener('message', onMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+    const onNativeOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: unknown }>).detail;
+      openBySessionId(detail?.sessionId);
+    };
+    window.addEventListener('enso:open-session', onNativeOpen);
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; sessionId?: string };
+      if (data?.type !== 'open-session') return;
+      openBySessionId(data.sessionId);
+    };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', onMessage);
+    }
+    return () => {
+      window.removeEventListener('enso:open-session', onNativeOpen);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', onMessage);
+      }
+    };
   }, []);
   useEffect(() => {
     applyAppBadge(attentionBadgeCount(catalog));
@@ -496,6 +512,9 @@ export function App() {
       onPushConfig: (key) => {
         vapidKeyRef.current = key;
         setPushConfigReady(true);
+        if (hasNativePush()) {
+          setNativePushGatewayResolver(() => resolveNativePushGatewayOrigin(device.relay));
+        }
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on') {
           void subscribePush(key).then((result) => {

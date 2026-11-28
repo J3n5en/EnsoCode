@@ -7,7 +7,14 @@ import {
   isNativeIosApp,
   registerNativeDeskFetcher,
   requestNativeQrScan,
+  resolveNativePushGatewayOrigin,
 } from './nativeBridge';
+import {
+  isPushSupported,
+  pushAvailability,
+  setNativePushGatewayResolver,
+  subscribePush,
+} from './push';
 
 describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () => {
   const origWindow = globalThis.window;
@@ -305,5 +312,53 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
       { reqId: 'req-1', status: 200, mime: 'text/plain', bodyB64: btoa('asset:r/index.html') },
     ]);
     unregister();
+  });
+
+  it('原生 iOS 壳支持 APNs E2E 推送：pushAvailability 返回 ok，只使用 /healthz 返回 apns:true 的中继', async () => {
+    const subscribeSpy = vi.fn(async (vapidKey: string, gatewayOrigin: string) => ({
+      ok: true as const,
+      subscription: {
+        endpoint: `${gatewayOrigin}/v1/push/apns/prod/${'aa'.repeat(32)}?k=${vapidKey.slice(0, 8)}`,
+        keys: { p256dh: 'p256-key', auth: 'auth-key' },
+      },
+    }));
+    (window as unknown as Record<string, unknown>).__ensoNative = {
+      platform: 'ios',
+      push: true,
+      subscribePush: subscribeSpy,
+      unsubscribePush: vi.fn(),
+    };
+
+    expect(isPushSupported()).toBe(true);
+    expect(pushAvailability()).toBe('ok');
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const u = String(input);
+      if (u.startsWith('https://relay-apns.example.com')) {
+        return new Response(JSON.stringify({ ok: true, apns: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ok: true, apns: false }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const gw1 = await resolveNativePushGatewayOrigin('https://relay-apns.example.com');
+    expect(gw1).toBe('https://relay-apns.example.com');
+    const gw2 = await resolveNativePushGatewayOrigin('https://relay-no-apns.example.com');
+    expect(gw2).toBeNull();
+
+    // 未启用 APNs 的中继（如未配证书的 CF）返回 service-unreachable，避免假成功
+    setNativePushGatewayResolver(() =>
+      resolveNativePushGatewayOrigin('https://relay-no-apns.example.com')
+    );
+    const miss = await subscribePush('vapid-pub-123');
+    expect(miss).toEqual({ ok: false, reason: 'service-unreachable' });
+    expect(subscribeSpy).not.toHaveBeenCalled();
+
+    // 已启用 APNs 的 Go 中继正常走原生订阅
+    setNativePushGatewayResolver(() =>
+      resolveNativePushGatewayOrigin('https://relay-apns.example.com')
+    );
+    const res = await subscribePush('vapid-pub-123');
+    expect(res.ok).toBe(true);
+    expect(subscribeSpy).toHaveBeenCalledWith('vapid-pub-123', 'https://relay-apns.example.com');
   });
 });

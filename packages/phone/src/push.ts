@@ -7,6 +7,7 @@ export {
   type PushSubscribeResult,
   pushAvailability,
   registerServiceWorker,
+  setNativePushGatewayResolver,
   subscribePush,
   unsubscribePush,
   type WebPushSubscription,

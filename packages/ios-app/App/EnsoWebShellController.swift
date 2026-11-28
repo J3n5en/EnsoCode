@@ -62,6 +62,10 @@ final class EnsoWebShellController: NSObject, ObservableObject {
         bridgeHandler.target = self
         ucc.add(bridgeHandler, name: "ensoNative")
 
+        EnsoPushManager.shared.configure { [weak self] sessionId in
+            self?.openSessionFromNotification(sessionId)
+        }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(appDidBecomeActive),
@@ -136,7 +140,24 @@ final class EnsoWebShellController: NSObject, ObservableObject {
             _ = try? server.ensureRunning()
         }
         // 切回前台时立即通知前端触发原生 QUIC / WebRTC 探活与重连
+        EnsoPushManager.shared.clearBadge()
         evalJS("window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));")
+    }
+
+    func openSessionFromNotification(_ sessionId: String) {
+        guard let sidLit = Self.jsStringLiteral(sessionId) else { return }
+        evalJS("window.dispatchEvent(new CustomEvent('enso:open-session', { detail: { sessionId: \(sidLit) } }));")
+        // 若当前在主壳页且尚未监听自定义事件，附带 query 参数确保冷启动也可定位会话
+        if let url = webView.url, url.path == "/" || url.path == "/index.html" {
+            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            var items = comps?.queryItems ?? []
+            items.removeAll { $0.name == "session" }
+            items.append(URLQueryItem(name: "session", value: sessionId))
+            comps?.queryItems = items
+            if let target = comps?.url {
+                webView.load(URLRequest(url: target))
+            }
+        }
     }
 
     @objc private func appDidEnterBackground() {
@@ -186,6 +207,8 @@ final class EnsoWebShellController: NSObject, ObservableObject {
       let openCb = null, controlCb = null, binaryCb = null, closeCb = null;
       const scanResolvers = new Map();
       let scanSeq = 0;
+      const pushResolvers = new Map();
+      let pushSeq = 0;
 
       window.__ensoNativeInternal = {
         onOpen: (id) => { try { openCb && openCb(id); } catch {} },
@@ -197,12 +220,18 @@ final class EnsoWebShellController: NSObject, ObservableObject {
           scanResolvers.delete(cbId);
           if (fn) fn(value);
         },
+        resolvePush: (cbId, result) => {
+          const fn = pushResolvers.get(cbId);
+          pushResolvers.delete(cbId);
+          if (fn) fn(result);
+        },
       };
 
       window.__ensoNative = {
         platform: 'ios',
         quic: true,
         deskProxy: true,
+        push: true,
         openQuic: (params) => post({ type: 'quic-open', params }),
         sendQuicText: (id, text) => post({ type: 'quic-send-text', id, text }),
         sendQuicBinary: (id, lane, base64) => post({ type: 'quic-send-binary', id, lane, base64 }),
@@ -216,6 +245,14 @@ final class EnsoWebShellController: NSObject, ObservableObject {
           scanResolvers.set(cbId, resolve);
           post({ type: 'scan-qr', cbId });
         }),
+        subscribePush: (vapidPublicKey, gatewayOrigin) => new Promise((resolve) => {
+          const cbId = 'p-' + (++pushSeq);
+          pushResolvers.set(cbId, resolve);
+          post({ type: 'push-subscribe', cbId, vapidPublicKey, gatewayOrigin });
+        }),
+        unsubscribePush: () => {
+          post({ type: 'push-unsubscribe' });
+        },
         replyDeskAsset: (reqId, status, mime, bodyBase64) => post({
           type: 'desk-asset-reply',
           reqId,
@@ -295,6 +332,27 @@ extension EnsoWebShellController: WKScriptMessageHandler {
             guard let cbId = body["cbId"] as? String else { return }
             pendingScanCallbackId = cbId
             isShowingScanner = true
+
+        case "push-subscribe":
+            guard let cbId = body["cbId"] as? String,
+                  let vapidPublicKey = body["vapidPublicKey"] as? String,
+                  let gatewayOrigin = body["gatewayOrigin"] as? String
+            else { return }
+            Task { @MainActor [weak self] in
+                let result = await EnsoPushManager.shared.subscribe(
+                    vapidPublicKey: vapidPublicKey,
+                    gatewayOrigin: gatewayOrigin
+                )
+                guard let self,
+                      let cbLit = Self.jsStringLiteral(cbId),
+                      let data = try? JSONSerialization.data(withJSONObject: result, options: []),
+                      let json = String(data: data, encoding: .utf8)
+                else { return }
+                self.evalJS("window.__ensoNativeInternal?.resolvePush(\(cbLit), \(json));")
+            }
+
+        case "push-unsubscribe":
+            EnsoPushManager.shared.clearBadge()
 
         case "desk-asset-reply":
             guard let reqId = body["reqId"] as? String,

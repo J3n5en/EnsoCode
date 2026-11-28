@@ -38,6 +38,21 @@ export interface EnsoNativeBridge {
   onQuicClose?(cb: (id: string, code: number, reason: string) => void): void;
   /** 原生 AVFoundation 扫码；用户取消返回 null */
   scanQr?(): Promise<string | null>;
+  /** 是否具备原生 APNs 端到端推送能力（iOS UNUserNotificationCenter + NSE 本地解密） */
+  readonly push?: boolean;
+  /** 申请系统通知权限、拿 APNs token 并用本机共享 Keychain E2E 密钥构造标准 WebPushSubscription */
+  subscribePush?(
+    vapidPublicKey: string,
+    gatewayOrigin: string
+  ): Promise<
+    | { ok: true; subscription: { endpoint: string; keys: { p256dh: string; auth: string } } }
+    | {
+        ok: false;
+        reason: 'unsupported' | 'permission-denied' | 'service-unreachable' | 'subscribe-failed';
+      }
+  >;
+  /** 原生退订通知并清角标 */
+  unsubscribePush?(): void;
   /** 回传 /desk/* 资源给原生 LocalDeskProxyServer */
   replyDeskAsset?(reqId: string, status: number, mime: string, bodyBase64: string): void;
 }
@@ -54,13 +69,26 @@ const QUIC_PROBE_TTL_MS = 5 * 60_000;
 const QUIC_HAPPY_EYEBALLS_MS = 250;
 const QUIC_BULK_BYTES = 16 * 1024;
 
-const endpointCache = new Map<string, { at: number; endpoint: QuicEndpoint | null }>();
+interface RelayHealthInfo {
+  at: number;
+  endpoint: QuicEndpoint | null;
+  apns: boolean;
+}
+
+const endpointCache = new Map<string, RelayHealthInfo>();
 let quicConnSeq = 0;
 
 export function getNativeBridge(): EnsoNativeBridge | null {
   if (typeof window === 'undefined') return null;
-  const candidate = (window as unknown as { __ensoNative?: EnsoNativeBridge }).__ensoNative;
-  return candidate && typeof candidate === 'object' ? candidate : null;
+  const direct = (window as unknown as { __ensoNative?: EnsoNativeBridge }).__ensoNative;
+  if (direct && typeof direct === 'object') return direct;
+  try {
+    if (window.top && window.top !== window) {
+      const topBridge = (window.top as unknown as { __ensoNative?: EnsoNativeBridge }).__ensoNative;
+      if (topBridge && typeof topBridge === 'object') return topBridge;
+    }
+  } catch {}
+  return null;
 }
 
 export function isNativeIosApp(): boolean {
@@ -69,6 +97,11 @@ export function isNativeIosApp(): boolean {
 
 export function hasNativeDeskProxy(): boolean {
   return Boolean(getNativeBridge()?.deskProxy);
+}
+
+export function hasNativePush(): boolean {
+  const bridge = getNativeBridge();
+  return Boolean(bridge?.push && typeof bridge.subscribePush === 'function');
 }
 
 export async function requestNativeQrScan(): Promise<string | null> {
@@ -97,49 +130,71 @@ function toBytes(data: ArrayBuffer | Uint8Array): Uint8Array {
   return data instanceof Uint8Array ? data : new Uint8Array(data);
 }
 
-async function probeQuicEndpoint(relayUrl: string): Promise<QuicEndpoint | null> {
+async function probeRelayHealth(relayUrl: string): Promise<RelayHealthInfo | null> {
   const now = Date.now();
   const cached = endpointCache.get(relayUrl);
-  if (cached && now - cached.at < QUIC_PROBE_TTL_MS) return cached.endpoint;
+  if (cached && now - cached.at < QUIC_PROBE_TTL_MS) return cached;
   let parsed: URL;
   try {
     parsed = new URL(relayUrl);
   } catch {
     return null;
   }
-  // 原生 QUIC 强制 TLS 1.3；纯 HTTP 且无显式 QUIC 端口时不跳过探测（自签/局域网也可能开启）
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 1500);
     const res = await fetch(`${parsed.origin}/healthz`, { signal: ctrl.signal });
     clearTimeout(timer);
     if (!res.ok) {
-      endpointCache.set(relayUrl, { at: now, endpoint: null });
-      return null;
+      const miss: RelayHealthInfo = { at: now, endpoint: null, apns: false };
+      endpointCache.set(relayUrl, miss);
+      return miss;
     }
     const body = (await res.json()) as {
       quic?: unknown;
       quicPort?: unknown;
       alpn?: unknown;
+      apns?: unknown;
     };
-    if (
+    const endpoint: QuicEndpoint | null =
       body.quic === true &&
       typeof body.quicPort === 'number' &&
       Number.isInteger(body.quicPort) &&
       body.quicPort > 0 &&
       body.quicPort <= 65535
-    ) {
-      const endpoint: QuicEndpoint = {
-        host: parsed.hostname,
-        port: body.quicPort,
-        alpn: typeof body.alpn === 'string' && body.alpn ? body.alpn : 'enso-pair/1',
-      };
-      endpointCache.set(relayUrl, { at: now, endpoint });
-      return endpoint;
-    }
+        ? {
+            host: parsed.hostname,
+            port: body.quicPort,
+            alpn: typeof body.alpn === 'string' && body.alpn ? body.alpn : 'enso-pair/1',
+          }
+        : null;
+    const info: RelayHealthInfo = { at: now, endpoint, apns: body.apns === true };
+    endpointCache.set(relayUrl, info);
+    return info;
   } catch {}
-  endpointCache.set(relayUrl, { at: now, endpoint: null });
-  return null;
+  const miss: RelayHealthInfo = { at: now, endpoint: null, apns: false };
+  endpointCache.set(relayUrl, miss);
+  return miss;
+}
+
+async function probeQuicEndpoint(relayUrl: string): Promise<QuicEndpoint | null> {
+  return (await probeRelayHealth(relayUrl))?.endpoint ?? null;
+}
+
+/**
+ * 解析当前中继的 APNs E2E 推送网关：只有当前中继为 `https://` 且 `/healthz` 返回 `apns: true`
+ * 时返回其 origin；未配置 APNs 证书的中继（例如空置的 CF 中继）返回 null，避免假成功订阅。
+ */
+export async function resolveNativePushGatewayOrigin(relayUrl?: string): Promise<string | null> {
+  if (!relayUrl) return null;
+  try {
+    const parsed = new URL(relayUrl);
+    if (parsed.protocol !== 'https:') return null;
+    const health = await probeRelayHealth(relayUrl);
+    return health?.apns ? parsed.origin : null;
+  } catch {
+    return null;
+  }
 }
 
 // 全局复用原生 QUIC 回调分发器：每个连接按 id 路由，避免反复覆盖 native callback
