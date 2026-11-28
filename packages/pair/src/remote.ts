@@ -15,10 +15,35 @@ import {
 
 export type RemoteKind = 'main' | 'settings';
 
+export interface RemotePrefetchItem {
+  ch: string;
+  args: unknown[];
+  h: string;
+}
+
+export interface RemotePrefetchResultItem {
+  ch: string;
+  args: unknown[];
+  data: unknown;
+}
+
+export interface RemotePrefetchResult {
+  type: 'rpc-prefetch';
+  cid: string;
+  items: RemotePrefetchResultItem[];
+}
+
 export type RemoteToHost =
   /** seq：已按序应用的最后一个宿主帧序号，宿主据此补发 */
   /** page：每次页面加载一个；宿主据此回收旧页面遗留的 renderer */
-  | { type: 'rpc-hello'; cid: string; kind: RemoteKind; seq?: number; page?: string }
+  | {
+      type: 'rpc-hello';
+      cid: string;
+      kind: RemoteKind;
+      seq?: number;
+      page?: string;
+      prefetch?: RemotePrefetchItem[];
+    }
   | { type: 'rpc-bye'; cid: string }
   | { type: 'rpc-invoke'; cid: string; id: number; ch: string; args: unknown }
   /** id：续上后可能重发，宿主按 id 去重 */
@@ -40,6 +65,8 @@ export type HostToRemote =
       leader: boolean;
       /** 宿主按 seq 补发并对 invoke/send 去重：浏览器可放心重发未决请求 */
       replay?: true;
+      /** 宿主接受 rpc-hello.prefetch，将并发推送一帧 rpc-prefetch */
+      prefetch?: true;
     }
   | { type: 'rpc-ready'; cid: string; ok: false; error: string }
   | { type: 'rpc-result'; cid: string; id: number; ok: true; data: unknown; seq?: number }
@@ -49,7 +76,8 @@ export type HostToRemote =
   | RemoteGzip
   | RemotePart
   | RemoteBinaryPart
-  | RemoteBatch;
+  | RemoteBatch
+  | RemotePrefetchResult;
 
 /** 断线补发与并发流式冲洗批封套：多条连续 rpc 帧合成一帧，共用一次 gzip 字典与加解密 */
 export interface RemoteBatch {
@@ -276,6 +304,7 @@ const HOST_REMOTE_TYPES: ReadonlySet<string> = new Set([
   'part',
   'bpart',
   'rpc-batch',
+  'rpc-prefetch',
 ]);
 
 type BatchableFrame = RemoteBatch['frames'][number];

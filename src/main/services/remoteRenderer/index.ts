@@ -6,10 +6,17 @@ import {
   encodeBase64,
   encodeRemoteValue,
   type HostToRemote,
+  type RemotePrefetchItem,
+  type RemotePrefetchResultItem,
   type RemoteToHost,
 } from '@enso/pair';
 import { app, type IpcEvent, type IpcInvokeEvent, images, ipcMain } from '@platform';
-import { RemoteReadCache, takeRemoteMarks, writeSeedOf } from '@shared/remoteDelta';
+import {
+  PREFETCH_READ_CHANNELS,
+  RemoteReadCache,
+  takeRemoteMarks,
+  writeSeedOf,
+} from '@shared/remoteDelta';
 import { compactRemoteWireResult, expandRemoteWireResult } from '@shared/remoteWireCompact';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { getSourceAuthorityRegistry } from '../../ipc/agent';
@@ -235,13 +242,78 @@ function dispose(sender: RemoteSender): void {
   sender.destroy();
 }
 
+function formatReadReply(
+  sender: RemoteSender,
+  channel: string,
+  args: unknown[],
+  rawResult: unknown,
+  ifNone: string | undefined
+): unknown {
+  const expandedSeed = (encoded: unknown) =>
+    writeSeedOf(channel, expandRemoteWireResult(channel, encoded))?.value;
+  const prehashed = encodePrehashedRead(channel, rawResult);
+  if (prehashed) {
+    const seed = writeSeedOf(channel, prehashed.data);
+    if (seed) {
+      sender.writes.seedLazy(seed.name, () => expandedSeed(JSON.parse(prehashed.json)));
+    }
+    return ifNone === undefined
+      ? prehashed.data
+      : readCache.respondPrehashed(prehashed.data, prehashed.h, prehashed.chars, ifNone);
+  }
+  const data = encodeRemoteValue(prepareResult(channel, rawResult, args));
+  const seed = writeSeedOf(channel, data);
+  if (seed) {
+    const value = expandedSeed(data);
+    if (value !== undefined) sender.writes.seed(seed.name, value);
+  }
+  return ifNone === undefined ? data : readCache.respond(data, ifNone);
+}
+
+async function runPrefetch(
+  link: RemoteLink,
+  sender: RemoteSender,
+  requests: readonly RemotePrefetchItem[]
+): Promise<void> {
+  const seen = new Set<string>();
+  const leader = isLeader(sender);
+  const event = fakeEvent(sender);
+  const tasks: Promise<RemotePrefetchResultItem | null>[] = [];
+  for (const item of requests) {
+    const dedupeKey = `${item.ch}\0${JSON.stringify(item.args)}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    if (!PREFETCH_READ_CHANNELS.has(item.ch)) continue;
+    if (!isRemoteChannelAllowed(item.ch, leader, hostControl)) continue;
+    const handler = registeredHandler(item.ch);
+    if (!handler) continue;
+    tasks.push(
+      (async () => {
+        try {
+          const decoded = decodeRemoteValue<unknown>(item.args);
+          const args = prepareArgs(item.ch, Array.isArray(decoded) ? decoded : []);
+          const rawResult = await handler(event, ...args);
+          const data = formatReadReply(sender, item.ch, args, rawResult, item.h);
+          return { ch: item.ch, args: item.args, data };
+        } catch {
+          return null;
+        }
+      })()
+    );
+  }
+  const settled = await Promise.all(tasks);
+  if (!sender.online || sender.isDestroyed()) return;
+  const items = settled.filter((entry): entry is RemotePrefetchResultItem => entry !== null);
+  link.send({ type: 'rpc-prefetch', cid: sender.cid, items });
+}
+
 async function hello(link: RemoteLink, command: Extract<RemoteToHost, { type: 'rpc-hello' }>) {
   const version = await rendererBuildId(rendererRoot(), app.getVersion());
   if (!version) {
     link.send({ type: 'rpc-ready', cid: command.cid, ok: false, error: 'renderer-missing' });
     return;
   }
-  const ready = (sender: RemoteSender, resumed: boolean): void => {
+  const ready = (sender: RemoteSender, resumed: boolean, prefetch = false): void => {
     const leader = sender.kind === 'main' && isLeader(sender);
     if (sender.kind === 'main') leaderSent.set(sender.id, leader);
     link.send({
@@ -253,6 +325,7 @@ async function hello(link: RemoteLink, command: Extract<RemoteToHost, { type: 'r
       platform: process.platform,
       leader,
       replay: true,
+      ...(prefetch ? { prefetch: true as const } : {}),
     });
     // 仅断线续连后补发秘书重读通知：丢失过推送的远端借此自愈；冷启动浏览器随即自己拉列表与状态
     if (resumed) primeSecretaryRereads(sender, secretaryIdProvider());
@@ -274,8 +347,10 @@ async function hello(link: RemoteLink, command: Extract<RemoteToHost, { type: 'r
   addRemoteSender(sender);
   sender.page = command.page;
   for (const stale of staleRemoteSenders(link.pairId, command.page)) dispose(stale);
-  ready(sender, false);
+  const prefetch = Array.isArray(command.prefetch) && command.prefetch.length > 0;
+  ready(sender, false, prefetch);
   refreshRemoteLeadership();
+  if (prefetch && command.prefetch) void runPrefetch(link, sender, command.prefetch);
 }
 
 async function invoke(link: RemoteLink, command: Extract<RemoteToHost, { type: 'rpc-invoke' }>) {
@@ -317,44 +392,13 @@ async function invoke(link: RemoteLink, command: Extract<RemoteToHost, { type: '
   try {
     const rawResult = await handler(fakeEvent(sender), ...args);
     commit?.();
-    const expandedSeed = (encoded: unknown) =>
-      writeSeedOf(command.ch, expandRemoteWireResult(command.ch, encoded))?.value;
-    const prehashed = encodePrehashedRead(command.ch, rawResult);
-    if (prehashed) {
-      const seed = writeSeedOf(command.ch, prehashed.data);
-      if (seed) {
-        sender.writes.seedLazy(seed.name, () => expandedSeed(JSON.parse(prehashed.json)));
-      }
-      sender.post({
-        type: 'rpc-result',
-        cid: command.cid,
-        id: command.id,
-        ok: true,
-        data:
-          marks.ifNone === undefined
-            ? prehashed.data
-            : readCache.respondPrehashed(
-                prehashed.data,
-                prehashed.h,
-                prehashed.chars,
-                marks.ifNone
-              ),
-      });
-    } else {
-      const data = encodeRemoteValue(prepareResult(command.ch, rawResult, args));
-      const seed = writeSeedOf(command.ch, data);
-      if (seed) {
-        const value = expandedSeed(data);
-        if (value !== undefined) sender.writes.seed(seed.name, value);
-      }
-      sender.post({
-        type: 'rpc-result',
-        cid: command.cid,
-        id: command.id,
-        ok: true,
-        data: marks.ifNone === undefined ? data : readCache.respond(data, marks.ifNone),
-      });
-    }
+    sender.post({
+      type: 'rpc-result',
+      cid: command.cid,
+      id: command.id,
+      ok: true,
+      data: formatReadReply(sender, command.ch, args, rawResult, marks.ifNone),
+    });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }

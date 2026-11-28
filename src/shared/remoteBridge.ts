@@ -20,11 +20,17 @@ export interface RemoteBridgeFrame {
   close(): void;
 }
 
+export interface RemotePrefetchController {
+  take(key: string, expectedHash: string): Promise<unknown> | null;
+}
+
 export interface RemoteBridge {
   /** 宿主平台（快捷键、路径展示随宿主） */
   platform: string;
   attach(kind: RemoteFrameKind): RemoteBridgeFrame;
   leader(): boolean;
+  /** 启动只读预取控制器：命中 rpc-hello prefetch 时免发首轮重读 RPC */
+  prefetch?: RemotePrefetchController;
   /** 离开桌面模式回手机版；只有手机壳提供 */
   exitDesk?(): void;
   /** 打开壳里的「电脑与通知」抽屉（推送、已配对电脑）；只有新版手机壳提供 */

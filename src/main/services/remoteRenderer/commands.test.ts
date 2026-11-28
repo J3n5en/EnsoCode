@@ -80,4 +80,67 @@ describe('parseRemoteCommand', () => {
       expect(parseRemoteCommand(bad).ok).toBe(false);
     }
   });
+
+  it('validates rpc-hello prefetch entries and caps length', () => {
+    expect(
+      parseRemoteCommand({
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: [{ ch: 'settings:read', args: [], h: 'abc', extra: 1 }],
+      })
+    ).toEqual({
+      ok: true,
+      command: {
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: [{ ch: 'settings:read', args: [], h: 'abc' }],
+      },
+    });
+    expect(
+      parseRemoteCommand({
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: 'bad',
+      }).ok
+    ).toBe(false);
+    expect(
+      parseRemoteCommand({
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: Array.from({ length: 17 }, (_, i) => ({
+          ch: 'settings:read',
+          args: [i],
+          h: 'h',
+        })),
+      }).ok
+    ).toBe(false);
+    expect(
+      parseRemoteCommand({
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: [{ ch: 'bad channel', args: [], h: 'h' }],
+      }).ok
+    ).toBe(false);
+    expect(
+      parseRemoteCommand({
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: [{ ch: 'settings:read', args: {}, h: 'h' }],
+      }).ok
+    ).toBe(false);
+    expect(
+      parseRemoteCommand({
+        type: 'rpc-hello',
+        cid: 'c',
+        kind: 'main',
+        prefetch: [{ ch: 'settings:read', args: [], h: 'x'.repeat(65) }],
+      }).ok
+    ).toBe(false);
+  });
 });

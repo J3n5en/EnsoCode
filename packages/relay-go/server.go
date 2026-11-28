@@ -251,6 +251,14 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, pairID st
 		return
 	}
 
+	relayEpoch := r.URL.Query().Get("relayEpoch")
+	if len(relayEpoch) > 64 {
+		relayEpoch = ""
+	}
+	sinceStr := r.URL.Query().Get("sinceRelaySeq")
+	sinceSeq, sinceErr := strconv.ParseUint(sinceStr, 10, 64)
+	hasSince := sinceStr != "" && sinceErr == nil
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -258,7 +266,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, pairID st
 	conn.SetReadLimit(maxFrameBytes)
 	p := newPeer(role, conn)
 	go p.writePump(conn)
-	s.hub.join(pairID, role, p)
+	s.hub.joinWithResume(pairID, role, p, relayEpoch, sinceSeq, hasSince)
 	s.readPump(conn, pairID, role, p)
 }
 

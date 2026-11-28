@@ -1,5 +1,6 @@
 import { normalizeRelayUrl } from '@enso/pair';
 import type { RemoteBridge, RemoteFrameKind } from '@shared/remoteBridge';
+import { collectPrefetchItems } from '@shared/remoteDelta';
 import {
   cachedRemoteImage,
   pruneRemoteImages,
@@ -252,6 +253,16 @@ async function main(): Promise<void> {
     for (const listener of linkListeners) listener(status);
   };
 
+  /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
+  const reads = new Map<string, { h: string; json: string }>();
+  const readsSignature = (map: Map<string, { h: string; json: string }>): string =>
+    [...map.entries()]
+      .map(([k, v]) => `${k}\0${v.h}`)
+      .sort()
+      .join('\n');
+  let savedReadsSig = '';
+  (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
+
   let tunnel!: DeskTunnel;
   tunnel = new DeskTunnel(
     device,
@@ -284,6 +295,7 @@ async function main(): Promise<void> {
         location.reload();
         return true;
       },
+      getPrefetch: () => collectPrefetchItems(reads),
       onPushConfig: (key) => {
         publishLink(reduceDeskLink(link, { type: 'push-config', key }));
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) !== 'on') return;
@@ -391,6 +403,20 @@ async function main(): Promise<void> {
       };
     },
     leader: () => tunnel.leader,
+    prefetch: {
+      take: (key, expectedHash) => {
+        const pending = tunnel.takePrefetch(key, expectedHash);
+        if (pending && key === `${IPC_CHANNELS.SETTINGS_READ}\0[]`) {
+          void pending.then((hit) => {
+            if (hit !== null && hit !== undefined && !settingsLoaded) {
+              settingsLoaded = true;
+              void markReady(version);
+            }
+          });
+        }
+        return pending;
+      },
+    },
     exitDesk() {
       leaveGuard?.release();
       location.href = PHONE_URL;
@@ -624,15 +650,6 @@ async function main(): Promise<void> {
     }, 100);
   };
 
-  /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
-  const reads = new Map<string, { h: string; json: string }>();
-  const readsSignature = (map: Map<string, { h: string; json: string }>): string =>
-    [...map.entries()]
-      .map(([k, v]) => `${k}\0${v.h}`)
-      .sort()
-      .join('\n');
-  let savedReadsSig = '';
-  (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
   (window as Window & { __deskTrace?: unknown }).__deskTrace = tunnel.trace;
 
   /** 切后台/离开时存一份当前界面和只读缓存，下次启动先显示它 */
@@ -687,7 +704,6 @@ async function main(): Promise<void> {
     );
   };
 
-  tunnel.start();
   clearTimeout(bootWatchdog);
   const cached = loadDeskMeta(localStorage, device.pairId);
   if (cached) {
@@ -699,6 +715,7 @@ async function main(): Promise<void> {
     for (const [key, entry] of saved) reads.set(key, entry);
     savedReadsSig = readsSignature(reads);
   }
+  tunnel.start();
   const launched = cached !== null && (await cachedBuild(cached));
   if (launched) {
     use(cached);

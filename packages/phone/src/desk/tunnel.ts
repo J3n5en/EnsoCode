@@ -12,6 +12,7 @@ import {
   type PhoneToHost,
   REMOTE_PART_CHARS,
   type RemoteKind,
+  type RemotePrefetchItem,
   type RemoteToHost,
   splitRemoteBinaryFrame,
   splitRemoteFrame,
@@ -29,6 +30,8 @@ export interface DeskLinkHooks {
   onResuming?(active: boolean): void;
   /** 握手报的桌面构建；返回 true 表示页面要换构建重载，这次握手不再处理 */
   onBuild?(version: string, platform: string): boolean;
+  /** 冷启动时收集可附带在 rpc-hello 里的只读预校验请求 */
+  getPrefetch?(): RemotePrefetchItem[];
 }
 
 export interface DeskAsset {
@@ -101,6 +104,8 @@ const SLOW_INVOKE_MS = 1_000;
 /** 缺口超过这么久才补齐的记进诊断；短缺口是大帧走中继、小帧走直连的正常乱序 */
 const SLOW_GAP_MS = 300;
 const CAN_GUNZIP = typeof DecompressionStream === 'function';
+const PREFETCH_TIMEOUT_MS = 4_000;
+const PREFETCH_READY_TTL_MS = 30_000;
 
 /** 桌面模式不用手机版的会话缓存：连接前读 IndexedDB 里的全部会话正文只会拖慢启动 */
 const NO_CACHE: PhoneCacheStore = {
@@ -146,6 +151,21 @@ export class DeskTunnel {
   private resuming = false;
   leader = false;
   private readOnly = false;
+  private prefetchPending = new Map<
+    string,
+    Map<
+      string,
+      {
+        h: string;
+        promise: Promise<unknown>;
+        resolve: (data: unknown) => void;
+        settled: boolean;
+        taken: boolean;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >
+  >();
+  private prefetchReady = new Map<string, Map<string, { h: string; data: unknown; at: number }>>();
   /** 本次页面加载：宿主据此回收旧页面遗留的 renderer */
   private readonly page = crypto.randomUUID();
   /** 链路诊断：缺口、重新 hello、换链等关键时刻（壳挂到 window.__deskTrace，排查卡顿用） */
@@ -361,13 +381,93 @@ export class DeskTunnel {
       slot.gapTimer = null;
       this.watchGap(slot, slot.helloAt, false);
     }
+    const prefetch =
+      !slot.everReady && slot.kind === 'main' ? (this.link.getPrefetch?.() ?? []) : [];
+    this.clearPrefetch(slot.cid);
+    if (prefetch.length > 0) {
+      const map = new Map<
+        string,
+        {
+          h: string;
+          promise: Promise<unknown>;
+          resolve: (data: unknown) => void;
+          settled: boolean;
+          taken: boolean;
+          timer: ReturnType<typeof setTimeout>;
+        }
+      >();
+      for (const item of prefetch) {
+        const key = `${item.ch}\0${JSON.stringify(item.args)}`;
+        if (map.has(key)) continue;
+        let resolve!: (data: unknown) => void;
+        const promise = new Promise<unknown>((res) => {
+          resolve = res;
+        });
+        const entry = {
+          h: item.h,
+          promise,
+          resolve,
+          settled: false,
+          taken: false,
+          timer: setTimeout(() => {
+            if (entry.settled) return;
+            entry.settled = true;
+            map.delete(key);
+            resolve(null);
+          }, PREFETCH_TIMEOUT_MS),
+        };
+        map.set(key, entry);
+      }
+      this.prefetchPending.set(slot.cid, map);
+    }
     this.post({
       type: 'rpc-hello',
       cid: slot.cid,
       kind: slot.kind,
       seq: slot.stream.applied,
       page: this.page,
+      ...(prefetch.length > 0 ? { prefetch } : {}),
     });
+  }
+
+  /** 消费冷启动 rpc-hello 捎带的只读预校验结果；无匹配或已消费过时返回 null */
+  takePrefetch(key: string, expectedHash: string): Promise<unknown> | null {
+    const now = Date.now();
+    for (const [cid, readyMap] of this.prefetchReady) {
+      const hit = readyMap.get(key);
+      if (!hit) continue;
+      readyMap.delete(key);
+      if (readyMap.size === 0) this.prefetchReady.delete(cid);
+      if (hit.h === expectedHash && now - hit.at <= PREFETCH_READY_TTL_MS) {
+        return Promise.resolve(hit.data);
+      }
+      return null;
+    }
+    for (const pendingMap of this.prefetchPending.values()) {
+      const entry = pendingMap.get(key);
+      if (!entry || entry.h !== expectedHash || entry.settled || entry.taken) continue;
+      entry.taken = true;
+      return entry.promise;
+    }
+    return null;
+  }
+
+  private resolvePendingPrefetch(cid: string): void {
+    const pendingMap = this.prefetchPending.get(cid);
+    if (!pendingMap) return;
+    this.prefetchPending.delete(cid);
+    for (const entry of pendingMap.values()) {
+      clearTimeout(entry.timer);
+      if (!entry.settled) {
+        entry.settled = true;
+        entry.resolve(null);
+      }
+    }
+  }
+
+  private clearPrefetch(cid: string): void {
+    this.resolvePendingPrefetch(cid);
+    this.prefetchReady.delete(cid);
   }
 
   /** 续上后重发宿主可能没收到的请求：未决 invoke 与最近的 send，按发出顺序，排在离线队列之前 */
@@ -555,6 +655,7 @@ export class DeskTunnel {
           return;
         }
         if (this.link.onBuild?.(frame.version, frame.platform)) return;
+        if (frame.prefetch !== true) this.resolvePendingPrefetch(frame.cid);
         const lost = slot.everReady && !frame.resumed;
         const resumed = slot.everReady && frame.resumed;
         this.note(`ready ${slot.cid.slice(0, 4)} resumed=${frame.resumed}`);
@@ -591,10 +692,47 @@ export class DeskTunnel {
         }
         return;
       }
+      case 'rpc-prefetch': {
+        const slot = this.slots.get(frame.cid);
+        if (!slot || !Array.isArray(frame.items)) {
+          this.clearPrefetch(frame.cid);
+          return;
+        }
+        const pendingMap = this.prefetchPending.get(frame.cid);
+        let readyMap = this.prefetchReady.get(frame.cid);
+        const now = Date.now();
+        for (const item of frame.items) {
+          if (!item || typeof item.ch !== 'string' || !Array.isArray(item.args)) continue;
+          const key = `${item.ch}\0${JSON.stringify(item.args)}`;
+          const entry = pendingMap?.get(key);
+          if (!entry) continue;
+          clearTimeout(entry.timer);
+          pendingMap?.delete(key);
+          if (entry.taken) {
+            if (!entry.settled) {
+              entry.settled = true;
+              entry.resolve(item.data);
+            }
+          } else {
+            if (!readyMap) {
+              readyMap = new Map();
+              this.prefetchReady.set(frame.cid, readyMap);
+            }
+            readyMap.set(key, { h: entry.h, data: item.data, at: now });
+            if (!entry.settled) {
+              entry.settled = true;
+              entry.resolve(null);
+            }
+          }
+        }
+        this.resolvePendingPrefetch(frame.cid);
+        return;
+      }
     }
   }
 
   private drop(slot: Slot, reason: string): void {
+    this.clearPrefetch(slot.cid);
     for (const pending of slot.pending.values()) pending.reject(new Error(reason));
     slot.pending.clear();
     slot.queue = [];

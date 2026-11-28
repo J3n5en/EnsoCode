@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +24,17 @@ type frame struct {
 const (
 	peerQueueFrames = 4096
 	peerQueueBytes  = 16 * maxFrameBytes
+
+	hotBufMaxBytes  = 1024 * 1024
+	hotBufMaxFrames = 512
+	hotBufTTL       = 90 * time.Second
 )
+
+type hotFrame struct {
+	seq  uint64
+	data []byte
+	at   time.Time
+}
 
 type peer struct {
 	id        uint64
@@ -136,18 +147,78 @@ func (p *peer) writePump(conn *websocket.Conn) {
 }
 
 type room struct {
-	mu    sync.Mutex
-	host  *peer
-	guest *peer
+	mu       sync.Mutex
+	host     *peer
+	guest    *peer
+	epoch    string
+	hostSeq  uint64
+	hotBuf   []hotFrame
+	hotBytes int
 }
 
 type hub struct {
-	mu    sync.Mutex
-	rooms map[string]*room
+	mu       sync.Mutex
+	rooms    map[string]*room
+	now      func() time.Time
+	epochSeq atomic.Uint64
 }
 
 func newHub() *hub {
-	return &hub{rooms: make(map[string]*room)}
+	return &hub{
+		rooms: make(map[string]*room),
+		now:   time.Now,
+	}
+}
+
+func (h *hub) currentTime() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
+}
+
+func (h *hub) nextEpoch() string {
+	return randomToken()[:16] + "-" + strconv.FormatUint(h.epochSeq.Add(1), 36)
+}
+
+func clearHotBufLocked(r *room) {
+	r.hotBuf = nil
+	r.hotBytes = 0
+}
+
+func pruneHotBufLocked(r *room, now time.Time) {
+	drop := 0
+	for drop < len(r.hotBuf) && now.Sub(r.hotBuf[drop].at) > hotBufTTL {
+		r.hotBytes -= len(r.hotBuf[drop].data)
+		drop++
+	}
+	if drop > 0 {
+		if drop == len(r.hotBuf) {
+			clearHotBufLocked(r)
+			return
+		}
+		r.hotBuf = append([]hotFrame(nil), r.hotBuf[drop:]...)
+	}
+}
+
+func appendHotBufLocked(r *room, data []byte, now time.Time) {
+	r.hostSeq++
+	pruneHotBufLocked(r, now)
+	if len(data) > hotBufMaxBytes {
+		clearHotBufLocked(r)
+		return
+	}
+	cp := append([]byte(nil), data...)
+	r.hotBuf = append(r.hotBuf, hotFrame{seq: r.hostSeq, data: cp, at: now})
+	r.hotBytes += len(cp)
+	drop := 0
+	for len(r.hotBuf)-drop > hotBufMaxFrames || r.hotBytes > hotBufMaxBytes {
+		r.hotBytes -= len(r.hotBuf[drop].data)
+		drop++
+	}
+	if drop > 0 {
+		r.hotBuf = append([]hotFrame(nil), r.hotBuf[drop:]...)
+	}
 }
 
 // roomLocked 取或建房间，调用方须持有 h.mu。
@@ -161,6 +232,10 @@ func (h *hub) roomLocked(pairID string) *room {
 }
 
 func (h *hub) join(pairID, role string, p *peer) {
+	h.joinWithResume(pairID, role, p, "", 0, false)
+}
+
+func (h *hub) joinWithResume(pairID, role string, p *peer, sinceEpoch string, sinceSeq uint64, hasSince bool) {
 	// 取房间与入座在 h.mu 下一次完成（锁序 h.mu → r.mu，与 leave 一致）：分两步时，
 	// leave 可能在中间把这间当时为空的房间从 map 删掉，新 peer 就落进孤儿房间，
 	// 对端再进房分到另一间新房，两端转发一边通一边不通，直到重连。
@@ -172,11 +247,46 @@ func (h *hub) join(pairID, role string, p *peer) {
 	if role == roleHost {
 		stale = r.host
 		r.host = p
+		r.epoch = h.nextEpoch()
+		r.hostSeq = 0
+		clearHotBufLocked(r)
 		other = r.guest
+		if other != nil {
+			other.sendJSON(map[string]any{
+				"type":       "host-online",
+				"relayEpoch": r.epoch,
+				"relaySeq":   uint64(0),
+			})
+		}
 	} else {
 		stale = r.guest
 		r.guest = p
 		other = r.host
+		if other != nil {
+			pruneHotBufLocked(r, h.currentTime())
+			hostOnline := map[string]any{
+				"type":       "host-online",
+				"relayEpoch": r.epoch,
+				"relaySeq":   r.hostSeq,
+			}
+			var replay []hotFrame
+			if hasSince && sinceEpoch != "" && sinceEpoch == r.epoch && sinceSeq < r.hostSeq &&
+				len(r.hotBuf) > 0 && r.hotBuf[0].seq <= sinceSeq+1 {
+				for _, entry := range r.hotBuf {
+					if entry.seq > sinceSeq {
+						replay = append(replay, entry)
+					}
+				}
+				if len(replay) > 0 {
+					hostOnline["replayedFrom"] = sinceSeq
+				}
+			}
+			// Hold r.mu across host-online + replay enqueue so concurrent forward() frames stay strictly ordered after replay.
+			p.sendJSON(hostOnline)
+			for _, entry := range replay {
+				p.trySend(frame{messageType: websocket.BinaryMessage, data: entry.data})
+			}
+		}
 	}
 	r.mu.Unlock()
 	h.mu.Unlock()
@@ -186,13 +296,11 @@ func (h *hub) join(pairID, role string, p *peer) {
 	}
 	if role == roleHost {
 		if other != nil {
-			other.sendJSON(map[string]string{"type": "host-online"})
 			p.sendJSON(map[string]string{"type": "peer-joined"})
 		}
 	} else {
 		if other != nil {
 			other.sendJSON(map[string]string{"type": "peer-joined"})
-			p.sendJSON(map[string]string{"type": "host-online"})
 		} else {
 			p.sendJSON(map[string]string{"type": "host-offline"})
 		}
@@ -225,6 +333,11 @@ func (h *hub) leave(pairID, role string, id uint64) {
 		return
 	}
 	*cur = nil
+	if role == roleHost {
+		r.epoch = ""
+		r.hostSeq = 0
+		clearHotBufLocked(r)
+	}
 	if r.host == nil && r.guest == nil {
 		delete(h.rooms, pairID)
 	}
@@ -245,10 +358,17 @@ func (h *hub) forward(pairID, fromRole string, messageType int, data []byte) {
 	r.mu.Lock()
 	var dst *peer
 	if fromRole == roleHost {
+		if messageType == websocket.BinaryMessage {
+			appendHotBufLocked(r, data, h.currentTime())
+		}
 		dst = r.guest
-	} else {
-		dst = r.host
+		if dst != nil {
+			dst.trySend(frame{messageType: messageType, data: data})
+		}
+		r.mu.Unlock()
+		return
 	}
+	dst = r.host
 	r.mu.Unlock()
 	if dst != nil {
 		dst.trySend(frame{messageType: messageType, data: data})
@@ -266,6 +386,9 @@ func (h *hub) revoke(pairID string) {
 	r.mu.Lock()
 	host, guest := r.host, r.guest
 	r.host, r.guest = nil, nil
+	r.epoch = ""
+	r.hostSeq = 0
+	clearHotBufLocked(r)
 	r.mu.Unlock()
 	msg := map[string]string{"type": "revoked"}
 	for _, p := range []*peer{host, guest} {

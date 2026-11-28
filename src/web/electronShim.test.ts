@@ -167,4 +167,24 @@ describe('electronShim 秘书状态', () => {
       expect(invoke).toHaveBeenCalledTimes(1);
     }
   });
+
+  it('命中 rpc-hello prefetch 时免发一次 frame.invoke；返回 null 时回落常规 invoke', async () => {
+    const { ipcRenderer, remoteBridge } = await import('./electronShim');
+    invoke.mockClear();
+    const prefetched = { __ensoCached: { h: 'h-pref', v: { theme: 'dark' } } };
+    remoteBridge.prefetch = {
+      take: vi.fn().mockResolvedValueOnce(prefetched).mockResolvedValueOnce(null),
+    };
+    const res1 = await ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_READ);
+    expect(res1).toEqual({ theme: 'dark' });
+    expect(invoke).not.toHaveBeenCalled();
+
+    invoke.mockResolvedValueOnce(
+      JSON.stringify({ __ensoCached: { h: 'h-model', v: { models: [] } } })
+    );
+    const res2 = await ipcRenderer.invoke(IPC_CHANNELS.MODEL_DIRECTORY_GET);
+    expect(res2).toEqual({ models: [] });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    remoteBridge.prefetch = undefined;
+  });
 });

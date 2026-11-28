@@ -78,6 +78,20 @@ async function rawInvoke(channel: string, encodedArgs: unknown[]): Promise<unkno
   return JSON.parse(await frame.invoke(channel, JSON.stringify(encodedArgs)));
 }
 
+async function fetchCachedWithPrefetch(
+  channel: string,
+  key: string,
+  encodedArgs: unknown[],
+  hash: string
+): Promise<unknown> {
+  const pending = remoteBridge.prefetch?.take(key, hash);
+  if (pending) {
+    const hit = await pending;
+    if (hit !== null && hit !== undefined) return hit;
+  }
+  return rawInvoke(channel, withIfNone(encodedArgs, hash));
+}
+
 async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown> {
   const encoded = encodeRemoteValue(args) as unknown[];
   if (channel === IPC_CHANNELS.SETTINGS_WRITE_KEY && typeof args[0] === 'string') {
@@ -94,7 +108,9 @@ async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown>
   }
   const key = `${channel}\0${JSON.stringify(encoded)}`;
   if (CACHED_READS.has(channel)) {
-    const json = await reads.readJson(key, (hash) => rawInvoke(channel, withIfNone(encoded, hash)));
+    const json = await reads.readJson(key, (hash) =>
+      fetchCachedWithPrefetch(channel, key, encoded, hash)
+    );
     const expanded = () => expandRemoteWireResult(channel, JSON.parse(json));
     const result = expanded();
     const seed = writeSeedOf(channel, result);

@@ -672,3 +672,81 @@ func TestWSPeerLeft(t *testing.T) {
 		t.Fatalf("host %s", got)
 	}
 }
+
+func readControlJSON(t *testing.T, conn *websocket.Conn, timeout time.Duration) map[string]any {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	mt, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mt != websocket.TextMessage {
+		t.Fatalf("expected text frame, got %d", mt)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("ws json %s: %v", data, err)
+	}
+	return out
+}
+
+func TestWSHotBufReconnectReplay(t *testing.T) {
+	hs, pairID, hostToken, deviceToken := pairRoom(t)
+	host := dialWS(t, hs, pairID, roleHost, hostToken)
+	guest1 := dialWS(t, hs, pairID, roleGuest, deviceToken)
+
+	_ = readJSONType(t, host, time.Second) // peer-joined
+	hello1 := readControlJSON(t, guest1, time.Second)
+	if hello1["type"] != "host-online" {
+		t.Fatalf("guest1 first: %#v", hello1)
+	}
+	epoch, _ := hello1["relayEpoch"].(string)
+	if epoch == "" {
+		t.Fatalf("missing relayEpoch in host-online: %#v", hello1)
+	}
+
+	if err := host.WriteMessage(websocket.BinaryMessage, []byte("m1")); err != nil {
+		t.Fatal(err)
+	}
+	_ = guest1.SetReadDeadline(time.Now().Add(time.Second))
+	mt, data, err := guest1.ReadMessage()
+	if err != nil || mt != websocket.BinaryMessage || string(data) != "m1" {
+		t.Fatalf("guest1 m1: %d %q %v", mt, data, err)
+	}
+
+	// Host sends two frames while guest1 disappears / is half-open.
+	_ = guest1.Close()
+	_ = readJSONType(t, host, time.Second) // peer-left
+	if err := host.WriteMessage(websocket.BinaryMessage, []byte("m2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.WriteMessage(websocket.BinaryMessage, []byte("m3")); err != nil {
+		t.Fatal(err)
+	}
+	// Ensure relay readPump ingested m2 and m3 by waiting for a ping->pong roundtrip on host.
+	if err := host.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFrame(host, time.Second, isText("pong")) {
+		t.Fatal("host ping timeout")
+	}
+
+	u := "ws" + strings.TrimPrefix(hs.URL, "http") + "/v1/pair/" + pairID + "?role=" + roleGuest + "&token=" + deviceToken + "&relayEpoch=" + epoch + "&sinceRelaySeq=1"
+	guest2, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = guest2.Close() })
+
+	hello2 := readControlJSON(t, guest2, time.Second)
+	if hello2["type"] != "host-online" || hello2["relayEpoch"] != epoch || hello2["relaySeq"] != float64(3) || hello2["replayedFrom"] != float64(1) {
+		t.Fatalf("guest2 host-online: %#v", hello2)
+	}
+	for _, want := range []string{"m2", "m3"} {
+		_ = guest2.SetReadDeadline(time.Now().Add(time.Second))
+		mt, b, err := guest2.ReadMessage()
+		if err != nil || mt != websocket.BinaryMessage || string(b) != want {
+			t.Fatalf("replay %q: mt=%d got=%q err=%v", want, mt, b, err)
+		}
+	}
+}

@@ -287,4 +287,28 @@ describe('seedLazy 与 respondPrehashed 快路径', () => {
     expect(delta.__ensoCached.b).toBe(h1);
     expect(delta.__ensoCached.ops).toBeDefined();
   });
+
+  it('collectPrefetchItems 按优先级挑选允许的只读缓存并忽略脏条目', async () => {
+    const mod = await import('./remoteDelta');
+    const store = new Map<string, { h: string; json: string }>([
+      ['worktree:list\0[]', { h: 'hw', json: '[]' }],
+      ['window:minimize\0[]', { h: 'hbad', json: 'null' }],
+      ['conversations:read\0[]', { h: 'hc', json: '{}' }],
+      ['settings:read\0[]', { h: 'hs', json: '{}' }],
+      ['broken-key', { h: 'hx', json: '{}' }],
+      ['settings:read\0{"not":"array"}', { h: 'hy', json: '{}' }],
+    ]);
+    const collected = (
+      mod as unknown as {
+        collectPrefetchItems: (
+          s: typeof store,
+          limit?: number
+        ) => { ch: string; args: unknown[]; h: string }[];
+      }
+    ).collectPrefetchItems(store, 2);
+    expect(collected).toEqual([
+      { ch: 'settings:read', args: [], h: 'hs' },
+      { ch: 'conversations:read', args: [], h: 'hc' },
+    ]);
+  });
 });
