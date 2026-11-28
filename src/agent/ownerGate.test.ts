@@ -308,3 +308,59 @@ describe('OwnerGate', () => {
     expect(audit).not.toHaveBeenCalled();
   });
 });
+
+describe('OwnerGate.isOwnerInputTurn', () => {
+  it('只有 Main 标记过的 user 消息算 owner 亲手触发；缺省、未标记、恢复的历史都不算', () => {
+    const gate = new OwnerGate();
+    expect(gate.isOwnerInputTurn()).toBe(false);
+    gate.observeMessage({ role: 'user', content: 'report from a session' });
+    expect(gate.isOwner()).toBe(true);
+    expect(gate.isOwnerInputTurn()).toBe(false);
+    gate.observeMessage({ role: 'user', content: 'hi' }, true);
+    expect(gate.isOwnerInputTurn()).toBe(true);
+    const resumed = new OwnerGate();
+    resumed.syncFromMessages([{ role: 'user', content: 'hi' }]);
+    expect(resumed.isOwnerInputTurn()).toBe(false);
+  });
+
+  it('没被信任的插件投递一进来就清掉，自称 owner 也一样；之后 owner 在 ask_user 里确认也不恢复', () => {
+    for (const details of [
+      { pluginId: 'enso.tgclient', sender: { channel: 'telegram', userId: '9' } },
+      { pluginId: 'enso.tgclient', origin: 'owner' },
+      { pluginId: 'enso.tgclient', origin: 'owner', sender: { channel: 'telegram', userId: '1' } },
+    ]) {
+      const gate = new OwnerGate({ trustedPlugins: new Set(['enso.telegram']) });
+      gate.observeMessage({ role: 'user', content: 'hi' }, true);
+      gate.observeMessage(pluginMessage(details));
+      expect(gate.isOwnerInputTurn()).toBe(false);
+      gate.handleAskUserAnswer('同意');
+      expect(gate.isOwnerInputTurn()).toBe(false);
+    }
+  });
+
+  it('被信任的插件以 owner 身份投递（Main 判定 origin=owner）才算；外部来源照样不算', () => {
+    const trusted = new Set(['enso.telegram']);
+    for (const details of [
+      { pluginId: 'enso.telegram', origin: 'owner' },
+      { pluginId: 'enso.telegram', origin: 'owner', sender: { channel: 'telegram', userId: '1' } },
+    ]) {
+      const gate = new OwnerGate({ trustedPlugins: trusted });
+      gate.observeMessage({ role: 'user', content: 'report' });
+      gate.observeMessage(pluginMessage(details));
+      expect(gate.isOwnerInputTurn(), JSON.stringify(details)).toBe(true);
+    }
+    const gate = new OwnerGate({ trustedPlugins: trusted });
+    gate.observeMessage(
+      pluginMessage({ pluginId: 'enso.telegram', sender: { channel: 'telegram', userId: '9' } })
+    );
+    expect(gate.origin().kind).toBe('external');
+    expect(gate.isOwnerInputTurn()).toBe(false);
+  });
+
+  it('非插件的 custom 消息不影响', () => {
+    const gate = new OwnerGate();
+    gate.observeMessage({ role: 'user', content: 'hi' }, true);
+    gate.observeMessage({ role: 'custom', customType: 'system-reminder', details: {} });
+    expect(gate.isOwnerInputTurn()).toBe(true);
+  });
+});

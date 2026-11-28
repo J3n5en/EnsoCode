@@ -893,6 +893,8 @@ function pluginSecretaryName(projectId: string): string | null {
 function secretarySpawnOptions(ctx: SecretaryContext): {
   systemPrompt: string;
   pluginIds: string[];
+  /** 勾选且被信任的插件；没勾选的插件不进会话，信任它也没有意义 */
+  trustedPluginIds: string[];
   skillIds: string[];
   /** 启用的自有 skill 目录：停用的不挂，改了要释放会话 */
   skillDirs: string[];
@@ -900,9 +902,11 @@ function secretarySpawnOptions(ctx: SecretaryContext): {
 } {
   const store = new SecretaryStore(ctx.dir);
   const profile = store.profile();
+  const pluginIds = profile?.pluginIds ?? [];
   return {
     systemPrompt: secretarySystemPrompt(ctx, store, profile),
-    pluginIds: profile?.pluginIds ?? [],
+    pluginIds,
+    trustedPluginIds: (profile?.trustedPluginIds ?? []).filter((id) => pluginIds.includes(id)),
     skillIds: profile?.skillIds ?? [],
     skillDirs: secretarySkillDirs(secretarySkillsDir(ctx), profile?.disabledSkillNames ?? []),
     tools: secretaryToolDescriptors(secretaryToolsDir(ctx)),
@@ -1008,11 +1012,13 @@ export function promptRootFromMain(
   sessionId: string,
   text: string,
   deliveryId: string,
-  images?: AttachedImage[]
+  images?: AttachedImage[],
+  /** 只有经过 owner 身份核验的入口（秘书联系方式里绑定的本人）才传 */
+  ownerInput?: true
 ): AgentActionResult {
   const identity = exactIdentity(sessionId);
   if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
-  return promptSession(identity, text, images, deliveryId);
+  return promptSession(identity, text, images, deliveryId, undefined, ownerInput);
 }
 
 /** Main 侧插话：与用户自己插话同一条 steer 通道，pi 在当前工具调用结束后读到它 */
@@ -1736,7 +1742,8 @@ function wirePairAgentBridge(): void {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
-      if (identity) promptSession(identity, text, images, randomUUID());
+      // 配对手机是 owner 本人的设备
+      if (identity) promptSession(identity, text, images, randomUUID(), undefined, true);
     },
     steer: (sessionId, text, images) => {
       const rejected = botControlError(sessionId);
@@ -1842,7 +1849,7 @@ function wirePairSessionHost(): void {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
-      if (identity) promptSession(identity, text, images, randomUUID());
+      if (identity) promptSession(identity, text, images, randomUUID(), undefined, true);
     },
     steer: (sessionId, text, images) => {
       const rejected = botControlError(sessionId);
@@ -3249,11 +3256,14 @@ export function registerAgentHandlers(): void {
       if (agentSessionIndex.isDetached(identity))
         return { ok: false, error: DETACHED_SESSION_ERROR };
       const typedImages = images as { data: string; mimeType: string }[] | undefined;
+      // 应用输入框：owner 本人在桌前输入
       return promptSession(
         identity,
         withSecretaryImagePaths(identity.sessionId, text as string, typedImages),
         typedImages,
-        deliveryId
+        deliveryId,
+        undefined,
+        true
       );
     }
   );
@@ -3284,7 +3294,9 @@ export function registerAgentHandlers(): void {
         identity,
         withSecretaryImagePaths(identity.sessionId, text as string, typedImages),
         typedImages,
-        deliveryId
+        deliveryId,
+        undefined,
+        true
       );
     }
   );

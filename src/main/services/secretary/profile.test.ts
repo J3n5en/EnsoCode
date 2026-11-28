@@ -262,6 +262,29 @@ describe('保存后的副作用', () => {
     expect(h.released).toEqual(['sec-1']);
   });
 
+  it('信任插件名单：缺省一个都不信任，设置页保存后落盘并释放会话，清空后不落盘', async () => {
+    const h = harness({ profile: { ...baseProfile(), pluginIds: ['enso.telegram'] } });
+    expect(h.saved?.trustedPluginIds).toBeUndefined();
+    await h.service.save({ trustedPluginIds: ['enso.telegram'] }, null);
+    expect(h.saved?.trustedPluginIds).toEqual(['enso.telegram']);
+    expect(h.released).toEqual(['sec-1']);
+    await h.service.save({ trustedPluginIds: [] }, null);
+    expect(h.saved && 'trustedPluginIds' in h.saved).toBe(false);
+    expect(h.released).toEqual(['sec-1', 'sec-1']);
+  });
+
+  it('秘书不能经提案信任插件', async () => {
+    const h = harness({ profile: { ...baseProfile(), pluginIds: ['enso.telegram'] } });
+    expect(
+      await h.service.propose(
+        { trustedPluginIds: ['enso.telegram'], name: '小秘' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'trustedPluginIds can only be changed in settings' });
+    expect(h.file.proposals).toEqual({});
+    expect(h.saved?.trustedPluginIds).toBeUndefined();
+  });
+
   it('releaseSessions 直接释放空闲会话，忙的留到本轮结束', async () => {
     const running = new Set(['sec-2']);
     const h = harness({

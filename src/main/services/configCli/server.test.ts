@@ -337,6 +337,13 @@ describe('config CLI socket', () => {
       ok: false,
       error: 'Unknown settings field: notASetting',
     });
+    // 秘书信任插件写在秘书档案里，不是设置字段：本机进程不能经 CLI 给秘书放开确认
+    for (const key of ['trustedPluginIds', 'secretaryTrustedPluginIds']) {
+      expect(await config({ action: 'set', key, value: ['enso.telegram'] })).toMatchObject({
+        ok: false,
+        error: `Unknown settings field: ${key}`,
+      });
+    }
   });
 
   it('Git Commit 生成：模型引用可写，自定义提示词标记只能在设置页改', async () => {

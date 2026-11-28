@@ -150,6 +150,23 @@ describe('parseProfileDraft', () => {
       error: 'invalid skillIds',
     });
   });
+
+  it('narrows the trusted plugin ids the same way and rejects non-lists', () => {
+    expect(parseProfileDraft({ trustedPluginIds: ['enso.telegram', 'enso.telegram'] })).toEqual({
+      ok: true,
+      draft: { trustedPluginIds: ['enso.telegram'] },
+    });
+    expect(parseProfileDraft({ trustedPluginIds: [] })).toEqual({
+      ok: true,
+      draft: { trustedPluginIds: [] },
+    });
+    for (const bad of [true, 'enso.telegram', [7], ['']]) {
+      expect(parseProfileDraft({ trustedPluginIds: bad }), JSON.stringify(bad)).toEqual({
+        ok: false,
+        error: 'invalid trustedPluginIds',
+      });
+    }
+  });
 });
 
 describe('parseProfile', () => {
@@ -157,6 +174,17 @@ describe('parseProfile', () => {
     expect(parseProfile(undefined)).toBeNull();
     expect(parseProfile([])).toBeNull();
     expect(parseProfile('{}')).toBeNull();
+  });
+
+  it('trusts no plugin unless the profile lists one; dirty entries are dropped', () => {
+    expect(parseProfile({})).not.toHaveProperty('trustedPluginIds');
+    expect(parseProfile({ trustedPluginIds: [] })).not.toHaveProperty('trustedPluginIds');
+    expect(parseProfile({ trustedPluginIds: 'enso.telegram' })).not.toHaveProperty(
+      'trustedPluginIds'
+    );
+    expect(parseProfile({ trustedPluginIds: ['enso.telegram', 7, ''] })?.trustedPluginIds).toEqual([
+      'enso.telegram',
+    ]);
   });
 
   it('fills every default for an empty record', () => {

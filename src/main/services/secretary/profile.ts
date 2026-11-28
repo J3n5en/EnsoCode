@@ -90,6 +90,8 @@ function mergeProfile(
     version: 1,
     updatedAt: now,
   };
+  // 和读盘口径一致：空的信任名单不落盘
+  if (merged.trustedPluginIds?.length === 0) delete merged.trustedPluginIds;
   if (addressAs === null) delete merged.addressAs;
   else if (addressAs) merged.addressAs = addressAs;
   if (dailyBriefAt === null) delete merged.dailyBriefAt;
@@ -160,6 +162,8 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     const kitChanged =
       identityChanged ||
       !sameIds(before?.pluginIds, profile.pluginIds) ||
+      // 信任名单在 spawn 时下发：撤销信任要让活着的会话换掉旧的那一份
+      !sameIds(before?.trustedPluginIds, profile.trustedPluginIds) ||
       !sameIds(before?.skillIds, profile.skillIds) ||
       !sameIds(before?.disabledSkillNames, profile.disabledSkillNames);
     const conversations = await ports.conversations();
@@ -245,6 +249,10 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
 
     async propose(params, ctx) {
       if (!ctx.secretaryConversationId) return { ok: false, error: 'invalid arguments' };
+      // 信任插件是 owner 在设置页亲手做的决定：秘书不能经提案给自己放开确认
+      if (Object.hasOwn(params, 'trustedPluginIds')) {
+        return { ok: false, error: 'trustedPluginIds can only be changed in settings' };
+      }
       const parsed = parseProfileDraft(draftFromParams(params));
       if (!parsed.ok) return parsed;
       if (Object.keys(parsed.draft).length === 0) return { ok: false, error: 'invalid arguments' };

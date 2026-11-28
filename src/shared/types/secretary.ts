@@ -22,6 +22,11 @@ export interface SecretaryProfile {
   takeoverScope: SecretaryTakeoverScope;
   /** 勾选给秘书用的 Enso 插件 id；插件停用或卸载后自动失效，不改写档案 */
   pluginIds?: string[];
+  /**
+   * owner 在设置页里信任的插件 id（缺省或空 = 一个都不信任）。完全放行档且本轮由 owner 亲手触发时，
+   * 这些插件的非只读工具不再逐次确认；受保护动作底线照常拦。只能在设置页改，秘书提案不能动它。
+   */
+  trustedPluginIds?: string[];
   /** 勾选给秘书用的全局 Enso skill id；未勾选的不加载 */
   skillIds?: string[];
   /** 秘书自有 skill 里被停用的目录名：文件还在，只是不进会话 */

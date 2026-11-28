@@ -306,6 +306,17 @@ function ownerGateError(gate: OwnerGate, match: OwnerGateMatch): Error {
 /** 本轮能不能开工。缺省是用户自己发起；外部插件投递进来后保持拦截，直到 owner 确认 */
 export class OwnerGate {
   private state: TurnTriggerOrigin = { kind: 'owner', source: 'user' };
+  /**
+   * 最近一条 user 消息是不是 Main 标记过的 owner 亲手输入。秘书会话里 Main 的投递（会话回传、
+   * 同事消息、触发器、定时）也是 user 消息，只有这一位能把它们和 owner 自己说的话分开。
+   */
+  private ownerInput = false;
+  /** 秘书资料里信任的插件：只有它们以 owner 身份投递的消息才算 owner 触发 */
+  private readonly trustedPlugins: ReadonlySet<string>;
+
+  constructor(options?: { trustedPlugins?: ReadonlySet<string> }) {
+    this.trustedPlugins = options?.trustedPlugins ?? new Set();
+  }
 
   origin(): TurnTriggerOrigin {
     return this.state;
@@ -315,15 +326,25 @@ export class OwnerGate {
     return this.state.kind === 'owner';
   }
 
-  observeMessage(message: unknown): void {
+  /**
+   * 本轮由 owner 触发：最近一条输入是 Main 标记过的 owner 输入，或是被信任的插件以 owner 身份
+   * （Main 按 owner 绑定或插件的 injectTrusted 权限判定）投递的消息；其他插件投递一进来就不算。
+   */
+  isOwnerInputTurn(): boolean {
+    return this.state.kind === 'owner' && this.ownerInput;
+  }
+
+  observeMessage(message: unknown, ownerInput = false): void {
     if (!isRecord(message)) return;
     if (message.role === 'user') {
       this.state = { kind: 'owner', source: 'user' };
+      this.ownerInput = ownerInput;
       return;
     }
     if (message.role !== 'custom' || message.customType !== PLUGIN_MESSAGE_TYPE) return;
     const details = isRecord(message.details) ? message.details : {};
     const pluginId = typeof details.pluginId === 'string' ? details.pluginId : 'unknown';
+    this.ownerInput = details.origin === 'owner' && this.trustedPlugins.has(pluginId);
     const pluginName = typeof details.pluginName === 'string' ? details.pluginName : undefined;
     const sender = parsePluginInjectSender(details.sender) ?? undefined;
     if (details.origin === 'owner') {

@@ -89,6 +89,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `memoryDispatchRecallEnabled`（缺省开）控制秘书派发会话时是否按任务内容检索本机记忆库并把相关经验注入首条 prompt。写入后立即生效（在派发时读取）；注入失败或超时静默降级，不阻塞派发。它只作用于本机记忆库，不参与配置同步；同样是普通布尔开关，`policy.ts` 不需要为它加规则。
 
+秘书的「完全放行时信任这个插件」不在 `settings.json` 里，CLI 读不到也写不了：它存在秘书档案 `profile.json` 的 `trustedPluginIds`（插件 id 列表，缺省或空表示一个都不信任），只能在「设置 → 秘书 → 插件」里勾，秘书自己的配置提案也改不了。`set trustedPluginIds …` 按未登记字段拒绝，所以 `policy.ts` 不需要为它加规则。打开后，只有同时满足这几条时，这个插件的非只读工具才不再逐次确认：秘书会话是「完全放行」档；这一轮由 owner 发起，即应用输入框、配对手机、内置 Telegram 渠道里绑定的本人，或被信任的插件投递、且 Main 判定为 owner 身份的消息（`origin=owner`，如 Telegram Bot 插件的管理员），而不是会话回传、同事消息、触发器、定时或没被信任的插件投递；没有命中受保护动作底线（打开「受保护动作确认」时，`telegram_reply` 这类外发工具仍按底线弹卡）。改动在秘书会话空闲后重建时生效，正在跑的一轮沿用旧名单。
+
 部分设置本来就只对新会话生效，例如 `subagentModels`、`subagentAllowedModes`、`editMode`、`rtkEnabled`。CLI 写入后，它们的行为与在设置页修改一致。
 
 `providers.<id>.autoFetchModels` 接受布尔值，默认关闭，仅在当前设备生效。开启这条已启用的 API Key 供应商时，或在保留此设置的情况下启动应用时，会立即拉取该供应商的模型。关闭开关会停止这条供应商的定时拉取，并取消该条正在进行的自动拉取。自动拉取只追加从未见过的模型，新模型默认禁用；用户删掉的模型不会再被加回。
