@@ -27,19 +27,14 @@ const childPatch = {
   role: 'system',
   content: '',
   sections: { addendum: 'subagent contract' },
-  timestamp: 10,
-} as unknown as Message;
-const childTools = {
-  role: 'system',
-  content: '',
   toolsRemoved: [{ name: 'bash' }, { name: 'subagent' }],
-  toolsAdded: [tool('message_main')],
+  toolsAdded: [tool('message_main_agent')],
   timestamp: 10,
 } as unknown as Message;
 const task = { role: 'user', content: 'do the task', timestamp: 11 } as unknown as Message;
 
 describe('withForkPrefix', () => {
-  it('前缀原样还原，子代理首轮 system 补丁降成 user 正文，请求里只剩父会话的 system 消息', () => {
+  it('前缀换回注入时的原样字节，子代理自己的 system 增量与后续消息原样保留', () => {
     // 子会话自己的 context 变换把历史图片换成了占位：前缀字节必须换回注入时的原样
     const transformed = [
       prefix[0],
@@ -52,35 +47,25 @@ describe('withForkPrefix', () => {
       },
       prefix[2],
       childPatch,
-      childTools,
       task,
     ] as Message[];
     const out = withForkPrefix(prefix, { messages: transformed });
 
     expect(JSON.stringify(out.messages.slice(0, prefix.length))).toBe(JSON.stringify(prefix));
-    expect(out.messages.filter((m) => m.role === 'system')).toEqual([prefix[0]]);
-    expect(out.messages).toHaveLength(prefix.length + 1);
-    const first = out.messages[prefix.length] as { role: string; content: string };
-    expect(first.role).toBe('user');
-    expect(first.content).toContain('subagent contract');
-    expect(first.content).toContain('- bash');
-    expect(first.content).toContain('- subagent');
-    expect(first.content.endsWith('do the task')).toBe(true);
+    // 子代理独有工具（message_main_agent）与禁用工具都靠这条增量生效，不能丢
+    expect(out.messages.slice(prefix.length)).toEqual([childPatch, task]);
   });
 
-  it('后续轮次改写结果与首轮逐字节一致，子代理自己的前缀也稳定', () => {
-    const turn1 = [...prefix, childPatch, childTools, task];
+  it('后续轮次改写结果与首轮逐字节一致', () => {
+    const turn1 = [...prefix, childPatch, task];
     const reply = { role: 'assistant', content: [{ type: 'text', text: 'done' }], timestamp: 12 };
-    const later = { role: 'system', content: '', toolsAdded: [tool('grep')], timestamp: 13 };
-    const turn2 = [...turn1, reply, later, { role: 'user', content: 'next', timestamp: 14 }];
+    const turn2 = [...turn1, reply, { role: 'user', content: 'next', timestamp: 14 }];
     const a = withForkPrefix(prefix, { messages: turn1 });
     const b = withForkPrefix(prefix, { messages: turn2 as Message[] });
     expect(JSON.stringify(b.messages.slice(0, a.messages.length))).toBe(JSON.stringify(a.messages));
-    // 前缀之后子代理自己新增的 system 消息不动
-    expect(b.messages).toContainEqual(later);
   });
 
-  it('前缀对不上（子会话压缩过）或消息不够长时原样返回', () => {
+  it('前缀对不上（子会话压缩过）、消息不够长或没有前缀时原样返回', () => {
     const compacted = [{ role: 'user', content: 'summary', timestamp: 99 }, task] as Message[];
     const context = { messages: compacted };
     expect(withForkPrefix(prefix, context)).toBe(context);
@@ -88,12 +73,8 @@ describe('withForkPrefix', () => {
     expect(withForkPrefix(prefix, short)).toBe(short);
     const plain = { messages: [...prefix, task] };
     expect(withForkPrefix(undefined, plain)).toBe(plain);
-  });
-
-  it('前缀后紧跟的不是 user 消息时补一条 user 正文；没有补丁时不加正文', () => {
-    const out = withForkPrefix(prefix, { messages: [...prefix, childPatch] });
-    expect(out.messages.at(-1)).toMatchObject({ role: 'user', timestamp: 10 });
-    const none = withForkPrefix(prefix, { messages: [...prefix, task] });
-    expect(none.messages.at(-1)).toEqual(task);
+    expect(withForkPrefix([], plain)).toBe(plain);
+    const roleSwap = { messages: [prefix[0], prefix[2], prefix[1], task] };
+    expect(withForkPrefix(prefix, roleSwap)).toBe(roleSwap);
   });
 });

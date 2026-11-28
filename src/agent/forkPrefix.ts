@@ -1,20 +1,13 @@
-import {
-  type Message,
-  renderSystemMessageUpdate,
-  type SystemMessage,
-  type UserMessage,
-} from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 
 /**
- * seed_context="fork" 子代理的请求改写。
+ * seed_context="fork" 子代理的请求改写：前缀位置换回注入时的原样消息。
  *
- * 子会话 transcript 以父会话某次请求的消息原样起头（含承载系统提示与工具声明的 system 消息），
- * 子代理自己的提示段与工具差异由 pi 在首轮以 system 消息补在前缀之后。不支持中途 system 消息的
- * provider 会把全部 system 消息折叠回请求头，子代理的差异就改写了父前缀，缓存一个字节都命中不了。
- * 所以每次请求：
- * - 前缀位置换回注入时的原样消息（子会话自己的 context 变换会改历史图片、旧工具结果）；
- * - 紧跟前缀的那段子代理 system 补丁降成下一条 user 消息里的正文，请求头与工具声明保持父会话原样。
- * 声明了但子代理不能执行的工具，调用时 pi 按「Tool not found」报错，不会执行。
+ * 子会话 transcript 以父会话某次请求的消息原样起头（含承载系统提示与工具声明的 system 消息）。
+ * 子会话自己的 context 变换（历史图片降占位、旧工具结果裁剪等）会改动这段前缀，缓存就对不上；
+ * 每次请求把它换回原样字节。子代理自己的提示段与工具增减由 pi 以 system 增量补在前缀之后：
+ * 支持中途 system / 工具变更的 provider 原生渲染在前缀后，缓存命中；不支持的折叠回请求头，
+ * 只丢缓存，提示与工具仍然正确。
  * 前缀对不上（子会话已压缩等）时原样返回，不改写。
  */
 export function withForkPrefix<T extends { messages: Message[] }>(
@@ -29,38 +22,5 @@ export function withForkPrefix<T extends { messages: Message[] }>(
       return context;
     }
   }
-  const tail = messages.slice(prefix.length);
-  const firstOwn = tail.findIndex((message) => message.role !== 'system');
-  const patchEnd = firstOwn < 0 ? tail.length : firstOwn;
-  const patches = tail.slice(0, patchEnd) as SystemMessage[];
-  const rest = tail.slice(patchEnd);
-  const note = patches.map(renderForkPatch).filter(Boolean).join('\n\n');
-  return { ...context, messages: [...prefix, ...withNote(rest, note, patches[0]?.timestamp)] };
-}
-
-function renderForkPatch(message: SystemMessage): string {
-  const removed = (message.toolsRemoved ?? []).map((tool) => `- ${tool.name}`);
-  return [
-    renderSystemMessageUpdate(message),
-    removed.length > 0
-      ? `These tools are declared above but disabled for this forked subagent; calls to them fail:\n${removed.join('\n')}`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-function withNote(rest: Message[], note: string, timestamp = 0): Message[] {
-  if (!note) return rest;
-  const text = `<fork_system_update>\n${note}\n</fork_system_update>`;
-  const [first, ...others] = rest;
-  if (first?.role !== 'user') {
-    const user: UserMessage = { role: 'user', content: text, timestamp };
-    return [user, ...rest];
-  }
-  const content =
-    typeof first.content === 'string'
-      ? `${text}\n\n${first.content}`
-      : [{ type: 'text' as const, text }, ...first.content];
-  return [{ ...first, content }, ...others];
+  return { ...context, messages: [...prefix, ...messages.slice(prefix.length)] };
 }

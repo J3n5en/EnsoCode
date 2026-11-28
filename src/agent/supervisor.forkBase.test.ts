@@ -504,8 +504,13 @@ describe('spawn-child seed_context="fork"', () => {
       childStream.mock.calls[0][1] as { messages: Array<{ role: string; content: unknown }> }
     ).messages;
     expect(JSON.stringify(childSent.slice(0, parentSent.length))).toBe(JSON.stringify(parentSent));
-    expect(childSent.filter((message) => message.role === 'system')).toHaveLength(1);
-    expect(String(childSent.at(-1)?.content)).toContain('subagent contract');
+    // 子代理自己的提示段与工具增减原样留作 system 增量，由 pi 渲染在前缀之后
+    expect(childSent.slice(parentSent.length).map((message) => message.role)).toEqual([
+      'system',
+      'system',
+      'user',
+    ]);
+    expect(JSON.stringify(childSent[parentSent.length])).toContain('subagent contract');
     await supervisor.shutdown();
   });
 
@@ -619,12 +624,27 @@ describe('spawn-child seed_context="fork"', () => {
     const childStream = sent(childSession) as unknown as ReturnType<typeof vi.fn>;
     await (childSession.agent.streamFunction as unknown as Wrapped)(
       childSession.physicalModel,
-      { messages: structuredClone(restored) },
+      {
+        // 子会话自己的 context 变换把历史图换成了占位：接回的改写要把前缀换回原样
+        messages: restored.map((message, index) =>
+          index === 1
+            ? {
+                ...message,
+                content: [
+                  { type: 'text', text: 'fix the bug' },
+                  { type: 'text', text: '[image omitted]' },
+                ],
+              }
+            : message
+        ),
+      },
       { sessionId: childSession.sessionId }
     ).catch(() => undefined);
-    const childSent = (childStream.mock.calls[0][1] as { messages: Array<{ role: string }> })
-      .messages;
-    expect(childSent.filter((message) => message.role === 'system')).toHaveLength(1);
+    const childSent = (childStream.mock.calls[0][1] as { messages: unknown[] }).messages;
+    expect(JSON.stringify(childSent.slice(0, parentRequest.length))).toBe(
+      JSON.stringify(parentRequest)
+    );
+    expect(childSent).toHaveLength(restored.length);
     await supervisor.shutdown();
   });
 });
