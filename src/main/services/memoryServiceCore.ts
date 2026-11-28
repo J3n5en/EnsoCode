@@ -1169,6 +1169,7 @@ export async function invokeMemory(
     onCreated: onMemoryCreated,
     onDeleted: notifyMemoryChanged,
     onPending: notifyMemoryChanged,
+    audit: auditSink,
     complete: () => getMemoryCompletion(),
   };
   if (op !== 'search')
