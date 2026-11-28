@@ -52,6 +52,7 @@ function sessions(activeId: string) {
     conversations: {
       secretary: { projectId: 'sec' },
       normal: { projectId: 'code' },
+      other: { projectId: 'code' },
     },
   } as unknown as ReturnType<typeof useSessionsStore.getState>);
 }
@@ -347,7 +348,11 @@ describe('文件树宽度', () => {
 describe('无 tab 展开时的新建菜单信号', () => {
   beforeEach(() => {
     vi.mocked(useSettingsStore.getState).mockReturnValue({
-      projects: [{ id: 'code', kind: 'project' }],
+      secretaryEnabled: true,
+      projects: [
+        { id: 'code', kind: 'project' },
+        { id: 'sec', kind: 'secretary' },
+      ],
     } as unknown as ReturnType<typeof useSettingsStore.getState>);
     useSidePanelStore.setState((state) => ({
       ...state,
@@ -425,11 +430,87 @@ describe('无 tab 展开时的新建菜单信号', () => {
     sessions('normal');
     useSidePanelStore.getState().toggleOpen();
     expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    sessions('other');
     useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('other');
+    useSidePanelStore.getState().clearNewTabMenuPrompt();
+  });
+
+  it('秘书会话展开：不置信号，秘书面板会自动打开，菜单会盖在它上面', () => {
+    sessions('secretary');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.secretary?.open).toBe(true);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('秘书开关关掉时，秘书项目的会话按普通会话处理（与侧栏面板集合口径一致）', () => {
+    vi.mocked(useSettingsStore.getState).mockReturnValue({
+      secretaryEnabled: false,
+      projects: [{ id: 'sec', kind: 'secretary' }],
+    } as unknown as ReturnType<typeof useSettingsStore.getState>);
     sessions('secretary');
     useSidePanelStore.getState().toggleOpen();
     expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('secretary');
     useSidePanelStore.getState().clearNewTabMenuPrompt();
+  });
+
+  it('有启用中的全局标签时展开：不置信号，全局标签会被补进 dock', () => {
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      uiByConversation: { normal: { open: false, width: state.lastWidth } },
+      liveGlobalTabs: ['plugin:demo:view'],
+    }));
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('收起时清掉未消费的信号，下次有 tab 展开不会误弹', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(false);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('有 tab 的会话展开时清掉残留的旧信号', () => {
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      layouts: {
+        normal: { panels: { files: { id: 'files', contentComponent: 'files' } } } as never,
+      },
+      newTabMenuPrompt: { conversationId: 'normal', at: 1 },
+    }));
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    expect(useSidePanelStore.getState().uiByConversation.normal?.open).toBe(true);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('布局写入 tab 后清掉该会话的信号；空布局与别的会话不受影响', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    useSidePanelStore.getState().saveLayout('normal', { panels: {} } as never);
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    useSidePanelStore
+      .getState()
+      .saveLayout('other', { panels: { files: { id: 'files' } } } as never);
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    useSidePanelStore
+      .getState()
+      .saveLayout('normal', { panels: { files: { id: 'files' } } } as never);
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
+  });
+
+  it('程序化打开侧栏（ensureOpen 随后建面板）清掉该会话的信号，别的会话不受影响', () => {
+    sessions('normal');
+    useSidePanelStore.getState().toggleOpen();
+    useSidePanelStore.getState().ensureOpen('other');
+    expect(useSidePanelStore.getState().newTabMenuPrompt?.conversationId).toBe('normal');
+    useSidePanelStore.getState().ensureOpen('normal');
+    expect(useSidePanelStore.getState().newTabMenuPrompt).toBeNull();
   });
 
   it('newTabMenuPrompt 不持久化', () => {
