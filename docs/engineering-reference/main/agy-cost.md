@@ -18,7 +18,7 @@ EnsoCode 经 `agy acp` 调 Antigravity。下面的数字来自开发机 2026-11-
 | 长会话的上下文 | 秘书会话 719 次请求，上下文涨到约 46 万 token，每次请求都带着它（多数命中缓存）| 压缩策略，不在本次范围 |
 | 新会话首个请求 | 中位数 2.2 万未缓存 token，55 个会话首请求命中缓存 0 次 | 只有 EnsoCode 挂的工具声明和 append 归我们管 |
 | 其中 `mcp_enso_*` 工具声明 | 普通会话 33–35 KB（约 8K token），秘书约 15 KB | `src/shared/agy/hostTools.ts` |
-| 其中 session 级 append | 3.7–4.0 KB（约 1K token）。16 KiB 只是上限 | `src/shared/agy/systemAppend.ts` |
+| 其中 session 级 append | 普通会话 3.7–4.0 KB（约 1K token）；秘书会话加上规则约 30 KB | `src/shared/agy/systemAppend.ts` |
 | `sir_flash_lite` 安全预审 | 1333 次，`mcp_enso_*` 与 `call_mcp_tool` 占 478 次 | MCP 工具不在 agy 的白名单里，只能少调 |
 
 agy 的预审白名单（二进制内嵌的 `agy_tool_safety` 配置）只认 agy 自己的工具名，比如 `view_file`、`grep_search`、
@@ -50,10 +50,24 @@ agy 的预审白名单（二进制内嵌的 `agy_tool_safety` 配置）只认 ag
   append 约 1K token，且是产品说明的载体，没删。
 - `todo` 的提示词没改：两天 28 次预审，降频收益小于改提示词的风险。
 
-## 已知问题
+## 秘书规则进 append
 
-秘书的人设（`personaExtension` 替换的开头角色段，含 silence_turn、派发规则等）不在 append 里，agy 上的秘书看不到它。
-补上会让 append 变大，需要单独评估。
+秘书 / Bot 的人设由 `personaExtension` 换进 pi 不带标签的开头角色段。`ensoSystemAppend` 只按标签取
+`addendum`、`preset_tail`、`preset_boost`，开头段因为带 pi 身份句故意不取，人设就一起丢了。
+现在人设由桥从 `PersonaHolder` 直接传入，作为 `<role>` 段放在 append 最前。
+
+上限分两层：
+
+- `<role>` 整段保留，从不截断；
+- 其余 Enso 段仍按原来的 16 KiB 预算、按 addendum → preset_tail → preset_boost 的顺序在行边界截断，
+  且和 `<role>` 合计不超过 40 KiB（agy 在 128 KiB 截断 prompt，回退路径下 append 和当轮用户文字同发）。
+
+没有人设的会话输出逐字节不变。本机秘书档案下规则 26.3 KB，append 从 3.7 KB 变成 30.0 KB，
+比旧的 16 KiB 上限多 13.7 KB，超出的就是规则本身。
+
+成本按上面的口径推算：秘书会话两天 719 次请求，append 在每次请求里都带着（多数命中缓存），
+首个请求和 54 次缓存重置时按未缓存计。append 每多 1K token，两天约多 0.72M cached 和约 55K 未缓存输入 token。
+秘书规则约 6.6K token（按 4 字节/token 估），即约 4.7M cached 和约 0.36M 未缓存，是这个会话未缓存输入（14.7M）的 2.5% 左右。
 
 ## 怎么量
 

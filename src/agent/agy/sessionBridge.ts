@@ -69,6 +69,8 @@ export function attachAgyBridgeToSession(
     readRoots: () => readonly string[];
     /** 临时会话（插件 agent.run 等）不记 agy sessionId，下次也不 resume */
     resumable?: boolean;
+    /** 当轮人设（秘书规则、Bot 人设）；它换的是 pi 不带标签的开头角色段，ensoSystemAppend 取不到，从这里给 */
+    persona?: () => string;
   }
 ): AgySessionBridge {
   const tools = new Map<string, Card>();
@@ -195,7 +197,10 @@ export function attachAgyBridgeToSession(
   const bridge: AgySessionBridge = {
     async runTurn(input) {
       // pi 这一轮的系统提示词（含 Enso 扩展追加的段）在上下文的 system 消息里；只取 Enso 自有段
-      const systemAppend = ensoSystemAppend(getCurrentSystemPrompt(input.messages));
+      const systemAppend = ensoSystemAppend(
+        getCurrentSystemPrompt(input.messages),
+        options.persona?.()
+      );
       const runtime = await openBoundAgySession({
         ensoSessionId: options.ensoSessionId,
         cwd: options.cwd,

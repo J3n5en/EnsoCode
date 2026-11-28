@@ -4002,6 +4002,7 @@ export class SessionSupervisor {
       gate,
       planActive: () => plan.state().active,
       readRoots: () => [cwd, ...(agyTemp ? [agyTemp] : [])],
+      ...(persona ? { persona: () => persona.current } : {}),
     });
     // 关掉 plan 时先退出 plan 模式，再撤掉控制器：工具门不再限制，set-plan-mode 不再生效
     const setPlanEnabled = (enabled: boolean) => {
