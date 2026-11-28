@@ -4288,7 +4288,12 @@ export class SessionSupervisor {
         queueMicrotask(() => {
           if (this.sessions.get(identity.sessionId) !== managed) return;
           const full = { messages: projectMessages(raw), baseIndex: 0 };
+          // 只在还没进入新回合时把 turnStartIndex 对齐到全量长度，避免把历史用户消息错切进本轮
+          const stillAtResumeHead = managed.turnStartIndex === immediate.messages.length;
           managed.messages = full.messages;
+          if (stillAtResumeHead && managed.status === 'idle') {
+            managed.turnStartIndex = full.messages.length;
+          }
           emitResumeSnapshot(full, true);
         });
       }

@@ -3,6 +3,7 @@ export const SILENT_MARKER = '<secretary-silent/>';
 
 /** 秘书内置工具：调用后结束本轮，表示系统推送不需要打扰用户。 */
 export const SILENCE_TURN_TOOL = 'silence_turn';
+export const TURN_DISCARD_TOOL = 'turn_discard';
 
 export function messageText(message: { content?: unknown }): string {
   const content = message.content;
@@ -19,13 +20,18 @@ export function messageText(message: { content?: unknown }): string {
 
 /** 去掉回传包裹后没有别的正文：这是系统注入，不是用户打的字 */
 export function isPureSessionUpdate(text: string): boolean {
-  if (!/<session-updates>|<secretary-schedule>|<secretary-message>|<secretary-trigger>/.test(text))
+  if (
+    !/<session-updates>|<secretary-schedule>|<secretary-message>|<secretary-trigger>|<agent-notification>/.test(
+      text
+    )
+  )
     return false;
   const stripped = text
     .replace(/<session-updates>[\s\S]*?<\/session-updates>/g, '')
     .replace(/<secretary-schedule>[\s\S]*?<\/secretary-schedule>/g, '')
     .replace(/<secretary-message>[\s\S]*?<\/secretary-message>/g, '')
     .replace(/<secretary-trigger>[\s\S]*?<\/secretary-trigger>/g, '')
+    .replace(/<agent-notification>[\s\S]*?<\/agent-notification>/g, '')
     .trim();
   return stripped.length === 0;
 }
@@ -46,6 +52,17 @@ export function calledSilenceTurn(message: {
     const record = part as { type?: unknown; name?: unknown };
     return record.type === 'toolCall' && record.name === SILENCE_TURN_TOOL;
   });
+}
+
+function calledTurnDiscardSuccessfully(
+  turn: readonly { role?: string; toolName?: string; isError?: boolean; content?: unknown }[]
+): boolean {
+  return turn.some(
+    (message) =>
+      message.role === 'toolResult' &&
+      message.toolName === TURN_DISCARD_TOOL &&
+      message.isError !== true
+  );
 }
 
 /** 本轮调用过 silence_turn。不要求用户消息是系统回传。 */
@@ -70,13 +87,20 @@ export function shouldSilenceTurn(
 
 /** 从本轮消息判断该不该静默。用户文本取原始正文，不走标题清洗。 */
 export function turnRequestedSilence(
-  messages: readonly { role?: string; toolName?: string; content?: unknown }[],
+  messages: readonly {
+    role?: string;
+    toolName?: string;
+    isError?: boolean;
+    pluginSource?: unknown;
+    content?: unknown;
+  }[],
   fromIndex = 0
 ): boolean {
   const turn = messages.slice(Math.max(0, fromIndex));
   let userText = '';
   let assistantText = '';
   let called = false;
+  let hasNonUserTrigger = false;
   for (const message of turn) {
     if (calledSilenceTurn(message)) called = true;
     if (message.role === 'user') {
@@ -85,9 +109,23 @@ export function turnRequestedSilence(
     } else if (message.role === 'assistant') {
       const text = messageText(message).trim();
       if (text) assistantText = text;
+    } else if (message.role === 'custom' && message.pluginSource) {
+      hasNonUserTrigger = true;
     }
   }
-  return shouldSilenceTurn(userText, assistantText, called);
+  if (shouldSilenceTurn(userText, assistantText, called)) return true;
+  const noTypedUserInput = userText.length === 0;
+  // 插件投递（Telegram / GitHub watch / Scheduler 等）在消息流里是 role:'custom' 而非 user；
+  // 没有用户手打正文时，调用 silence_turn 或成功调用 turn_discard 都不应弹桌面/手机通知。
+  if (called && noTypedUserInput) return true;
+  if (
+    hasNonUserTrigger &&
+    noTypedUserInput &&
+    (isSilentMarker(assistantText) || calledTurnDiscardSuccessfully(turn))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function sessionIdsInUpdates(text: string): string[] {
