@@ -25,6 +25,7 @@ import {
 } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import { turnCalledSilenceTurn } from '@shared/secretary/silence';
+import { nestedToolCallParent } from '@shared/toolCallId';
 import type { ContextOccupancy, PluginInterceptRequest, TokenUsage } from '@shared/types/agent';
 
 /** Main 等待 before_compact 最多 10 秒，本地再留余量后照常压缩 */
@@ -58,15 +59,44 @@ export interface PluginInjectMessage {
 
 type SendPluginMessage = ExtensionAPI['sendMessage'];
 
+type ContextUsageMessage = {
+  role?: string;
+  usage?: TokenUsage & { reasoning?: number; reasoningTokens?: number };
+};
+
+function isTokenCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function positiveTokenCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 /** 插件看到的上下文占用：宿主分桶 + 最近一次带用量回复的实报 token */
 export function contextUsagePayload(
   occupancy: ContextOccupancy,
-  messages: ReadonlyArray<{ role?: string; usage?: TokenUsage }>
+  messages: ReadonlyArray<ContextUsageMessage>,
+  options?: { turns?: number }
 ): ContextUsagePayload {
   const buckets = {} as ContextUsagePayload['buckets'];
   for (const id of CONTEXT_USAGE_BUCKETS) buckets[id] = occupancy.buckets[id];
-  const last = messages.findLast((message) => message.role === 'assistant' && message.usage);
+  const last = messages.findLast(
+    (message) =>
+      message.role === 'assistant' &&
+      message.usage !== undefined &&
+      isTokenCount(message.usage.input) &&
+      isTokenCount(message.usage.output) &&
+      isTokenCount(message.usage.cacheRead) &&
+      isTokenCount(message.usage.cacheWrite)
+  );
   const usage = last?.usage;
+  const reasoningTokens = usage
+    ? positiveTokenCount(usage.reasoning ?? usage.reasoningTokens)
+    : undefined;
+  const turns =
+    typeof options?.turns === 'number' && Number.isInteger(options.turns) && options.turns >= 0
+      ? options.turns
+      : undefined;
   return {
     used: occupancy.used,
     estimated: occupancy.estimated,
@@ -74,6 +104,7 @@ export function contextUsagePayload(
     ...(occupancy.percent !== undefined ? { percent: occupancy.percent } : {}),
     buckets,
     ...(occupancy.parts ? { parts: occupancy.parts } : {}),
+    ...(turns !== undefined ? { turns } : {}),
     ...(usage
       ? {
           usage: {
@@ -81,6 +112,7 @@ export function contextUsagePayload(
             output: usage.output,
             cacheRead: usage.cacheRead,
             cacheWrite: usage.cacheWrite,
+            ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
           },
         }
       : {}),
@@ -361,10 +393,18 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
           invoker.notify('after_compact', { reason: event.reason });
         });
       }
+      const parentFieldOf = (event: { toolCallId: string; parentToolCallId?: string }) => {
+        const parentToolCallId =
+          (typeof event.parentToolCallId === 'string' && event.parentToolCallId.length > 0
+            ? event.parentToolCallId
+            : undefined) ?? nestedToolCallParent(event.toolCallId);
+        return parentToolCallId ? { parentToolCallId } : {};
+      };
       const intercepts = (event: PluginInterceptEvent) => invoker.intercepts(event);
       if (intercepts('tool_call') || observe.has('tool_call')) {
         pi.on('tool_call', async (event) => {
           const input = event.input as Record<string, unknown>;
+          const parentField = parentFieldOf(event);
           let result: ToolCallEventResult | undefined;
           if (intercepts('tool_call') && invoker.watchesTool('tool_call', event.toolName)) {
             try {
@@ -372,6 +412,7 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
                 input,
                 await invoker.intercept('tool_call', {
                   toolCallId: event.toolCallId,
+                  ...parentField,
                   toolName: event.toolName,
                   input: { ...input },
                 })
@@ -383,6 +424,7 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
           if (observe.has('tool_call') && !result?.block) {
             invoker.notify('tool_call', {
               toolCallId: event.toolCallId,
+              ...parentField,
               toolName: event.toolName,
               input: { ...input },
             });
@@ -392,12 +434,14 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
       }
       if (intercepts('tool_result') || observe.has('tool_result')) {
         pi.on('tool_result', async (event) => {
+          const parentField = parentFieldOf(event);
           let result: ToolResultEventResult | undefined;
           if (intercepts('tool_result') && invoker.watchesTool('tool_result', event.toolName)) {
             try {
               result = applyToolResult(
                 await invoker.intercept('tool_result', {
                   toolCallId: event.toolCallId,
+                  ...parentField,
                   toolName: event.toolName,
                   input: event.input,
                   content: textContent(event.content),
@@ -411,6 +455,7 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
           if (observe.has('tool_result')) {
             invoker.notify('tool_result', {
               toolCallId: event.toolCallId,
+              ...parentField,
               toolName: event.toolName,
               input: event.input,
               content: observeToolContent(result?.content ?? event.content),

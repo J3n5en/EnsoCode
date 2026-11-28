@@ -585,8 +585,21 @@ export function runPluginHost(
         notify: (title: string, body?: string) =>
           hostCall('ui.notify', { title, body: body ?? '' }),
         view: {
-          emit: (name: string, data?: unknown) =>
-            hostCall('ui.viewEvent', { name, data: data ?? null }),
+          emit: (name: string, data?: unknown, options?: { sessionId?: string }) =>
+            hostCall('ui.viewEvent', {
+              name,
+              data: data ?? null,
+              ...(isRecord(options) && options.sessionId !== undefined
+                ? { sessionId: options.sessionId }
+                : {}),
+            }),
+          emitToSession: (sessionId: string, name: string, data?: unknown) =>
+            hostCall('ui.viewEvent', {
+              name,
+              data: data ?? null,
+              // 显式定向接口漏传 sessionId 时交由 gate 报 INVALID_ARGS，避免静默退化为全局广播
+              sessionId: sessionId === undefined ? null : sessionId,
+            }),
           open: (input?: string | { viewId?: string; sessionId?: string }) =>
             hostCall('ui.viewOpen', typeof input === 'string' ? { viewId: input } : (input ?? {})),
           close: (input?: string | { viewId?: string; sessionId?: string }) =>

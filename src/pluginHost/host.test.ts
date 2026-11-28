@@ -330,6 +330,43 @@ describe('runPluginHost', () => {
     });
   });
 
+  it('ui.view.emit 支持可选 sessionId，emitToSession 显式透传 sessionId（漏传不退化为广播）', async () => {
+    const h = harness(`export function activate(enso) {
+      enso.commands.register('push', async () => {
+        await enso.ui.view.emit('broadcast', { n: 1 });
+        await enso.ui.view.emit('scoped', { n: 2 }, { sessionId: 's1' });
+        await enso.ui.view.emit('empty', null, { sessionId: '' });
+        await enso.ui.view.emitToSession('s2', 'direct', { n: 3 });
+        await enso.ui.view.emitToSession(undefined, 'missing', null);
+      });
+    }`);
+    await h.next((m) => m.t === 'ready');
+    h.deliver(call('6', 'command.run', { id: 'push' }));
+    const seenIds = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      const msg = await h.next(
+        (m) => m.t === 'call' && m.api === 'ui.viewEvent' && !seenIds.has(m.id)
+      );
+      if (msg.t !== 'call') break;
+      seenIds.add(msg.id);
+      h.deliver({ t: 'res', id: msg.id, ok: true, value: null });
+    }
+    await h.next((m) => m.t === 'res' && m.id === '6');
+    const viewCalls = h.sent
+      .filter(
+        (m): m is Extract<PluginHostToMain, { t: 'call' }> =>
+          m.t === 'call' && m.api === 'ui.viewEvent'
+      )
+      .map((m) => m.args);
+    expect(viewCalls).toEqual([
+      { name: 'broadcast', data: { n: 1 } },
+      { name: 'scoped', data: { n: 2 }, sessionId: 's1' },
+      { name: 'empty', data: null, sessionId: '' },
+      { name: 'direct', data: { n: 3 }, sessionId: 's2' },
+      { name: 'missing', data: null, sessionId: null },
+    ]);
+  });
+
   it('取消后处理器收到 abort，挂起的宿主调用被拒绝', async () => {
     const h = harness(`export function activate(enso) {
       enso.tools.register('slow', async (args, ctx) => {

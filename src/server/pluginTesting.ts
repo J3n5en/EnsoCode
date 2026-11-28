@@ -41,6 +41,7 @@ export async function mountMain(activate, options = {}) {
       notify: (...args) => call('ui.notify', args),
       view: {
         emit: (...args) => call('ui.view.emit', args),
+        emitToSession: (...args) => call('ui.view.emitToSession', args),
         open: (...args) => call('ui.view.open', args),
       },
       status: { update: (...args) => call('ui.status.update', args) },

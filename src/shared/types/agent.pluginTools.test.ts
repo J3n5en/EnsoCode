@@ -103,6 +103,30 @@ describe('插件工具协议', () => {
     expect(
       contextUsage({ used: 15, estimated: false, contextWindow: 100, percent: 15, buckets, usage })
     ).not.toBeNull();
+    expect(
+      contextUsage({
+        used: 15,
+        estimated: false,
+        buckets,
+        usage: { ...usage, reasoningTokens: 42 },
+      })
+    ).not.toBeNull();
+    expect(
+      contextUsage({
+        used: 15,
+        estimated: false,
+        buckets,
+        usage: { ...usage, reasoningTokens: -1 },
+      })
+    ).toBeNull();
+    expect(
+      contextUsage({
+        used: 15,
+        estimated: false,
+        buckets,
+        usage: { ...usage, extra: 1 },
+      })
+    ).toBeNull();
     expect(contextUsage({ used: 15, estimated: true, buckets })).not.toBeNull();
     expect(contextUsage({ used: 15, estimated: true, buckets: { system: 1 } })).toBeNull();
     expect(contextUsage({ used: -1, estimated: true, buckets })).toBeNull();
@@ -164,15 +188,70 @@ describe('插件工具协议', () => {
     ).not.toBeNull();
     for (const [event, data] of [
       ['tool_call', { toolCallId: 'c1', toolName: 'bash', input: {} }],
+      ['tool_call', { toolCallId: 'p1/1', parentToolCallId: 'p1', toolName: 'read', input: {} }],
       [
         'tool_result',
         { toolCallId: 'c1', toolName: 'bash', input: {}, content: 'ok', isError: false },
+      ],
+      [
+        'tool_result',
+        {
+          toolCallId: 'p1/1',
+          parentToolCallId: 'p1',
+          toolName: 'read',
+          input: {},
+          content: 'ok',
+          isError: false,
+        },
       ],
       ['input', { text: 'hi', source: 'interactive' }],
     ] as const) {
       expect(
         parseAgentWorkerEvent({ type: 'plugin-event', identity: parent, seq: 3, event, data })
       ).not.toBeNull();
+    }
+    expect(
+      parseAgentWorkerEvent({
+        type: 'plugin-intercept',
+        identity: parent,
+        seq: 2,
+        requestId: 'r1',
+        event: 'tool_call',
+        payload: {
+          toolCallId: 'p1/1',
+          parentToolCallId: 'p1',
+          toolName: 'read',
+          input: { path: 'a.ts' },
+        },
+      })
+    ).not.toBeNull();
+    for (const badParent of ['', 'x'.repeat(513), 123]) {
+      expect(
+        parseAgentWorkerEvent({
+          type: 'plugin-event',
+          identity: parent,
+          seq: 3,
+          event: 'tool_call',
+          data: { toolCallId: 'p1/1', parentToolCallId: badParent, toolName: 'read', input: {} },
+        })
+      ).toBeNull();
+      expect(
+        parseAgentWorkerEvent({
+          type: 'plugin-intercept',
+          identity: parent,
+          seq: 2,
+          requestId: 'r1',
+          event: 'tool_result',
+          payload: {
+            toolCallId: 'p1/1',
+            parentToolCallId: badParent,
+            toolName: 'read',
+            input: {},
+            content: 'ok',
+            isError: false,
+          },
+        })
+      ).toBeNull();
     }
     expect(
       parseAgentWorkerEvent({

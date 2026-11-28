@@ -6432,10 +6432,11 @@ export class SessionSupervisor {
       occupancy = undefined;
     }
     let parts: ContextPart[] | undefined;
+    let turns: number | undefined;
     if (occupancy) {
       try {
         const inputs = this.occupancyInputs(managed);
-        parts = buildContextParts({
+        const built = buildContextParts({
           buckets: contextUsagePayload(occupancy, managed.messages).buckets,
           agentsFiles: inputs.agentsFiles,
           skills: inputs.skills,
@@ -6443,7 +6444,9 @@ export class SessionSupervisor {
           reminders: inputs.pendingTaskReminders ?? [],
           messages: inputs.contextMessages,
           estimate: (message) => this.estimateSessionMessage(message),
-        }).parts;
+        });
+        parts = built.parts;
+        turns = built.turns;
       } catch {
         // 拆分失败只少了条目，分类合计照发
       }
@@ -6459,9 +6462,22 @@ export class SessionSupervisor {
       usageTotals: toUsageTotals(computeStats(managed.messages)),
     });
     if (occupancy && managed.pluginEvents?.plan.observe.includes('context_usage')) {
+      // 原始 pi 消息保留 usage.reasoning（投影消息会剥离）；无记录时回退 managed.messages
+      const rawMessages = Array.isArray(managed.session.messages)
+        ? (managed.session.messages as Parameters<typeof contextUsagePayload>[1])
+        : [];
+      const usageMessages = rawMessages.some(
+        (message) => message?.role === 'assistant' && Boolean(message.usage)
+      )
+        ? rawMessages
+        : managed.messages;
       managed.pluginEvents.notify(
         'context_usage',
-        contextUsagePayload({ ...occupancy, ...(parts ? { parts } : {}) }, managed.messages)
+        contextUsagePayload(
+          { ...occupancy, ...(parts ? { parts } : {}) },
+          usageMessages,
+          turns !== undefined ? { turns } : undefined
+        )
       );
     }
   }

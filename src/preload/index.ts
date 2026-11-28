@@ -2534,7 +2534,12 @@ const electronAPI = {
         ipcRenderer.removeListener(IPC_CHANNELS.EXTENSION_PLUGINS_DRAFT_REQUEST, listener);
     },
     onViewEvent: (
-      callback: (event: { pluginId: string; name: string; data: unknown }) => void
+      callback: (event: {
+        pluginId: string;
+        name: string;
+        data: unknown;
+        sessionId?: string;
+      }) => void
     ): (() => void) => {
       const listener = (_e: unknown, event: Parameters<typeof callback>[0]) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, listener);

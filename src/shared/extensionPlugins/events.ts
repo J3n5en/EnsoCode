@@ -85,8 +85,14 @@ export interface ContextUsagePayload {
   contextWindow?: number;
   percent?: number;
   buckets: Record<ContextUsageBucket, number>;
-  /** 最近一次带用量的回复的实报 token */
-  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** 最近一次带用量的回复的实报 token；provider 报告推理用量时附带 reasoningTokens（已含在 output 内） */
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoningTokens?: number;
+  };
   /** 与 magpie 同形的七类拆分，各类条目按大小排列（会话按轮次） */
   parts?: ContextPart[];
   /** 当前上下文里用户发言的轮数 */
@@ -171,6 +177,8 @@ export interface PluginEventSubscription {
 
 export interface ToolCallPayload {
   toolCallId: string;
+  /** 嵌套调用（如 codemode 脚本内）的父工具调用 id；顶层调用不带 */
+  parentToolCallId?: string;
   toolName: string;
   input: Record<string, unknown>;
 }
