@@ -610,6 +610,14 @@ export interface AgentControlContext {
   owner: AgentOwnerIdentity;
 }
 
+/** 子代理 spawn 首轮上下文种子策略；默认 none 保持空白起步 */
+export const SUBAGENT_SEED_CONTEXTS = ['none', 'prior_reads', 'fork_compact'] as const;
+export type SubagentSeedContext = (typeof SUBAGENT_SEED_CONTEXTS)[number];
+
+export function isSubagentSeedContext(value: unknown): value is SubagentSeedContext {
+  return typeof value === 'string' && SUBAGENT_SEED_CONTEXTS.includes(value as SubagentSeedContext);
+}
+
 /** Main 授权的验收命令 id。模型不能提交 argv；未知 id 在 Main 拒绝，不会执行。 */
 export type AgentRunGate = { commandRef: string };
 
@@ -623,6 +631,7 @@ export interface AgentControlSpawnRequest {
   agentType?: string;
   model?: string;
   thinking?: AgentControlThinkingLevel;
+  seedContext?: SubagentSeedContext;
   schema?: unknown;
   gate?: AgentRunGate;
 }
@@ -792,6 +801,7 @@ export type AgentControlToolRequest =
       agentType?: string;
       model?: string;
       thinking?: AgentControlThinkingLevel;
+      seedContext?: SubagentSeedContext;
       wait: boolean;
       schema?: unknown;
       gate?: AgentRunGate;
@@ -887,6 +897,7 @@ export function parseAgentControlToolRequest(value: unknown): AgentControlToolRe
         'agentType',
         'model',
         'thinking',
+        'seedContext',
         'wait',
         'schema',
         'gate',
@@ -900,6 +911,7 @@ export function parseAgentControlToolRequest(value: unknown): AgentControlToolRe
         (value.thinking === undefined ||
           value.thinking === 'off' ||
           THINKING_LEVELS.includes(value.thinking as ThinkingLevel)) &&
+        (value.seedContext === undefined || isSubagentSeedContext(value.seedContext)) &&
         typeof value.wait === 'boolean' &&
         schemaValid &&
         optionalGate
@@ -1501,6 +1513,7 @@ export type AgentCommand =
       cwd: string;
       config: ResolvedAgentTypeSpawnConfig;
       resumeFile?: string;
+      seedContext?: SubagentSeedContext;
     }
   | {
       type: 'prompt-child';
@@ -4273,11 +4286,12 @@ const agentCommandParsers = {
     return value as unknown as AgentCommand;
   },
   'spawn-child': (value: Record<string, unknown>): AgentCommand | null => {
-    return hasOnlyKeys(value, ['type', 'identity', 'cwd', 'config', 'resumeFile']) &&
+    return hasOnlyKeys(value, ['type', 'identity', 'cwd', 'config', 'resumeFile', 'seedContext']) &&
       parseChildSessionIdentity(value.identity) &&
       typeof value.cwd === 'string' &&
       parseResolvedAgentTypeSpawnConfig(value.config) &&
-      (value.resumeFile === undefined || isNonEmptyString(value.resumeFile))
+      (value.resumeFile === undefined || isNonEmptyString(value.resumeFile)) &&
+      (value.seedContext === undefined || isSubagentSeedContext(value.seedContext))
       ? (value as unknown as AgentCommand)
       : null;
   },

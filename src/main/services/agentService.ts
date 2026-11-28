@@ -64,6 +64,7 @@ export interface AgentRuntimeSpawnInput {
   agentType?: string;
   model?: string;
   thinking?: AgentControlSpawnRequest['thinking'];
+  seedContext?: AgentControlSpawnRequest['seedContext'];
 }
 
 export interface AgentRuntimeRunInput {
@@ -446,6 +447,7 @@ export class AgentService implements AgentServiceContract {
         ...(request.agentType ? { agentType: request.agentType } : {}),
         ...(request.model ? { model: request.model } : {}),
         ...(request.thinking ? { thinking: request.thinking } : {}),
+        ...(request.seedContext ? { seedContext: request.seedContext } : {}),
       });
     } catch (error) {
       return failure('runtime-unavailable', error instanceof Error ? error.message : String(error));

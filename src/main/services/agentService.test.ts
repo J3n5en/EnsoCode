@@ -131,6 +131,15 @@ describe('AgentService lifecycle', () => {
     );
   });
 
+  it('spawn 透传 seedContext 给 runtime.spawn', async () => {
+    const { service, runtime } = setup();
+    const result = await service.spawn(spawnRequest({ seedContext: 'prior_reads' }));
+    expect(result.ok).toBe(true);
+    expect(runtime.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ seedContext: 'prior_reads' })
+    );
+  });
+
   it('adopts a persisted agent-tool coworker by stable instanceId after Main restart', async () => {
     const { service, runtime } = setup();
     const restored = {

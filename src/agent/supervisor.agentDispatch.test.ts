@@ -3297,6 +3297,312 @@ describe('SessionSupervisor custom parent system prompt', () => {
       await supervisor.shutdown();
     }
   );
+
+  it('spawn-child 带 seedContext=prior_reads 仅在首轮注入种子，后续 send 不重复注入；resumeFile 时跳过', async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'enso-seed-workspace-'));
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-seed-session-'));
+    try {
+      const targetFile = path.join(workspace, 'app.ts');
+      writeFileSync(targetFile, 'export const answer = 42;\n');
+
+      const events: AgentWorkerEvent[] = [];
+      const supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: '/tmp/agent',
+        sessionDir,
+      });
+      supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: workspace, model });
+      await waitFor(events, 'parent-ready');
+
+      const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+      parentSession.messages = [
+        { role: 'user', content: 'Keep answer equal to 42 and avoid breaking exports.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'read-1', name: 'read', arguments: { path: 'app.ts' } },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'read-1',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'export const answer = 42;' }],
+        },
+      ] as never[];
+
+      const baseChildConfig = {
+        typeKey: 'builtin:scout' as const,
+        displayName: 'scout',
+        description: 'Scout Agent',
+        spawnSpecId: 'spawn-scout',
+        systemPrompt: 'scout role',
+        model,
+        tools: 'all' as const,
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'scout-hash',
+      };
+
+      supervisor.handleCommand({
+        type: 'spawn-child',
+        identity: child,
+        cwd: workspace,
+        config: baseChildConfig,
+        seedContext: 'prior_reads',
+      });
+      await vi.waitFor(() =>
+        expect(events.some((event) => event.type === 'child-ready')).toBe(true)
+      );
+      const childSession = mocks.sessions[1] as ReturnType<typeof session>;
+
+      // 首轮 prompt-child：注入角色提示 + 一次性种子
+      supervisor.handleCommand({
+        type: 'prompt-child',
+        identity: child,
+        requestId: 'run-1',
+        task: { text: 'implement fix', images: [], fileMentions: [] },
+      });
+      await vi.waitFor(() => expect(childSession.prompt).toHaveBeenCalledTimes(1));
+      const [firstPrompt] = childSession.prompt.mock.calls[0] as [string, unknown];
+      expect(firstPrompt).toContain('<role>\nscout role\n</role>');
+      expect(firstPrompt).toContain('<parent_context_seed mode="prior_reads">');
+      expect(firstPrompt).toContain('export const answer = 42;');
+      expect(firstPrompt).toContain('Keep answer equal to 42');
+      expect(firstPrompt).toContain('implement fix');
+
+      // 第 2 轮 prompt-child（coworker 后续 send）：绝不重复注入种子，保持缓存前缀稳定
+      supervisor.handleCommand({
+        type: 'prompt-child',
+        identity: child,
+        requestId: 'run-2',
+        task: { text: 'follow up check', images: [], fileMentions: [] },
+      });
+      await vi.waitFor(() => expect(childSession.prompt).toHaveBeenCalledTimes(2));
+      expect(childSession.prompt.mock.calls[1]).toEqual(['follow up check', undefined]);
+
+      // resumeFile 恢复时跳过种子注入（即使传了 seedContext）
+      const resumedChild = {
+        ...child,
+        sessionId: 'parent::cw-resumed',
+        generation: '44444444-4444-4444-8444-444444444444',
+        instanceId: '55555555-5555-4555-8555-555555555555',
+        instanceName: 'scout-55555555',
+      };
+      const resumeFile = path.join(sessionDir, 'resumed.jsonl');
+      writeFileSync(resumeFile, '{}\n');
+      supervisor.handleCommand({
+        type: 'spawn-child',
+        identity: resumedChild,
+        cwd: workspace,
+        config: baseChildConfig,
+        resumeFile,
+        seedContext: 'prior_reads',
+      });
+      await vi.waitFor(() =>
+        expect(events.filter((event) => event.type === 'child-ready')).toHaveLength(2)
+      );
+      const resumedSession = mocks.sessions[2] as ReturnType<typeof session>;
+      supervisor.handleCommand({
+        type: 'prompt-child',
+        identity: resumedChild,
+        requestId: 'run-3',
+        task: { text: 'continue after resume', images: [], fileMentions: [] },
+      });
+      await vi.waitFor(() => expect(resumedSession.prompt).toHaveBeenCalledTimes(1));
+      expect(resumedSession.prompt.mock.calls[0]).toEqual(['continue after resume', undefined]);
+
+      await supervisor.shutdown();
+    } finally {
+      try {
+        rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+        rmSync(sessionDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+      } catch {
+        // Windows 临时目录句柄释放存在短延迟，忽略清理期 EPERM
+      }
+    }
+  });
+
+  it('跨模型 fork_compact：父会话带 Gemini thoughtSignature + 贴图，OpenAI 子模型首轮收到清洗文本与合规图片', async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'enso-cross-model-seed-'));
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-cross-model-session-'));
+    try {
+      writeFileSync(path.join(workspace, 'worker.ts'), 'export const ok = true;\n');
+
+      const events: AgentWorkerEvent[] = [];
+      const supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: '/tmp/agent',
+        sessionDir,
+      });
+      const geminiParentModel = {
+        api: 'google-generative-ai' as const,
+        baseUrl: 'https://gemini.test/v1',
+        apiKey: 'secret',
+        modelId: 'gemini-3-pro',
+        settingsProviderId: 'google',
+      };
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: workspace,
+        model: geminiParentModel,
+      });
+      await waitFor(events, 'parent-ready');
+
+      const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+      const pngBase64 = Buffer.from('fake-png-bytes').toString('base64');
+      parentSession.messages = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Inspect screenshot and fix worker.ts' },
+            { type: 'image', data: pngBase64, mimeType: 'image/png' },
+          ],
+        },
+        {
+          role: 'assistant',
+          thoughtSignature: 'gemini-sig-outer',
+          content: [
+            {
+              type: 'thinking',
+              thinking: 'GEMINI_HIDDEN_THOUGHT',
+              thoughtSignature: 'gemini-sig-inner',
+            },
+            { type: 'text', text: 'Checked worker.ts; ready to hand off.' },
+            {
+              type: 'toolCall',
+              id: 'call-1',
+              name: 'read',
+              arguments: { path: 'worker.ts' },
+              thoughtSignature: 'gemini-sig-call',
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'export const ok = true;' }],
+        },
+      ] as never[];
+
+      const openAiVisionModel = {
+        api: 'openai-responses' as const,
+        baseUrl: 'https://openai.test/v1',
+        apiKey: 'secret',
+        modelId: 'gpt-5-vision',
+        settingsProviderId: 'openai',
+        input: ['text', 'image'] as ('text' | 'image')[],
+      };
+      const openAiTextOnlyModel = {
+        api: 'openai-responses' as const,
+        baseUrl: 'https://openai.test/v1',
+        apiKey: 'secret',
+        modelId: 'gpt-5-text-only',
+        settingsProviderId: 'openai',
+        input: ['text'] as ('text' | 'image')[],
+      };
+
+      const makeConfig = (childModel: typeof openAiVisionModel | typeof openAiTextOnlyModel) => ({
+        typeKey: 'builtin:scout' as const,
+        displayName: 'scout',
+        description: 'Scout Agent',
+        spawnSpecId: 'spawn-scout',
+        systemPrompt: 'scout role',
+        model: childModel,
+        tools: 'all' as const,
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'scout-hash',
+      });
+
+      // 1) 支持视觉的 OpenAI 子模型：首轮透传清洗后文本 + 标准 ImageContent
+      supervisor.handleCommand({
+        type: 'spawn-child',
+        identity: child,
+        cwd: workspace,
+        config: makeConfig(openAiVisionModel),
+        seedContext: 'fork_compact',
+      });
+      await vi.waitFor(() =>
+        expect(events.some((event) => event.type === 'child-ready')).toBe(true)
+      );
+      const visionChildSession = mocks.sessions[1] as ReturnType<typeof session>;
+      supervisor.handleCommand({
+        type: 'prompt-child',
+        identity: child,
+        requestId: 'vision-run-1',
+        task: { text: 'apply the patch', images: [], fileMentions: [] },
+      });
+      await vi.waitFor(() => expect(visionChildSession.prompt).toHaveBeenCalledTimes(1));
+      const [visionPrompt, visionOpts] = visionChildSession.prompt.mock.calls[0] as [
+        string,
+        { images?: Array<{ type: string; data: string; mimeType: string }> } | undefined,
+      ];
+      expect(visionPrompt).toContain('<parent_context_seed mode="fork_compact">');
+      expect(visionPrompt).toContain('Checked worker.ts; ready to hand off.');
+      expect(visionPrompt).toContain('export const ok = true;');
+      expect(visionPrompt).not.toContain('GEMINI_HIDDEN_THOUGHT');
+      expect(visionPrompt).not.toContain('gemini-sig');
+      expect(visionOpts?.images).toEqual([
+        { type: 'image', data: pngBase64, mimeType: 'image/png' },
+      ]);
+
+      // 2) 非视觉 OpenAI 子模型（pi 目录 model.input 仅含 'text'）：图片自动降级为文本占位，不传 images 数组
+      mocks.createAgentSession.mockImplementationOnce(async (options: Record<string, unknown>) => ({
+        session: session({
+          ...options,
+          model: { ...(options.model as Record<string, unknown>), input: ['text'] },
+        }),
+      }));
+      const textOnlyChild = {
+        ...child,
+        sessionId: 'parent::cw-text-only',
+        generation: '66666666-6666-4666-8666-666666666666',
+        instanceId: '77777777-7777-4777-8777-777777777777',
+        instanceName: 'scout-77777777',
+      };
+      supervisor.handleCommand({
+        type: 'spawn-child',
+        identity: textOnlyChild,
+        cwd: workspace,
+        config: makeConfig(openAiTextOnlyModel),
+        seedContext: 'fork_compact',
+      });
+      await vi.waitFor(() =>
+        expect(events.filter((event) => event.type === 'child-ready')).toHaveLength(2)
+      );
+      const textOnlySession = mocks.sessions[2] as ReturnType<typeof session>;
+      supervisor.handleCommand({
+        type: 'prompt-child',
+        identity: textOnlyChild,
+        requestId: 'text-run-1',
+        task: { text: 'review logic', images: [], fileMentions: [] },
+      });
+      await vi.waitFor(() => expect(textOnlySession.prompt).toHaveBeenCalledTimes(1));
+      const [textOnlyPrompt, textOnlyOpts] = textOnlySession.prompt.mock.calls[0] as [
+        string,
+        unknown,
+      ];
+      expect(textOnlyPrompt).toContain('[image omitted from context: image/png');
+      expect(textOnlyPrompt).not.toContain('gemini-sig');
+      expect(textOnlyOpts).toBeUndefined();
+
+      await supervisor.shutdown();
+    } finally {
+      try {
+        rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+        rmSync(sessionDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+      } catch {
+        // Windows 临时目录句柄释放存在短延迟，忽略清理期 EPERM
+      }
+    }
+  });
 });
 
 describe('SessionSupervisor agy model switch', () => {

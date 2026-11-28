@@ -125,6 +125,7 @@ import type {
   SlashCommand,
   SpawnModelConfig,
   SubagentModelOption,
+  SubagentSeedContext,
   ThinkingLevel,
   VirtualClassifierCredentials,
 } from '@shared/types/agent';
@@ -182,6 +183,7 @@ import {
 import { enabledHotBuiltins, nextActiveToolNames } from './builtinLoadout';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
+import { buildChildContextSeed, type ChildContextSeed, type SeedImage } from './childContextSeed';
 import {
   appendSystemPromptExtension,
   SUBAGENT_CONTRACT_PROMPT,
@@ -441,6 +443,8 @@ interface ChildPluginSource {
 /** 会话工厂：父 runtime/resource/tool 配置的唯一 child 创建入口。 */
 interface SessionFactory {
   cwd: string;
+  /** 远程会话标记：构建上下文种子时不做本机磁盘 stat */
+  remote?: boolean;
   /** gate 验收命令执行器(远程会话走 ssh,本地会话走 /bin/sh) */
   runGate: (gate: string) => Promise<string>;
   agentTypes: AgentTypeSpawnConfig[];
@@ -591,6 +595,10 @@ interface ManagedSession {
   parentId?: string;
   coworkerName?: string;
   pendingRole?: string;
+  /** 子会话首轮一次性上下文种子（仅在首次 prompt 时注入一次后立即清零，不污染后续缓存前缀） */
+  pendingSeed?: ChildContextSeed;
+  /** 本地工作区已读文件账本（供子会话种子鲜度校验只读查询） */
+  readLedger?: ReadLedger;
   /** 父会话 spawn 时带了系统提示词：秘书档案改了就地换正文 */
   persona?: PersonaHolder;
   /** 最近一次会话请求原样留底：插件 fork 代理据此重放前缀，命中同一份提示缓存 */
@@ -2190,7 +2198,8 @@ export class SessionSupervisor {
           command.identity,
           command.cwd,
           command.config,
-          command.resumeFile
+          command.resumeFile,
+          command.seedContext
         );
         return;
       case 'dismiss-child': {
@@ -2264,12 +2273,14 @@ export class SessionSupervisor {
         // 只有子代理 Run（Main 带 requestBudget 标记）计数；Bot 成员等不 arm，不计数
         if (command.requestBudget) managed.requestBudget?.arm();
         else managed.requestBudget?.disarm();
-        const images = command.task.images.map((image) => ({ type: 'image' as const, ...image }));
+        const taskImages = command.task.images.map((image) => ({
+          type: 'image' as const,
+          ...image,
+        }));
+        const initial = consumeInitialPrompt(managed, command.task.text, taskImages);
+        const images = initial.images ?? [];
         void managed.session
-          .prompt(
-            consumeRole(managed, command.task.text),
-            images.length > 0 ? { images } : undefined
-          )
+          .prompt(initial.text, images.length > 0 ? { images } : undefined)
           .catch((error) => {
             this.failTurn(managed, toErrorMessage(error));
           });
@@ -3321,6 +3332,7 @@ export class SessionSupervisor {
     // coworker 用独立门(否则审批条落错 tab、allowSession 白名单跨会话泄漏)
     const factory: SessionFactory = {
       cwd,
+      remote: Boolean(remoteOps),
       runGate: (gateCommand) => runGateCommand(cwd, gateCommand, sshExecutor),
       agentTypes,
       subagentModels,
@@ -3982,6 +3994,7 @@ export class SessionSupervisor {
     if (rolePrompt && !resumeFile) managedRef.pendingRole = rolePrompt;
     if (persona) managedRef.persona = persona;
     if (refusalRetryPrompt) managedRef.refusalRetryPrompt = refusalRetryPrompt;
+    managedRef.readLedger = readLedger;
     managedRef.browser = browser;
     managedRef.memory = memory;
     const managed = managedRef;
@@ -4416,7 +4429,8 @@ export class SessionSupervisor {
     identity: ChildSessionIdentity,
     cwd: string,
     config: ResolvedAgentTypeSpawnConfig,
-    resumeFile?: string
+    resumeFile?: string,
+    seedContext?: SubagentSeedContext
   ): Promise<void> {
     const parent = this.must(identity.parent);
     const factory = parent.factory;
@@ -4531,7 +4545,24 @@ export class SessionSupervisor {
       ...(result.requestBudget ? { requestBudget: result.requestBudget } : {}),
     });
     this.attachChildPlugins(managedRef, result, Boolean(resumeFile));
-    if (!resumeFile) managedRef.pendingRole = config.systemPrompt;
+    if (!resumeFile) {
+      managedRef.pendingRole = config.systemPrompt;
+      if (seedContext && seedContext !== 'none') {
+        const seed = await buildChildContextSeed(
+          (parent.session.messages ?? []) as readonly ContextMessage[],
+          parent.readLedger,
+          {
+            mode: seedContext,
+            cwd,
+            acceptsImages: acceptsImageInput(result.session.model),
+            remote: factory.remote,
+          }
+        );
+        if (seed.text || seed.images?.length) {
+          managedRef.pendingSeed = seed;
+        }
+      }
+    }
     this.options.emit({
       type: 'child-ready',
       identity,
@@ -4557,7 +4588,8 @@ export class SessionSupervisor {
     agentTypeName?: string,
     modelName?: string,
     resumeFile?: string,
-    thinking?: ChildThinkingLevel
+    thinking?: ChildThinkingLevel,
+    seedContext?: SubagentSeedContext
   ): Promise<CoworkerInfo> {
     const parent = this.mustCurrent(parentId);
     const factory = parent.factory;
@@ -4650,9 +4682,26 @@ export class SessionSupervisor {
       ...(requestBudget ? { requestBudget } : {}),
     });
     this.attachChildPlugins(managed, { pluginTools, pluginEvents }, Boolean(resumeFile));
-    // 角色提示在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
-    if (!resumeFile && agentType?.systemPrompt) {
-      managed.pendingRole = agentType.systemPrompt;
+    // 角色提示与上下文种子在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
+    if (!resumeFile) {
+      if (agentType?.systemPrompt) {
+        managed.pendingRole = agentType.systemPrompt;
+      }
+      if (seedContext && seedContext !== 'none') {
+        const seed = await buildChildContextSeed(
+          (parent.session.messages ?? []) as readonly ContextMessage[],
+          parent.readLedger,
+          {
+            mode: seedContext,
+            cwd: factory.cwd,
+            acceptsImages: acceptsImageInput(session.model),
+            remote: factory.remote,
+          }
+        );
+        if (seed.text || seed.images?.length) {
+          managed.pendingSeed = seed;
+        }
+      }
     }
     parent.coworkers.set(name, info);
     return info;
@@ -4878,7 +4927,9 @@ export class SessionSupervisor {
       if (managed.status === 'running') {
         await this.steerTracked(managed, text);
       } else {
-        void this.promptTracked(managed, consumeRole(managed, text), {
+        const initial = consumeInitialPrompt(managed, text);
+        void this.promptTracked(managed, initial.text, {
+          ...(initial.images && initial.images.length > 0 ? { images: initial.images } : {}),
           streamingBehavior: 'followUp',
         })
           .then(() => {
@@ -5927,9 +5978,10 @@ export class SessionSupervisor {
     managed.currentTurnId = randomUUID();
     managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
-    const body = consumeRole(managed, text);
+    const initial = consumeInitialPrompt(managed, text, images);
+    const body = initial.text;
     const options = {
-      ...(images ? { images } : {}),
+      ...(initial.images ? { images: initial.images } : {}),
       streamingBehavior: 'followUp' as const,
       preflightResult: (disposition: PromptDisposition) => {
         if (disposition === 'queued') this.noteQueuedPrompt(managed, deliveryId);
@@ -7442,12 +7494,28 @@ function withPendingPlanNote(
   return note ? prependTurnNote(note, text) : text;
 }
 
-/** coworker 首条消息前缀注入角色提示,消费一次 */
-function consumeRole(managed: { pendingRole?: string }, text: string): string {
-  if (!managed.pendingRole) return text;
+/** coworker/子代理首条消息前缀注入角色提示与一次性上下文种子，各自只消费一次 */
+function consumeInitialPrompt(
+  managed: { pendingRole?: string; pendingSeed?: ChildContextSeed },
+  text: string,
+  images?: SeedImage[]
+): { text: string; images?: SeedImage[] } {
   const role = managed.pendingRole;
   managed.pendingRole = undefined;
-  return `<role>\n${role}\n</role>\n\n${text}`;
+  const seed = managed.pendingSeed;
+  managed.pendingSeed = undefined;
+
+  const parts: string[] = [];
+  if (role) parts.push(`<role>\n${role}\n</role>`);
+  if (seed?.text) parts.push(seed.text);
+  parts.push(text);
+  const body = parts.join('\n\n');
+
+  const seedImages = seed?.images;
+  if (!seedImages || seedImages.length === 0) {
+    return { text: body, ...(images !== undefined ? { images } : {}) };
+  }
+  return { text: body, images: [...seedImages, ...(images ?? [])] };
 }
 
 const toErrorMessage = (error: unknown): string =>

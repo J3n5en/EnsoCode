@@ -46,6 +46,43 @@ describe('ReadLedger', () => {
     expect(await ledger.check('a.txt')).toBeUndefined();
   });
 
+  it('getMeta / listSeen / snapshot 提供只读查询且不泄露内部状态', async () => {
+    const file = path.join(dir, 'a.txt');
+    const link = path.join(dir, 'link.txt');
+    writeFileSync(file, 'hello');
+    let hasSymlink = false;
+    try {
+      symlinkSync(file, link);
+      hasSymlink = true;
+    } catch {
+      // Windows 未开启开发者模式时无软链权限
+    }
+    const ledger = new ReadLedger(dir);
+    await ledger.record('a.txt');
+
+    const byRel = await ledger.getMeta('a.txt');
+    const byAbs = await ledger.getMeta(file);
+    const byAt = await ledger.getMeta('@a.txt');
+    expect(byRel).toBeDefined();
+    expect(byAbs).toEqual(byRel);
+    expect(byAt).toEqual(byRel);
+    if (hasSymlink) {
+      expect(await ledger.getMeta('link.txt')).toEqual(byRel);
+    }
+    expect(ledger.listSeen()).toHaveLength(1);
+
+    const snap = ledger.snapshot();
+    expect(snap.size).toBe(1);
+    const realKey = ledger.listSeen()[0]!;
+    expect(snap.get(realKey)).toEqual(byRel);
+    // 修改返回的快照副本不影响账本本身
+    (snap as Map<string, { mtimeMs: number; size: number }>).clear();
+    expect(ledger.listSeen()).toHaveLength(1);
+    // 删除文件后仍可按规范路径查到历史元数据
+    rmSync(file);
+    expect(await ledger.getMeta(realKey)).toEqual(byRel);
+  });
+
   it('withPriorRead：未读即拒且不执行底层工具，按工具 cwd 解析相对路径', async () => {
     writeFileSync(path.join(dir, 'a.txt'), 'x');
     const ledger = new ReadLedger('/nonexistent');

@@ -1979,6 +1979,7 @@ async function runAgentControl(
         ...(request.agentType ? { agentType: request.agentType } : {}),
         ...(request.model ? { model: request.model } : {}),
         ...(request.thinking ? { thinking: request.thinking } : {}),
+        ...(request.seedContext ? { seedContext: request.seedContext } : {}),
         ...(request.schema !== undefined ? { schema: request.schema } : {}),
         ...(request.gate ? { gate: request.gate } : {}),
       });
@@ -2286,6 +2287,7 @@ export function registerAgentHandlers(): void {
           ...(input.agentType ? { agentType: input.agentType } : {}),
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinking ? { thinking: input.thinking } : {}),
+          ...(input.seedContext ? { seedContext: input.seedContext } : {}),
         }),
       prompt: async (input) =>
         promptChildSession(
