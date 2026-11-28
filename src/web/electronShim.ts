@@ -70,6 +70,21 @@ const writes = new RemoteWriteClient();
 const upserts = new UpsertDecoder();
 const shared = new Map<string, Promise<unknown>>();
 
+const OPTIMISTIC_READ_STORE_KEY: Readonly<Record<string, string>> = {
+  [IPC_CHANNELS.SETTINGS_READ]: 'enso-settings',
+  [IPC_CHANNELS.CONVERSATIONS_READ]: 'enso-conversations',
+};
+const OPTIMISTIC_RESYNC_EVENT: Readonly<Record<string, string>> = {
+  [IPC_CHANNELS.SETTINGS_READ]: IPC_CHANNELS.SETTINGS_CHANGED,
+  [IPC_CHANNELS.CONVERSATIONS_READ]: IPC_CHANNELS.CONVERSATIONS_RESYNC,
+};
+/** 本次 iframe 生命周期内已完成首次乐观返回的通道 key（同一通道仅首读走乐观，重读直接走线上校对） */
+const optimisticServedKeys = new Set<string>();
+/** 正在后台校对中的持久化 store 名：校对落地前拒收对应 SETTINGS_WRITE_KEY，防止用本地旧缓存覆盖宿主新状态 */
+const pendingOptimisticStores = new Set<string>();
+/** 后台校对刚拿到变更后暂存的新鲜 JSON，紧随其后的 resync 重读可直接消费一次，免再打一轮 RPC */
+const optimisticFreshJson = new Map<string, string>();
+
 const unavailable = (channel: string) =>
   new Error(`Channel '${channel}' is not available remotely`);
 
@@ -92,9 +107,49 @@ async function fetchCachedWithPrefetch(
   return rawInvoke(channel, withIfNone(encodedArgs, hash));
 }
 
+function emitLocalChannel(channel: string, args: unknown[]): void {
+  const listeners = channelListeners.get(channel);
+  if (!listeners) return;
+  for (const fn of [...listeners]) fn(...args);
+}
+
+function startOptimisticVerify(
+  channel: string,
+  key: string,
+  encodedArgs: unknown[],
+  storeKey: string,
+  cachedHash: string
+): void {
+  pendingOptimisticStores.add(storeKey);
+  void reads
+    .readJson(key, (hash) => fetchCachedWithPrefetch(channel, key, encodedArgs, hash))
+    .then((freshJson) => {
+      const latestHash = host.__ensoRemoteReads?.get(key)?.h;
+      const changed = latestHash !== undefined && latestHash !== cachedHash;
+      if (!changed) {
+        const expanded = () => expandRemoteWireResult(channel, JSON.parse(freshJson));
+        const seed = writeSeedOf(channel, expanded());
+        if (seed) writes.seedLazy(seed.name, () => writeSeedOf(channel, expanded())?.value);
+      } else {
+        optimisticFreshJson.set(key, freshJson);
+      }
+      pendingOptimisticStores.delete(storeKey);
+      remoteBridge.optimistic?.onVerified?.(channel, changed);
+      if (changed) {
+        const eventChannel = OPTIMISTIC_RESYNC_EVENT[channel];
+        if (eventChannel) emitLocalChannel(eventChannel, []);
+      }
+    })
+    .catch(() => {
+      pendingOptimisticStores.delete(storeKey);
+      remoteBridge.optimistic?.onVerified?.(channel, false);
+    });
+}
+
 async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown> {
   const encoded = encodeRemoteValue(args) as unknown[];
   if (channel === IPC_CHANNELS.SETTINGS_WRITE_KEY && typeof args[0] === 'string') {
+    if (pendingOptimisticStores.has(args[0])) return false;
     // 第三个参数是会话写回的确认号，丢了宿主会当它什么补丁都没应用
     return writes.write(args[0], args[1] === undefined ? undefined : encoded[1], async (arg) =>
       decodeRemoteValue(
@@ -108,6 +163,27 @@ async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown>
   }
   const key = `${channel}\0${JSON.stringify(encoded)}`;
   if (CACHED_READS.has(channel)) {
+    const fresh = optimisticFreshJson.get(key);
+    if (fresh !== undefined) {
+      optimisticFreshJson.delete(key);
+      const expanded = () => expandRemoteWireResult(channel, JSON.parse(fresh));
+      const result = expanded();
+      const seed = writeSeedOf(channel, result);
+      if (seed) {
+        writes.seedLazy(seed.name, () => writeSeedOf(channel, expanded())?.value);
+      }
+      return decodeRemoteValue(result);
+    }
+    const optimisticStore = OPTIMISTIC_READ_STORE_KEY[channel];
+    if (optimisticStore && remoteBridge.optimistic?.enabled && !optimisticServedKeys.has(key)) {
+      const cached = host.__ensoRemoteReads?.get(key);
+      if (cached) {
+        optimisticServedKeys.add(key);
+        startOptimisticVerify(channel, key, encoded, optimisticStore, cached.h);
+        remoteBridge.optimistic.onHydrated?.(channel);
+        return decodeRemoteValue(expandRemoteWireResult(channel, JSON.parse(cached.json)));
+      }
+    }
     const json = await reads.readJson(key, (hash) =>
       fetchCachedWithPrefetch(channel, key, encoded, hash)
     );

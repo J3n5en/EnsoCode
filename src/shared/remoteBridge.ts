@@ -24,6 +24,15 @@ export interface RemotePrefetchController {
   take(key: string, expectedHash: string): Promise<unknown> | null;
 }
 
+export interface RemoteOptimisticController {
+  /** 开启冷启动乐观缓存水合：仅在父壳有持久化读缓存时启用 */
+  enabled: boolean;
+  /** 首次从本地缓存乐观返回核心只读通道时通知父壳 */
+  onHydrated?(channel: string): void;
+  /** 后台与宿主校对完成后通知父壳；changed=true 表示线上版本与缓存不同 */
+  onVerified?(channel: string, changed: boolean): void;
+}
+
 export interface RemoteBridge {
   /** 宿主平台（快捷键、路径展示随宿主） */
   platform: string;
@@ -31,6 +40,8 @@ export interface RemoteBridge {
   leader(): boolean;
   /** 启动只读预取控制器：命中 rpc-hello prefetch 时免发首轮重读 RPC */
   prefetch?: RemotePrefetchController;
+  /** 乐观缓存水合控制：启动时先用本地缓存渲染，后台校对前禁止写回对应设置键 */
+  optimistic?: RemoteOptimisticController;
   /** 离开桌面模式回手机版；只有手机壳提供 */
   exitDesk?(): void;
   /** 打开壳里的「电脑与通知」抽屉（推送、已配对电脑）；只有新版手机壳提供 */

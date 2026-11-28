@@ -228,6 +228,7 @@ async function main(): Promise<void> {
   /** 换构建整页重载中：旧构建的快照和只读缓存不再有用，别在离开时写存储 */
   let leaving = false;
   let settingsLoaded = false;
+  let optimisticHydrated = false;
   let snapshot: HTMLIFrameElement | null = null;
   let snapshotTimer: ReturnType<typeof setInterval> | null = null;
   let snapshotBlobs: string[] = [];
@@ -379,6 +380,7 @@ async function main(): Promise<void> {
         void (async () => {
           await keepSnapshot();
           settingsLoaded = false;
+          optimisticHydrated = false;
           await coverWithSnapshot();
           if (iframes.main === iframe) iframe?.contentWindow?.location.reload();
         })();
@@ -415,6 +417,18 @@ async function main(): Promise<void> {
           });
         }
         return pending;
+      },
+    },
+    optimistic: {
+      enabled: true,
+      onHydrated: (channel) => {
+        if (channel === IPC_CHANNELS.SETTINGS_READ) optimisticHydrated = true;
+      },
+      onVerified: (channel) => {
+        if (channel === IPC_CHANNELS.SETTINGS_READ && !settingsLoaded) {
+          settingsLoaded = true;
+          void markReady(version);
+        }
       },
     },
     exitDesk() {
@@ -639,6 +653,7 @@ async function main(): Promise<void> {
         now: Date.now(),
         liveChars: liveChars(),
         settingsLoaded,
+        optimisticHydrated,
         liveLoading: Boolean(
           iframes.main?.contentDocument?.querySelector('[data-timeline-loading]')
         ),
@@ -775,6 +790,7 @@ async function main(): Promise<void> {
   use(current);
   dropSnapshot();
   settingsLoaded = false;
+  optimisticHydrated = false;
   attached.main?.close();
   delete attached.main;
   iframes.main?.remove();

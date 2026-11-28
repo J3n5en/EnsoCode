@@ -168,6 +168,75 @@ describe('snapshotReady', () => {
       })
     ).toBe(true);
   });
+
+  it('乐观水合已就绪且正文达标时不必苦等网络完成即可提前揭开快照；正文不足仍继续盖着', () => {
+    expect(
+      snapshotReady({
+        ...base,
+        settingsLoaded: false,
+        optimisticHydrated: true,
+        liveChars: 4200,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(true);
+    // 离线时仍保持快照，给出离线时间提示，不提前暴露未连网的空操作态
+    expect(
+      snapshotReady({
+        ...base,
+        settingsLoaded: false,
+        optimisticHydrated: true,
+        liveChars: 4200,
+        liveLoading: false,
+        hostOnline: false,
+      })
+    ).toBe(false);
+    // 实时时间线仍在加载或文字不足：即使乐观水合完成也继续盖着
+    expect(
+      snapshotReady({
+        ...base,
+        settingsLoaded: false,
+        optimisticHydrated: true,
+        liveChars: 4200,
+        liveLoading: true,
+        hostOnline: true,
+      })
+    ).toBe(false);
+    expect(
+      snapshotReady({
+        ...base,
+        settingsLoaded: false,
+        optimisticHydrated: true,
+        liveChars: 150,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(false);
+  });
+
+  it('tracker 在 optimisticHydrated 提前放行时，文字达标立即揭开', () => {
+    const step = createSnapshotTracker(0, 5000);
+    expect(
+      step({
+        now: 100,
+        liveChars: 50,
+        settingsLoaded: false,
+        optimisticHydrated: true,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(false);
+    expect(
+      step({
+        now: 200,
+        liveChars: 4200,
+        settingsLoaded: false,
+        optimisticHydrated: true,
+        liveLoading: false,
+        hostOnline: true,
+      })
+    ).toBe(true);
+  });
 });
 
 describe('offlineSnapshotNote', () => {
