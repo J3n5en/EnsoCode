@@ -357,11 +357,15 @@ function emit(link: RemoteLink, command: Extract<RemoteToHost, { type: 'rpc-send
 
 async function asset(link: RemoteLink, command: Extract<RemoteToHost, { type: 'asset-get' }>) {
   const reply = (status: number, mime: string, body: Uint8Array) =>
-    link.send({ type: 'asset', id: command.id, status, mime, data: encodeBase64(body) });
+    link.v2
+      ? link.send({ type: 'asset', id: command.id, status, mime, bin: body })
+      : link.send({ type: 'asset', id: command.id, status, mime, data: encodeBase64(body) });
   if (command.path === 'meta') {
     const root = rendererRoot();
     const version = await rendererBuildId(root, app.getVersion());
-    const download = version ? await downloadEstimate(root, link.gzip === true, version) : 0;
+    const download = version
+      ? await downloadEstimate(root, link.gzip === true, version, link.v2 === true)
+      : 0;
     const bundle = version ? (await bundleManifest(root, version))?.id : undefined;
     const body = JSON.stringify(
       version

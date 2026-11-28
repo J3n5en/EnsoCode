@@ -13,12 +13,15 @@ import {
   isConnectStuck,
   isHostRemoteFrame,
   isReplayHello,
+  openFrame,
   type PairedDevice,
   type PhoneToHost,
   parsePairUri,
   RELAY_CONNECT_TIMEOUT_MS,
   type RemoteToHost,
   revokePairing,
+  sealFrame,
+  sealFrameV2,
   shouldReplaceOnNudge,
   toBase64Url,
   toWebSocketUrl,
@@ -42,6 +45,7 @@ import {
 } from './nodeStore';
 import { PAIR_DIRECT_ENABLED } from './pairDirectConfig';
 import { isDirectPeerAvailable, mainDirectPeerFactory, preloadDirectPeer } from './pairDirectPeer';
+import { nodeFrameCodec } from './pairFrameCodec';
 import { startPairNetworkWatch } from './pairNetworkWatch';
 import { seedRelayHostCache } from './pairRelayLookup';
 import { openPairRelayWebSocket } from './pairRelayOpen';
@@ -73,6 +77,8 @@ interface Connection {
   generation: number;
   probeNonce: number;
   probeSentAt: number | null;
+  /** 对端支持二进制加密帧 v2 */
+  hostFrameV2: boolean;
   /** 直连和中继共用：一帧只封一次 */
   replay: FrameReplay;
   /** 直连和中继共用的收帧链：解密是异步的，并发解密会让后到的小帧越过前面的大帧 */
@@ -306,7 +312,14 @@ function openConnection(node: RemoteNode): void {
     generation: 0,
     probeNonce: 0,
     probeSentAt: null,
-    replay: createFrameReplay(),
+    hostFrameV2: false,
+    replay: createFrameReplay(
+      (key, payload, nonce) =>
+        conn.hostFrameV2
+          ? sealFrameV2(key, payload, { nonce, codec: nodeFrameCodec })
+          : sealFrame(key, payload, nonce),
+      (key, frame) => openFrame(key, frame, { codec: nodeFrameCodec })
+    ),
     receiveQueue: Promise.resolve(),
   };
   conn.direct = new DirectLink({
@@ -492,6 +505,8 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'host-info': {
       conn.hostname = payload.hostname;
       conn.appVersion = payload.appVersion;
+      conn.hostFrameV2 =
+        Array.isArray(payload.capabilities) && payload.capabilities.includes('frame-v2');
       // 默认「节点 N」换成对方主机名（用户改过名的不动）
       const next = adoptHostname(loadNodes(), conn.node.nodeId, payload.hostname);
       const updated = next.find((n) => n.nodeId === conn.node.nodeId);

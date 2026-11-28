@@ -34,6 +34,7 @@ import {
   parsePairSessionSync,
   RELAY_CONNECT_TIMEOUT_MS,
   sealFrame,
+  sealFrameV2,
   shouldReplaceOnNudge,
   toWebSocketUrl,
   VISIBILITY_PROBE_MS,
@@ -146,7 +147,12 @@ export class PairClient {
   private heartbeat: Heartbeat | null = null;
   private contentKey: Uint8Array;
   /** 直连和中继共用这一份：帧只封一次，再选路 */
-  private replay: FrameReplay = createFrameReplay(sealFrame, openFrame);
+  private hostFrameV2 = false;
+  private replay: FrameReplay = createFrameReplay(
+    (key, payload, nonce) =>
+      this.hostFrameV2 ? sealFrameV2(key, payload, { nonce }) : sealFrame(key, payload, nonce),
+    (key, frame) => openFrame(key, frame)
+  );
   /**
    * 防重放刚因 host-online 重置：此时发的帧不带锁定前缀。经直连会先于中继的 peer-joined
    * 到达 host，被它仍锁定的旧前缀静默丢弃；这几秒改走中继，保证排在 peer-joined 之后。
@@ -231,6 +237,10 @@ export class PairClient {
       onRtt: (ms) => this.events.onRtt?.(ms),
       onNeedRelayProbe: () => this.sendRelayProbe(),
     });
+  }
+
+  get hostV2(): boolean {
+    return this.hostFrameV2;
   }
 
   transport(): DirectTransport {
@@ -549,6 +559,8 @@ export class PairClient {
         this.events.onPushConfig?.(payload.vapidPublicKey);
         break;
       case 'host-info':
+        this.hostFrameV2 =
+          Array.isArray(payload.capabilities) && payload.capabilities.includes('frame-v2');
         this.direct.hostInfo(payload);
         this.events.onReadOnly?.(payload.readOnly === true);
         this.events.onRemoteDesktop?.(payload.remoteDesktop === true);
@@ -877,7 +889,12 @@ export class PairClient {
     if (this.closed || this.revoked || this.roomPrimed) return;
     if (this.ws?.readyState !== 1) return;
     this.roomPrimed = true;
-    this.send(this.desk ? { type: 'snapshot', desk: true } : { type: 'snapshot' });
+    const canV2 = typeof DecompressionStream === 'function';
+    this.send(
+      this.desk
+        ? { type: 'snapshot', desk: true, ...(canV2 ? { v2: true } : {}) }
+        : { type: 'snapshot', ...(canV2 ? { v2: true } : {}) }
+    );
     if (this.subscribedId) this.subscribe(this.subscribedId);
   }
 

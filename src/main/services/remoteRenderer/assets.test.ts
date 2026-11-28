@@ -82,7 +82,7 @@ describe('first-load download estimate', () => {
     ]);
   });
 
-  it('estimates wire size, smaller when the browser accepts gzip', async () => {
+  it('estimates wire size, smaller when the browser accepts gzip or v2 binary', async () => {
     const root = fixture();
     writeFileSync(
       join(root, 'index.html'),
@@ -91,9 +91,12 @@ describe('first-load download estimate', () => {
     writeFileSync(join(root, 'assets', 'big.js'), 'const a = 1;\n'.repeat(20_000));
     const plain = await downloadEstimate(root, false);
     const packed = await downloadEstimate(root, true);
+    const v2Packed = await downloadEstimate(root, true, 'b1', true);
     expect(plain).toBeGreaterThan(20_000 * 13);
     expect(packed).toBeGreaterThan(0);
     expect(packed).toBeLessThan(plain / 5);
+    expect(v2Packed).toBeGreaterThan(0);
+    expect(v2Packed).toBeLessThan(packed);
   });
 });
 

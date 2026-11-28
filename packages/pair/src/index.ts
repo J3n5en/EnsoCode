@@ -4,13 +4,19 @@
 export {
   type BoxedContentKey,
   boxContentKey,
+  FRAME_V2_GZIP_MIN_BYTES,
+  type FrameCodec,
   generateContentKey,
   generatePairKeypair,
+  isIncompressibleMime,
+  MAX_DECOMPRESSED_BYTES,
   openBoxedContentKey,
   openFrame,
   PairCryptoError,
   type PairKeypair,
+  type SealFrameV2Options,
   sealFrame,
+  sealFrameV2,
 } from './crypto';
 export { createBrowserDirectPeerFactory } from './direct/browserPeer';
 export {
@@ -76,6 +82,7 @@ export {
   type DirectCandidate,
   type DirectCapability,
   type HostAppearance,
+  type HostCapability,
   type HostToPhone,
   type IceServerEntry,
   isPhoneCommand,
@@ -113,6 +120,7 @@ export {
   toWebSocketUrl,
 } from './relay';
 export {
+  createRemoteBinaryPartAssembler,
   createRemoteOrderedStream,
   createRemotePartAssembler,
   decodeBase64,
@@ -123,14 +131,19 @@ export {
   gzipRemoteJson,
   type HostToRemote,
   isHostRemoteFrame,
+  isRemoteBinaryPart,
   isRemotePart,
+  REMOTE_BIN_PART_BYTES,
   REMOTE_GZIP_MIN_CHARS,
   REMOTE_PART_CHARS,
+  type RemoteBinaryPart,
+  type RemoteBinaryPartAssembler,
   type RemoteGzip,
   type RemoteKind,
   type RemotePart,
   type RemotePartAssembler,
   type RemoteToHost,
+  splitRemoteBinaryFrame,
   splitRemoteFrame,
 } from './remote';
 export { createFrameReplay, type FrameReplay, isReplayHello } from './replay';

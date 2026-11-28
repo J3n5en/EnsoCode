@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateContentKey, sealFrame } from './crypto';
+import { generateContentKey, openFrame, sealFrame, sealFrameV2 } from './crypto';
 import { createFrameReplay } from './replay';
 
 describe('连接前缀与计数器', () => {
@@ -140,3 +140,53 @@ describe('连接前缀与计数器', () => {
 function counterOf(frame: Uint8Array): number {
   return (frame[9] << 24) | (frame[10] << 16) | (frame[11] << 8) | frame[12];
 }
+
+describe('FrameReplay 搭配二进制加密帧 v2', () => {
+  it('二进制 bin 帧同样完成质询锁定、防重放与乱序接收', async () => {
+    const key = generateContentKey();
+    const host = createFrameReplay(
+      (k, p, n) => sealFrameV2(k, p, { nonce: n }),
+      (k, f) => openFrame(k, f)
+    );
+    const phone = createFrameReplay(
+      (k, p, n) => sealFrameV2(k, p, { nonce: n }),
+      (k, f) => openFrame(k, f)
+    );
+
+    const hostInfo = await host.seal(key, { type: 'host-info', hostname: 'mac' });
+    expect(hostInfo[0]).toBe(2);
+    expect(await phone.open(key, hostInfo)).toEqual({ type: 'host-info', hostname: 'mac' });
+    expect(await host.open(key, await phone.seal(key, { type: 'snapshot' }))).toEqual({
+      type: 'snapshot',
+    });
+
+    const binA = new Uint8Array([10, 20, 30]);
+    const binB = new Uint8Array([40, 50]);
+    const f1 = await host.seal(key, {
+      type: 'asset',
+      id: 1,
+      status: 200,
+      mime: 'image/png',
+      bin: binA,
+    });
+    const f2 = await host.seal(key, {
+      type: 'asset',
+      id: 2,
+      status: 200,
+      mime: 'image/png',
+      bin: binB,
+    });
+    expect(f1[0]).toBe(2);
+    expect(f2[0]).toBe(2);
+
+    const out2 = (await phone.open(key, f2)) as { id: number; bin: Uint8Array };
+    expect(out2.id).toBe(2);
+    expect(Buffer.from(out2.bin).equals(Buffer.from(binB))).toBe(true);
+
+    const out1 = (await phone.open(key, f1)) as { id: number; bin: Uint8Array };
+    expect(out1.id).toBe(1);
+    expect(Buffer.from(out1.bin).equals(Buffer.from(binA))).toBe(true);
+
+    expect(await phone.open(key, f1)).toBeUndefined();
+  });
+});

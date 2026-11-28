@@ -1,5 +1,5 @@
 import type { HostToRemote, RemoteToHost } from '@enso/pair';
-import { encodeBase64, splitRemoteFrame } from '@enso/pair';
+import { encodeBase64, splitRemoteBinaryFrame, splitRemoteFrame } from '@enso/pair';
 import { describe, expect, it, vi } from 'vitest';
 import { NodeRemoteTunnel } from './tunnel';
 
@@ -28,7 +28,7 @@ describe('NodeRemoteTunnel', () => {
     expect(sent).toEqual([]);
     tunnel.setOnline(true);
     expect(sent).toEqual([
-      { type: 'remote-ack', bytes: 0, gzip: true },
+      { type: 'remote-ack', bytes: 0, gzip: true, v2: true },
       { type: 'rpc-hello', cid, kind: 'settings', seq: 0, page: expect.any(String) },
     ]);
     tunnel.receive(ready(cid));
@@ -171,5 +171,33 @@ describe('NodeRemoteTunnel', () => {
     tunnel.close();
     await expect(pending).rejects.toThrow();
     await expect(asset).resolves.toMatchObject({ status: 503 });
+  });
+
+  it('支持 asset.bin 与 bpart 二进制分片重组', async () => {
+    const { sent, tunnel } = setup();
+    const a1 = tunnel.fetchAsset('r/bin');
+    const a2 = tunnel.fetchAsset('r/js');
+    tunnel.setOnline(true);
+    const reqs = sent.filter(
+      (frame): frame is Extract<RemoteToHost, { type: 'asset-get' }> => frame.type === 'asset-get'
+    );
+    const raw = new Uint8Array([9, 8, 7]);
+    tunnel.receive({
+      type: 'asset',
+      id: reqs[0]!.id,
+      status: 200,
+      mime: 'application/octet-stream',
+      bin: raw,
+    });
+    expect(Buffer.from((await a1).body).equals(Buffer.from(raw))).toBe(true);
+
+    const js = new TextEncoder().encode('export const n = 1;\n'.repeat(200));
+    const parts = await splitRemoteBinaryFrame(
+      { type: 'asset', id: reqs[1]!.id, status: 200, mime: 'text/javascript', bin: js },
+      () => 'bp-node',
+      { limit: 150 }
+    );
+    for (const part of parts) tunnel.receive(part as HostToRemote);
+    expect(Buffer.from((await a2).body).equals(Buffer.from(js))).toBe(true);
   });
 });
