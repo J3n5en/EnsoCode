@@ -13,6 +13,7 @@ import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
 import { installKeyboardInset } from '../keyboard';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
+import { hasNativeDeskProxy, registerNativeDeskFetcher } from '../nativeBridge';
 import { isStandalone, PHONE_PUSH_ENABLED_KEY, pushAvailability, subscribePush } from '../push';
 import { acceptPushSubscription, pushDeps, turnPushOff, turnPushOn } from '../pushToggle';
 import { watchShellUpdate } from '../shellUpdate';
@@ -160,7 +161,8 @@ function showState(state: ConnState): void {
 
 async function main(): Promise<void> {
   (window as { __deskBoot?: boolean }).__deskBoot = true;
-  if (!('serviceWorker' in navigator)) {
+  const nativeDeskProxy = hasNativeDeskProxy();
+  if (!nativeDeskProxy && !('serviceWorker' in navigator)) {
     splash('当前浏览器不支持 Service Worker，无法使用完整版。');
     return;
   }
@@ -213,9 +215,11 @@ async function main(): Promise<void> {
   const launchSessionId =
     urlSession ?? (await withTimeout(takeStashedSessionId(), STORAGE_TIMEOUT_MS, null));
 
-  await ensureDeskWorker(navigator.serviceWorker, (stage) => {
-    bootStage = stage;
-  });
+  if (!nativeDeskProxy) {
+    await ensureDeskWorker(navigator.serviceWorker, (stage) => {
+      bootStage = stage;
+    });
+  }
   bootStage = '启动隧道';
 
   const frames = $('frames');
@@ -234,16 +238,18 @@ async function main(): Promise<void> {
   let snapshotBlobs: string[] = [];
 
   // 壳是旧版本缓存出来的：renderer 还没起来就立即换新（旧壳配新桌面起不来时自愈），否则等回前台
-  watchShellUpdate({
-    container: navigator.serviceWorker,
-    doc: document,
-    storage: sessionStorage,
-    canReloadNow: () => !settingsLoaded && !stopped,
-    reload: () => {
-      leaveGuard?.release();
-      location.reload();
-    },
-  });
+  if (!nativeDeskProxy && 'serviceWorker' in navigator) {
+    watchShellUpdate({
+      container: navigator.serviceWorker,
+      doc: document,
+      storage: sessionStorage,
+      canReloadNow: () => !settingsLoaded && !stopped,
+      reload: () => {
+        leaveGuard?.release();
+        location.reload();
+      },
+    });
+  }
 
   let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
   const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
@@ -527,21 +533,28 @@ async function main(): Promise<void> {
     return asset;
   };
 
-  navigator.serviceWorker.addEventListener('message', (event) => {
-    const data = event.data as { type?: unknown; path?: unknown; sessionId?: unknown } | null;
-    if (data?.type === 'open-session') {
-      const sessionId = parseSessionId(data.sessionId);
-      if (sessionId) focusSession(sessionId);
-      return;
-    }
-    const port = event.ports[0];
-    if (data?.type !== 'desk-fetch' || typeof data.path !== 'string' || !port) return;
-    const path = data.path;
-    void (path.startsWith('li/') ? fetchDeskImage(path) : fetchDeskAsset(path)).then((asset) => {
-      const body = asset.body.slice().buffer;
-      port.postMessage({ status: asset.status, mime: asset.mime, body }, [body]);
+  const fetchDeskResource = (path: string): Promise<DeskAsset> =>
+    path.startsWith('li/') ? fetchDeskImage(path) : fetchDeskAsset(path);
+
+  if (nativeDeskProxy) {
+    registerNativeDeskFetcher(fetchDeskResource);
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const data = event.data as { type?: unknown; path?: unknown; sessionId?: unknown } | null;
+      if (data?.type === 'open-session') {
+        const sessionId = parseSessionId(data.sessionId);
+        if (sessionId) focusSession(sessionId);
+        return;
+      }
+      const port = event.ports[0];
+      if (data?.type !== 'desk-fetch' || typeof data.path !== 'string' || !port) return;
+      void fetchDeskResource(data.path).then((asset) => {
+        const body = asset.body.slice().buffer;
+        port.postMessage({ status: asset.status, mime: asset.mime, body }, [body]);
+      });
     });
-  });
+  }
 
   /** 某个构建曾完整起来过（资源都在 SW 缓存里）：可以不等宿主，直接起 renderer */
   const cachedBuild = async (meta: DeskMeta): Promise<boolean> => {
