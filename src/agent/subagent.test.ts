@@ -152,6 +152,45 @@ describe('subagent unified control', () => {
     await expect(run({ operation: 'list', limit: 0 })).rejects.toThrow(/limit: integer 1-100/);
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it('seed_context 仅在 spawn 接受白名单枚举并透传为 seedContext，非法值和非 spawn 均拒绝', async () => {
+    const invoke = vi.fn(async (request: AgentControlToolRequest) => ({
+      ok: true as const,
+      value: request,
+    }));
+    const tool = createUnifiedSubagentTool({ agentTypes: [], models: [], invoke });
+    const run = (params: Record<string, unknown>) =>
+      tool.execute('call', params, undefined, undefined, {} as never);
+
+    // 默认不传 seed_context 时不附加 seedContext 字段（向后兼容）
+    await run({ operation: 'spawn', description: 'd', prompt: 'p' });
+    expect(invoke).toHaveBeenLastCalledWith(
+      { operation: 'spawn', mode: 'task', description: 'd', prompt: 'p', wait: false },
+      undefined
+    );
+
+    for (const seed of ['none', 'prior_reads', 'fork_compact', 'fork'] as const) {
+      await run({ operation: 'spawn', description: 'd', prompt: 'p', seed_context: seed });
+      expect(invoke).toHaveBeenLastCalledWith(
+        expect.objectContaining({ operation: 'spawn', seedContext: seed }),
+        undefined
+      );
+    }
+
+    invoke.mockClear();
+    await expect(
+      run({ operation: 'spawn', description: 'd', prompt: 'p', seed_context: 'raw_messages' })
+    ).rejects.toThrow(/seed_context: none\|prior_reads\|fork_compact/);
+    await expect(
+      run({ operation: 'send', agentId: 'a1', message: 'hi', seed_context: 'prior_reads' })
+    ).rejects.toThrow(/seed_context is only supported for operation:"spawn"/);
+    expect(invoke).not.toHaveBeenCalled();
+
+    const guidelines = (tool.promptGuidelines ?? []).join('\n');
+    expect(guidelines).toContain('seed_context');
+    expect(guidelines).toContain('"prior_reads"');
+    expect(guidelines).toContain('"fork_compact"');
+  });
 });
 
 describe('CoworkerIdleReminder', () => {

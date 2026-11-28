@@ -84,6 +84,7 @@ import {
   type SessionReloadResult,
   type SpawnModelConfig,
   type SubagentModelOption,
+  type SubagentSeedContext,
   type ThinkingLevel,
   type TitleSummaryInput,
   type VirtualClassifierCredentials,
@@ -2272,7 +2273,8 @@ export function spawnChildSession(
   identity: ChildSessionIdentity,
   cwd: string,
   config: ResolvedAgentTypeSpawnConfig,
-  resumeFile?: string
+  resumeFile?: string,
+  seedContext?: SubagentSeedContext
 ): { ok: boolean; error?: string } {
   if (resumeFile && !existsSync(resumeFile)) {
     return { ok: false, error: 'coworker 会话文件已丢失，无法恢复' };
@@ -2283,6 +2285,7 @@ export function spawnChildSession(
     cwd,
     config,
     ...(resumeFile ? { resumeFile } : {}),
+    ...(seedContext ? { seedContext } : {}),
   });
 }
 

@@ -9,6 +9,11 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
  * edit / apply_patch 靠原文匹配天然防陈旧，不拦，只在成功后刷新记录。
  * 按 realpath 建键，相对 / 绝对 / @ 前缀 / 软链接都归到同一文件；任何读取都算数（大文件不可能全读）。
  */
+export interface ReadLedgerMeta {
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
 export class ReadLedger {
   private readonly seen = new Map<string, { mtimeMs: number; size: number }>();
 
@@ -18,6 +23,21 @@ export class ReadLedger {
     let p = filePath.trim().replace(/^@/, '');
     if (p === '~' || p.startsWith('~/')) p = path.join(homedir(), p.slice(1));
     return path.resolve(cwd, p);
+  }
+
+  /** 只读查询某路径在会话中最近一次读/写记录的元数据（不修改账本） */
+  async getMeta(filePath: string, cwd?: string): Promise<ReadLedgerMeta | undefined> {
+    const direct = this.seen.get(filePath);
+    if (direct) return { ...direct };
+    const resolved = this.resolve(filePath, cwd);
+    try {
+      const real = await realpath(resolved);
+      const entry = this.seen.get(real);
+      return entry ? { ...entry } : undefined;
+    } catch {
+      const entry = this.seen.get(resolved);
+      return entry ? { ...entry } : undefined;
+    }
   }
 
   async record(filePath: string, cwd?: string): Promise<void> {

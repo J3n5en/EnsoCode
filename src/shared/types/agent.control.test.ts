@@ -25,10 +25,23 @@ describe('agent control tool protocol', () => {
         mode: 'task',
         description: 'review',
         prompt: 'review it',
+        seedContext: 'prior_reads',
         wait: false,
         gate: { commandRef: 'tests' },
       })
     ).not.toBeNull();
+    for (const seedContext of ['none', 'prior_reads', 'fork_compact', 'fork'] as const) {
+      expect(
+        parseAgentControlToolRequest({
+          operation: 'spawn',
+          mode: 'coworker',
+          description: 'build',
+          prompt: 'implement feature',
+          seedContext,
+          wait: false,
+        })
+      ).toMatchObject({ operation: 'spawn', seedContext });
+    }
     expect(
       parseAgentControlToolRequest({
         operation: 'send',
@@ -94,6 +107,22 @@ describe('agent control tool protocol', () => {
         prompt: 'x',
         wait: false,
         gate: { argv: ['pnpm', 'test'] },
+      },
+      {
+        operation: 'spawn',
+        mode: 'task',
+        description: 'x',
+        prompt: 'x',
+        wait: false,
+        seedContext: 'full_history',
+      },
+      {
+        operation: 'send',
+        agentId: 'a',
+        message: 'x',
+        delivery: 'auto',
+        wait: false,
+        seedContext: 'prior_reads',
       },
     ]) {
       expect(parseAgentControlToolRequest(request)).toBeNull();

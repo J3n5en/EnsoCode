@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -44,6 +44,38 @@ describe('ReadLedger', () => {
     expect(await ledger.check('a.txt')).toMatch(/changed on disk/);
     await ledger.record('a.txt');
     expect(await ledger.check('a.txt')).toBeUndefined();
+  });
+
+  it('getMeta 提供只读查询且不泄露内部状态', async () => {
+    const file = path.join(dir, 'a.txt');
+    const link = path.join(dir, 'link.txt');
+    writeFileSync(file, 'hello');
+    let hasSymlink = false;
+    try {
+      symlinkSync(file, link);
+      hasSymlink = true;
+    } catch {
+      // Windows 未开启开发者模式时无软链权限
+    }
+    const ledger = new ReadLedger(dir);
+    await ledger.record('a.txt');
+
+    const byRel = await ledger.getMeta('a.txt');
+    const byAbs = await ledger.getMeta(file);
+    const byAt = await ledger.getMeta('@a.txt');
+    expect(byRel).toBeDefined();
+    expect(byAbs).toEqual(byRel);
+    expect(byAt).toEqual(byRel);
+    if (hasSymlink) {
+      expect(await ledger.getMeta('link.txt')).toEqual(byRel);
+    }
+    // 修改返回的副本不影响账本本身
+    if (byRel) (byRel as { size: number }).size = -1;
+    expect((await ledger.getMeta('a.txt'))?.size).toBe(5);
+    // 删除文件后仍可按规范路径查到历史元数据
+    const realKey = realpathSync(file);
+    rmSync(file);
+    expect((await ledger.getMeta(realKey))?.size).toBe(5);
   });
 
   it('withPriorRead：未读即拒且不执行底层工具，按工具 cwd 解析相对路径', async () => {

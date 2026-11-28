@@ -24,6 +24,7 @@ import {
   type RendererAgentEvent,
   type ResolvedAgentTypeSpawnConfig,
   type SpawnModelConfig,
+  type SubagentSeedContext,
 } from '@shared/types/agent';
 import type {
   AgentDispatchRequest,
@@ -46,6 +47,7 @@ interface SpawnOverrides {
   thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** 子代理历史里给用户看的任务标题，不参与实例名 */
   title?: string;
+  seedContext?: SubagentSeedContext;
 }
 
 type SpawnConfigResolution =
@@ -129,7 +131,8 @@ interface DispatchHost {
     identity: ChildSessionIdentity,
     cwd: string,
     config: ResolvedAgentTypeSpawnConfig,
-    resumeFile?: string
+    resumeFile?: string,
+    seedContext?: SubagentSeedContext
   ): { ok: boolean; error?: string };
   promptChild(
     identity: ChildSessionIdentity,
@@ -337,7 +340,9 @@ export class AgentDispatchService {
         return this.cancelledTeamOperation();
       }
       if (guard) this.teamGuards.set(child.generation, guard);
-      const spawned = this.options.host.spawnChild(child, cwd, spawnConfig);
+      const spawned = overrides?.seedContext
+        ? this.options.host.spawnChild(child, cwd, spawnConfig, undefined, overrides.seedContext)
+        : this.options.host.spawnChild(child, cwd, spawnConfig);
       if (!spawned.ok) throw new Error(spawned.error ?? 'Failed to spawn coworker.');
       const ready = await this.waitForChild(child, guard?.signal);
       this.verifyChildReady(
@@ -497,6 +502,7 @@ export class AgentDispatchService {
     mode: 'task' | 'coworker';
     model?: string;
     thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    seedContext?: SubagentSeedContext;
   }): Promise<ChildSessionIdentity> {
     const hired = await this.hireCoworker(
       input.parentConversationId,
@@ -509,6 +515,7 @@ export class AgentDispatchService {
         ...(input.model ? { model: input.model } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
         ...(input.description ? { title: input.description } : {}),
+        ...(input.seedContext ? { seedContext: input.seedContext } : {}),
       },
       input.agentId
     );

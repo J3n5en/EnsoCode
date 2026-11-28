@@ -793,6 +793,16 @@ describe('parent/child commands', () => {
     ]) {
       expect(parseAgentCommand({ ...command, config: bad })).toBeNull();
     }
+    // spawn-child 可选透传 seedContext 白名单枚举，非法值拒绝
+    for (const seedContext of ['none', 'prior_reads', 'fork_compact', 'fork'] as const) {
+      expect(parseAgentCommand({ ...command, seedContext })).toEqual({
+        ...command,
+        seedContext,
+      });
+    }
+    for (const badSeed of ['raw', '', 123, true]) {
+      expect(parseAgentCommand({ ...command, seedContext: badSeed })).toBeNull();
+    }
   });
 
   it('prompt-child 首条 task 绑定 child generation/requestId，旧 generation 拒绝', () => {

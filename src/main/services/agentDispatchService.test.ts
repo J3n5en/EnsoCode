@@ -172,6 +172,7 @@ async function setup(
     cwd: string;
     config: ResolvedAgentTypeSpawnConfig;
     resumeFile?: string;
+    seedContext?: 'none' | 'prior_reads' | 'fork_compact' | 'fork';
   }> = [];
   const resumeCoworkerCalls: Array<{
     parent: { sessionId: string; generation: string };
@@ -240,12 +241,13 @@ async function setup(
         );
         return { ok: true };
       },
-      spawnChild: (identity, cwd, spawnConfig, resumeFile) => {
+      spawnChild: (identity, cwd, spawnConfig, resumeFile, seedContext) => {
         spawnChildCalls.push({
           identity,
           cwd,
           config: spawnConfig,
           ...(resumeFile ? { resumeFile } : {}),
+          ...(seedContext ? { seedContext } : {}),
         });
         if (options.rejectChild) {
           const reason = options.rejectChild;
@@ -863,6 +865,35 @@ describe('agent-tool 显式 thinking', () => {
     fixture.service.observe({ type: 'child-ended', identity: low, seq: 2, reason: 'dismissed' });
     await fixture.service.resumeControlledAgent(fixture.conversationId, low);
     expect(childLevel(fixture.spawnChildCalls.at(-1)!.config)).toBe('low');
+  });
+
+  it('spawnControlledAgent 透传 seedContext 给 host.spawnChild，resume 时不重传', async () => {
+    const fixture = await setup();
+    const parent = { sessionId: fixture.conversationId, generation: crypto.randomUUID() };
+    fixture.index.prepareParent(parent);
+    fixture.service.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: path.join(fixture.root, 'parent.jsonl'),
+      model: { providerId: 'provider', modelId: 'model' },
+    });
+    await settle();
+    const child = await fixture.service.spawnControlledAgent({
+      agentId: crypto.randomUUID(),
+      parentConversationId: fixture.conversationId,
+      name: 'seeded',
+      agentType: 'builtin:scout',
+      mode: 'task',
+      seedContext: 'prior_reads',
+    });
+    expect(fixture.spawnChildCalls[0]?.seedContext).toBe('prior_reads');
+
+    writeFileSync(path.join(fixture.root, 'child.jsonl'), '{}\n');
+    fixture.service.observe({ type: 'child-ended', identity: child, seq: 2, reason: 'dismissed' });
+    await fixture.service.resumeControlledAgent(fixture.conversationId, child);
+    expect(fixture.spawnChildCalls[1]?.seedContext).toBeUndefined();
+    expect(fixture.spawnChildCalls[1]?.resumeFile).toBe(path.join(fixture.root, 'child.jsonl'));
   });
 });
 
