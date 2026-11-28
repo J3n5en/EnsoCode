@@ -1,0 +1,34 @@
+name: EnsoCode
+options:
+  bundleIdPrefix: com.ensocode
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+packages:
+  EnsoCore:
+    path: .
+targets:
+  EnsoCode:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - "Info.plist"
+      - path: WebApp
+        type: folder
+        buildPhase: resources
+        optional: true
+    dependencies:
+      - package: EnsoCore
+        product: EnsoCore
+    info:
+      path: App/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ensocode.mobile
+        PRODUCT_NAME: EnsoCode
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

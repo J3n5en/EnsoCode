@@ -1,0 +1,5 @@
+.build/
+WebApp/
+EnsoCode.xcodeproj/
+DerivedData/
+.DS_Store
