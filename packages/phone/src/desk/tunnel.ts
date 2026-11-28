@@ -581,6 +581,16 @@ export class DeskTunnel {
         if (slot) this.ordered(slot, frame);
         return;
       }
+      case 'rpc-batch': {
+        if (!Array.isArray(frame.frames)) return;
+        for (const item of frame.frames) {
+          if (!item || typeof item !== 'object') continue;
+          if (item.type !== 'rpc-result' && item.type !== 'rpc-event') continue;
+          const slot = this.slots.get(item.cid);
+          if (slot) this.ordered(slot, item);
+        }
+        return;
+      }
     }
   }
 

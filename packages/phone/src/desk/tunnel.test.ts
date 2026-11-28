@@ -386,4 +386,31 @@ describe('DeskTunnel', () => {
     expect(Buffer.from(bigAsset.body).equals(Buffer.from(bigPng))).toBe(true);
     expect(mockState.sent.filter((m) => m.type === 'remote-ack').length).toBeGreaterThanOrEqual(2);
   });
+
+  it('拆包 rpc-batch 按序触发 rpc-event 与 rpc-result 并忽略嵌套 rpc-batch', async () => {
+    const { frame, cid } = createOnlineTunnel();
+    const events: string[] = [];
+    frame.on('evt', (payload) => events.push(payload));
+
+    const invokePromise = frame.invoke('settings:read', '[]');
+    const req = mockState.sent.find(
+      (m): m is Extract<PhoneToHost, { type: 'rpc-invoke' }> => m.type === 'rpc-invoke'
+    );
+
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-batch',
+      frames: [
+        { type: 'rpc-event', cid, ch: 'evt', args: ['first'], seq: 1 },
+        {
+          type: 'rpc-batch',
+          frames: [{ type: 'rpc-event', cid, ch: 'evt', args: ['nested'], seq: 99 }],
+        } as never,
+        { type: 'rpc-result', cid, id: req!.id, ok: true, data: { batched: 1 }, seq: 2 },
+        { type: 'rpc-event', cid, ch: 'evt', args: ['third'], seq: 3 },
+      ],
+    });
+
+    await expect(invokePromise).resolves.toBe(JSON.stringify({ batched: 1 }));
+    expect(events).toEqual(['["first"]', '["third"]']);
+  });
 });

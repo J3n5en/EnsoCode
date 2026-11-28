@@ -483,3 +483,80 @@ describe('remoteLeaderId', () => {
     }
   });
 });
+
+describe('RemoteSender rpc-batch', () => {
+  it('canBatch 开启时 resume 把多条补发帧合为 rpc-batch，未开启保持逐帧，且保留窗口仍按条推进 seq', () => {
+    const sent: HostToRemote[] = [];
+    const initial = Object.assign((frame: HostToRemote) => sent.push(frame), {
+      canBatch: () => false,
+    });
+    const sender = new RemoteSender('pair-b', 'cid-b', 'main', initial);
+    sender.send('e1', 'a');
+    sender.send('e2', 'b');
+    sender.post({ type: 'rpc-result', cid: 'cid-b', id: 1, ok: true, data: 'ok' });
+
+    const batched: HostToRemote[] = [];
+    const batchDeliver = Object.assign((frame: HostToRemote) => batched.push(frame), {
+      canBatch: () => true,
+    });
+    expect(sender.resume(batchDeliver, 0)).toBe(true);
+    expect(batched).toHaveLength(1);
+    expect(batched[0]).toMatchObject({
+      type: 'rpc-batch',
+      frames: [
+        { type: 'rpc-event', ch: 'e1', seq: 1 },
+        { type: 'rpc-event', ch: 'e2', seq: 2 },
+        { type: 'rpc-result', id: 1, seq: 3 },
+      ],
+    });
+
+    // canBatch 为 false 时回落逐帧，且只补 seq > 2
+    const legacy: HostToRemote[] = [];
+    expect(sender.resume((frame) => legacy.push(frame), 2)).toBe(true);
+    expect(legacy).toHaveLength(1);
+    expect((legacy[0] as { seq?: number }).seq).toBe(3);
+
+    sender.destroy();
+  });
+
+  it('flushStreaming 在多条流式更新同时冲洗且 canBatch 开启时合为 rpc-batch', () => {
+    vi.useFakeTimers();
+    try {
+      const sent: HostToRemote[] = [];
+      const deliver = Object.assign((frame: HostToRemote) => sent.push(frame), {
+        canBatch: () => true,
+      });
+      const sender = new RemoteSender('pair-s', 'cid-s', 'main', deliver);
+      sender.send('agent:event', {
+        type: 'message-upsert',
+        identity: { sessionId: 's1', generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: { text: 'hello' },
+      });
+      sender.send('agent:event', {
+        type: 'message-upsert',
+        identity: { sessionId: 's2', generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: { text: 'world' },
+      });
+      vi.advanceTimersByTime(STREAM_COALESCE_MS);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        type: 'rpc-batch',
+        frames: [
+          { type: 'rpc-event', ch: 'agent:event', seq: 1 },
+          { type: 'rpc-event', ch: 'agent:event', seq: 2 },
+        ],
+      });
+      // retained 仍按逐条 seq=1,2 保留，从 seq=1 断点只补 seq=2
+      const replay: HostToRemote[] = [];
+      expect(sender.resume((frame) => replay.push(frame), 1)).toBe(true);
+      expect(seqs(replay)).toEqual([2]);
+      sender.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

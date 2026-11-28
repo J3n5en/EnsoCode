@@ -200,4 +200,33 @@ describe('NodeRemoteTunnel', () => {
     for (const part of parts) tunnel.receive(part as HostToRemote);
     expect(Buffer.from((await a2).body).equals(Buffer.from(js))).toBe(true);
   });
+
+  it('拆包 rpc-batch 按序分发事件与 invoke 结果并跳过非法子项', async () => {
+    const { sent, tunnel } = setup();
+    const events: string[] = [];
+    const cid = tunnel.attach('main', {
+      onEvent: (ch, payload) => events.push(`${ch}:${payload}`),
+      onReset() {},
+    });
+    tunnel.setOnline(true);
+    tunnel.receive(ready(cid));
+
+    const resultPromise = tunnel.invoke(cid, 'settings:read', '[]');
+    const req = sent.find(
+      (f): f is Extract<RemoteToHost, { type: 'rpc-invoke' }> => f.type === 'rpc-invoke'
+    );
+
+    tunnel.receive({
+      type: 'rpc-batch',
+      frames: [
+        { type: 'rpc-event', cid, ch: 'a', args: [1], seq: 1 },
+        null as never,
+        { type: 'rpc-result', cid, id: req!.id, ok: true, data: { ok: true }, seq: 2 },
+        { type: 'rpc-event', cid, ch: 'b', args: [2], seq: 3 },
+      ],
+    });
+
+    await expect(resultPromise).resolves.toBe(JSON.stringify({ ok: true }));
+    expect(events).toEqual(['a:[1]', 'b:[2]']);
+  });
 });

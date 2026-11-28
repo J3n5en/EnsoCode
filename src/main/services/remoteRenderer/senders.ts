@@ -1,5 +1,10 @@
 import { EventEmitter } from 'node:events';
-import { encodeRemoteValue, type HostToRemote, type RemoteKind } from '@enso/pair';
+import {
+  batchRemoteFrames,
+  encodeRemoteValue,
+  type HostToRemote,
+  type RemoteKind,
+} from '@enso/pair';
 import { REREAD_MARK, RemoteWriteBases, UPSERT_MARK, UpsertEncoder } from '@shared/remoteDelta';
 import {
   OVERVIEW_BYTE_BUDGET,
@@ -35,7 +40,7 @@ const MAX_RESUME_TAILS = 8;
 /** 与真实 webContents id（小整数）错开 */
 let nextId = 1_000_000_000;
 
-type Deliver = (frame: HostToRemote) => void;
+type Deliver = ((frame: HostToRemote) => void) & { canBatch?: () => boolean };
 
 interface Retained {
   seq: number;
@@ -149,13 +154,22 @@ export class RemoteSender extends EventEmitter {
     if (this.streaming.size === 0) return;
     const pending = [...this.streaming];
     this.streaming.clear();
+    const flushed: Retained[] = [];
     for (const [key, args] of pending) {
       const encoded = encodeRemoteValue(args) as Record<string, unknown>[];
       const event = encoded[0] as Record<string, unknown>;
       const { mark, message } = this.upserts.encode(key, event.message);
       if (message === undefined) delete event.message;
       event[UPSERT_MARK] = mark;
-      this.postNow({ type: 'rpc-event', cid: this.cid, ch: AGENT_EVENT_CHANNEL, args: encoded });
+      flushed.push(
+        this.retain({ type: 'rpc-event', cid: this.cid, ch: AGENT_EVENT_CHANNEL, args: encoded })
+      );
+    }
+    if (this.suspended) return;
+    if (flushed.length >= 2 && this.deliver.canBatch?.()) {
+      for (const frame of batchRemoteFrames(flushed)) this.deliver(frame);
+    } else {
+      for (const entry of flushed) this.deliver(entry.frame);
     }
   }
 
@@ -192,11 +206,11 @@ export class RemoteSender extends EventEmitter {
     return sessions.length === event.sessions.length ? event : { ...event, sessions };
   }
 
-  private postNow(frame: HostToRemote): void {
-    if (this.destroyed) return;
+  private retain(frame: HostToRemote): Retained {
     const stamped = { ...frame, seq: ++this.seq } as HostToRemote;
     const bytes = JSON.stringify(stamped).length;
-    this.retained.push({ seq: this.seq, frame: stamped, bytes });
+    const entry: Retained = { seq: this.seq, frame: stamped, bytes };
+    this.retained.push(entry);
     this.retainedBytes += bytes;
     while (
       this.retained.length > 1 &&
@@ -206,7 +220,13 @@ export class RemoteSender extends EventEmitter {
       this.retainedBytes -= evicted.bytes;
       this.evictedThrough = evicted.seq;
     }
-    if (!this.suspended) this.deliver(stamped);
+    return entry;
+  }
+
+  private postNow(frame: HostToRemote): void {
+    if (this.destroyed) return;
+    const entry = this.retain(frame);
+    if (!this.suspended) this.deliver(entry.frame);
   }
 
   get online(): boolean {
@@ -239,7 +259,12 @@ export class RemoteSender extends EventEmitter {
     this.suspended = false;
     if (from < this.evictedThrough || from > this.seq) return false;
     beforeReplay?.();
-    for (const { seq, frame } of this.retained) if (seq > from) deliver(frame);
+    const pending = this.retained.filter((entry) => entry.seq > from);
+    if (pending.length >= 2 && deliver.canBatch?.()) {
+      for (const frame of batchRemoteFrames(pending)) deliver(frame);
+    } else {
+      for (const entry of pending) deliver(entry.frame);
+    }
     return true;
   }
 

@@ -218,7 +218,10 @@ function prepareResult(channel: string, result: unknown, args: unknown[] = []): 
   return trimSecretaryResult(channel, result);
 }
 
-const deliverer = (link: RemoteLink) => (frame: HostToRemote) => link.send(frame);
+const deliverer = (link: RemoteLink) =>
+  Object.assign((frame: HostToRemote) => link.send(frame), {
+    canBatch: () => link.v2 === true,
+  });
 
 function cancelGrace(sender: RemoteSender): void {
   const timer = graceTimers.get(sender.id);

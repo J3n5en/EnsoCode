@@ -120,6 +120,7 @@ export {
   toWebSocketUrl,
 } from './relay';
 export {
+  batchRemoteFrames,
   createRemoteBinaryPartAssembler,
   createRemoteOrderedStream,
   createRemotePartAssembler,
@@ -133,9 +134,12 @@ export {
   isHostRemoteFrame,
   isRemoteBinaryPart,
   isRemotePart,
+  REMOTE_BATCH_MAX_BYTES,
+  REMOTE_BATCH_MAX_FRAMES,
   REMOTE_BIN_PART_BYTES,
   REMOTE_GZIP_MIN_CHARS,
   REMOTE_PART_CHARS,
+  type RemoteBatch,
   type RemoteBinaryPart,
   type RemoteBinaryPartAssembler,
   type RemoteGzip,

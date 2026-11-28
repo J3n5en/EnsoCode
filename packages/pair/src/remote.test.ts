@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  batchRemoteFrames,
   createRemoteBinaryPartAssembler,
   createRemoteOrderedStream,
   createRemotePartAssembler,
@@ -7,6 +8,7 @@ import {
   encodeRemoteValue,
   gunzipRemoteFrame,
   gzipRemoteJson,
+  type HostToRemote,
   isRemoteBinaryPart,
   isRemotePart,
   type RemoteBinaryPart,
@@ -255,5 +257,86 @@ describe('remote binary parts (bpart)', () => {
         bin: new Uint8Array([125]),
       })
     ).toBeNull();
+  });
+});
+
+describe('batchRemoteFrames', () => {
+  const evt = (seq: number, ch = 'evt'): HostToRemote => ({
+    type: 'rpc-event',
+    cid: 'c1',
+    ch,
+    args: [seq],
+    seq,
+  });
+  const res = (seq: number, id: number): HostToRemote => ({
+    type: 'rpc-result',
+    cid: 'c1',
+    id,
+    ok: true,
+    data: seq,
+    seq,
+  });
+
+  it('单条不套壳；多条连续 rpc 帧合为 rpc-batch', () => {
+    expect(batchRemoteFrames([{ frame: evt(1), bytes: 40 }])).toEqual([evt(1)]);
+    expect(
+      batchRemoteFrames([
+        { frame: evt(1), bytes: 40 },
+        { frame: res(2, 10), bytes: 50 },
+      ])
+    ).toEqual([
+      {
+        type: 'rpc-batch',
+        frames: [evt(1), res(2, 10)],
+      },
+    ]);
+  });
+
+  it('按 maxBytes 和 maxFrames 自动切分，超大单条与非 rpc 帧保序不套壳', () => {
+    const batchedByBytes = batchRemoteFrames(
+      [
+        { frame: evt(1), bytes: 60 },
+        { frame: evt(2), bytes: 40 },
+        { frame: evt(3), bytes: 30 },
+        { frame: evt(4), bytes: 200 },
+        { frame: evt(5), bytes: 20 },
+      ],
+      100,
+      10
+    );
+    expect(batchedByBytes).toEqual([
+      { type: 'rpc-batch', frames: [evt(1), evt(2)] },
+      evt(3),
+      evt(4),
+      evt(5),
+    ]);
+
+    const ready: HostToRemote = {
+      type: 'rpc-ready',
+      cid: 'c1',
+      ok: true,
+      resumed: true,
+      version: '1',
+      platform: 'darwin',
+      leader: true,
+    };
+    const batchedByCount = batchRemoteFrames(
+      [
+        { frame: evt(1), bytes: 10 },
+        { frame: evt(2), bytes: 10 },
+        { frame: evt(3), bytes: 10 },
+        { frame: ready, bytes: 50 },
+        { frame: evt(4), bytes: 10 },
+        { frame: res(5, 1), bytes: 10 },
+      ],
+      1000,
+      2
+    );
+    expect(batchedByCount).toEqual([
+      { type: 'rpc-batch', frames: [evt(1), evt(2)] },
+      evt(3),
+      ready,
+      { type: 'rpc-batch', frames: [evt(4), res(5, 1)] },
+    ]);
   });
 });

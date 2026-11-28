@@ -48,7 +48,18 @@ export type HostToRemote =
   | { type: 'asset'; id: number; status: number; mime: string; data?: string; bin?: Uint8Array }
   | RemoteGzip
   | RemotePart
-  | RemoteBinaryPart;
+  | RemoteBinaryPart
+  | RemoteBatch;
+
+/** 断线补发与并发流式冲洗批封套：多条连续 rpc 帧合成一帧，共用一次 gzip 字典与加解密 */
+export interface RemoteBatch {
+  type: 'rpc-batch';
+  frames: (
+    | { type: 'rpc-result'; cid: string; id: number; ok: true; data: unknown; seq?: number }
+    | { type: 'rpc-result'; cid: string; id: number; ok: false; error: string; seq?: number }
+    | { type: 'rpc-event'; cid: string; ch: string; args: unknown; seq?: number }
+  )[];
+}
 
 /** 大帧压缩：原帧 JSON 经 gzip 后 base64，解开后按普通帧处理 */
 export interface RemoteGzip {
@@ -78,6 +89,9 @@ export interface RemoteBinaryPart {
 export const REMOTE_PART_CHARS = 240_000;
 /** v2 二进制分片每片最大原始字节数：留足头字段与加密开销，远低于中继 1MB 单帧上限 */
 export const REMOTE_BIN_PART_BYTES = 700_000;
+/** 单批 rpc-batch 上限：控制在 256KB 与 256 条内，让首批重放帧快速解密上屏 */
+export const REMOTE_BATCH_MAX_BYTES = 256 * 1024;
+export const REMOTE_BATCH_MAX_FRAMES = 256;
 const MAX_PARTS = 1024;
 
 const TAG = '$enso';
@@ -261,7 +275,62 @@ const HOST_REMOTE_TYPES: ReadonlySet<string> = new Set([
   'gzip',
   'part',
   'bpart',
+  'rpc-batch',
 ]);
+
+type BatchableFrame = RemoteBatch['frames'][number];
+
+function isBatchableFrame(frame: HostToRemote): frame is BatchableFrame {
+  return frame.type === 'rpc-event' || frame.type === 'rpc-result';
+}
+
+/**
+ * 将连续的 rpc-event / rpc-result 合并为 rpc-batch：
+ * - 单条不套壳；>= 2 条合为 rpc-batch
+ * - 超出 maxBytes / maxFrames 时自动切批；超大单条与非 rpc 帧保序单独输出
+ */
+export function batchRemoteFrames(
+  entries: readonly { frame: HostToRemote; bytes: number }[],
+  maxBytes = REMOTE_BATCH_MAX_BYTES,
+  maxFrames = REMOTE_BATCH_MAX_FRAMES
+): HostToRemote[] {
+  const out: HostToRemote[] = [];
+  let current: BatchableFrame[] = [];
+  let currentBytes = 0;
+
+  const flush = (): void => {
+    if (current.length === 0) return;
+    out.push(
+      current.length === 1 ? (current[0] as HostToRemote) : { type: 'rpc-batch', frames: current }
+    );
+    current = [];
+    currentBytes = 0;
+  };
+
+  for (const entry of entries) {
+    if (!isBatchableFrame(entry.frame)) {
+      flush();
+      out.push(entry.frame);
+      continue;
+    }
+    if (entry.bytes > maxBytes) {
+      flush();
+      out.push(entry.frame);
+      continue;
+    }
+    if (
+      current.length > 0 &&
+      (current.length >= maxFrames || currentBytes + entry.bytes > maxBytes)
+    ) {
+      flush();
+    }
+    current.push(entry.frame);
+    currentBytes += entry.bytes;
+  }
+
+  flush();
+  return out;
+}
 
 export function isHostRemoteFrame(value: { type: string }): value is HostToRemote {
   return HOST_REMOTE_TYPES.has(value.type);

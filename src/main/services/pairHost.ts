@@ -1372,6 +1372,10 @@ function bulkGroupOf(message: HostToPhone): string | undefined {
   ) {
     return `rpc:${message.cid}:${message.seq}`;
   }
+  if (message.type === 'rpc-batch') {
+    const first = message.frames[0];
+    return first ? `rpc:${first.cid}:batch:${first.seq ?? 0}` : undefined;
+  }
   if (message.type === 'asset') return `asset:${message.id}`;
   return undefined;
 }
