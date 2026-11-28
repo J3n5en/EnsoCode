@@ -19,7 +19,7 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
   {
     id: 'scout',
     title: 'Scout · Research',
-    summary: 'Read code, search, look up docs, and summarize findings.',
+    summary: 'Read code, search docs, summarize findings.',
     chip: 'scout research',
     template:
       'Use for lookups and read-only exploration: reading code, searching the repo, checking docs, and summarizing findings. Fast and cheap; do not use it for architecture decisions.',
@@ -27,7 +27,7 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
   {
     id: 'worker',
     title: 'Worker · Implementation',
-    summary: 'Main coding work, bug fixes, and self-contained coding subtasks.',
+    summary: 'Main coding, bug fixes, scoped subtasks.',
     chip: 'worker build',
     template:
       'Use for the main coding work: implementing features, fixing bugs, and self-contained coding subtasks with a clear scope.',
@@ -35,7 +35,7 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
   {
     id: 'reviewer',
     title: 'Reviewer · Deep review & architecture',
-    summary: 'Code review, architecture trade-offs, and hard debugging.',
+    summary: 'Code review, architecture, hard debugging.',
     chip: 'reviewer review',
     template:
       'Use for code review, architecture trade-offs, and hard debugging. Strongest reasoning but slower and pricier; do not use it for bulk scanning.',
@@ -43,7 +43,7 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
   {
     id: 'tester',
     title: 'Tester · Tests',
-    summary: 'Write failing tests first (TDD) and add unit coverage.',
+    summary: 'Failing tests first (TDD), unit coverage.',
     chip: 'tester tests',
     template:
       'Use for writing tests: failing tests first for TDD, and adding unit test coverage to existing code.',
@@ -51,7 +51,7 @@ export const SUBAGENT_ROLE_PRESETS: readonly SubagentRolePreset[] = [
   {
     id: 'light',
     title: 'Light · Mechanical edits & fallback',
-    summary: 'Bulk mechanical replacements, formatting, and high-throughput errands.',
+    summary: 'Bulk mechanical edits, formatting, errands.',
     chip: 'light errands',
     template:
       'Use for bulk mechanical replacements, formatting, and high-throughput errands, or as a fallback for exploration. Cheapest; not for tasks that need judgment.',

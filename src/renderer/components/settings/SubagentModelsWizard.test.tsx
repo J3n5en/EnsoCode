@@ -132,8 +132,22 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+const slot = (el: Element, name: string) =>
+  el.querySelector(`[data-slot="subagent-wizard-${name}"]`) as HTMLElement | null;
+async function clickEl(el: Element | null) {
+  await act(async () => (el as HTMLElement).click());
+}
+/** 直接调用 React onChange，绕开 linkedom 不支持的受控输入事件 */
+async function typeInto(el: Element, value: string) {
+  const [, props] = Object.entries(el).find(([key]) => key.startsWith('__reactProps$')) as [
+    string,
+    { onChange: (event: { target: { value: string } }) => void },
+  ];
+  await act(async () => props.onChange({ target: { value } }));
+}
+
 describe('SubagentModelsWizard', () => {
-  it('五个角色默认全部留空显示「跳过此角色」，确认禁用', async () => {
+  it('五个角色默认全部跳过：无动作按钮、无编辑区、无写入方式子栏，确认禁用', async () => {
     await render();
     expect(roles()).toHaveLength(5);
     expect(
@@ -141,44 +155,71 @@ describe('SubagentModelsWizard', () => {
         role.querySelector('[data-model-picker]')?.getAttribute('data-model-picker')
       )
     ).toEqual(Array(5).fill('Skip this role'));
+    for (const role of roles()) {
+      expect(slot(role, 'tune')).toBeNull();
+      expect(slot(role, 'skip')).toBeNull();
+    }
     expect(container.querySelector('textarea')).toBeNull();
-    expect(container.querySelector('[data-slot="subagent-wizard-description-preview"]')).toBeNull();
+    expect(container.querySelector('[data-slot="subagent-wizard-mode"]')).toBeNull();
     expect(footer().textContent).toContain('Will add 0 models (skipping 5 roles)');
     expect(confirmButton()?.disabled).toBe(true);
     expect(harness.segmented).toBe(false);
   });
 
-  it('选中后只露一行描述预览，点「微调」才出现文本框', async () => {
+  it('已有列表时在写入方式子栏里给出追加/替换', async () => {
+    await render([{ id: 'old', providerId: 'api', modelId: 'fast', description: 'old' }]);
+    const bar = container.querySelector('[data-slot="subagent-wizard-mode"]');
+    expect(bar?.textContent).toContain('Write mode');
+    expect(bar?.querySelector('[data-segmented]')).not.toBeNull();
+  });
+
+  it('选中后收起态不重复显示描述，点铅笔才展开编辑区，完成收起', async () => {
     await render();
     await pick(1, 'smart');
-    const worker = roles()[1];
     const template = SUBAGENT_ROLE_PRESETS[1].template;
-    expect(
-      worker.querySelector('[data-slot="subagent-wizard-description-preview"]')?.textContent
-    ).toBe(template);
+    expect(roles()[1].textContent).not.toContain(template);
     expect(container.querySelector('textarea')).toBeNull();
-    expect(roles()[0].querySelector('[data-slot="subagent-wizard-tune"]')).toBeNull();
+    expect(slot(roles()[0], 'tune')).toBeNull();
 
-    await act(async () =>
-      (worker.querySelector('[data-slot="subagent-wizard-tune"]') as HTMLElement).click()
-    );
-    const textarea = roles()[1].querySelector('textarea');
-    expect(textarea?.value).toBe(template);
-    expect(roles()[1].querySelector('[data-slot="subagent-wizard-tune"]')?.textContent).toBe(
-      'Done'
-    );
+    await clickEl(slot(roles()[1], 'tune'));
+    expect(slot(roles()[1], 'tune')?.getAttribute('aria-expanded')).toBe('true');
+    const editor = slot(roles()[1], 'editor');
+    expect(editor?.textContent).toContain('Selection description');
+    expect(editor?.querySelector('textarea')?.value).toBe(template);
+    expect(slot(roles()[1], 'reset')).toBeNull();
+
+    await clickEl(slot(roles()[1], 'done'));
+    expect(slot(roles()[1], 'editor')).toBeNull();
     expect(footer().textContent).toContain('Will add 1 models (skipping 4 roles)');
   });
 
-  it('清除按钮把角色改回跳过；确认只写入已选角色', async () => {
+  it('改过描述显示「已自定义」，恢复默认回到模板', async () => {
+    await render();
+    await pick(2, 'smart');
+    await clickEl(slot(roles()[2], 'tune'));
+    await typeInto(roles()[2].querySelector('textarea') as Element, 'my review notes');
+    expect(slot(roles()[2], 'customized')?.textContent).toBe('Customized');
+
+    await clickEl(slot(roles()[2], 'reset'));
+    expect(roles()[2].querySelector('textarea')?.value).toBe(SUBAGENT_ROLE_PRESETS[2].template);
+    expect(slot(roles()[2], 'customized')).toBeNull();
+  });
+
+  it('清除按钮改回跳过并关闭编辑区；确认只写入已选角色', async () => {
     await render([{ id: 'old', providerId: 'api', modelId: 'fast', description: 'old' }]);
-    expect(harness.segmented).toBe(true);
     await pick(0, 'fast');
     await pick(2, 'smart');
     await pick(4, 'fast');
-    await act(async () =>
-      (roles()[4].querySelector('[aria-label="Skip this role"]') as HTMLElement).click()
-    );
+    await clickEl(slot(roles()[4], 'tune'));
+    expect(slot(roles()[4], 'editor')).not.toBeNull();
+    await clickEl(slot(roles()[4], 'skip'));
+    expect(slot(roles()[4], 'editor')).toBeNull();
+    expect(slot(roles()[4], 'tune')).toBeNull();
+    // 重新选中时编辑区不会自己冒出来
+    await pick(4, 'fast');
+    expect(slot(roles()[4], 'editor')).toBeNull();
+    await clickEl(slot(roles()[4], 'skip'));
+
     expect(footer().textContent).toContain('Will add 2 models (skipping 3 roles)');
     await act(async () => confirmButton()?.click());
     const written = harness.setEntries.mock.calls[0][0] as SubagentModelEntry[];

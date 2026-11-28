@@ -2493,7 +2493,9 @@ export const zhTranslations: Record<string, string> = {
   'Disabled ({{count}})': '已停用 ({{count}})',
   'Pick models only for the roles you need; empty roles are skipped. Roles may share a model.':
     '只给需要的角色选模型，留空的角色会跳过；不同角色可以选同一个模型。',
-  'Fine-tune': '微调',
+  'Write mode': '写入方式',
+  Customized: '已自定义',
+  'Selection description': '选型描述',
   'Click to add a description…': '点击编辑添加选型描述…',
   'Existing models': '已有模型',
   'Append to existing list': '追加到现有列表',
@@ -2502,30 +2504,27 @@ export const zhTranslations: Record<string, string> = {
   'Will add {{count}} models (skipping {{skipped}} roles)':
     '将添加 {{count}} 个模型（跳过 {{skipped}} 个角色）',
   'Scout · Research': 'Scout · 调研探索',
-  'Read code, search, look up docs, and summarize findings.': '读代码、搜索、查文档并汇总结论。',
+  'Read code, search docs, summarize findings.': '读代码、搜索、查文档并汇总结论。',
   'scout research': 'scout 调研',
   'Use for lookups and read-only exploration: reading code, searching the repo, checking docs, and summarizing findings. Fast and cheap; do not use it for architecture decisions.':
     '用于查找和只读探索：读代码、搜索仓库、查文档、汇总结论。快且便宜；不要用它做架构决策。',
   'Worker · Implementation': 'Worker · 编码实现',
-  'Main coding work, bug fixes, and self-contained coding subtasks.':
-    '主要编码、修 bug、可独立完成的编码子任务。',
+  'Main coding, bug fixes, scoped subtasks.': '主要编码、修 bug、可独立完成的编码子任务。',
   'worker build': 'worker 实现',
   'Use for the main coding work: implementing features, fixing bugs, and self-contained coding subtasks with a clear scope.':
     '用于主要编码工作：实现功能、修复 bug，以及范围清晰、可独立完成的编码子任务。',
   'Reviewer · Deep review & architecture': 'Reviewer · 深度评审/架构',
-  'Code review, architecture trade-offs, and hard debugging.': '代码评审、架构权衡、疑难排障。',
+  'Code review, architecture, hard debugging.': '代码评审、架构权衡、疑难排障。',
   'reviewer review': 'reviewer 评审',
   'Use for code review, architecture trade-offs, and hard debugging. Strongest reasoning but slower and pricier; do not use it for bulk scanning.':
     '用于代码评审、架构权衡和疑难排障。推理最强但更慢更贵；不要用它做批量扫描。',
   'Tester · Tests': 'Tester · 测试编写',
-  'Write failing tests first (TDD) and add unit coverage.':
-    'TDD 先写失败的测试，补充单元测试覆盖。',
+  'Failing tests first (TDD), unit coverage.': 'TDD 先写失败的测试，补充单元测试覆盖。',
   'tester tests': 'tester 测试',
   'Use for writing tests: failing tests first for TDD, and adding unit test coverage to existing code.':
     '用于编写测试：TDD 先写失败的测试，为已有代码补充单元测试覆盖。',
   'Light · Mechanical edits & fallback': '轻量 · 机械改动/兜底',
-  'Bulk mechanical replacements, formatting, and high-throughput errands.':
-    '批量机械替换、格式化、高吞吐跑腿。',
+  'Bulk mechanical edits, formatting, errands.': '批量机械替换、格式化、高吞吐跑腿。',
   'light errands': '轻量跑腿',
   'Use for bulk mechanical replacements, formatting, and high-throughput errands, or as a fallback for exploration. Cheapest; not for tasks that need judgment.':
     '用于批量机械替换、格式化等高吞吐跑腿，也可作为探索的兜底。最便宜；不用于需要判断的任务。',
