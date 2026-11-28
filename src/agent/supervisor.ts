@@ -3769,7 +3769,10 @@ export class SessionSupervisor {
         'browser',
         createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
       ),
-      ...builtin('memory', createMemoryTools(memory, { language: memoryLanguage })),
+      ...builtin(
+        'memory',
+        createMemoryTools(memory, { language: memoryLanguage, secretary: secretaryMode })
+      ),
       ...(delegation
         ? createDelegationTools(delegation, {
             groupTasks: botGroupTasks,

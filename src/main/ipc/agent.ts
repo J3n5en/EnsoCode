@@ -196,7 +196,7 @@ import { resolveLocalUnderCwd } from '../services/filesWorkspace';
 import { setSecretaryReportResolver } from '../services/localImageProtocol';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import { type Complete, redactSecrets } from '../services/memory/distill';
-import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
+import { memorySpaceContext, secretaryProjectIds } from '../services/memory/space';
 import {
   configureMemoryDistill,
   invokeMemory,
@@ -2589,7 +2589,7 @@ export function registerAgentHandlers(): void {
       const conversation = sourceAuthority?.conversation(rootSessionId(identity));
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
       const projectId = project?.state === 'active' ? project.projectId : null;
-      // 秘书：projectId 是私有空间，可见项目只读
+      // 秘书：projectId 是私有空间，可见项目与 global 可读写（写共享空间记审计）
       const secretary = isSecretaryProject(project);
       const memory = conversation?.bot
         ? getBotServices()?.memory.context({ ...conversation, projectId })
@@ -2599,10 +2599,11 @@ export function registerAgentHandlers(): void {
               ? {
                   ...memorySpaceContext({ projectId }),
                   secretary: {
-                    readProjectIds: secretaryReadProjectIds(
+                    projectIds: secretaryProjectIds(
                       secretaryProfileForTurn(rootSessionId(identity)),
                       sourceAuthority?.projection().projects ?? []
                     ),
+                    sessionId: rootSessionId(identity),
                   },
                 }
               : memorySpaceContext({ projectId }),

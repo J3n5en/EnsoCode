@@ -355,6 +355,31 @@ describe('parse*Request（Main 侧 unknown 收窄）', () => {
     expect(parsed).not.toHaveProperty('spaceId');
   });
 
+  it('projectId：归一去空白、空串丢弃，search 与 capture 往返保留；非字符串 / 空白收窄时拒绝', () => {
+    const search = normalizeMemorySearchParams({ query: 'q', projectId: ' p-1 ' });
+    expect(search).toMatchObject({ projectId: 'p-1', spaceId: 'all' });
+    expect(parseMemorySearchRequest(search)).toMatchObject({ projectId: 'p-1', spaceId: 'all' });
+    const capture = normalizeMemoryCaptureParams({ content: 'c', projectId: 'p-1' });
+    expect(parseMemoryCaptureRequest(capture)).toMatchObject({ content: 'c', projectId: 'p-1' });
+
+    expect(normalizeMemorySearchParams({ query: 'q', projectId: ' ' })).not.toHaveProperty(
+      'projectId'
+    );
+    expect(normalizeMemoryCaptureParams({ content: 'c', projectId: '' })).not.toHaveProperty(
+      'projectId'
+    );
+    expect(parseMemorySearchRequest({ query: 'q', limit: 5, spaceId: 'all' })).not.toHaveProperty(
+      'projectId'
+    );
+    const cap = normalizeMemoryCaptureParams({ content: 'c' }) as Record<string, unknown>;
+    for (const projectId of [' ', 7, null]) {
+      expect(
+        parseMemorySearchRequest({ query: 'q', limit: 5, spaceId: 'all', projectId })
+      ).toBeNull();
+      expect(parseMemoryCaptureRequest({ ...cap, projectId })).toBeNull();
+    }
+  });
+
   it('capture：Main 派生 unitTypeSource：缺省 default，非法 fallback→fact，合法 explicit', () => {
     const ok = normalizeMemoryCaptureParams({ content: 'c', title: 't' });
     expect(parseMemoryCaptureRequest(ok)).toEqual({
