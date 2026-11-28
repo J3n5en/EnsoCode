@@ -72,12 +72,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (path === '/v1/pair/claim' && request.method === 'POST') {
     return routeByPublicKey(request, env, '/claim');
   }
+  if (path === '/healthz' && request.method === 'GET') {
+    return json({ ok: true, quic: false });
+  }
 
   // /v1/pair/:id  (WSS 连接 或 DELETE 解绑)
   const m = /^\/v1\/pair\/([^/]+)$/.exec(path);
   if (m) {
     const pairId = decodeURIComponent(m[1]);
-    if (request.headers.get('Upgrade') === 'websocket') {
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       return routeById(request, env, pairId, '/connect');
     }
     if (request.method === 'DELETE') {

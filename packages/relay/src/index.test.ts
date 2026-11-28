@@ -49,3 +49,25 @@ describe('POST /v1/pair/request 的公钥校验', () => {
     expect(stub.fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('健康检查与 WebSocket Upgrade 路由（与 Go 中继对齐）', () => {
+  it('GET /healthz 返回 { ok: true, quic: false } 并带 CORS 头', async () => {
+    const { env } = fakeEnv();
+    const res = await worker.fetch(new Request('https://relay/healthz'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(await res.json()).toEqual({ ok: true, quic: false });
+  });
+
+  it('Upgrade 头大小写不敏感匹配 WebSocket', async () => {
+    const { env, stub } = fakeEnv();
+    const res = await worker.fetch(
+      new Request('https://relay/v1/pair/room-1?role=guest&token=tok', {
+        headers: { Upgrade: 'WebSocket' },
+      }),
+      env
+    );
+    expect(res.status).toBe(200);
+    expect(stub.fetch).toHaveBeenCalledTimes(1);
+  });
+});
