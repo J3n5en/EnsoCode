@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import { Editor, type EditorOptions } from '@pierre/diffs/edit';
-import { EditProvider, File, Virtualizer } from '@pierre/diffs/react';
+import { EditProvider } from '@pierre/diffs/react';
 import { conversationCwd } from '@shared/conversationCwd';
 import type { FilesDirEntry } from '@shared/types';
 import type { ProjectedMessage } from '@shared/types/agent';
@@ -45,9 +45,11 @@ import {
 } from '../../plugins/fileViewers';
 import { PluginFrame } from '../../plugins/PluginView';
 import { FileImageViewer, isImageRel } from './FileImageViewer';
+import { FilesCodeView } from './FilesCodeView';
 import { FilesSearchPane } from './FilesSearchPane';
 import { fileTypeIcon, fileTypeIconClass } from './fileIcons';
 import { FileMarkdownPreview } from './filePreviewMarkdown';
+import { filesHighlightPool } from './filesHighlightPool';
 import { ancestorDirs, applyCompletedWrites } from './filesTreeRefresh';
 import {
   fileTabPathMenuItems,
@@ -213,6 +215,8 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
 
   useEffect(() => {
     let alive = true;
+    // 读盘期间先把高亮 worker 拉起来，打开源码时不再等它初始化
+    filesHighlightPool();
     ensureHighlighter().then(() => {
       if (alive) setReady(true);
     });
@@ -1338,16 +1342,18 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
                 />
               </div>
             ) : (
-              <Virtualizer style={{ height: '100%', overflow: 'auto' }}>
-                <File
-                  key={`${active.rel}:${active.version}`}
-                  file={{ name: fileName(active.rel), contents: active.draft }}
-                  disableWorkerPool
-                  edit
-                  editorOptions={editOptions}
-                  options={fileOptions}
-                />
-              </Virtualizer>
+              <FilesCodeView
+                key={`${active.rel}:${active.version}`}
+                name={fileName(active.rel)}
+                initialContents={active.draft}
+                revealLine={
+                  pendingLineRef.current?.rel === active.rel
+                    ? pendingLineRef.current.line
+                    : undefined
+                }
+                editorOptions={editOptions}
+                options={fileOptions}
+              />
             )}
           </div>
         </div>
