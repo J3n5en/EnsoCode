@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { EnsoMark } from '@/components/chat/EnsoMark';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isNativeIosApp, requestNativeQrScan } from './nativeBridge';
 import { createQrScanner } from './qr';
 
 /** 扫到的内容是否是配对码（能解析出 relay + 公钥即可） */
@@ -87,6 +88,20 @@ export function PairScreen({
 
   const startScan = async () => {
     setError(null);
+    if (isNativeIosApp()) {
+      try {
+        const scanned = await requestNativeQrScan();
+        if (!scanned) return;
+        if (isPairPayload(scanned)) {
+          void pair(scanned);
+        } else {
+          setError('未识别到有效的 EnsoCode 配对二维码');
+        }
+        return;
+      } catch {
+        // 原生扫码不可用时自动退回 getUserMedia
+      }
+    }
     try {
       // 只负责拿流；挂到 <video> 与解码循环交给下面的 effect——
       // setScanning 是异步的，此刻 <video> 还没挂载，直接读 ref 必然为 null

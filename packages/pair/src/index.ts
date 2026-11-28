@@ -180,3 +180,11 @@ export {
   TAILSCALE_MAGIC_DNS,
 } from './revive';
 export { isPairSyncCursor, parsePairSessionSync } from './sessionSync';
+export {
+  browserWebSocketFactory,
+  type RelayConnectParams,
+  type RelaySocketFactory,
+  type RelaySocketLike,
+  type RelayTransportKind,
+  type RelayTransportLane,
+} from './transport';

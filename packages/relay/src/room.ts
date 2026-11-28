@@ -7,9 +7,20 @@ import {
   MAX_FRAME_BYTES,
   type PairState,
   purgeAt,
+  randomToken,
   request,
   tokenValid,
 } from './pairing';
+
+const HOT_BUF_MAX_BYTES = 1024 * 1024;
+const HOT_BUF_MAX_FRAMES = 512;
+const HOT_BUF_TTL_MS = 90_000;
+
+interface HotFrame {
+  seq: number;
+  data: ArrayBuffer;
+  at: number;
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -23,11 +34,68 @@ function json(body: unknown, status = 200): Response {
  * 两个 WebSocket 用 hibernation API 持有（tag = host/guest）。只转发密文，不解密、不写聊天。
  */
 export class PairRoom extends DurableObject<Env> {
+  private epoch = '';
+  private epochCounter = 0;
+  private hostSeq = 0;
+  private hotBuf: HotFrame[] = [];
+  private hotBytes = 0;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // 心跳应答由 runtime 直接回，不唤醒（不计费）休眠中的 DO。
     // 客户端定期发 "ping" 探测半开死链（见 @enso/pair attachHeartbeat）
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+  }
+
+  private nextEpoch(): string {
+    this.epochCounter += 1;
+    return `${randomToken().slice(0, 16)}-${this.epochCounter.toString(36)}`;
+  }
+
+  private clearHotBuf(): void {
+    this.hotBuf = [];
+    this.hotBytes = 0;
+  }
+
+  private resetHostSession(): void {
+    this.epoch = '';
+    this.hostSeq = 0;
+    this.clearHotBuf();
+  }
+
+  private pruneHotBuf(now: number): void {
+    let drop = 0;
+    while (drop < this.hotBuf.length && now - this.hotBuf[drop].at > HOT_BUF_TTL_MS) {
+      this.hotBytes -= this.hotBuf[drop].data.byteLength;
+      drop += 1;
+    }
+    if (drop > 0) {
+      if (drop === this.hotBuf.length) {
+        this.clearHotBuf();
+      } else {
+        this.hotBuf = this.hotBuf.slice(drop);
+      }
+    }
+  }
+
+  private appendHotBuf(data: ArrayBuffer, now: number): void {
+    this.hostSeq += 1;
+    this.pruneHotBuf(now);
+    if (data.byteLength > HOT_BUF_MAX_BYTES) {
+      this.clearHotBuf();
+      return;
+    }
+    const copy = data.slice(0);
+    this.hotBuf.push({ seq: this.hostSeq, data: copy, at: now });
+    this.hotBytes += copy.byteLength;
+    let drop = 0;
+    while (this.hotBuf.length - drop > HOT_BUF_MAX_FRAMES || this.hotBytes > HOT_BUF_MAX_BYTES) {
+      this.hotBytes -= this.hotBuf[drop].data.byteLength;
+      drop += 1;
+    }
+    if (drop > 0) {
+      this.hotBuf = this.hotBuf.slice(drop);
+    }
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -120,7 +188,14 @@ export class PairRoom extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server, [role]);
 
     if (role === 'host') {
-      this.broadcast('guest', { type: 'host-online' });
+      this.epoch = this.nextEpoch();
+      this.hostSeq = 0;
+      this.clearHotBuf();
+      this.broadcast('guest', {
+        type: 'host-online',
+        relayEpoch: this.epoch,
+        relaySeq: 0,
+      });
       // 手机可能先于 host 进房（如 Electron 重启），必须告知 host 对端已在，
       // 否则 host 认为手机离线而不下发目录
       if (this.ctx.getWebSockets('guest').length > 0) {
@@ -129,7 +204,56 @@ export class PairRoom extends DurableObject<Env> {
     } else {
       this.broadcast('host', { type: 'peer-joined' });
       const hostOnline = this.ctx.getWebSockets('host').length > 0;
-      server.send(JSON.stringify({ type: hostOnline ? 'host-online' : 'host-offline' }));
+      if (!hostOnline) {
+        server.send(JSON.stringify({ type: 'host-offline' }));
+      } else {
+        // DO 休眠重建实例后 host 仍在：惰性分配新 epoch，避免误匹配休眠前的旧 epoch
+        if (!this.epoch) {
+          this.epoch = this.nextEpoch();
+          this.hostSeq = 0;
+          this.clearHotBuf();
+        }
+        this.pruneHotBuf(Date.now());
+        const rawEpoch = url.searchParams.get('relayEpoch') ?? '';
+        const sinceEpoch = rawEpoch.length <= 64 ? rawEpoch : '';
+        const sinceStr = url.searchParams.get('sinceRelaySeq');
+        const parsedSince =
+          sinceStr !== null && /^\d+$/.test(sinceStr) ? Number(sinceStr) : Number.NaN;
+        const hasSince = Number.isSafeInteger(parsedSince) && parsedSince >= 0;
+
+        const payload: {
+          type: 'host-online';
+          relayEpoch: string;
+          relaySeq: number;
+          replayedFrom?: number;
+        } = {
+          type: 'host-online',
+          relayEpoch: this.epoch,
+          relaySeq: this.hostSeq,
+        };
+        const replay: HotFrame[] = [];
+        if (
+          hasSince &&
+          sinceEpoch !== '' &&
+          sinceEpoch === this.epoch &&
+          parsedSince < this.hostSeq &&
+          this.hotBuf.length > 0 &&
+          this.hotBuf[0].seq <= parsedSince + 1
+        ) {
+          for (const entry of this.hotBuf) {
+            if (entry.seq > parsedSince) replay.push(entry);
+          }
+          if (replay.length > 0) payload.replayedFrom = parsedSince;
+        }
+        server.send(JSON.stringify(payload));
+        for (const entry of replay) {
+          try {
+            server.send(entry.data);
+          } catch {
+            break;
+          }
+        }
+      }
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -156,6 +280,7 @@ export class PairRoom extends DurableObject<Env> {
         ws.close(1008, 'revoked');
       } catch {}
     }
+    this.resetHostSession();
     await this.ctx.storage.deleteAll();
     return json({ ok: true });
   }
@@ -180,6 +305,14 @@ export class PairRoom extends DurableObject<Env> {
       console.warn(`frame ${size}B over ${MAX_FRAME_BYTES} limit, dropped`);
       return;
     }
+    if (isHost && typeof message !== 'string') {
+      if (!this.epoch) {
+        this.epoch = this.nextEpoch();
+        this.hostSeq = 0;
+        this.clearHotBuf();
+      }
+      this.appendHotBuf(message, Date.now());
+    }
     for (const peer of this.ctx.getWebSockets(isHost ? 'guest' : 'host')) {
       try {
         peer.send(message);
@@ -193,6 +326,7 @@ export class PairRoom extends DurableObject<Env> {
     // 被顶替/半开的旧连接迟到关闭，不代表对端真的离线
     const alive = this.ctx.getWebSockets(isHost ? 'host' : 'guest').filter((w) => w !== ws);
     if (alive.length > 0) return;
+    if (isHost) this.resetHostSession();
     this.broadcast(isHost ? 'guest' : 'host', { type: isHost ? 'host-offline' : 'peer-left' });
   }
 

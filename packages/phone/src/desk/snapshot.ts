@@ -179,6 +179,7 @@ export async function saveSnapshot(cacheName: string, base: string, doc: Documen
   baseEl.href = `${base}/`;
   head.prepend(baseEl);
   const html = `<!doctype html>${clone.outerHTML}`;
+  if (typeof caches === 'undefined') return;
   const cache = await caches.open(cacheName);
   await cache.put(
     snapshotUrl(base),
@@ -274,7 +275,7 @@ export async function saveReads(
   base: string,
   reads: Map<string, ReadEntry>
 ): Promise<void> {
-  if (reads.size === 0) return;
+  if (reads.size === 0 || typeof caches === 'undefined') return;
   const cache = await caches.open(cacheName);
   await cache.put(
     readsUrl(base),

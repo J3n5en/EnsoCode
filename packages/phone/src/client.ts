@@ -33,6 +33,8 @@ import {
   type ProviderEntry,
   parsePairSessionSync,
   RELAY_CONNECT_TIMEOUT_MS,
+  type RelaySocketFactory,
+  type RelaySocketLike,
   sealFrame,
   sealFrameV2,
   shouldReplaceOnNudge,
@@ -56,6 +58,7 @@ import {
   type SyncTracking,
 } from '@shared/pair/syncProjection';
 import { normalizeTimelinePrefs } from '@shared/pair/timelinePrefs';
+import { createNativeOrBrowserRelaySocket } from './nativeBridge';
 import { type PhoneCacheData, type PhoneCacheStore, phoneCache } from './sessionCache';
 import {
   setCompactReadOnlyTools,
@@ -143,7 +146,7 @@ export interface ClientEvents {
 }
 
 export class PairClient {
-  private ws: WebSocket | null = null;
+  private ws: RelaySocketLike | null = null;
   private heartbeat: Heartbeat | null = null;
   private contentKey: Uint8Array;
   /** 直连和中继共用这一份：帧只封一次，再选路 */
@@ -215,7 +218,8 @@ export class PairClient {
     private events: ClientEvents,
     directFactory: DirectPeerFactory | null = createBrowserDirectPeerFactory(),
     private cache: PhoneCacheStore = phoneCache,
-    private desk = false
+    private desk = false,
+    private socketFactory: RelaySocketFactory = createNativeOrBrowserRelaySocket
   ) {
     this.contentKey = fromBase64Url(device.contentKey);
     this.direct = new DirectLink({
@@ -296,9 +300,18 @@ export class PairClient {
         ? `&relayEpoch=${encodeURIComponent(this.relayEpoch)}&sinceRelaySeq=${this.relaySeq}`
         : '';
     const url = `${base}/v1/pair/${encodeURIComponent(this.device.pairId)}?role=guest&token=${encodeURIComponent(this.device.token)}${resume}`;
-    let ws: WebSocket;
+    let ws: RelaySocketLike;
     try {
-      ws = new WebSocket(url);
+      ws = this.socketFactory({
+        relayUrl: this.device.relayUrl,
+        wsUrl: url,
+        pairId: this.device.pairId,
+        role: 'guest',
+        token: this.device.token,
+        ...(this.relayEpoch !== null
+          ? { relayEpoch: this.relayEpoch, sinceRelaySeq: this.relaySeq }
+          : {}),
+      });
     } catch {
       this.scheduleReconnect();
       return;
@@ -338,7 +351,7 @@ export class PairClient {
       this.scheduleReconnect();
     };
     this.heartbeat = attachHeartbeat(
-      ws,
+      ws as unknown as WebSocket,
       () => {
         try {
           ws.close();
@@ -511,7 +524,7 @@ export class PairClient {
     this.connect();
   }
 
-  private enqueueFrame(frame: Uint8Array, socket?: WebSocket): void {
+  private enqueueFrame(frame: Uint8Array, socket?: RelaySocketLike): void {
     this.receiveQueue = this.receiveQueue
       .then(async () => {
         if (this.closed || this.revoked || (socket && socket !== this.ws)) return;
@@ -867,7 +880,7 @@ export class PairClient {
   send(command: PhoneToHost, opts?: { bulk?: boolean }): void {
     if (!this.canSend()) return;
     if ((opts?.bulk || Date.now() < this.relayOnlyUntil) && this.ws?.readyState === 1) {
-      this.sendViaRelay(command);
+      this.sendViaRelay(command, opts?.bulk ? 'bulk' : 'ctrl');
       return;
     }
     this.sendQueue = this.sendQueue
@@ -877,7 +890,7 @@ export class PairClient {
         if (this.closed || this.revoked || this.overRelayLimit(frame, command)) return;
         // 直连优先；背压/刚好断掉时无缝退回中继
         if (this.direct.send(frame)) return;
-        this.sendFrameViaRelay(frame);
+        this.sendFrameViaRelay(frame, opts?.bulk ? 'bulk' : 'ctrl');
       })
       .catch(() => {});
   }
@@ -890,9 +903,14 @@ export class PairClient {
     return true;
   }
 
-  private sendFrameViaRelay(frame: Uint8Array): void {
+  private sendFrameViaRelay(frame: Uint8Array, lane: 'ctrl' | 'bulk' = 'ctrl'): void {
     if (this.ws?.readyState !== 1) return;
-    this.ws.send(frame.slice().buffer as ArrayBuffer);
+    const buf = frame.slice().buffer as ArrayBuffer;
+    if (this.ws.sendOnLane) {
+      this.ws.sendOnLane(buf, lane);
+      return;
+    }
+    this.ws.send(buf);
   }
 
   private sendRelayProbe(): void {
@@ -901,13 +919,13 @@ export class PairClient {
     this.sendViaRelay({ type: 'probe', nonce: this.probeNonce });
   }
 
-  private sendViaRelay(command: PhoneToHost): void {
+  private sendViaRelay(command: PhoneToHost, lane: 'ctrl' | 'bulk' = 'ctrl'): void {
     this.sendQueue = this.sendQueue
       .then(async () => {
         if (this.closed || this.revoked) return;
         const frame = await this.replay.seal(this.contentKey, command);
         if (this.closed || this.revoked || this.overRelayLimit(frame, command)) return;
-        this.sendFrameViaRelay(frame);
+        this.sendFrameViaRelay(frame, lane);
       })
       .catch(() => {});
   }

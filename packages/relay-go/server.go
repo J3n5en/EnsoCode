@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -31,13 +32,14 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	store  *Store
-	hub    *hub
-	static fs.FS
-	desk   func() *deskBundle
-	shell  sync.Map
-	now    func() int64
-	log    *slog.Logger
+	store    *Store
+	hub      *hub
+	static   fs.FS
+	desk     func() *deskBundle
+	shell    sync.Map
+	now      func() int64
+	log      *slog.Logger
+	quicPort atomic.Int32
 }
 
 func newServer(store *Store, static fs.FS, log *slog.Logger) *Server {
@@ -89,7 +91,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/v1/pair/claim" && r.Method == http.MethodPost:
 		s.handleClaim(w, r)
 	case p == "/healthz" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		body := map[string]any{"ok": true}
+		if qp := s.quicPort.Load(); qp > 0 {
+			body["quic"] = true
+			body["quicPort"] = int(qp)
+			body["alpn"] = quicALPN
+		}
+		writeJSON(w, http.StatusOK, body)
 	case strings.HasPrefix(p, "/"+deskBundleDir+"/") && (r.Method == http.MethodGet || r.Method == http.MethodHead):
 		s.desk().serve(w, r, strings.TrimPrefix(p, "/"+deskBundleDir+"/"))
 	default:

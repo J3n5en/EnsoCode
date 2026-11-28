@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -39,7 +40,7 @@ type hotFrame struct {
 type peer struct {
 	id        uint64
 	role      string
-	conn      *websocket.Conn
+	closer    io.Closer
 	send      chan frame
 	done      chan struct{}
 	kill      chan struct{} // abort 关掉它，writePump 不必干等下一轮 ping
@@ -49,13 +50,17 @@ type peer struct {
 }
 
 func newPeer(role string, conn *websocket.Conn) *peer {
+	return newPeerWithCloser(role, conn)
+}
+
+func newPeerWithCloser(role string, closer io.Closer) *peer {
 	return &peer{
-		id:   peerSeq.Add(1),
-		role: role,
-		conn: conn,
-		send: make(chan frame, peerQueueFrames),
-		done: make(chan struct{}),
-		kill: make(chan struct{}),
+		id:     peerSeq.Add(1),
+		role:   role,
+		closer: closer,
+		send:   make(chan frame, peerQueueFrames),
+		done:   make(chan struct{}),
+		kill:   make(chan struct{}),
 	}
 }
 
@@ -92,7 +97,9 @@ func (p *peer) trySend(fr frame) {
 func (p *peer) abort() {
 	if p.dead.CompareAndSwap(false, true) {
 		close(p.kill)
-		go func() { _ = p.conn.Close() }()
+		if p.closer != nil {
+			go func() { _ = p.closer.Close() }()
+		}
 	}
 }
 
