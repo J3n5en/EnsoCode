@@ -40,11 +40,13 @@ class Socket {
   static all: Socket[] = [];
   readyState = 0;
   binaryType = '';
+  url: string;
   onopen?: () => void;
   onclose?: (event: { code: number; reason: string }) => void;
   onmessage?: (event: { data: ArrayBuffer | string }) => void;
   sent: PhoneToHost[] = [];
-  constructor() {
+  constructor(url = '') {
+    this.url = url;
     Socket.all.push(this);
   }
   open() {
@@ -1213,5 +1215,59 @@ describe('PairClient Bot 帧', () => {
     });
     await settle();
     expect(client.hostV2).toBe(false);
+  });
+
+  it('追踪 relayEpoch/relaySeq：重连 URL 带断点且重放帧不触发错误与直连混淆', async () => {
+    const socket = await start();
+    expect(socket.url).not.toContain('relayEpoch=');
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'host-online', relayEpoch: 'ep-1', relaySeq: 5 }),
+    });
+    await settle();
+    // 收到 2 帧中继二进制帧（relaySeq 5 -> 7）
+    socket.receive({ type: 'catalog', entries: [] });
+    socket.receive({ type: 'projects', projects: [] });
+    await settle();
+
+    client.conceal();
+    vi.advanceTimersByTime(FOREGROUND_STALE_HIDDEN_MS + 1_000);
+    client.nudge('visibility');
+    await settle();
+    const next = Socket.all[1];
+    expect(next).toBeTruthy();
+    const q = new URL(next.url).searchParams;
+    expect(q.get('relayEpoch')).toBe('ep-1');
+    expect(q.get('sinceRelaySeq')).toBe('7');
+
+    // 中继回放 2 帧（replayedFrom=7, relaySeq=9）后再触发下一次重连：relaySeq 应从 7 推进到 9
+    next.open();
+    next.onmessage?.({
+      data: JSON.stringify({
+        type: 'host-online',
+        relayEpoch: 'ep-1',
+        relaySeq: 9,
+        replayedFrom: 7,
+      }),
+    });
+    next.receive({ type: 'catalog', entries: [] });
+    next.receive({ type: 'projects', projects: [] });
+    await settle();
+
+    client.conceal();
+    vi.advanceTimersByTime(FOREGROUND_STALE_HIDDEN_MS + 1_000);
+    client.nudge('visibility');
+    await settle();
+    const third = Socket.all[2];
+    expect(new URL(third.url).searchParams.get('sinceRelaySeq')).toBe('9');
+
+    // host-offline 清除 relayEpoch，之后重连不带 relayEpoch
+    third.open();
+    third.onmessage?.({ data: JSON.stringify({ type: 'host-offline' }) });
+    await settle();
+    client.conceal();
+    vi.advanceTimersByTime(FOREGROUND_STALE_HIDDEN_MS + 1_000);
+    client.nudge('visibility');
+    await settle();
+    expect(Socket.all[3].url).not.toContain('relayEpoch=');
   });
 });

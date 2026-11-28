@@ -57,6 +57,17 @@ describe('node-datachannel 回环直连', () => {
     expect(hostFrames[0]).toEqual(big);
     expect(guestFrames[0]).toEqual(new Uint8Array([7, 8, 9]));
 
+    // 双通道并发：bulk 大帧与 ctrl 小帧同时互发均完整到达且不串包
+    const bulkFrame = new Uint8Array(65_536).map((_, i) => (i * 3) & 0xff);
+    const ctrlFrame = new Uint8Array([42, 43, 44, 45]);
+    expect(guest.send(bulkFrame, { bulk: true })).toBe(true);
+    expect(guest.send(ctrlFrame)).toBe(true);
+    const bothUntil = Date.now() + 5_000;
+    while (Date.now() < bothUntil && hostFrames.length < 3) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(hostFrames.slice(1)).toEqual(expect.arrayContaining([bulkFrame, ctrlFrame]));
+
     guest.close();
     host.close();
   }, 20_000);

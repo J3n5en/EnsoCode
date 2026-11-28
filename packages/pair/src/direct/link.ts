@@ -13,6 +13,8 @@ import {
 import { describeCandidates } from './nat';
 import {
   DIRECT_BUFFER_LIMIT,
+  DIRECT_BULK_THRESHOLD_BYTES,
+  type DirectChannelKind,
   type DirectPeer,
   type DirectPeerFactory,
   isAllowedCandidate,
@@ -53,7 +55,7 @@ const PONG = 0x03;
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
 /** 回前台探活：对端在局域网/直连上，正常几十毫秒内回 pong */
-const PROBE_TIMEOUT_MS = 2_000;
+const PROBE_TIMEOUT_MS = 600;
 
 /**
  * 状态机 + peer 生命周期 + 定时器 + 分片 + 心跳的胶水，三端共用。
@@ -66,6 +68,7 @@ export class DirectLink {
   private dcOpen = false;
   private iceServers: IceServerEntry[];
   private reassembler: Reassembler = createReassembler();
+  private bulkReassembler: Reassembler = createReassembler();
   private negotiateTimer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -165,9 +168,23 @@ export class DirectLink {
     return this.state.phase === 'connected' && this.dcOpen ? 'direct' : 'relay';
   }
 
-  /** 直连可用时分片发出；返回 false 表示调用方应改走中继 */
-  send(frame: Uint8Array): boolean {
+  /** 直连可用时分片发出；大帧或 bulk 标记优先走独立 bulk DataChannel，返回 false 表示调用方应改走中继 */
+  send(frame: Uint8Array, opts?: { bulk?: boolean }): boolean {
     if (this.transport() !== 'direct' || !this.peer) return false;
+    const wantBulk = opts?.bulk === true || frame.byteLength >= DIRECT_BULK_THRESHOLD_BYTES;
+    const useBulk = wantBulk && Boolean(this.peer.sendBulk && this.peer.isBulkOpen?.());
+    if (useBulk) {
+      // bulk 独立缓冲上限判断：背压打满时直接退回中继，绝不阻塞或作废 ctrl 通道
+      if ((this.peer.bufferedBulk?.() ?? 0) + frame.byteLength > DIRECT_BUFFER_LIMIT) return false;
+      const chunks = encodeChunks(frame);
+      for (let i = 0; i < chunks.length; i++) {
+        if (!this.peer.sendBulk!(chunks[i])) {
+          if (i > 0) this.failGen(this.peerGen);
+          return false;
+        }
+      }
+      return true;
+    }
     // 余量放不下整帧就整帧走中继：大帧连发时若中途背压，半帧会污染对端拼帧器而作废整条直连
     if ((this.peer.buffered?.() ?? 0) + frame.byteLength > DIRECT_BUFFER_LIMIT) return false;
     const chunks = encodeChunks(frame);
@@ -284,6 +301,7 @@ export class DirectLink {
     this.peer = peer;
     this.peerGen = gen;
     this.reassembler = createReassembler();
+    this.bulkReassembler = createReassembler();
     this.localCandidates = [];
     this.remoteCandidates = [];
     peer.onIceCandidate((c) => {
@@ -308,9 +326,14 @@ export class DirectLink {
       }
       this.dispatch({ type: 'dc-open', gen });
     });
-    peer.onMessage((bytes) => {
+    peer.onMessage((bytes, channel?: DirectChannelKind) => {
       if (this.peerGen !== gen) return;
       this.alive();
+      if (channel === 'bulk') {
+        const frame = this.bulkReassembler.push(bytes);
+        if (frame) this.deps.onFrame(frame);
+        return;
+      }
       if (bytes.byteLength === 1 && bytes[0] === PING) {
         peer.send(new Uint8Array([PONG]));
         return;

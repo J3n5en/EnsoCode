@@ -1,5 +1,6 @@
 import { normalizeRelayUrl } from '@enso/pair';
 import type { RemoteBridge, RemoteFrameKind } from '@shared/remoteBridge';
+import { collectPrefetchItems } from '@shared/remoteDelta';
 import {
   cachedRemoteImage,
   pruneRemoteImages,
@@ -227,6 +228,7 @@ async function main(): Promise<void> {
   /** 换构建整页重载中：旧构建的快照和只读缓存不再有用，别在离开时写存储 */
   let leaving = false;
   let settingsLoaded = false;
+  let optimisticHydrated = false;
   let snapshot: HTMLIFrameElement | null = null;
   let snapshotTimer: ReturnType<typeof setInterval> | null = null;
   let snapshotBlobs: string[] = [];
@@ -251,6 +253,16 @@ async function main(): Promise<void> {
     const status = toRemoteLinkStatus(link, pushAvailability());
     for (const listener of linkListeners) listener(status);
   };
+
+  /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
+  const reads = new Map<string, { h: string; json: string }>();
+  const readsSignature = (map: Map<string, { h: string; json: string }>): string =>
+    [...map.entries()]
+      .map(([k, v]) => `${k}\0${v.h}`)
+      .sort()
+      .join('\n');
+  let savedReadsSig = '';
+  (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
 
   let tunnel!: DeskTunnel;
   tunnel = new DeskTunnel(
@@ -284,6 +296,7 @@ async function main(): Promise<void> {
         location.reload();
         return true;
       },
+      getPrefetch: () => collectPrefetchItems(reads),
       onPushConfig: (key) => {
         publishLink(reduceDeskLink(link, { type: 'push-config', key }));
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) !== 'on') return;
@@ -367,6 +380,7 @@ async function main(): Promise<void> {
         void (async () => {
           await keepSnapshot();
           settingsLoaded = false;
+          optimisticHydrated = false;
           await coverWithSnapshot();
           if (iframes.main === iframe) iframe?.contentWindow?.location.reload();
         })();
@@ -391,6 +405,32 @@ async function main(): Promise<void> {
       };
     },
     leader: () => tunnel.leader,
+    prefetch: {
+      take: (key, expectedHash) => {
+        const pending = tunnel.takePrefetch(key, expectedHash);
+        if (pending && key === `${IPC_CHANNELS.SETTINGS_READ}\0[]`) {
+          void pending.then((hit) => {
+            if (hit !== null && hit !== undefined && !settingsLoaded) {
+              settingsLoaded = true;
+              void markReady(version);
+            }
+          });
+        }
+        return pending;
+      },
+    },
+    optimistic: {
+      enabled: true,
+      onHydrated: (channel) => {
+        if (channel === IPC_CHANNELS.SETTINGS_READ) optimisticHydrated = true;
+      },
+      onVerified: (channel) => {
+        if (channel === IPC_CHANNELS.SETTINGS_READ && !settingsLoaded) {
+          settingsLoaded = true;
+          void markReady(version);
+        }
+      },
+    },
     exitDesk() {
       leaveGuard?.release();
       location.href = PHONE_URL;
@@ -613,6 +653,7 @@ async function main(): Promise<void> {
         now: Date.now(),
         liveChars: liveChars(),
         settingsLoaded,
+        optimisticHydrated,
         liveLoading: Boolean(
           iframes.main?.contentDocument?.querySelector('[data-timeline-loading]')
         ),
@@ -624,15 +665,6 @@ async function main(): Promise<void> {
     }, 100);
   };
 
-  /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
-  const reads = new Map<string, { h: string; json: string }>();
-  const readsSignature = (map: Map<string, { h: string; json: string }>): string =>
-    [...map.entries()]
-      .map(([k, v]) => `${k}\0${v.h}`)
-      .sort()
-      .join('\n');
-  let savedReadsSig = '';
-  (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
   (window as Window & { __deskTrace?: unknown }).__deskTrace = tunnel.trace;
 
   /** 切后台/离开时存一份当前界面和只读缓存，下次启动先显示它 */
@@ -687,7 +719,6 @@ async function main(): Promise<void> {
     );
   };
 
-  tunnel.start();
   clearTimeout(bootWatchdog);
   const cached = loadDeskMeta(localStorage, device.pairId);
   if (cached) {
@@ -699,6 +730,7 @@ async function main(): Promise<void> {
     for (const [key, entry] of saved) reads.set(key, entry);
     savedReadsSig = readsSignature(reads);
   }
+  tunnel.start();
   const launched = cached !== null && (await cachedBuild(cached));
   if (launched) {
     use(cached);
@@ -758,6 +790,7 @@ async function main(): Promise<void> {
   use(current);
   dropSnapshot();
   settingsLoaded = false;
+  optimisticHydrated = false;
   attached.main?.close();
   delete attached.main;
   iframes.main?.remove();

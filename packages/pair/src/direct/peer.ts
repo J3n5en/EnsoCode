@@ -7,6 +7,11 @@ import type { DirectCandidate, IceServerEntry } from '../protocol';
 
 export type Unsubscribe = () => void;
 
+export type DirectChannelKind = 'ctrl' | 'bulk';
+
+/** 超过该阈值的密文帧默认分流到 bulk DataChannel，避免大包/快照阻塞小 RPC 控制帧 */
+export const DIRECT_BULK_THRESHOLD_BYTES = 16_384;
+
 export interface DirectPeer {
   /** guest：内部创建 ordered DataChannel，返回 offer SDP */
   createOffer(): Promise<string>;
@@ -17,13 +22,19 @@ export interface DirectPeer {
   /** 只吐过滤后的本地候选（见 isAllowedCandidate），已去 a= 前缀 */
   onIceCandidate(cb: (candidate: DirectCandidate) => void): Unsubscribe;
   onOpen(cb: () => void): Unsubscribe;
-  onMessage(cb: (bytes: Uint8Array) => void): Unsubscribe;
+  onMessage(cb: (bytes: Uint8Array, channel?: DirectChannelKind) => void): Unsubscribe;
   /** 通道关闭或 ICE 失败/断开，二者归一为一次回调 */
   onClose(cb: () => void): Unsubscribe;
   /** false = 未 open 或背压拒绝，调用方应改走中继 */
   send(bytes: Uint8Array): boolean;
+  /** 可选大包数据通道发送：缺省或未 open 时由 DirectLink 回落到 ctrl 通道 */
+  sendBulk?(bytes: Uint8Array): boolean;
   /** DataChannel 已缓冲字节数；DirectLink 据此整帧判断余量，避免半帧后背压作废通道 */
   buffered?(): number;
+  /** bulk DataChannel 已缓冲字节数 */
+  bufferedBulk?(): number;
+  /** bulk DataChannel 是否已打开（旧对端仅开单通道时为 false） */
+  isBulkOpen?(): boolean;
   /** 幂等；之后不再触发任何回调 */
   close(): void;
 }

@@ -167,4 +167,143 @@ describe('electronShim 秘书状态', () => {
       expect(invoke).toHaveBeenCalledTimes(1);
     }
   });
+
+  it('命中 rpc-hello prefetch 时免发一次 frame.invoke；返回 null 时回落常规 invoke', async () => {
+    const { ipcRenderer, remoteBridge } = await import('./electronShim');
+    invoke.mockClear();
+    const prefetched = { __ensoCached: { h: 'h-pref', v: { theme: 'dark' } } };
+    remoteBridge.prefetch = {
+      take: vi.fn().mockResolvedValueOnce(prefetched).mockResolvedValueOnce(null),
+    };
+    const res1 = await ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_READ);
+    expect(res1).toEqual({ theme: 'dark' });
+    expect(invoke).not.toHaveBeenCalled();
+
+    invoke.mockResolvedValueOnce(
+      JSON.stringify({ __ensoCached: { h: 'h-model', v: { models: [] } } })
+    );
+    const res2 = await ipcRenderer.invoke(IPC_CHANNELS.MODEL_DIRECTORY_GET);
+    expect(res2).toEqual({ models: [] });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    remoteBridge.prefetch = undefined;
+  });
+});
+
+describe('electronShim 乐观缓存水合与写入门禁', () => {
+  it('命中本地持久化读缓存时先同步返回快照并后台校对；未校对前拦截 SETTINGS_WRITE_KEY，校对变化后触发重读回调', async () => {
+    const { ipcRenderer, remoteBridge } = await import('./electronShim');
+    const reads = (
+      window.parent as unknown as { __ensoRemoteReads: Map<string, { h: string; json: string }> }
+    ).__ensoRemoteReads;
+    const settingsKey = `${IPC_CHANNELS.SETTINGS_READ}\0[]`;
+    const convKey = `${IPC_CHANNELS.CONVERSATIONS_READ}\0[]`;
+    reads.set(settingsKey, {
+      h: 'h-opt-s1',
+      json: JSON.stringify({ 'enso-settings': { state: { theme: 'light' }, version: 1 } }),
+    });
+    reads.set(convKey, {
+      h: 'h-opt-c1',
+      json: JSON.stringify({ seq: 5, value: { state: { order: ['c1'], conversations: {} } } }),
+    });
+
+    let releaseSettings!: (v: string) => void;
+    let releaseConv!: (v: string) => void;
+    invoke.mockClear();
+    invoke.mockImplementation((ch: string) => {
+      if (ch === IPC_CHANNELS.SETTINGS_READ) {
+        return new Promise<string>((r) => {
+          releaseSettings = r;
+        });
+      }
+      if (ch === IPC_CHANNELS.CONVERSATIONS_READ) {
+        return new Promise<string>((r) => {
+          releaseConv = r;
+        });
+      }
+      return Promise.resolve('true');
+    });
+
+    const settingsChanged = vi.fn();
+    const convResync = vi.fn();
+    ipcRenderer.on(IPC_CHANNELS.SETTINGS_CHANGED, settingsChanged);
+    ipcRenderer.on(IPC_CHANNELS.CONVERSATIONS_RESYNC, convResync);
+
+    const onOptimistic = vi.fn();
+    const onVerified = vi.fn();
+    remoteBridge.optimistic = {
+      enabled: true,
+      onHydrated: onOptimistic,
+      onVerified,
+    };
+
+    // 首次读取立刻返回本地持久化快照，不阻塞等网络
+    const sRes = await ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_READ);
+    expect(sRes).toEqual({ 'enso-settings': { state: { theme: 'light' }, version: 1 } });
+    const cRes = await ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ);
+    expect(cRes).toEqual({ seq: 5, value: { state: { order: ['c1'], conversations: {} } } });
+    expect(onOptimistic).toHaveBeenCalled();
+
+    // 后台校对尚未完成前，写回 SETTINGS_WRITE_KEY 必须被门禁拒绝（绝不发给宿主覆盖最新状态）
+    const writeCallsBefore = invoke.mock.calls.filter(
+      ([ch]) => ch === IPC_CHANNELS.SETTINGS_WRITE_KEY
+    ).length;
+    const blockedSettings = await ipcRenderer.invoke(
+      IPC_CHANNELS.SETTINGS_WRITE_KEY,
+      'enso-settings',
+      { state: { theme: 'stale' } }
+    );
+    const blockedConv = await ipcRenderer.invoke(
+      IPC_CHANNELS.SETTINGS_WRITE_KEY,
+      'enso-conversations',
+      { state: { order: [] } },
+      5
+    );
+    expect(blockedSettings).toBe(false);
+    expect(blockedConv).toBe(false);
+    expect(invoke.mock.calls.filter(([ch]) => ch === IPC_CHANNELS.SETTINGS_WRITE_KEY).length).toBe(
+      writeCallsBefore
+    );
+
+    // 后台校对：settings 未变（same），conversations 有更新（新 hash）
+    releaseSettings(JSON.stringify({ __ensoCached: { h: 'h-opt-s1', same: 1 } }));
+    releaseConv(
+      JSON.stringify({
+        __ensoCached: {
+          h: 'h-opt-c2',
+          v: { seq: 6, value: { state: { order: ['c1', 'c2'], conversations: {} } } },
+        },
+      })
+    );
+
+    await vi.waitFor(() => expect(onVerified).toHaveBeenCalledTimes(2));
+    // settings same → 无需重读；conversations 变了 → 通知渲染层静默 resync
+    expect(settingsChanged).not.toHaveBeenCalled();
+    expect(convResync).toHaveBeenCalledTimes(1);
+
+    // 渲染层收到 CONVERSATIONS_RESYNC 触发重读时直接消费后台已拉回的新鲜 JSON，不再二次打宿主 RPC
+    const convInvokeBeforeResync = invoke.mock.calls.filter(
+      ([ch]) => ch === IPC_CHANNELS.CONVERSATIONS_READ
+    ).length;
+    const resyncedConv = await ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ);
+    expect(resyncedConv).toEqual({
+      seq: 6,
+      value: { state: { order: ['c1', 'c2'], conversations: {} } },
+    });
+    expect(invoke.mock.calls.filter(([ch]) => ch === IPC_CHANNELS.CONVERSATIONS_READ).length).toBe(
+      convInvokeBeforeResync
+    );
+
+    // 校对完成后，写入门禁放行
+    const allowed = await ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, 'enso-settings', {
+      state: { theme: 'dark' },
+    });
+    expect(allowed).toBe(true);
+    expect(invoke.mock.calls.filter(([ch]) => ch === IPC_CHANNELS.SETTINGS_WRITE_KEY).length).toBe(
+      writeCallsBefore + 1
+    );
+
+    ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, settingsChanged);
+    ipcRenderer.removeListener(IPC_CHANNELS.CONVERSATIONS_RESYNC, convResync);
+    remoteBridge.optimistic = undefined;
+  });
 });

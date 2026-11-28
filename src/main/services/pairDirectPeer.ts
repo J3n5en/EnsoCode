@@ -1,4 +1,10 @@
-import type { DirectCandidate, DirectPeer, DirectPeerFactory, IceServerEntry } from '@enso/pair';
+import type {
+  DirectCandidate,
+  DirectChannelKind,
+  DirectPeer,
+  DirectPeerFactory,
+  IceServerEntry,
+} from '@enso/pair';
 import { app } from '@platform';
 
 /**
@@ -49,12 +55,14 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     iceTransportPolicy: 'all',
   });
   let dc: NdcChannel | null = null;
+  let bulkDc: NdcChannel | null = null;
+  let bulkOpened = false;
   let closed = false;
   let remoteSet = false;
   const queuedCandidates: DirectCandidate[] = [];
   const iceCbs: ((c: DirectCandidate) => void)[] = [];
   const openCbs: (() => void)[] = [];
-  const messageCbs: ((b: Uint8Array) => void)[] = [];
+  const messageCbs: ((b: Uint8Array, channel?: DirectChannelKind) => void)[] = [];
   const closeCbs: (() => void)[] = [];
   let closeEmitted = false;
 
@@ -64,10 +72,15 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     for (const cb of closeCbs) cb();
   };
 
-  const attach = (channel: NdcChannel): void => {
-    dc = channel;
+  const attach = (channel: NdcChannel, kind: DirectChannelKind): void => {
+    if (kind === 'bulk') bulkDc = channel;
+    else dc = channel;
     channel.onOpen(() => {
       if (closed) return;
+      if (kind === 'bulk') {
+        bulkOpened = true;
+        return;
+      }
       // 真机验收靠这一行分辨 LAN（host↔host）、STUN 打洞（srflx/prflx）与地址族（v6 无 NAT）
       try {
         const pair = pc.getSelectedCandidatePair();
@@ -88,10 +101,25 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
           : msg instanceof ArrayBuffer
             ? new Uint8Array(msg)
             : new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength);
-      for (const cb of messageCbs) cb(bytes);
+      for (const cb of messageCbs) cb(bytes, kind);
     });
-    channel.onClosed(emitClose);
-    channel.onError(emitClose);
+    if (kind === 'ctrl') {
+      channel.onClosed(emitClose);
+      channel.onError(emitClose);
+    } else {
+      channel.onClosed(() => {
+        if (bulkDc === channel) {
+          bulkDc = null;
+          bulkOpened = false;
+        }
+      });
+      channel.onError(() => {
+        if (bulkDc === channel) {
+          bulkDc = null;
+          bulkOpened = false;
+        }
+      });
+    }
   };
 
   pc.onLocalCandidate((candidate, mid) => {
@@ -102,7 +130,10 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     if (state === 'disconnected' || state === 'failed' || state === 'closed') emitClose();
   });
   pc.onDataChannel((channel) => {
-    if (!closed) attach(channel);
+    if (closed) return;
+    const kind: DirectChannelKind = channel.getLabel() === 'pair-bulk' ? 'bulk' : 'ctrl';
+    attach(channel, kind);
+    if (kind === 'bulk' && channel.isOpen()) bulkOpened = true;
   });
 
   const flushCandidates = (): void => {
@@ -132,7 +163,8 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
   return {
     async createOffer() {
       const pending = waitLocalDescription();
-      attach(pc.createDataChannel('pair'));
+      attach(pc.createDataChannel('pair'), 'ctrl');
+      attach(pc.createDataChannel('pair-bulk'), 'bulk');
       return pending;
     },
     async acceptOffer(sdp) {
@@ -182,10 +214,26 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
         return false;
       }
     },
+    sendBulk(bytes) {
+      if (closed || !bulkOpened || !bulkDc?.isOpen()) return false;
+      if (bulkDc.bufferedAmount() > 1_048_576) return false;
+      try {
+        bulkDc.sendMessageBinary(bytes);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     buffered: () => (dc && !closed && dc.isOpen() ? dc.bufferedAmount() : 0),
+    bufferedBulk: () => (bulkDc && !closed && bulkDc.isOpen() ? bulkDc.bufferedAmount() : 0),
+    isBulkOpen: () => !closed && bulkOpened && Boolean(bulkDc?.isOpen()),
     close() {
       if (closed) return;
       closed = true;
+      bulkOpened = false;
+      try {
+        bulkDc?.close();
+      } catch {}
       try {
         dc?.close();
       } catch {}

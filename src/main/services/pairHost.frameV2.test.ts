@@ -121,22 +121,24 @@ describe('pairHost frame-v2 能力协商与二进制帧收发', () => {
     });
 
     mocks.socket?.onmessage?.({ data: JSON.stringify({ type: 'peer-joined' }) });
-    await vi.waitFor(() => expect(mocks.socket?.send).toHaveBeenCalled());
-
-    const initialRawFrames = (mocks.socket?.send.mock.calls ?? []).map(
-      ([buf]) => new Uint8Array(buf as ArrayBuffer)
-    );
-    expect(initialRawFrames.every((frame) => frame[0] === 1)).toBe(true);
-    const initialPayloads = await Promise.all(
-      initialRawFrames.map((frame) => openFrame(contentKey, frame))
-    );
-    const hostInfo = initialPayloads.find(
-      (item): item is { type: string; capabilities?: string[] } =>
-        typeof item === 'object' &&
-        item !== null &&
-        (item as { type?: string }).type === 'host-info'
-    );
-    expect(hostInfo?.capabilities).toContain('frame-v2');
+    let hostInfo: { type: string; capabilities?: string[] } | undefined;
+    await vi.waitFor(async () => {
+      const initialRawFrames = (mocks.socket?.send.mock.calls ?? []).map(
+        ([buf]) => new Uint8Array(buf as ArrayBuffer)
+      );
+      expect(initialRawFrames.length).toBeGreaterThan(0);
+      expect(initialRawFrames.every((frame) => frame[0] === 1)).toBe(true);
+      const initialPayloads = await Promise.all(
+        initialRawFrames.map((frame) => openFrame(contentKey, frame))
+      );
+      hostInfo = initialPayloads.find(
+        (item): item is { type: string; capabilities?: string[] } =>
+          typeof item === 'object' &&
+          item !== null &&
+          (item as { type?: string }).type === 'host-info'
+      );
+      expect(hostInfo?.capabilities).toContain('frame-v2');
+    });
 
     // 客户端以 v2 发送 remote-ack(v2: true) 与 rpc-hello
     deliverFrame(

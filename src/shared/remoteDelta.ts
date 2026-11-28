@@ -304,6 +304,68 @@ export interface RemoteReadStore {
   keys(): IterableIterator<string>;
 }
 
+export const MAX_REMOTE_PREFETCH_ITEMS = 16;
+
+export const PREFETCH_READ_CHANNELS: ReadonlySet<string> = new Set([
+  IPC_CHANNELS.SETTINGS_READ,
+  IPC_CHANNELS.CONVERSATIONS_READ,
+  IPC_CHANNELS.SOURCE_AUTHORITY_READ,
+  IPC_CHANNELS.MODEL_DIRECTORY_GET,
+  IPC_CHANNELS.PROVIDERS_MODEL_META,
+  IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
+  IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS,
+  IPC_CHANNELS.SECRETARY_GET_STATE,
+  IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL,
+  IPC_CHANNELS.WORKTREE_LIST,
+  IPC_CHANNELS.WORKTREE_STATUSES,
+  IPC_CHANNELS.PROJECTS_GET_ICONS,
+]);
+
+const PREFETCH_PRIORITY: readonly string[] = [
+  IPC_CHANNELS.SETTINGS_READ,
+  IPC_CHANNELS.CONVERSATIONS_READ,
+  IPC_CHANNELS.SOURCE_AUTHORITY_READ,
+  IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL,
+  IPC_CHANNELS.MODEL_DIRECTORY_GET,
+  IPC_CHANNELS.PROVIDERS_MODEL_META,
+  IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
+  IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS,
+  IPC_CHANNELS.SECRETARY_GET_STATE,
+];
+
+export interface CollectedPrefetchItem {
+  ch: string;
+  args: unknown[];
+  h: string;
+}
+
+/** 从本地持久化读缓存提取可走 rpc-hello 1-RTT 预校验的只读请求 */
+export function collectPrefetchItems(
+  store: RemoteReadStore,
+  limit = MAX_REMOTE_PREFETCH_ITEMS
+): CollectedPrefetchItem[] {
+  const candidates: { ch: string; args: unknown[]; h: string; priority: number }[] = [];
+  for (const key of store.keys()) {
+    const sep = key.indexOf('\0');
+    if (sep <= 0) continue;
+    const ch = key.slice(0, sep);
+    if (!PREFETCH_READ_CHANNELS.has(ch)) continue;
+    const entry = store.get(key);
+    if (!entry || typeof entry.h !== 'string' || entry.h.length > 64) continue;
+    let args: unknown;
+    try {
+      args = JSON.parse(key.slice(sep + 1));
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(args)) continue;
+    const idx = PREFETCH_PRIORITY.indexOf(ch);
+    candidates.push({ ch, args, h: entry.h, priority: idx === -1 ? 999 : idx });
+  }
+  candidates.sort((a, b) => a.priority - b.priority);
+  return candidates.slice(0, Math.max(0, limit)).map(({ ch, args, h }) => ({ ch, args, h }));
+}
+
 /** shim 侧：同时发出的相同读取共用一次请求；结果按 hash 缓存（store 可放在父页面，跨 iframe 重载保留） */
 export class RemoteReadClient {
   private inflight = new Map<string, Promise<string>>();

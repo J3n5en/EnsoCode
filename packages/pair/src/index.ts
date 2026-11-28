@@ -40,6 +40,9 @@ export {
 export { DirectLink, type DirectLinkDeps, type DirectSignal } from './direct/link';
 export { classifyNatMapping, describeCandidates, type NatMapping } from './direct/nat';
 export {
+  DIRECT_BUFFER_LIMIT,
+  DIRECT_BULK_THRESHOLD_BYTES,
+  type DirectChannelKind,
   type DirectPeer,
   type DirectPeerFactory,
   isAllowedCandidate,
@@ -146,6 +149,9 @@ export {
   type RemoteKind,
   type RemotePart,
   type RemotePartAssembler,
+  type RemotePrefetchItem,
+  type RemotePrefetchResult,
+  type RemotePrefetchResultItem,
   type RemoteToHost,
   splitRemoteBinaryFrame,
   splitRemoteFrame,

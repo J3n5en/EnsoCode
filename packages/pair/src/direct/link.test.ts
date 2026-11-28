@@ -14,10 +14,14 @@ function fakePeer() {
     close: [] as (() => void)[],
   };
   const sent: Uint8Array[] = [];
+  const sentBulk: Uint8Array[] = [];
   const sendResults: boolean[] = [];
+  const sendBulkResults: boolean[] = [];
   const calls: string[] = [];
   let closed = false;
   let buffered = 0;
+  let bulkBuffered = 0;
+  let bulkOpen = false;
   const peer: DirectPeer = {
     createOffer: vi.fn(async () => {
       calls.push('createOffer');
@@ -54,7 +58,14 @@ function fakePeer() {
       sent.push(b);
       return true;
     },
+    sendBulk: (b) => {
+      if (closed || !bulkOpen || sendBulkResults.shift() === false) return false;
+      sentBulk.push(b);
+      return true;
+    },
     buffered: () => buffered,
+    bufferedBulk: () => (bulkOpen ? bulkBuffered : Number.POSITIVE_INFINITY),
+    isBulkOpen: () => !closed && bulkOpen,
     close: () => {
       closed = true;
       calls.push('close');
@@ -64,9 +75,17 @@ function fakePeer() {
     peer,
     calls,
     sent,
+    sentBulk,
     sendResults,
+    sendBulkResults,
     setBuffered: (bytes: number) => {
       buffered = bytes;
+    },
+    setBulkBuffered: (bytes: number) => {
+      bulkBuffered = bytes;
+    },
+    setBulkOpen: (open: boolean) => {
+      bulkOpen = open;
     },
     isClosed: () => closed,
     fire: {
@@ -76,8 +95,9 @@ function fakePeer() {
       open: () => {
         for (const f of cbs.open) f();
       },
-      message: (b: Uint8Array) => {
-        for (const f of cbs.message) f(b);
+      message: (b: Uint8Array, channel?: 'ctrl' | 'bulk') => {
+        for (const f of cbs.message)
+          (f as (b: Uint8Array, ch?: 'ctrl' | 'bulk') => void)(b, channel);
       },
       close: () => {
         for (const f of cbs.close) f();
@@ -620,5 +640,94 @@ describe('DirectLink host', () => {
     await flush();
     expect(h.factoryIceServers).toHaveLength(2);
     expect(h.signals).toEqual([]);
+  });
+});
+
+describe('DirectLink 双 DataChannel (ctrl + bulk) 与独立拼帧', () => {
+  it('大帧走 bulk 通道、小帧走 ctrl 通道；bulk 未就绪或背压时仅大帧回落，不阻塞 ctrl', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.setBulkOpen(true);
+    p.fire.open();
+    expect(h.link.transport()).toBe('direct');
+    p.sent.length = 0; // 清掉心跳 ping
+
+    const small = new Uint8Array(128).fill(1);
+    const large = new Uint8Array(20_000).fill(2);
+    expect(h.link.send(small)).toBe(true);
+    expect(h.link.send(large, { bulk: true })).toBe(true);
+    expect(p.sent.length).toBe(1);
+    expect(p.sentBulk.length).toBeGreaterThan(1);
+
+    // bulk 背压打满时，bulk 帧直接返回 false 让调用方退中继，不影响 ctrl 通道继续秒发
+    p.setBulkBuffered(1_048_000);
+    expect(h.link.send(large, { bulk: true })).toBe(false);
+    expect(h.link.send(small)).toBe(true);
+    expect(p.sent.length).toBe(2);
+
+    // 旧对端（未开 bulk 通道）：bulk=true 时自动回落到 ctrl 通道，保持向后兼容
+    p.setBulkOpen(false);
+    p.setBulkBuffered(0);
+    expect(h.link.send(large, { bulk: true })).toBe(true);
+    expect(p.sent.length).toBeGreaterThan(2);
+  });
+
+  it('超过阈值的大帧在 bulk 就绪时自动走 bulk 通道，小帧仍走 ctrl', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.setBulkOpen(true);
+    p.fire.open();
+    p.sent.length = 0;
+
+    expect(h.link.send(new Uint8Array(20_000).fill(5))).toBe(true);
+    expect(p.sent).toHaveLength(0);
+    expect(p.sentBulk.length).toBeGreaterThan(1);
+  });
+
+  it('ctrl 与 bulk 分片交错到达时互不污染各自拼帧器', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.fire.open();
+
+    const bulkPayload = new Uint8Array(24_000).map((_, i) => (i + 7) & 0xff);
+    const ctrlPayload = new Uint8Array(18_000).map((_, i) => (i + 3) & 0xff);
+    const bulkChunks = encodeChunks(bulkPayload);
+    const ctrlChunks = encodeChunks(ctrlPayload);
+    expect(bulkChunks.length).toBeGreaterThan(1);
+    expect(ctrlChunks.length).toBeGreaterThan(1);
+
+    // bulk 先发第一片，中途插入整条 ctrl 帧，再发 bulk 末片
+    p.fire.message(bulkChunks[0], 'bulk');
+    for (const c of ctrlChunks) p.fire.message(c, 'ctrl');
+    for (const c of bulkChunks.slice(1)) p.fire.message(c, 'bulk');
+
+    expect(h.frames).toHaveLength(2);
+    expect(h.frames[0]).toEqual(ctrlPayload);
+    expect(h.frames[1]).toEqual(bulkPayload);
+  });
+
+  it('回前台 probe 默认在 600ms 内快速判死直连，缩短切回中继与重协商耗时', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.fire.open();
+    expect(h.link.transport()).toBe('direct');
+
+    expect(h.link.probe()).toBe(true);
+    await vi.advanceTimersByTimeAsync(599);
+    expect(h.link.transport()).toBe('direct');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.link.transport()).toBe('relay');
   });
 });

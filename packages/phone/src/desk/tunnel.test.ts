@@ -413,4 +413,91 @@ describe('DeskTunnel', () => {
     await expect(invokePromise).resolves.toBe(JSON.stringify({ batched: 1 }));
     expect(events).toEqual(['["first"]', '["third"]']);
   });
+
+  it('冷启动 rpc-hello 附带 prefetch，支持 rpc-prefetch 命中消费与旧宿主即时回落', async () => {
+    const tunnel = new DeskTunnel(
+      DEVICE,
+      () => {},
+      () => {},
+      {
+        getPrefetch: () => [
+          { ch: 'settings:read', args: [], h: 'hs1' },
+          { ch: 'conversations:read', args: [], h: 'hc1' },
+        ],
+      }
+    );
+    tunnel.attach('main', () => {});
+    mockState.events?.onState('online');
+    const hello = hellos()[0] as Extract<PhoneToHost, { type: 'rpc-hello' }> & {
+      prefetch?: unknown;
+    };
+    expect(hello.prefetch).toEqual([
+      { ch: 'settings:read', args: [], h: 'hs1' },
+      { ch: 'conversations:read', args: [], h: 'hc1' },
+    ]);
+
+    const t = tunnel as unknown as {
+      takePrefetch: (key: string, expectedHash: string) => Promise<unknown> | null;
+    };
+    const settingsHit = t.takePrefetch('settings:read\0[]', 'hs1');
+    expect(settingsHit).not.toBeNull();
+    // hash 不匹配直接返回 null
+    expect(t.takePrefetch('settings:read\0[]', 'other')).toBeNull();
+
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-ready',
+      cid: hello.cid,
+      ok: true,
+      resumed: false,
+      version: 'v1',
+      platform: 'darwin',
+      leader: true,
+      replay: true,
+      prefetch: true,
+    } as HostToRemote);
+
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-prefetch',
+      cid: hello.cid,
+      items: [
+        { ch: 'settings:read', args: [], data: { __ensoCached: { h: 'hs1', same: 1 } } },
+        { ch: 'conversations:read', args: [], data: { __ensoCached: { h: 'hc1', same: 1 } } },
+      ],
+    } as HostToRemote);
+
+    await expect(settingsHit!).resolves.toEqual({ __ensoCached: { h: 'hs1', same: 1 } });
+    // 已到站后再 takePrefetch 同样可直接消费一次
+    const convHit = t.takePrefetch('conversations:read\0[]', 'hc1');
+    await expect(convHit!).resolves.toEqual({ __ensoCached: { h: 'hc1', same: 1 } });
+    expect(t.takePrefetch('conversations:read\0[]', 'hc1')).toBeNull();
+
+    // 旧宿主（rpc-ready 没有 prefetch: true）立即以 null 结束等待
+    const tunnelOld = new DeskTunnel(
+      DEVICE,
+      () => {},
+      () => {},
+      {
+        getPrefetch: () => [{ ch: 'settings:read', args: [], h: 'hs1' }],
+      }
+    );
+    tunnelOld.attach('main', () => {});
+    mockState.events?.onState('online');
+    const oldHello = hellos().at(-1)!;
+    const oldPending = (
+      tunnelOld as unknown as {
+        takePrefetch: (key: string, expectedHash: string) => Promise<unknown> | null;
+      }
+    ).takePrefetch('settings:read\0[]', 'hs1');
+    mockState.events?.onRemoteFrame?.({
+      type: 'rpc-ready',
+      cid: oldHello.cid,
+      ok: true,
+      resumed: false,
+      version: 'v1',
+      platform: 'darwin',
+      leader: true,
+      replay: true,
+    });
+    await expect(oldPending!).resolves.toBeNull();
+  });
 });

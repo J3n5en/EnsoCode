@@ -1277,7 +1277,13 @@ async function sendNow(
     }
     // 直连优先；背压/刚好断掉/peer-joined 重放保护窗口内走中继。信令始终只走中继。
     const forceRelay = relayOnly || (Date.now() < conn.relayOnlyUntil && conn.ws?.readyState === 1);
-    if (!forceRelay && conn.direct.send(frame)) return true;
+    const isBulkFrame =
+      message.type === 'part' ||
+      message.type === 'bpart' ||
+      message.type === 'gzip' ||
+      message.type === 'asset';
+    if (!forceRelay && conn.direct.send(frame, isBulkFrame ? { bulk: true } : undefined))
+      return true;
     const ok = sendFrameViaRelay(conn, frame);
     if (!ok) releaseProviderFp();
     return ok;
