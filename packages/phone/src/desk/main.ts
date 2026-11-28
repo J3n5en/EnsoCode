@@ -16,6 +16,7 @@ import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '..
 import {
   hasNativeDeskProxy,
   hasNativePush,
+  pushNativeWidgetState,
   registerNativeDeskFetcher,
   resolveNativePushGatewayOrigin,
 } from '../nativeBridge';
@@ -31,6 +32,7 @@ import { watchShellUpdate } from '../shellUpdate';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
 import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } from '../storageGuard';
 import { PHONE_URL, saveUiMode } from '../uiMode';
+import { buildWidgetSnapshotFromDeskReads } from '../widgetState';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
 import { createDeviceDrawer, DESKTOP_DRAWER_QUERY } from './deviceDrawer';
@@ -262,15 +264,6 @@ async function main(): Promise<void> {
     });
   }
 
-  let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
-  const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
-  const publishLink = (next: typeof link) => {
-    if (next === link) return;
-    link = next;
-    const status = toRemoteLinkStatus(link, pushAvailability());
-    for (const listener of linkListeners) listener(status);
-  };
-
   /** 只读结果缓存（shim 从父页面取用）：重启 PWA 后带 hash 询问，没变就不用重下设置和历史 */
   const reads = new Map<string, { h: string; json: string }>();
   const readsSignature = (map: Map<string, { h: string; json: string }>): string =>
@@ -280,6 +273,29 @@ async function main(): Promise<void> {
       .join('\n');
   let savedReadsSig = '';
   (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
+
+  let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
+  const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
+  const syncNativeDeskWidget = () => {
+    const convKey = `${IPC_CHANNELS.CONVERSATIONS_READ}\0[]`;
+    const convJson = reads.get(convKey)?.json;
+    pushNativeWidgetState(
+      buildWidgetSnapshotFromDeskReads({
+        deviceLabel: link.deviceLabel,
+        connectionState: link.state,
+        transport: link.transport ?? '',
+        rttMs: link.rttMs,
+        conversationsJson: convJson,
+      })
+    );
+  };
+  const publishLink = (next: typeof link) => {
+    if (next === link) return;
+    link = next;
+    const status = toRemoteLinkStatus(link, pushAvailability());
+    for (const listener of linkListeners) listener(status);
+    syncNativeDeskWidget();
+  };
 
   let tunnel!: DeskTunnel;
   tunnel = new DeskTunnel(
@@ -414,6 +430,8 @@ async function main(): Promise<void> {
               if (!settingsLoaded) void markReady(version);
               settingsLoaded = true;
             });
+          if (channel === IPC_CHANNELS.CONVERSATIONS_READ)
+            void result.then(() => syncNativeDeskWidget());
           return result;
         },
         send: frame.send,

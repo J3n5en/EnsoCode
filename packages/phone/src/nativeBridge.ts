@@ -53,8 +53,41 @@ export interface EnsoNativeBridge {
   >;
   /** 原生退订通知并清角标 */
   unsubscribePush?(): void;
+  /** 是否具备原生灵动岛与小组件状态同步能力 */
+  readonly widgets?: boolean;
+  readonly liveActivity?: boolean;
+  /** 把会话聚合快照同步给原生 App Group（小组件）与 ActivityKit（灵动岛） */
+  updateWidgetState?(snapshot: NativeWidgetSnapshot): void;
   /** 回传 /desk/* 资源给原生 LocalDeskProxyServer */
   replyDeskAsset?(reqId: string, status: number, mime: string, bodyBase64: string): void;
+}
+
+export interface NativeWidgetSessionItem {
+  id: string;
+  title: string;
+  projectName: string;
+  status: string;
+  pendingCount: number;
+  unread: boolean;
+  updatedAt: number;
+}
+
+export interface NativeWidgetSnapshot {
+  deviceLabel: string;
+  connectionState: string;
+  transport: string;
+  rttMs: number | null;
+  runningCount: number;
+  pendingCount: number;
+  unreadCount: number;
+  activeTitle: string | null;
+  activeProject: string | null;
+  activeSessionId: string | null;
+  activeStatus: string;
+  activeDetail: string | null;
+  startedAt: number | null;
+  sessions: NativeWidgetSessionItem[];
+  updatedAt: number;
 }
 
 interface QuicEndpoint {
@@ -102,6 +135,14 @@ export function hasNativeDeskProxy(): boolean {
 export function hasNativePush(): boolean {
   const bridge = getNativeBridge();
   return Boolean(bridge?.push && typeof bridge.subscribePush === 'function');
+}
+
+export function pushNativeWidgetState(snapshot: NativeWidgetSnapshot): void {
+  const bridge = getNativeBridge();
+  if (!bridge?.updateWidgetState) return;
+  try {
+    bridge.updateWidgetState(snapshot);
+  } catch {}
 }
 
 export async function requestNativeQrScan(): Promise<string | null> {

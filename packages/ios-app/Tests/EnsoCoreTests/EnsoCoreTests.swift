@@ -208,4 +208,60 @@ final class EnsoCoreTests: XCTestCase {
         XCTAssertEqual(collector.ctrlData, small)
         XCTAssertEqual(collector.bulkData, large)
     }
+
+    func testSharedWidgetStoreRoundTripAndMergePushNotification() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("enso-widget-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let store = SharedWidgetStore(directory: tmpDir)
+        XCTAssertNil(store.load())
+
+        let initial = EnsoWidgetSnapshot(
+            deviceLabel: "MacBook Pro",
+            connectionState: "online",
+            transport: "direct",
+            rttMs: 14,
+            runningCount: 1,
+            pendingCount: 0,
+            unreadCount: 0,
+            activeTitle: "构建 iOS 小组件",
+            activeProject: "enso-code",
+            activeSessionId: "s-1",
+            activeStatus: "running",
+            activeDetail: "正在编译",
+            startedAt: 1_700_000_000_000,
+            sessions: [
+                EnsoWidgetSessionItem(
+                    id: "s-1",
+                    title: "构建 iOS 小组件",
+                    projectName: "enso-code",
+                    status: "running",
+                    pendingCount: 0,
+                    unread: false,
+                    updatedAt: 1_700_000_000_000
+                ),
+            ],
+            updatedAt: 1_700_000_000_000
+        )
+        XCTAssertTrue(store.save(initial))
+        XCTAssertEqual(store.load(), initial)
+
+        let merged = store.mergePushNotification(
+            title: "构建 iOS 小组件",
+            body: "请求执行 bash 命令",
+            sessionId: "s-1",
+            pending: true,
+            nowMs: 1_700_000_050_000
+        )
+        XCTAssertEqual(merged.pendingCount, 1)
+        XCTAssertEqual(merged.activeStatus, "pending")
+        XCTAssertEqual(merged.activeDetail, "请求执行 bash 命令")
+        XCTAssertEqual(merged.sessions.first?.status, "waiting")
+        XCTAssertEqual(merged.sessions.first?.pendingCount, 1)
+        XCTAssertEqual(store.load(), merged)
+
+        let url = EnsoWidgetSnapshot.deepLinkURL(sessionId: "s-1")
+        XCTAssertEqual(url.absoluteString, "enso://open?session=s-1")
+    }
 }

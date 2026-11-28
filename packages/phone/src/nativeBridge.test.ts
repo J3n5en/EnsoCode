@@ -5,6 +5,7 @@ import {
   getNativeBridge,
   hasNativeDeskProxy,
   isNativeIosApp,
+  pushNativeWidgetState,
   registerNativeDeskFetcher,
   requestNativeQrScan,
   resolveNativePushGatewayOrigin,
@@ -15,6 +16,7 @@ import {
   setNativePushGatewayResolver,
   subscribePush,
 } from './push';
+import { buildWidgetSnapshotFromCatalog, buildWidgetSnapshotFromDeskReads } from './widgetState';
 
 describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () => {
   const origWindow = globalThis.window;
@@ -371,5 +373,75 @@ describe('nativeBridge (iOS 原生壳桥接 + QUIC Happy Eyeballs 回落)', () =
     expect(await resolveNativePushGatewayOrigin('wss://relay-upgraded.example.com/')).toBe(
       'https://relay-upgraded.example.com'
     );
+  });
+
+  it('小组件与灵动岛状态聚合：待审批优先于运行中，并同步给原生 updateWidgetState', () => {
+    const updateSpy = vi.fn();
+    (window as unknown as Record<string, unknown>).__ensoNative = {
+      platform: 'ios',
+      widgets: true,
+      liveActivity: true,
+      updateWidgetState: updateSpy,
+    };
+
+    const snap = buildWidgetSnapshotFromCatalog({
+      deviceLabel: 'Mac Studio',
+      connectionState: 'online',
+      transport: 'direct',
+      rttMs: 12,
+      activeId: 's-idle',
+      now: 1_700_000_000_000,
+      catalog: [
+        {
+          id: 's-idle',
+          title: '普通会话',
+          projectName: 'demo',
+          projectId: 'p1',
+          status: 'idle',
+          updatedAt: 100,
+        },
+        {
+          id: 's-run',
+          title: '正在跑构建',
+          projectName: 'enso-code',
+          projectId: 'p2',
+          status: 'running',
+          updatedAt: 200,
+        },
+        {
+          id: 's-pending',
+          title: '等待审批',
+          projectName: 'enso-code',
+          projectId: 'p2',
+          status: 'waiting',
+          pendingApprovalCount: 2,
+          unread: true,
+          updatedAt: 150,
+        },
+      ],
+    });
+
+    expect(snap.runningCount).toBe(1);
+    expect(snap.pendingCount).toBe(2);
+    expect(snap.activeSessionId).toBe('s-pending');
+    expect(snap.activeStatus).toBe('pending');
+    expect(snap.sessions[0]?.id).toBe('s-pending');
+    expect(snap.sessions[1]?.id).toBe('s-run');
+
+    pushNativeWidgetState(snap);
+    expect(updateSpy).toHaveBeenCalledWith(snap);
+
+    const deskSnap = buildWidgetSnapshotFromDeskReads({
+      deviceLabel: 'MacBook',
+      connectionState: 'online',
+      transport: 'relay',
+      rttMs: 38,
+      now: 1_700_000_000_000,
+      conversationsJson: JSON.stringify([
+        { id: 'c1', title: 'Desk 会话', projectName: 'proj', status: 'running', updatedAt: 500 },
+      ]),
+    });
+    expect(deskSnap.runningCount).toBe(1);
+    expect(deskSnap.activeSessionId).toBe('c1');
   });
 });

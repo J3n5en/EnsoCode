@@ -39,7 +39,11 @@ import { GroupChatScreen, type MemberPending } from './GroupChatScreen';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from './launchSession';
 import { useMediaQuery, WIDE_LAYOUT_QUERY } from './media';
 import { NewSessionSheet } from './NewSessionSheet';
-import { hasNativePush, resolveNativePushGatewayOrigin } from './nativeBridge';
+import {
+  hasNativePush,
+  pushNativeWidgetState,
+  resolveNativePushGatewayOrigin,
+} from './nativeBridge';
 import { OutboxBar } from './OutboxBar';
 import { PairScreen } from './PairScreen';
 import {
@@ -76,6 +80,7 @@ import { setPhoneAgentActions } from './stubs/electron-api';
 import { setQueueActions } from './stubs/sessions-store';
 import { deskUrl, takePairFromDesk } from './uiMode';
 import { shouldHoldWakeLock, syncWakeLock } from './wakeLock';
+import { buildWidgetSnapshotFromCatalog } from './widgetState';
 
 /**
  * 扫码直达：桌面二维码是 https 链接，系统相机可直接打开本页并带上 #relay=…&pk=…。
@@ -766,6 +771,22 @@ export function App() {
   // 在线时附带业务帧出口（直连 / 中继）：顶栏副标题与抽屉设备行共用
   const connectionLabel =
     state === 'online' ? formatOnlineConnectionLabel(transport, rttMs) : CONN_STATE_LABEL[state];
+
+  // iOS 原生壳：同步活跃会话与运行态到主屏/锁屏小组件与灵动岛
+  const widgetDeviceLabel = device?.label ?? '';
+  useEffect(() => {
+    if (!widgetDeviceLabel) return;
+    pushNativeWidgetState(
+      buildWidgetSnapshotFromCatalog({
+        deviceLabel: widgetDeviceLabel,
+        connectionState: state,
+        transport: transport ?? '',
+        rttMs,
+        catalog,
+        activeId,
+      })
+    );
+  }, [widgetDeviceLabel, state, transport, rttMs, catalog, activeId]);
 
   /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
   const resetHostState = (nextView: LastView) => {

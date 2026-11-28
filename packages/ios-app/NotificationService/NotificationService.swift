@@ -1,5 +1,6 @@
 import EnsoCore
 import UserNotifications
+import WidgetKit
 
 /// iOS Notification Service Extension：
 /// 拦截带有 `mutable-content: 1` 的 APNs 远程通知，从共享 Keychain 取出本机 P-256 ECDH 私钥，
@@ -37,6 +38,14 @@ final class NotificationService: UNNotificationServiceExtension {
                 if payload.pending {
                     bestAttempt.interruptionLevel = .timeSensitive
                 }
+                // 后台推送解密成功后同步刷新主屏/锁屏小组件共享快照
+                _ = SharedWidgetStore.shared.mergePushNotification(
+                    title: payload.title,
+                    body: payload.body,
+                    sessionId: payload.sessionId,
+                    pending: payload.pending
+                )
+                WidgetCenter.shared.reloadAllTimelines()
             }
         }
 
